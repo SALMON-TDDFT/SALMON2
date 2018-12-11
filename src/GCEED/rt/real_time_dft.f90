@@ -61,7 +61,7 @@ integer :: ia,ib
 real(8) :: rab
 real(8),allocatable :: tfourier_integrand(:,:)
 
-call init_xc(xc_func, 0, cval, xcname=xc, xname=xname, cname=cname)
+call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 call check_cep
 call check_ae_shape
@@ -185,6 +185,10 @@ if(comm_is_root(nproc_id_global))then
       end if
     end do
   end if
+end if
+
+if(iperiodic==3)then
+  call prep_poisson_fft
 end if
 
 call read_pslfile
@@ -1038,6 +1042,13 @@ else
   end do
 end if
 
+if(nump>=1)then
+  allocate(vonf_sd(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  allocate(eonf_sd(3,mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  vonf_sd=0.d0
+  eonf_sd=0.d0
+  call set_vonf_sd
+end if
 
 if(iflag_dip2==1) then
   allocate(rbox_array_dip2(4,num_dip2),rbox_array2_dip2(4,num_dip2))

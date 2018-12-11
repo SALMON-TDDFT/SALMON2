@@ -36,7 +36,7 @@ integer :: ia_sta,ia_end
 real(8) :: x,y,z
 integer :: ik,iik
 integer :: ix,iy,iz
-integer :: iix,iiy,iiz,iia
+integer :: iix,iiy,iiz
 integer :: aewald_sta,aewald_end,aewald_num
 integer :: totnum_aewald
 integer :: ibox
@@ -65,6 +65,9 @@ integer :: p_allob
 real(8) :: sum_temp1, sum_temp2
 real(8) :: sum_temp3(4)
 real(8) :: sum_temp4(4)
+
+integer :: iy_sta,iy_end,iz_sta,iz_end
+real(8) :: rbox13,rbox14,rbox15,rbox16
 
 if(iperiodic==1)then
   Etot=0.d0
@@ -153,19 +156,20 @@ end if
 !    Eion_tmp1=Eion_tmp1-Pi*sum(Zps(Kion(:)))**2/(2*aEwald*aLxyz) - sqrt(aEwald/Pi)*sum(Zps(Kion(:))**2)
 if(aewald_num>=1)then
 ! 2:Eion
+  do ia=1,MI
   do ii=aewald_sta,aewald_end
-    iia=(ii-1)/((NEwald*2+1)**3)+1
     iix=mod((ii-1)/((NEwald*2+1)**2),NEwald*2+1)-NEwald
     iiy=mod((ii-1)/(NEwald*2+1),NEwald*2+1)-NEwald
     iiz=mod(ii-1,NEwald*2+1)-NEwald
     do ib=1,MI
-      if (iix**2+iiy**2+iiz**2 == 0 .and. iia == ib) cycle
-      rab(1)=Rion(1,iia)-dble(iix)*Hgs(1)*lg_num(1)-Rion(1,ib)
-      rab(2)=Rion(2,iia)-dble(iiy)*Hgs(2)*lg_num(2)-Rion(2,ib)
-      rab(3)=Rion(3,iia)-dble(iiz)*Hgs(3)*lg_num(3)-Rion(3,ib)
+      if (iix**2+iiy**2+iiz**2 == 0 .and. ia == ib) cycle
+      rab(1)=Rion(1,ia)-dble(iix)*Hgs(1)*lg_num(1)-Rion(1,ib)
+      rab(2)=Rion(2,ia)-dble(iiy)*Hgs(2)*lg_num(2)-Rion(2,ib)
+      rab(3)=Rion(3,ia)-dble(iiz)*Hgs(3)*lg_num(3)-Rion(3,ib)
       rab2=sum(rab(:)**2)
-      Ebox1(2)=Ebox1(2) + 0.5d0*Zps(Kion(iia))*Zps(Kion(ib))*erfc(sqrt(aEwald*rab2))/sqrt(rab2)
+      Ebox1(2)=Ebox1(2) + 0.5d0*Zps(Kion(ia))*Zps(Kion(ib))*erfc(sqrt(aEwald*rab2))/sqrt(rab2)
     enddo
+  enddo
   enddo
 end if
 
@@ -207,18 +211,52 @@ if(nproc_id_global==nproc_size_global-1) NG_l_e_para=NG_e
 
 sysvol=Hvol*lg_num(1)*lg_num(2)*lg_num(3)
 
+select case(iflag_hartree)
+case(2)
 !3:Eion_l, 4:Eh_l, 5:Eloc_l1, 6: Eloc_l2
-do n=NG_l_s_para,NG_l_e_para
-  if(n == nGzero ) cycle
-  G2=Gx(n)**2+Gy(n)**2+Gz(n)**2
-  Ebox1(3)=Ebox1(3)+sysvol*(4*Pi/G2)*(abs(rhoion_G(n))**2*exp(-G2/(4*aEwald))*0.5d0)
-  Ebox1(4)=Ebox1(4)+sysvol*(4*Pi/G2)*(abs(rhoe_G(n))**2*0.5d0)
-  Ebox1(5)=Ebox1(5)+sysvol*(4*Pi/G2)*(-rhoe_G(n)*conjg(rhoion_G(n)))
-  do ia=1,MI
-    Gd=Gx(n)*Rion(1,ia)+Gy(n)*Rion(2,ia)+Gz(n)*Rion(3,ia)
-    Ebox1(6)=Ebox1(6)+conjg(rhoe_G(n))*dVloc_G(n,Kion(ia))*exp(-zI*Gd)
+  do n=NG_l_s_para,NG_l_e_para
+    if(n == nGzero ) cycle
+    G2=Gx(n)**2+Gy(n)**2+Gz(n)**2
+    Ebox1(3)=Ebox1(3)+sysvol*(4*Pi/G2)*(abs(rhoion_G(n))**2*exp(-G2/(4*aEwald))*0.5d0)
+    Ebox1(4)=Ebox1(4)+sysvol*(4*Pi/G2)*(abs(rhoe_G(n))**2*0.5d0)
+    Ebox1(5)=Ebox1(5)+sysvol*(4*Pi/G2)*(-rhoe_G(n)*conjg(rhoion_G(n)))
+    do ia=1,MI
+      Gd=Gx(n)*Rion(1,ia)+Gy(n)*Rion(2,ia)+Gz(n)*Rion(3,ia)
+      Ebox1(6)=Ebox1(6)+conjg(rhoe_G(n))*dVloc_G(n,Kion(ia))*exp(-zI*Gd)
+    end do
+  enddo
+case(4)
+  iz_sta=1
+  iz_end=lg_num(3)/NPUZ
+  iy_sta=1
+  iy_end=lg_num(2)/NPUY
+
+  do iz=iz_sta,iz_end
+    do iy=iy_sta,iy_end
+      rbox13=0.d0
+      rbox14=0.d0
+      rbox15=0.d0
+      rbox16=0.d0
+!$OMP parallel do reduction (+ : rbox13,rbox14,rbox15,rbox16) private(n,G2,iix,Gd)
+      do ix=1,lg_num(1)
+        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+        if(n == nGzero ) cycle
+        G2=Gx(n)**2+Gy(n)**2+Gz(n)**2
+        rbox13=rbox13+sysvol*(4*Pi/G2)*(abs(rhoion_G(n))**2*exp(-G2/(4*aEwald))*0.5d0)
+        rbox14=rbox14+sysvol*(4*Pi/G2)*(abs(rhoe_G(n))**2*0.5d0)
+        rbox15=rbox15+sysvol*(4*Pi/G2)*(-rhoe_G(n)*conjg(rhoion_G(n)))
+        do ia=1,MI
+          Gd=Gx(n)*Rion(1,ia)+Gy(n)*Rion(2,ia)+Gz(n)*Rion(3,ia)
+          rbox16=rbox16+conjg(rhoe_G(n))*dVloc_G(n,Kion(ia))*exp(-zI*Gd)
+        end do
+      end do
+      Ebox1(3)=Ebox1(3)+rbox13/dble(NPUW)
+      Ebox1(4)=Ebox1(4)+rbox14/dble(NPUW)
+      Ebox1(5)=Ebox1(5)+rbox15/dble(NPUW)
+      Ebox1(6)=Ebox1(6)+rbox16/dble(NPUW)
+    end do
   end do
-enddo
+end select
 
 sum_temp3(1:4)=Ebox1(3:6)
 call comm_summation(sum_temp3,sum_temp4,4,nproc_group_global)

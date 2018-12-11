@@ -79,7 +79,9 @@ else ()
 
     set(CMAKE_Fortran_COMPILER ${MPI_Fortran_COMPILER})
     set(CMAKE_C_COMPILER ${MPI_C_COMPILER})
+    
   endif ()
+
 
   set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
   set(CMAKE_Fortran_FLAGS_RELEASE "-O3")
@@ -111,6 +113,9 @@ set(EXTERNAL_LIBS          "")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR})
+
+### MPI Setting
+add_definitions_if(USE_MPI  -DSALMON_USE_MPI)
 
 ### NVIDIA Tools Extension Library
 if (USE_NVTX)
@@ -194,6 +199,7 @@ set(SALMON_XC_LIB        "xc_rtl")
 set(SALMON_POISSON_LIB   "poisson_rtl")
 set(SALMON_MAXWELL_LIB   "maxwell_rtl")
 set(SALMON_COMMON_LIB    "common_rtl")
+set(SALMON_EXT_LIB       "ext_rtl")
 set(SALMON_MISC_LIB      "misc_rtl")
 
 set(SALMON_SRC_DIR ${CMAKE_SOURCE_DIR}/src)

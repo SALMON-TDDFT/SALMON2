@@ -44,6 +44,7 @@ contains
     use timer
     use salmon_math
     use projector
+    use opt_variables, only: NUMBER_THREADS_POW2
     implicit none
     logical,intent(in)       :: Rion_update
     integer,intent(in)       :: zu_NB
@@ -56,10 +57,16 @@ contains
     real(8)      :: ftmp_l(3,NI)
     real(8)      :: FionR(3,NI), FionG(3,NI),nabt_wrk(4,3)
     complex(8)   :: uVpsi,duVpsi(3)
-    complex(8)   :: dzudr(3,NL,NB,NK_s:NK_e),dzudrzu(3),dzuekrdr(3)
+    complex(8)   :: dzudrzu(3),dzuekrdr(3)
+
+    complex(8), allocatable :: dzudr(:,:,:,:)
 
     integer :: tid
-    real(8) :: ftmp_t(3,NI,0:NUMBER_THREADS-1)
+    real(8) :: ftmp_t(3,NI,0:NUMBER_THREADS_POW2-1)
+
+    allocate(dzudr(3,NL,zu_NB,NK_s:NK_e))
+    ftmp_t(:,:,:) = 0.d0
+
 
     !flag_use_grad_wf_on_force is given in Gloval_Variable
     !if .true.   use gradient of wave-function (better accuracy)
@@ -298,16 +305,15 @@ contains
 
 !OpenMP manual reduction routine
   subroutine mreduce_omp(vout,vtmp,vsize,tid)
-    use global_variables, only: NUMBER_THREADS
-    use misc_routines, only: ceiling_pow2
+    use opt_variables, only: NUMBER_THREADS_POW2
     implicit none
     integer,intent(in)  :: vsize,tid
     real(8),intent(out) :: vout(vsize)
-    real(8)             :: vtmp(vsize,0:NUMBER_THREADS-1)
+    real(8)             :: vtmp(vsize,0:NUMBER_THREADS_POW2-1)
 
     integer :: i
 
-    i = ceiling_pow2(NUMBER_THREADS)/2
+    i = NUMBER_THREADS_POW2/2
     do while(i > 0)
       if(tid < i) then
         vtmp(:,tid) = vtmp(:,tid) + vtmp(:,tid + i)

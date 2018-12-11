@@ -13,30 +13,31 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine exc_cor_lsda_ns
-  use salmon_parallel, only: nproc_group_h
-  use salmon_communication, only: comm_summation
-  use builtin_pz_sp, only: exc_cor_pz_sp
+subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
   use scf_data
-  use new_world_sub
-  use allocate_mat_sub
   implicit none
-  integer :: ix,iy,iz
-  real(8) :: tot_exc
-
-  call exc_cor_pz_sp(mg_num(1)*mg_num(2)*mg_num(3), rho_s, exc_m_tmp, eexc_m_tmp, vxc_s)
-
-  tot_exc=0.d0 
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    tot_exc=tot_exc+eexc_m_tmp(ix,iy,iz)
-  end do
-  end do
-  end do
-  tot_exc=tot_exc*hvol
- 
-  call comm_summation(tot_exc,Exc,nproc_group_h)
-
-  return
-end subroutine exc_cor_lsda_ns
+  character :: JOBZ, UPLO
+  integer :: LWORK
+  integer :: iter,ier2
+  real(8),allocatable :: RWORK(:)
+  real(8) :: W(iter)
+  complex(8) :: Rmat(iter,iter)
+  complex(8),allocatable :: WORK(:)
+  complex(8) :: evec(iter,iter)
+  
+  ier2=0
+  
+  JOBZ='V'
+  UPLO='U'
+  
+  LWORK=2*iter-1
+  allocate(WORK(LWORK))
+  allocate(RWORK(3*iter-2))
+  
+  call ZHEEV(JOBZ,UPLO,iter,Rmat,iter,W,WORK,LWORK,RWORK,ier2)
+  
+  evec(:,:)=Rmat(:,:)
+  
+  deallocate(WORK,RWORK)
+  
+end subroutine eigen_subdiag_periodic

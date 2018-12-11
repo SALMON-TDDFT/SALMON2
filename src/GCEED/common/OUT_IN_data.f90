@@ -1,5 +1,5 @@
 !
-!  Copyright 2017 SALMON developers
+!  Copyright 2018 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -460,6 +460,7 @@ complex(8),allocatable :: cmatbox_read3(:,:,:)
 integer :: icheck_read
 integer :: ifilenum_data
 integer :: icomm
+integer :: ifMST0(2)
 integer :: imesh_oddeven0
 integer :: itmg
 
@@ -524,10 +525,20 @@ if(comm_is_root(nproc_id_global))then
   read(96) lg_end(:3)
   if(ilsda == 0) then
     read(96) MST0(1)
-    read(96) ifMST(1)
+!    read(96) ifMST(1)
+    if(iSCFRT==2)then
+      read(96) ifMST(1)
+    else
+      read(96) ifMST0(1)
+    endif
   else if(ilsda == 1)then
     read(96) (MST0(is),is=1,2)
-    read(96) (ifMST(is),is=1,2)
+!    read(96) (ifMST(is),is=1,2)
+    if(iSCFRT==2)then
+      read(96) (ifMST(is),is=1,2)
+    else
+      read(96) (ifMST0(is),is=1,2)
+    endif
   end if
   if(version_num_box(1)<=31)then
     if(iflag_ps.eq.1)then
@@ -608,6 +619,8 @@ end select
 inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
 
 lg_num(:)=lg_end(:)-lg_sta(:)+1
+
+call check_fourier
 
 call set_gridcoo
 
@@ -1060,9 +1073,9 @@ if(IC<=2)then
     end if
     if(iSCFRT==1)then
       call comm_bcast(matbox_read,nproc_group_global)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
+      do iz=ng_sta(3),ng_end(3)
+      do iy=ng_sta(2),ng_end(2)
+      do ix=ng_sta(1),ng_end(1)
         rho_in(ix,iy,iz,num_rho_stock+1)=matbox_read(ix,iy,iz)
       end do
       end do
@@ -1074,9 +1087,9 @@ if(IC<=2)then
     end if
     if(iSCFRT==1)then
       call comm_bcast(matbox_read,nproc_group_global)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
+      do iz=ng_sta(3),ng_end(3)
+      do iy=ng_sta(2),ng_end(2)
+      do ix=ng_sta(1),ng_end(1)
         rho_out(ix,iy,iz,num_rho_stock)=matbox_read(ix,iy,iz)
       end do
       end do
@@ -1101,9 +1114,9 @@ if(IC<=2)then
           read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
+        do iz=ng_sta(3),ng_end(3)
+        do iy=ng_sta(2),ng_end(2)
+        do ix=ng_sta(1),ng_end(1)
           rho_s_in(ix,iy,iz,num_rho_stock,is)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1113,9 +1126,9 @@ if(IC<=2)then
           read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
+        do iz=ng_sta(3),ng_end(3)
+        do iy=ng_sta(2),ng_end(2)
+        do ix=ng_sta(1),ng_end(1)
           rho_s_out(ix,iy,iz,num_rho_stock,is)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1130,9 +1143,9 @@ if(IC<=2)then
       end if
       if(iSCFRT==1)then
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
+        do iz=ng_sta(3),ng_end(3)
+        do iy=ng_sta(2),ng_end(2)
+        do ix=ng_sta(1),ng_end(1)
           rho_in(ix,iy,iz,ii)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1146,9 +1159,9 @@ if(IC<=2)then
       end if
       if(iSCFRT==1)then
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
+        do iz=ng_sta(3),ng_end(3)
+        do iy=ng_sta(2),ng_end(2)
+        do ix=ng_sta(1),ng_end(1)
           rho_out(ix,iy,iz,ii)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1176,9 +1189,9 @@ if(IC<=2)then
           end if
           if(iSCFRT==1)then
             call comm_bcast(matbox_read,nproc_group_global)
-            do iz=mg_sta(3),mg_end(3)
-            do iy=mg_sta(2),mg_end(2)
-            do ix=mg_sta(1),mg_end(1)
+            do iz=ng_sta(3),ng_end(3)
+            do iy=ng_sta(2),ng_end(2)
+            do ix=ng_sta(1),ng_end(1)
               rho_s_in(ix,iy,iz,ii,is)=matbox_read(ix,iy,iz)
             end do
             end do
@@ -1192,9 +1205,9 @@ if(IC<=2)then
           end if
           if(iSCFRT==1)then
             call comm_bcast(matbox_read,nproc_group_global)
-            do iz=mg_sta(3),mg_end(3)
-            do iy=mg_sta(2),mg_end(2)
-            do ix=mg_sta(1),mg_end(1)
+            do iz=ng_sta(3),ng_end(3)
+            do iy=ng_sta(2),ng_end(2)
+            do ix=ng_sta(1),ng_end(1)
               rho_s_out(ix,iy,iz,ii,is)=matbox_read(ix,iy,iz)
             end do
             end do

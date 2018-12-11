@@ -16,6 +16,7 @@
 MODULE scf_data
 use salmon_global
 use salmon_xc, only: xc_functional
+use salmon_pp, only: pp_info
 implicit none
 !-------------------- Parameters
 integer, parameter :: maxntmg=10
@@ -152,6 +153,8 @@ integer :: itotfMST
 integer :: MST0(2),itotMST0
 integer :: Mx(3),Mxin(3),Mxin_old(3)
 
+real(8) :: rnetot
+
 character(8),allocatable :: AtomName(:)   
 integer,allocatable :: iAtomicNumber(:)   
 integer,allocatable :: istopt_a(:)    
@@ -165,6 +168,13 @@ real(8) :: rLsize(3,maxntmg)    ! size of the box
 integer :: maxMps
 
 ! Pseudopotential
+type(pp_info) :: pp
+integer,parameter :: Nrmax=3000,Lmax=4
+integer,allocatable :: NRloc(:)
+real(8),allocatable :: Rloc(:)
+real(8),allocatable :: Zps(:)              ! Pseudo charge
+real(8),allocatable :: Rps(:)              ! Core radius
+real(8),allocatable :: Mass(:)             ! Atomic weight
 integer,allocatable :: Jxyz_all(:,:,:),Mps_all(:),Jxxyyzz_all(:,:,:)
 integer,allocatable :: Mps(:)
 integer,allocatable :: Jxyz_tmp1(:,:,:)
@@ -177,6 +187,8 @@ integer :: Mlps(maxMKI),Lref(maxMKI)
 real(8),allocatable :: Vpsl(:,:,:)                 ! Local pseudopotential
 real(8),allocatable :: Vpsl_atom(:,:,:,:)
 real(8),allocatable :: uV_all(:,:,:),uVu(:,:)          ! Non-local
+!Nonlinear core correction
+logical :: flag_nlcc = .false.
 
 real(8),allocatable :: rocc(:,:)                    ! Occupation number
 real(8),allocatable :: psi(:,:,:,:,:)              ! Single particle orbitals
@@ -382,12 +394,7 @@ real(8),allocatable :: dRion(:,:,:)
 real(8),allocatable :: Rion_eq(:,:)
 real(8),parameter :: umass=1822.9d0
 
-real(8),allocatable :: Eeff_dip(:,:,:,:)  
-real(8),allocatable :: Eeff_dip0(:,:,:,:)  
-
 integer :: wmaxMI
-
-real(8) :: rad_diele
 
 real(8) :: fcN(0:12)
 real(8) :: fbN(0:12)
@@ -412,7 +419,7 @@ integer :: ik_oddeven
 
 ! variables for FFTE routine
 integer,dimension(3) :: LNPU
-integer :: NPUZ,NPUY
+integer :: NPUZ,NPUY,NPUW
 
 real(8) :: absorption(0:100000)
 real(8) :: absorption_d(0:100000)
@@ -421,9 +428,18 @@ real(8) :: absorption_id(0:100000)
 integer :: iflag_dos
 integer :: iflag_pdos
 
+real(8) , allocatable :: rxk_ob(:,:,:,:),rhxk_ob(:,:,:,:),rgk_ob(:,:,:,:),rpk_ob(:,:,:,:)
+
+complex(8) , allocatable :: zxk_ob(:,:,:,:),zhxk_ob(:,:,:,:),zgk_ob(:,:,:,:),zpk_ob(:,:,:,:)
+complex(8) , allocatable :: zpko_ob(:,:,:,:),zhtpsi_ob(:,:,:,:)
+
 integer :: iflag_ELF
 
 integer :: iflag_indA
+
+integer :: iflag_hartree
+
+real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 
 !filename
 character(100) :: file_OUT

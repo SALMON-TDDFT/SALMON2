@@ -24,6 +24,7 @@ integer :: Ntime
 real(8) :: dip_spacing
 
 ik_oddeven=2
+ilsda=ispin
 
 if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
@@ -70,7 +71,11 @@ nproc_Mxin_s = nproc_domain_s
 
 if(nproc_ob==0.and.nproc_mxin(1)==0.and.nproc_mxin(2)==0.and.nproc_mxin(3)==0.and.  &
                    nproc_mxin_s(1)==0.and.nproc_mxin_s(2)==0.and.nproc_mxin_s(3)==0) then
-  call set_numcpu_rt
+  if(ilsda==0)then
+    call set_numcpu_rt
+  else if(ilsda==1)then
+    call set_numcpu_rt_sp
+  end if
 else
   call check_numcpu
 end if
@@ -160,11 +165,23 @@ if(iwdenoption==0)then
 end if
 
 select case(trans_longi)
-case('lo')
-  iflag_indA=0
 case('tr')
+  iflag_indA=0
+case('lo')
   iflag_indA=1
 end select
+
+select case(fourier)
+case('ft','FT')
+  iflag_hartree=2
+case('ffte','FFTE')
+  iflag_hartree=4
+end select
+
+if(temperature>=0.d0)then
+  write(*,*) "At the moment, temperature must be given in a variable temperature_k"
+  stop 
+end if
 
 if(comm_is_root(nproc_id_global))close(fh_namelist)
 

@@ -16,6 +16,7 @@
 Module Global_Variables
   use salmon_global
   use salmon_xc, only: xc_functional
+  use salmon_pp, only: pp_info
 !ARTED version
   character(50),parameter :: ARTED_ver='ARTED.1.6.0 (based on 2014.08.10.2)'
 
@@ -50,6 +51,7 @@ Module Global_Variables
   real(8),allocatable :: nabx(:),naby(:),nabz(:)
 
 ! pseudopotential
+  type(pp_info) :: pp
   integer,parameter :: Nrmax=3000,Lmax=4
   character(2) :: ps_type
   integer :: Nps,Nlma
@@ -76,7 +78,7 @@ Module Global_Variables
 ! physical quantities
   real(8) :: Eall,Eall0,Eall_GS0,jav(3),jav_ion(3),Tion
   real(8) :: Ekin,Eloc,Enl,Eh,Exc,Eion,Eelemag                      
-  real(8),allocatable :: javt(:,:)
+  real(8),allocatable :: javt(:,:), javt_ion(:,:)
   real(8),allocatable :: Vpsl(:),Vpsl_ia(:,:),Vh(:),Vexc(:),Eexc(:),Vloc(:),Vloc_GS(:),Vloc_t(:)!yabana
   real(8),allocatable :: Eall_t(:),Tion_t(:),Temperature_ion_t(:),Ework_integ_fdR(:)
   real(8),allocatable :: Enh_t(:),Hnvt_t(:)
@@ -321,6 +323,16 @@ Module Global_Variables
   
   ! Exchange Correlation
   type(xc_functional) :: xc_func
+
+  !AY trial for Raman: Maxwell + Force-Field type MD (theory=Raman)
+  logical :: flag_ms_ff_LessPrint
+  integer :: Nm_FDTD, iter_save, imode_FDTD_raman
+  integer :: interval_step_trj_raman
+  real(8) :: Omg_dt,v_mxmt
+  real(8) :: eps_diag, dchidq(3,3)
+  real(8),allocatable :: c_pmode(:), Rion_eq0(:,:) 
+  real(8),allocatable :: Rion_m_next(:,:,:),velocity_m_next(:,:,:)
+  character(1024) :: dir_ion_trj
 
   interface 
     subroutine total_Energy_omp(Rion_update,GS_RT,ixy_m)

@@ -57,13 +57,20 @@ else if(iSCFRT==2.and.icalcforce==1)then
   deallocate(cgrad_wk)
 end if
 
-deallocate (rho_tmp)
-deallocate (vxc_tmp)
-deallocate (eexc_tmp)
-if(ispin==1)then
-  deallocate (exc_m_tmp)
-  deallocate (eexc_m_tmp)
+if(iSCFRT==1.and.iperiodic==0)then
+  deallocate(rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
 end if
+
+if(iSCFRT==1.and.iperiodic==3)then
+  deallocate(zxk_ob,zhxk_ob,zgk_ob,zpk_ob)
+  deallocate(zpko_ob,zhtpsi_ob)
+end if
+
+deallocate (rho_tmp)
+deallocate (rho_s_tmp)
+deallocate (vxc_tmp)
+deallocate (vxc_s_tmp)
+deallocate (eexc_tmp)
 deallocate (exc_dummy)
 deallocate (exc_dummy2)
 deallocate (exc_dummy3)

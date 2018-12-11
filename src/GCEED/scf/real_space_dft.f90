@@ -57,7 +57,7 @@ complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg
 
-call init_xc(xc_func, 0, cval, xcname=xc, xname=xname, cname=cname)
+call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
 ihpsieff=0
@@ -147,6 +147,10 @@ if(istopt==1)then
     if(icalcforce==1)then
       allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
     end if
+    
+    if(iperiodic==3)then
+      call prep_poisson_fft
+    end if
 
     if(iflag_ps.eq.0)then
       Vpsl=0d0
@@ -228,11 +232,7 @@ if(istopt==1)then
     end if
     allocate( esp(itotMST,num_kpoints_rd) )
 
-    if(ilsda==0)then
-      call exc_cor_ns
-    else if(ilsda==1)then
-      call exc_cor_lsda_ns
-    end if
+    call exc_cor_ns
 
     call allgatherv_vlocal
 
@@ -271,6 +271,10 @@ if(istopt==1)then
                  1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
       call init_k_rd(k_rd,ksquare,1)
+    end if
+
+    if(iperiodic==3)then
+      call prep_poisson_fft
     end if
 
     if(iflag_ps/=0) then
@@ -376,7 +380,15 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   Miter=Miter+1
 
-  call calc_occupation
+  if(temperature_k>=0.d0.and.Miter>iditer_notemperature) then
+    if(iperiodic.eq.3) then
+      call ne2mu_p
+    else
+      call ne2mu
+    endif
+  else
+    call calc_occupation
+  endif
 
   call copy_density
 
@@ -387,9 +399,19 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call DTcg(psi,iflag)
+        select case(gscg)
+        case('y')
+          call sgscg(psi,iflag)
+        case('n')
+          call DTcg(psi,iflag)
+        end select
       case(3)
-        call DTcg_periodic(zpsi,iflag)
+        select case(gscg)
+        case('y')
+          call gscg_periodic(zpsi,iflag)
+        case('n')
+          call DTcg_periodic(zpsi,iflag)
+        end select
       end select
       elp3(182)=get_wtime()
       elp3(183)=elp3(183)+elp3(182)-elp3(181)
@@ -455,11 +477,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     elp3(126)=elp3(126)+elp3(116)-elp3(115)
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      if(ilsda==0)then
-        call exc_cor_ns
-      else if(ilsda==1)then
-        call exc_cor_lsda_ns
-      end if
+      call exc_cor_ns
     end if
    
     call allgatherv_vlocal
@@ -528,9 +546,19 @@ DFT_Iteration : do iter=1,iDiter(img)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
       case(0)
-        call DTcg(psi,iflag)
+        select case(gscg)
+        case('y')
+          call sgscg(psi,iflag)
+        case('n')
+          call DTcg(psi,iflag)
+        end select
       case(3)
-        call DTcg_periodic(zpsi,iflag)
+        select case(gscg)
+        case('y')
+          call gscg_periodic(zpsi,iflag)
+        case('n')
+          call DTcg_periodic(zpsi,iflag)
+        end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
@@ -567,11 +595,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      if(ilsda==0)then
-        call exc_cor_ns
-      else if(ilsda==1)then
-        call exc_cor_lsda_ns
-      end if
+      call exc_cor_ns
     end if
    
     call allgatherv_vlocal
@@ -825,7 +849,7 @@ if(comm_is_root(nproc_id_global)) then
   select case (ilsda)
   case(0)
     write(1,*) "Number of states = ", nstate
-    write(1,*) "Number of electrons = ", ifMST(1)
+    write(1,*) "Number of electrons = ", ifMST(1)*2
   case(1)
     write(1,*) "Number of states = ", (nstate_spin(is),is=1,2)
     write(1,*) "Number of electrons = ", (nelec_spin(is),is=1,2)
@@ -961,6 +985,7 @@ if(comm_is_root(nproc_id_global))      &
 rLsize1(:)=rLsize(:,img)
 call setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
            Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
+call check_fourier
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
