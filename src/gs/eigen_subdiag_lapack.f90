@@ -14,7 +14,6 @@
 !  limitations under the License.
 !
 subroutine eigen_subdiag(Rmat,evec,iter,ier2)
-  use scf_data
   implicit none
   
   integer :: iter,ier2
