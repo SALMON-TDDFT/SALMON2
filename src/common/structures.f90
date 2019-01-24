@@ -16,6 +16,13 @@
 module structures
   implicit none
 
+  type s_system
+    integer :: norb,nspin,nk
+    real(8) :: Hvol,Hgs(3)
+    real(8),allocatable :: occ(:,:),wk(:),esp(:,:) ! occ(NB,NK),wk(NK),esp(NB,NK)
+    real(8),allocatable :: Rion(:,:) ! atom position
+  end type s_system
+
   type s_rgrid
     integer,dimension(3) :: is,ie,num &             ! num=ie-is+1
                            ,is_overlap,ie_overlap & ! is_overlap=is-4, ie_overlap=ie+4
@@ -24,11 +31,11 @@ module structures
   end type s_rgrid
 
   type s_wavefunction
-    integer :: i1_s,i1_e,n1,i2_s,i2_e,n2,i3_s,i3_e,n3 ! i1=i1_s,...,i1_e, n1=i1_e-i1_s+1
-    real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! rwf(x,y,z,ispin,i3,i2,i1)
-    complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! zwf(x,y,z,ispin,i3,i2,i1)
-!    real(8)   ,allocatable :: rwf(:,:,:,:)   ! rwf(x,y,z,iorb)
-!    complex(8),allocatable :: zwf(:,:,:,:,:) ! zwf(x,y,z,isigma,iorb)
+    integer :: i1_s,i1_e,num1 ! i1=i1_s,...,i1_e, num1=i1_e-i1_s+1
+    integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e
+    integer :: io_s,io_e,numo ! io=io_s,...,io_e
+    real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! rwf(x,y,z,ispin,io,ik,i1)
+    complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! zwf(x,y,z,ispin,io,ik,i1)
   end type s_wavefunction
 
   type s_stencil
@@ -36,13 +43,54 @@ module structures
     real(8),allocatable :: kAc(:,:) ! kAc(Nk,3)
   end type s_stencil
 
-  type struct_pseudopotential ! --> pp_grid
-     integer :: NI,Nps,Nlma
-     integer,allocatable :: index_atom(:),Mps(:),Jxyz(:,:,:)
-     real(8),allocatable :: uV(:,:),uVu(:)
-! exp_ikr=ekr --> zproj
-     complex(8),allocatable :: zproj(:,:,:) ! zproj(j,ilma,ik) = exp(-i(k+A/c)r)*uV ! j=1~Mps(ia), ilma=1~Nlma
-  end type struct_pseudopotential
+  type s_pp_info
+    real(8) :: zion
+    integer :: lmax,lmax0
+    integer :: nrmax,nrmax0
+    logical :: flag_nlcc
+    character(2),allocatable :: atom_symbol(:)
+    real(8),allocatable :: rmass(:)
+    integer,allocatable :: mr(:)
+    integer,allocatable :: lref(:)
+    integer,allocatable :: nrps(:)
+    integer,allocatable :: mlps(:)
+    integer,allocatable :: zps(:)
+    integer,allocatable :: nrloc(:)
+    real(8),allocatable :: rloc(:)
+    real(8),allocatable :: rps(:)
+    real(8),allocatable :: anorm(:,:)
+    integer,allocatable :: inorm(:,:)
+    real(8),allocatable :: rad(:,:)
+    real(8),allocatable :: radnl(:,:)
+    real(8),allocatable :: vloctbl(:,:)
+    real(8),allocatable :: dvloctbl(:,:)
+    real(8),allocatable :: udvtbl(:,:,:)
+    real(8),allocatable :: dudvtbl(:,:,:)
+    real(8),allocatable :: rho_nlcc_tbl(:,:)
+    real(8),allocatable :: tau_nlcc_tbl(:,:)
+    real(8),allocatable :: upp_f(:,:,:)
+    real(8),allocatable :: vpp_f(:,:,:)
+    real(8),allocatable :: upp(:,:)
+    real(8),allocatable :: dupp(:,:)
+    real(8),allocatable :: vpp(:,:)
+    real(8),allocatable :: dvpp(:,:)
+  end type s_pp_info
+
+  type s_pp_grid
+    integer :: nps
+    integer,allocatable :: mps(:)
+    integer,allocatable :: jxyz(:,:,:)
+    integer,allocatable :: jxx(:,:)
+    integer,allocatable :: jyy(:,:)
+    integer,allocatable :: jzz(:,:)
+    real(8),allocatable :: uv(:,:)
+    real(8),allocatable :: duv(:,:,:)
+    integer :: nlma
+    integer,allocatable :: lma_tbl(:,:)
+    integer,allocatable :: ia_tbl(:)
+    real(8),allocatable :: rinv_uvu(:)
+    complex(8),allocatable :: zproj(:,:,:) ! zproj(j,ilma,ik) = exp(-i(k+A/c)r)*uv ! j=1~Mps(ia), ilma=1~Nlma
+  end type s_pp_grid
 
 ! rho%f, V_local(1:nspin)%f, tau%f, V_H%f, V_xc%f, current(3)%f?
   type s_scalar
@@ -54,15 +102,6 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
-  type s_system
-    integer :: norb,nspin,nk
-    real(8) :: Hvol,Hgs(3)
-    real(8),allocatable :: occ(:,:),wk(:),esp(:,:) ! occ(NB,NK),wk(NK),esp(NB,NK)
-    real(8),allocatable :: Rion(:,:) ! atom position
-  end type s_system
-
-! real(8),allocatable :: force(:,:),Floc(:,:),Fnl(:,:),Fion(:,:),FionAc(:,:)
-! Ftot%force, Floc%force, Fnl%force, Fion%force, FionAc%force ?
   type s_force
     real(8),allocatable :: force(:,:) ! force(1:3,1:NI)
   end type s_force

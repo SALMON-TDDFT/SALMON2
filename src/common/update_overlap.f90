@@ -8,7 +8,7 @@
 !      http://www.apache.org/licenses/LICENSE-2.0
 !
 !  Unless required by applicable law or agreed to in writing, software
-!  distributed under the License is distributed on an "AS IS" BASIS,
+!  distrisuted under the License is distrisuted on an "AS IS" BASIS,
 !  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
@@ -19,11 +19,11 @@ contains
 
 !===================================================================================================================================
 
-subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,icomm)
+subroutine update_overlap_R(tpsi,is_array,ie_array,Norb,Nd,is,ie,irank_overlap,icomm)
   use salmon_communication, only: comm_proc_null, comm_isend, comm_irecv, comm_wait_all
   implicit none
-  integer,intent(in) :: ib_array(3),ie_array(3),Norb,Nd,ib(3),ie(3),irank_overlap(6),icomm
-  real(8) :: tpsi(ib_array(1):ie_array(1),ib_array(2):ie_array(2),ib_array(3):ie_array(3),1:Norb)
+  integer,intent(in) :: is_array(3),ie_array(3),Norb,Nd,is(3),ie(3),irank_overlap(6),icomm
+  real(8) :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3),1:Norb)
   !
   integer :: ix,iy,iz,iorb
   integer :: iup,idw,jup,jdw,kup,kdw
@@ -38,19 +38,19 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   kup = irank_overlap(5)
   kdw = irank_overlap(6)
 
-  allocate(commbuf_x(Nd,ie(2)-ib(2)+1,ie(3)-ib(3)+1,Norb,4))
-  allocate(commbuf_y(ie(1)-ib(1)+1,Nd,ie(3)-ib(3)+1,Norb,4))
-  allocate(commbuf_z(ie(1)-ib(1)+1,ie(2)-ib(2)+1,Nd,Norb,4))
+  allocate(commbuf_x(Nd,ie(2)-is(2)+1,ie(3)-is(3)+1,Norb,4))
+  allocate(commbuf_y(ie(1)-is(1)+1,Nd,ie(3)-is(3)+1,Norb,4))
+  allocate(commbuf_z(ie(1)-is(1)+1,ie(2)-is(2)+1,Nd,Norb,4))
 
   !send from idw to iup
 
   if(iup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix) 
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        commbuf_x(ix,iy,iz,iorb,1)=tpsi(ie(1)-Nd+ix,iy+ib(2)-1,iz+ib(3)-1,iorb)
+        commbuf_x(ix,iy,iz,iorb,1)=tpsi(ie(1)-Nd+ix,iy+is(2)-1,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -64,10 +64,10 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(idw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        commbuf_x(ix,iy,iz,iorb,3)=tpsi(ib(1)+ix-1,iy+ib(2)-1,iz+ib(3)-1,iorb)
+        commbuf_x(ix,iy,iz,iorb,3)=tpsi(is(1)+ix-1,iy+is(2)-1,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -81,10 +81,10 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix) 
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_y(ix,iy,iz,iorb,1)=tpsi(ix+ib(1)-1,ie(2)-Nd+iy,iz+ib(3)-1,iorb)
+      do ix=1,ie(1)-is(1)+1
+        commbuf_y(ix,iy,iz,iorb,1)=tpsi(ix+is(1)-1,ie(2)-Nd+iy,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -98,10 +98,10 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jdw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_y(ix,iy,iz,iorb,3)=tpsi(ix+ib(1)-1,ib(2)+iy-1,iz+ib(3)-1,iorb)
+      do ix=1,ie(1)-is(1)+1
+        commbuf_y(ix,iy,iz,iorb,3)=tpsi(ix+is(1)-1,is(2)+iy-1,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -116,9 +116,9 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix)
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_z(ix,iy,iz,iorb,1)=tpsi(ix+ib(1)-1,iy+ib(2)-1,ie(3)-Nd+iz,iorb)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        commbuf_z(ix,iy,iz,iorb,1)=tpsi(ix+is(1)-1,iy+is(2)-1,ie(3)-Nd+iz,iorb)
       end do
       end do
       end do
@@ -133,9 +133,9 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix) 
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_z(ix,iy,iz,iorb,3)=tpsi(ix+ib(1)-1,iy+ib(2)-1,ib(3)+iz-1,iorb)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        commbuf_z(ix,iy,iz,iorb,3)=tpsi(ix+is(1)-1,iy+is(2)-1,is(3)+iz-1,iorb)
       end do
       end do
       end do
@@ -149,10 +149,10 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(idw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iy,ix)
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        tpsi(ib(1)-1-Nd+ix,iy+ib(2)-1,iz+ib(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,2)
+        tpsi(is(1)-1-Nd+ix,iy+is(2)-1,iz+is(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,2)
       end do
       end do
       end do
@@ -163,10 +163,10 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(iup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        tpsi(ie(1)+ix,iy+ib(2)-1,iz+ib(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,4)
+        tpsi(ie(1)+ix,iy+is(2)-1,iz+is(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,4)
       end do
       end do
       end do
@@ -177,10 +177,10 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jdw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,ib(2)-1-Nd+iy,iz+ib(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,2)
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,is(2)-1-Nd+iy,iz+is(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,2)
       end do
       end do
       end do
@@ -191,10 +191,10 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix) 
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,ie(2)+iy,iz+ib(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,4)
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,ie(2)+iy,iz+is(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,4)
       end do
       end do
       end do
@@ -206,9 +206,9 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix) 
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,iy+ib(2)-1,ib(3)-1-Nd+iz,iorb)=commbuf_z(ix,iy,iz,iorb,2)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,iy+is(2)-1,is(3)-1-Nd+iz,iorb)=commbuf_z(ix,iy,iz,iorb,2)
       end do
       end do
       end do
@@ -220,9 +220,9 @@ subroutine update_overlap_R(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix)
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,iy+ib(2)-1,ie(3)+iz,iorb)=commbuf_z(ix,iy,iz,iorb,4)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,iy+is(2)-1,ie(3)+iz,iorb)=commbuf_z(ix,iy,iz,iorb,4)
       end do
       end do
       end do
@@ -236,11 +236,11 @@ end subroutine update_overlap_R
 
 !===================================================================================================================================
 
-subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,icomm)
+subroutine update_overlap_C(tpsi,is_array,ie_array,Norb,Nd,is,ie,irank_overlap,icomm)
   use salmon_communication, only: comm_proc_null, comm_isend, comm_irecv, comm_wait_all
   implicit none
-  integer,intent(in) :: ib_array(3),ie_array(3),Norb,Nd,ib(3),ie(3),irank_overlap(6),icomm
-  complex(8) :: tpsi(ib_array(1):ie_array(1),ib_array(2):ie_array(2),ib_array(3):ie_array(3),1:Norb)
+  integer,intent(in) :: is_array(3),ie_array(3),Norb,Nd,is(3),ie(3),irank_overlap(6),icomm
+  complex(8) :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3),1:Norb)
   !
   integer :: ix,iy,iz,iorb
   integer :: iup,idw,jup,jdw,kup,kdw
@@ -255,19 +255,19 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   kup = irank_overlap(5)
   kdw = irank_overlap(6)
 
-  allocate(commbuf_x(Nd,ie(2)-ib(2)+1,ie(3)-ib(3)+1,Norb,4))
-  allocate(commbuf_y(ie(1)-ib(1)+1,Nd,ie(3)-ib(3)+1,Norb,4))
-  allocate(commbuf_z(ie(1)-ib(1)+1,ie(2)-ib(2)+1,Nd,Norb,4))
+  allocate(commbuf_x(Nd,ie(2)-is(2)+1,ie(3)-is(3)+1,Norb,4))
+  allocate(commbuf_y(ie(1)-is(1)+1,Nd,ie(3)-is(3)+1,Norb,4))
+  allocate(commbuf_z(ie(1)-is(1)+1,ie(2)-is(2)+1,Nd,Norb,4))
 
   !send from idw to iup
 
   if(iup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix) 
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        commbuf_x(ix,iy,iz,iorb,1)=tpsi(ie(1)-Nd+ix,iy+ib(2)-1,iz+ib(3)-1,iorb)
+        commbuf_x(ix,iy,iz,iorb,1)=tpsi(ie(1)-Nd+ix,iy+is(2)-1,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -281,10 +281,10 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(idw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        commbuf_x(ix,iy,iz,iorb,3)=tpsi(ib(1)+ix-1,iy+ib(2)-1,iz+ib(3)-1,iorb)
+        commbuf_x(ix,iy,iz,iorb,3)=tpsi(is(1)+ix-1,iy+is(2)-1,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -298,10 +298,10 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix) 
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_y(ix,iy,iz,iorb,1)=tpsi(ix+ib(1)-1,ie(2)-Nd+iy,iz+ib(3)-1,iorb)
+      do ix=1,ie(1)-is(1)+1
+        commbuf_y(ix,iy,iz,iorb,1)=tpsi(ix+is(1)-1,ie(2)-Nd+iy,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -315,10 +315,10 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jdw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_y(ix,iy,iz,iorb,3)=tpsi(ix+ib(1)-1,ib(2)+iy-1,iz+ib(3)-1,iorb)
+      do ix=1,ie(1)-is(1)+1
+        commbuf_y(ix,iy,iz,iorb,3)=tpsi(ix+is(1)-1,is(2)+iy-1,iz+is(3)-1,iorb)
       end do
       end do
       end do
@@ -333,9 +333,9 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix)
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_z(ix,iy,iz,iorb,1)=tpsi(ix+ib(1)-1,iy+ib(2)-1,ie(3)-Nd+iz,iorb)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        commbuf_z(ix,iy,iz,iorb,1)=tpsi(ix+is(1)-1,iy+is(2)-1,ie(3)-Nd+iz,iorb)
       end do
       end do
       end do
@@ -350,9 +350,9 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix) 
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        commbuf_z(ix,iy,iz,iorb,3)=tpsi(ix+ib(1)-1,iy+ib(2)-1,ib(3)+iz-1,iorb)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        commbuf_z(ix,iy,iz,iorb,3)=tpsi(ix+is(1)-1,iy+is(2)-1,is(3)+iz-1,iorb)
       end do
       end do
       end do
@@ -366,10 +366,10 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(idw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iy,ix)
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        tpsi(ib(1)-1-Nd+ix,iy+ib(2)-1,iz+ib(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,2)
+        tpsi(is(1)-1-Nd+ix,iy+is(2)-1,iz+is(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,2)
       end do
       end do
       end do
@@ -380,10 +380,10 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(iup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
-      do iy=1,ie(2)-ib(2)+1
+      do iz=1,ie(3)-is(3)+1
+      do iy=1,ie(2)-is(2)+1
       do ix=1,Nd
-        tpsi(ie(1)+ix,iy+ib(2)-1,iz+ib(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,4)
+        tpsi(ie(1)+ix,iy+is(2)-1,iz+is(3)-1,iorb)=commbuf_x(ix,iy,iz,iorb,4)
       end do
       end do
       end do
@@ -394,10 +394,10 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jdw/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix)
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,ib(2)-1-Nd+iy,iz+ib(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,2)
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,is(2)-1-Nd+iy,iz+is(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,2)
       end do
       end do
       end do
@@ -408,10 +408,10 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
   if(jup/=comm_proc_null)then
     do iorb=1,Norb
   !$OMP parallel do private(iz,iy,ix) 
-      do iz=1,ie(3)-ib(3)+1
+      do iz=1,ie(3)-is(3)+1
       do iy=1,Nd
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,ie(2)+iy,iz+ib(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,4)
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,ie(2)+iy,iz+is(3)-1,iorb)=commbuf_y(ix,iy,iz,iorb,4)
       end do
       end do
       end do
@@ -423,9 +423,9 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix) 
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,iy+ib(2)-1,ib(3)-1-Nd+iz,iorb)=commbuf_z(ix,iy,iz,iorb,2)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,iy+is(2)-1,is(3)-1-Nd+iz,iorb)=commbuf_z(ix,iy,iz,iorb,2)
       end do
       end do
       end do
@@ -437,9 +437,9 @@ subroutine update_overlap_C(tpsi,ib_array,ie_array,Norb,Nd,ib,ie,irank_overlap,i
     do iorb=1,Norb
       do iz=1,Nd
   !$OMP parallel do private(iy,ix)
-      do iy=1,ie(2)-ib(2)+1
-      do ix=1,ie(1)-ib(1)+1
-        tpsi(ix+ib(1)-1,iy+ib(2)-1,ie(3)+iz,iorb)=commbuf_z(ix,iy,iz,iorb,4)
+      do iy=1,ie(2)-is(2)+1
+      do ix=1,ie(1)-is(1)+1
+        tpsi(ix+is(1)-1,iy+is(2)-1,ie(3)+iz,iorb)=commbuf_z(ix,iy,iz,iorb,4)
       end do
       end do
       end do

@@ -15,60 +15,12 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module salmon_pp
-
   implicit none
-
-  type pp_info
-    real(8) :: zion
-    integer :: lmax,lmax0
-    integer :: nrmax,nrmax0
-    logical :: flag_nlcc
-    character(2),allocatable :: atom_symbol(:)
-    real(8),allocatable :: rmass(:)
-    integer,allocatable :: mr(:)
-    integer,allocatable :: lref(:)
-    integer,allocatable :: nrps(:)
-    integer,allocatable :: mlps(:)
-    integer,allocatable :: zps(:)
-    integer,allocatable :: nrloc(:)
-    real(8),allocatable :: rloc(:)
-    real(8),allocatable :: rps(:)
-    real(8),allocatable :: anorm(:,:)
-    integer,allocatable :: inorm(:,:)
-    real(8),allocatable :: rad(:,:)
-    real(8),allocatable :: radnl(:,:)
-    real(8),allocatable :: vloctbl(:,:)
-    real(8),allocatable :: dvloctbl(:,:)
-    real(8),allocatable :: udvtbl(:,:,:)
-    real(8),allocatable :: dudvtbl(:,:,:)
-    real(8),allocatable :: rho_nlcc_tbl(:,:)
-    real(8),allocatable :: tau_nlcc_tbl(:,:)
-    real(8),allocatable :: upp_f(:,:,:)
-    real(8),allocatable :: vpp_f(:,:,:)
-    real(8),allocatable :: upp(:,:)
-    real(8),allocatable :: dupp(:,:)
-    real(8),allocatable :: vpp(:,:)
-    real(8),allocatable :: dvpp(:,:)
-  end type
-
-  type pp_grid
-    integer :: nps
-    integer,allocatable :: mps(:)
-    integer,allocatable :: jxyz(:,:,:)
-    integer,allocatable :: jxx(:,:)
-    integer,allocatable :: jyy(:,:)
-    integer,allocatable :: jzz(:,:)
-    real(8),allocatable :: uv(:,:)
-    real(8),allocatable :: duv(:,:,:)
-    integer :: nlma
-    integer,allocatable :: lma_tbl(:,:)
-    integer,allocatable :: ia_tbl(:)
-    real(8),allocatable :: rinv_uvu(:)
-  end type
 
   contains
 
   subroutine init_pp(pp,nrmax,lmax,flag_nlcc)
+    use structures, only: s_pp_info
     use salmon_global,only : nelem,lloc_ps
     use salmon_global,only : pseudo_file
     use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat, &
@@ -77,7 +29,7 @@ module salmon_pp
     use salmon_parallel, only: nproc_group_global, nproc_id_global
     use salmon_communication, only: comm_bcast, comm_is_root
     implicit none
-    type(pp_info) :: pp
+    type(s_pp_info) :: pp
     integer, parameter :: nrmax0=50000, lmax0=4
     integer,intent(in) :: nrmax,lmax
     logical,intent(in) :: flag_nlcc
@@ -261,8 +213,9 @@ module salmon_pp
   end subroutine init_pp
 !======================================================================
   subroutine read_mr_yb(pp,ik,ps_file)
+    use structures, only: s_pp_info
     implicit none
-    type(pp_info) :: pp
+    type(s_pp_info) :: pp
     integer :: ik
     character(256) :: ps_file
     
@@ -274,8 +227,9 @@ module salmon_pp
   end subroutine read_mr_YB
 !======================================================================
   subroutine read_mr_abinit(pp,ik,ps_file)
+    use structures, only: s_pp_info
     implicit none
-    type(pp_info) :: pp
+    type(s_pp_info) :: pp
     integer :: ik
     character(256) :: ps_file
     real(8) :: zatom, zion, pspdat,pspcod,pspxc,lmaxabinit,lloc,mmax,r2well
@@ -292,8 +246,9 @@ module salmon_pp
   end subroutine read_mr_ABINIT
 !======================================================================
   subroutine read_mr_abinitfhi(pp,ik,ps_file)
+    use structures, only: s_pp_info
     implicit none
-    type(pp_info) :: pp
+    type(s_pp_info) :: pp
     integer :: ik
     integer :: i
     character(256) :: ps_file
@@ -310,8 +265,9 @@ module salmon_pp
 
 !======================================================================
   subroutine read_mr_fhi(pp,ik,ps_file)
+    use structures, only: s_pp_info
     implicit none
-    type(pp_info) :: pp
+    type(s_pp_info) :: pp
     integer :: ik
     integer :: i
     character(256) :: ps_file

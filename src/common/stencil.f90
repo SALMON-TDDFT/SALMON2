@@ -24,7 +24,7 @@ contains
 # define DY(dt) ix,idy(iy+(dt)),iz
 # define DZ(dt) ix,iy,idz(iz+(dt))
 
-subroutine stencil_R(tpsi,htpsi,ib_array,ie_array, &
+subroutine stencil_R(tpsi,htpsi,ib_array,ie_array &
                     ,V_local,ib,ie &
                     ,idx,idy,idz,lap0,lapt)
   implicit none

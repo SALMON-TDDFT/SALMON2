@@ -16,10 +16,10 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_vloc(pp,dvloc_g,gx,gy,gz,ng,ng_s,ng_e,ngzero)
   use salmon_global,only : nelem
-  use salmon_pp,only : pp_info
+  use structures,only : s_pp_info
   implicit none
   real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
-  type(pp_info) :: pp
+  type(s_pp_info) :: pp
   integer,intent(in) :: ng,ng_s,ng_e
   integer,intent(in) :: ngzero
   real(8),intent(in) :: gx(ng),gy(ng),gz(ng)
@@ -66,10 +66,10 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
   use salmon_global,only : natom, nelem, kion, rion
   use salmon_parallel,only : nproc_group_tdks
   use salmon_communication, only: comm_summation
-  use salmon_pp,only : pp_info
+  use structures,only : s_pp_info
   implicit none
   real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
-  type(pp_info) :: pp
+  type(s_pp_info) :: pp
   integer,intent(in) :: ngzero
   integer,intent(in) :: ng,ng_s,ng_e
   complex(8),intent(in) :: dvloc_g(ng_s:ng_e,nelem)
@@ -147,9 +147,9 @@ end subroutine calc_vpsl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_mps(ppg)
   use salmon_global,only : natom
-  use salmon_pp,only : pp_grid
+  use structures,only : s_pp_grid
   implicit none 
-  type(pp_grid) :: ppg
+  type(s_pp_grid) :: ppg
 
   allocate(ppg%mps(natom))
 
@@ -157,9 +157,9 @@ end subroutine init_mps
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_jxyz(ppg)
   use salmon_global,only : natom
-  use salmon_pp,only : pp_grid
+  use structures,only : s_pp_grid
   implicit none 
-  type(pp_grid) :: ppg
+  type(s_pp_grid) :: ppg
 
   allocate(ppg%jxyz(3,ppg%nps,natom))
   allocate(ppg%jxx( ppg%nps,natom))
@@ -169,9 +169,9 @@ subroutine init_jxyz(ppg)
 end subroutine init_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine finalize_jxyz(ppg)
-  use salmon_pp,only : pp_grid
+  use structures,only : s_pp_grid
   implicit none 
-  type(pp_grid) :: ppg
+  type(s_pp_grid) :: ppg
 
   deallocate(ppg%jxyz)
   deallocate(ppg%jxx,ppg%jyy,ppg%jzz)
@@ -181,10 +181,10 @@ end subroutine finalize_jxyz
 
 subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
-  use salmon_pp,only : pp_info,pp_grid
+  use structures,only : s_pp_info,s_pp_grid
   implicit none
-  type(pp_info) :: pp
-  type(pp_grid) :: ppg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
   real(8),intent(in) :: alx,aly,alz
   integer,intent(in) :: nl,ml
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
@@ -262,10 +262,10 @@ end subroutine calc_mps
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
-  use salmon_pp,only : pp_info,pp_grid
+  use structures,only : s_pp_info,s_pp_grid
   implicit none
-  type(pp_info) :: pp
-  type(pp_grid) :: ppg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
   real(8),intent(in) :: alx,aly,alz
   integer,intent(in) :: nl,ml
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
@@ -348,19 +348,19 @@ end subroutine calc_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_lma_tbl(pp,ppg)
   use salmon_global,only : natom
-  use salmon_pp,only : pp_info,pp_grid
+  use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(pp_info) :: pp
-  type(pp_grid) :: ppg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
 
   allocate(ppg%lma_tbl((pp%lmax+1)**2,natom))
 
 end subroutine init_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine finalize_lma_tbl(ppg)
-  use salmon_pp,only : pp_grid
+  use structures,only : s_pp_grid
   implicit none 
-  type(pp_grid) :: ppg
+  type(s_pp_grid) :: ppg
 
   deallocate(ppg%lma_tbl)
 
@@ -368,10 +368,10 @@ end subroutine finalize_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_uv(pp,ppg)
   use salmon_global,only : natom
-  use salmon_pp,only : pp_info,pp_grid
+  use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(pp_info) :: pp
-  type(pp_grid) :: ppg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
 
   allocate(ppg%ia_tbl((pp%lmax+1)**2*natom))
   allocate(ppg%rinv_uvu((pp%lmax+1)**2*natom))
@@ -380,9 +380,9 @@ subroutine init_uv(pp,ppg)
 end subroutine init_uv
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine finalize_uv(ppg)
-  use salmon_pp,only : pp_grid
+  use structures,only : s_pp_grid
   implicit none 
-  type(pp_grid) :: ppg
+  type(s_pp_grid) :: ppg
 
   deallocate(ppg%ia_tbl,ppg%rinv_uvu)
   deallocate(ppg%uv,ppg%duv)
@@ -391,10 +391,10 @@ end subroutine finalize_uv
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine set_nlma(pp,ppg)
   use salmon_global,only : natom,kion
-  use salmon_pp,only : pp_info,pp_grid
+  use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(pp_info) :: pp
-  type(pp_grid) :: ppg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
   integer :: lma
   integer :: a,ik,m,l
 
@@ -414,10 +414,10 @@ end subroutine set_nlma
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine set_lma_tbl(pp,ppg)
   use salmon_global,only : natom,kion
-  use salmon_pp,only : pp_info,pp_grid
+  use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(pp_info) :: pp
-  type(pp_grid) :: ppg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
   integer :: lm,lma
   integer :: a,ik,m,l
 
@@ -442,11 +442,11 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
                    lx,ly,lz,nl,hx,hy,hz,alx,aly,alz,  &
                    flag_use_grad_wf_on_force,property)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
-  use salmon_pp,only : pp_info,pp_grid
+  use structures,only : s_pp_info,s_pp_grid
   implicit none
   real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
-  type(pp_info) :: pp
-  type(pp_grid) :: ppg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
   integer,intent(in) :: nl
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
   real(8),intent(in) :: hx,hy,hz
