@@ -16,7 +16,7 @@
 Module Global_Variables
   use salmon_global
   use salmon_xc, only: xc_functional
-  use salmon_pp, only: pp_info
+  use salmon_pp, only: pp_info,pp_grid
 !ARTED version
   character(50),parameter :: ARTED_ver='ARTED.1.6.0 (based on 2014.08.10.2)'
 
@@ -52,6 +52,7 @@ Module Global_Variables
 
 ! pseudopotential
   type(pp_info) :: pp
+  type(pp_grid) :: ppg
   integer,parameter :: Nrmax=3000,Lmax=4
   character(2) :: ps_type
   integer :: Nps,Nlma
@@ -323,16 +324,6 @@ Module Global_Variables
   
   ! Exchange Correlation
   type(xc_functional) :: xc_func
-
-  !AY trial for Raman: Maxwell + Force-Field type MD (theory=Raman)
-  logical :: flag_ms_ff_LessPrint
-  integer :: Nm_FDTD, iter_save, imode_FDTD_raman
-  integer :: interval_step_trj_raman
-  real(8) :: Omg_dt,v_mxmt
-  real(8) :: eps_diag, dchidq(3,3)
-  real(8),allocatable :: c_pmode(:), Rion_eq0(:,:) 
-  real(8),allocatable :: Rion_m_next(:,:,:),velocity_m_next(:,:,:)
-  character(1024) :: dir_ion_trj
 
   interface 
     subroutine total_Energy_omp(Rion_update,GS_RT,ixy_m)

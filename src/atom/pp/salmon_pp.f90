@@ -51,10 +51,25 @@ module salmon_pp
     real(8),allocatable :: dvpp(:,:)
   end type
 
+  type pp_grid
+    integer :: nps
+    integer,allocatable :: mps(:)
+    integer,allocatable :: jxyz(:,:,:)
+    integer,allocatable :: jxx(:,:)
+    integer,allocatable :: jyy(:,:)
+    integer,allocatable :: jzz(:,:)
+    real(8),allocatable :: uv(:,:)
+    real(8),allocatable :: duv(:,:,:)
+    integer :: nlma
+    integer,allocatable :: lma_tbl(:,:)
+    integer,allocatable :: ia_tbl(:)
+    real(8),allocatable :: rinv_uvu(:)
+  end type
+
   contains
 
   subroutine init_pp(pp,nrmax,lmax,flag_nlcc)
-    use salmon_global, only: nelem,lloc_ps
+    use salmon_global,only : nelem,lloc_ps
     use salmon_global,only : pseudo_file
     use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat, &
                              n_ABINITFHI_psformat,n_FHI_psformat, &
@@ -70,10 +85,9 @@ module salmon_pp
     character(256) :: ps_file
     integer :: ips_type,nlen_psf
 
-    allocate(pp%atom_symbol(1:nelem))
-    allocate(pp%rmass(1:nelem))
-    
-    allocate(pp%mr(1:nelem))
+    allocate(pp%atom_symbol(nelem))
+    allocate(pp%rmass(nelem))
+    allocate(pp%mr(nelem))
 
     if (comm_is_root(nproc_id_global)) then
   
