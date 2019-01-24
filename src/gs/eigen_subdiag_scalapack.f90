@@ -15,7 +15,6 @@
 !
 subroutine eigen_subdiag(Rmat,evec,iter,ier2)
 use salmon_parallel, only: nproc_size_global
-use scf_data
 implicit none
 
 integer :: iter,ier2
@@ -61,8 +60,8 @@ END subroutine eigen_subdiag
 !     pasted directly into matlab.
 !
 !     .. Parameters ..
+use inputoutput, only: nproc_domain
 use salmon_parallel, only: nproc_size_global
-use scf_data
 integer :: iter
 real(8) :: Rmat(iter,iter)
 real(8) :: evec(iter,iter)
@@ -109,12 +108,12 @@ real(8) :: evec(iter,iter)
       NB = 1
 !      NPROW = 2
 !      NPCOL = 2
-      if(nproc_Mxin(1)>1)then
-        NPROW = nproc_Mxin(1)
-      else if(nproc_Mxin(2)>1)then
-        NPROW = nproc_Mxin(2)
+      if(nproc_domain(1)>1)then
+        NPROW = nproc_domain(1)
+      else if(nproc_domain(2)>1)then
+        NPROW = nproc_domain(2)
       else
-        NPROW = nproc_Mxin(3)
+        NPROW = nproc_domain(3)
       end if
       NPCOL = nproc_size_global/NPROW
       LDA = iter

@@ -13,31 +13,31 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
-  use scf_data
+subroutine eigen_subdiag(Rmat,evec,iter,ier2)
   implicit none
-  character :: JOBZ, UPLO
-  integer :: LWORK
+  
   integer :: iter,ier2
-  real(8),allocatable :: RWORK(:)
+  real(8) :: Rmat(iter,iter)
+  real(8) :: evec(iter,iter)
+  
+  character(1) :: JOBZ,UPLO
+  integer :: N
+  real(8) :: A(iter,iter)
+  integer :: LDA
   real(8) :: W(iter)
-  complex(8) :: Rmat(iter,iter)
-  complex(8),allocatable :: WORK(:)
-  complex(8) :: evec(iter,iter)
+  real(8) :: WORK(3*iter-1)
+  integer :: LWORK
   
   ier2=0
   
   JOBZ='V'
-  UPLO='U'
-  
-  LWORK=2*iter-1
-  allocate(WORK(LWORK))
-  allocate(RWORK(3*iter-2))
-  
-  call ZHEEV(JOBZ,UPLO,iter,Rmat,iter,W,WORK,LWORK,RWORK,ier2)
-  
-  evec(:,:)=Rmat(:,:)
-  
-  deallocate(WORK,RWORK)
-  
-end subroutine eigen_subdiag_periodic
+  UPLO='L'
+  N=iter
+  A=Rmat
+  LDA=iter
+  LWORK=3*iter-1
+  call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
+  evec=A
+
+END subroutine eigen_subdiag
+ 
