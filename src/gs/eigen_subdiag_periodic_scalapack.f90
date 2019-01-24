@@ -14,7 +14,6 @@
 !  limitations under the License.
 !
 subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
-  use scf_data
   implicit none
   character :: JOBZ, UPLO
   integer :: LWORK
