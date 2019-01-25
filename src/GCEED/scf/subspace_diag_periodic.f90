@@ -122,7 +122,6 @@ do is=is_sta,is_end
   
     do jj=iobsta(is),iobend(is)
       call calc_myob(jj,j_myob)
-      call check_corrkob(jj,ik,icorr_j)
       call check_corrkob_ud(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(icorr_j==1)then
 !$OMP parallel do private(iz,iy,ix)

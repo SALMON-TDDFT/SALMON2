@@ -155,10 +155,10 @@ elp2(2)=get_wtime()
   else
     do iob=iobsta(is),iobend(is)
       call calc_myob(iob,iob_myob)
-      call check_corrkob(iob,1,icorr_iob)
+      call check_corrkob_ud(iob,1,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       do job=iobsta(is),iob-1
         call calc_myob(job,job_myob)
-        call check_corrkob(job,1,icorr_job)
+        call check_corrkob_ud(job,1,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
         if(icorr_job==1)then
   !$omp parallel do private(iz,iy,ix) collapse(2)
           do iz=mg_sta(3),mg_end(3)

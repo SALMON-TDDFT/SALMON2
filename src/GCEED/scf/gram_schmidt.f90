@@ -47,7 +47,7 @@ end if
 do is=is_sta,is_end
 do iob=pstart(is),pend(is)
   call calc_myob(iob,iob_myob)
-  call check_corrkob(iob,1,icorr_p)
+  call check_corrkob_ud(iob,1,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
   if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix)
     do iz=mg_sta(3),mg_end(3)
@@ -98,7 +98,7 @@ do iob=pstart(is),pend(is)
   call comm_summation(matbox_m,matbox_m2,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
 
   rbox=0.d0
-  call check_corrkob(iob,1,icorr_p)
+  call check_corrkob_ud(iob,1,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
   if(icorr_p==1)then
 !$OMP parallel do reduction ( + : rbox ) private(iz,iy,ix)
     do iz=mg_sta(3),mg_end(3)

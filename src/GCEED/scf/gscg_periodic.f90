@@ -168,10 +168,10 @@ subroutine gscg_periodic(psi_in,iflag)
       else
         do iob=iobsta(is),iobend(is)
           call calc_myob(iob,iob_myob)
-          call check_corrkob(iob,ik,icorr_iob)
+          call check_corrkob_ud(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
           do job=iobsta(is),iob-1
             call calc_myob(job,job_myob)
-            call check_corrkob(job,ik,icorr_job)
+            call check_corrkob_ud(job,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
             if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)
               do iz=mg_sta(3),mg_end(3)
