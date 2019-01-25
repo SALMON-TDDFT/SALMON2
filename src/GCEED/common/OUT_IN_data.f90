@@ -154,7 +154,7 @@ case(0)
     do ik=1,num_kpoints_rd
     do iob=1,itotMST
       call calc_myob(iob,iob_myob)
-      call check_corrkob(iob,ik,icorr_p)
+      call check_corrkob_ud(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
   
       matbox_l=0.d0
       if(icorr_p==1)then
@@ -193,7 +193,7 @@ case(3)
     do iob=1,itotMST
 
       call calc_myob(iob,iob_myob)
-      call check_corrkob(iob,ik,icorr_p)
+      call check_corrkob_ud(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       cmatbox_l=0.d0
       if(icorr_p==1)then
         cmatbox_l(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))   &
@@ -947,7 +947,7 @@ do p0=pstart(is),pend(is)
 ! read file
   call conv_p0(p0,iob)
   call calc_myob(iob,iob_myob)
-  call check_corrkob(iob,ik,icheck_corrkob)
+  call check_corrkob_ud(iob,ik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
 
   if(IC<=2)then
     if(nproc_id_global<num_datafiles_IN)then
