@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine check_corrkob_ud(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
   use salmon_parallel, only: nproc_id_kgrid, nproc_id_spin
   implicit none
   integer,intent(in)  :: iob,ik
@@ -70,4 +70,4 @@ subroutine check_corrkob_ud(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_
     end if
   end if
   
-end subroutine check_corrkob_ud
+end subroutine check_corrkob
