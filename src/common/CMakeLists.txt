@@ -1,6 +1,7 @@
 set(SOURCES
    broyden.f90
    calc_iquotient.f90
+   check_corrkob.f90
    hpsi.f90
    stencil.f90
    update_overlap.f90
