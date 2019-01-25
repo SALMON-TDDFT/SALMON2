@@ -13,15 +13,15 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_iquotient(iob,nproc_ob,itotMST,iquotient)
-implicit none
-integer :: iob,nproc_ob,itotMST
-integer :: iquotient
-
-if(mod(iob*nproc_ob,itotMST)==0)then
-  iquotient=iob*nproc_ob/itotMST-1
-else
-  iquotient=iob*nproc_ob/itotMST
-end if
+subroutine calc_iquotient(iob,nproc_ob,itotmst,iquotient)
+  implicit none
+  integer,intent(in) :: iob,nproc_ob,itotmst
+  integer,intent(out) :: iquotient
+  
+  if(mod(iob*nproc_ob,itotmst)==0)then
+    iquotient=iob*nproc_ob/itotmst-1
+  else
+    iquotient=iob*nproc_ob/itotmst
+  end if
 
 end subroutine calc_iquotient
