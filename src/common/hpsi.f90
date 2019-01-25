@@ -15,222 +15,221 @@
 !
 module hpsi_sub
 
-interface hpsi
-  module procedure hpsi_R,hpsi_C
-end interface hpsi
-
 contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi_R(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                 ,V_local,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,Nspin &
-                 ,idx,idy,idz,lap0,lapt,is_table &
-                 ,NI,Nps,Nlma,ia_table,Mps,Jxyz,uV,uVu &
+SUBROUTINE hpsi(tpsi,htpsi,rg_wf &
+                 ,V_local,Nspin &
+                 ,stencil &
+                 ,ppg,ttpsi &
                  ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo)
+  use structures
   use update_overlap_sub, only: update_overlap_R
   use stencil_sub, only: stencil_R
   implicit none
-  integer,intent(in)  :: ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                        ,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,Nspin &
-                        ,idx(ix_sta-4:ix_end+4),idy(iy_sta-4:iy_end+4),idz(iz_sta-4:iz_end+4) &
-                        ,is_table(Norb) &
-                        ,NI,Nps,Nlma,ia_table(Nlma),Mps(NI),Jxyz(3,Nps,NI) &
+  integer,intent(in)  :: Nspin &
                         ,nproc_Mxin_mul,irank_overlap(6),icomm_overlap,icomm_pseudo
-  real(8),intent(in)  :: tpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb) &
-                        ,V_local(ix_sta:ix_end,iy_sta:iy_end,iz_sta:iz_end,1:Nspin) &
-                        ,lap0,lapt(4,3),uV(Nps,Nlma),uVu(Nlma)
-  real(8),intent(out) :: htpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
+  type(s_rgrid)  ,intent(in) :: rg_wf
+  type(s_scalar) ,intent(in) :: V_local(Nspin)
+  type(s_stencil),intent(in) :: stencil
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_wavefunction),intent(in)  :: tpsi
+  type(s_wavefunction),intent(out) :: htpsi
+  type(s_wavefunction),optional,intent(out) :: ttpsi
   !
-  integer :: is,iorb
-
-  if(nproc_Mxin_mul.ne.1) then
-    call update_overlap_R(tpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb) &
-                         ,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb,4 &
-                         ,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,irank_overlap,icomm_overlap)
-  end if
-
-! stencil
-
-  do iorb=1,Norb
-    is = is_table(iorb)
-    call stencil_R(tpsi(:,:,:,iorb),htpsi(:,:,:,iorb),ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end &
-                  ,V_local(:,:,:,is),ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end &
-                  ,idx,idy,idz,lap0,lapt)
-
-  end do
-
-! pseudopotential
-
-  call pseudo_R(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-               ,NI,Nps,Nlma,ia_table,Mps,Jxyz,uV,uVu &
-               ,nproc_Mxin_mul,icomm_pseudo)
-
-  return
-end subroutine hpsi_R
-
-!===================================================================================================================================
-
-SUBROUTINE hpsi_C(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb & ! wavefunctions
-                 ,V_local,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,Nspin &         ! local potential
-                 ,idx,idy,idz,lap0,lapt &                                           ! stencil
-                 ,is_table,Nk &                                                     ! spin table & # of k points
-                 ,NI,Nps,Nlma,ia_table,Mps,Jxyz,uV,uVu &                            ! pseudo potential
-                 ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo &         ! MPI
-                 ,ik_table,nabt,kAc,exp_ikr,ttpsi)                                  ! k vector & ttpsi
-  use update_overlap_sub, only: update_overlap_C
-  use stencil_sub, only: stencil_C
-  implicit none
-  integer   ,intent(in)  :: ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                           ,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,Nspin &
-                           ,idx(ix_sta-4:ix_end+4),idy(iy_sta-4:iy_end+4),idz(iz_sta-4:iz_end+4) &
-                           ,is_table(Norb),Nk &
-                           ,NI,Nps,Nlma,ia_table(Nlma),Mps(NI),Jxyz(3,Nps,NI) &
-                           ,nproc_Mxin_mul,irank_overlap(6),icomm_overlap,icomm_pseudo
-  complex(8),intent(in)  :: tpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
-  real(8)   ,intent(in)  :: V_local(ix_sta:ix_end,iy_sta:iy_end,iz_sta:iz_end,1:Nspin) &
-                           ,lap0,lapt(4,3),uV(Nps,Nlma),uVu(Nlma)
-  complex(8),intent(out) :: htpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
-  !
-  integer   ,optional,intent(in)  :: ik_table(Norb)
-  real(8)   ,optional,intent(in)  :: nabt(4,3),kAc(Nk,3)
-  complex(8),optional,intent(in)  :: exp_ikr(Nps,NI,Nk)
-  complex(8),optional,intent(out) :: ttpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
-  !
-  integer :: is,iorb,ik,ix,iy,iz
-  real(8) :: k_nabt(4,3),k2
+  integer :: ispin,io,ik,i1,i1_s,i1_e,ik_s,ik_e,io_s,io_e,norb
+  real(8) :: k_nabt(4,3),k_lap0
   logical :: if_kAc
 
-  if_kAc = present(kAc)
+  i1_s = tpsi%i1_s
+  i1_e = tpsi%i1_e
+  ik_s = tpsi%ik_s
+  ik_e = tpsi%ik_e
+  io_s = tpsi%io_s
+  io_e = tpsi%io_e
+  norb = Nspin* tpsi%numo * tpsi%numk * tpsi%num1
 
-  if(nproc_Mxin_mul.ne.1) then
-    call update_overlap_C(tpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb) &
-                       ,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb,4 &
-                       ,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,irank_overlap,icomm_overlap)
-  end if
+  if(allocated(tpsi%rwf)) then ! real or complex
 
-! stencil
-
-  do iorb=1,Norb
-    is = is_table(iorb)
-
-    if(if_kAc) then
-      ik = ik_table(iorb)
-      k2 = 0.5d0* sum(kAc(ik,:)**2)
-      k_nabt(:,1) = kAc(ik,1) * nabt(:,1)
-      k_nabt(:,2) = kAc(ik,2) * nabt(:,2)
-      k_nabt(:,3) = kAc(ik,3) * nabt(:,3)
-    else
-      k2 = 0d0
-      k_nabt = 0d0
+  ! overlap region communication
+    if(nproc_Mxin_mul.ne.1) then
+      call update_overlap_R(tpsi%rwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !?????????
+                           ,rg_wf%is,rg_wf%ie,irank_overlap,icomm_overlap)
     end if
-
-    call stencil_C(tpsi(:,:,:,iorb),htpsi(:,:,:,iorb),ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end &
-                  ,V_local(:,:,:,is),ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end &
-                  ,idx,idy,idz,lap0+k2,lapt,k_nabt)
-
-  end do
-
-! subtraction
-
-  if(present(ttpsi)) then
-    do iorb=1,Norb
-      is = is_table(iorb)
-      do iz=iz_sta,iz_end
-        do iy=iy_sta,iy_end
-          do ix=ix_sta,ix_end
-            ttpsi(ix,iy,iz,iorb) = htpsi(ix,iy,iz,iorb) - V_local(ix,iy,iz,is) * tpsi(ix,iy,iz,iorb)
-          end do
-        end do
-      end do
+  ! stencil
+    do i1=i1_s,i1_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      call stencil_R(tpsi%rwf(:,:,:,ispin,io,ik,i1),htpsi%rwf(:,:,:,ispin,io,ik,i1),rg_wf%is_array,rg_wf%ie_array &
+                    ,V_local(ispin)%f,rg_wf%is,rg_wf%ie &
+                    ,rg_wf%idx,rg_wf%idy,rg_wf%idz,stencil%lap0,stencil%lapt)
     end do
+    end do
+    end do
+    end do
+  ! pseudopotential
+    call pseudo_R(tpsi,htpsi,Nspin,ppg &
+                 ,nproc_Mxin_mul,icomm_pseudo)
+
+  else
+
+  if_kAc = allocated(stencil%kAc) !?????
+
+! overlap region communication
+    if(nproc_Mxin_mul.ne.1) then
+      call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !????????
+                           ,rg_wf%is,rg_wf%ie,irank_overlap,icomm_overlap)
+    end if
+  ! stencil
+    do i1=i1_s,i1_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      if(if_kAc) then
+        k_lap0 = stencil%lap0 + 0.5d0* sum(stencil%kAc(ik,:)**2)
+        k_nabt(:,1) = stencil%kAc(ik,1) * stencil%nabt(:,1)
+        k_nabt(:,2) = stencil%kAc(ik,2) * stencil%nabt(:,2)
+        k_nabt(:,3) = stencil%kAc(ik,3) * stencil%nabt(:,3)
+      else
+        k_lap0 = stencil%lap0
+        k_nabt = 0d0
+      end if
+      ! spin collinear
+      call stencil_C(tpsi%zwf(:,:,:,ispin,io,ik,i1),htpsi%zwf(:,:,:,ispin,io,ik,i1),rg_wf%is_array,rg_wf%ie_array &
+                    ,V_local(ispin)%f,rg_wf%is,rg_wf%ie &
+                    ,rg_wf%idx,rg_wf%idy,rg_wf%idz,k_lap0,stencil%lapt,k_nabt)
+    end do
+    end do
+    end do
+    end do
+  ! subtraction
+    if(present(ttpsi)) then
+      do i1=i1_s,i1_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        ttpsi%zwf(:,:,:,ispin,io,ik,i1) = htpsi%zwf(:,:,:,ispin,io,ik,i1) &
+          - V_local(ispin)%f(:,:,:) * tpsi%zwf(:,:,:,ispin,io,ik,i1)
+      end do
+      end do
+      end do
+      end do
+    end if
+  ! pseudopotential
+    call pseudo_C(tpsi,htpsi,nspin,ppg &
+                  ,nproc_Mxin_mul,icomm_pseudo)
+
   end if
-
-! pseudopotential
-
-  call pseudo_C(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-               ,NI,Nps,Nlma,ia_table,Mps,Jxyz,uV,uVu &
-               ,Nk,nproc_Mxin_mul,icomm_pseudo &
-               ,ik_table,exp_ikr)
 
   return
-end subroutine hpsi_C
+end subroutine hpsi
 
 !===================================================================================================================================
 
-subroutine pseudo_R(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                   ,NI,Nps,Nlma,ia_table,Mps,Jxyz,uV,uVu &
+subroutine pseudo_R(tpsi,htpsi,nspin,ppg &
                    ,nproc_Mxin_mul,icomm_pseudo)
+  use structures
   use salmon_communication, only: comm_summation
   implicit none
-  integer,intent(in)  :: ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                        ,NI,Nps,Nlma,ia_table(Nlma),Mps(NI),Jxyz(3,Nps,NI) &
-                        ,nproc_Mxin_mul,icomm_pseudo
-  real(8),intent(in)  :: tpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
-  real(8),intent(in)  :: uV(Nps,Nlma),uVu(Nlma)
+  integer,intent(in) :: nspin,nproc_Mxin_mul,icomm_pseudo
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_wavefunction)   ,intent(in) :: tpsi
+  type(s_wavefunction),intent(inout) :: htpsi
   !
-  real(8),intent(out) :: htpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
-  !
-  integer :: ilma,ia,j,ix,iy,iz,iorb
+  integer :: ispin,io,ik,i1,i1_s,i1_e,ik_s,ik_e,io_s,io_e,iorb,norb
+  integer :: ilma,ia,j,ix,iy,iz,Nlma
   real(8) :: uVpsi,wrk
   real(8),allocatable :: uVpsibox(:,:),uVpsibox2(:,:)
 
+  i1_s = tpsi%i1_s
+  i1_e = tpsi%i1_e
+  ik_s = tpsi%ik_s
+  ik_e = tpsi%ik_e
+  io_s = tpsi%io_s
+  io_e = tpsi%io_e
+  norb = Nspin* tpsi%numo * tpsi%numk * tpsi%num1
+
+  Nlma = ppg%Nlma
 
   if(nproc_Mxin_mul.ne.1) then
 
     allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
 
-    do iorb=1,Norb
+    iorb = 0
+    do i1=i1_s,i1_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      iorb = iorb + 1
       do ilma=1,Nlma
-        ia = ia_table(ilma)
-        uVpsi=0.d0
-        do j=1,Mps(ia)
-          ix = Jxyz(1,j,ia)
-          iy = Jxyz(2,j,ia)
-          iz = Jxyz(3,j,ia)
-          uVpsi = uVpsi + uV(j,ilma) * tpsi(ix,iy,iz,iorb)
+        ia = ppg%ia_tbl(ilma)
+        uVpsi = 0.d0
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%rwf(ix,iy,iz,ispin,io,ik,i1)
         end do
-        uVpsi = uVpsi * uVu(ilma)
+        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         uVpsibox(ilma,iorb) = uVpsi
       end do
     end do
+    end do
+    end do
+    end do
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,icomm_pseudo)
-    do iorb=1,Norb
+    iorb = 0
+    do i1=i1_s,i1_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      iorb = iorb + 1
       do ilma=1,Nlma
-        ia = ia_table(ilma)
-        do j=1,Mps(ia)
-          ix = Jxyz(1,j,ia)
-          iy = Jxyz(2,j,ia)
-          iz = Jxyz(3,j,ia)
-          wrk = uVpsibox2(ilma,iorb) * uV(j,ilma)
-          htpsi(ix,iy,iz,iorb) = htpsi(ix,iy,iz,iorb) + wrk
+        ia = ppg%ia_tbl(ilma)
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          wrk = uVpsibox2(ilma,iorb) * ppg%uV(j,ilma)
+          htpsi%rwf(ix,iy,iz,ispin,io,ik,i1) = htpsi%rwf(ix,iy,iz,ispin,io,ik,i1) + wrk
         end do
       end do
+    end do
+    end do
+    end do
     end do
 
     deallocate(uVpsibox,uVpsibox2)
 
   else
 
-    do iorb=1,Norb
+    do i1=i1_s,i1_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
       do ilma=1,Nlma
-        ia = ia_table(ilma)
-        uVpsi=0.d0
-        do j=1,Mps(ia)
-          ix = Jxyz(1,j,ia)
-          iy = Jxyz(2,j,ia)
-          iz = Jxyz(3,j,ia)
-          uVpsi = uVpsi + uV(j,ilma) * tpsi(ix,iy,iz,iorb)
+        ia = ppg%ia_tbl(ilma)
+        uVpsi = 0.d0
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%rwf(ix,iy,iz,ispin,io,ik,i1)
         end do
-        uVpsi = uVpsi * uVu(ilma)
-        do j=1,Mps(ia)
-          ix = Jxyz(1,j,ia)
-          iy = Jxyz(2,j,ia)
-          iz = Jxyz(3,j,ia)
-          wrk = uVpsi * uV(j,ilma)
-          htpsi(ix,iy,iz,iorb) = htpsi(ix,iy,iz,iorb) + wrk
+        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          wrk = uVpsi * ppg%uV(j,ilma)
+          htpsi%rwf(ix,iy,iz,ispin,io,ik,i1) = htpsi%rwf(ix,iy,iz,ispin,io,ik,i1) + wrk
         end do
       end do
+    end do
+    end do
+    end do
     end do
 
   end if
@@ -238,93 +237,133 @@ subroutine pseudo_R(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,N
   return
 end subroutine pseudo_R
 
-!===================================================================================================================================
+!-----------------------------------------------------------------------------------------------------------------------------------
 
-subroutine pseudo_C(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                   ,NI,Nps,Nlma,ia_table,Mps,Jxyz,uV,uVu &
-                   ,Nk,nproc_Mxin_mul,icomm_pseudo &
-                   ,ik_table,exp_ikr)
+subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
+                   ,nproc_Mxin_mul,icomm_pseudo)
+  use structures
   use salmon_communication, only: comm_summation
   implicit none
-  integer   ,intent(in) :: ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                          ,NI,Nps,Nlma,ia_table(Nlma),Mps(NI),Jxyz(3,Nps,NI) &
-                          ,Nk,nproc_Mxin_mul,icomm_pseudo
-  complex(8),intent(in) :: tpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
-  real(8)   ,intent(in) :: uV(Nps,Nlma),uVu(Nlma)
+  integer,intent(in) :: nspin,nproc_Mxin_mul,icomm_pseudo
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_wavefunction)   ,intent(in) :: tpsi
+  type(s_wavefunction),intent(inout) :: htpsi
   !
-  integer   ,optional,intent(in) :: ik_table(Norb)
-  complex(8),optional,intent(in) :: exp_ikr(Nps,NI,Nk)
-  !
-  complex(8),intent(out) :: htpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb)
-  !
-  integer    :: ilma,ia,j,ix,iy,iz,ik,iorb
+  integer :: ispin,io,ik,i1,i1_s,i1_e,ik_s,ik_e,io_s,io_e,iorb,norb
+  integer :: ilma,ia,j,ix,iy,iz,Nlma
+  logical :: if_zproj
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox(:,:),uVpsibox2(:,:)
 
+  i1_s = tpsi%i1_s
+  i1_e = tpsi%i1_e
+  ik_s = tpsi%ik_s
+  ik_e = tpsi%ik_e
+  io_s = tpsi%io_s
+  io_e = tpsi%io_e
+  norb = Nspin* tpsi%numo * tpsi%numk * tpsi%num1
+
+  Nlma = ppg%Nlma
+  if_zproj = allocated(ppg%zproj)
+
+!      ! gather (load) pseudo potential point
+!      do i=1,NPI
+!        spseudo(i) = tpsi(idx_proj(i))
+!      end do
 
   if(nproc_Mxin_mul.ne.1) then
 
     allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
-    if(present(exp_ikr)) then
+    if(if_zproj) then
 
-      do iorb=1,Norb
-        ik = ik_table(iorb)
+      iorb = 0
+      do i1=i1_s,i1_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        iorb = iorb + 1
         do ilma=1,Nlma
-          ia = ia_table(ilma)
+          ia = ppg%ia_tbl(ilma)
           uVpsi=0.d0
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            uVpsi = uVpsi + uV(j,ilma) * exp_ikr(j,ia,ik) * tpsi(ix,iy,iz,iorb)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            uVpsi = uVpsi + conjg(ppg%zproj(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,i1)
           end do
-          uVpsi = uVpsi * uVu(ilma)
+          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
           uVpsibox(ilma,iorb) = uVpsi
         end do
       end do
+      end do
+      end do
+      end do
       call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,icomm_pseudo)
-      do iorb=1,Norb
-        ik = ik_table(iorb)
+      iorb = 0
+      do i1=i1_s,i1_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        iorb = iorb + 1
         do ilma=1,Nlma
-          ia = ia_table(ilma)
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            wrk = conjg(exp_ikr(j,ia,ik)) * uVpsibox2(ilma,iorb) * uV(j,ilma)
-            htpsi(ix,iy,iz,iorb) = htpsi(ix,iy,iz,iorb) + wrk
+          ia = ppg%ia_tbl(ilma)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            wrk = uVpsibox2(ilma,iorb) * ppg%zproj(j,ilma,ik)
+            htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) + wrk
           end do
         end do
+      end do
+      end do
+      end do
       end do
 
     else
 
-      do iorb=1,Norb
+      iorb = 0
+      do i1=i1_s,i1_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        iorb = iorb + 1
         do ilma=1,Nlma
-          ia = ia_table(ilma)
+          ia = ppg%ia_tbl(ilma)
           uVpsi=0.d0
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            uVpsi = uVpsi + uV(j,ilma) * tpsi(ix,iy,iz,iorb)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%zwf(ix,iy,iz,ispin,io,ik,i1)
           end do
-          uVpsi = uVpsi * uVu(ilma)
+          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
           uVpsibox(ilma,iorb) = uVpsi
         end do
       end do
+      end do
+      end do
+      end do
       call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,icomm_pseudo)
-      do iorb=1,Norb
+      iorb = 0
+      do i1=i1_s,i1_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        iorb = iorb + 1
         do ilma=1,Nlma
-          ia = ia_table(ilma)
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            wrk = uVpsibox2(ilma,iorb) * uV(j,ilma)
-            htpsi(ix,iy,iz,iorb) = htpsi(ix,iy,iz,iorb) + wrk
+          ia = ppg%ia_tbl(ilma)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            wrk = uVpsibox2(ilma,iorb) * ppg%uV(j,ilma)
+            htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) + wrk
           end do
         end do
+      end do
+      end do
+      end do
       end do
 
     end if
@@ -332,51 +371,66 @@ subroutine pseudo_C(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,N
 
   else
 
-    if(present(exp_ikr)) then
+    if(if_zproj) then
 
-      do iorb=1,Norb
-        ik = ik_table(iorb)
+      iorb = 0
+      do i1=i1_s,i1_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        iorb = iorb + 1
         do ilma=1,Nlma
-          ia = ia_table(ilma)
+          ia = ppg%ia_tbl(ilma)
           uVpsi=0.d0
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            uVpsi = uVpsi + uV(j,ilma) * exp_ikr(j,ia,ik) * tpsi(ix,iy,iz,iorb)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            uVpsi = uVpsi + conjg(ppg%zproj(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,i1)
           end do
-          uVpsi = uVpsi * uVu(ilma)
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            wrk = conjg(exp_ikr(j,ia,ik)) * uVpsi * uV(j,ilma)
-            htpsi(ix,iy,iz,iorb) = htpsi(ix,iy,iz,iorb) + wrk
+          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            wrk = uVpsi * ppg%zproj(j,ilma,ik)
+            htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) + wrk
           end do
         end do
+      end do
+      end do
+      end do
       end do
 
     else
 
-      do iorb=1,Norb
+      iorb = 0
+      do i1=i1_s,i1_e
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        iorb = iorb + 1
         do ilma=1,Nlma
-          ia = ia_table(ilma)
+          ia = ppg%ia_tbl(ilma)
           uVpsi=0.d0
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            uVpsi = uVpsi + uV(j,ilma) * tpsi(ix,iy,iz,iorb)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%zwf(ix,iy,iz,ispin,io,ik,i1)
           end do
-          uVpsi = uVpsi * uVu(ilma)
-          do j=1,Mps(ia)
-            ix = Jxyz(1,j,ia)
-            iy = Jxyz(2,j,ia)
-            iz = Jxyz(3,j,ia)
-            wrk = uVpsi * uV(j,ilma)
-            htpsi(ix,iy,iz,iorb) = htpsi(ix,iy,iz,iorb) + wrk
+          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+          do j=1,ppg%mps(ia)
+            ix = ppg%jxyz(1,j,ia)
+            iy = ppg%jxyz(2,j,ia)
+            iz = ppg%jxyz(3,j,ia)
+            wrk = uVpsi * ppg%uV(j,ilma)
+            htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,i1) + wrk
           end do
         end do
+      end do
+      end do
+      end do
       end do
 
     end if
