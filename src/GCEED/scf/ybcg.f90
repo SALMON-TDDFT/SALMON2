@@ -80,7 +80,7 @@ do is=is_sta,is_end
 
 
 orbital : do iob=iobsta(is),iobend(is)
-  call calc_myob(iob,iob_myob)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
   call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
   elp2(2)=get_wtime()
 
@@ -129,7 +129,7 @@ orbital : do iob=iobsta(is),iobend(is)
 
     do job=iobsta(is),iob-1
       sum0=0.d0
-      call calc_myob(job,job_myob)
+      call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(jcorr==1)then
         call inner_product(psi_in(:,:,:,job_myob,1),gk(:,:,:),sum0)
