@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_iroot_ud(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
   use salmon_parallel, only: nproc_id_spin
   implicit none
   integer,intent(in)  :: iob
@@ -42,4 +42,4 @@ subroutine calc_iroot_ud(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_s
     end if 
   end if
 
-end subroutine calc_iroot_ud
+end subroutine calc_iroot

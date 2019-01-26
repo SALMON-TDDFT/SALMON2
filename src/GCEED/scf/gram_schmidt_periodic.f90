@@ -63,7 +63,7 @@ do ik=k_sta,k_end
       end do
       end do
     end if
-    call calc_iroot_ud(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+    call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
     call comm_bcast(cmatbox,nproc_group_kgrid,iroot)
 
     zovrp=0.d0
