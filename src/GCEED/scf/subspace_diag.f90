@@ -86,7 +86,7 @@ do is=is_sta,is_end
     end do
   
     do job=iobsta(is),iobend(is)
-      call calc_myob(job,job_myob)
+      call calc_myob_ud(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(icorr_j==1)then
 !$OMP parallel do private(iz,iy,ix)
@@ -139,7 +139,7 @@ do is=is_sta,is_end
     end do
      
     do job=iobsta(is),iobend(is)
-      call calc_myob(job,job_myob)
+      call calc_myob_ud(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(icorr_j==1)then
 !$OMP parallel do private(iz,iy,ix)

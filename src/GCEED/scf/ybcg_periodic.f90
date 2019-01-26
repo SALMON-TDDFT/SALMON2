@@ -94,7 +94,7 @@ do ik=k_sta,k_end
 do is=is_sta,is_end
 
 orbital : do p=pstart(is),pend(is)
-  call calc_myob(p,p_myob)
+  call calc_myob_ud(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
   call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
 
   elp2(2)=get_wtime()
@@ -123,7 +123,7 @@ orbital : do p=pstart(is),pend(is)
     end do
   else
     do q=pstart(is),p-1
-      call calc_myob(q,q_myob)
+      call calc_myob_ud(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(icorr_q==1)then
 !$omp parallel do
@@ -249,7 +249,7 @@ orbital : do p=pstart(is),pend(is)
       end do
     else
       do q=pstart(is),p-1
-        call calc_myob(q,q_myob)
+        call calc_myob_ud(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
         call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
         if(icorr_q==1)then
 !$omp parallel do

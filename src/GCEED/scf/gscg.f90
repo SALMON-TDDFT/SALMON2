@@ -45,7 +45,7 @@ real(8):: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:
 real(8):: htpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 integer :: iob_myob,job_myob
 integer :: iob_allob
-integer :: icorr,jcorr,icorr_iob,icorr_job
+integer :: icorr_iob,icorr_job
 integer :: iroot
 integer :: is_sta,is_end
 
@@ -154,10 +154,10 @@ elp2(2)=get_wtime()
     end do
   else
     do iob=iobsta(is),iobend(is)
-      call calc_myob(iob,iob_myob)
+      call calc_myob_ud(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(iob,1,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       do job=iobsta(is),iob-1
-        call calc_myob(job,job_myob)
+        call calc_myob_ud(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
         call check_corrkob(job,1,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
         if(icorr_job==1)then
   !$omp parallel do private(iz,iy,ix) collapse(2)
