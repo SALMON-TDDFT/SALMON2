@@ -167,10 +167,10 @@ subroutine gscg_periodic(psi_in,iflag)
         elp3(1557)=elp3(1557)+elp3(1507)-elp3(1508)
       else
         do iob=iobsta(is),iobend(is)
-          call calc_myob_ud(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+          call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
           call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
           do job=iobsta(is),iob-1
-            call calc_myob_ud(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+            call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
             call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
             if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)

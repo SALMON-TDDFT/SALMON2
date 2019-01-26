@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_myob_ud(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
   use salmon_parallel, only: nproc_id_spin
   implicit none
   integer,intent(in)  :: iob
@@ -49,4 +49,4 @@ subroutine calc_myob_ud(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob
     end if
   end if
 
-end subroutine calc_myob_ud
+end subroutine calc_myob
