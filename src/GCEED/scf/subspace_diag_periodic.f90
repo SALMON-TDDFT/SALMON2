@@ -133,7 +133,7 @@ do is=is_sta,is_end
         end do
         end do
       end if
-      call calc_iroot(jj,iroot)
+      call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(htpsi,nproc_group_kgrid,iroot)
       do ii=1,iobnum
         call calc_allob(ii,i_allob)
@@ -184,7 +184,7 @@ do is=is_sta,is_end
         end do
         end do
       end if
-      call calc_iroot(jj,iroot)
+      call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(htpsi,nproc_group_kgrid,iroot)
       do ii=1,iobnum
         call calc_allob(ii,i_allob)

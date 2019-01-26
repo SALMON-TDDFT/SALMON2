@@ -124,7 +124,7 @@ orbital : do iob=iobsta(is),iobend(is)
       end do
       end do
     end if
-    call calc_iroot(iob,iroot)
+    call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
     call comm_bcast(gk,nproc_group_grid,iroot)
 
     do job=iobsta(is),iob-1
@@ -144,7 +144,7 @@ orbital : do iob=iobsta(is),iobend(is)
         end do
       end if
 
-      call calc_iroot(job,iroot)
+      call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(gk,nproc_group_grid,iroot)
     end do
 

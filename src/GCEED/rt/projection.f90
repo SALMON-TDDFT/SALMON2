@@ -60,7 +60,7 @@ do iob=1,itotMST0
     end do
     end do
   end if
-  call calc_iroot(iob,iroot)
+  call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
   call comm_bcast(cmatbox_m,nproc_group_kgrid,iroot)
   do job=1,iobmax
     cbox=0.d0

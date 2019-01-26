@@ -99,7 +99,7 @@ do is=is_sta,is_end
         end do
         call hpsi2(tpsi,htpsi,job,1,0,0)
       end if
-      call calc_iroot(job,iroot)
+      call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(htpsi,nproc_group_kgrid,iroot)
       
       do iob=1,iobnum
@@ -151,7 +151,7 @@ do is=is_sta,is_end
         end do
         end do
       end if
-      call calc_iroot(job,iroot)
+      call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(matbox_m,nproc_group_kgrid,iroot)
       do iob=1,iobnum
         call calc_allob(iob,iob_allob)
