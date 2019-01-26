@@ -135,7 +135,7 @@ orbital : do p=pstart(is),pend(is)
         end do
         end do
       end if
-      call calc_iroot(q,iroot)
+      call calc_iroot_ud(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(cmatbox_m,nproc_group_kgrid,iroot)
       sum0=0.d0
       if(icorr_p==1)then
@@ -207,7 +207,7 @@ orbital : do p=pstart(is),pend(is)
     end do
   end if
 
-  call calc_iroot(p,iroot)
+  call calc_iroot_ud(p,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
   call comm_bcast(xk,nproc_group_kgrid,iroot)
   call comm_bcast(hxk,nproc_group_kgrid,iroot)
   call comm_bcast(txk,nproc_group_kgrid,iroot)
@@ -261,7 +261,7 @@ orbital : do p=pstart(is),pend(is)
           end do
           end do
         end if
-        call calc_iroot(q,iroot)
+        call calc_iroot_ud(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
         call comm_bcast(cmatbox_m,nproc_group_kgrid,iroot)
         sum0=0.d0
 !$omp parallel do reduction(+ : sum0)
