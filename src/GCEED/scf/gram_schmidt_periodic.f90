@@ -33,7 +33,7 @@ integer :: icorr_p
 integer :: iroot
 integer :: is_sta,is_end
 
-call set_isstaend(is_sta,is_end)
+call set_isstaend_ud(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
 
 if(ilsda == 0)then
   iobsta(1)=1

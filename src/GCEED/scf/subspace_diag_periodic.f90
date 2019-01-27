@@ -75,7 +75,7 @@ elp3(352)=elp3(352)+elp3(302)-elp3(301)
 elp3(303)=get_wtime()
 elp3(353)=elp3(353)+elp3(303)-elp3(302)
 
-call set_isstaend(is_sta,is_end)
+call set_isstaend_ud(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
 
 do ik=k_sta,k_end
 do is=is_sta,is_end
