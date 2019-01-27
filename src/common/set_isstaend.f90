@@ -13,30 +13,29 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine set_isstaend(is_sta,is_end)
-use salmon_parallel, only: nproc_id_spin
-use scf_data
-use new_world_sub
-implicit none
-integer :: is_sta,is_end
-
-if(ilsda==0)then
-  is_sta=1
-  is_end=1
-else
-  if(nproc_ob==1)then
+subroutine set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  use salmon_parallel, only: nproc_id_spin
+  implicit none
+  integer,intent(out) :: is_sta,is_end
+  integer,intent(in)  :: ilsda,nproc_ob,nproc_ob_spin(2)
+  
+  if(ilsda==0)then
     is_sta=1
-    is_end=2
+    is_end=1
   else
-    if(nproc_id_spin<nproc_ob_spin(1))then
+    if(nproc_ob==1)then
       is_sta=1
-      is_end=1
-    else
-      is_sta=2
       is_end=2
+    else
+      if(nproc_id_spin<nproc_ob_spin(1))then
+        is_sta=1
+        is_end=1
+      else
+        is_sta=2
+        is_end=2
+      end if
     end if
   end if
-end if
 
 return
 

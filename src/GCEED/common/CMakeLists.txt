@@ -47,7 +47,6 @@ set(SOURCES
     set_icoo1d.f90
     set_imesh_oddeven.f90
     set_ispin.f90
-    set_isstaend.f90
     storevpp.f90
     total_energy_periodic.f90
     writeavs.f90

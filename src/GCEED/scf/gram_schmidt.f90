@@ -32,7 +32,7 @@ integer :: iroot
 integer :: icorr_p
 integer :: is_sta,is_end
 
-call set_isstaend(is_sta,is_end)
+call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
 
 if(ilsda == 0)then
   pstart(1)=1
