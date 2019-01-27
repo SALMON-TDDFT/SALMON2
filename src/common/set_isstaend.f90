@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine set_isstaend_ud(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+subroutine set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
   use salmon_parallel, only: nproc_id_spin
   implicit none
   integer,intent(out) :: is_sta,is_end
@@ -39,4 +39,4 @@ subroutine set_isstaend_ud(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
 
 return
 
-end subroutine set_isstaend_ud
+end subroutine set_isstaend

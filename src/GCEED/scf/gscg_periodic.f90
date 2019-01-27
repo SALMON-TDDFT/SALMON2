@@ -54,7 +54,7 @@ subroutine gscg_periodic(psi_in,iflag)
   
   allocate (htpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   
-  call set_isstaend_ud(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
   
   iwk_size=2
   call make_iwksta_iwkend

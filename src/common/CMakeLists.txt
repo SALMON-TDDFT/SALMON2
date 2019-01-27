@@ -5,7 +5,7 @@ set(SOURCES
    calc_myob.f90
    check_corrkob.f90
    hpsi.f90
-   set_isstaend_ud.f90
+   set_isstaend.f90
    stencil.f90
    update_overlap.f90
    structures.f90
