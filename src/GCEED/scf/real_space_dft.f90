@@ -39,6 +39,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine Real_Space_DFT
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
                            nproc_group_spin
@@ -56,6 +57,7 @@ character(100) :: file_atoms_coo
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg
+type(s_rgrid) :: mg
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -439,6 +441,13 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     if(iflag_subspace_diag==1)then
       if(Miter>iDiter_nosubspace_diag)then
+        mg%is(1:3)=mg_sta(1:3)
+        mg%ie(1:3)=mg_end(1:3)
+        mg%num(1:3)=mg_num(1:3)
+        mg%is_overlap(1:3)=mg_sta(1:3)-Nd
+        mg%ie_overlap(1:3)=mg_end(1:3)+Nd
+        mg%is_array(1:3)=mg_sta(1:3)-Nd
+        mg%ie_array(1:3)=mg_end(1:3)+Nd
         select case(iperiodic)
         case(0)
           call subspace_diag
@@ -528,6 +537,13 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
 
     if(Miter>iDiter_nosubspace_diag)then
+      mg%is(1:3)=mg_sta(1:3)
+      mg%ie(1:3)=mg_end(1:3)
+      mg%num(1:3)=mg_num(1:3)
+      mg%is_overlap(1:3)=mg_sta(1:3)-Nd
+      mg%ie_overlap(1:3)=mg_end(1:3)+Nd
+      mg%is_array(1:3)=mg_sta(1:3)-Nd
+      mg%ie_array(1:3)=mg_end(1:3)+Nd
       select case(iperiodic)
       case(0)
         call subspace_diag
