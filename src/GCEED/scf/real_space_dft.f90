@@ -39,7 +39,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine Real_Space_DFT
-use structures, only: s_rgrid
+use structures, only: s_rgrid, s_wavefunction
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
                            nproc_group_spin
@@ -58,6 +58,7 @@ complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg
 type(s_rgrid) :: mg
+type(s_wavefunction) :: spsi
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -450,7 +451,43 @@ DFT_Iteration : do iter=1,iDiter(img)
         mg%ie_array(1:3)=mg_end(1:3)+Nd
         select case(iperiodic)
         case(0)
-          call subspace_diag(mg)
+          allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
+                            mg%is(2):mg%ie(2),  &
+                            mg%is(3):mg%ie(3),  &
+                            1,  &
+                            1,  &
+                            1:iobnum,  &
+                            k_sta:k_end))
+
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+
+          call subspace_diag(mg,spsi)
+
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+
+          deallocate(spsi%rwf)
         case(3)
           call subspace_diag_periodic
         end select
@@ -546,7 +583,43 @@ DFT_Iteration : do iter=1,iDiter(img)
       mg%ie_array(1:3)=mg_end(1:3)+Nd
       select case(iperiodic)
       case(0)
-        call subspace_diag(mg)
+        allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
+                          mg%is(2):mg%ie(2),  &
+                          mg%is(3):mg%ie(3),  &
+                          1,  &
+                          1,  &
+                          1:iobnum,  &
+                          k_sta:k_end))
+
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+
+        call subspace_diag(mg,spsi)
+
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+
+        deallocate(spsi%rwf)
       case(3)
         call subspace_diag_periodic
       end select

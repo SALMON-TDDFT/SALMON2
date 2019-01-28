@@ -13,9 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subspace_diag(mg)
+subroutine subspace_diag(mg,spsi)
 
-use structures, only: s_rgrid
+use structures, only: s_rgrid,s_wavefunction
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation, comm_bcast
 use misc_routines, only: get_wtime
@@ -39,6 +39,7 @@ integer :: job_myob,iroot,icorr_j,iob_allob,job_allob
 integer :: iter
 integer :: iobsta(2),iobend(2)
 type(s_rgrid) :: mg
+type(s_wavefunction) :: spsi
 
 elp3(301)=get_wtime()
 
@@ -104,7 +105,7 @@ do is=is_sta,is_end
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          tpsi(ix,iy,iz)=psi(ix,iy,iz,job_myob,1)
+          tpsi(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,1,job_myob,1)
         end do
         end do
         end do
@@ -121,7 +122,7 @@ do is=is_sta,is_end
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            rbox=rbox+psi(ix,iy,iz,iob,1)*htpsi(ix,iy,iz)
+            rbox=rbox+spsi%rwf(ix,iy,iz,1,1,iob,1)*htpsi(ix,iy,iz)
           end do
           end do
           end do
@@ -141,8 +142,8 @@ do is=is_sta,is_end
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          psi_box(ix,iy,iz,job)=psi(ix,iy,iz,job,1)
-          psi(ix,iy,iz,job,1)=0.d0
+          psi_box(ix,iy,iz,job)=spsi%rwf(ix,iy,iz,1,1,job,1)
+          spsi%rwf(ix,iy,iz,1,1,job,1)=0.d0
         end do
         end do
         end do
@@ -171,7 +172,8 @@ do is=is_sta,is_end
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            psi(ix,iy,iz,iob,1)=psi(ix,iy,iz,iob,1)+evec(job-iobsta(is)+1,iob_allob-iobsta(is)+1)*rmatbox_m(ix,iy,iz)
+            spsi%rwf(ix,iy,iz,1,1,iob,1)=spsi%rwf(ix,iy,iz,1,1,iob,1)  &
+                                           +evec(job-iobsta(is)+1,iob_allob-iobsta(is)+1)*rmatbox_m(ix,iy,iz)
           end do
           end do
           end do
@@ -187,7 +189,7 @@ do is=is_sta,is_end
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          rbox=rbox+abs(psi(ix,iy,iz,iob,1))**2
+          rbox=rbox+abs(spsi%rwf(ix,iy,iz,1,1,iob,1))**2
         end do
         end do
         end do
@@ -196,7 +198,7 @@ do is=is_sta,is_end
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          psi(ix,iy,iz,iob,1)=psi(ix,iy,iz,iob,1)/sqrt(rbox1*Hvol)
+          spsi%rwf(ix,iy,iz,1,1,iob,1)=spsi%rwf(ix,iy,iz,1,1,iob,1)/sqrt(rbox1*Hvol)
         end do
         end do
         end do
