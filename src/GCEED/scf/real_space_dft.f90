@@ -489,7 +489,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
           deallocate(spsi%rwf)
         case(3)
-          call subspace_diag_periodic
+          call subspace_diag_periodic(mg)
         end select
       end if
     end if
@@ -621,7 +621,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
         deallocate(spsi%rwf)
       case(3)
-        call subspace_diag_periodic
+        call subspace_diag_periodic(mg)
       end select
     end if
 
