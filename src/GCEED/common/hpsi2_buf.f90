@@ -26,6 +26,7 @@ subroutine r_hpsi2_buf(tpsi,htpsi,iob,iiik,nn,isub)
                    mg_sta(3):mg_end(3))
   integer :: iob,iiik,nn,isub
   
+  iwk_size=2
 
   call hpsi2(tpsi,htpsi,iob,iiik,nn,isub)
 

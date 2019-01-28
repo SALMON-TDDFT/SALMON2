@@ -472,7 +472,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
           end do
 
-          call subspace_diag(mg,spsi)
+          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
 
           do ik=k_sta,k_end
           do iob=1,iobnum
@@ -604,7 +604,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         end do
 
-        call subspace_diag(mg,spsi)
+        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
 
         do ik=k_sta,k_end
         do iob=1,iobnum
