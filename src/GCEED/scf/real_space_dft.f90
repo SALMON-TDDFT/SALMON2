@@ -450,7 +450,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         mg%ie_array(1:3)=mg_end(1:3)+Nd
         select case(iperiodic)
         case(0)
-          call subspace_diag
+          call subspace_diag(mg)
         case(3)
           call subspace_diag_periodic
         end select
@@ -546,7 +546,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       mg%ie_array(1:3)=mg_end(1:3)+Nd
       select case(iperiodic)
       case(0)
-        call subspace_diag
+        call subspace_diag(mg)
       case(3)
         call subspace_diag_periodic
       end select
