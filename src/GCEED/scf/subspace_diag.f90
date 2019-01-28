@@ -20,7 +20,6 @@ use salmon_communication, only: comm_summation, comm_bcast
 use misc_routines, only: get_wtime
 use scf_data
 use inner_product_sub
-use hpsi2_sub
 use copy_psi_mesh_sub
 implicit none
 integer :: iob,job,ii,jj
@@ -32,6 +31,7 @@ real(8),allocatable :: tpsi(:,:,:),htpsi(:,:,:)
 real(8),allocatable :: psi_box(:,:,:,:)
 real(8) :: rbox,rbox1
 real(8),allocatable :: evec(:,:)
+real(8),allocatable :: rmatbox_m(:,:,:)
 integer :: ier2
 integer :: is_sta,is_end
 integer :: job_myob,iroot,icorr_j,iob_allob,job_allob
@@ -43,6 +43,7 @@ elp3(301)=get_wtime()
 allocate(tpsi(mg_sta(1)-Nd:mg_end(1)+Nd,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd))
 allocate(htpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(psi_box(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+allocate(rmatbox_m(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
 iwk_size=2
 call make_iwksta_iwkend
@@ -97,7 +98,7 @@ do is=is_sta,is_end
         end do
         end do
         end do
-        call hpsi2(tpsi,htpsi,job,1,0,0)
+        call r_hpsi2_buf(tpsi,htpsi,job,1,0,0)
       end if
       call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(htpsi,nproc_group_kgrid,iroot)
@@ -146,13 +147,13 @@ do is=is_sta,is_end
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
         do ix=mg_sta(1),mg_end(1)
-          matbox_m(ix,iy,iz)=psi_box(ix,iy,iz,job_myob)
+          rmatbox_m(ix,iy,iz)=psi_box(ix,iy,iz,job_myob)
         end do
         end do
         end do
       end if
       call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call comm_bcast(matbox_m,nproc_group_kgrid,iroot)
+      call comm_bcast(rmatbox_m,nproc_group_kgrid,iroot)
       do iob=1,iobnum
         call calc_allob(iob,iob_allob)
         if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
@@ -160,7 +161,7 @@ do is=is_sta,is_end
           do iz=mg_sta(3),mg_end(3)
           do iy=mg_sta(2),mg_end(2)
           do ix=mg_sta(1),mg_end(1)
-            psi(ix,iy,iz,iob,1)=psi(ix,iy,iz,iob,1)+evec(job-iobsta(is)+1,iob_allob-iobsta(is)+1)*matbox_m(ix,iy,iz)
+            psi(ix,iy,iz,iob,1)=psi(ix,iy,iz,iob,1)+evec(job-iobsta(is)+1,iob_allob-iobsta(is)+1)*rmatbox_m(ix,iy,iz)
           end do
           end do
           end do

@@ -28,6 +28,7 @@ set(SOURCES
     hartree_FFTE.f90
     hartree_periodic.f90
     hartree.f90
+    hpsi2_buf.f90
     init_wf.f90
     init_k_rd.f90
     inner_product3.f90
