@@ -13,22 +13,31 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subspace_diag_periodic(mg)
+subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+                                     iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
 
-  use structures, only: s_rgrid
+  use structures, only: s_rgrid,s_wavefunction
   use salmon_parallel, only: nproc_group_korbital, nproc_group_k, nproc_group_kgrid
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
-  use scf_data
-  use new_world_sub
-  use hpsi2_sub
   implicit none
   type(s_rgrid),intent(in) :: mg
+  type(s_wavefunction),intent(inout) :: spsi
+  real(8),intent(out) :: elp3(3000)
+  integer,intent(in)  :: ilsda
+  integer,intent(in)  :: nproc_ob
+  integer,intent(in)  :: iparaway_ob
+  integer,intent(in)  :: iobnum
+  integer,intent(in)  :: itotmst
+  integer,intent(in)  :: mst(2),ifmst(2)
+  integer,intent(in)  :: k_sta,k_end
+  integer,intent(in)  :: nproc_ob_spin(2)
+  real(8),intent(in)  :: hvol
   integer :: ii,jj,ik
   integer :: ix,iy,iz
-  complex(8),allocatable :: Amat(:,:)
-  complex(8),allocatable :: Amat2(:,:)
-  complex(8),allocatable :: Smat(:,:)
+  complex(8),allocatable :: amat(:,:)
+  complex(8),allocatable :: amat2(:,:)
+  complex(8),allocatable :: smat(:,:)
   complex(8):: tpsi(mg%is_array(1):mg%ie_array(1),  &
                     mg%is_array(2):mg%ie_array(2),  &
                     mg%is_array(3):mg%ie_array(3))
@@ -57,17 +66,14 @@ subroutine subspace_diag_periodic(mg)
                          mg%is(2):mg%ie(2),  &
                          mg%is(3):mg%ie(3),1:iobnum))
   
-  iwk_size=2
-  call make_iwksta_iwkend
-  
   if(ilsda == 0)then
     iobsta(1)=1
-    iobend(1)=itotMST
+    iobend(1)=itotmst
   else if(ilsda == 1)then
     iobsta(1)=1
-    iobend(1)=MST(1)
-    iobsta(2)=MST(1)+1
-    iobend(2)=itotMST
+    iobend(1)=mst(1)
+    iobsta(2)=mst(1)+1
+    iobend(2)=itotmst
   end if
   
   !$OMP parallel do private(iz,iy,ix)
@@ -90,23 +96,23 @@ subroutine subspace_diag_periodic(mg)
   do ik=k_sta,k_end
   do is=is_sta,is_end
   
-    if(ifMST(is)>=1.and.MST(is)>=1)then
+    if(ifmst(is)>=1.and.mst(is)>=1)then
   
       iter=iobend(is)-iobsta(is)+1
     
       allocate(evec(iter,iter))
-      allocate(Amat(iter,iter))
-      allocate(Amat2(iter,iter))
-      allocate(Smat(iter,iter))
+      allocate(amat(iter,iter))
+      allocate(amat2(iter,iter))
+      allocate(smat(iter,iter))
     
   !$OMP parallel do private(jj,ii)
       do jj=1,iter
         do ii=1,iter
-          Amat(ii,jj)=0.d0
+          amat(ii,jj)=0.d0
         end do
       end do
     
-  !do jj=1,itotMST
+  !do jj=1,itotmst
       do jj=1,iobnum
         call calc_allob(jj,j_allob)
         if(j_allob>=iobsta(is).and.j_allob<=iobend(is))then
@@ -114,11 +120,11 @@ subroutine subspace_diag_periodic(mg)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            tpsi(ix,iy,iz)=zpsi(ix,iy,iz,jj,ik)
+            tpsi(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,1,jj,ik)
           end do
           end do
           end do
-          call hpsi2(tpsi,htpsi,j_allob,ik,0,0)
+          call c_hpsi2_buf(tpsi,htpsi,j_allob,ik,0,0)
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -153,18 +159,18 @@ subroutine subspace_diag_periodic(mg)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-               cbox=cbox+conjg(zpsi(ix,iy,iz,ii,ik))*htpsi(ix,iy,iz)
+               cbox=cbox+conjg(spsi%zwf(ix,iy,iz,1,1,ii,ik))*htpsi(ix,iy,iz)
             end do
             end do
             end do
-            Amat(i_allob-iobsta(is)+1,jj-iobsta(is)+1)=cbox*Hvol
+            amat(i_allob-iobsta(is)+1,jj-iobsta(is)+1)=cbox*hvol
           end if
         end do
       end do
     
-      call comm_summation(Amat,Amat2,iter*iter,nproc_group_k)
+      call comm_summation(amat,amat2,iter*iter,nproc_group_k)
     
-      call eigen_subdiag_periodic(Amat2,evec,iter,ier2)
+      call eigen_subdiag_periodic(amat2,evec,iter,ier2)
     
       do jj=1,iobnum
         call calc_allob(jj,j_allob)
@@ -173,8 +179,8 @@ subroutine subspace_diag_periodic(mg)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            ztpsi_groupob(ix,iy,iz,jj)=zpsi(ix,iy,iz,jj,ik)
-            zpsi(ix,iy,iz,jj,ik)=0.d0
+            ztpsi_groupob(ix,iy,iz,jj)=spsi%zwf(ix,iy,iz,1,1,jj,ik)
+            spsi%zwf(ix,iy,iz,1,1,jj,ik)=0.d0
           end do
           end do
           end do
@@ -203,7 +209,7 @@ subroutine subspace_diag_periodic(mg)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zpsi(ix,iy,iz,ii,ik)=zpsi(ix,iy,iz,ii,ik)+evec(jj-iobsta(is)+1,i_allob-iobsta(is)+1)*htpsi(ix,iy,iz)
+              spsi%zwf(ix,iy,iz,1,1,ii,ik)=spsi%zwf(ix,iy,iz,1,1,ii,ik)+evec(jj-iobsta(is)+1,i_allob-iobsta(is)+1)*htpsi(ix,iy,iz)
             end do
             end do
             end do
@@ -219,7 +225,7 @@ subroutine subspace_diag_periodic(mg)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            rbox=rbox+abs(zpsi(ix,iy,iz,ii,ik))**2
+            rbox=rbox+abs(spsi%zwf(ix,iy,iz,1,1,ii,ik))**2
           end do
           end do
           end do
@@ -228,14 +234,14 @@ subroutine subspace_diag_periodic(mg)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            zpsi(ix,iy,iz,ii,ik)=zpsi(ix,iy,iz,ii,ik)/sqrt(rbox1*Hvol)
+            spsi%zwf(ix,iy,iz,1,1,ii,ik)=spsi%zwf(ix,iy,iz,1,1,ii,ik)/sqrt(rbox1*hvol)
           end do
           end do
           end do
         end if
       end do
     
-      deallocate(Amat,Amat2,Smat)
+      deallocate(amat,amat2,smat)
       deallocate(evec)
   
     end if

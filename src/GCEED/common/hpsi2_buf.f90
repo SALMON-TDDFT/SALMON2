@@ -32,3 +32,25 @@ subroutine r_hpsi2_buf(tpsi,htpsi,iob,iiik,nn,isub)
 
 
 end subroutine r_hpsi2_buf
+
+!=======================================================================
+
+subroutine c_hpsi2_buf(tpsi,htpsi,iob,iiik,nn,isub)
+  use hpsi2_sub
+  implicit none
+  complex(8) :: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd,   &
+                     mg_sta(2)-Nd:mg_end(2)+Nd,   &
+                     mg_sta(3)-Nd:mg_end(3)+Nd)
+  complex(8) :: htpsi(mg_sta(1):mg_end(1),  &
+                      mg_sta(2):mg_end(2),      &
+                      mg_sta(3):mg_end(3))
+  integer :: iob,iiik,nn,isub
+  
+  iwk_size=2
+
+  call hpsi2(tpsi,htpsi,iob,iiik,nn,isub)
+
+
+end subroutine c_hpsi2_buf
+
+!=======================================================================
