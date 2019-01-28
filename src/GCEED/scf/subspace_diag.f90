@@ -13,191 +13,208 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subspace_diag
+subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
 
-use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
-use salmon_communication, only: comm_summation, comm_bcast
-use misc_routines, only: get_wtime
-use scf_data
-use inner_product_sub
-use hpsi2_sub
-use copy_psi_mesh_sub
-implicit none
-integer :: iob,job,ii,jj
-integer :: ix,iy,iz,is
-real(8),allocatable :: Amat(:,:)
-real(8),allocatable :: Amat2(:,:)
-real(8),allocatable :: Smat(:,:)
-real(8),allocatable :: tpsi(:,:,:),htpsi(:,:,:)
-real(8),allocatable :: psi_box(:,:,:,:)
-real(8) :: rbox,rbox1
-real(8),allocatable :: evec(:,:)
-integer :: ier2
-integer :: is_sta,is_end
-integer :: job_myob,iroot,icorr_j,iob_allob,job_allob
-integer :: iter
-integer :: iobsta(2),iobend(2)
-
-elp3(301)=get_wtime()
-
-allocate(tpsi(mg_sta(1)-Nd:mg_end(1)+Nd,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd))
-allocate(htpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-allocate(psi_box(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-
-iwk_size=2
-call make_iwksta_iwkend
-
-call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
-
-if(ilsda == 0)then
-  iobsta(1)=1
-  iobend(1)=itotMST
-else if(ilsda == 1)then
-  iobsta(1)=1
-  iobend(1)=MST(1)
-  iobsta(2)=MST(1)+1
-  iobend(2)=itotMST
-end if
-
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg_sta(3)-Nd,mg_end(3)+Nd
-do iy=mg_sta(2)-Nd,mg_end(2)+Nd
-do ix=mg_sta(1)-Nd,mg_end(1)+Nd
-  tpsi(ix,iy,iz)=0.d0
-end do
-end do
-end do
-
-do is=is_sta,is_end
-
-  if(ifMST(is)>=1.and.MST(is)>=1)then
-
-    iter=iobend(is)-iobsta(is)+1
-    allocate(evec(iter,iter))
-    allocate(Amat(iter,iter))
-    allocate(Amat2(iter,iter))
-    allocate(Smat(iter,iter))
+  use structures, only: s_rgrid,s_wavefunction
+  use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
+  use salmon_communication, only: comm_summation, comm_bcast
+  use misc_routines, only: get_wtime
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_wavefunction),intent(inout) :: spsi
+  real(8),intent(out) :: elp3(3000)
+  integer,intent(in)  :: ilsda
+  integer,intent(in)  :: nproc_ob
+  integer,intent(in)  :: iparaway_ob
+  integer,intent(in)  :: iobnum
+  integer,intent(in)  :: itotmst
+  integer,intent(in)  :: mst(2),ifmst(2)
+  integer,intent(in)  :: k_sta,k_end
+  integer,intent(in)  :: nproc_ob_spin(2)
+  real(8),intent(in)  :: hvol
+  integer :: iob,job,ii,jj
+  integer :: ix,iy,iz,is
+  real(8),allocatable :: amat(:,:)
+  real(8),allocatable :: amat2(:,:)
+  real(8),allocatable :: smat(:,:)
+  real(8),allocatable :: tpsi(:,:,:),htpsi(:,:,:)
+  real(8),allocatable :: psi_box(:,:,:,:)
+  real(8) :: rbox,rbox1
+  real(8),allocatable :: evec(:,:)
+  real(8),allocatable :: rmatbox_m(:,:,:)
+  integer :: ier2
+  integer :: is_sta,is_end
+  integer :: job_myob,iroot,icorr_j,iob_allob,job_allob
+  integer :: iter
+  integer :: iobsta(2),iobend(2)
   
-    do jj=1,iter
-!$OMP parallel do 
-      do ii=1,iter
-        Amat2(ii,jj)=0.d0
+  elp3(301)=get_wtime()
+  
+  allocate(tpsi(mg%is_array(1):mg%ie_array(1),  &
+                mg%is_array(2):mg%ie_array(2),  &
+                mg%is_array(3):mg%ie_array(3)))
+  allocate(htpsi(mg%is(1):mg%ie(1),  &
+                 mg%is(2):mg%ie(2),  &
+                 mg%is(3):mg%ie(3)))
+  allocate(psi_box(mg%is(1):mg%ie(1),  &
+                   mg%is(2):mg%ie(2),  &
+                   mg%is(3):mg%ie(3),1:iobnum))
+  allocate(rmatbox_m(mg%is(1):mg%ie(1),  &
+                     mg%is(2):mg%ie(2),  &
+                     mg%is(3):mg%ie(3)))
+  
+  call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  
+  if(ilsda == 0)then
+    iobsta(1)=1
+    iobend(1)=itotmst
+  else if(ilsda == 1)then
+    iobsta(1)=1
+    iobend(1)=mst(1)
+    iobsta(2)=mst(1)+1
+    iobend(2)=itotmst
+  end if
+  
+  !$OMP parallel do private(iz,iy,ix)
+  do iz=mg%is_array(3),mg%ie_array(3)
+  do iy=mg%is_array(2),mg%ie_array(2)
+  do ix=mg%is_array(1),mg%ie_array(1)
+    tpsi(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+  
+  do is=is_sta,is_end
+  
+    if(ifmst(is)>=1.and.mst(is)>=1)then
+  
+      iter=iobend(is)-iobsta(is)+1
+      allocate(evec(iter,iter))
+      allocate(amat(iter,iter))
+      allocate(amat2(iter,iter))
+      allocate(smat(iter,iter))
+    
+      do jj=1,iter
+  !$OMP parallel do 
+        do ii=1,iter
+          amat2(ii,jj)=0.d0
+        end do
       end do
-    end do
-  
-    do job=iobsta(is),iobend(is)
-      call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
-      if(icorr_j==1)then
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          tpsi(ix,iy,iz)=psi(ix,iy,iz,job_myob,1)
+    
+      do job=iobsta(is),iobend(is)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        if(icorr_j==1)then
+  !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            tpsi(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,1,job_myob,1)
+          end do
+          end do
+          end do
+          call r_hpsi2_buf(tpsi,htpsi,job,1,0,0)
+        end if
+        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call comm_bcast(htpsi,nproc_group_kgrid,iroot)
+        
+        do iob=1,iobnum
+          call calc_allob(iob,iob_allob)
+          if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
+            rbox=0.d0
+  !$OMP parallel do reduction(+:rbox) private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              rbox=rbox+spsi%rwf(ix,iy,iz,1,1,iob,1)*htpsi(ix,iy,iz)
+            end do
+            end do
+            end do
+            amat2(iob_allob-iobsta(is)+1,job-iobsta(is)+1)=rbox*Hvol
+          end if
         end do
-        end do
-        end do
-        call hpsi2(tpsi,htpsi,job,1,0,0)
-      end if
-      call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call comm_bcast(htpsi,nproc_group_kgrid,iroot)
+      end do
       
+      call comm_summation(amat2,amat,iter*iter,nproc_group_global)
+    
+      call eigen_subdiag(amat,evec,iter,ier2)
+     
+      do job=1,iobnum
+        call calc_allob(job,job_allob)
+        if(job_allob>=iobsta(is).and.job_allob<=iobend(is))then
+  !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi_box(ix,iy,iz,job)=spsi%rwf(ix,iy,iz,1,1,job,1)
+            spsi%rwf(ix,iy,iz,1,1,job,1)=0.d0
+          end do
+          end do
+          end do
+        end if
+      end do
+       
+      do job=iobsta(is),iobend(is)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        if(icorr_j==1)then
+  !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            rmatbox_m(ix,iy,iz)=psi_box(ix,iy,iz,job_myob)
+          end do
+          end do
+          end do
+        end if
+        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call comm_bcast(rmatbox_m,nproc_group_kgrid,iroot)
+        do iob=1,iobnum
+          call calc_allob(iob,iob_allob)
+          if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
+  !$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%rwf(ix,iy,iz,1,1,iob,1)=spsi%rwf(ix,iy,iz,1,1,iob,1)  &
+                                             +evec(job-iobsta(is)+1,iob_allob-iobsta(is)+1)*rmatbox_m(ix,iy,iz)
+            end do
+            end do
+            end do
+          end if
+        end do
+      end do
+    
       do iob=1,iobnum
         call calc_allob(iob,iob_allob)
         if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
           rbox=0.d0
-!$OMP parallel do reduction(+:rbox) private(iz,iy,ix)
-          do iz=mg_sta(3),mg_end(3)
-          do iy=mg_sta(2),mg_end(2)
-          do ix=mg_sta(1),mg_end(1)
-            rbox=rbox+psi(ix,iy,iz,iob,1)*htpsi(ix,iy,iz)
+  !$OMP parallel do reduction(+:rbox) private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            rbox=rbox+abs(spsi%rwf(ix,iy,iz,1,1,iob,1))**2
           end do
           end do
           end do
-          Amat2(iob_allob-iobsta(is)+1,job-iobsta(is)+1)=rbox*Hvol
-        end if
-      end do
-    end do
-    
-    call comm_summation(Amat2,Amat,iter*iter,nproc_group_global)
-  
-    call eigen_subdiag(Amat,evec,iter,ier2)
-   
-    do job=1,iobnum
-      call calc_allob(job,job_allob)
-      if(job_allob>=iobsta(is).and.job_allob<=iobend(is))then
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          psi_box(ix,iy,iz,job)=psi(ix,iy,iz,job,1)
-          psi(ix,iy,iz,job,1)=0.d0
-        end do
-        end do
-        end do
-      end if
-    end do
-     
-    do job=iobsta(is),iobend(is)
-      call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
-      if(icorr_j==1)then
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          matbox_m(ix,iy,iz)=psi_box(ix,iy,iz,job_myob)
-        end do
-        end do
-        end do
-      end if
-      call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call comm_bcast(matbox_m,nproc_group_kgrid,iroot)
-      do iob=1,iobnum
-        call calc_allob(iob,iob_allob)
-        if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg_sta(3),mg_end(3)
-          do iy=mg_sta(2),mg_end(2)
-          do ix=mg_sta(1),mg_end(1)
-            psi(ix,iy,iz,iob,1)=psi(ix,iy,iz,iob,1)+evec(job-iobsta(is)+1,iob_allob-iobsta(is)+1)*matbox_m(ix,iy,iz)
+          call comm_summation(rbox,rbox1,nproc_group_korbital)
+  !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,1,iob,1)=spsi%rwf(ix,iy,iz,1,1,iob,1)/sqrt(rbox1*Hvol)
           end do
           end do
           end do
         end if
       end do
-    end do
+      deallocate(amat,amat2,smat)
+      deallocate(evec)
   
-    do iob=1,iobnum
-      call calc_allob(iob,iob_allob)
-      if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
-        rbox=0.d0
-!$OMP parallel do reduction(+:rbox) private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          rbox=rbox+abs(psi(ix,iy,iz,iob,1))**2
-        end do
-        end do
-        end do
-        call comm_summation(rbox,rbox1,nproc_group_korbital)
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          psi(ix,iy,iz,iob,1)=psi(ix,iy,iz,iob,1)/sqrt(rbox1*Hvol)
-        end do
-        end do
-        end do
-      end if
-    end do
-    deallocate(Amat,Amat2,Smat)
-    deallocate(evec)
-
-  end if
-
-end do
-
-deallocate(htpsi,psi_box)
-
+    end if
+  
+  end do
+  
+  deallocate(htpsi,psi_box)
+  
 end subroutine subspace_diag
