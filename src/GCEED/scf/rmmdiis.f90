@@ -120,7 +120,7 @@ do iob=1,iobnum
 ! Solve by Lagrange's method of undetermined multipliers, and obtain 
 ! Rbar from previous combinations of phi and R.
     if(iflagdiis(iob) == 1)then
-      call diis_core(phi,R1,phibar,Rbar,iob,iter,iobcheck)
+      call diis_core(mg,phi,R1,phibar,Rbar,iob,iter,iobcheck)
     end if
   end if
 
