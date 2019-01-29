@@ -395,6 +395,14 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   call copy_density
 
+  mg%is(1:3)=mg_sta(1:3)
+  mg%ie(1:3)=mg_end(1:3)
+  mg%num(1:3)=mg_num(1:3)
+  mg%is_overlap(1:3)=mg_sta(1:3)-Nd
+  mg%ie_overlap(1:3)=mg_end(1:3)+Nd
+  mg%is_array(1:3)=mg_sta(1:3)-Nd
+  mg%ie_array(1:3)=mg_end(1:3)+Nd
+
   if(iscf_order==1)then
    
     if( amin_routine == 'cg' .or.       &
@@ -442,13 +450,6 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     if(iflag_subspace_diag==1)then
       if(Miter>iDiter_nosubspace_diag)then
-        mg%is(1:3)=mg_sta(1:3)
-        mg%ie(1:3)=mg_end(1:3)
-        mg%num(1:3)=mg_num(1:3)
-        mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-        mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-        mg%is_array(1:3)=mg_sta(1:3)-Nd
-        mg%ie_array(1:3)=mg_end(1:3)+Nd
         select case(iperiodic)
         case(0)
           allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
@@ -611,13 +612,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
 
     if(Miter>iDiter_nosubspace_diag)then
-      mg%is(1:3)=mg_sta(1:3)
-      mg%ie(1:3)=mg_end(1:3)
-      mg%num(1:3)=mg_num(1:3)
-      mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-      mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-      mg%is_array(1:3)=mg_sta(1:3)-Nd
-      mg%ie_array(1:3)=mg_end(1:3)+Nd
       select case(iperiodic)
       case(0)
         allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
