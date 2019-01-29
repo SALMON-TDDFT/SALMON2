@@ -26,7 +26,7 @@ module inner_product_sub
   contains
 
 !=======================================================================
-  subroutine r_inner_product(mg,matbox1,matbox2,rbox2,iwk_size)
+  subroutine r_inner_product(mg,matbox1,matbox2,rbox2,commname)
     use structures, only: s_rgrid
     use salmon_parallel, only: nproc_group_korbital, nproc_group_h
     use salmon_communication, only: comm_summation
@@ -35,7 +35,7 @@ module inner_product_sub
     real(8),intent(in) :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8),intent(in) :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8),intent(out) :: rbox2
-    integer,intent(in) :: iwk_size
+    character(30),intent(in) :: commname
     integer :: ix,iy,iz
     real(8) :: rbox
     
@@ -48,20 +48,18 @@ module inner_product_sub
     end do
     end do
     end do
-    
-    if(iwk_size>=1.and.iwk_size<=2)then
+
+    select case(commname)    
+    case("nproc_group_korbital")
       call comm_summation(rbox,rbox2,nproc_group_korbital)
-    else if(iwk_size>=11.and.iwk_size<=12)then
+    case("nproc_group_h")
       call comm_summation(rbox,rbox2,nproc_group_h)
-    else
-      write(*,*) "iwk_size is not set" 
-      stop
-    end if
+    end select
   
   end subroutine r_inner_product
   
 !=======================================================================
-  subroutine c_inner_product(mg,matbox1,matbox2,cbox2,iwk_size)
+  subroutine c_inner_product(mg,matbox1,matbox2,cbox2,commname)
     use structures, only: s_rgrid
     use salmon_parallel, only: nproc_group_korbital, nproc_group_h
     use salmon_communication, only: comm_summation
@@ -70,7 +68,7 @@ module inner_product_sub
     complex(8),intent(in)  :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     complex(8),intent(in)  :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     complex(8),intent(out) :: cbox2
-    integer,intent(in) :: iwk_size
+    character(30),intent(in) :: commname
     integer :: ix,iy,iz
     complex(8) :: cbox
     
@@ -84,14 +82,12 @@ module inner_product_sub
     end do
     end do
     
-    if(iwk_size>=1.and.iwk_size<=2)then
+    select case(commname)    
+    case("nproc_group_korbital")
       call comm_summation(cbox,cbox2,nproc_group_korbital)
-    else if(iwk_size>=11.and.iwk_size<=12)then
+    case("nproc_group_h")
       call comm_summation(cbox,cbox2,nproc_group_h)
-    else
-      write(*,*) "iwk_size is not set" 
-      stop
-    end if
+    end select
     
   end subroutine c_inner_product
   
