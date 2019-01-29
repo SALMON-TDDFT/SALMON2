@@ -19,7 +19,6 @@ use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
 use scf_data
 use new_world_sub
-use inner_product_sub
 use read_pslfile_sub
 implicit none
 

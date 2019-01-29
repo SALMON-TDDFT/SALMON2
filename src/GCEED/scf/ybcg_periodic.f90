@@ -16,18 +16,19 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-SUBROUTINE DTcg_periodic(psi_in,iflag)
+SUBROUTINE DTcg_periodic(mg,psi_in,iflag)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
 use salmon_communication, only: comm_bcast, comm_summation
 use misc_routines, only: get_wtime
 use scf_data
 use new_world_sub
-use inner_product_sub
 use allocate_mat_sub
 use hpsi2_sub
 !$ use omp_lib
 implicit none
 
+type(s_rgrid),intent(in) :: mg
 complex(8) :: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
                1:iobnum,k_sta:k_end)
 complex(8) :: psi2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &

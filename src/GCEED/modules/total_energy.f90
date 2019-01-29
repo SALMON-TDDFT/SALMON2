@@ -19,7 +19,6 @@ use scf_data
 use hpsi2_sub
 use new_world_sub
 use read_pslfile_sub
-use inner_product_sub
 
 INTERFACE Total_Energy
   MODULE PROCEDURE R_Total_Energy, C_Total_Energy

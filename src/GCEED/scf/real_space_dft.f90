@@ -395,6 +395,14 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   call copy_density
 
+  mg%is(1:3)=mg_sta(1:3)
+  mg%ie(1:3)=mg_end(1:3)
+  mg%num(1:3)=mg_num(1:3)
+  mg%is_overlap(1:3)=mg_sta(1:3)-Nd
+  mg%ie_overlap(1:3)=mg_end(1:3)+Nd
+  mg%is_array(1:3)=mg_sta(1:3)-Nd
+  mg%ie_array(1:3)=mg_end(1:3)+Nd
+
   if(iscf_order==1)then
    
     if( amin_routine == 'cg' .or.       &
@@ -404,16 +412,16 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(psi,iflag)
+          call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(psi,iflag)
+          call DTcg(mg,psi,iflag)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(zpsi,iflag)
+          call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(zpsi,iflag)
+          call DTcg_periodic(mg,zpsi,iflag)
         end select
       end select
       elp3(182)=get_wtime()
@@ -422,7 +430,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(psi)
+        call rmmdiis(mg,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -442,13 +450,6 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     if(iflag_subspace_diag==1)then
       if(Miter>iDiter_nosubspace_diag)then
-        mg%is(1:3)=mg_sta(1:3)
-        mg%ie(1:3)=mg_end(1:3)
-        mg%num(1:3)=mg_num(1:3)
-        mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-        mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-        mg%is_array(1:3)=mg_sta(1:3)-Nd
-        mg%ie_array(1:3)=mg_end(1:3)+Nd
         select case(iperiodic)
         case(0)
           allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
@@ -611,13 +612,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
 
     if(Miter>iDiter_nosubspace_diag)then
-      mg%is(1:3)=mg_sta(1:3)
-      mg%ie(1:3)=mg_end(1:3)
-      mg%num(1:3)=mg_num(1:3)
-      mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-      mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-      mg%is_array(1:3)=mg_sta(1:3)-Nd
-      mg%ie_array(1:3)=mg_end(1:3)+Nd
       select case(iperiodic)
       case(0)
         allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
@@ -711,22 +705,22 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(psi,iflag)
+          call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(psi,iflag)
+          call DTcg(mg,psi,iflag)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(zpsi,iflag)
+          call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(zpsi,iflag)
+          call DTcg_periodic(mg,zpsi,iflag)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(psi)
+        call rmmdiis(mg,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

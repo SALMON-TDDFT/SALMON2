@@ -16,17 +16,19 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-SUBROUTINE DTcg(psi_in,iflag)
+SUBROUTINE DTcg(mg,psi_in,iflag)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_group_grid
 use salmon_communication, only: comm_bcast
 use misc_routines, only: get_wtime
+use inner_product_sub
 use scf_data
 use new_world_sub
-use inner_product_sub
 use hpsi2_sub
 !$ use omp_lib
 implicit none
 
+type(s_rgrid),intent(in) :: mg
 real(8):: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
                1:iobnum,k_sta:k_end)
 integer :: iter,iob,job,iflag
@@ -42,6 +44,9 @@ integer :: iob_myob,job_myob
 integer :: icorr,jcorr               
 integer :: iroot
 integer :: is_sta,is_end
+character(30) :: commname
+
+commname='nproc_group_korbital'
 
 allocate (xk(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate (hxk(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
@@ -106,7 +111,7 @@ orbital : do iob=iobsta(is),iobend(is)
 
     call hpsi2(tpsi,hxk,iob,1,0,0)
 
-    call inner_product(xk,hxk,xkHxk)
+    call inner_product(mg,xk,hxk,xkHxk,commname)
 
     xkHxk=xkHxk*Hvol ; xkxk=1.d0 ; Rk=xkHxk/xkxk
 
@@ -132,7 +137,7 @@ orbital : do iob=iobsta(is),iobend(is)
       call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(jcorr==1)then
-        call inner_product(psi_in(:,:,:,job_myob,1),gk(:,:,:),sum0)
+        call inner_product(mg,psi_in(:,:,:,job_myob,1),gk(:,:,:),sum0,commname)
         sum0=sum0*Hvol
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg_sta(3),mg_end(3)
@@ -150,7 +155,7 @@ orbital : do iob=iobsta(is),iobend(is)
 
     if(icorr==1)then
 
-      call inner_product(gk,gk,sum0)
+      call inner_product(mg,gk,gk,sum0,commname)
       sum0=sum0*Hvol
 
       if ( iter==1 ) then
@@ -177,13 +182,13 @@ orbital : do iob=iobsta(is),iobend(is)
 
       xkpk=0.d0 ; pkpk=0.d0 ; pkHxk=0.d0
 
-      call inner_product(xk,pk,xkpk)
+      call inner_product(mg,xk,pk,xkpk,commname)
       xkpk = xkpk*Hvol
 
-      call inner_product(pk,pk,pkpk)
+      call inner_product(mg,pk,pk,pkpk,commname)
       pkpk = pkpk*Hvol
 
-      call inner_product(pk,hxk,pkHxk)
+      call inner_product(mg,pk,hxk,pkHxk,commname)
       pkHxk = pkHxk*Hvol
 
 !$OMP parallel do private(iz,iy,ix)
@@ -196,7 +201,7 @@ orbital : do iob=iobsta(is),iobend(is)
       end do
       call hpsi2(tpsi,gk,iob,1,0,0)
 
-      call inner_product(pk,gk,pkHpk)
+      call inner_product(mg,pk,gk,pkHpk,commname)
       pkHpk = pkHpk*Hvol
 
       Ak=pkHpk*xkpk-pkHxk*pkpk
@@ -207,10 +212,10 @@ orbital : do iob=iobsta(is),iobend(is)
       xk = xk + alpha*pk
       hxk=hxk + alpha*gk
 
-      call inner_product(xk,hxk,xkHxk)
+      call inner_product(mg,xk,hxk,xkHxk,commname)
       xkHxk = xkHxk*Hvol
 
-      call inner_product(xk,xk,xkxk)
+      call inner_product(mg,xk,xk,xkxk,commname)
       xkxk = xkxk*Hvol
     
       Rk=xkHxk/xkxk
@@ -220,7 +225,7 @@ orbital : do iob=iobsta(is),iobend(is)
   end do Iteration
 
   if(icorr==1)then
-    call inner_product(xk,xk,sum0)
+    call inner_product(mg,xk,xk,sum0,commname)
 !$OMP parallel do private(iz,iy,ix)
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
