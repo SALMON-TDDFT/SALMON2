@@ -23,7 +23,6 @@ use salmon_communication, only: comm_summation, comm_bcast
 use misc_routines, only: get_wtime
 use scf_data
 use new_world_sub
-use inner_product_sub
 use hpsi2_sub
 !$ use omp_lib
 implicit none

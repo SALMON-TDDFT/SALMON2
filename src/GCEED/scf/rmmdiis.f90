@@ -25,7 +25,6 @@ use salmon_communication, only: comm_summation
 use scf_data
 use hpsi2_sub
 use new_world_sub
-use inner_product_sub
 !$ use omp_lib
 implicit none
 
