@@ -21,7 +21,7 @@ use structures, only: s_rgrid
 use salmon_parallel, only: nproc_group_grid
 use salmon_communication, only: comm_bcast
 use misc_routines, only: get_wtime
-use inner_product_ud_sub
+use inner_product_sub
 use scf_data
 use new_world_sub
 use hpsi2_sub
@@ -108,7 +108,7 @@ orbital : do iob=iobsta(is),iobend(is)
 
     call hpsi2(tpsi,hxk,iob,1,0,0)
 
-    call inner_product_ud(mg,xk,hxk,xkHxk,2)
+    call inner_product(mg,xk,hxk,xkHxk,2)
 
     xkHxk=xkHxk*Hvol ; xkxk=1.d0 ; Rk=xkHxk/xkxk
 
@@ -134,7 +134,7 @@ orbital : do iob=iobsta(is),iobend(is)
       call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(jcorr==1)then
-        call inner_product_ud(mg,psi_in(:,:,:,job_myob,1),gk(:,:,:),sum0,2)
+        call inner_product(mg,psi_in(:,:,:,job_myob,1),gk(:,:,:),sum0,2)
         sum0=sum0*Hvol
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg_sta(3),mg_end(3)
@@ -152,7 +152,7 @@ orbital : do iob=iobsta(is),iobend(is)
 
     if(icorr==1)then
 
-      call inner_product_ud(mg,gk,gk,sum0,2)
+      call inner_product(mg,gk,gk,sum0,2)
       sum0=sum0*Hvol
 
       if ( iter==1 ) then
@@ -179,13 +179,13 @@ orbital : do iob=iobsta(is),iobend(is)
 
       xkpk=0.d0 ; pkpk=0.d0 ; pkHxk=0.d0
 
-      call inner_product_ud(mg,xk,pk,xkpk,2)
+      call inner_product(mg,xk,pk,xkpk,2)
       xkpk = xkpk*Hvol
 
-      call inner_product_ud(mg,pk,pk,pkpk,2)
+      call inner_product(mg,pk,pk,pkpk,2)
       pkpk = pkpk*Hvol
 
-      call inner_product_ud(mg,pk,hxk,pkHxk,2)
+      call inner_product(mg,pk,hxk,pkHxk,2)
       pkHxk = pkHxk*Hvol
 
 !$OMP parallel do private(iz,iy,ix)
@@ -198,7 +198,7 @@ orbital : do iob=iobsta(is),iobend(is)
       end do
       call hpsi2(tpsi,gk,iob,1,0,0)
 
-      call inner_product_ud(mg,pk,gk,pkHpk,2)
+      call inner_product(mg,pk,gk,pkHpk,2)
       pkHpk = pkHpk*Hvol
 
       Ak=pkHpk*xkpk-pkHxk*pkpk
@@ -209,10 +209,10 @@ orbital : do iob=iobsta(is),iobend(is)
       xk = xk + alpha*pk
       hxk=hxk + alpha*gk
 
-      call inner_product_ud(mg,xk,hxk,xkHxk,2)
+      call inner_product(mg,xk,hxk,xkHxk,2)
       xkHxk = xkHxk*Hvol
 
-      call inner_product_ud(mg,xk,xk,xkxk,2)
+      call inner_product(mg,xk,xk,xkxk,2)
       xkxk = xkxk*Hvol
     
       Rk=xkHxk/xkxk
@@ -222,7 +222,7 @@ orbital : do iob=iobsta(is),iobend(is)
   end do Iteration
 
   if(icorr==1)then
-    call inner_product_ud(mg,xk,xk,sum0,2)
+    call inner_product(mg,xk,xk,sum0,2)
 !$OMP parallel do private(iz,iy,ix)
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)

@@ -13,20 +13,20 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-module inner_product_ud_sub
+module inner_product_sub
 
   implicit none
   
-  interface inner_product_ud
+  interface inner_product
   
-    module procedure r_inner_product_ud, c_inner_product_ud
+    module procedure r_inner_product, c_inner_product
   
   end interface
   
   contains
 
 !=======================================================================
-  subroutine r_inner_product_ud(mg,matbox1,matbox2,rbox2,iwk_size)
+  subroutine r_inner_product(mg,matbox1,matbox2,rbox2,iwk_size)
     use structures, only: s_rgrid
     use salmon_parallel, only: nproc_group_korbital, nproc_group_h
     use salmon_communication, only: comm_summation
@@ -58,10 +58,10 @@ module inner_product_ud_sub
       stop
     end if
   
-  end subroutine r_inner_product_ud
+  end subroutine r_inner_product
   
 !=======================================================================
-  subroutine c_inner_product_ud(mg,matbox1,matbox2,cbox2,iwk_size)
+  subroutine c_inner_product(mg,matbox1,matbox2,cbox2,iwk_size)
     use structures, only: s_rgrid
     use salmon_parallel, only: nproc_group_korbital, nproc_group_h
     use salmon_communication, only: comm_summation
@@ -93,7 +93,7 @@ module inner_product_ud_sub
       stop
     end if
     
-  end subroutine c_inner_product_ud
+  end subroutine c_inner_product
   
-end module inner_product_ud_sub
+end module inner_product_sub
 

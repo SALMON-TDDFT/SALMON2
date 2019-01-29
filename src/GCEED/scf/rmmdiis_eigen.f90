@@ -19,7 +19,7 @@ SUBROUTINE diis_core(mg,phi,R1,phibar,Rbar,iob,iter,pcheck)
 use structures, only: s_rgrid
 use scf_data
 use new_world_sub
-use inner_product_ud_sub
+use inner_product_sub
 use eigen_sub
 !$ use omp_lib
 implicit none
@@ -51,10 +51,10 @@ allocate(evec(iter,iter))
       
 do ii=0,iter-1
   do jj=0,iter-1
-    call inner_product_ud(mg,R1(:,:,:,ii),R1(:,:,:,jj),rbox,2)
+    call inner_product(mg,R1(:,:,:,ii),R1(:,:,:,jj),rbox,2)
     Rmat(ii+1,jj+1)=rbox*Hvol
 
-    call inner_product_ud(mg,phi(:,:,:,ii),phi(:,:,:,jj),rbox,2)
+    call inner_product(mg,phi(:,:,:,ii),phi(:,:,:,jj),rbox,2)
     Smat(ii+1,jj+1)=rbox*Hvol
   end do
 end do
@@ -98,7 +98,7 @@ if(icount == iter)then
   end do
   end do
     
-  call inner_product_ud(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,2)
+  call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,2)
   rnorm=sqrt(rbox*Hvol)
 !$OMP parallel do private(iz,iy,ix)
   do iz=mg_sta(3),mg_end(3)
@@ -125,7 +125,7 @@ else
     end do
     end do
     end do
-    call inner_product_ud(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,2)
+    call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,2)
  
     rnorm=sqrt(rbox*Hvol)
 !$OMP parallel do private(iz,iy,ix)
@@ -171,7 +171,7 @@ else
       end do
     end do
 
-    call inner_product_ud(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,2)
+    call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,2)
     rnorm=sqrt(rbox*Hvol)
 !$OMP parallel do private(iz,iy,ix)
     do iz=mg_sta(3),mg_end(3)
