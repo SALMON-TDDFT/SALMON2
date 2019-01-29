@@ -16,7 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(psi_in,iflag)
+subroutine sgscg(mg,psi_in,iflag)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation, comm_bcast
 use misc_routines, only: get_wtime
@@ -27,6 +28,7 @@ use hpsi2_sub
 !$ use omp_lib
 implicit none
 
+type(s_rgrid),intent(in) :: mg
 real(8):: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
                1:iobnum,1)
 integer :: iter,iob,job,iflag

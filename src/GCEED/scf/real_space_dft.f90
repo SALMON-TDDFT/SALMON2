@@ -412,16 +412,16 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(psi,iflag)
+          call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(psi,iflag)
+          call DTcg(mg,psi,iflag)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(zpsi,iflag)
+          call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(zpsi,iflag)
+          call DTcg_periodic(mg,zpsi,iflag)
         end select
       end select
       elp3(182)=get_wtime()
@@ -430,7 +430,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(psi)
+        call rmmdiis(mg,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -705,22 +705,22 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(psi,iflag)
+          call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(psi,iflag)
+          call DTcg(mg,psi,iflag)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(zpsi,iflag)
+          call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(zpsi,iflag)
+          call DTcg_periodic(mg,zpsi,iflag)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(psi)
+        call rmmdiis(mg,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

@@ -16,7 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(psi_in,iflag)
+subroutine gscg_periodic(mg,psi_in,iflag)
+  use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
@@ -28,6 +29,7 @@ subroutine gscg_periodic(psi_in,iflag)
   !$ use omp_lib
   implicit none
   
+  type(s_rgrid),intent(in) :: mg
   complex(8) :: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
                  1:iobnum,k_sta:k_end)
   integer :: iter,iob,job,iflag
