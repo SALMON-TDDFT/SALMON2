@@ -444,7 +444,31 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(mg,psi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+          call dtcg(mg,spsi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
         end select
       case(3)
         select case(gscg)
@@ -698,7 +722,31 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(mg,psi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+          call dtcg(mg,spsi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
         end select
       case(3)
         select case(gscg)

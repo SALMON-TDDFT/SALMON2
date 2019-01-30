@@ -16,8 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-SUBROUTINE DTcg(mg,psi_in,iflag)
-use structures, only: s_rgrid
+SUBROUTINE DTcg(mg,spsi,iflag)
+use structures, only: s_rgrid,s_wavefunction
 use salmon_parallel, only: nproc_group_grid
 use salmon_communication, only: comm_bcast
 use misc_routines, only: get_wtime
@@ -29,8 +29,7 @@ use hpsi2_sub
 implicit none
 
 type(s_rgrid),intent(in) :: mg
-real(8):: psi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),  &
-                 1:iobnum,k_sta:k_end)
+type(s_wavefunction),intent(inout) :: spsi
 integer :: iter,iob,job,iflag
 integer :: ix,iy,iz
 integer :: is,iobsta(2),iobend(2)
@@ -97,7 +96,7 @@ orbital : do iob=iobsta(is),iobend(is)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      xk(ix,iy,iz)=psi_in(ix,iy,iz,iob_myob,1)
+      xk(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,1,iob_myob,1)
     end do
     end do
     end do
@@ -139,13 +138,13 @@ orbital : do iob=iobsta(is),iobend(is)
       call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(jcorr==1)then
-        call inner_product(mg,psi_in(:,:,:,job_myob,1),gk(:,:,:),sum0,commname)
+        call inner_product(mg,spsi%rwf(:,:,:,1,1,job_myob,1),gk(:,:,:),sum0,commname)
         sum0=sum0*Hvol
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*psi_in(ix,iy,iz,job_myob,1)
+          gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi%rwf(ix,iy,iz,1,1,job_myob,1)
         end do
         end do
         end do
@@ -232,7 +231,7 @@ orbital : do iob=iobsta(is),iobend(is)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      psi_in(ix,iy,iz,iob_myob,1)=xk(ix,iy,iz)/sqrt(sum0*Hvol)
+      spsi%rwf(ix,iy,iz,1,1,iob_myob,1)=xk(ix,iy,iz)/sqrt(sum0*Hvol)
     end do
     end do
     end do
