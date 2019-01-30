@@ -106,7 +106,66 @@ module structures
     real(8),allocatable :: force(:,:) ! force(1:3,1:NI)
   end type s_force
 
-! memo: structures, pp_grid, hpsi, GCEED/scf(total_energy, force)
-! mn2007/SALMON (branch: develop-2.0.0)
+contains
+
+# define DEAL(x) if(allocated(x)) deallocate(x)
+
+  subroutine deallocate_system(system)
+    type(s_system) :: system
+    DEAL(system%occ)
+    DEAL(system%wk)
+    DEAL(system%esp)
+    DEAL(system%Rion)
+  end subroutine deallocate_system
+
+  subroutine deallocate_rgrid(rg)
+    type(s_rgrid) :: rg
+    DEAL(rg%idx)
+    DEAL(rg%idy)
+    DEAL(rg%idz)
+  end subroutine deallocate_rgrid
+
+  subroutine deallocate_wavefunction(psi)
+    type(s_wavefunction) :: psi
+    DEAL(psi%rwf)
+    DEAL(psi%zwf)
+  end subroutine deallocate_wavefunction
+
+  subroutine deallocate_stencil(stencil)
+    type(s_stencil) :: stencil
+    DEAL(stencil%kAc)
+  end subroutine deallocate_stencil
+
+!  subroutine deallocate_pp_info(pp)
+
+  subroutine deallocate_pp_grid(ppg)
+    type(s_pp_grid) :: ppg
+    DEAL(ppg%mps)
+    DEAL(ppg%jxyz)
+    DEAL(ppg%jxx)
+    DEAL(ppg%jyy)
+    DEAL(ppg%jzz)
+    DEAL(ppg%uv)
+    DEAL(ppg%duv)
+    DEAL(ppg%lma_tbl)
+    DEAL(ppg%ia_tbl)
+    DEAL(ppg%rinv_uvu)
+    DEAL(ppg%zproj)
+  end subroutine deallocate_pp_grid
+
+  subroutine deallocate_scalar(x)
+    type(s_scalar) :: x
+    DEAL(x%f)
+  end subroutine deallocate_scalar
+
+  subroutine deallocate_vector(x)
+    type(s_vector) :: x
+    DEAL(x%v)
+  end subroutine deallocate_vector
+
+  subroutine deallocate_force(x)
+    type(s_force) :: x
+    DEAL(x%force)
+  end subroutine deallocate_force
 
 end module structures
