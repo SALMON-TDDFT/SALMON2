@@ -213,8 +213,8 @@ orbital : do p=pstart(is),pend(is)
   call comm_bcast(hxk,nproc_group_kgrid,iroot)
   call comm_bcast(txk,nproc_group_kgrid,iroot)
 
-  call inner_product4(xk,hxk,xkHxk)
-  call inner_product4(xk,txk,xkTxk)
+  call inner_product4(mg,xk,hxk,xkHxk,Hvol)
+  call inner_product4(mg,xk,txk,xkTxk,Hvol)
   
   Iteration : do iter=1,Ncg
 
@@ -284,7 +284,7 @@ orbital : do p=pstart(is),pend(is)
         end do
       end do
     end if
-    call inner_product4(gk,gk,sum1)
+    call inner_product4(mg,gk,gk,sum1,Hvol)
     
     if(iter==1)then
 !$OMP parallel do
@@ -307,7 +307,7 @@ orbital : do p=pstart(is),pend(is)
       end do
     end if
     gkgk=sum1
-    call inner_product4(xk,pk,zs)
+    call inner_product4(mg,xk,pk,zs,Hvol)
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -316,7 +316,7 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
     end do
-    call inner_product4(pko,pko,sum1)
+    call inner_product4(mg,pko,pko,sum1,Hvol)
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -327,8 +327,8 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
     call hpsi2(tpsi,htpsi,p,ik,0,0)
-    call inner_product4(xk,htpsi,xkHpk)
-    call inner_product4(pko,htpsi,pkHpk)
+    call inner_product4(mg,xk,htpsi,xkHpk,Hvol)
+    call inner_product4(mg,pko,htpsi,pkHpk,Hvol)
     
 
     ev=0.5d0*((xkHxk+pkHpk)-sqrt((xkHxk-pkHpk)**2+4.d0*abs(xkHpk)**2))
@@ -348,14 +348,14 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
 
-    call inner_product4(xk,hxk,xkHxk)
-    call inner_product4(xk,txk,xkTxk)
-    call inner_product4(xk,xk,xkxk)
+    call inner_product4(mg,xk,hxk,xkHxk,Hvol)
+    call inner_product4(mg,xk,txk,xkTxk,Hvol)
+    call inner_product4(mg,xk,xk,xkxk,Hvol)
     Rk=xkHxk/xkxk
 
   end do Iteration
 
-  call inner_product4(xk(mg_sta(1),mg_sta(2),mg_sta(3)),xk(mg_sta(1),mg_sta(2),mg_sta(3)),sum0)
+  call inner_product4(mg,xk(mg_sta(1),mg_sta(2),mg_sta(3)),xk(mg_sta(1),mg_sta(2),mg_sta(3)),sum0,Hvol)
   if(icorr_p==1)then
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)

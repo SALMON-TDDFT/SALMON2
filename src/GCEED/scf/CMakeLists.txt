@@ -7,7 +7,6 @@ set(SOURCES
     convert_input_scf.f90
     copy_density.f90
     deallocate_sendrecv.f90
-    inner_product5.f90
     gram_schmidt.f90
     gram_schmidt_periodic.f90
     gscg.f90
