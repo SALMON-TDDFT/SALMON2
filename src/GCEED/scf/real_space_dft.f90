@@ -440,36 +440,36 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
         select case(gscg)
         case('y')
-          call sgscg(mg,psi,iflag)
+          call sgscg(mg,spsi,iflag)
         case('n')
-          do ik=k_sta,k_end
-          do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
-            end do
-            end do
-            end do
-          end do
-          end do
           call dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
-          do ik=k_sta,k_end
-          do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
-            end do
-            end do
-            end do
-          end do
-          end do
         end select
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
       case(3)
         select case(gscg)
         case('y')
@@ -718,36 +718,36 @@ DFT_Iteration : do iter=1,iDiter(img)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
       case(0)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
         select case(gscg)
         case('y')
-          call sgscg(mg,psi,iflag)
+          call sgscg(mg,spsi,iflag)
         case('n')
-          do ik=k_sta,k_end
-          do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
-            end do
-            end do
-            end do
-          end do
-          end do
           call dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
-          do ik=k_sta,k_end
-          do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
-            end do
-            end do
-            end do
-          end do
-          end do
         end select
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
       case(3)
         select case(gscg)
         case('y')

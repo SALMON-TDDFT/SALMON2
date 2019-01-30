@@ -16,8 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,psi_in,iflag)
-use structures, only: s_rgrid
+subroutine sgscg(mg,spsi,iflag)
+use structures, only: s_rgrid,s_wavefunction
 use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation, comm_bcast
 use misc_routines, only: get_wtime
@@ -28,8 +28,7 @@ use hpsi2_sub
 implicit none
 
 type(s_rgrid),intent(in) :: mg
-real(8):: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
-               1:iobnum,1)
+type(s_wavefunction),intent(inout) :: spsi
 integer :: iter,iob,job,iflag
 integer :: ix,iy,iz
 integer :: is,iobsta(2),iobend(2)
@@ -86,7 +85,7 @@ do iob=1,iobnum
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
   do ix=mg_sta(1),mg_end(1)
-    rxk_ob(ix,iy,iz,iob)=psi_in(ix,iy,iz,iob,1)
+    rxk_ob(ix,iy,iz,iob)=spsi%rwf(ix,iy,iz,1,1,iob,1)
     tpsi(ix,iy,iz)=rxk_ob(ix,iy,iz,iob)
   end do
   end do
@@ -130,7 +129,7 @@ elp2(2)=get_wtime()
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
         do ix=mg_sta(1),mg_end(1)
-          sum0=sum0+psi_in(ix,iy,iz,job,1)*rgk_ob(ix,iy,iz,iob)
+          sum0=sum0+spsi%rwf(ix,iy,iz,1,1,job,1)*rgk_ob(ix,iy,iz,iob)
         end do
         end do
         end do
@@ -146,7 +145,7 @@ elp2(2)=get_wtime()
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
         do ix=mg_sta(1),mg_end(1)
-          rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*psi_in(ix,iy,iz,job,1)
+          rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%rwf(ix,iy,iz,1,1,job,1)
         end do
         end do
         end do
@@ -165,7 +164,7 @@ elp2(2)=get_wtime()
           do iz=mg_sta(3),mg_end(3)
           do iy=mg_sta(2),mg_end(2)
           do ix=mg_sta(1),mg_end(1)
-            matbox_m(ix,iy,iz)=psi_in(ix,iy,iz,job_myob,1)
+            matbox_m(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,1,job_myob,1)
           end do
           end do
           end do
@@ -278,7 +277,7 @@ do iob=1,iobnum
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
   do ix=mg_sta(1),mg_end(1)
-    psi_in(ix,iy,iz,iob,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
+    spsi%rwf(ix,iy,iz,1,1,iob,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
   end do
   end do
   end do
