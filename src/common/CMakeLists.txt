@@ -8,6 +8,7 @@ set(SOURCES
    inner_product.f90
    inner_product3.f90
    inner_product4.f90
+   inner_product7.f90
    set_isstaend.f90
    stencil.f90
    update_overlap.f90

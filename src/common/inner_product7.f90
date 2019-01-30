@@ -14,17 +14,22 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine inner_product7(matbox1,matbox2,rbox2)
+subroutine inner_product7(mg,itotmst,iobnum,rmatbox1,rmatbox2,rbox2,elp3,hvol)
+  use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_korbital
   use salmon_communication, only: comm_summation
   use misc_routines, only: get_wtime
-  use scf_data
-  use new_world_sub
   implicit none
+  type(s_rgrid),intent(in) :: mg
+  integer,intent(in)  :: itotmst
+  integer,intent(in)  :: iobnum
+  real(8),intent(in)  :: rmatbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:iobnum)
+  real(8),intent(in)  :: rmatbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:iobnum)
+  real(8),intent(out) :: rbox2(itotmst)
+  real(8),intent(out) :: elp3(3000)
+  real(8),intent(in)  :: hvol
   integer :: ix,iy,iz,iob,iob_allob
-  real(8) :: matbox1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum)
-  real(8) :: matbox2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum)
-  real(8) :: rbox,rbox1(itotMST),rbox2(itotMST)
+  real(8) :: rbox,rbox1(itotmst)
   
   rbox1(:)=0.d0
  
@@ -32,18 +37,18 @@ subroutine inner_product7(matbox1,matbox2,rbox2)
     call calc_allob(iob,iob_allob)
     rbox=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : rbox)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
-      rbox=rbox+matbox1(ix,iy,iz,iob)*matbox2(ix,iy,iz,iob)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rbox=rbox+rmatbox1(ix,iy,iz,iob)*rmatbox2(ix,iy,iz,iob)
     end do
     end do
     end do
-    rbox1(iob_allob)=rbox*Hvol
+    rbox1(iob_allob)=rbox*hvol
   end do
   
   elp3(186)=get_wtime()
-  call comm_summation(rbox1,rbox2,itotMST,nproc_group_korbital)
+  call comm_summation(rbox1,rbox2,itotmst,nproc_group_korbital)
   elp3(187)=get_wtime()
   elp3(190)=elp3(190)+elp3(187)-elp3(186)
   
