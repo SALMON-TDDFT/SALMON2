@@ -6,6 +6,7 @@ set(SOURCES
    check_corrkob.f90
    hpsi.f90
    inner_product.f90
+   inner_product3.f90
    set_isstaend.f90
    stencil.f90
    update_overlap.f90
