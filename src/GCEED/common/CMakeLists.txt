@@ -31,7 +31,6 @@ set(SOURCES
     hpsi2_buf.f90
     init_wf.f90
     init_k_rd.f90
-    inner_product4.f90
     inner_product7.f90
     laplacianh.f90
     nabla.f90
