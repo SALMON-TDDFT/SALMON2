@@ -114,7 +114,7 @@ subroutine gscg_periodic(mg,psi_in,iflag)
       end do
   
     end do
-    call inner_product5(zxk_ob,zhxk_ob,xkHxk_ob)
+    call inner_product5(mg,itotmst,iobnum,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
 
     Iteration : do iter=1,Ncg
       do iob_myob=1,iobnum
@@ -206,7 +206,7 @@ subroutine gscg_periodic(mg,psi_in,iflag)
           end do
         end do
       end if
-      call inner_product5(zgk_ob,zgk_ob,sum_ob1)
+      call inner_product5(mg,itotmst,iobnum,zgk_ob,zgk_ob,sum_ob1,hvol)
         
       do iob_myob=1,iobnum
         call calc_allob(iob_myob,iob_allob)
@@ -234,7 +234,7 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         gkgk_ob(iob_allob)=sum_ob1(iob_allob)
       end do
 
-      call inner_product5(zxk_ob,zpk_ob,zs_ob)
+      call inner_product5(mg,itotmst,iobnum,zxk_ob,zpk_ob,zs_ob,hvol)
 
       do iob_myob=1,iobnum
         call calc_allob(iob_myob,iob_allob)
@@ -247,7 +247,7 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         end do
         end do
       end do
-      call inner_product5(zpko_ob,zpko_ob,sum_ob1)
+      call inner_product5(mg,itotmst,iobnum,zpko_ob,zpko_ob,sum_ob1,hvol)
 
       do iob_myob=1,iobnum
         call calc_allob(iob_myob,iob_allob)
@@ -272,8 +272,8 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         end do
         end do
       end do
-      call inner_product5(zxk_ob,zhtpsi_ob,xkHpk_ob)
-      call inner_product5(zpko_ob,zhtpsi_ob,pkHpk_ob)
+      call inner_product5(mg,itotmst,iobnum,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
+      call inner_product5(mg,itotmst,iobnum,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
         
     
       do iob_myob=1,iobnum
@@ -296,8 +296,8 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         end do
       end do 
     
-      call inner_product5(zxk_ob,zhxk_ob,xkHxk_ob)
-      call inner_product5(zxk_ob,zxk_ob,xkxk_ob)
+      call inner_product5(mg,itotmst,iobnum,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+      call inner_product5(mg,itotmst,iobnum,zxk_ob,zxk_ob,xkxk_ob,hvol)
 
       do iob_myob=1,iobnum
         call calc_allob(iob_myob,iob_allob)
