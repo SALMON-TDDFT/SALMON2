@@ -7,11 +7,8 @@ set(SOURCES
     calc_force.f90
     calc_gradient_fast_c.f90
     calc_gradient_fast.f90
-    calc_iquotient.f90
-    calc_iroot.f90
     calcJxyz_all.f90
     calcJxyz_all_periodic.f90
-    calc_myob.f90
     calc_ob_num.f90
     calc_pmax.f90
     calcuV.f90
@@ -19,7 +16,6 @@ set(SOURCES
     calcVpsl_periodic.f90
     calcVpsl_periodic_FFTE.f90
     check_cep.f90
-    check_corrkob.f90
     check_fourier.f90
     check_mg.f90
     check_ng.f90
@@ -32,11 +28,9 @@ set(SOURCES
     hartree_FFTE.f90
     hartree_periodic.f90
     hartree.f90
+    hpsi2_buf.f90
     init_wf.f90
     init_k_rd.f90
-    inner_product3.f90
-    inner_product4.f90
-    inner_product7.f90
     laplacianh.f90
     nabla.f90
     OUT_IN_data.f90
@@ -51,7 +45,6 @@ set(SOURCES
     set_icoo1d.f90
     set_imesh_oddeven.f90
     set_ispin.f90
-    set_isstaend.f90
     storevpp.f90
     total_energy_periodic.f90
     writeavs.f90

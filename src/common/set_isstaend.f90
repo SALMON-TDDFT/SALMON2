@@ -13,31 +13,30 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
-  use scf_data
+subroutine set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  use salmon_parallel, only: nproc_id_spin
   implicit none
-  character :: JOBZ, UPLO
-  integer :: LWORK
-  integer :: iter,ier2
-  real(8),allocatable :: RWORK(:)
-  real(8) :: W(iter)
-  complex(8) :: Rmat(iter,iter)
-  complex(8),allocatable :: WORK(:)
-  complex(8) :: evec(iter,iter)
+  integer,intent(out) :: is_sta,is_end
+  integer,intent(in)  :: ilsda,nproc_ob,nproc_ob_spin(2)
   
-  ier2=0
-  
-  JOBZ='V'
-  UPLO='U'
-  
-  LWORK=2*iter-1
-  allocate(WORK(LWORK))
-  allocate(RWORK(3*iter-2))
-  
-  call ZHEEV(JOBZ,UPLO,iter,Rmat,iter,W,WORK,LWORK,RWORK,ier2)
-  
-  evec(:,:)=Rmat(:,:)
-  
-  deallocate(WORK,RWORK)
-  
-end subroutine eigen_subdiag_periodic
+  if(ilsda==0)then
+    is_sta=1
+    is_end=1
+  else
+    if(nproc_ob==1)then
+      is_sta=1
+      is_end=2
+    else
+      if(nproc_id_spin<nproc_ob_spin(1))then
+        is_sta=1
+        is_end=1
+      else
+        is_sta=2
+        is_end=2
+      end if
+    end if
+  end if
+
+return
+
+end subroutine set_isstaend

@@ -1,6 +1,16 @@
 set(SOURCES
    broyden.f90
+   calc_iquotient.f90
+   calc_iroot.f90
+   calc_myob.f90
+   check_corrkob.f90
    hpsi.f90
+   inner_product.f90
+   inner_product3.f90
+   inner_product4.f90
+   inner_product5.f90
+   inner_product7.f90
+   set_isstaend.f90
    stencil.f90
    update_overlap.f90
    structures.f90

@@ -16,18 +16,19 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-SUBROUTINE DTcg_periodic(psi_in,iflag)
+SUBROUTINE DTcg_periodic(mg,psi_in,iflag)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
 use salmon_communication, only: comm_bcast, comm_summation
 use misc_routines, only: get_wtime
 use scf_data
 use new_world_sub
-use inner_product_sub
 use allocate_mat_sub
 use hpsi2_sub
 !$ use omp_lib
 implicit none
 
+type(s_rgrid),intent(in) :: mg
 complex(8) :: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
                1:iobnum,k_sta:k_end)
 complex(8) :: psi2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
@@ -61,7 +62,7 @@ allocate (txk(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate (htpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate (pko(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
-call set_isstaend(is_sta,is_end)
+call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
 
 iwk_size=2
 call make_iwksta_iwkend
@@ -94,8 +95,8 @@ do ik=k_sta,k_end
 do is=is_sta,is_end
 
 orbital : do p=pstart(is),pend(is)
-  call calc_myob(p,p_myob)
-  call check_corrkob(p,ik,icorr_p)
+  call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+  call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
 
   elp2(2)=get_wtime()
 
@@ -123,8 +124,8 @@ orbital : do p=pstart(is),pend(is)
     end do
   else
     do q=pstart(is),p-1
-      call calc_myob(q,q_myob)
-      call check_corrkob(q,ik,icorr_q)
+      call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+      call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
       if(icorr_q==1)then
 !$omp parallel do
         do iz=mg_sta(3),mg_end(3)
@@ -135,7 +136,7 @@ orbital : do p=pstart(is),pend(is)
         end do
         end do
       end if
-      call calc_iroot(q,iroot)
+      call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
       call comm_bcast(cmatbox_m,nproc_group_kgrid,iroot)
       sum0=0.d0
       if(icorr_p==1)then
@@ -207,13 +208,13 @@ orbital : do p=pstart(is),pend(is)
     end do
   end if
 
-  call calc_iroot(p,iroot)
+  call calc_iroot(p,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
   call comm_bcast(xk,nproc_group_kgrid,iroot)
   call comm_bcast(hxk,nproc_group_kgrid,iroot)
   call comm_bcast(txk,nproc_group_kgrid,iroot)
 
-  call inner_product4(xk,hxk,xkHxk)
-  call inner_product4(xk,txk,xkTxk)
+  call inner_product4(mg,xk,hxk,xkHxk,Hvol)
+  call inner_product4(mg,xk,txk,xkTxk,Hvol)
   
   Iteration : do iter=1,Ncg
 
@@ -249,8 +250,8 @@ orbital : do p=pstart(is),pend(is)
       end do
     else
       do q=pstart(is),p-1
-        call calc_myob(q,q_myob)
-        call check_corrkob(q,ik,icorr_q)
+        call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
         if(icorr_q==1)then
 !$omp parallel do
           do iz=mg_sta(3),mg_end(3)
@@ -261,7 +262,7 @@ orbital : do p=pstart(is),pend(is)
           end do
           end do
         end if
-        call calc_iroot(q,iroot)
+        call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
         call comm_bcast(cmatbox_m,nproc_group_kgrid,iroot)
         sum0=0.d0
 !$omp parallel do reduction(+ : sum0)
@@ -283,7 +284,7 @@ orbital : do p=pstart(is),pend(is)
         end do
       end do
     end if
-    call inner_product4(gk,gk,sum1)
+    call inner_product4(mg,gk,gk,sum1,Hvol)
     
     if(iter==1)then
 !$OMP parallel do
@@ -306,7 +307,7 @@ orbital : do p=pstart(is),pend(is)
       end do
     end if
     gkgk=sum1
-    call inner_product4(xk,pk,zs)
+    call inner_product4(mg,xk,pk,zs,Hvol)
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -315,7 +316,7 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
     end do
-    call inner_product4(pko,pko,sum1)
+    call inner_product4(mg,pko,pko,sum1,Hvol)
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -326,8 +327,8 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
     call hpsi2(tpsi,htpsi,p,ik,0,0)
-    call inner_product4(xk,htpsi,xkHpk)
-    call inner_product4(pko,htpsi,pkHpk)
+    call inner_product4(mg,xk,htpsi,xkHpk,Hvol)
+    call inner_product4(mg,pko,htpsi,pkHpk,Hvol)
     
 
     ev=0.5d0*((xkHxk+pkHpk)-sqrt((xkHxk-pkHpk)**2+4.d0*abs(xkHpk)**2))
@@ -347,14 +348,14 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
 
-    call inner_product4(xk,hxk,xkHxk)
-    call inner_product4(xk,txk,xkTxk)
-    call inner_product4(xk,xk,xkxk)
+    call inner_product4(mg,xk,hxk,xkHxk,Hvol)
+    call inner_product4(mg,xk,txk,xkTxk,Hvol)
+    call inner_product4(mg,xk,xk,xkxk,Hvol)
     Rk=xkHxk/xkxk
 
   end do Iteration
 
-  call inner_product4(xk(mg_sta(1),mg_sta(2),mg_sta(3)),xk(mg_sta(1),mg_sta(2),mg_sta(3)),sum0)
+  call inner_product4(mg,xk(mg_sta(1),mg_sta(2),mg_sta(3)),xk(mg_sta(1),mg_sta(2),mg_sta(3)),sum0,Hvol)
   if(icorr_p==1)then
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)

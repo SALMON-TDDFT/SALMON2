@@ -39,6 +39,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine Real_Space_DFT
+use structures, only: s_rgrid, s_wavefunction
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
                            nproc_group_spin
@@ -56,6 +57,8 @@ character(100) :: file_atoms_coo
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg
+type(s_rgrid) :: mg
+type(s_wavefunction) :: spsi
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -392,6 +395,14 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   call copy_density
 
+  mg%is(1:3)=mg_sta(1:3)
+  mg%ie(1:3)=mg_end(1:3)
+  mg%num(1:3)=mg_num(1:3)
+  mg%is_overlap(1:3)=mg_sta(1:3)-Nd
+  mg%ie_overlap(1:3)=mg_end(1:3)+Nd
+  mg%is_array(1:3)=mg_sta(1:3)-Nd
+  mg%ie_array(1:3)=mg_end(1:3)+Nd
+
   if(iscf_order==1)then
    
     if( amin_routine == 'cg' .or.       &
@@ -401,16 +412,16 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(psi,iflag)
+          call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(psi,iflag)
+          call DTcg(mg,psi,iflag)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(zpsi,iflag)
+          call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(zpsi,iflag)
+          call DTcg_periodic(mg,zpsi,iflag)
         end select
       end select
       elp3(182)=get_wtime()
@@ -419,7 +430,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(psi)
+        call rmmdiis(mg,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -441,9 +452,82 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(Miter>iDiter_nosubspace_diag)then
         select case(iperiodic)
         case(0)
-          call subspace_diag
+          allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
+                            mg%is(2):mg%ie(2),  &
+                            mg%is(3):mg%ie(3),  &
+                            1,  &
+                            1,  &
+                            1:iobnum,  &
+                            k_sta:k_end))
+
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+
+          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+
+          deallocate(spsi%rwf)
         case(3)
-          call subspace_diag_periodic
+          allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
+                            mg%is(2):mg%ie(2),  &
+                            mg%is(3):mg%ie(3),  &
+                            1,  &
+                            1,  &
+                            1:iobnum,  &
+                            k_sta:k_end))
+
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%zwf(ix,iy,iz,1,1,iob,ik)=zpsi(ix,iy,iz,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+
+          call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+                                         iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,1,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+
+          deallocate(spsi%zwf)
         end select
       end if
     end if
@@ -530,9 +614,82 @@ DFT_Iteration : do iter=1,iDiter(img)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
-        call subspace_diag
+        allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
+                          mg%is(2):mg%ie(2),  &
+                          mg%is(3):mg%ie(3),  &
+                          1,  &
+                          1,  &
+                          1:iobnum,  &
+                          k_sta:k_end))
+
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+
+        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+
+        deallocate(spsi%rwf)
       case(3)
-        call subspace_diag_periodic
+        allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
+                          mg%is(2):mg%ie(2),  &
+                          mg%is(3):mg%ie(3),  &
+                          1,  &
+                          1,  &
+                          1:iobnum,  &
+                          k_sta:k_end))
+
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%zwf(ix,iy,iz,1,1,iob,ik)=zpsi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+
+        call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+                                       iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,1,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+
+        deallocate(spsi%zwf)
       end select
     end if
 
@@ -548,22 +705,22 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(psi,iflag)
+          call sgscg(mg,psi,iflag)
         case('n')
-          call DTcg(psi,iflag)
+          call DTcg(mg,psi,iflag)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(zpsi,iflag)
+          call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(zpsi,iflag)
+          call DTcg_periodic(mg,zpsi,iflag)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(psi)
+        call rmmdiis(mg,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

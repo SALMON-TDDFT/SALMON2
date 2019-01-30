@@ -10,7 +10,6 @@ set(SOURCES
     gradient.f90
     hpsi2${HPSI_TEST_SUFFIX}.f90
     init_sendrecv.f90
-    inner_product.f90
     laplacian2.f90
     new_world.f90
     readbox_rt.f90

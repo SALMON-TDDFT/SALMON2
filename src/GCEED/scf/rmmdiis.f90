@@ -18,16 +18,17 @@
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-SUBROUTINE rmmdiis(psi_in)
+SUBROUTINE rmmdiis(mg,psi_in)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
 use scf_data
 use hpsi2_sub
 use new_world_sub
-use inner_product_sub
 !$ use omp_lib
 implicit none
 
+type(s_rgrid),intent(in) :: mg
 real(8) :: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),   &
                   1:iobnum,k_sta:k_end)
 integer :: iob,iter,ix,iy,iz
@@ -105,21 +106,21 @@ do iob=1,iobnum
   end do
 
     call hpsi2(tpsi,htphi(:,:,:),iob,1,0,0)
-    call inner_product3(phi(mg_sta(1),mg_sta(2),mg_sta(3),0),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1)
+    call inner_product3(mg,phi(mg_sta(1),mg_sta(2),mg_sta(3),0),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
 
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
       R1(:,:,iz,0)=htphi(:,:,iz)-rbox1*Hvol*phi(:,:,iz,0)
     end do 
     epsdiis(iob,0)=rbox1*Hvol
-    call inner_product3(R1(mg_sta(1),mg_sta(2),mg_sta(3),0),R1(mg_sta(1),mg_sta(2),mg_sta(3),0),rbox1)
+    call inner_product3(mg,R1(mg_sta(1),mg_sta(2),mg_sta(3),0),R1(mg_sta(1),mg_sta(2),mg_sta(3),0),rbox1,elp3)
     Rnorm(iob,0)=rbox1*Hvol
 
   else
 ! Solve by Lagrange's method of undetermined multipliers, and obtain 
 ! Rbar from previous combinations of phi and R.
     if(iflagdiis(iob) == 1)then
-      call diis_core(phi,R1,phibar,Rbar,iob,iter,iobcheck)
+      call diis_core(mg,phi,R1,phibar,Rbar,iob,iter,iobcheck)
     end if
   end if
 
@@ -138,7 +139,7 @@ do iob=1,iobnum
     end if
 
 ! normalization
-    call inner_product3(phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),rbox1)
+    call inner_product3(mg,phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),rbox1,elp3)
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
       phi(:,:,iz,iter)=phi(:,:,iz,iter)/sqrt(rbox1*Hvol)
@@ -154,16 +155,16 @@ do iob=1,iobnum
     end do
 
     call hpsi2(tpsi,htphi(:,:,:),iob,1,0,0)
-    call inner_product3(phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1)
+    call inner_product3(mg,phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
       R1(:,:,iz,iter)=htphi(:,:,iz)-rbox1*Hvol*phi(:,:,iz,iter)
     end do
 
-    call inner_product3(phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1)
+    call inner_product3(mg,phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
     epsdiis(iob,iter)=rbox1*Hvol
 
-    call inner_product3(R1(mg_sta(1),mg_sta(2),mg_sta(3),iter),R1(mg_sta(1),mg_sta(2),mg_sta(3),iter),rbox1)
+    call inner_product3(mg,R1(mg_sta(1),mg_sta(2),mg_sta(3),iter),R1(mg_sta(1),mg_sta(2),mg_sta(3),iter),rbox1,elp3)
     Rnorm(iob,iter)=rbox1*Hvol
 
 ! judgement for closing loop.
@@ -208,7 +209,7 @@ do iob=1,iobnum
     end do
 
     call hpsi2(tpsi,htphi(:,:,:),iob,1,0,0)
-    call inner_product3(phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1)
+    call inner_product3(mg,phi(mg_sta(1),mg_sta(2),mg_sta(3),iter),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
     
     end if
 
@@ -228,7 +229,7 @@ do iob=1,iobnum
   end do
 
   call hpsi2(tpsi,htphi(:,:,:),iob,1,0,0)
-  call inner_product3(psi_in(mg_sta(1),mg_sta(2),mg_sta(3),iob,1),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1)
+  call inner_product3(mg,psi_in(mg_sta(1),mg_sta(2),mg_sta(3),iob,1),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
   rbox1=sum(psi_in(:,:,:,iob,1)*htphi(:,:,:))*Hvol
   if(rbox1-esp(iob,1)>5.d0) iflag_diisjump=1
 end do
@@ -254,7 +255,7 @@ else if(iflag_diisjump==1)then
 
     call hpsi2(tpsi,htphi(:,:,:),iob,1,0,0)
 
-    call inner_product3(phi(mg_sta(1),mg_sta(2),mg_sta(3),0),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1)
+    call inner_product3(mg,phi(mg_sta(1),mg_sta(2),mg_sta(3),0),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
 
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
