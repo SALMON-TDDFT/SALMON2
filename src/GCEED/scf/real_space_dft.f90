@@ -365,6 +365,43 @@ else
   end do
 end if
 
+mg%is(1:3)=mg_sta(1:3)
+mg%ie(1:3)=mg_end(1:3)
+mg%num(1:3)=mg_num(1:3)
+mg%is_overlap(1:3)=mg_sta(1:3)-Nd
+mg%ie_overlap(1:3)=mg_end(1:3)+Nd
+mg%is_array(1:3)=mg_sta(1:3)-Nd
+mg%ie_array(1:3)=mg_end(1:3)+Nd
+
+spsi%i1_s=1
+spsi%i1_e=1
+spsi%num1=1
+spsi%ik_s=k_sta
+spsi%ik_e=k_end
+spsi%numk=k_num
+spsi%io_s=1
+spsi%io_e=iobnum
+spsi%numo=iobnum
+
+select case(iperiodic)
+case(0)
+  allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
+                    mg%is(2):mg%ie(2),  &
+                    mg%is(3):mg%ie(3),  &
+                    1,  &
+                    spsi%i1_s:spsi%i1_e,  &
+                    spsi%io_s:spsi%io_e,  &
+                    spsi%ik_s:spsi%ik_e))
+case(3)
+  allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
+                    mg%is(2):mg%ie(2),  &
+                    mg%is(3):mg%ie(3),  &
+                    1,  &
+                    spsi%i1_s:spsi%i1_e,  &
+                    spsi%io_s:spsi%io_e,  &
+                    spsi%ik_s:spsi%ik_e))
+end select
+
 DFT_Iteration : do iter=1,iDiter(img)
 
   elp3(111)=get_wtime()
@@ -395,13 +432,6 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   call copy_density
 
-  mg%is(1:3)=mg_sta(1:3)
-  mg%ie(1:3)=mg_end(1:3)
-  mg%num(1:3)=mg_num(1:3)
-  mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-  mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-  mg%is_array(1:3)=mg_sta(1:3)-Nd
-  mg%ie_array(1:3)=mg_end(1:3)+Nd
 
   if(iscf_order==1)then
    
@@ -452,14 +482,6 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(Miter>iDiter_nosubspace_diag)then
         select case(iperiodic)
         case(0)
-          allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
-                            mg%is(2):mg%ie(2),  &
-                            mg%is(3):mg%ie(3),  &
-                            1,  &
-                            1,  &
-                            1:iobnum,  &
-                            k_sta:k_end))
-
           do ik=k_sta,k_end
           do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
@@ -488,16 +510,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
           end do
 
-          deallocate(spsi%rwf)
         case(3)
-          allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
-                            mg%is(2):mg%ie(2),  &
-                            mg%is(3):mg%ie(3),  &
-                            1,  &
-                            1,  &
-                            1:iobnum,  &
-                            k_sta:k_end))
-
           do ik=k_sta,k_end
           do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
@@ -526,8 +539,6 @@ DFT_Iteration : do iter=1,iDiter(img)
             end do
           end do
           end do
-
-          deallocate(spsi%zwf)
         end select
       end if
     end if
@@ -614,14 +625,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
-        allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
-                          mg%is(2):mg%ie(2),  &
-                          mg%is(3):mg%ie(3),  &
-                          1,  &
-                          1,  &
-                          1:iobnum,  &
-                          k_sta:k_end))
-
         do ik=k_sta,k_end
         do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
@@ -649,17 +652,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
         end do
         end do
-
-        deallocate(spsi%rwf)
       case(3)
-        allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
-                          mg%is(2):mg%ie(2),  &
-                          mg%is(3):mg%ie(3),  &
-                          1,  &
-                          1,  &
-                          1:iobnum,  &
-                          k_sta:k_end))
-
         do ik=k_sta,k_end
         do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
@@ -688,8 +681,6 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
         end do
         end do
-
-        deallocate(spsi%zwf)
       end select
     end if
 
@@ -910,6 +901,14 @@ else if(ilsda==1)then
 end if
 
 end do DFT_Iteration
+
+select case(iperiodic)
+case(0)
+  deallocate(spsi%rwf)
+case(3)
+  deallocate(spsi%zwf)
+end select
+
 elp3(104)=get_wtime()
 
 deallocate(idiis_sd)
