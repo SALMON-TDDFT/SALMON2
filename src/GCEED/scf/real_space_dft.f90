@@ -456,7 +456,7 @@ DFT_Iteration : do iter=1,iDiter(img)
             end do
           end do
           end do
-          call dtcg(mg,spsi,iflag)
+          call dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
           do ik=k_sta,k_end
           do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
@@ -734,7 +734,7 @@ DFT_Iteration : do iter=1,iDiter(img)
             end do
           end do
           end do
-          call dtcg(mg,spsi,iflag)
+          call dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
           do ik=k_sta,k_end
           do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
