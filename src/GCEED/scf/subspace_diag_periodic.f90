@@ -120,7 +120,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            tpsi(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,1,jj,ik)
+            tpsi(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,jj,ik,1)
           end do
           end do
           end do
@@ -159,7 +159,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-               cbox=cbox+conjg(spsi%zwf(ix,iy,iz,1,1,ii,ik))*htpsi(ix,iy,iz)
+               cbox=cbox+conjg(spsi%zwf(ix,iy,iz,1,ii,ik,1))*htpsi(ix,iy,iz)
             end do
             end do
             end do
@@ -179,8 +179,8 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            ztpsi_groupob(ix,iy,iz,jj)=spsi%zwf(ix,iy,iz,1,1,jj,ik)
-            spsi%zwf(ix,iy,iz,1,1,jj,ik)=0.d0
+            ztpsi_groupob(ix,iy,iz,jj)=spsi%zwf(ix,iy,iz,1,jj,ik,1)
+            spsi%zwf(ix,iy,iz,1,jj,ik,1)=0.d0
           end do
           end do
           end do
@@ -209,7 +209,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,1,1,ii,ik)=spsi%zwf(ix,iy,iz,1,1,ii,ik)+evec(jj-iobsta(is)+1,i_allob-iobsta(is)+1)*htpsi(ix,iy,iz)
+              spsi%zwf(ix,iy,iz,1,ii,ik,1)=spsi%zwf(ix,iy,iz,1,ii,ik,1)+evec(jj-iobsta(is)+1,i_allob-iobsta(is)+1)*htpsi(ix,iy,iz)
             end do
             end do
             end do
@@ -225,7 +225,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            rbox=rbox+abs(spsi%zwf(ix,iy,iz,1,1,ii,ik))**2
+            rbox=rbox+abs(spsi%zwf(ix,iy,iz,1,ii,ik,1))**2
           end do
           end do
           end do
@@ -234,7 +234,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,1,1,ii,ik)=spsi%zwf(ix,iy,iz,1,1,ii,ik)/sqrt(rbox1*hvol)
+            spsi%zwf(ix,iy,iz,1,ii,ik,1)=spsi%zwf(ix,iy,iz,1,ii,ik,1)/sqrt(rbox1*hvol)
           end do
           end do
           end do

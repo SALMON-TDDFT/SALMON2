@@ -39,7 +39,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine Real_Space_DFT
-use structures, only: s_rgrid, s_wavefunction
+use structures, only: s_rgrid, s_wf_info, s_wavefunction
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
                            nproc_group_spin
@@ -58,6 +58,7 @@ complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg
 type(s_rgrid) :: mg
+type(s_wf_info) :: info
 type(s_wavefunction) :: spsi
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -365,6 +366,40 @@ else
   end do
 end if
 
+mg%is(1:3)=mg_sta(1:3)
+mg%ie(1:3)=mg_end(1:3)
+mg%num(1:3)=mg_num(1:3)
+mg%is_overlap(1:3)=mg_sta(1:3)-Nd
+mg%ie_overlap(1:3)=mg_end(1:3)+Nd
+mg%is_array(1:3)=mg_sta(1:3)-Nd
+mg%ie_array(1:3)=mg_end(1:3)+Nd
+
+info%ik_s=k_sta
+info%ik_e=k_end
+info%numk=k_num
+info%io_s=1
+info%io_e=iobnum
+info%numo=iobnum
+
+select case(iperiodic)
+case(0)
+  allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
+                    mg%is(2):mg%ie(2),  &
+                    mg%is(3):mg%ie(3),  &
+                    1,  &
+                    info%io_s:info%io_e,  &
+                    info%ik_s:info%ik_e,  &
+                    1))
+case(3)
+  allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
+                    mg%is(2):mg%ie(2),  &
+                    mg%is(3):mg%ie(3),  &
+                    1,  &
+                    info%io_s:info%io_e,  &
+                    info%ik_s:info%ik_e,  &
+                    1))
+end select
+
 DFT_Iteration : do iter=1,iDiter(img)
 
   elp3(111)=get_wtime()
@@ -395,13 +430,6 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   call copy_density
 
-  mg%is(1:3)=mg_sta(1:3)
-  mg%ie(1:3)=mg_end(1:3)
-  mg%num(1:3)=mg_num(1:3)
-  mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-  mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-  mg%is_array(1:3)=mg_sta(1:3)-Nd
-  mg%ie_array(1:3)=mg_end(1:3)+Nd
 
   if(iscf_order==1)then
    
@@ -410,12 +438,37 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
         select case(gscg)
         case('y')
-          call sgscg(mg,psi,iflag)
+          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
         case('n')
-          call DTcg(mg,psi,iflag)
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
         end select
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+        end do
       case(3)
         select case(gscg)
         case('y')
@@ -452,21 +505,13 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(Miter>iDiter_nosubspace_diag)then
         select case(iperiodic)
         case(0)
-          allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
-                            mg%is(2):mg%ie(2),  &
-                            mg%is(3):mg%ie(3),  &
-                            1,  &
-                            1,  &
-                            1:iobnum,  &
-                            k_sta:k_end))
-
           do ik=k_sta,k_end
           do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+              spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
             end do
             end do
             end do
@@ -481,30 +526,21 @@ DFT_Iteration : do iter=1,iDiter(img)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
             end do
             end do
             end do
           end do
           end do
 
-          deallocate(spsi%rwf)
         case(3)
-          allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
-                            mg%is(2):mg%ie(2),  &
-                            mg%is(3):mg%ie(3),  &
-                            1,  &
-                            1,  &
-                            1:iobnum,  &
-                            k_sta:k_end))
-
           do ik=k_sta,k_end
           do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,1,1,iob,ik)=zpsi(ix,iy,iz,iob,ik)
+              spsi%zwf(ix,iy,iz,1,iob,ik,1)=zpsi(ix,iy,iz,iob,ik)
             end do
             end do
             end do
@@ -520,14 +556,12 @@ DFT_Iteration : do iter=1,iDiter(img)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,1,iob,ik)
+              zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,iob,ik,1)
             end do
             end do
             end do
           end do
           end do
-
-          deallocate(spsi%zwf)
         end select
       end if
     end if
@@ -614,21 +648,13 @@ DFT_Iteration : do iter=1,iDiter(img)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
-        allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
-                          mg%is(2):mg%ie(2),  &
-                          mg%is(3):mg%ie(3),  &
-                          1,  &
-                          1,  &
-                          1:iobnum,  &
-                          k_sta:k_end))
-
         do ik=k_sta,k_end
         do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,1,1,iob,ik)=psi(ix,iy,iz,iob,ik)
+            spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
           end do
           end do
           end do
@@ -643,30 +669,20 @@ DFT_Iteration : do iter=1,iDiter(img)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,1,iob,ik)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
           end do
           end do
           end do
         end do
         end do
-
-        deallocate(spsi%rwf)
       case(3)
-        allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
-                          mg%is(2):mg%ie(2),  &
-                          mg%is(3):mg%ie(3),  &
-                          1,  &
-                          1,  &
-                          1:iobnum,  &
-                          k_sta:k_end))
-
         do ik=k_sta,k_end
         do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,1,1,iob,ik)=zpsi(ix,iy,iz,iob,ik)
+            spsi%zwf(ix,iy,iz,1,iob,ik,1)=zpsi(ix,iy,iz,iob,ik)
           end do
           end do
           end do
@@ -682,14 +698,12 @@ DFT_Iteration : do iter=1,iDiter(img)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,1,iob,ik)
+            zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,iob,ik,1)
           end do
           end do
           end do
         end do
         end do
-
-        deallocate(spsi%zwf)
       end select
     end if
 
@@ -703,12 +717,37 @@ DFT_Iteration : do iter=1,iDiter(img)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
       case(0)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
         select case(gscg)
         case('y')
-          call sgscg(mg,psi,iflag)
+          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
         case('n')
-          call DTcg(mg,psi,iflag)
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
         end select
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+        end do
       case(3)
         select case(gscg)
         case('y')
@@ -910,6 +949,14 @@ else if(ilsda==1)then
 end if
 
 end do DFT_Iteration
+
+select case(iperiodic)
+case(0)
+  deallocate(spsi%rwf)
+case(3)
+  deallocate(spsi%zwf)
+end select
+
 elp3(104)=get_wtime()
 
 deallocate(idiis_sd)
