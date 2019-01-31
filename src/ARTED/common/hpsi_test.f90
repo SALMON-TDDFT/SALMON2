@@ -116,7 +116,8 @@ contains
     complex(8),intent(out),optional :: ttpsi0(0:PNLz-1,0:PNLy-1,0:PNLx-1)
     !
     integer :: i,ix,iy,iz,irank_overlap(6),icomm_overlap,icomm_pseudo
-    type(s_rgrid) :: rg
+    type(s_wf_info) :: info
+    type(s_rgrid)   :: rg
     type(s_stencil) :: stencil
     type(s_wavefunction) :: tpsi, htpsi, ttpsi
     type(s_scalar) :: V_local(1)
@@ -162,20 +163,21 @@ contains
       rg%idz(i) = mod(NLx+i,NLx) ! x <--> z
     end do
 
+    info%io_s = 1
+    info%io_e = 1
+    info%numo = 1
+    info%ik_s = 1
+    info%ik_e = 1
+    info%numk = 1
+    info%i1_s = 1
+    info%i1_e = 1
+    info%num1 = 1
+    info%if_divide_rspace = .false.
     allocate(tpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1) &
            ,htpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1))
     if(present(ttpsi0)) then
       allocate(ttpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1))
     end if
-    tpsi%io_s = 1
-    tpsi%io_e = 1
-    tpsi%numo = 1
-    tpsi%ik_s = 1
-    tpsi%ik_e = 1
-    tpsi%numk = 1
-    tpsi%i1_s = 1
-    tpsi%i1_e = 1
-    tpsi%num1 = 1
     tpsi%zwf(:,:,:,1,1,1,1) = tpsi0
 
     allocate(V_local(1)%f(0:NLz-1,0:NLy-1,0:NLx-1))
@@ -189,8 +191,7 @@ contains
     if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,1))
     ppg%zproj(:,:,1) = zproj(:,:,ik)
 
-    call hpsi(tpsi,htpsi,rg,V_local,1,stencil,ppg &
-                 ,1,irank_overlap,icomm_overlap,icomm_pseudo,ttpsi)
+    call hpsi(tpsi,htpsi,info,rg,V_local,1,stencil,ppg,ttpsi)
 
     htpsi0 = htpsi%zwf(:,:,:,1,1,1,1)
     if(present(ttpsi0)) ttpsi0 = ttpsi%zwf(:,:,:,1,1,1,1)

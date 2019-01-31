@@ -30,10 +30,15 @@ module structures
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
   end type s_rgrid
 
-  type s_wavefunction
+  type s_wf_info
+    logical :: if_divide_rspace
+    integer :: irank_overlap(6),icomm_overlap,icomm_pseudo
     integer :: i1_s,i1_e,num1 ! i1=i1_s,...,i1_e, num1=i1_e-i1_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e
     integer :: io_s,io_e,numo ! io=io_s,...,io_e
+  end type s_wf_info
+
+  type s_wavefunction
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! rwf(x,y,z,ispin,io,ik,i1)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! zwf(x,y,z,ispin,io,ik,i1)
   end type s_wavefunction

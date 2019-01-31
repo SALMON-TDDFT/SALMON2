@@ -40,8 +40,9 @@ subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
   real(8) :: htpsi0(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3))
   integer :: iob,nn,isub,ik
 
-  integer :: ix,iy,iz,is,i_all,Norb,i,iobmax,Nspin,ind,j,irank_overlap(6),icomm_pseudo,icomm_overlap
-  type(s_rgrid) :: rg
+  integer :: ix,iy,iz,is,i_all,Norb,i,iobmax,Nspin,ind,j
+  type(s_wf_info) :: info
+  type(s_rgrid)   :: rg
   type(s_stencil) :: stencil
   type(s_wavefunction) :: tpsi, htpsi
   type(s_scalar),allocatable :: V(:)
@@ -87,19 +88,29 @@ subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
     rg%idz(j) = j
   end do
 
+  info%io_s = 1
+  info%io_e = 1
+  info%numo = 1
+  info%ik_s = 1
+  info%ik_e = 1
+  info%numk = 1
+  info%i1_s = 1
+  info%i1_e = 1
+  info%num1 = 1
+  info%if_divide_rspace = nproc_Mxin_mul.ne.1
+  info%irank_overlap(1) = iup_array(1)
+  info%irank_overlap(2) = idw_array(1)
+  info%irank_overlap(3) = jup_array(1)
+  info%irank_overlap(4) = jdw_array(1)
+  info%irank_overlap(5) = kup_array(1)
+  info%irank_overlap(6) = kdw_array(1)
+  info%icomm_overlap = nproc_group_korbital
+  info%icomm_pseudo = nproc_group_korbital
+
   allocate(tpsi%rwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,1,1,1) &
          ,htpsi%rwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,1,1,1))
-  tpsi%io_s = 1
-  tpsi%io_e = 1
-  tpsi%numo = 1
-  tpsi%ik_s = 1
-  tpsi%ik_e = 1
-  tpsi%numk = 1
-  tpsi%i1_s = 1
-  tpsi%i1_e = 1
-  tpsi%num1 = 1
   call set_ispin(iob,is)
   do iz=rg%is(3),rg%ie(3)
   do iy=rg%is(3),rg%ie(3)
@@ -115,16 +126,7 @@ subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
     V(j)%f = Vlocal(:,:,:,j)
   end do
 
-  irank_overlap(1) = iup_array(1)
-  irank_overlap(2) = idw_array(1)
-  irank_overlap(3) = jup_array(1)
-  irank_overlap(4) = jdw_array(1)
-  irank_overlap(5) = kup_array(1)
-  irank_overlap(6) = kdw_array(1)
-  icomm_overlap = nproc_group_korbital
-
-  call hpsi(tpsi,htpsi,rg,V,Nspin,stencil,ppg &
-                 ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo)
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
 
   htpsi0 = htpsi%rwf(:,:,:,is,1,1,1)
 
@@ -148,10 +150,11 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
   complex(8) :: htpsi0(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3))
   integer,intent(in) :: iob,nn,isub,ik
 
-  integer :: ix,iy,iz,is,i_all,Norb,i,iobmax,Nspin,ind,j,irank_overlap(6),icomm_pseudo,icomm_overlap,iatom,ikoa,jj
+  integer :: ix,iy,iz,is,i_all,Norb,i,iobmax,Nspin,ind,j,iatom,ikoa,jj
   real(8) :: x,y,z
   complex(8),parameter :: zi=(0d0,1d0)
-  type(s_rgrid) :: rg
+  type(s_wf_info) :: info
+  type(s_rgrid)   :: rg
   type(s_stencil) :: stencil
   type(s_wavefunction) :: tpsi, htpsi
   type(s_scalar),allocatable :: V(:)
@@ -201,19 +204,29 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
     rg%idz(j) = j
   end do
 
+  info%io_s = 1
+  info%io_e = 1
+  info%numo = 1
+  info%ik_s = ik
+  info%ik_e = ik
+  info%numk = 1
+  info%i1_s = 1
+  info%i1_e = 1
+  info%num1 = 1
+  info%if_divide_rspace = nproc_Mxin_mul.ne.1
+  info%irank_overlap(1) = iup_array(1)
+  info%irank_overlap(2) = idw_array(1)
+  info%irank_overlap(3) = jup_array(1)
+  info%irank_overlap(4) = jdw_array(1)
+  info%irank_overlap(5) = kup_array(1)
+  info%irank_overlap(6) = kdw_array(1)
+  info%icomm_overlap = nproc_group_korbital
+  info%icomm_pseudo = nproc_group_korbital
+
   allocate(tpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,1,ik:ik,1) &
          ,htpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,1,ik:ik,1))
-  tpsi%io_s = 1
-  tpsi%io_e = 1
-  tpsi%numo = 1
-  tpsi%ik_s = ik
-  tpsi%ik_e = ik
-  tpsi%numk = 1
-  tpsi%i1_s = 1
-  tpsi%i1_e = 1
-  tpsi%num1 = 1
   call set_ispin(iob,is)
   do iz=rg%is(3),rg%ie(3)
   do iy=rg%is(3),rg%ie(3)
@@ -240,18 +253,9 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
       end do
     end do
   end if
-  call convert_pseudo_GCEED(ppg,icomm_pseudo,ik,ik,ekr)
+  call convert_pseudo_GCEED(ppg,ik,ik,ekr)
 
-  irank_overlap(1) = iup_array(1)
-  irank_overlap(2) = idw_array(1)
-  irank_overlap(3) = jup_array(1)
-  irank_overlap(4) = jdw_array(1)
-  irank_overlap(5) = kup_array(1)
-  irank_overlap(6) = kdw_array(1)
-  icomm_overlap = nproc_group_korbital
-
-  call hpsi(tpsi,htpsi,rg,V,Nspin,stencil,ppg &
-                 ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo)
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
 
   call set_ispin(iob,is)
   htpsi0 = htpsi%zwf(:,:,:,is,1,ik,1)
@@ -267,12 +271,10 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
 
 end subroutine hpsi_test2_C
 
-subroutine convert_pseudo_GCEED(ppg,icomm_pseudo,ik_s,ik_e,ekr)
+subroutine convert_pseudo_GCEED(ppg,ik_s,ik_e,ekr)
   use structures
   use scf_data, only: MI,Kion,Mlps,uVu,iwk_size,uV_all,Jxyz,uVu,Hvol,Mps,iperiodic ! GCEED
-  use salmon_parallel, only: nproc_group_korbital, nproc_group_h
   type(s_pp_grid) :: ppg
-  integer :: icomm_pseudo
   integer :: ik_s,ik_e
   complex(kind=8) :: ekr(maxMps,MI,ik_s:ik_e)
   !

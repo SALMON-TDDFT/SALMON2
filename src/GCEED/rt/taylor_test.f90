@@ -130,11 +130,12 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
                    1:iobnum,k_sta:k_end)
   real(8) :: V0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),numspin)
   !
-  integer :: is,i_all,Norb,i,iobmax,Nspin,ik,ind,j,irank_overlap(6),icomm_pseudo,icomm_overlap,iatom,ikoa,jj
+  integer :: is,i_all,Norb,i,iobmax,Nspin,ik,ind,j,iatom,ikoa,jj
   real(8) :: x,y,z
   complex(8),parameter :: zi=(0d0,1d0)
   complex(8) :: ekr(maxMps,MI,k_sta:k_end)
-  type(s_rgrid) :: rg
+  type(s_wf_info) :: info
+  type(s_rgrid)   :: rg
   type(s_stencil) :: stencil
   type(s_wavefunction) :: tpsi, htpsi
   type(s_scalar),allocatable :: V(:)
@@ -184,19 +185,29 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
     rg%idz(j) = j
   end do
 
+  info%io_s = 1
+  info%io_e = iobnum
+  info%numo = iobnum
+  info%ik_s = k_sta
+  info%ik_e = k_end
+  info%numk = k_num
+  info%i1_s = 1
+  info%i1_e = 1
+  info%num1 = 1
+  info%if_divide_rspace = nproc_Mxin_mul.ne.1
+  info%irank_overlap(1) = iup_array(1)
+  info%irank_overlap(2) = idw_array(1)
+  info%irank_overlap(3) = jup_array(1)
+  info%irank_overlap(4) = jdw_array(1)
+  info%irank_overlap(5) = kup_array(1)
+  info%irank_overlap(6) = kdw_array(1)
+  info%icomm_overlap = nproc_group_korbital
+  info%icomm_pseudo = nproc_group_korbital
+
   allocate(tpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,iobnum,k_sta:k_end,1) &
          ,htpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,iobnum,k_sta:k_end,1))
-  tpsi%io_s = 1
-  tpsi%io_e = iobnum
-  tpsi%numo = iobnum
-  tpsi%ik_s = k_sta
-  tpsi%ik_e = k_end
-  tpsi%numk = k_num
-  tpsi%i1_s = 1
-  tpsi%i1_e = 1
-  tpsi%num1 = 1
   do ik=k_sta,k_end
     do i=1,iobnum
       call calc_allob(i,i_all)
@@ -224,18 +235,9 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
       end do
     end do
   end if
-  call convert_pseudo_GCEED(ppg,icomm_pseudo,k_sta,k_end,ekr)
+  call convert_pseudo_GCEED(ppg,k_sta,k_end,ekr)
 
-  irank_overlap(1) = iup_array(1)
-  irank_overlap(2) = idw_array(1)
-  irank_overlap(3) = jup_array(1)
-  irank_overlap(4) = jdw_array(1)
-  irank_overlap(5) = kup_array(1)
-  irank_overlap(6) = kdw_array(1)
-  icomm_overlap = nproc_group_korbital
-
-  call hpsi(tpsi,htpsi,rg,V,Nspin,stencil,ppg &
-                 ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo)
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
 
   do ik=k_sta,k_end
     do i=1,iobnum
