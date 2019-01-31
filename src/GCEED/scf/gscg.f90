@@ -23,7 +23,6 @@ use salmon_communication, only: comm_summation, comm_bcast
 use misc_routines, only: get_wtime
 use scf_data
 use new_world_sub
-use hpsi2_sub
 !$ use omp_lib
 implicit none
 
@@ -43,6 +42,7 @@ real(8) , allocatable :: gk(:,:,:)
 real(8) :: elp2(2000)
 real(8):: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd)
 real(8):: htpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
+real(8):: rmatbox_m(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
 integer :: iob_myob,job_myob
 integer :: iob_allob
 integer :: icorr_iob,icorr_job
@@ -90,7 +90,7 @@ do iob=1,spsi%numo
   end do
   end do
   end do
-  call hpsi2(tpsi,htpsi,iob_allob,1,0,0)
+  call r_hpsi2_buf(tpsi,htpsi,iob_allob,1,0,0)
   
 !$OMP parallel do private(iz,iy,ix) collapse(2)
   do iz=mg_sta(3),mg_end(3)
@@ -164,19 +164,19 @@ elp2(2)=get_wtime()
           do iz=mg_sta(3),mg_end(3)
           do iy=mg_sta(2),mg_end(2)
           do ix=mg_sta(1),mg_end(1)
-            matbox_m(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,1,job_myob,1)
+            rmatbox_m(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,1,job_myob,1)
           end do
           end do
           end do
         end if
         call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-        call comm_bcast(matbox_m,nproc_group_grid,iroot)
+        call comm_bcast(rmatbox_m,nproc_group_grid,iroot)
         sum0=0.d0
   !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
         do iz=iwk3sta(3),iwk3end(3)
         do iy=iwk3sta(2),iwk3end(2)
         do ix=iwk3sta(1),iwk3end(1)
-          sum0=sum0+matbox_m(ix,iy,iz)*rgk_ob(ix,iy,iz,iob_myob)
+          sum0=sum0+rmatbox_m(ix,iy,iz)*rgk_ob(ix,iy,iz,iob_myob)
         end do
         end do
         end do
@@ -185,7 +185,7 @@ elp2(2)=get_wtime()
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
         do ix=mg_sta(1),mg_end(1)
-          rgk_ob(ix,iy,iz,iob_myob)=rgk_ob(ix,iy,iz,iob_myob)-sum1*matbox_m(ix,iy,iz)
+          rgk_ob(ix,iy,iz,iob_myob)=rgk_ob(ix,iy,iz,iob_myob)-sum1*rmatbox_m(ix,iy,iz)
         end do
         end do
         end do
@@ -234,7 +234,7 @@ elp2(2)=get_wtime()
     end do
     end do
     end do
-    call hpsi2(tpsi,htpsi,iob_allob,1,0,0)
+    call r_hpsi2_buf(tpsi,htpsi,iob_allob,1,0,0)
     
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg_sta(3),mg_end(3)
