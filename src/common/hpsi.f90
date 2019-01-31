@@ -19,43 +19,41 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,rg_wf &
-                 ,V_local,Nspin &
-                 ,stencil &
-                 ,ppg,ttpsi &
-                 ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo)
+SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
   use structures
-  use update_overlap_sub, only: update_overlap_R
-  use stencil_sub, only: stencil_R
+  use update_overlap_sub, only: update_overlap_R, update_overlap_C
+  use stencil_sub, only: stencil_R, stencil_C
   implicit none
-  integer,intent(in)  :: Nspin &
-                        ,nproc_Mxin_mul,irank_overlap(6),icomm_overlap,icomm_pseudo
+  integer,intent(in)  :: Nspin
+  type(s_wf_info),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: rg_wf
   type(s_scalar) ,intent(in) :: V_local(Nspin)
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction),intent(in)  :: tpsi
-  type(s_wavefunction),intent(out) :: htpsi
-  type(s_wavefunction),optional,intent(out) :: ttpsi
+  type(s_wavefunction),intent(in) :: tpsi
+  type(s_wavefunction)            :: htpsi
+  type(s_wavefunction),optional   :: ttpsi
   !
   integer :: ispin,io,ik,i1,i1_s,i1_e,ik_s,ik_e,io_s,io_e,norb
   real(8) :: k_nabt(4,3),k_lap0
   logical :: if_kAc
 
-  i1_s = tpsi%i1_s
-  i1_e = tpsi%i1_e
-  ik_s = tpsi%ik_s
-  ik_e = tpsi%ik_e
-  io_s = tpsi%io_s
-  io_e = tpsi%io_e
-  norb = Nspin* tpsi%numo * tpsi%numk * tpsi%num1
+  i1_s = info%i1_s
+  i1_e = info%i1_e
+  ik_s = info%ik_s
+  ik_e = info%ik_e
+  io_s = info%io_s
+  io_e = info%io_e
+  norb = Nspin* info%numo * info%numk * info%num1
 
-  if(allocated(tpsi%rwf)) then ! real or complex
+  if_kAc = allocated(stencil%kAc)
+
+  if(allocated(tpsi%rwf)) then
 
   ! overlap region communication
-    if(nproc_Mxin_mul.ne.1) then
+    if(info%if_divide_rspace) then
       call update_overlap_R(tpsi%rwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !?????????
-                           ,rg_wf%is,rg_wf%ie,irank_overlap,icomm_overlap)
+                           ,rg_wf%is,rg_wf%ie,info%irank_overlap,info%icomm_overlap)
     end if
   ! stencil
     do i1=i1_s,i1_e
@@ -70,23 +68,18 @@ SUBROUTINE hpsi(tpsi,htpsi,rg_wf &
     end do
     end do
   ! pseudopotential
-    call pseudo_R(tpsi,htpsi,Nspin,ppg &
-                 ,nproc_Mxin_mul,icomm_pseudo)
+    call pseudo_R(tpsi,htpsi,info,Nspin,ppg)
 
   else
 
-  if_kAc = allocated(stencil%kAc) !?????
-
 ! overlap region communication
-    if(nproc_Mxin_mul.ne.1) then
+    if(info%if_divide_rspace) then
       call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !????????
-                           ,rg_wf%is,rg_wf%ie,irank_overlap,icomm_overlap)
+                           ,rg_wf%is,rg_wf%ie,info%irank_overlap,info%icomm_overlap)
     end if
   ! stencil
     do i1=i1_s,i1_e
     do ik=ik_s,ik_e
-    do io=io_s,io_e
-    do ispin=1,Nspin
       if(if_kAc) then
         k_lap0 = stencil%lap0 + 0.5d0* sum(stencil%kAc(ik,:)**2)
         k_nabt(:,1) = stencil%kAc(ik,1) * stencil%nabt(:,1)
@@ -96,12 +89,15 @@ SUBROUTINE hpsi(tpsi,htpsi,rg_wf &
         k_lap0 = stencil%lap0
         k_nabt = 0d0
       end if
-      ! spin collinear
-      call stencil_C(tpsi%zwf(:,:,:,ispin,io,ik,i1),htpsi%zwf(:,:,:,ispin,io,ik,i1),rg_wf%is_array,rg_wf%ie_array &
-                    ,V_local(ispin)%f,rg_wf%is,rg_wf%ie &
-                    ,rg_wf%idx,rg_wf%idy,rg_wf%idz,k_lap0,stencil%lapt,k_nabt)
-    end do
-    end do
+      do io=io_s,io_e
+      do ispin=1,Nspin
+
+        ! spin collinear
+        call stencil_C(tpsi%zwf(:,:,:,ispin,io,ik,i1),htpsi%zwf(:,:,:,ispin,io,ik,i1),rg_wf%is_array,rg_wf%ie_array &
+                      ,V_local(ispin)%f,rg_wf%is,rg_wf%ie &
+                      ,rg_wf%idx,rg_wf%idy,rg_wf%idz,k_lap0,stencil%lapt,k_nabt)
+      end do
+      end do
     end do
     end do
   ! subtraction
@@ -118,8 +114,7 @@ SUBROUTINE hpsi(tpsi,htpsi,rg_wf &
       end do
     end if
   ! pseudopotential
-    call pseudo_C(tpsi,htpsi,nspin,ppg &
-                  ,nproc_Mxin_mul,icomm_pseudo)
+    call pseudo_C(tpsi,htpsi,info,nspin,ppg)
 
   end if
 
@@ -128,32 +123,32 @@ end subroutine hpsi
 
 !===================================================================================================================================
 
-subroutine pseudo_R(tpsi,htpsi,nspin,ppg &
-                   ,nproc_Mxin_mul,icomm_pseudo)
+subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
   use structures
   use salmon_communication, only: comm_summation
   implicit none
-  integer,intent(in) :: nspin,nproc_Mxin_mul,icomm_pseudo
+  integer,intent(in) :: nspin
+  type(s_wf_info),intent(in) :: info
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction)   ,intent(in) :: tpsi
-  type(s_wavefunction),intent(inout) :: htpsi
+  type(s_wavefunction),intent(in) :: tpsi
+  type(s_wavefunction) :: htpsi
   !
   integer :: ispin,io,ik,i1,i1_s,i1_e,ik_s,ik_e,io_s,io_e,iorb,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma
   real(8) :: uVpsi,wrk
   real(8),allocatable :: uVpsibox(:,:),uVpsibox2(:,:)
 
-  i1_s = tpsi%i1_s
-  i1_e = tpsi%i1_e
-  ik_s = tpsi%ik_s
-  ik_e = tpsi%ik_e
-  io_s = tpsi%io_s
-  io_e = tpsi%io_e
-  norb = Nspin* tpsi%numo * tpsi%numk * tpsi%num1
+  i1_s = info%i1_s
+  i1_e = info%i1_e
+  ik_s = info%ik_s
+  ik_e = info%ik_e
+  io_s = info%io_s
+  io_e = info%io_e
+  norb = Nspin* info%numo * info%numk * info%num1
 
   Nlma = ppg%Nlma
 
-  if(nproc_Mxin_mul.ne.1) then
+  if(info%if_divide_rspace) then
 
     allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
 
@@ -179,7 +174,7 @@ subroutine pseudo_R(tpsi,htpsi,nspin,ppg &
     end do
     end do
     end do
-    call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,icomm_pseudo)
+    call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_pseudo)
     iorb = 0
     do i1=i1_s,i1_e
     do ik=ik_s,ik_e
@@ -239,15 +234,15 @@ end subroutine pseudo_R
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
-subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
-                   ,nproc_Mxin_mul,icomm_pseudo)
+subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   use structures
   use salmon_communication, only: comm_summation
   implicit none
-  integer,intent(in) :: nspin,nproc_Mxin_mul,icomm_pseudo
+  integer,intent(in) :: nspin
+  type(s_wf_info),intent(in) :: info
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction)   ,intent(in) :: tpsi
-  type(s_wavefunction),intent(inout) :: htpsi
+  type(s_wavefunction),intent(in) :: tpsi
+  type(s_wavefunction) :: htpsi
   !
   integer :: ispin,io,ik,i1,i1_s,i1_e,ik_s,ik_e,io_s,io_e,iorb,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma
@@ -255,13 +250,13 @@ subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox(:,:),uVpsibox2(:,:)
 
-  i1_s = tpsi%i1_s
-  i1_e = tpsi%i1_e
-  ik_s = tpsi%ik_s
-  ik_e = tpsi%ik_e
-  io_s = tpsi%io_s
-  io_e = tpsi%io_e
-  norb = Nspin* tpsi%numo * tpsi%numk * tpsi%num1
+  i1_s = info%i1_s
+  i1_e = info%i1_e
+  ik_s = info%ik_s
+  ik_e = info%ik_e
+  io_s = info%io_s
+  io_e = info%io_e
+  norb = Nspin* info%numo * info%numk * info%num1
 
   Nlma = ppg%Nlma
   if_zproj = allocated(ppg%zproj)
@@ -271,7 +266,7 @@ subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
 !        spseudo(i) = tpsi(idx_proj(i))
 !      end do
 
-  if(nproc_Mxin_mul.ne.1) then
+  if(info%if_divide_rspace) then
 
     allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
     if(if_zproj) then
@@ -298,7 +293,7 @@ subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
       end do
       end do
       end do
-      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,icomm_pseudo)
+      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_pseudo)
       iorb = 0
       do i1=i1_s,i1_e
       do ik=ik_s,ik_e
@@ -344,7 +339,7 @@ subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
       end do
       end do
       end do
-      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,icomm_pseudo)
+      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_pseudo)
       iorb = 0
       do i1=i1_s,i1_e
       do ik=ik_s,ik_e
@@ -373,12 +368,10 @@ subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
 
     if(if_zproj) then
 
-      iorb = 0
       do i1=i1_s,i1_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,Nspin
-        iorb = iorb + 1
         do ilma=1,Nlma
           ia = ppg%ia_tbl(ilma)
           uVpsi=0.d0
@@ -404,12 +397,10 @@ subroutine pseudo_C(tpsi,htpsi,nspin,ppg &
 
     else
 
-      iorb = 0
       do i1=i1_s,i1_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,Nspin
-        iorb = iorb + 1
         do ilma=1,Nlma
           ia = ppg%ia_tbl(ilma)
           uVpsi=0.d0

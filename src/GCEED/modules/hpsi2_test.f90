@@ -30,227 +30,270 @@ END INTERFACE
 CONTAINS
 
 !-----------------------------------------------------------------------------------------------------------------------------------
-subroutine hpsi_test2_R(tpsi0,htpsi0,iob,nn,isub)
-  use salmon_parallel, only: nproc_group_orbital
+subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
+  use structures
+  use salmon_parallel, only: nproc_group_korbital
   use init_sendrecv_sub
   use hpsi_sub
   implicit none
   real(8) :: tpsi0(iwksta(1):iwkend(1),iwksta(2):iwkend(2),iwksta(3):iwkend(3))
   real(8) :: htpsi0(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3))
-  integer :: iob,nn,isub
+  integer :: iob,nn,isub,ik
 
-  integer :: ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end &
-            ,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end &
-            ,is,Norb,Nspin,is_table(1),ind,j,irank_overlap(6),icomm_overlap,icomm_pseudo &
-            ,NI,Nps,Nlma
-  real(8) :: lap0,lapt(4,3)
-  integer,allocatable :: idx(:),idy(:),idz(:)
-  real(8),allocatable :: htpsi(:,:,:,:)
+  integer :: ix,iy,iz,is,i_all,Norb,i,iobmax,Nspin,ind,j
+  type(s_wf_info) :: info
+  type(s_rgrid)   :: rg
+  type(s_stencil) :: stencil
+  type(s_wavefunction) :: tpsi, htpsi
+  type(s_scalar),allocatable :: V(:)
 
-  integer,allocatable :: ia_table(:),Mps_wrk(:),Jxyz_wrk(:,:,:)
-  real(8),allocatable :: uV_wrk(:,:),uVu_wrk(:)
-
-  irank_overlap(1) = iup_array(1)
-  irank_overlap(2) = idw_array(1)
-  irank_overlap(3) = jup_array(1)
-  irank_overlap(4) = jdw_array(1)
-  irank_overlap(5) = kup_array(1)
-  irank_overlap(6) = kdw_array(1)
-
-  lap0 = -0.5d0*cNmat(0,4)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+  stencil%lap0 = 0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   do j=1,3
     do ind=1,4
-      lapt(ind,j) = cNmat(ind,4)/Hgs(j)**2
+      stencil%lapt(ind,j) = cNmat(ind,4)/Hgs(j)**2
+      stencil%nabt(ind,j) = bNmat(ind,4)/Hgs(j)
     end do
   end do
 
-  Norb = 1
   Nspin = numspin
-
   call set_ispin(iob,is)
-  is_table(1) = is
 
-  ipx_sta = iwksta(1)
-  ipx_end = iwkend(1)
-  ipy_sta = iwksta(2)
-  ipy_end = iwkend(2)
-  ipz_sta = iwksta(3)
-  ipz_end = iwkend(3)
+  rg%is_array(1) = iwk3sta(1)
+  rg%ie_array(1) = iwk3end(1)
+  rg%is_array(2) = iwk3sta(2)
+  rg%ie_array(2) = iwk3end(2)
+  rg%is_array(3) = iwk3sta(3)
+  rg%ie_array(3) = iwk3end(3)
 
-  ix_sta = mg_sta(1)
-  ix_end = mg_end(1)
-  iy_sta = mg_sta(2)
-  iy_end = mg_end(2)
-  iz_sta = mg_sta(3)
-  iz_end = mg_end(3)
+  rg%is(1) = mg_sta(1)
+  rg%ie(1) = mg_end(1)
+  rg%is(2) = mg_sta(2)
+  rg%ie(2) = mg_end(2)
+  rg%is(3) = mg_sta(3)
+  rg%ie(3) = mg_end(3)
 
-  allocate(idx(ix_sta-4:ix_end+4),idy(iy_sta-4:iy_end+4),idz(iz_sta-4:iz_end+4))
-  do j=ix_sta-4,ix_end+4
-    idx(j) = j
+  rg%is_overlap = rg%is - 4
+  rg%ie_overlap = rg%ie + 4
+
+  allocate(rg%idx(rg%is_overlap(1):rg%ie_overlap(1)) &
+          ,rg%idy(rg%is_overlap(2):rg%ie_overlap(2)) &
+          ,rg%idz(rg%is_overlap(3):rg%ie_overlap(3)))
+  do j=rg%is_overlap(1),rg%ie_overlap(1)
+    rg%idx(j) = j
   end do
-  do j=iy_sta-4,iy_end+4
-    idy(j) = j
+  do j=rg%is_overlap(2),rg%ie_overlap(2)
+    rg%idy(j) = j
   end do
-  do j=iz_sta-4,iz_end+4
-    idz(j) = j
+  do j=rg%is_overlap(3),rg%ie_overlap(3)
+    rg%idz(j) = j
   end do
 
-  icomm_overlap = nproc_group_orbital
-  call convert_pseudo_GCEED(NI,Nps,Nlma,ia_table,Mps_wrk,uV_wrk,uVu_wrk,Jxyz_wrk,icomm_pseudo)
+  info%io_s = 1
+  info%io_e = 1
+  info%numo = 1
+  info%ik_s = 1
+  info%ik_e = 1
+  info%numk = 1
+  info%i1_s = 1
+  info%i1_e = 1
+  info%num1 = 1
+  info%if_divide_rspace = nproc_Mxin_mul.ne.1
+  info%irank_overlap(1) = iup_array(1)
+  info%irank_overlap(2) = idw_array(1)
+  info%irank_overlap(3) = jup_array(1)
+  info%irank_overlap(4) = jdw_array(1)
+  info%irank_overlap(5) = kup_array(1)
+  info%irank_overlap(6) = kdw_array(1)
+  info%icomm_overlap = nproc_group_korbital
+  info%icomm_pseudo = nproc_group_korbital
 
-  allocate(htpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb))
-  htpsi = 0d0
+  allocate(tpsi%rwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
+          ,Nspin,1,1,1) &
+         ,htpsi%rwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
+          ,Nspin,1,1,1))
+  call set_ispin(iob,is)
+  do iz=rg%is(3),rg%ie(3)
+  do iy=rg%is(3),rg%ie(3)
+  do ix=rg%is(3),rg%ie(3)
+    tpsi%zwf(ix,iy,iz,is,1,1,1) = tpsi0(ix,iy,iz)
+  end do
+  end do
+  end do
 
-  call hpsi_R(tpsi0,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                   ,Vlocal,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,Nspin &
-                   ,idx,idy,idz,lap0,lapt,is_table &
-                   ,NI,Nps,Nlma,ia_table,Mps_wrk,Jxyz_wrk,uV_wrk,uVu_wrk &
-                   ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo)
+  allocate(V(Nspin))
+  do j=1,Nspin
+    allocate(V(j)%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+    V(j)%f = Vlocal(:,:,:,j)
+  end do
 
-  htpsi0(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3)) &
-    = htpsi(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3),1)
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
 
-  deallocate(idx,idy,idz,htpsi,uV_wrk,Jxyz_wrk,Mps_wrk,ia_table,uVu_wrk)
+  htpsi0 = htpsi%rwf(:,:,:,is,1,1,1)
+
+  call deallocate_rgrid(rg)
+  call deallocate_stencil(stencil)
+  call deallocate_wavefunction(tpsi)
+  call deallocate_wavefunction(htpsi)
+  do j=1,Nspin
+    call deallocate_scalar(V(j))
+  end do
+  deallocate(V)
 end subroutine hpsi_test2_R
 
-subroutine hpsi_test2_C(tpsi0,htpsi0,iob,nn,isub)
-  use salmon_parallel, only: nproc_group_orbital
+subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
+  use structures
+  use salmon_parallel, only: nproc_group_korbital
   use init_sendrecv_sub
   use hpsi_sub
   implicit none
   complex(8) :: tpsi0(iwksta(1):iwkend(1),iwksta(2):iwkend(2),iwksta(3):iwkend(3))
   complex(8) :: htpsi0(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3))
-  integer :: iob,nn,isub
+  integer,intent(in) :: iob,nn,isub,ik
 
-  integer :: ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end &
-            ,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end &
-            ,is,Norb,Nspin,Nk,is_table(1),ind,j,irank_overlap(6),icomm_overlap,icomm_pseudo &
-            ,NI,Nps,Nlma
-  real(8) :: lap0,lapt(4,3)
-  integer,allocatable :: idx(:),idy(:),idz(:)
-  complex(8),allocatable :: htpsi(:,:,:,:)
+  integer :: ix,iy,iz,is,i_all,Norb,i,iobmax,Nspin,ind,j,iatom,ikoa,jj
+  real(8) :: x,y,z
+  complex(8),parameter :: zi=(0d0,1d0)
+  type(s_wf_info) :: info
+  type(s_rgrid)   :: rg
+  type(s_stencil) :: stencil
+  type(s_wavefunction) :: tpsi, htpsi
+  type(s_scalar),allocatable :: V(:)
 
-  integer,allocatable :: ia_table(:),Mps_wrk(:),Jxyz_wrk(:,:,:)
-  real(8),allocatable :: uV_wrk(:,:),uVu_wrk(:)
+  complex(8) :: ekr(maxMps,MI)
 
-  irank_overlap(1) = iup_array(1)
-  irank_overlap(2) = idw_array(1)
-  irank_overlap(3) = jup_array(1)
-  irank_overlap(4) = jdw_array(1)
-  irank_overlap(5) = kup_array(1)
-  irank_overlap(6) = kdw_array(1)
-
-  lap0 = -0.5d0*cNmat(0,4)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+  allocate(stencil%kAc(ik:ik,3))
+  stencil%lap0 = 0.5d0*ksquare(ik) -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   do j=1,3
     do ind=1,4
-      lapt(ind,j) = cNmat(ind,4)/Hgs(j)**2
+      stencil%lapt(ind,j) = cNmat(ind,4)/Hgs(j)**2
+      stencil%nabt(ind,j) = bNmat(ind,4)/Hgs(j)
     end do
+    stencil%kAc(ik,j) = k_rd(j,ik)
   end do
 
-  Norb = 1
   Nspin = numspin
-  Nk = 1
+  call set_ispin(iob,is)
+
+  rg%is_array(1) = iwk3sta(1)
+  rg%ie_array(1) = iwk3end(1)
+  rg%is_array(2) = iwk3sta(2)
+  rg%ie_array(2) = iwk3end(2)
+  rg%is_array(3) = iwk3sta(3)
+  rg%ie_array(3) = iwk3end(3)
+
+  rg%is(1) = mg_sta(1)
+  rg%ie(1) = mg_end(1)
+  rg%is(2) = mg_sta(2)
+  rg%ie(2) = mg_end(2)
+  rg%is(3) = mg_sta(3)
+  rg%ie(3) = mg_end(3)
+
+  rg%is_overlap = rg%is - 4
+  rg%ie_overlap = rg%ie + 4
+
+  allocate(rg%idx(rg%is_overlap(1):rg%ie_overlap(1)) &
+          ,rg%idy(rg%is_overlap(2):rg%ie_overlap(2)) &
+          ,rg%idz(rg%is_overlap(3):rg%ie_overlap(3)))
+  do j=rg%is_overlap(1),rg%ie_overlap(1)
+    rg%idx(j) = j
+  end do
+  do j=rg%is_overlap(2),rg%ie_overlap(2)
+    rg%idy(j) = j
+  end do
+  do j=rg%is_overlap(3),rg%ie_overlap(3)
+    rg%idz(j) = j
+  end do
+
+  info%io_s = 1
+  info%io_e = 1
+  info%numo = 1
+  info%ik_s = ik
+  info%ik_e = ik
+  info%numk = 1
+  info%i1_s = 1
+  info%i1_e = 1
+  info%num1 = 1
+  info%if_divide_rspace = nproc_Mxin_mul.ne.1
+  info%irank_overlap(1) = iup_array(1)
+  info%irank_overlap(2) = idw_array(1)
+  info%irank_overlap(3) = jup_array(1)
+  info%irank_overlap(4) = jdw_array(1)
+  info%irank_overlap(5) = kup_array(1)
+  info%irank_overlap(6) = kdw_array(1)
+  info%icomm_overlap = nproc_group_korbital
+  info%icomm_pseudo = nproc_group_korbital
+
+  allocate(tpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
+          ,Nspin,1,ik:ik,1) &
+         ,htpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
+          ,Nspin,1,ik:ik,1))
+  call set_ispin(iob,is)
+  do iz=rg%is(3),rg%ie(3)
+  do iy=rg%is(3),rg%ie(3)
+  do ix=rg%is(3),rg%ie(3)
+    tpsi%zwf(ix,iy,iz,is,1,ik,1) = tpsi0(ix,iy,iz)
+  end do
+  end do
+  end do
+
+  allocate(V(Nspin))
+  do j=1,Nspin
+    allocate(V(j)%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+    V(j)%f = Vlocal(:,:,:,j)
+  end do
+
+  if(iperiodic==3)then
+    do iatom=1,MI
+      ikoa=Kion(iatom)
+      do jj=1,Mps(iatom)
+        x=(dble(Jxyz(1,jj,iatom)-1)-dble(Jxxyyzz(1,jj,iatom)*lg_num(1)))*Hgs(1)
+        y=(dble(Jxyz(2,jj,iatom)-1)-dble(Jxxyyzz(2,jj,iatom)*lg_num(2)))*Hgs(2)
+        z=(dble(Jxyz(3,jj,iatom)-1)-dble(Jxxyyzz(3,jj,iatom)*lg_num(3)))*Hgs(3)
+        ekr(jj,iatom)=exp(zi*(k_rd(1,ik)*x+k_rd(2,ik)*y+k_rd(3,ik)*z))
+      end do
+    end do
+  end if
+  call convert_pseudo_GCEED(ppg,ik,ik,ekr)
+
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
 
   call set_ispin(iob,is)
-  is_table(1) = is
+  htpsi0 = htpsi%zwf(:,:,:,is,1,ik,1)
 
-  ipx_sta = iwksta(1)
-  ipx_end = iwkend(1)
-  ipy_sta = iwksta(2)
-  ipy_end = iwkend(2)
-  ipz_sta = iwksta(3)
-  ipz_end = iwkend(3)
-
-  ix_sta = mg_sta(1)
-  ix_end = mg_end(1)
-  iy_sta = mg_sta(2)
-  iy_end = mg_end(2)
-  iz_sta = mg_sta(3)
-  iz_end = mg_end(3)
-
-  allocate(idx(ix_sta-4:ix_end+4),idy(iy_sta-4:iy_end+4),idz(iz_sta-4:iz_end+4))
-  do j=ix_sta-4,ix_end+4
-    idx(j) = j
+  call deallocate_rgrid(rg)
+  call deallocate_stencil(stencil)
+  call deallocate_wavefunction(tpsi)
+  call deallocate_wavefunction(htpsi)
+  do j=1,Nspin
+    call deallocate_scalar(V(j))
   end do
-  do j=iy_sta-4,iy_end+4
-    idy(j) = j
-  end do
-  do j=iz_sta-4,iz_end+4
-    idz(j) = j
-  end do
+  deallocate(V)
 
-  icomm_overlap = nproc_group_orbital
-  call convert_pseudo_GCEED(NI,Nps,Nlma,ia_table,Mps_wrk,uV_wrk,uVu_wrk,Jxyz_wrk,icomm_pseudo)
-
-  allocate(htpsi(ipx_sta:ipx_end,ipy_sta:ipy_end,ipz_sta:ipz_end,1:Norb))
-  htpsi = 0d0
-
-  call hpsi_C(tpsi0,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,Norb &
-                   ,Vlocal,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,Nspin &
-                   ,idx,idy,idz,lap0,lapt,is_table,Nk &
-                   ,NI,Nps,Nlma,ia_table,Mps_wrk,Jxyz_wrk,uV_wrk,uVu_wrk &
-                   ,nproc_Mxin_mul,irank_overlap,icomm_overlap,icomm_pseudo)
-
-  htpsi0(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3)) &
-    = htpsi(iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3),1)
-
-  deallocate(idx,idy,idz,htpsi,uV_wrk,uVu_wrk,Jxyz_wrk,Mps_wrk,ia_table)
 end subroutine hpsi_test2_C
 
-subroutine convert_pseudo_GCEED(NI,Nps,Nlma,ia_table,Mps_new,uV_new,uVu_new,Jxyz_new,icomm_pseudo)
-  use scf_data, only: MI,Kion,Mlps,uVu,iwk_size,uV_all,Jxyz,uVu,Hvol,Mps ! GCEED
-  use salmon_parallel, only: nproc_group_orbital, nproc_group_h
-  integer :: NI,Nps,Nlma,icomm_pseudo
-  integer,allocatable :: ia_table(:),Mps_new(:),Jxyz_new(:,:,:)
-  real(8),allocatable :: uV_new(:,:),uVu_new(:)
+subroutine convert_pseudo_GCEED(ppg,ik_s,ik_e,ekr)
+  use structures
+  use scf_data, only: MI,Kion,Mlps,uVu,iwk_size,uV_all,Jxyz,uVu,Hvol,Mps,iperiodic ! GCEED
+  type(s_pp_grid) :: ppg
+  integer :: ik_s,ik_e
+  complex(kind=8) :: ekr(maxMps,MI,ik_s:ik_e)
   !
-  integer :: jj,iatom,ik,lm,ilma,jm
+  integer :: jj,iatom,ik,lm,ilma,jm,NI,Nlma,nps
 
-  NI = MI
+  nps = ppg%nps
+  nlma = ppg%nlma
 
-  allocate(Mps_new(NI))
-
-  Mps_new = Mps
-  icomm_pseudo = nproc_group_orbital
-
-  Nps = maxval(Mps_new)
-
-  allocate(Jxyz_new(3,Nps,NI))
-
-  do iatom=1,MI
-    do jj=1,Mps(iatom)
-      Jxyz_new(:,jj,iatom) = Jxyz(:,jj,iatom)
-    end do
-  end do
-
-  ilma = 0
-  do iatom=1,MI
-    ik=Kion(iatom)
-    loop_lm : do lm=1,(Mlps(ik)+1)**2
-      if ( abs(uVu(lm,iatom))<1.d-5 ) cycle loop_lm
-      ilma = ilma + 1
-    end do loop_lm
-  end do
-  Nlma = ilma
-
-  allocate(ia_table(Nlma),uV_new(Nps,Nlma),uVu_new(Nlma))
-  uV_new = 0d0
-
-  ilma = 0
-  do iatom=1,MI
-    ik=Kion(iatom)
-    loop_lm2 : do lm=1,(Mlps(ik)+1)**2
-      if ( abs(uVu(lm,iatom))<1.d-5 ) cycle loop_lm2
-      ilma = ilma + 1
-
-      ia_table(ilma) = iatom
-      do jj=1,Mps_new(iatom)
-        uV_new(jj,ilma) = uV(jj,lm,iatom)
+  if(iperiodic==3)then
+    if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(Nps,Nlma,ik_s:ik_e))
+    do ik=ik_s,ik_e
+      do ilma=1,Nlma
+        iatom = ppg%ia_tbl(ilma)
+        do jj=1,ppg%Mps(iatom)
+          ppg%zproj(jj,ilma,ik) = conjg(ekr(jj,iatom,ik)) * ppg%uv(jj,ilma)
+        end do
       end do
-      uVu_new(ilma) = Hvol/uVu(lm,iatom)
-
-    end do loop_lm2
-  end do
+    end do
+  end if
 
   return
 end subroutine convert_pseudo_GCEED

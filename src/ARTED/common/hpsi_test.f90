@@ -98,106 +98,112 @@ contains
   end subroutine
 
 !-----------------------------------------------------------------------------------------------------------------------------------
-  subroutine hpsi_test3(ik,tpsi,htpsi,ttpsi)
-    use hpsi_sub, only: hpsi_C
+  subroutine hpsi_test3(ik,tpsi0,htpsi0,ttpsi0)
+    use structures
+    use hpsi_sub, only: hpsi
     use timer
-    use Global_Variables, only: NLx,NLy,NLz,kAc,lapx,lapy,lapz,nabx,naby,nabz,Vloc,Mps,uV,iuV,Hxyz,ekr_omp,Nlma,a_tbl,Nps,NI,Jxyz
-    use opt_variables, only: lapt,PNLx,PNLy,PNLz,PNL
+    use Global_Variables, only: NLx,NLy,NLz,NL,kAc,lapx,lapy,lapz,nabx,naby,nabz,Vloc,ppg,zproj
+    use opt_variables, only: PNLx,PNLy,PNLz
+!    use Global_Variables, only: NLx,NLy,NLz,kAc,lapx,lapy,lapz,nabx,naby,nabz,Vloc,Mps,uV,iuV,Hxyz,ekr_omp,Nlma,a_tbl,Nps,NI,Jxyz
+!    use opt_variables, only: lapt,PNLx,PNLy,PNLz,PNL
 #ifdef ARTED_USE_NVTX
     use nvtx
 #endif
     implicit none
     integer,intent(in)              :: ik
-    complex(8),intent(in)           ::  tpsi(0:PNLz-1,0:PNLy-1,0:PNLx-1)
-    complex(8),intent(out)          :: htpsi(0:PNLz-1,0:PNLy-1,0:PNLx-1)
-    complex(8),intent(out),optional :: ttpsi(0:PNLz-1,0:PNLy-1,0:PNLx-1)
+    complex(8),intent(in)           ::  tpsi0(0:PNLz-1,0:PNLy-1,0:PNLx-1)
+    complex(8),intent(out)          :: htpsi0(0:PNLz-1,0:PNLy-1,0:PNLx-1)
+    complex(8),intent(out),optional :: ttpsi0(0:PNLz-1,0:PNLy-1,0:PNLx-1)
     !
-    integer :: ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end &
-              ,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end &
-              ,is_table(1),ik_table(1),i,irank_overlap(6),icomm_overlap,icomm_pseudo
-    real(8) :: lap0,lapt_wrk(4,3),nabt_wrk(4,3),kAc_wrk(1,3)
-    integer,allocatable :: idx(:),idy(:),idz(:),Jxyz_wrk(:,:,:)
-    real(8),allocatable :: uVu_wrk(:)
+    integer :: i,ix,iy,iz,irank_overlap(6),icomm_overlap,icomm_pseudo
+    type(s_wf_info) :: info
+    type(s_rgrid)   :: rg
+    type(s_stencil) :: stencil
+    type(s_wavefunction) :: tpsi, htpsi, ttpsi
+    type(s_scalar) :: V_local(1)
 
-    lap0 = -(lapx(0)+lapy(0)+lapz(0))*0.5d0
+    stencil%lap0 = -(lapx(0)+lapy(0)+lapz(0))*0.5d0
 
-    lapt_wrk(1:4,1) = lapz(1:4) ! x <--> z
-    lapt_wrk(1:4,2) = lapy(1:4)
-    lapt_wrk(1:4,3) = lapx(1:4) ! x <--> z
+    stencil%lapt(1:4,1) = lapz(1:4) ! x <--> z
+    stencil%lapt(1:4,2) = lapy(1:4)
+    stencil%lapt(1:4,3) = lapx(1:4) ! x <--> z
 
-    nabt_wrk(1:4,1) = nabz(1:4) ! x <--> z
-    nabt_wrk(1:4,2) = naby(1:4)
-    nabt_wrk(1:4,3) = nabx(1:4) ! x <--> z
+    stencil%nabt(1:4,1) = nabz(1:4) ! x <--> z
+    stencil%nabt(1:4,2) = naby(1:4)
+    stencil%nabt(1:4,3) = nabx(1:4) ! x <--> z
 
-    kAc_wrk(1,1) = kAc(ik,3) ! x <--> z
-    kAc_wrk(1,2) = kAc(ik,2)
-    kAc_wrk(1,3) = kAc(ik,1) ! x <--> z
+    allocate(stencil%kAc(1,3))
+    stencil%kAc(1,1) = kAc(ik,3) ! x <--> z
+    stencil%kAc(1,2) = kAc(ik,2)
+    stencil%kAc(1,3) = kAc(ik,1) ! x <--> z
 
-    ix_sta = 0
-    ix_end = NLz-1 ! x <--> z
-    iy_sta = 0
-    iy_end = NLy-1
-    iz_sta = 0
-    iz_end = NLx-1 ! x <--> z
+    rg%is = 0
+    rg%ie(1) = NLz-1 ! x <--> z
+    rg%ie(2) = NLy-1
+    rg%ie(3) = NLx-1 ! x <--> z
 
-    ipx_sta = 0
-    ipx_end = PNLz-1 ! x <--> z
-    ipy_sta = 0
-    ipy_end = PNLy-1
-    ipz_sta = 0
-    ipz_end = PNLx-1 ! x <--> z
+    rg%is_overlap = rg%is - 4
+    rg%ie_overlap = rg%ie + 4
 
-    is_table(1) = 1
-    ik_table(1) = 1
+    rg%is_array = 0
+    rg%ie_array(1) = PNLz-1 ! x <--> z
+    rg%ie_array(2) = PNLy-1
+    rg%ie_array(3) = PNLx-1 ! x <--> z
 
-    allocate(idx(ix_sta-4:ix_end+4),idy(iy_sta-4:iy_end+4),idz(iz_sta-4:iz_end+4))
-    do i=ix_sta-4,ix_end+4
-      idx(i) = mod(NLz+i,NLz) ! x <--> z
+    allocate(rg%idx(rg%is_overlap(1):rg%ie_overlap(1)) &
+            ,rg%idy(rg%is_overlap(2):rg%ie_overlap(2)) &
+            ,rg%idz(rg%is_overlap(3):rg%ie_overlap(3)))
+    do i=rg%is_overlap(1),rg%ie_overlap(1)
+      rg%idx(i) = mod(NLz+i,NLz) ! x <--> z
     end do
-    do i=iy_sta-4,iy_end+4
-      idy(i) = mod(NLy+i,NLy)
+    do i=rg%is_overlap(2),rg%ie_overlap(2)
+      rg%idy(i) = mod(NLy+i,NLy)
     end do
-    do i=iz_sta-4,iz_end+4
-      idz(i) = mod(NLx+i,NLx) ! x <--> z
+    do i=rg%is_overlap(3),rg%ie_overlap(3)
+      rg%idz(i) = mod(NLx+i,NLx) ! x <--> z
     end do
 
-    call convert_pseudo_ARTED(Jxyz_wrk,Jxyz,NI,Nps,NLy,NLz,Nlma,uVu_wrk,iuV,Hxyz)
+    info%io_s = 1
+    info%io_e = 1
+    info%numo = 1
+    info%ik_s = 1
+    info%ik_e = 1
+    info%numk = 1
+    info%i1_s = 1
+    info%i1_e = 1
+    info%num1 = 1
+    info%if_divide_rspace = .false.
+    allocate(tpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1) &
+           ,htpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1))
+    if(present(ttpsi0)) then
+      allocate(ttpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1))
+    end if
+    tpsi%zwf(:,:,:,1,1,1,1) = tpsi0
 
-    call hpsi_C(tpsi,htpsi,ipx_sta,ipx_end,ipy_sta,ipy_end,ipz_sta,ipz_end,1 &
-           ,Vloc,ix_sta,ix_end,iy_sta,iy_end,iz_sta,iz_end,1 &
-           ,idx,idy,idz,lap0,lapt_wrk,is_table,1 &
-           ,NI,Nps,Nlma,a_tbl,Mps,Jxyz_wrk,uV,uVu_wrk &
-           ,1,irank_overlap,icomm_overlap,icomm_pseudo &
-           ,ik_table,nabt_wrk,kAc_wrk,ekr_omp(:,:,ik:ik),ttpsi)
+    allocate(V_local(1)%f(0:NLz-1,0:NLy-1,0:NLx-1))
+    do i=1,NL
+      iz = mod(i-1,NLz)
+      iy = mod((i-1-iz)/NLz,NLy)
+      ix = (i-1-iz-iy*NLy)/(NLy*NLz)
+      V_local(1)%f(iz,iy,ix) = Vloc(i)
+    end do
 
-    deallocate(idx,idy,idz,Jxyz_wrk,uVu_wrk)
+    if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,1))
+    ppg%zproj(:,:,1) = zproj(:,:,ik)
+
+    call hpsi(tpsi,htpsi,info,rg,V_local,1,stencil,ppg,ttpsi)
+
+    htpsi0 = htpsi%zwf(:,:,:,1,1,1,1)
+    if(present(ttpsi0)) ttpsi0 = ttpsi%zwf(:,:,:,1,1,1,1)
+
+    call deallocate_rgrid(rg)
+    call deallocate_stencil(stencil)
+    call deallocate_wavefunction(tpsi)
+    call deallocate_wavefunction(htpsi)
+    call deallocate_wavefunction(ttpsi)
+    call deallocate_scalar(V_local(1))
 
     return
-  contains
-    subroutine convert_pseudo_ARTED(Jxyz_new,Jxyz,NI,Nps,NLy,NLz,Nlma,uVu,iuV,Hxyz)
-      integer :: NI,Nps,Jxyz(Nps,NI),NLy,NLz,Nlma,iuV(Nlma)
-      integer,allocatable :: Jxyz_new(:,:,:)
-      real(8) :: Hxyz
-      real(8),allocatable :: uVu(:)
-      !
-      integer    :: ia,j,i,ix,iy,iz ! i = ix*NLy*NLz + iy*NLz + iz + 1, ix=0:NLx-1, ...
-      allocate(Jxyz_new(3,Nps,NI),uVu(Nlma))
-      do ia=1,NI
-        do j=1,Nps
-          i = Jxyz(j,ia)
-          iz = mod(i-1,NLz)
-          iy = mod((i-1-iz)/NLz,NLy)
-          ix = (i-1-iz-iy*NLy)/(NLy*NLz)
-          Jxyz_new(1,j,ia) = iz ! x <--> z
-          Jxyz_new(2,j,ia) = iy
-          Jxyz_new(3,j,ia) = ix ! x <--> z
-        end do
-      end do
-      do i=1,Nlma
-        uVu(i) = dble(iuV(i)) * Hxyz
-      end do
-      return
-    end subroutine convert_pseudo_ARTED
   end subroutine hpsi_test3
 !-----------------------------------------------------------------------------------------------------------------------------------
 
