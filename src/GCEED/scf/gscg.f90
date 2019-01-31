@@ -78,7 +78,7 @@ else if(ilsda == 1)then
   iobend(2)=itotMST
 end if
 
-do iob=1,iobnum
+do iob=1,spsi%numo
   call calc_allob(iob,iob_allob)
 
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -102,14 +102,14 @@ do iob=1,iobnum
   end do
 end do
 
-call inner_product7(mg,itotmst,iobnum,rxk_ob,rhxk_ob,xkHxk_ob,elp3,hvol)
+call inner_product7(mg,itotmst,spsi%numo,rxk_ob,rhxk_ob,xkHxk_ob,elp3,hvol)
 
 xkxk_ob(:)=1.d0 
 Rk_ob(:)=xkHxk_ob(:)/xkxk_ob(:)
 
 Iteration : do iter=1,Ncg
 elp2(2)=get_wtime()
-  do iob=1,iobnum
+  do iob=1,spsi%numo
     call calc_allob(iob,iob_allob)
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg_sta(3),mg_end(3)
@@ -192,9 +192,9 @@ elp2(2)=get_wtime()
       end do
     end do
   end if 
- call inner_product7(mg,itotmst,iobnum,rgk_ob,rgk_ob,sum_ob0,elp3,hvol)
+ call inner_product7(mg,itotmst,spsi%numo,rgk_ob,rgk_ob,sum_ob0,elp3,hvol)
  if ( iter==1 ) then
-    do iob=1,iobnum
+    do iob=1,spsi%numo
       call calc_allob(iob,iob_allob)
 !$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=mg_sta(3),mg_end(3)
@@ -206,7 +206,7 @@ elp2(2)=get_wtime()
       end do
     end do
   else
-    do iob=1,iobnum
+    do iob=1,spsi%numo
       call calc_allob(iob,iob_allob)
       uk=sum_ob0(iob_allob)/gkgk_ob(iob_allob)
 !$OMP parallel do private(iz,iy,ix)
@@ -220,11 +220,11 @@ elp2(2)=get_wtime()
     end do
   end if 
   gkgk_ob(:)=sum_ob0(:)
-  call inner_product7(mg,itotmst,iobnum,rxk_ob,rpk_ob,xkpk_ob,elp3,hvol)
-  call inner_product7(mg,itotmst,iobnum,rpk_ob,rpk_ob,pkpk_ob,elp3,hvol)
-  call inner_product7(mg,itotmst,iobnum,rpk_ob,rhxk_ob,pkHxk_ob,elp3,hvol)
+  call inner_product7(mg,itotmst,spsi%numo,rxk_ob,rpk_ob,xkpk_ob,elp3,hvol)
+  call inner_product7(mg,itotmst,spsi%numo,rpk_ob,rpk_ob,pkpk_ob,elp3,hvol)
+  call inner_product7(mg,itotmst,spsi%numo,rpk_ob,rhxk_ob,pkHxk_ob,elp3,hvol)
 
-  do iob=1,iobnum
+  do iob=1,spsi%numo
     call calc_allob(iob,iob_allob)
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg_sta(3),mg_end(3)
@@ -245,8 +245,8 @@ elp2(2)=get_wtime()
     end do
     end do
   end do
-  call inner_product7(mg,itotmst,iobnum,rpk_ob,rgk_ob,pkHpk_ob,elp3,hvol)
- do iob=1,iobnum
+  call inner_product7(mg,itotmst,spsi%numo,rpk_ob,rgk_ob,pkHpk_ob,elp3,hvol)
+ do iob=1,spsi%numo
     call calc_allob(iob,iob_allob)
     Ak=pkHpk_ob(iob_allob)*xkpk_ob(iob_allob)-pkHxk_ob(iob_allob)*pkpk_ob(iob_allob)
     Bk=pkHpk_ob(iob_allob)*xkxk_ob(iob_allob)-xkHxk_ob(iob_allob)*pkpk_ob(iob_allob)
@@ -263,15 +263,15 @@ elp2(2)=get_wtime()
     end do
     end do
   end do
-  call inner_product7(mg,itotmst,iobnum,rxk_ob,rhxk_ob,xkHxk_ob,elp3,hvol)
-  call inner_product7(mg,itotmst,iobnum,rxk_ob,rxk_ob,xkxk_ob,elp3,hvol)
+  call inner_product7(mg,itotmst,spsi%numo,rxk_ob,rhxk_ob,xkHxk_ob,elp3,hvol)
+  call inner_product7(mg,itotmst,spsi%numo,rxk_ob,rxk_ob,xkxk_ob,elp3,hvol)
   Rk_ob(:)=xkHxk_ob(:)/xkxk_ob(:)
 
 
 end do Iteration
 
-call inner_product7(mg,itotmst,iobnum,rxk_ob,rxk_ob,sum_ob0,elp3,hvol)
-do iob=1,iobnum
+call inner_product7(mg,itotmst,spsi%numo,rxk_ob,rxk_ob,sum_ob0,elp3,hvol)
+do iob=1,spsi%numo
   call calc_allob(iob,iob_allob)
 !$OMP parallel do private(iz,iy,ix) collapse(2)
   do iz=mg_sta(3),mg_end(3)
