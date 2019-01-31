@@ -483,7 +483,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,psi)
+        call rmmdiis(mg,info,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -759,7 +759,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,psi)
+        call rmmdiis(mg,info,psi)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

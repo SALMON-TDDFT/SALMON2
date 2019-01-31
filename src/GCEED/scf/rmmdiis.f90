@@ -18,8 +18,8 @@
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-SUBROUTINE rmmdiis(mg,psi_in)
-use structures, only: s_rgrid
+SUBROUTINE rmmdiis(mg,info,psi_in)
+use structures, only: s_rgrid, s_wf_info
 use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
 use scf_data
@@ -29,8 +29,9 @@ use new_world_sub
 implicit none
 
 type(s_rgrid),intent(in) :: mg
+type(s_wf_info) :: info
 real(8) :: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),   &
-                  1:iobnum,k_sta:k_end)
+                  1:info%numo,k_sta:k_end)
 integer :: iob,iter,ix,iy,iz
 integer,allocatable :: iflagdiis(:)
 integer,allocatable :: iobcheck(:,:)
@@ -52,7 +53,7 @@ allocate (phi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),0:Ncg)
 allocate (R1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),0:Ncg))
 allocate (phibar(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),0:Ncg))
 allocate (Rbar(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),0:Ncg))
-allocate (psi_stock(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end))
+allocate (psi_stock(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:info%numo,k_sta:k_end))
 
 allocate (iobcheck(1:itotMST,0:Ncg))
 iobcheck=0
@@ -70,23 +71,23 @@ end do
 end do
 end do
 
-if(iobnum>=1)then
-  allocate (iflagdiis(1:iobnum))
-  allocate (epsdiis(1:iobnum,0:Ncg))
-  allocate (Rnorm(1:iobnum,0:Ncg))
+if(info%numo>=1)then
+  allocate (iflagdiis(1:info%numo))
+  allocate (epsdiis(1:info%numo,0:Ncg))
+  allocate (Rnorm(1:info%numo,0:Ncg))
 end if 
 
 ! Flag for convergence
-if(iobnum >= 1) iflagdiis=1
+if(info%numo >= 1) iflagdiis=1
 
-if(iobnum >= 1) then
+if(info%numo >= 1) then
   phi=0.d0
   psi_stock=psi_in
 end if
 
 iflag_diisjump=0
 
-do iob=1,iobnum
+do iob=1,info%numo
 
   Iteration : do iter=1,Ncg
 
@@ -218,7 +219,7 @@ do iob=1,iobnum
 end do        ! loop for iob
 
 iflag_diisjump=0
-do iob=1,iobnum
+do iob=1,info%numo
 !$OMP parallel do private(iz,iy,ix)
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
@@ -238,7 +239,7 @@ if(iflag_diisjump==0)then
   continue
 else if(iflag_diisjump==1)then
   psi_in=psi_stock
-  do iob=1,iobnum
+  do iob=1,info%numo
   
 !$OMP parallel do
     do iz=mg_sta(3),mg_end(3)
@@ -266,7 +267,7 @@ else if(iflag_diisjump==1)then
   end do
 
   rnorm_diff_psi=0.d0
-  do iob=1,iobnum
+  do iob=1,info%numo
     phi(:,:,:,0)=abs(psi_in(:,:,:,iob,1)-psi_stock(:,:,:,iob,1))
     rbox1=sum(phi(:,:,:,0)*phi(:,:,:,0))*Hvol
     rnorm_diff_psi(iob,1)=rbox1
@@ -278,7 +279,7 @@ end if
 deallocate(htphi)
 deallocate(phibox,Rbox,phi,R1,phibar,Rbar)
 
-if(iobnum>=1)then
+if(info%numo>=1)then
   deallocate (iflagdiis,epsdiis,Rnorm)
 end if 
 deallocate(iobcheck) 
