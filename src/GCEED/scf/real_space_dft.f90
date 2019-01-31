@@ -483,7 +483,31 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,psi)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+        call rmmdiis(mg,info,spsi)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+        end do
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -759,7 +783,31 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,psi)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
+          end do
+          end do
+          end do
+        end do
+        end do
+        call rmmdiis(mg,info,spsi)
+        do ik=k_sta,k_end
+        do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+        end do
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

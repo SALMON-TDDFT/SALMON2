@@ -18,8 +18,8 @@
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-SUBROUTINE rmmdiis(mg,info,psi_in)
-use structures, only: s_rgrid, s_wf_info
+SUBROUTINE rmmdiis(mg,info,spsi)
+use structures, only: s_rgrid,s_wf_info,s_wavefunction
 use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
 use scf_data
@@ -30,8 +30,7 @@ implicit none
 
 type(s_rgrid),intent(in) :: mg
 type(s_wf_info) :: info
-real(8) :: psi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),  &
-                  1:info%numo,info%ik_s:info%ik_e)
+type(s_wavefunction) :: spsi
 integer :: iob,iter,ix,iy,iz
 integer,allocatable :: iflagdiis(:)
 integer,allocatable :: iobcheck(:,:)
@@ -40,7 +39,7 @@ real(8),allocatable :: htphi(:,:,:)
 real(8),allocatable :: R1(:,:,:,:)
 real(8),allocatable :: phibar(:,:,:,:),Rbar(:,:,:,:)
 real(8),allocatable :: phibox(:,:,:),Rbox(:,:,:)
-real(8),allocatable :: psi_stock(:,:,:,:,:)
+real(8),allocatable :: psi_stock(:,:,:,:,:,:,:)
 real(8) :: rbox1
 real(8),allocatable :: epsdiis(:,:),Rnorm(:,:)
 real(8) :: rnorm_diff_psi(itotMST,1)
@@ -55,8 +54,8 @@ allocate (phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:Ncg))
 allocate (R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:Ncg))
 allocate (phibar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:Ncg))
 allocate (Rbar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:Ncg))
-allocate (psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),  &
-                    1:info%numo,info%ik_s:info%ik_e))
+allocate (psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
+                    1:info%numo,info%ik_s:info%ik_e,1))
 
 allocate (iobcheck(1:itotMST,0:Ncg))
 iobcheck=0
@@ -85,7 +84,7 @@ if(info%numo >= 1) iflagdiis=1
 
 if(info%numo >= 1) then
   phi=0.d0
-  psi_stock=psi_in
+  psi_stock=spsi%rwf
 end if
 
 iflag_diisjump=0
@@ -98,7 +97,7 @@ do iob=1,info%numo
 ! Obtain residual vector R_0
 !$OMP parallel do
     do iz=mg%is(3),mg%ie(3)
-      phi(:,:,iz,0)=psi_in(:,:,iz,iob,1)
+      phi(:,:,iz,0)=spsi%rwf(:,:,iz,1,iob,1,1)
     end do
 !$OMP parallel do private(iz,iy,ix)
   do iz=mg%is(3),mg%ie(3)
@@ -177,14 +176,14 @@ do iob=1,info%numo
       if(iter >= 3 .and. epsdiis(iob,iter) > epsdiis(iob,iter-1)) then
 !$OMP parallel do
         do iz=mg%is(3),mg%ie(3)
-          psi_in(:,:,iz,iob,1) = phi(:,:,iz,iter-1)
+          spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,iter-1)
         end do
         iflagdiis(iob)=0
       else if(-(epsdiis(iob,iter)-epsdiis(iob,iter-1)) <= 1.0d-8 .or.      &
               Rnorm(iob,iter)/Rnorm(iob,0) <= 0.3d0) then
 !$OMP parallel do
         do iz=mg%is(3),mg%ie(3)
-          psi_in(:,:,iz,iob,1) = phi(:,:,iz,iter)
+          spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,iter)
         end do
         iflagdiis(iob)=0
       end if
@@ -193,13 +192,13 @@ do iob=1,info%numo
     if(iter == Ncg) then
 !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
-        psi_in(:,:,iz,iob,1) = phi(:,:,iz,Ncg)
+        spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,Ncg)
       end do
      end if
     if(iter == 1 .and. iflag_diisjump == 1) then
 !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
-        psi_in(:,:,iz,iob,1) = phi(:,:,iz,1)
+        spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,1)
       end do
     end if
 
@@ -227,26 +226,26 @@ do iob=1,info%numo
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    tpsi(ix,iy,iz)=psi_in(ix,iy,iz,iob,1)
+    tpsi(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,iob,1,1)
   end do
   end do
   end do
 
   call hpsi2(tpsi,htphi(:,:,:),iob,1,0,0)
-  call inner_product3(mg,psi_in(mg_sta(1),mg_sta(2),mg_sta(3),iob,1),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
-  rbox1=sum(psi_in(:,:,:,iob,1)*htphi(:,:,:))*Hvol
+  call inner_product3(mg,spsi%rwf(mg_sta(1),mg_sta(2),mg_sta(3),1,iob,1,1),htphi(mg_sta(1),mg_sta(2),mg_sta(3)),rbox1,elp3)
+  rbox1=sum(spsi%rwf(:,:,:,1,iob,1,1)*htphi(:,:,:))*Hvol
   if(rbox1-esp(iob,1)>5.d0) iflag_diisjump=1
 end do
 
 if(iflag_diisjump==0)then
   continue
 else if(iflag_diisjump==1)then
-  psi_in=psi_stock
+  spsi%rwf=psi_stock
   do iob=1,info%numo
   
 !$OMP parallel do
     do iz=mg%is(3),mg%ie(3)
-      phi(:,:,iz,0)=psi_in(:,:,iz,iob,1)
+      phi(:,:,iz,0)=spsi%rwf(:,:,iz,1,iob,1,1)
     end do
 !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -264,14 +263,14 @@ else if(iflag_diisjump==1)then
 !$OMP parallel do
     do iz=mg%is(3),mg%ie(3)
       R1(:,:,iz,0)=htphi(:,:,iz)-rbox1*Hvol*phi(:,:,iz,0)
-      psi_in(:,:,iz,iob,1)=phi(:,:,iz,0)+lambda2_diis*R1(:,:,iz,0)
+      spsi%rwf(:,:,iz,1,iob,1,1)=phi(:,:,iz,0)+lambda2_diis*R1(:,:,iz,0)
     end do 
 
   end do
 
   rnorm_diff_psi=0.d0
   do iob=1,info%numo
-    phi(:,:,:,0)=abs(psi_in(:,:,:,iob,1)-psi_stock(:,:,:,iob,1))
+    phi(:,:,:,0)=abs(spsi%rwf(:,:,:,1,iob,1,1)-psi_stock(:,:,:,1,iob,1,1))
     rbox1=sum(phi(:,:,:,0)*phi(:,:,:,0))*Hvol
     rnorm_diff_psi(iob,1)=rbox1
   end do
