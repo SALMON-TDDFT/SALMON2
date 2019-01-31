@@ -77,12 +77,12 @@ subroutine dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,ipar
   
   if(ilsda == 0)then
     iobsta(1)=1
-    iobend(1)=itotmst
+    iobend(1)=itotMST
   else if(ilsda == 1)then
     iobsta(1)=1
-    iobend(1)=mst(1)
-    iobsta(2)=mst(1)+1
-    iobend(2)=itotmst
+    iobend(1)=MST(1)
+    iobsta(2)=MST(1)+1
+    iobend(2)=itotMST
   end if
   
   do is=is_sta,is_end

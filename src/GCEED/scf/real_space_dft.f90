@@ -454,8 +454,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         select case(gscg)
         case('y')
-          call sgscg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+          call sgscg(mg,spsi,iflag)
         case('n')
           call dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
         end select
@@ -733,8 +732,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         select case(gscg)
         case('y')
-          call sgscg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+          call sgscg(mg,spsi,iflag)
         case('n')
           call dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
         end select
