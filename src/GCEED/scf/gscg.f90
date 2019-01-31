@@ -16,19 +16,32 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,spsi,iflag)
+subroutine sgscg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+use inputoutput, only: ncg
 use structures, only: s_rgrid,s_wavefunction
 use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation, comm_bcast
 use misc_routines, only: get_wtime
-use scf_data
-use new_world_sub
 !$ use omp_lib
 implicit none
 
 type(s_rgrid),intent(in) :: mg
 type(s_wavefunction),intent(inout) :: spsi
-integer :: iter,iob,job,iflag
+integer,intent(inout) :: iflag
+  integer,intent(in)    :: itotmst
+  integer,intent(in)    :: mst(2)
+  real(8),intent(in)    :: hvol
+  integer,intent(in)    :: ilsda
+  integer,intent(in)    :: nproc_ob
+  integer,intent(in)    :: nproc_ob_spin
+  integer,intent(in)    :: iparaway_ob
+  real(8),intent(out)    :: elp3(3000)
+  real(8),intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:spsi%numo)
+  real(8),intent(inout) :: rhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:spsi%numo)
+  real(8),intent(inout) :: rgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:spsi%numo)
+  real(8),intent(inout) :: rpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:spsi%numo)
+integer :: iter,iob,job
 integer :: ix,iy,iz
 integer :: is,iobsta(2),iobend(2)
 real(8) :: sum0,sum1
@@ -52,9 +65,6 @@ integer :: iroot
 integer :: is_sta,is_end
 
 allocate (gk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-
-iwk_size=2
-call make_iwksta_iwkend
 
 call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
 
@@ -109,7 +119,7 @@ call inner_product7(mg,itotmst,spsi%numo,rxk_ob,rhxk_ob,xkHxk_ob,elp3,hvol)
 xkxk_ob(:)=1.d0 
 Rk_ob(:)=xkHxk_ob(:)/xkxk_ob(:)
 
-Iteration : do iter=1,Ncg
+Iteration : do iter=1,ncg
 elp2(2)=get_wtime()
   do iob=1,spsi%numo
     call calc_allob(iob,iob_allob)
@@ -157,10 +167,10 @@ elp2(2)=get_wtime()
   else
     do iob=iobsta(is),iobend(is)
       call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,1,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call check_corrkob(iob,1,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,spsi%ik_s,spsi%ik_e,nproc_ob_spin,mst)
       do job=iobsta(is),iob-1
         call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-        call check_corrkob(job,1,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        call check_corrkob(job,1,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,spsi%ik_s,spsi%ik_e,nproc_ob_spin,mst)
         if(icorr_job==1)then
   !$omp parallel do private(iz,iy,ix) collapse(2)
           do iz=mg%is(3),mg%ie(3)
