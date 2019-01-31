@@ -93,9 +93,9 @@ if(icount == iter)then
 ! if phibar is estimated to be equal mixture of previous phis,
 ! update phibar by newest phi
 !$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     phibar(ix,iy,iz,iter-1)=phi(ix,iy,iz,iter-1)
   end do
   end do
@@ -104,9 +104,9 @@ if(icount == iter)then
   call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
   rnorm=sqrt(rbox*Hvol)
 !$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)/rnorm
     Rbar(ix,iy,iz,iter-1)=R1(ix,iy,iz,iter-1)
   end do
@@ -121,9 +121,9 @@ else
 ! if Smat is not positive-definite,
 ! update phibar by newest phi
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       phibar(ix,iy,iz,iter-1)=phi(ix,iy,iz,iter-1)
     end do
     end do
@@ -132,9 +132,9 @@ else
  
     rnorm=sqrt(rbox*Hvol)
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)/rnorm
     end do
     end do
@@ -155,18 +155,18 @@ else
     end do
 
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       phibar(ix,iy,iz,iter-1)=0d0
     end do
     end do
     end do
     do ii=1,iter
 !$OMP parallel do private(iz,iy,ix)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)      &
                       +dble(evec(ii,ibox))*phi(ix,iy,iz,ii-1)
       end do
@@ -177,27 +177,27 @@ else
     call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
     rnorm=sqrt(rbox*Hvol)
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)/rnorm
     end do
     end do
     end do
      
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       Rbar(ix,iy,iz,iter-1)=0d0
     end do
     end do
     end do
     do ii=1,iter
 !$OMP parallel do private(iz,iy,ix)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         Rbar(ix,iy,iz,iter-1)=Rbar(ix,iy,iz,iter-1)      &
                      +dble(evec(ii,ibox))*R1(ix,iy,iz,ii-1)/rnorm
       end do
