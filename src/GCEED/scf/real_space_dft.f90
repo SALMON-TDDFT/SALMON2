@@ -495,7 +495,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
         end do
         end do
-        call rmmdiis(mg,info,spsi)
+        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
         do ik=k_sta,k_end
         do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
@@ -795,7 +795,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
         end do
         end do
-        call rmmdiis(mg,info,spsi)
+        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
         do ik=k_sta,k_end
         do iob=1,iobnum
 !$OMP parallel do private(iz,iy,ix)
