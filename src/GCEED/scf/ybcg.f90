@@ -16,9 +16,9 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
   use inputoutput, only: ncg
-  use structures, only: s_rgrid,s_wavefunction
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction
   use salmon_parallel, only: nproc_group_grid
   use salmon_communication, only: comm_bcast
   use misc_routines, only: get_wtime
@@ -27,6 +27,7 @@ subroutine dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,ipar
   implicit none
   
   type(s_rgrid),intent(in) :: mg
+  type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst
@@ -90,7 +91,7 @@ subroutine dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,ipar
   
   orbital : do iob=iobsta(is),iobend(is)
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-    call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,itotmst,spsi%ik_s,spsi%ik_e,nproc_ob_spin,mst)
+    call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
     elp2(2)=get_wtime()
   
     if(icorr==1)then
@@ -99,7 +100,7 @@ subroutine dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,ipar
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        xk(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,1,iob_myob,1)
+        xk(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,iob_myob,1,1)
       end do
       end do
       end do
@@ -139,15 +140,15 @@ subroutine dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,ipar
       do job=iobsta(is),iob-1
         sum0=0.d0
         call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-        call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,itotmst,spsi%ik_s,spsi%ik_e,nproc_ob_spin,mst)
+        call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
         if(jcorr==1)then
-          call inner_product(mg,spsi%rwf(:,:,:,1,1,job_myob,1),gk(:,:,:),sum0,commname)
+          call inner_product(mg,spsi%rwf(:,:,:,1,job_myob,1,1),gk(:,:,:),sum0,commname)
           sum0=sum0*hvol
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi%rwf(ix,iy,iz,1,1,job_myob,1)
+            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi%rwf(ix,iy,iz,1,job_myob,1,1)
           end do
           end do
           end do
@@ -234,7 +235,7 @@ subroutine dtcg(mg,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,ipar
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi%rwf(ix,iy,iz,1,1,iob_myob,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
+        spsi%rwf(ix,iy,iz,1,iob_myob,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
       end do
       end do
       end do
