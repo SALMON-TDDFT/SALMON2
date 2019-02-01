@@ -24,15 +24,12 @@ use misc_routines, only: get_wtime
 use scf_data
 use new_world_sub
 use allocate_mat_sub
-use hpsi2_sub
 !$ use omp_lib
 implicit none
 
 type(s_rgrid),intent(in)           :: mg
 type(s_wf_info),intent(in)         :: info
 type(s_wavefunction),intent(inout) :: spsi
-complex(8) :: psi2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,   &
-               1:info%numo,info%ik_s:info%ik_e,1)
 integer :: iter,p,q,iflag
 integer :: ik
 integer :: ix,iy,iz
@@ -65,11 +62,6 @@ allocate (htpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 allocate (pko(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
 call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
-
-iwk_size=2
-call make_iwksta_iwkend
-
-psi2=0.d0
 
 !$OMP parallel do
 do iz=mg%is_array(3),mg%ie_array(3)
@@ -189,17 +181,8 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
  
-    call hpsi2(tpsi,hxk,p,ik,0,0)
+    call c_hpsi2_buf(tpsi,hxk,p,ik,0,0)
   
-!$omp parallel do 
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      psi2(ix,iy,iz,1,p_myob,ik,1)=hxk(ix,iy,iz)
-    end do
-    end do
-    end do
-
 !$omp parallel do 
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
@@ -328,7 +311,7 @@ orbital : do p=pstart(is),pend(is)
     end do
     end do
     end do
-    call hpsi2(tpsi,htpsi,p,ik,0,0)
+    call c_hpsi2_buf(tpsi,htpsi,p,ik,0,0)
     call inner_product4(mg,xk,htpsi,xkHpk,Hvol)
     call inner_product4(mg,pko,htpsi,pkHpk,Hvol)
     
