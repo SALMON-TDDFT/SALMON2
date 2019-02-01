@@ -141,7 +141,35 @@ contains
     DEAL(stencil%kAc)
   end subroutine deallocate_stencil
 
-!  subroutine deallocate_pp_info(pp)
+  subroutine deallocate_pp_info(pp)
+    type(s_pp_info) :: pp
+    DEAL(pp%atom_symbol)
+    DEAL(pp%rmass)
+    DEAL(pp%mr)
+    DEAL(pp%lref)
+    DEAL(pp%nrps)
+    DEAL(pp%mlps)
+    DEAL(pp%zps)
+    DEAL(pp%nrloc)
+    DEAL(pp%rloc)
+    DEAL(pp%rps)
+    DEAL(pp%anorm)
+    DEAL(pp%inorm)
+    DEAL(pp%rad)
+    DEAL(pp%radnl)
+    DEAL(pp%vloctbl)
+    DEAL(pp%dvloctbl)
+    DEAL(pp%udvtbl)
+    DEAL(pp%dudvtbl)
+    DEAL(pp%rho_nlcc_tbl)
+    DEAL(pp%tau_nlcc_tbl)
+    DEAL(pp%upp_f)
+    DEAL(pp%vpp_f)
+    DEAL(pp%upp)
+    DEAL(pp%dupp)
+    DEAL(pp%vpp)
+    DEAL(pp%dvpp)
+  end subroutine deallocate_pp_info
 
   subroutine deallocate_pp_grid(ppg)
     type(s_pp_grid) :: ppg
