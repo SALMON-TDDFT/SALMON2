@@ -16,8 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,psi_in,iflag)
-  use structures, only: s_rgrid
+subroutine gscg_periodic(mg,info,psi_in,iflag)
+  use structures, only: s_rgrid,s_wf_info
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_id_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
@@ -29,8 +29,9 @@ subroutine gscg_periodic(mg,psi_in,iflag)
   implicit none
   
   type(s_rgrid),intent(in) :: mg
+  type(s_wf_info) :: info
   complex(8) :: psi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),  &
-                 1:iobnum,k_sta:k_end)
+                 1:info%numo,info%ik_s:info%ik_e)
   integer :: iter,iob,job,iflag
   integer :: ik
   integer :: ix,iy,iz
@@ -84,12 +85,12 @@ subroutine gscg_periodic(mg,psi_in,iflag)
     iobend(2)=itotMST
   end if
   
-  do ik=k_sta,k_end
+  do ik=info%ik_s,info%ik_e
   do is=is_sta,is_end
 
     iter_bak_ob(:)=0 
   
-    do iob_myob=1,iobnum
+    do iob_myob=1,info%numo
       call calc_allob(iob_myob,iob_allob)
     
       elp2(2)=get_wtime()
@@ -116,10 +117,10 @@ subroutine gscg_periodic(mg,psi_in,iflag)
       end do
   
     end do
-    call inner_product5(mg,itotmst,iobnum,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+    call inner_product5(mg,itotmst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
 
     Iteration : do iter=1,Ncg
-      do iob_myob=1,iobnum
+      do iob_myob=1,info%numo
         call calc_allob(iob_myob,iob_allob)
     
     !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -171,10 +172,10 @@ subroutine gscg_periodic(mg,psi_in,iflag)
       else
         do iob=iobsta(is),iobend(is)
           call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
           do job=iobsta(is),iob-1
             call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
             if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)
               do iz=mg%is(3),mg%ie(3)
@@ -208,9 +209,9 @@ subroutine gscg_periodic(mg,psi_in,iflag)
           end do
         end do
       end if
-      call inner_product5(mg,itotmst,iobnum,zgk_ob,zgk_ob,sum_ob1,hvol)
+      call inner_product5(mg,itotmst,info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
         
-      do iob_myob=1,iobnum
+      do iob_myob=1,info%numo
         call calc_allob(iob_myob,iob_allob)
     
         if(iter==1)then
@@ -236,9 +237,9 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         gkgk_ob(iob_allob)=sum_ob1(iob_allob)
       end do
 
-      call inner_product5(mg,itotmst,iobnum,zxk_ob,zpk_ob,zs_ob,hvol)
+      call inner_product5(mg,itotmst,info%numo,zxk_ob,zpk_ob,zs_ob,hvol)
 
-      do iob_myob=1,iobnum
+      do iob_myob=1,info%numo
         call calc_allob(iob_myob,iob_allob)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
@@ -249,9 +250,9 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         end do
         end do
       end do
-      call inner_product5(mg,itotmst,iobnum,zpko_ob,zpko_ob,sum_ob1,hvol)
+      call inner_product5(mg,itotmst,info%numo,zpko_ob,zpko_ob,sum_ob1,hvol)
 
-      do iob_myob=1,iobnum
+      do iob_myob=1,info%numo
         call calc_allob(iob_myob,iob_allob)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
@@ -274,11 +275,11 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         end do
         end do
       end do
-      call inner_product5(mg,itotmst,iobnum,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
-      call inner_product5(mg,itotmst,iobnum,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
+      call inner_product5(mg,itotmst,info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
+      call inner_product5(mg,itotmst,info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
         
     
-      do iob_myob=1,iobnum
+      do iob_myob=1,info%numo
         call calc_allob(iob_myob,iob_allob)
 
         ev=0.5d0*((xkHxk_ob(iob_allob)+pkHpk_ob(iob_allob))   &
@@ -298,10 +299,10 @@ subroutine gscg_periodic(mg,psi_in,iflag)
         end do
       end do 
     
-      call inner_product5(mg,itotmst,iobnum,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
-      call inner_product5(mg,itotmst,iobnum,zxk_ob,zxk_ob,xkxk_ob,hvol)
+      call inner_product5(mg,itotmst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+      call inner_product5(mg,itotmst,info%numo,zxk_ob,zxk_ob,xkxk_ob,hvol)
 
-      do iob_myob=1,iobnum
+      do iob_myob=1,info%numo
         call calc_allob(iob_myob,iob_allob)
 
         if(abs(xkxk_ob(iob_allob))<=1.d30)then

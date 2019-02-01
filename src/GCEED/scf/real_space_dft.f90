@@ -472,7 +472,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,zpsi,iflag)
+          call gscg_periodic(mg,info,zpsi,iflag)
         case('n')
           do ik=k_sta,k_end
           do iob=1,iobnum
@@ -799,7 +799,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,zpsi,iflag)
+          call gscg_periodic(mg,info,zpsi,iflag)
         case('n')
           do ik=k_sta,k_end
           do iob=1,iobnum
