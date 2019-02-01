@@ -16,8 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-SUBROUTINE DTcg_periodic(mg,psi_in,iflag)
-use structures, only: s_rgrid
+SUBROUTINE DTcg_periodic(mg,info,psi_in,iflag)
+use structures, only: s_rgrid,s_wf_info
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
 use salmon_communication, only: comm_bcast, comm_summation
 use misc_routines, only: get_wtime
@@ -28,11 +28,12 @@ use hpsi2_sub
 !$ use omp_lib
 implicit none
 
-type(s_rgrid),intent(in) :: mg
+type(s_rgrid),intent(in)   :: mg
+type(s_wf_info),intent(in) :: info
 complex(8) :: psi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),   &
-               1:iobnum,k_sta:k_end)
+               1:info%numo,info%ik_s:info%ik_e)
 complex(8) :: psi2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),   &
-               1:iobnum,k_sta:k_end)
+               1:info%numo,info%ik_s:info%ik_e)
 integer :: iter,p,q,iflag
 integer :: ik
 integer :: ix,iy,iz
@@ -93,12 +94,12 @@ else if(ilsda == 1)then
   pend(2)=itotMST
 end if
 
-do ik=k_sta,k_end
+do ik=info%ik_s,info%ik_e
 do is=is_sta,is_end
 
 orbital : do p=pstart(is),pend(is)
   call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-  call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+  call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
 
   elp2(2)=get_wtime()
 
@@ -127,7 +128,7 @@ orbital : do p=pstart(is),pend(is)
   else
     do q=pstart(is),p-1
       call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
       if(icorr_q==1)then
 !$omp parallel do
         do iz=mg%is(3),mg%ie(3)
@@ -253,7 +254,7 @@ orbital : do p=pstart(is),pend(is)
     else
       do q=pstart(is),p-1
         call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
         if(icorr_q==1)then
 !$omp parallel do
           do iz=mg%is(3),mg%ie(3)

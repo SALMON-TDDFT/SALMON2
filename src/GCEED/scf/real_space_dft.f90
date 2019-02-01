@@ -474,7 +474,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(mg,zpsi,iflag)
+          call DTcg_periodic(mg,info,zpsi,iflag)
         end select
       end select
       elp3(182)=get_wtime()
@@ -777,7 +777,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(mg,zpsi,iflag)
+          call DTcg_periodic(mg,info,zpsi,iflag)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
