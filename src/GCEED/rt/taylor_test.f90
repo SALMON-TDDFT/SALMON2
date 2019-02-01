@@ -191,9 +191,9 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
   info%ik_s = k_sta
   info%ik_e = k_end
   info%numk = k_num
-  info%i1_s = 1
-  info%i1_e = 1
-  info%num1 = 1
+  info%im_s = 1
+  info%im_e = 1
+  info%numm = 1
   info%if_divide_rspace = nproc_Mxin_mul.ne.1
   info%irank_overlap(1) = iup_array(1)
   info%irank_overlap(2) = idw_array(1)

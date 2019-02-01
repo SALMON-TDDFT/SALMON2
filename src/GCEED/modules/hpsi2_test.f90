@@ -94,9 +94,9 @@ subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
   info%ik_s = 1
   info%ik_e = 1
   info%numk = 1
-  info%i1_s = 1
-  info%i1_e = 1
-  info%num1 = 1
+  info%im_s = 1
+  info%im_e = 1
+  info%numm = 1
   info%if_divide_rspace = nproc_Mxin_mul.ne.1
   info%irank_overlap(1) = iup_array(1)
   info%irank_overlap(2) = idw_array(1)
@@ -210,9 +210,9 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
   info%ik_s = ik
   info%ik_e = ik
   info%numk = 1
-  info%i1_s = 1
-  info%i1_e = 1
-  info%num1 = 1
+  info%im_s = 1
+  info%im_e = 1
+  info%numm = 1
   info%if_divide_rspace = nproc_Mxin_mul.ne.1
   info%irank_overlap(1) = iup_array(1)
   info%irank_overlap(2) = idw_array(1)
