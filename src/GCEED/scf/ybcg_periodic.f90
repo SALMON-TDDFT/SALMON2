@@ -16,8 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-SUBROUTINE DTcg_periodic(mg,info,psi_in,iflag)
-use structures, only: s_rgrid,s_wf_info
+SUBROUTINE DTcg_periodic(mg,info,spsi,iflag)
+use structures, only: s_rgrid,s_wf_info,s_wavefunction
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
 use salmon_communication, only: comm_bcast, comm_summation
 use misc_routines, only: get_wtime
@@ -28,12 +28,11 @@ use hpsi2_sub
 !$ use omp_lib
 implicit none
 
-type(s_rgrid),intent(in)   :: mg
-type(s_wf_info),intent(in) :: info
-complex(8) :: psi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),   &
-               1:info%numo,info%ik_s:info%ik_e)
-complex(8) :: psi2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),   &
-               1:info%numo,info%ik_s:info%ik_e)
+type(s_rgrid),intent(in)           :: mg
+type(s_wf_info),intent(in)         :: info
+type(s_wavefunction),intent(inout) :: spsi
+complex(8) :: psi2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,   &
+               1:info%numo,info%ik_s:info%ik_e,1)
 integer :: iter,p,q,iflag
 integer :: ik
 integer :: ix,iy,iz
@@ -110,7 +109,7 @@ orbital : do p=pstart(is),pend(is)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        sum0=sum0+conjg(psi_in(ix,iy,iz,q,ik))*psi_in(ix,iy,iz,p,ik)
+        sum0=sum0+conjg(spsi%zwf(ix,iy,iz,1,q,ik,1))*spsi%zwf(ix,iy,iz,1,p,ik,1)
       end do
       end do
       end do
@@ -120,7 +119,7 @@ orbital : do p=pstart(is),pend(is)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        psi_in(ix,iy,iz,p,ik)=psi_in(ix,iy,iz,p,ik)-sum1*psi_in(ix,iy,iz,q,ik)
+        spsi%zwf(ix,iy,iz,1,p,ik,1)=spsi%zwf(ix,iy,iz,1,p,ik,1)-sum1*spsi%zwf(ix,iy,iz,1,q,ik,1)
       end do
       end do
       end do
@@ -134,7 +133,7 @@ orbital : do p=pstart(is),pend(is)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          cmatbox_m(ix,iy,iz)=psi_in(ix,iy,iz,q_myob,ik)
+          cmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,q_myob,ik,1)
         end do
         end do
         end do
@@ -147,7 +146,7 @@ orbital : do p=pstart(is),pend(is)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          sum0=sum0+conjg(cmatbox_m(ix,iy,iz))*psi_in(ix,iy,iz,p_myob,ik)
+          sum0=sum0+conjg(cmatbox_m(ix,iy,iz))*spsi%zwf(ix,iy,iz,1,p_myob,ik,1)
         end do
         end do
         end do
@@ -159,7 +158,7 @@ orbital : do p=pstart(is),pend(is)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          psi_in(ix,iy,iz,p_myob,ik)=psi_in(ix,iy,iz,p_myob,ik)-sum1*cmatbox_m(ix,iy,iz)
+          spsi%zwf(ix,iy,iz,1,p_myob,ik,1)=spsi%zwf(ix,iy,iz,1,p_myob,ik,1)-sum1*cmatbox_m(ix,iy,iz)
         end do
         end do
         end do
@@ -172,7 +171,7 @@ orbital : do p=pstart(is),pend(is)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      sum0=sum0+abs(psi_in(ix,iy,iz,p_myob,ik))**2
+      sum0=sum0+abs(spsi%zwf(ix,iy,iz,1,p_myob,ik,1))**2
     end do
     end do
     end do
@@ -184,7 +183,7 @@ orbital : do p=pstart(is),pend(is)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      xk(ix,iy,iz)=psi_in(ix,iy,iz,p_myob,ik)/sqrt(sum1)
+      xk(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,p_myob,ik,1)/sqrt(sum1)
       tpsi(ix,iy,iz)=xk(ix,iy,iz)
     end do
     end do
@@ -196,7 +195,7 @@ orbital : do p=pstart(is),pend(is)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      psi2(ix,iy,iz,p_myob,ik)=hxk(ix,iy,iz)
+      psi2(ix,iy,iz,1,p_myob,ik,1)=hxk(ix,iy,iz)
     end do
     end do
     end do
@@ -237,7 +236,7 @@ orbital : do p=pstart(is),pend(is)
         do iz=iwk3sta(3),iwk3end(3)
         do iy=iwk3sta(2),iwk3end(2)
         do ix=iwk3sta(1),iwk3end(1)
-          sum0=sum0+conjg(psi_in(ix,iy,iz,q,ik))*gk(ix,iy,iz)
+          sum0=sum0+conjg(spsi%zwf(ix,iy,iz,1,q,ik,1))*gk(ix,iy,iz)
         end do
         end do
         end do
@@ -246,7 +245,7 @@ orbital : do p=pstart(is),pend(is)
         do iz=iwk3sta(3),iwk3end(3)
         do iy=iwk3sta(2),iwk3end(2)
         do ix=iwk3sta(1),iwk3end(1)
-          gk(ix,iy,iz)=gk(ix,iy,iz)-sum1*psi_in(ix,iy,iz,q,ik)
+          gk(ix,iy,iz)=gk(ix,iy,iz)-sum1*spsi%zwf(ix,iy,iz,1,q,ik,1)
         end do
         end do
         end do
@@ -260,7 +259,7 @@ orbital : do p=pstart(is),pend(is)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            cmatbox_m(ix,iy,iz)=psi_in(ix,iy,iz,q_myob,ik)
+            cmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,q_myob,ik,1)
           end do
           end do
           end do
@@ -364,7 +363,7 @@ orbital : do p=pstart(is),pend(is)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      psi_in(ix,iy,iz,p_myob,ik)=xk(ix,iy,iz)/sqrt(sum0)
+      spsi%zwf(ix,iy,iz,1,p_myob,ik,1)=xk(ix,iy,iz)/sqrt(sum0)
     end do
     end do
     end do

@@ -474,7 +474,31 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(mg,info,zpsi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%zwf(ix,iy,iz,1,iob,ik,1)=zpsi(ix,iy,iz,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+          call DTcg_periodic(mg,info,spsi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,iob,ik,1)
+            end do
+            end do
+            end do
+          end do
+          end do
         end select
       end select
       elp3(182)=get_wtime()
@@ -777,7 +801,31 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,zpsi,iflag)
         case('n')
-          call DTcg_periodic(mg,info,zpsi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%zwf(ix,iy,iz,1,iob,ik,1)=zpsi(ix,iy,iz,iob,ik)
+            end do
+            end do
+            end do
+          end do
+          end do
+          call DTcg_periodic(mg,info,spsi,iflag)
+          do ik=k_sta,k_end
+          do iob=1,iobnum
+!$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,iob,ik,1)
+            end do
+            end do
+            end do
+          end do
+          end do
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
