@@ -169,9 +169,9 @@ contains
     info%ik_s = 1
     info%ik_e = 1
     info%numk = 1
-    info%i1_s = 1
-    info%i1_e = 1
-    info%num1 = 1
+    info%im_s = 1
+    info%im_e = 1
+    info%numm = 1
     info%if_divide_rspace = .false.
     allocate(tpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1) &
            ,htpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3),1,1,1,1))
