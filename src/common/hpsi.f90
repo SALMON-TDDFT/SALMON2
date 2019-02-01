@@ -44,7 +44,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-  norb = Nspin* info%numo * info%numk * info%num1
+  norb = Nspin* info%numo * info%numk * info%numm
 
   if_kAc = allocated(stencil%kAc)
 
@@ -144,7 +144,7 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-  norb = Nspin* info%numo * info%numk * info%num1
+  norb = Nspin* info%numo * info%numk * info%numm
 
   Nlma = ppg%Nlma
 
@@ -256,7 +256,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-  norb = Nspin* info%numo * info%numk * info%num1
+  norb = Nspin* info%numo * info%numk * info%numm
 
   Nlma = ppg%Nlma
   if_zproj = allocated(ppg%zproj)
