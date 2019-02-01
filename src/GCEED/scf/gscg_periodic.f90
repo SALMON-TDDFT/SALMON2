@@ -16,8 +16,8 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,info,psi_in,iflag)
-  use structures, only: s_rgrid,s_wf_info
+subroutine gscg_periodic(mg,info,spsi,iflag)
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_id_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
@@ -30,8 +30,7 @@ subroutine gscg_periodic(mg,info,psi_in,iflag)
   
   type(s_rgrid),intent(in) :: mg
   type(s_wf_info) :: info
-  complex(8) :: psi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),  &
-                 1:info%numo,info%ik_s:info%ik_e)
+  type(s_wavefunction),intent(inout) :: spsi
   integer :: iter,iob,job,iflag
   integer :: ik
   integer :: ix,iy,iz
@@ -99,7 +98,7 @@ subroutine gscg_periodic(mg,info,psi_in,iflag)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        zxk_ob(ix,iy,iz,iob_myob)=psi_in(ix,iy,iz,iob_myob,ik)
+        zxk_ob(ix,iy,iz,iob_myob)=spsi%zwf(ix,iy,iz,1,iob_myob,ik,1)
         tpsi(ix,iy,iz)=zxk_ob(ix,iy,iz,iob_myob)
       end do
       end do
@@ -143,7 +142,7 @@ subroutine gscg_periodic(mg,info,psi_in,iflag)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              sum0=sum0+conjg(psi_in(ix,iy,iz,job,ik))*zgk_ob(ix,iy,iz,iob)
+              sum0=sum0+conjg(spsi%zwf(ix,iy,iz,1,job,ik,1))*zgk_ob(ix,iy,iz,iob)
             end do
             end do
             end do
@@ -161,7 +160,7 @@ subroutine gscg_periodic(mg,info,psi_in,iflag)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zgk_ob(ix,iy,iz,iob)=zgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*psi_in(ix,iy,iz,job,ik)
+              zgk_ob(ix,iy,iz,iob)=zgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%zwf(ix,iy,iz,1,job,ik,1)
             end do
             end do
             end do
@@ -181,7 +180,7 @@ subroutine gscg_periodic(mg,info,psi_in,iflag)
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
               do ix=mg%is(1),mg%ie(1)
-                cmatbox_m(ix,iy,iz)=psi_in(ix,iy,iz,job_myob,ik)
+                cmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,job_myob,ik,1)
               end do
               end do
               end do
@@ -310,7 +309,7 @@ subroutine gscg_periodic(mg,info,psi_in,iflag)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            psi_in(ix,iy,iz,iob_myob,ik)=zxk_ob(ix,iy,iz,iob_myob)/sqrt(xkxk_ob(iob_allob))
+            spsi%zwf(ix,iy,iz,1,iob_myob,ik,1)=zxk_ob(ix,iy,iz,iob_myob)/sqrt(xkxk_ob(iob_allob))
           end do
           end do
           end do
