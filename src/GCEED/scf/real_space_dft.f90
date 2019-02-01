@@ -477,7 +477,8 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,info,spsi,iflag)
+          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
         end select
@@ -790,7 +791,8 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,info,spsi,iflag)
+          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
         end select

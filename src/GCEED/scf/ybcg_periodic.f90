@@ -24,7 +24,6 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   use misc_routines, only: get_wtime
   !$ use omp_lib
   implicit none
-  
   type(s_rgrid),intent(in)           :: mg
   type(s_wf_info),intent(in)         :: info
   type(s_wavefunction),intent(inout) :: spsi
