@@ -185,7 +185,7 @@ Subroutine prep_ps_periodic(property)
   end if
 
   call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
-                   Lx,Ly,Lz,NL,Hx,Hy,Hz,aLx,aLy,aLz,  &
+                   Lx,Ly,Lz,NL,Hx,Hy,Hz,  &
                    flag_use_grad_wf_on_force,property)
 
   rinv_hxyz=1.d0/(Hx*Hy*Hz)
