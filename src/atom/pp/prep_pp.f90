@@ -165,6 +165,7 @@ subroutine init_jxyz(ppg)
   allocate(ppg%jxx( ppg%nps,natom))
   allocate(ppg%jyy( ppg%nps,natom))
   allocate(ppg%jzz( ppg%nps,natom))
+  allocate(ppg%rxyz(3,ppg%nps,natom))
 
 end subroutine init_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -175,6 +176,7 @@ subroutine finalize_jxyz(ppg)
 
   deallocate(ppg%jxyz)
   deallocate(ppg%jxx,ppg%jyy,ppg%jzz)
+  deallocate(ppg%rxyz)
 
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -334,6 +336,9 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
             ppg%jxx( j,a)=ix
             ppg%jyy( j,a)=iy
             ppg%jzz( j,a)=iz
+            ppg%rxyz(1,j,a)=dble(ix)*aLx
+            ppg%rxyz(2,j,a)=dble(iy)*aLy
+            ppg%rxyz(3,j,a)=dble(iz)*aLz
           endif
         endif
       enddo
@@ -538,9 +543,9 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   !!$omp parallel
   !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,duvr,ilma)
      do j=1,ppg%mps(a)
-       x=ppg%jxyz(1,j,a)*hx+rshift(1)-(rion(1,a)+ppg%jxx(j,a)*alx)
-       y=ppg%jxyz(2,j,a)*hy+rshift(2)-(rion(2,a)+ppg%jyy(j,a)*aly)
-       z=ppg%jxyz(3,j,a)*hz+rshift(3)-(rion(3,a)+ppg%jzz(j,a)*alz)
+       x=ppg%jxyz(1,j,a)*hx+rshift(1)-(rion(1,a)+ppg%rxyz(1,j,a))
+       y=ppg%jxyz(2,j,a)*hy+rshift(2)-(rion(2,a)+ppg%rxyz(2,j,a))
+       z=ppg%jxyz(3,j,a)*hz+rshift(3)-(rion(3,a)+ppg%rxyz(3,j,a))
        r=sqrt(x*x+y*y+z*z)+1d-50
        do ir=1,pp%nrps(ik)
          if(pp%radnl(ir,ik).gt.r) exit
