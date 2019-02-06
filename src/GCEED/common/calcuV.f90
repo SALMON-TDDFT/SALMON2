@@ -23,7 +23,6 @@ integer :: iatom,jj,lm
   integer :: i,ik,ix,iy,iz,l
   integer :: nl
 
-  real(8) :: alx,aly,alz
   real(8) :: hx,hy,hz
   integer :: lx(lg_num(1)*lg_num(2)*lg_num(3))
   integer :: ly(lg_num(1)*lg_num(2)*lg_num(3))
@@ -50,9 +49,6 @@ integer :: iatom,jj,lm
   hx=Hgs(1)
   hy=Hgs(2)
   hz=Hgs(3)
-  alx=Hgs(1)*dble(lg_num(1))
-  aly=Hgs(2)*dble(lg_num(2))
-  alz=Hgs(3)*dble(lg_num(3))
 
   if(iperiodic==0)then
     do iz=lg_sta(3),lg_end(3)
@@ -97,11 +93,11 @@ integer :: iatom,jj,lm
      
 
   call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
-               lx,ly,lz,nl,hx,hy,hz,alx,aly,alz,  &
+               lx,ly,lz,nl,hx,hy,hz,  &
                flag_use_grad_wf_on_force,property)
 
   call calc_uv(pp,ppg_all,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
-               lx,ly,lz,nl,hx,hy,hz,alx,aly,alz,  &
+               lx,ly,lz,nl,hx,hy,hz,  &
                flag_use_grad_wf_on_force,property)
 
   rinv_hvol=1.d0/Hvol

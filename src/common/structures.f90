@@ -89,6 +89,7 @@ module structures
     integer,allocatable :: jxx(:,:)
     integer,allocatable :: jyy(:,:)
     integer,allocatable :: jzz(:,:)
+    real(8),allocatable :: rxyz(:,:,:)
     real(8),allocatable :: uv(:,:)
     real(8),allocatable :: duv(:,:,:)
     integer :: nlma
