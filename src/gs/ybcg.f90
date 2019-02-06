@@ -17,11 +17,10 @@
 !======================================= Conjugate-Gradient minimization
 
 subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
-                iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
-                nproc_mxin_mul)
+                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
+  use salmon_parallel, only: nproc_group_grid
   use salmon_communication, only: comm_bcast
   use misc_routines, only: get_wtime
   use inner_product_sub
@@ -42,23 +41,16 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: nproc_ob_spin
   integer,intent(in)    :: iparaway_ob
-  integer,intent(in)    :: iup_array(4)
-  integer,intent(in)    :: idw_array(4)
-  integer,intent(in)    :: jup_array(4)
-  integer,intent(in)    :: jdw_array(4)
-  integer,intent(in)    :: kup_array(4)
-  integer,intent(in)    :: kdw_array(4)
+  type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
-  integer,intent(in)    :: nproc_mxin_mul
   integer,parameter :: nd=4
   integer :: j,ind
   integer :: iter,iob,job
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
   integer :: nspin
-  type(s_wf_info)       :: info_ob
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
@@ -90,16 +82,6 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
     end do
   end do
 
-  info_ob%im_s = 1
-  info_ob%im_e = 1
-  info_ob%numm = 1
-  info_ob%ik_s = 1
-  info_ob%ik_e = 1
-  info_ob%numk = 1
-  info_ob%io_s = 1
-  info_ob%io_e = 1
-  info_ob%numo = 1
-
   mg%is_overlap = mg%is - 4
   mg%ie_overlap = mg%ie + 4
 
@@ -115,16 +97,6 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
   do j=mg%is_overlap(3),mg%ie_overlap(3)
     mg%idz(j) = j
   end do
-
-  info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
-  info_ob%irank_overlap(1) = iup_array(1)
-  info_ob%irank_overlap(2) = idw_array(1)
-  info_ob%irank_overlap(3) = jup_array(1)
-  info_ob%irank_overlap(4) = jdw_array(1)
-  info_ob%irank_overlap(5) = kup_array(1)
-  info_ob%irank_overlap(6) = kdw_array(1)
-  info_ob%icomm_overlap = nproc_group_korbital
-  info_ob%icomm_pseudo = nproc_group_korbital
 
   nspin=1
   allocate(v(1))
