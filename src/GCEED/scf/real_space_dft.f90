@@ -482,7 +482,9 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
+                iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
+                nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
                              iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
@@ -495,7 +497,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
+        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -802,7 +804,9 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+                iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
+                nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
                              iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
@@ -812,7 +816,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
+        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

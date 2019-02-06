@@ -2,6 +2,9 @@ set(SOURCES
     eigen_subdiag_${FILE_MATHLIB}.f90
     eigen_subdiag_periodic_${FILE_MATHLIB}.f90
     gscg.f90
+    gscg_periodic.f90
+    rmmdiis_eigen.f90
+    rmmdiis_eigen_lapack.f90
     ybcg.f90
     ybcg_periodic.f90
    )

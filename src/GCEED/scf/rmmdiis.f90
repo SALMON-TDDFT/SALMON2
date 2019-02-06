@@ -18,7 +18,7 @@
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
+subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
   use inputoutput, only: ncg,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction
   use salmon_parallel, only: nproc_group_global
@@ -30,6 +30,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,
   type(s_wf_info) :: info
   type(s_wavefunction) :: spsi
   integer,intent(in)    :: itotmst
+  integer,intent(in)    :: mst(2)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: hvol
   integer,intent(out)   :: iflag_diisjump
@@ -124,7 +125,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,
   ! Solve by Lagrange's method of undetermined multipliers, and obtain 
   ! Rbar from previous combinations of phi and R.
       if(iflagdiis(iob) == 1)then
-        call diis_core(mg,phi,R1,phibar,Rbar,iob,iter,iobcheck)
+        call diis_core(mg,itotmst,mst,hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
       end if
     end if
   
