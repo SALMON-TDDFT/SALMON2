@@ -505,8 +505,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                 nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
-                             iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
-                             nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
         end select
       end select
       elp3(182)=get_wtime()
@@ -826,8 +825,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                 nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
-                             iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
-                             nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
