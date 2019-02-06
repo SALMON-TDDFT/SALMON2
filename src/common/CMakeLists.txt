@@ -14,6 +14,7 @@ set(SOURCES
    stencil.f90
    update_overlap.f90
    structures.f90
+   density_matrix.f90
    )
 
 add_library(${SALMON_COMMON_LIB} STATIC ${SOURCES})

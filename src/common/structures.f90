@@ -24,6 +24,7 @@ module structures
   end type s_system
 
   type s_rgrid
+    integer              :: ndir                    ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
     integer,dimension(3) :: is,ie,num &             ! num=ie-is+1
                            ,is_overlap,ie_overlap & ! is_overlap=is-4, ie_overlap=ie+4
                            ,is_array,ie_array       ! allocate( array(is_array(1):ie_array(1), ...) )
@@ -110,6 +111,12 @@ module structures
   type s_force
     real(8),allocatable :: force(:,:) ! force(1:3,1:NI)
   end type s_force
+
+  type s_dmatrix
+    complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=-Nd~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
+  end type s_dmatrix
+
+!===================================================================================================================================
 
 contains
 
