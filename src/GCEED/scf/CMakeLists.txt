@@ -11,7 +11,6 @@ set(SOURCES
     gram_schmidt_periodic.f90
     prep_ini.f90
     real_space_dft.f90
-    rmmdiis.f90
     set_numcpu_scf.f90
     simple_mixing.f90
     subdgemm_lapack.f90

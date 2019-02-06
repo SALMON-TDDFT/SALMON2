@@ -18,17 +18,20 @@
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
-  use inputoutput, only: ncg,lambda1_diis,lambda2_diis
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction
+subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+                   info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+  use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   !$ use omp_lib
   implicit none
   
-  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid),intent(inout) :: mg
   type(s_wf_info) :: info
   type(s_wavefunction) :: spsi
+  type(s_stencil) :: stencil
+  type(s_pp_grid) :: ppg
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
   integer,intent(in)    :: num_kpoints_rd
@@ -37,7 +40,17 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   real(8),intent(out)   :: elp3(3000)
   real(8),intent(in)    :: esp(itotmst,num_kpoints_rd)
   real(8),intent(out)   :: norm_diff_psi_stock(itotmst,1)
-  integer :: iob,iter,ix,iy,iz
+  type(s_wf_info)       :: info_ob
+  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
+  real(8),intent(in)    :: hgs(3)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  integer,parameter :: nd=4
+  integer :: j,ind
+  integer :: iob,iob_allob,iter,ix,iy,iz
+  integer :: nspin
+  type(s_wavefunction)  :: stpsi
+  type(s_wavefunction)  :: shtpsi
+  type(s_scalar),allocatable :: v(:)
   integer,allocatable :: iflagdiis(:)
   integer,allocatable :: iobcheck(:,:)
   real(8),allocatable :: phi(:,:,:,:)
@@ -49,10 +62,42 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   real(8) :: rbox1
   real(8),allocatable :: epsdiis(:,:),Rnorm(:,:)
   real(8) :: rnorm_diff_psi(itotmst,1)
-  real(8) :: tpsi(mg%is_array(1):mg%ie_array(1),  &
-                  mg%is_array(2):mg%ie_array(2),  &
-                  mg%is_array(3):mg%ie_array(3))
   
+  allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),1,1,1,1))
+  allocate(shtpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                      mg%is_array(2):mg%ie_array(2),  &
+                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
+
+  stencil%lap0 = 0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+  do j=1,3
+    do ind=1,4
+      stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+      stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
+    end do
+  end do
+
+  mg%is_overlap = mg%is - 4
+  mg%ie_overlap = mg%ie + 4
+
+  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
+          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
+          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
+  do j=mg%is_overlap(1),mg%ie_overlap(1)
+    mg%idx(j) = j
+  end do
+  do j=mg%is_overlap(2),mg%ie_overlap(2)
+    mg%idy(j) = j
+  end do
+  do j=mg%is_overlap(3),mg%ie_overlap(3)
+    mg%idz(j) = j
+  end do
+
+  nspin=1
+  allocate(v(1))
+  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+
   allocate (htphi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   allocate (phibox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   allocate (Rbox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
@@ -70,7 +115,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
   do ix=mg%is_array(1),mg%ie_array(1)
-    tpsi(ix,iy,iz)=0.d0
+    stpsi%rwf(ix,iy,iz,1,1,1,1)=0.d0
   end do
   end do
   end do
@@ -92,7 +137,10 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   iflag_diisjump=0
   
   do iob=1,info%numo
+    call calc_allob(iob,iob_allob)
   
+    call setv(mg,vlocal,v,iob_allob,mst)
+
     Iteration : do iter=1,ncg
   
     if(iter == 1) then
@@ -101,16 +149,27 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
       do iz=mg%is(3),mg%ie(3)
         phi(:,:,iz,0)=spsi%rwf(:,:,iz,1,iob,1,1)
       end do
+
   !$OMP parallel do private(iz,iy,ix)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      tpsi(ix,iy,iz)=phi(ix,iy,iz,0)
-    end do
-    end do
-    end do
-  
-      call r_hpsi2_buf(tpsi,htphi(:,:,:),iob,1,0,0)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        stpsi%rwf(ix,iy,iz,1,1,1,1)=phi(ix,iy,iz,0)
+      end do
+      end do
+      end do
+
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        htphi(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+      end do
+      end do
+      end do
+
       call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),0),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
   
   !$OMP parallel do
@@ -154,12 +213,22 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        tpsi(ix,iy,iz)=phi(ix,iy,iz,iter)
+        stpsi%rwf(ix,iy,iz,1,1,1,1)=phi(ix,iy,iz,iter)
+      end do
+      end do
+      end do
+
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        htphi(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
       end do
       end do
       end do
   
-      call r_hpsi2_buf(tpsi,htphi(:,:,:),iob,1,0,0)
       call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
@@ -208,12 +277,22 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        tpsi(ix,iy,iz)=phi(ix,iy,iz,iter)
+        stpsi%rwf(ix,iy,iz,1,1,1,1)=phi(ix,iy,iz,iter)
       end do
       end do
       end do
-  
-      call r_hpsi2_buf(tpsi,htphi(:,:,:),iob,1,0,0)
+
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        htphi(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+      end do
+      end do
+      end do
+
       call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
       
       end if
@@ -224,16 +303,31 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   
   iflag_diisjump=0
   do iob=1,info%numo
+    call calc_allob(iob,iob_allob)
+
+    call setv(mg,vlocal,v,iob_allob,mst)
+
   !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      tpsi(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,iob,1,1)
+      stpsi%rwf(ix,iy,iz,1,1,1,1)=spsi%rwf(ix,iy,iz,1,iob,1,1)
     end do
     end do
     end do
-  
-    call r_hpsi2_buf(tpsi,htphi(:,:,:),iob,1,0,0)
+
+    call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      htphi(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+    end do
+    end do
+    end do
+
+
     call inner_product3(mg,spsi%rwf(mg%is(1),mg%is(2),mg%is(3),1,iob,1,1),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
     rbox1=sum(spsi%rwf(:,:,:,1,iob,1,1)*htphi(:,:,:))*hvol
     if(rbox1-esp(iob,1)>5.d0) iflag_diisjump=1
@@ -244,21 +338,34 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   else if(iflag_diisjump==1)then
     spsi%rwf=psi_stock
     do iob=1,info%numo
+      call calc_allob(iob,iob_allob)
     
+      call setv(mg,vlocal,v,iob_allob,mst)
+
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
         phi(:,:,iz,0)=spsi%rwf(:,:,iz,1,iob,1,1)
       end do
+  
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        tpsi(ix,iy,iz)=phi(ix,iy,iz,0)
+        stpsi%rwf(ix,iy,iz,1,1,1,1)=phi(ix,iy,iz,0)
       end do
       end do
       end do
-  
-      call r_hpsi2_buf(tpsi,htphi(:,:,:),iob,1,0,0)
+
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        htphi(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+      end do
+      end do
+      end do
   
       call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),0),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
   
@@ -288,7 +395,61 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   end if 
   deallocate(iobcheck) 
   
+  deallocate(stpsi%rwf,shtpsi%rwf)
+  deallocate(mg%idx,mg%idy,mg%idz)
+  deallocate(v(1)%f)
+  deallocate(v)
+
   return
   
 end subroutine rmmdiis
 
+subroutine setv(mg,vlocal,v,iob_allob,mst)
+  use inputoutput, only: ispin
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  implicit none
+  type(s_rgrid),intent(inout) :: mg
+  type(s_scalar)        :: v(1)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  integer,intent(in)    :: iob_allob
+  integer,intent(in)    :: mst(2)
+  integer :: ix,iy,iz
+
+  if(iob_allob<=mst(1))then
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,1)
+    end do
+    end do
+    end do
+  else
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,2)
+    end do
+    end do
+    end do
+  end if
+
+end subroutine
+
+subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use hpsi_sub, only: hpsi
+  implicit none
+  type(s_wavefunction)  :: stpsi
+  type(s_wavefunction)  :: shtpsi
+  type(s_wf_info)       :: info_ob
+  type(s_rgrid),intent(inout) :: mg
+  type(s_scalar)        :: v(1)
+  integer :: nspin
+  type(s_stencil) :: stencil
+  type(s_pp_grid) :: ppg
+
+  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+
+end subroutine hpsi_test_diis

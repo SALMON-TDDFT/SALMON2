@@ -5,6 +5,7 @@ set(SOURCES
     gscg_periodic.f90
     rmmdiis_eigen.f90
     rmmdiis_eigen_lapack.f90
+    rmmdiis.f90
     ybcg.f90
     ybcg_periodic.f90
    )
