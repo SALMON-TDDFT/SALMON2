@@ -196,7 +196,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
       end do
       end do
       end do
-  
+ 
       call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
  
   !$OMP parallel do private(iz,iy,ix) 

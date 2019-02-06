@@ -2,6 +2,7 @@ set(SOURCES
     eigen_subdiag_${FILE_MATHLIB}.f90
     eigen_subdiag_periodic_${FILE_MATHLIB}.f90
     ybcg.f90
+    ybcg_periodic.f90
    )
 
 add_library(${SALMON_GS_LIB} STATIC ${SOURCES})
