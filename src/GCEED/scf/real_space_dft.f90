@@ -501,8 +501,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
-                iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
-                nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
@@ -821,8 +820,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
-                iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,  &
-                nproc_mxin_mul,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
