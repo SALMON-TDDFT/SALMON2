@@ -23,7 +23,6 @@ set(SOURCES
     total_energy_periodic_scf.f90
     total_energy_periodic_scf_esp.f90
     write_eigen.f90
-    ybcg.f90
     ybcg_periodic.f90
     )
 
