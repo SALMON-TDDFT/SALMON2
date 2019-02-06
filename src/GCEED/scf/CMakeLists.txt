@@ -9,7 +9,6 @@ set(SOURCES
     deallocate_sendrecv.f90
     gram_schmidt.f90
     gram_schmidt_periodic.f90
-    gscg.f90
     gscg_periodic.f90
     prep_ini.f90
     real_space_dft.f90

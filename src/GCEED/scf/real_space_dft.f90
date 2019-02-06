@@ -470,7 +470,9 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
-                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                 iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,   &
+                 nproc_Mxin_mul)
         case('n')
           call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
                     iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,   &
@@ -788,7 +790,9 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                     iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,   &
+                     nproc_Mxin_mul)
         case('n')
           call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
                     iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array,bnmat,cnmat,hgs,ppg,vlocal,   &
