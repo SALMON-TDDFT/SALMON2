@@ -42,7 +42,7 @@ subroutine Real_Space_DFT
 use structures, only: s_rgrid, s_wf_info, s_wavefunction
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
-                           nproc_group_spin
+                           nproc_group_spin, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
@@ -59,6 +59,7 @@ real(8) :: rNebox1,rNebox2
 integer :: itmg
 type(s_rgrid) :: mg
 type(s_wf_info) :: info
+type(s_wf_info) :: info_ob
 type(s_wavefunction) :: spsi
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -381,6 +382,25 @@ info%io_s=1
 info%io_e=iobnum
 info%numo=iobnum
 
+info_ob%im_s = 1
+info_ob%im_e = 1
+info_ob%numm = 1
+info_ob%ik_s = 1
+info_ob%ik_e = 1
+info_ob%numk = 1
+info_ob%io_s = 1
+info_ob%io_e = 1
+info_ob%numo = 1
+info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
+info_ob%irank_overlap(1) = iup_array(1)
+info_ob%irank_overlap(2) = idw_array(1)
+info_ob%irank_overlap(3) = jup_array(1)
+info_ob%irank_overlap(4) = jdw_array(1)
+info_ob%irank_overlap(5) = kup_array(1)
+info_ob%irank_overlap(6) = kdw_array(1)
+info_ob%icomm_overlap = nproc_group_korbital
+info_ob%icomm_pseudo = nproc_group_korbital
+
 select case(iperiodic)
 case(0)
   allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
@@ -470,17 +490,21 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
-                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
       elp3(182)=get_wtime()
@@ -489,7 +513,8 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
+        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -784,23 +809,28 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
+                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
+        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

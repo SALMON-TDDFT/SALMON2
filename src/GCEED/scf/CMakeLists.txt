@@ -9,12 +9,8 @@ set(SOURCES
     deallocate_sendrecv.f90
     gram_schmidt.f90
     gram_schmidt_periodic.f90
-    gscg.f90
-    gscg_periodic.f90
     prep_ini.f90
     real_space_dft.f90
-    rmmdiis_eigen.f90
-    rmmdiis.f90
     set_numcpu_scf.f90
     simple_mixing.f90
     subdgemm_lapack.f90
@@ -23,8 +19,6 @@ set(SOURCES
     total_energy_periodic_scf.f90
     total_energy_periodic_scf_esp.f90
     write_eigen.f90
-    ybcg.f90
-    ybcg_periodic.f90
     )
 
 add_library(${GCEED_SCF_LIB} ${SOURCES})
