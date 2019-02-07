@@ -18,8 +18,8 @@
 
 subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,  &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
-                         info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
-  use inputoutput, only: ncg,ispin
+                         info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
+  use inputoutput, only: ncg,ispin,natom
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_id_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
@@ -52,7 +52,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: num_kpoints_rd
-  real(8),intent(in)    :: k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd)
+  real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   integer,parameter :: nd=4
   integer :: j,ind
   integer :: iter,iob,job
@@ -79,7 +79,12 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   integer :: iroot
   integer :: is_sta,is_end
   integer :: iter_bak_ob(itotmst)
-  
+  integer :: ilma
+  complex(8) :: ekr(ppg%nps,natom)
+  real(8) :: x,y,z
+  integer :: a,iatom
+  complex(8),parameter :: zi=(0.d0,1.d0)
+
   allocate(stpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
@@ -89,6 +94,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
 
   allocate(stencil%kAc(1:1,3))
 
+  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   do j=1,3
     do ind=1,4
       stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
@@ -116,6 +122,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   allocate(v(1))
   allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
+
   call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -143,7 +150,22 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   do ik=info%ik_s,info%ik_e
   do is=is_sta,is_end
 
-    stencil%lap0 = 0.5d0*ksquare(ik) -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+    if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,1:1))
+    do a=1,natom
+      do j=1,ppg%mps(a)
+        x=ppg%rxyz(1,j,a)
+        y=ppg%rxyz(2,j,a)
+        z=ppg%rxyz(3,j,a)
+        ekr(j,a)=exp(zi*(k_rd(1,ik)*x+k_rd(2,ik)*y+k_rd(3,ik)*z))
+      end do
+    end do
+    do ilma=1,ppg%nlma
+      iatom = ppg%ia_tbl(ilma)
+      do j=1,ppg%mps(iatom)
+        ppg%zproj(j,ilma,1) = conjg(ekr(j,iatom)) * ppg%uv(j,ilma)
+      end do
+    end do
+
     do j=1,3
       stencil%kAc(1,j) = k_rd(j,ik)
     end do
@@ -437,6 +459,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   deallocate(mg%idx,mg%idy,mg%idz)
   deallocate(v(1)%f)
   deallocate(v)
+  if(allocated(ppg%zproj)) deallocate(ppg%zproj)
 
   return
   

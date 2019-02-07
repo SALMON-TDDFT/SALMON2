@@ -501,10 +501,10 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
-                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
-                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
       elp3(182)=get_wtime()
@@ -820,10 +820,10 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
-                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
           call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
-                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd,ksquare)
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
