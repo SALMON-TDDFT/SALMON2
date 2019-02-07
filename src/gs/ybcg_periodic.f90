@@ -82,7 +82,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
-  allocate(stencil%kAc(ik:ik,3))
+  allocate(stencil%kAc(1:1,3))
 
   do j=1,3
     do ind=1,4
