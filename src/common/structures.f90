@@ -209,4 +209,9 @@ contains
     DEAL(x%force)
   end subroutine deallocate_force
 
+  subroutine deallocate_dmatrix(dm)
+    type(s_dmatrix) :: dm
+    DEAL(dm%rho)
+  end subroutine deallocate_dmatrix
+
 end module structures

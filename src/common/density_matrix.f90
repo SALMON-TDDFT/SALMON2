@@ -114,6 +114,7 @@ contains
   subroutine calc_current(curr,nspin,ngrid,rg,stencil,info,psi,ppg,occ,dmat)
     use structures
     use salmon_communication, only: comm_summation
+    use salmon_parallel, only: nproc_group_rho,nproc_group_korbital !????????
     implicit none
     integer,intent(in) :: nspin,ngrid
     type(s_rgrid)  ,intent(in) :: rg
@@ -126,32 +127,33 @@ contains
     real(8) :: curr(3,nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io
-    real(8) :: wrk(3),wrk_sum(3)
+    real(8) :: wrk(3),wrk2(3)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
-      wrk_sum = 0d0
 
-      call stencil_current(wrk,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,rg%is,rg%ie,rg%idx,rg%idy,rg%idz,rg%ndir)
-      wrk_sum = wrk_sum + wrk
-
+      wrk2 = 0d0
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
         call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%kAc(ik,:),rg%is_array,rg%ie_array,rg%is,rg%ie)
-        wrk_sum = wrk_sum + wrk * occ(io,ik)
+        wrk2 = wrk2 + wrk * occ(io,ik)
 
         call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,rg%is_array,rg%ie_array,ik)
-        wrk_sum = wrk_sum + wrk * occ(io,ik)
+        wrk2 = wrk2 + wrk * occ(io,ik)
 
       end do
       end do
-!      call comm_summation(,,,info%icomm_pseudo) !??????? info%icomm_pseudo ?
+      call comm_summation(wrk2,wrk,3,nproc_group_rho) !??????? nproc_group_rho ?
 
-      curr(:,ispin,im) = wrk_sum / ngrid ! ngrid = aLxyz/Hxyz
+      call stencil_current(wrk2,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,rg%is,rg%ie,rg%idx,rg%idy,rg%idz,rg%ndir)
+      wrk2 = wrk + wrk2
+
+      call comm_summation(wrk2,wrk,3,nproc_group_korbital) !??????? nproc_group_korbital ?
+
+      curr(:,ispin,im) = wrk / ngrid ! ngrid = aLxyz/Hxyz
     end do
     end do
-!    call comm_summation(,,,) !??????? icomm ?
 
     return
 
@@ -274,6 +276,7 @@ contains
   subroutine calc_microscopic_current(curr,nspin,ngrid,rg,stencil,info,psi,ppg,occ,dmat)
     use structures
     use salmon_communication, only: comm_summation
+    use salmon_parallel, only: nproc_group_rho !????????
     implicit none
     integer,intent(in) :: nspin,ngrid
     type(s_rgrid)  ,intent(in) :: rg
@@ -285,36 +288,36 @@ contains
     type(s_dmatrix),intent(in) :: dmat
     type(s_vector)             :: curr(nspin,info%im_s:info%im_e)
     !
-    integer :: ispin,im,ik,io,is(3),ie(3)
-    real(8),allocatable :: wrk(:,:,:,:),wrk_sum(:,:,:,:)
+    integer :: ispin,im,ik,io,is(3),ie(3),nsize
+    real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
     is = rg%is
     ie = rg%ie
-    allocate(wrk(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)),wrk_sum(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)))
+    allocate(wrk(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)),wrk2(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)))
+    nsize = 3* rg%num(1) * rg%num(2) * rg%num(3)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
-      wrk_sum = 0d0
 
-      call stencil_current(wrk,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,is,ie,rg%idx,rg%idy,rg%idz,rg%ndir)
-      wrk_sum = wrk_sum + wrk
-
+      wrk2 = 0d0
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
         call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%kAc(ik,:),rg%is_array,rg%ie_array,is,ie)
-        wrk_sum = wrk_sum + wrk * occ(io,ik)
+        wrk2 = wrk2 + wrk * occ(io,ik)
 
 !       call nonlocal_part
 
       end do
       end do
-!      call comm_summation(,,,info%icomm_pseudo) !??????? info%icomm_pseudo ?
+      call comm_summation(wrk2,wrk,nsize,nproc_group_rho) !??????? nproc_group_rho ?
 
-      curr(ispin,im)%v = wrk_sum
+      call stencil_current(wrk2,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,is,ie,rg%idx,rg%idy,rg%idz,rg%ndir)
+
+      curr(ispin,im)%v = wrk + wrk2
     end do
     end do
 
-    deallocate(wrk,wrk_sum)
+    deallocate(wrk,wrk2)
     return
 
   contains

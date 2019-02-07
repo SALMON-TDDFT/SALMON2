@@ -72,7 +72,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
 
   else
 
-! overlap region communication
+  ! overlap region communication
     if(info%if_divide_rspace) then
       call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !????????
                            ,rg_wf%is,rg_wf%ie,info%irank_overlap,info%icomm_overlap)
