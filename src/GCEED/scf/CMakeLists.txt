@@ -14,8 +14,6 @@ set(SOURCES
     set_numcpu_scf.f90
     simple_mixing.f90
     subdgemm_lapack.f90
-    subspace_diag.f90
-    subspace_diag_periodic.f90
     total_energy_periodic_scf.f90
     total_energy_periodic_scf_esp.f90
     write_eigen.f90

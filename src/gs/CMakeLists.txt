@@ -6,6 +6,8 @@ set(SOURCES
     rmmdiis_eigen.f90
     rmmdiis_eigen_lapack.f90
     rmmdiis.f90
+    subspace_diag.f90
+    subspace_diag_periodic.f90
     ybcg.f90
     ybcg_periodic.f90
    )
