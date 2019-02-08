@@ -39,6 +39,7 @@ END MODULE global_variables_rt
 !=======================================================================
 
 subroutine Real_Time_DFT
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
@@ -46,6 +47,7 @@ use misc_routines, only: get_wtime
 use global_variables_rt
 implicit none
 
+type(s_rgrid) :: mg
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -174,7 +176,7 @@ end if
 elp3(402)=get_wtime()
 
 ! Read SCF data
-call IN_data
+call IN_data(mg)
 
 if(comm_is_root(nproc_id_global))then
   if(icalcforce==1.and.iflag_md==1)then
