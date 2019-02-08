@@ -17,18 +17,22 @@
 !======================================= Conjugate-Gradient minimization
 
 subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
-                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
-  use inputoutput, only: ncg
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction
+                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+  use inputoutput, only: ncg,ispin
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
   use misc_routines, only: get_wtime
+  use hpsi_sub
   !$ use omp_lib
   implicit none
   
-  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid),intent(inout) :: mg
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
+  type(s_stencil) :: stencil
+  type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
@@ -42,9 +46,19 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   real(8),intent(inout) :: rhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:info%numo)
   real(8),intent(inout) :: rgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:info%numo)
   real(8),intent(inout) :: rpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:info%numo)
+  type(s_wf_info)       :: info_ob
+  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
+  real(8),intent(in)    :: hgs(3)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  integer,parameter :: nd=4
+  integer :: j,ind
   integer :: iter,iob,job
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
+  integer :: nspin
+  type(s_wavefunction)  :: stpsi
+  type(s_wavefunction)  :: shtpsi
+  type(s_scalar),allocatable :: v(:)
   real(8) :: sum0,sum1
   real(8) :: sum_ob0(itotmst)
   real(8) :: sum_obmat0(itotmst,itotmst),sum_obmat1(itotmst,itotmst)
@@ -54,10 +68,6 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   real(8) :: uk,alpha,ak,bk,ck
   real(8) , allocatable :: gk(:,:,:)
   real(8) :: elp2(2000)
-  real(8):: tpsi(mg%is_array(1):mg%ie_array(1),  &
-                 mg%is_array(2):mg%ie_array(2),  &
-                 mg%is_array(3):mg%ie_array(3))
-  real(8):: htpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8):: rmatbox_m(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer :: iob_myob,job_myob
   integer :: iob_allob
@@ -65,6 +75,41 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   integer :: iroot
   integer :: is_sta,is_end
   
+  allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),1,1,1,1))
+  allocate(shtpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                      mg%is_array(2):mg%ie_array(2),  &
+                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
+
+  stencil%lap0 = 0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+  do j=1,3
+    do ind=1,4
+      stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+      stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
+    end do
+  end do
+
+  mg%is_overlap = mg%is - 4
+  mg%ie_overlap = mg%ie + 4
+
+  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
+          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
+          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
+  do j=mg%is_overlap(1),mg%ie_overlap(1)
+    mg%idx(j) = j
+  end do
+  do j=mg%is_overlap(2),mg%ie_overlap(2)
+    mg%idy(j) = j
+  end do
+  do j=mg%is_overlap(3),mg%ie_overlap(3)
+    mg%idz(j) = j
+  end do
+
+  nspin=1
+  allocate(v(1))
+  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+
   allocate (gk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
   call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
@@ -73,7 +118,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
   do ix=mg%is_array(1),mg%ie_array(1)
-    tpsi(ix,iy,iz)=0.d0
+    stpsi%rwf(ix,iy,iz,1,1,1,1)=0.d0
   end do
   end do
   end do
@@ -99,17 +144,38 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
       rxk_ob(ix,iy,iz,iob)=spsi%rwf(ix,iy,iz,1,iob,1,1)
-      tpsi(ix,iy,iz)=rxk_ob(ix,iy,iz,iob)
+      stpsi%rwf(ix,iy,iz,1,1,1,1)=rxk_ob(ix,iy,iz,iob)
     end do
     end do
     end do
-    call r_hpsi2_buf(tpsi,htpsi,iob_allob,1,0,0)
+
+    if(iob_allob<=mst(1))then
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,1)
+      end do
+      end do
+      end do
+    else
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,2)
+      end do
+      end do
+      end do
+    end if
+
+    call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
     
   !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rhxk_ob(ix,iy,iz,iob)=htpsi(ix,iy,iz)
+      rhxk_ob(ix,iy,iz,iob)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
     end do
     end do
     end do
@@ -243,17 +309,38 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        tpsi(ix,iy,iz) = rpk_ob(ix,iy,iz,iob)
+        stpsi%rwf(ix,iy,iz,1,1,1,1) = rpk_ob(ix,iy,iz,iob)
       end do
       end do
       end do
-      call r_hpsi2_buf(tpsi,htpsi,iob_allob,1,0,0)
+      
+      if(iob_allob<=mst(1))then
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,1)
+        end do
+        end do
+        end do
+      else
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,2)
+        end do
+        end do
+        end do
+      end if
+
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
       
   !$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-         rgk_ob(ix,iy,iz,iob)=htpsi(ix,iy,iz)
+         rgk_ob(ix,iy,iz,iob)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
       end do
       end do
       end do
@@ -301,6 +388,12 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   end if
   
   deallocate (gk)
+
+  deallocate(stpsi%rwf,shtpsi%rwf)
+  deallocate(mg%idx,mg%idy,mg%idz)
+  deallocate(v(1)%f)
+  deallocate(v)
+
   return
   
 end subroutine sgscg
