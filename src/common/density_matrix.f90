@@ -27,6 +27,7 @@ contains
 
   subroutine calc_density_matrix(dmat,psi,info,rg,nspin,occ)
     use structures
+    use update_overlap_sub
     use salmon_communication, only: comm_summation
     implicit none
     integer        ,intent(in) :: nspin
@@ -36,17 +37,24 @@ contains
     type(s_wavefunction),intent(in) :: psi
     type(s_dmatrix)            :: dmat
     !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize
+    integer :: im,ispin,ik,io,is(3),ie(3),nsize,norb
     complex(8),allocatable :: wrk(:,:,:,:,:),wrk2(:,:,:,:,:)
 
     is = rg%is
     ie = rg%ie
     nsize = Nd* rg%ndir * (rg%num(1)+Nd) * (rg%num(2)+Nd) * (rg%num(3)+Nd)
 
-! real(rwf) & complex(zwf) ?
+!????????? real(rwf) & complex(zwf) ?
 
     allocate( wrk(Nd,rg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) &
             ,wrk2(Nd,rg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) )
+
+  ! overlap region communication
+    if(info%if_divide_rspace) then
+      norb = Nspin* info%numo * info%numk * info%numm
+      call update_overlap_C(psi%zwf,rg%is_array,rg%ie_array,norb,Nd & !????????
+                           ,rg%is,rg%ie,info%irank_r,info%icomm_r)
+    end if
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
