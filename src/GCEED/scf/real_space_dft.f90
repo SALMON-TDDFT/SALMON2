@@ -122,7 +122,7 @@ if(istopt==1)then
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
-    call init_mesh(itmg)
+    call init_mesh(mg,itmg)
     call set_gridcoo
     call init_mesh_s
     call check_ng
@@ -264,7 +264,7 @@ if(istopt==1)then
 !------------------------------ Continue the previous calculation
 
   case(1,3)
-    call IN_data
+    call IN_data(mg)
 
     call allocate_mat
     call set_icoo1d
@@ -366,14 +366,6 @@ else
   end do
   end do
 end if
-
-mg%is(1:3)=mg_sta(1:3)
-mg%ie(1:3)=mg_end(1:3)
-mg%num(1:3)=mg_num(1:3)
-mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-mg%is_array(1:3)=mg_sta(1:3)-Nd
-mg%ie_array(1:3)=mg_end(1:3)+Nd
 
 info%ik_s=k_sta
 info%ik_e=k_end
@@ -1277,19 +1269,21 @@ END subroutine Real_Space_DFT
 !=======================================================================
 !========================================= Grid generation and labelling
 
-SUBROUTINE init_mesh
+SUBROUTINE init_mesh(mg,itmg)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root
 use inputoutput, only: iperiodic
 use global_variables_scf
 implicit none
-
+type(s_rgrid) :: mg
+integer,intent(in) :: itmg
 real(8) :: rLsize1(3)
 
 if(comm_is_root(nproc_id_global))      &
     print *,"----------------------------------- init_mesh"
 
-rLsize1(:)=rLsize(:,img)
+rLsize1(:)=rLsize(:,itmg)
 call setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
            Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
 call check_fourier
@@ -1297,7 +1291,7 @@ call check_fourier
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
 
-call setmg(mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
+call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
            lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori

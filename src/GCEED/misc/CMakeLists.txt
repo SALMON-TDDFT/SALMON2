@@ -6,3 +6,4 @@ set(SOURCES
     )
 
 add_library(${GCEED_MISC_LIB} ${SOURCES})
+add_dependencies(${GCEED_MISC_LIB} ${SALMON_COMMON_LIB})
