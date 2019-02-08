@@ -392,14 +392,13 @@ info_ob%io_s = 1
 info_ob%io_e = 1
 info_ob%numo = 1
 info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
-info_ob%irank_overlap(1) = iup_array(1)
-info_ob%irank_overlap(2) = idw_array(1)
-info_ob%irank_overlap(3) = jup_array(1)
-info_ob%irank_overlap(4) = jdw_array(1)
-info_ob%irank_overlap(5) = kup_array(1)
-info_ob%irank_overlap(6) = kdw_array(1)
-info_ob%icomm_overlap = nproc_group_korbital
-info_ob%icomm_pseudo = nproc_group_korbital
+info_ob%irank_r(1) = iup_array(1)
+info_ob%irank_r(2) = idw_array(1)
+info_ob%irank_r(3) = jup_array(1)
+info_ob%irank_r(4) = jdw_array(1)
+info_ob%irank_r(5) = kup_array(1)
+info_ob%irank_r(6) = kdw_array(1)
+info_ob%icomm_r = nproc_group_korbital
 
 select case(iperiodic)
 case(0)

@@ -33,7 +33,7 @@ module structures
 
   type s_wf_info
     logical :: if_divide_rspace
-    integer :: irank_overlap(6),icomm_overlap,icomm_pseudo
+    integer :: irank_r(6),icomm_r,icomm_ko ! icomm_r = communicator for r-space, icomm_ko = communicator for k-space & orbital.
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1

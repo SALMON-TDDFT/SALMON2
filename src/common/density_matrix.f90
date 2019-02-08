@@ -55,7 +55,7 @@ contains
         wrk = wrk + wrk2 * occ(io,ik)
       end do
       end do
-      call comm_summation(wrk,wrk2,nsize,info%icomm_pseudo) !??????? info%icomm_pseudo ?
+      call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
       dmat%rho(:,:,:,:,:,ispin,im) = wrk2(:,:,:,:,:)
     end do
     end do
@@ -114,7 +114,6 @@ contains
   subroutine calc_current(curr,nspin,ngrid,rg,stencil,info,psi,ppg,occ,dmat)
     use structures
     use salmon_communication, only: comm_summation
-    use salmon_parallel, only: nproc_group_rho,nproc_group_korbital !????????
     implicit none
     integer,intent(in) :: nspin,ngrid
     type(s_rgrid)  ,intent(in) :: rg
@@ -144,12 +143,12 @@ contains
 
       end do
       end do
-      call comm_summation(wrk2,wrk,3,nproc_group_rho) !??????? nproc_group_rho ?
+      call comm_summation(wrk2,wrk,3,info%icomm_ko)
 
       call stencil_current(wrk2,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,rg%is,rg%ie,rg%idx,rg%idy,rg%idz,rg%ndir)
       wrk2 = wrk + wrk2
 
-      call comm_summation(wrk2,wrk,3,nproc_group_korbital) !??????? nproc_group_korbital ?
+      call comm_summation(wrk2,wrk,3,info%icomm_r)
 
       curr(:,ispin,im) = wrk / ngrid ! ngrid = aLxyz/Hxyz
     end do
@@ -276,7 +275,6 @@ contains
   subroutine calc_microscopic_current(curr,nspin,ngrid,rg,stencil,info,psi,ppg,occ,dmat)
     use structures
     use salmon_communication, only: comm_summation
-    use salmon_parallel, only: nproc_group_rho !????????
     implicit none
     integer,intent(in) :: nspin,ngrid
     type(s_rgrid)  ,intent(in) :: rg
@@ -309,7 +307,7 @@ contains
 
       end do
       end do
-      call comm_summation(wrk2,wrk,nsize,nproc_group_rho) !??????? nproc_group_rho ?
+      call comm_summation(wrk2,wrk,nsize,info%icomm_ko) 
 
       call stencil_current(wrk2,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,is,ie,rg%idx,rg%idy,rg%idz,rg%ndir)
 
