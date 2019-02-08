@@ -32,9 +32,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
   type(s_scalar) ,intent(in) :: V_local(Nspin)
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction),intent(in) :: tpsi
-  type(s_wavefunction)            :: htpsi
-  type(s_wavefunction),optional   :: ttpsi
+  type(s_wavefunction)          :: tpsi
+  type(s_wavefunction)          :: htpsi
+  type(s_wavefunction),optional :: ttpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   real(8) :: k_nabt(Nd,3),k_lap0 !?????

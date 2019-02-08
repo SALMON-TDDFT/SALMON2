@@ -34,7 +34,7 @@ contains
     type(s_wf_info),intent(in) :: info
     real(8)        ,intent(in) :: occ(info%io_s:info%io_e,info%ik_s:info%ik_e)
     type(s_rgrid)  ,intent(in) :: rg
-    type(s_wavefunction),intent(in) :: psi
+    type(s_wavefunction)       :: psi
     type(s_dmatrix)            :: dmat
     !
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,norb
@@ -126,7 +126,7 @@ contains
         wrk = 0d0
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          wrk2 = abs( psi%rwf(:,:,:,ispin,io,ik,im) )**2
+          wrk2 = abs( psi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )**2
           wrk = wrk + wrk2 * occ(io,ik)
         end do
         end do
@@ -140,7 +140,7 @@ contains
         wrk = 0d0
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          wrk2 = abs( psi%zwf(:,:,:,ispin,io,ik,im) )**2
+          wrk2 = abs( psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )**2
           wrk = wrk + wrk2 * occ(io,ik)
         end do
         end do
