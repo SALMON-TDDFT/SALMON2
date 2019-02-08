@@ -24,9 +24,9 @@ module structures
   end type s_system
 
   type s_rgrid
-    integer              :: ndir                    ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
+    integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
     integer,dimension(3) :: is,ie,num &             ! num=ie-is+1
-                           ,is_overlap,ie_overlap & ! is_overlap=is-4, ie_overlap=ie+4
+                           ,is_overlap,ie_overlap & ! is_overlap=is-Nd, ie_overlap=ie+Nd
                            ,is_array,ie_array       ! allocate( array(is_array(1):ie_array(1), ...) )
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
   end type s_rgrid
@@ -45,7 +45,7 @@ module structures
   end type s_wavefunction
 
   type s_stencil
-    real(8) :: lap0,lapt(4,3),nabt(4,3)
+    real(8) :: lap0,lapt(4,3),nabt(4,3) !????? 4 --> Nd
     real(8),allocatable :: kAc(:,:) ! kAc(Nk,3)
   end type s_stencil
 
@@ -114,7 +114,7 @@ module structures
   end type s_force
 
   type s_dmatrix
-    complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=-Nd~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
+    complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
 
 !===================================================================================================================================

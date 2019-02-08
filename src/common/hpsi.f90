@@ -14,6 +14,8 @@
 !  limitations under the License.
 !
 module hpsi_sub
+  implicit none
+  integer,private,parameter :: Nd = 4 !????????
 
 contains
 
@@ -35,7 +37,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
   type(s_wavefunction),optional   :: ttpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  real(8) :: k_nabt(4,3),k_lap0
+  real(8) :: k_nabt(Nd,3),k_lap0 !?????
   logical :: if_kAc
 
   im_s = info%im_s
@@ -52,7 +54,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
 
   ! overlap region communication
     if(info%if_divide_rspace) then
-      call update_overlap_R(tpsi%rwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !?????????
+      call update_overlap_R(tpsi%rwf,rg_wf%is_array,rg_wf%ie_array,norb,Nd & !?????????
                            ,rg_wf%is,rg_wf%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
@@ -74,7 +76,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
 
   ! overlap region communication
     if(info%if_divide_rspace) then
-      call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !????????
+      call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,Nd & !????????
                            ,rg_wf%is,rg_wf%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
