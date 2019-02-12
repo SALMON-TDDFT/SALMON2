@@ -13,24 +13,25 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine taylor(mg,tzpsi_in,tzpsi_out,htpsi)
-use structures, only: s_rgrid
+subroutine taylor(mg,info,tzpsi_in,tzpsi_out,htpsi)
+use structures, only: s_rgrid, s_wf_info
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 implicit none
 
 type(s_rgrid),intent(in) :: mg
+type(s_wf_info),intent(in) :: info
 integer :: nn,ix,iy,iz
 complex(8) :: tzpsi_in(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &
-                       mg%is_array(3):mg%ie_array(3),1:iobnum,k_sta:k_end)
+                       mg%is_array(3):mg%ie_array(3),1:info%numo,info%ik_s:info%ik_e)
 complex(8) :: htpsi(mg%is_array(1):mg%ie_array(1),  &
                     mg%is_array(1):mg%ie_array(1),  &
-                    mg%is_array(3):mg%ie_array(3),1:iobnum,k_sta:k_end)
+                    mg%is_array(3):mg%ie_array(3),1:info%numo,info%ik_s:info%ik_e)
 complex(8) :: tzpsi_out(mg%is_array(1):mg%ie_array(1),  &
                         mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),1:iobnum,k_sta:k_end)
+                        mg%is_array(3):mg%ie_array(3),1:info%numo,info%ik_s:info%ik_e)
 
 iwk_size=2
 call make_iwksta_iwkend
