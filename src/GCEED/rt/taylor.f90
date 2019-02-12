@@ -13,41 +13,42 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine taylor(tzpsi_in,tzpsi_out,htpsi)
+subroutine taylor(mg,tzpsi_in,tzpsi_out,htpsi)
+use structures, only: s_rgrid
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 implicit none
 
+type(s_rgrid),intent(in) :: mg
 integer :: nn,ix,iy,iz
-complex(8) :: tzpsi_in(mg_sta(1)-Nd:mg_end(1)+Nd+1,    &
-                   mg_sta(2)-Nd:mg_end(2)+Nd,    &
-                   mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
-complex(8) :: htpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,    &
-                    mg_sta(2)-Nd:mg_end(2)+Nd,    &
-                    mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
-complex(8) :: tzpsi_out(mg_sta(1)-Nd:mg_end(1)+Nd+1,    &
-                   mg_sta(2)-Nd:mg_end(2)+Nd,    &
-                   mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
-
+complex(8) :: tzpsi_in(mg%is_array(1):mg%ie_array(1),  &
+                       mg%is_array(2):mg%ie_array(2),  &
+                       mg%is_array(3):mg%ie_array(3),1:iobnum,k_sta:k_end)
+complex(8) :: htpsi(mg%is_array(1):mg%ie_array(1),  &
+                    mg%is_array(1):mg%ie_array(1),  &
+                    mg%is_array(3):mg%ie_array(3),1:iobnum,k_sta:k_end)
+complex(8) :: tzpsi_out(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),1:iobnum,k_sta:k_end)
 
 iwk_size=2
 call make_iwksta_iwkend
 
 if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     rhobox(ix,iy,iz) = 0.d0
   end do
   end do
   end do
 else if(ilsda==1)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     rhobox_s(ix,iy,iz,1) = 0.d0
     rhobox_s(ix,iy,iz,2) = 0.d0
   end do
@@ -58,18 +59,18 @@ end if
 if(iperiodic==0.and.ihpsieff==1)then
   if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       Vlocal2(ix,iy,iz,1)=Vlocal(ix,iy,iz,1)+Vbox(ix,iy,iz)
     end do
     end do
     end do
   else if(ilsda==1)then 
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       Vlocal2(ix,iy,iz,1)=Vlocal(ix,iy,iz,1)+Vbox(ix,iy,iz)
       Vlocal2(ix,iy,iz,2)=Vlocal(ix,iy,iz,2)+Vbox(ix,iy,iz)
     end do

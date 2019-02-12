@@ -322,7 +322,7 @@ if(comm_is_root(nproc_id_global))then
   write(*, *) 
 end if
 
-call Time_Evolution
+call Time_Evolution(mg)
 
 elp3(409)=get_wtime()
 
@@ -796,7 +796,8 @@ END subroutine Real_Time_DFT
 
 !=======================================================================
 
-SUBROUTINE Time_Evolution
+SUBROUTINE Time_Evolution(mg)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_group_grid, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
 use misc_routines, only: get_wtime
@@ -804,6 +805,7 @@ use global_variables_rt
 
 implicit none
 
+type(s_rgrid),intent(in) :: mg
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
 real(8),allocatable :: R1(:,:,:)
@@ -1412,7 +1414,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(mg,shtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1432,7 +1434,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(mg,shtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1449,7 +1451,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(shtpsi)
+    call time_evolution_step(mg,shtpsi)
   end do TE3
   elp3(415)=get_wtime()
 

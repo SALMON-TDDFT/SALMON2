@@ -16,7 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(shtpsi)
+SUBROUTINE time_evolution_step(mg,shtpsi)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use misc_routines, only: get_wtime
@@ -27,6 +28,7 @@ use allocate_mat_sub
 use read_pslfile_sub
 
 implicit none
+type(s_rgrid),intent(in) :: mg
 integer :: ix,iy,iz,i1,mm,jj
 integer :: ii,iob,iatom,iik
 real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
@@ -65,9 +67,9 @@ elp3(532)=elp3(532)+elp3(512)-elp3(511)
 
 if(iobnum.ge.1)then
   if(mod(itt,2)==1)then
-    call taylor(zpsi_in,zpsi_out,shtpsi)
+    call taylor(mg,zpsi_in,zpsi_out,shtpsi)
   else
-    call taylor(zpsi_out,zpsi_in,shtpsi)
+    call taylor(mg,zpsi_out,zpsi_in,shtpsi)
   end if
 end if
 
