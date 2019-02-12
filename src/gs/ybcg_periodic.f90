@@ -26,7 +26,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   use hpsi_sub
   !$ use omp_lib
   implicit none
-  type(s_rgrid),intent(inout)        :: mg
+  type(s_rgrid),intent(in)           :: mg
   type(s_wf_info),intent(in)         :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
@@ -95,22 +95,6 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
       stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
       stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
     end do
-  end do
-
-  mg%is_overlap = mg%is - 4
-  mg%ie_overlap = mg%ie + 4
-
-  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
-          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
-          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
-  do j=mg%is_overlap(1),mg%ie_overlap(1)
-    mg%idx(j) = j
-  end do
-  do j=mg%is_overlap(2),mg%ie_overlap(2)
-    mg%idy(j) = j
-  end do
-  do j=mg%is_overlap(3),mg%ie_overlap(3)
-    mg%idz(j) = j
   end do
 
   nspin=1
@@ -485,7 +469,6 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   deallocate(stpsi%zwf,shtpsi%zwf,sttpsi%zwf)
  
   deallocate(stencil%kAc)
-  deallocate(mg%idx,mg%idy,mg%idz)
   deallocate(v(1)%f)
   deallocate(v)
   if(allocated(ppg%zproj)) deallocate(ppg%zproj)
