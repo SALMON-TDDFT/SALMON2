@@ -195,7 +195,7 @@ contains
 
       call comm_summation(wrk2,wrk,3,info%icomm_r)
 
-      curr(:,ispin,im) = wrk / ngrid ! ngrid = aLxyz/Hxyz
+      curr(:,ispin,im) = wrk / dble(ngrid) ! ngrid = aLxyz/Hxyz
     end do
     end do
 
@@ -252,7 +252,7 @@ contains
         tmp(3) = tmp(3) + nabt(1,3) * zdm(1,3,ix,iy,iz) * 2d0 &
                         + nabt(2,3) * zdm(2,3,ix,iy,iz) * 2d0 &
                         + nabt(3,3) * zdm(3,3,ix,iy,iz) * 2d0 &
-                        + nabt(4,4) * zdm(4,3,ix,iy,iz) * 2d0
+                        + nabt(4,3) * zdm(4,3,ix,iy,iz) * 2d0
       end do
       end do
       end do
@@ -270,46 +270,26 @@ contains
       integer    :: ilma,ia,j,i,ix,iy,iz
       real(8)    :: x,y,z
       complex(8) :: uVpsi,uVpsi_r(3)
-
       jw = 0d0
-
       do ilma=1,ppg%Nlma
         ia=ppg%ia_tbl(ilma)
         uVpsi = 0d0
         uVpsi_r = 0d0
         do j=1,ppg%Mps(ia)
-!          ix=ppg%Jxx(j,ia); x=Lx(i)*Hx-ix*aLx
-!          iy=ppg%Jyy(j,ia); y=Ly(i)*Hy-iy*aLy
-!          iz=ppg%Jzz(j,ia); z=Lz(i)*Hz-iz*aLz
-
           x = ppg%Rxyz(1,j,ia)
           y = ppg%Rxyz(2,j,ia)
           z = ppg%Rxyz(3,j,ia)
-
           ix = ppg%Jxyz(1,j,ia)
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
-
           uVpsi = uVpsi +conjg(ppg%zproj(j,ilma,ik))  *psi(ix,iy,iz)
-          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zproj(j,ilma,ik))*x*psi(ix,iy,iz)
+          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zproj(j,ilma,ik))*x*psi(ix,iy,iz) !???????? zproj
           uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zproj(j,ilma,ik))*y*psi(ix,iy,iz)
           uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zproj(j,ilma,ik))*z*psi(ix,iy,iz)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
-!        uVpsix=uVpsix*Hxyz
-!        uVpsiy=uVpsiy*Hxyz
-!        uVpsiz=uVpsiz*Hxyz
-!        jxt=jxt+occ(ib,ik)*IaLxyz*2*aimag(conjg(uVpsix)*uVpsi)
-!        jyt=jyt+occ(ib,ik)*IaLxyz*2*aimag(conjg(uVpsiy)*uVpsi)
-!        jzt=jzt+occ(ib,ik)*IaLxyz*2*aimag(conjg(uVpsiz)*uVpsi)
-
       end do
-
-!      jx=jx*Hxyz*IaLxyz+jxt
-!      jy=jy*Hxyz*IaLxyz+jyt
-!      jz=jz*Hxyz*IaLxyz+jzt
-
       return
     end subroutine nonlocal_part
 
@@ -410,7 +390,7 @@ contains
         tmp(3) = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,idz(iz-1))) ) &
                + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,idz(iz-2))) ) &
                + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,idz(iz-3))) ) &
-               + nabt(4,4) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,idz(iz-4))) )
+               + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,idz(iz-4))) )
 
         jw(:,ix,iy,iz) = aimag(tmp)
       end do
