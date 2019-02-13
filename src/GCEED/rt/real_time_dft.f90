@@ -797,16 +797,20 @@ END subroutine Real_Time_DFT
 !=======================================================================
 
 SUBROUTINE Time_Evolution(mg)
-use structures, only: s_rgrid, s_wf_info
-use salmon_parallel, only: nproc_id_global, nproc_group_grid, nproc_group_h
+use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil
+use salmon_parallel, only: nproc_id_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation
 use misc_routines, only: get_wtime
 use global_variables_rt
+use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
 
 implicit none
 
 type(s_rgrid),intent(in) :: mg
 type(s_wf_info) :: info
+type(s_wf_info) :: info_ob
+type(s_stencil) :: stencil
+type(s_wavefunction) :: spsi_in,spsi_out
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
 real(8),allocatable :: R1(:,:,:)
@@ -814,6 +818,7 @@ character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
 integer :: iob_allob
 real(8) :: absr2
+integer :: j,ind
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -1411,6 +1416,84 @@ info%io_s=1
 info%io_e=iobnum
 info%numo=iobnum
 
+  allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        1,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
+                       mg%is_array(2):mg%ie_array(2),  &
+                       mg%is_array(3):mg%ie_array(3),  &
+                       1,  &
+                       info%io_s:info%io_e,  &
+                       info%ik_s:info%ik_e,  &
+                       1))
+
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do iz=mg%is_array(3),mg%ie_array(3)
+    do iy=mg%is_array(2),mg%ie_array(2)
+    do ix=mg%is_array(1),mg%ie_array(1)
+      spsi_in%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
+    end do
+    end do
+    end do
+  end do
+  end do
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do iz=mg%is_array(3),mg%ie_array(3)
+    do iy=mg%is_array(2),mg%ie_array(2)
+    do ix=mg%is_array(1),mg%ie_array(1)
+      spsi_out%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
+    end do
+    end do
+    end do
+  end do
+  end do
+
+  info_ob%im_s = 1
+  info_ob%im_e = 1
+  info_ob%numm = 1
+  info_ob%ik_s = 1
+  info_ob%ik_e = 1
+  info_ob%numk = 1
+  info_ob%io_s = 1
+  info_ob%io_e = 1
+  info_ob%numo = 1
+  info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
+  info_ob%irank_r(1) = iup_array(1)
+  info_ob%irank_r(2) = idw_array(1)
+  info_ob%irank_r(3) = jup_array(1)
+  info_ob%irank_r(4) = jdw_array(1)
+  info_ob%irank_r(5) = kup_array(1)
+  info_ob%irank_r(6) = kdw_array(1)
+  info_ob%icomm_r = nproc_group_korbital
+  
+  if(iperiodic==3) allocate(stencil%kAc(1:1,3))
+
+  stencil%lap0 = -0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+
+  if(iperiodic==0)then
+    do j=1,3
+      do ind=1,4
+        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+        stencil%nabt(ind,j) = 0.d0
+      end do
+    end do
+  else if(iperiodic==3)then
+    do j=1,3
+      do ind=1,4
+        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+        stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
+      end do
+    end do
+  end if
+
 if(itotNtime-Miter_rt<=10000)then
 
   elp3(412)=get_wtime()
@@ -1425,7 +1508,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(mg,info,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1445,7 +1528,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(mg,info,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1453,7 +1536,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(mg,info,shtpsi)
+    call time_evolution_step(mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1462,11 +1545,13 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(mg,info,shtpsi)
+    call time_evolution_step(mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE3
   elp3(415)=get_wtime()
 
 end if
+
+  if(iperiodic==3) deallocate(stencil%kAc)
 
 elp3(408)=get_wtime()
 
