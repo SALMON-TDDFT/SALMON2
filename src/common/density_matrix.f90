@@ -21,7 +21,7 @@ module density_matrix
 
 contains
 
-! dmat(r,dr) = sum occ psi(r+dr) * conjg(psi(r))
+! density matrix: dmat(r,dr) = sum occ psi(r+dr) * conjg(psi(r))
 ! dmat(r,-dr) = conjg(dmat(r-dr,dr))
 ! j(r) = sum occ aimag( conjg(psi(r))* (sum nabt*psi)(r) ) = aimag( sum_dr nabt(dr)* dmat(r,dr) )
 
@@ -44,7 +44,13 @@ contains
     ie = rg%ie
     nsize = Nd* rg%ndir * (rg%num(1)+Nd) * (rg%num(2)+Nd) * (rg%num(3)+Nd)
 
-!????????? real(rwf) & complex(zwf) ?
+    if(allocated(psi%rwf)) then
+      allocate(psi%zwf(rg%is_array(1):rg%ie_array(1) &
+                      ,rg%is_array(2):rg%ie_array(2) &
+                      ,rg%is_array(3):rg%ie_array(3) &
+                      ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+      psi%zwf = cmplx(psi%rwf)
+    end if
 
     allocate( wrk(Nd,rg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) &
             ,wrk2(Nd,rg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) )
@@ -70,6 +76,7 @@ contains
     end do
     end do
 
+    if(allocated(psi%rwf)) deallocate(psi%zwf)
     deallocate(wrk,wrk2)
     return
 
@@ -283,7 +290,7 @@ contains
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
           uVpsi = uVpsi +conjg(ppg%zproj(j,ilma,ik))  *psi(ix,iy,iz)
-          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zproj(j,ilma,ik))*x*psi(ix,iy,iz) !???????? zproj
+          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zproj(j,ilma,ik))*x*psi(ix,iy,iz)
           uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zproj(j,ilma,ik))*y*psi(ix,iy,iz)
           uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zproj(j,ilma,ik))*z*psi(ix,iy,iz)
         end do
