@@ -80,8 +80,9 @@ subroutine taylor(mg,info,tzpsi_in,tzpsi_out,htpsi)
 
   if(iperiodic==3) allocate(stencil%kAc(1:1,3))
 
+  stencil%lap0 = -0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+
   if(iperiodic==0)then
-    stencil%lap0 = -0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
     do j=1,3
       do ind=1,4
         stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
@@ -89,7 +90,6 @@ subroutine taylor(mg,info,tzpsi_in,tzpsi_out,htpsi)
       end do
     end do
   else if(iperiodic==3)then
-    stencil%lap0 = 0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
     do j=1,3
       do ind=1,4
         stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
