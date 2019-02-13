@@ -13,16 +13,18 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine taylor(mg,itotmst,mst,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,ppg,vlocal,vbox,num_kpoints_rd,k_rd, &
-                  rhobox,rhobox_s,zc,ihpsieff,rocc,wtk)
+subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,  &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
   implicit none
-  
+  integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
   integer,intent(in) :: itotmst
   integer,intent(in) :: mst(2)
+  integer,intent(in) :: lg_sta(3)
+  integer,intent(in) :: lg_end(3)
   integer,intent(in)    :: ilsda
   type(s_wf_info),intent(in) :: info
   type(s_wf_info),intent(inout) :: info_ob
@@ -31,7 +33,9 @@ subroutine taylor(mg,itotmst,mst,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,p
   type(s_wavefunction),intent(inout) :: tspsi_out
   type(s_pp_grid),intent(inout) :: ppg
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
-  real(8),intent(in)    :: vbox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(in)    :: vbox(lg_sta(1)-nd:lg_end(1)+nd,  &
+                                lg_sta(2)-nd:lg_end(2)+nd,  &
+                                lg_sta(3)-nd:lg_end(3)+nd)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   real(8),intent(out)   :: rhobox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))

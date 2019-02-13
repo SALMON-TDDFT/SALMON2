@@ -860,10 +860,10 @@ fileLaser= "laser.out"
 
 allocate (R1(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2), & 
                               lg_sta(3):lg_end(3))) 
-if(ikind_eext.ne.0)then
+!if(ikind_eext.ne.0)then
   allocate( Vbox(lg_sta(1)-Nd:lg_end(1)+Nd,lg_sta(2)-Nd:lg_end(2)+Nd, & 
                                            lg_sta(3)-Nd:lg_end(3)+Nd))
-endif
+!endif
 
 allocate( elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2), & 
                               lg_sta(3):lg_end(3))) 
