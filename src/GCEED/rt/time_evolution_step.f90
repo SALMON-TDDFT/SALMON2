@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(mg,info,shtpsi)
-use structures, only: s_rgrid, s_wf_info
+use structures, only: s_rgrid,s_wf_info
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use misc_routines, only: get_wtime
