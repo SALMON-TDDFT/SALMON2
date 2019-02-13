@@ -13,24 +13,38 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine taylor(mg,info,info_ob,stencil,tspsi_in,tspsi_out)
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
-  use scf_data
-  use allocate_mat_sub
-  use deallocate_mat_sub
+subroutine taylor(mg,itotmst,mst,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,ppg,vlocal,vbox,num_kpoints_rd,k_rd, &
+                  rhobox,rhobox_s,zc,ihpsieff,rocc,wtk)
+  use inputoutput, only: iperiodic,ispin,natom,n_hamil
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
   implicit none
   
   type(s_rgrid),intent(in) :: mg
+  integer,intent(in) :: itotmst
+  integer,intent(in) :: mst(2)
+  integer,intent(in)    :: ilsda
   type(s_wf_info),intent(in) :: info
   type(s_wf_info),intent(inout) :: info_ob
   type(s_stencil),intent(inout) :: stencil
   type(s_wavefunction),intent(inout) :: tspsi_in
   type(s_wavefunction),intent(inout) :: tspsi_out
+  type(s_pp_grid),intent(inout) :: ppg
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  real(8),intent(in)    :: vbox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  integer,intent(in)    :: num_kpoints_rd
+  real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
+  real(8),intent(out)   :: rhobox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(out)   :: rhobox_s(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2)
+  complex(8),intent(in) :: zc(n_hamil)
+  integer,intent(in)    :: ihpsieff
+  real(8),intent(in)    :: rocc(itotmst,num_kpoints_rd)
+  real(8),intent(in)    :: wtk(num_kpoints_rd)
   type(s_wavefunction) :: stpsi_in_ob
   type(s_wavefunction) :: stpsi_out_ob
   type(s_wavefunction) :: shtpsi_ob
   type(s_scalar),allocatable :: v(:)
+  real(8)              :: vlocal2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer :: nspin
   integer :: nn,ix,iy,iz
   integer :: ik,iob,iob_allob
@@ -189,7 +203,7 @@ subroutine taylor(mg,info,info_ob,stencil,tspsi_in,tspsi_out)
     end do
     end do
 
-    do nn=1,N_hamil
+    do nn=1,n_hamil
       if(mod(nn,2)==1)then
         call hpsi(stpsi_in_ob,shtpsi_ob,info_ob,mg,v,nspin,stencil,ppg)
 !$OMP parallel do private(iz,iy,ix)

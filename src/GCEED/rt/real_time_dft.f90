@@ -869,9 +869,9 @@ allocate( elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2), &
                               lg_sta(3):lg_end(3))) 
 
 allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-if(ilsda==1)then
+!if(ilsda==1)then
   allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
-end if
+!end if
 if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
   do iz=mg_sta(3),mg_end(3)
