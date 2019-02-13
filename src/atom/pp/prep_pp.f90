@@ -165,6 +165,7 @@ subroutine init_jxyz(ppg)
   allocate(ppg%jxx( ppg%nps,natom))
   allocate(ppg%jyy( ppg%nps,natom))
   allocate(ppg%jzz( ppg%nps,natom))
+  allocate(ppg%rxyz(3,ppg%nps,natom))
 
 end subroutine init_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -175,6 +176,7 @@ subroutine finalize_jxyz(ppg)
 
   deallocate(ppg%jxyz)
   deallocate(ppg%jxx,ppg%jyy,ppg%jzz)
+  deallocate(ppg%rxyz)
 
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -334,6 +336,9 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
             ppg%jxx( j,a)=ix
             ppg%jyy( j,a)=iy
             ppg%jzz( j,a)=iz
+            ppg%rxyz(1,j,a)=dble(mx(i))*hx+rshift(1)-(rion(1,a)+dble(ix)*alx)
+            ppg%rxyz(2,j,a)=dble(my(i))*hy+rshift(2)-(rion(2,a)+dble(iy)*aly)
+            ppg%rxyz(3,j,a)=dble(mz(i))*hz+rshift(3)-(rion(3,a)+dble(iz)*alz)
           endif
         endif
       enddo
@@ -439,7 +444,7 @@ subroutine set_lma_tbl(pp,ppg)
 end subroutine set_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
-                   lx,ly,lz,nl,hx,hy,hz,alx,aly,alz,  &
+                   lx,ly,lz,nl,hx,hy,hz,  &
                    flag_use_grad_wf_on_force,property)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
   use structures,only : s_pp_info,s_pp_grid
@@ -450,7 +455,6 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   integer,intent(in) :: nl
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
   real(8),intent(in) :: hx,hy,hz
-  real(8),intent(in) :: alx,aly,alz
   logical,intent(in) :: flag_use_grad_wf_on_force
   character(17),intent(in) :: property
   real(8),intent(out) :: save_udvtbl_a(pp%nrmax,0:pp%lmax,natom)
@@ -538,9 +542,9 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   !!$omp parallel
   !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,duvr,ilma)
      do j=1,ppg%mps(a)
-       x=ppg%jxyz(1,j,a)*hx+rshift(1)-(rion(1,a)+ppg%jxx(j,a)*alx)
-       y=ppg%jxyz(2,j,a)*hy+rshift(2)-(rion(2,a)+ppg%jyy(j,a)*aly)
-       z=ppg%jxyz(3,j,a)*hz+rshift(3)-(rion(3,a)+ppg%jzz(j,a)*alz)
+       x=ppg%rxyz(1,j,a)
+       y=ppg%rxyz(2,j,a)
+       z=ppg%rxyz(3,j,a)
        r=sqrt(x*x+y*y+z*z)+1d-50
        do ir=1,pp%nrps(ik)
          if(pp%radnl(ir,ik).gt.r) exit

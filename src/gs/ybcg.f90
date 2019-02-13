@@ -16,19 +16,23 @@
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
-  use inputoutput, only: ncg
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction
+subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
+                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+  use inputoutput, only: ncg,ispin
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid
   use salmon_communication, only: comm_bcast
   use misc_routines, only: get_wtime
   use inner_product_sub
+  use hpsi_sub
   !$ use omp_lib
   implicit none
   
   type(s_rgrid),intent(in) :: mg
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
+  type(s_stencil) :: stencil
+  type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
@@ -37,25 +41,51 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: nproc_ob_spin
   integer,intent(in)    :: iparaway_ob
+  type(s_wf_info)       :: info_ob
+  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
+  real(8),intent(in)    :: hgs(3)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  integer,parameter :: nd=4
+  integer :: j,ind
   integer :: iter,iob,job
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
+  integer :: nspin
+  type(s_wavefunction)  :: stpsi
+  type(s_wavefunction)  :: shtpsi
+  type(s_scalar),allocatable :: v(:)
   real(8) :: sum0,xkhxk,xkxk,Rk,gkgk,xkpk,pkpk,pkhxk,pkhpk
   real(8) :: uk,alpha,ak,bk,ck
   real(8) , allocatable :: xk(:,:,:),hxk(:,:,:),gk(:,:,:),pk(:,:,:)
   real(8) , allocatable :: gk2(:,:,:)
   real(8) :: elp2(2000)
-  real(8):: tpsi(mg%is_array(1):mg%ie_array(1),  &
-                 mg%is_array(2):mg%ie_array(2),  &
-                 mg%is_array(3):mg%ie_array(3))
   integer :: iob_myob,job_myob
   integer :: icorr,jcorr               
   integer :: iroot
   integer :: is_sta,is_end
   character(30) :: commname
-  
+
   commname='nproc_group_korbital'
-  
+
+  allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),1,1,1,1))
+  allocate(shtpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                      mg%is_array(2):mg%ie_array(2),  &
+                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
+
+  stencil%lap0 = 0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+  do j=1,3
+    do ind=1,4
+      stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+      stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
+    end do
+  end do
+
+  nspin=1
+  allocate(v(1))
+  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+
   allocate (xk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   allocate (hxk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   allocate (gk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
@@ -68,7 +98,8 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
   do ix=mg%is_array(1),mg%ie_array(1)
-    tpsi(ix,iy,iz)=0.d0
+    stpsi%rwf(ix,iy,iz,1,1,1,1)=0.d0
+    shtpsi%rwf(ix,iy,iz,1,1,1,1)=0.d0
   end do
   end do
   end do
@@ -88,7 +119,15 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
   
   do is=is_sta,is_end
   
-  
+  !$OMP parallel do private(iz,iy,ix) 
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,is)
+    end do
+    end do
+    end do
+
   orbital : do iob=iobsta(is),iobend(is)
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
     call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
@@ -109,12 +148,21 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        tpsi(ix,iy,iz)=xk(ix,iy,iz)
+        stpsi%rwf(ix,iy,iz,1,1,1,1)=xk(ix,iy,iz)
       end do
       end do
       end do
-  
-      call r_hpsi2_buf(tpsi,hxk,iob,1,0,0)
+ 
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+ 
+  !$OMP parallel do private(iz,iy,ix) 
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        hxk(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+      end do
+      end do
+      end do
   
       call inner_product(mg,xk,hxk,xkhxk,commname)
   
@@ -196,16 +244,26 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
         call inner_product(mg,pk,hxk,pkhxk,commname)
         pkhxk = pkhxk*hvol
   
-  !$OMP parallel do private(iz,iy,ix)
+  !$OMP parallel do private(iz,iy,ix) 
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          tpsi(ix,iy,iz) = pk(ix,iy,iz)
+          stpsi%rwf(ix,iy,iz,1,1,1,1)=pk(ix,iy,iz)
         end do
         end do
         end do
-        call r_hpsi2_buf(tpsi,gk,iob,1,0,0)
+
+        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
   
+  !$OMP parallel do private(iz,iy,ix) 
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          gk(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+        end do
+        end do
+        end do
+
         call inner_product(mg,pk,gk,pkhpk,commname)
         pkhpk = pkhpk*hvol
   
@@ -250,6 +308,10 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
   end if
   
   deallocate (xk,hxk,gk,pk,gk2)
+  
+  deallocate(v(1)%f)
+  deallocate(v)
+
   return
 
 end subroutine dtcg

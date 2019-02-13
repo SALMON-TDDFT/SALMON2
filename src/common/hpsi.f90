@@ -14,6 +14,8 @@
 !  limitations under the License.
 !
 module hpsi_sub
+  implicit none
+  integer,private,parameter :: Nd = 4 !????????
 
 contains
 
@@ -30,12 +32,12 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
   type(s_scalar) ,intent(in) :: V_local(Nspin)
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction),intent(in) :: tpsi
-  type(s_wavefunction)            :: htpsi
-  type(s_wavefunction),optional   :: ttpsi
+  type(s_wavefunction)          :: tpsi
+  type(s_wavefunction)          :: htpsi
+  type(s_wavefunction),optional :: ttpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  real(8) :: k_nabt(4,3),k_lap0
+  real(8) :: k_nabt(Nd,3),k_lap0 !?????
   logical :: if_kAc
 
   im_s = info%im_s
@@ -52,8 +54,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
 
   ! overlap region communication
     if(info%if_divide_rspace) then
-      call update_overlap_R(tpsi%rwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !?????????
-                           ,rg_wf%is,rg_wf%ie,info%irank_overlap,info%icomm_overlap)
+      call update_overlap_R(tpsi%rwf,rg_wf%is_array,rg_wf%ie_array,norb,Nd & !?????????
+                           ,rg_wf%is,rg_wf%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
     do im=im_s,im_e
@@ -72,10 +74,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
 
   else
 
-! overlap region communication
+  ! overlap region communication
     if(info%if_divide_rspace) then
-      call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,4 & !????????
-                           ,rg_wf%is,rg_wf%ie,info%irank_overlap,info%icomm_overlap)
+      call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,Nd & !????????
+                           ,rg_wf%is,rg_wf%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
     do im=im_s,im_e
@@ -174,7 +176,7 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
     end do
-    call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_pseudo)
+    call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
     iorb = 0
     do im=im_s,im_e
     do ik=ik_s,ik_e
@@ -293,7 +295,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
       end do
       end do
       end do
-      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_pseudo)
+      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
       iorb = 0
       do im=im_s,im_e
       do ik=ik_s,ik_e
@@ -339,7 +341,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
       end do
       end do
       end do
-      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_pseudo)
+      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
       iorb = 0
       do im=im_s,im_e
       do ik=ik_s,ik_e

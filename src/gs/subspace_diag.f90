@@ -13,15 +13,20 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
-  use structures, only: s_rgrid,s_wavefunction
+  use inputoutput, only: ispin
+  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
   use misc_routines, only: get_wtime
+  use hpsi_sub
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_wavefunction),intent(inout) :: spsi
+  type(s_stencil) :: stencil
+  type(s_pp_grid) :: ppg
   real(8),intent(out) :: elp3(3000)
   integer,intent(in)  :: ilsda
   integer,intent(in)  :: nproc_ob
@@ -32,12 +37,22 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
   integer,intent(in)  :: k_sta,k_end
   integer,intent(in)  :: nproc_ob_spin(2)
   real(8),intent(in)  :: hvol
+  type(s_wf_info)       :: info_ob
+  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
+  real(8),intent(in)    :: hgs(3)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  integer,parameter :: nd=4
+  integer :: j,ind
   integer :: iob,job,ii,jj
   integer :: ix,iy,iz,is
+  integer :: nspin
+  type(s_wavefunction)  :: stpsi
+  type(s_wavefunction)  :: shtpsi
+  type(s_scalar),allocatable :: v(:)
   real(8),allocatable :: amat(:,:)
   real(8),allocatable :: amat2(:,:)
   real(8),allocatable :: smat(:,:)
-  real(8),allocatable :: tpsi(:,:,:),htpsi(:,:,:)
+  real(8),allocatable :: htpsi(:,:,:)
   real(8),allocatable :: psi_box(:,:,:,:)
   real(8) :: rbox,rbox1
   real(8),allocatable :: evec(:,:)
@@ -49,10 +64,26 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
   integer :: iobsta(2),iobend(2)
   
   elp3(301)=get_wtime()
-  
-  allocate(tpsi(mg%is_array(1):mg%ie_array(1),  &
-                mg%is_array(2):mg%ie_array(2),  &
-                mg%is_array(3):mg%ie_array(3)))
+
+  allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),1,1,1,1))
+  allocate(shtpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                      mg%is_array(2):mg%ie_array(2),  &
+                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
+
+  stencil%lap0 = 0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+  do j=1,3
+    do ind=1,4
+      stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+      stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
+    end do
+  end do
+
+  nspin=1
+  allocate(v(1))
+  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+ 
   allocate(htpsi(mg%is(1):mg%ie(1),  &
                  mg%is(2):mg%ie(2),  &
                  mg%is(3):mg%ie(3)))
@@ -79,13 +110,33 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
   do iz=mg%is_array(3),mg%ie_array(3)
   do iy=mg%is_array(2),mg%ie_array(2)
   do ix=mg%is_array(1),mg%ie_array(1)
-    tpsi(ix,iy,iz)=0.d0
+    stpsi%rwf(ix,iy,iz,1,1,1,1)=0.d0
   end do
   end do
   end do
   
   do is=is_sta,is_end
   
+    if(is==1)then
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,1)
+      end do
+      end do
+      end do
+    else
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,2)
+      end do
+      end do
+      end do
+    end if
+
     if(ifmst(is)>=1.and.mst(is)>=1)then
   
       iter=iobend(is)-iobsta(is)+1
@@ -109,11 +160,19 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            tpsi(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,job_myob,1,1)
+            stpsi%rwf(ix,iy,iz,1,1,1,1)=spsi%rwf(ix,iy,iz,1,job_myob,1,1)
           end do
           end do
           end do
-          call r_hpsi2_buf(tpsi,htpsi,job,1,0,0)
+          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+  !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            htpsi(ix,iy,iz)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+          end do
+          end do
+          end do
         end if
         call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
@@ -216,5 +275,8 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
   end do
   
   deallocate(htpsi,psi_box)
-  
+  deallocate(stpsi%rwf,shtpsi%rwf)
+  deallocate(v(1)%f)
+  deallocate(v)
+
 end subroutine subspace_diag

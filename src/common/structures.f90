@@ -24,15 +24,16 @@ module structures
   end type s_system
 
   type s_rgrid
+    integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
     integer,dimension(3) :: is,ie,num &             ! num=ie-is+1
-                           ,is_overlap,ie_overlap & ! is_overlap=is-4, ie_overlap=ie+4
+                           ,is_overlap,ie_overlap & ! is_overlap=is-Nd, ie_overlap=ie+Nd
                            ,is_array,ie_array       ! allocate( array(is_array(1):ie_array(1), ...) )
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
   end type s_rgrid
 
   type s_wf_info
     logical :: if_divide_rspace
-    integer :: irank_overlap(6),icomm_overlap,icomm_pseudo
+    integer :: irank_r(6),icomm_r,icomm_ko ! icomm_r = communicator for r-space, icomm_ko = communicator for k-space & orbital.
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
@@ -44,7 +45,7 @@ module structures
   end type s_wavefunction
 
   type s_stencil
-    real(8) :: lap0,lapt(4,3),nabt(4,3)
+    real(8) :: lap0,lapt(4,3),nabt(4,3) !????? 4 --> Nd
     real(8),allocatable :: kAc(:,:) ! kAc(Nk,3)
   end type s_stencil
 
@@ -88,6 +89,7 @@ module structures
     integer,allocatable :: jxx(:,:)
     integer,allocatable :: jyy(:,:)
     integer,allocatable :: jzz(:,:)
+    real(8),allocatable :: rxyz(:,:,:)
     real(8),allocatable :: uv(:,:)
     real(8),allocatable :: duv(:,:,:)
     integer :: nlma
@@ -110,6 +112,12 @@ module structures
   type s_force
     real(8),allocatable :: force(:,:) ! force(1:3,1:NI)
   end type s_force
+
+  type s_dmatrix
+    complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
+  end type s_dmatrix
+
+!===================================================================================================================================
 
 contains
 
@@ -200,5 +208,10 @@ contains
     type(s_force) :: x
     DEAL(x%force)
   end subroutine deallocate_force
+
+  subroutine deallocate_dmatrix(dm)
+    type(s_dmatrix) :: dm
+    DEAL(dm%rho)
+  end subroutine deallocate_dmatrix
 
 end module structures

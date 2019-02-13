@@ -42,7 +42,7 @@ subroutine Real_Space_DFT
 use structures, only: s_rgrid, s_wf_info, s_wavefunction
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
-                           nproc_group_spin
+                           nproc_group_spin, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
@@ -59,6 +59,7 @@ real(8) :: rNebox1,rNebox2
 integer :: itmg
 type(s_rgrid) :: mg
 type(s_wf_info) :: info
+type(s_wf_info) :: info_ob
 type(s_wavefunction) :: spsi
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -121,7 +122,7 @@ if(istopt==1)then
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
-    call init_mesh(itmg)
+    call init_mesh(mg,itmg)
     call set_gridcoo
     call init_mesh_s
     call check_ng
@@ -263,7 +264,7 @@ if(istopt==1)then
 !------------------------------ Continue the previous calculation
 
   case(1,3)
-    call IN_data
+    call IN_data(mg)
 
     call allocate_mat
     call set_icoo1d
@@ -366,20 +367,30 @@ else
   end do
 end if
 
-mg%is(1:3)=mg_sta(1:3)
-mg%ie(1:3)=mg_end(1:3)
-mg%num(1:3)=mg_num(1:3)
-mg%is_overlap(1:3)=mg_sta(1:3)-Nd
-mg%ie_overlap(1:3)=mg_end(1:3)+Nd
-mg%is_array(1:3)=mg_sta(1:3)-Nd
-mg%ie_array(1:3)=mg_end(1:3)+Nd
-
 info%ik_s=k_sta
 info%ik_e=k_end
 info%numk=k_num
 info%io_s=1
 info%io_e=iobnum
 info%numo=iobnum
+
+info_ob%im_s = 1
+info_ob%im_e = 1
+info_ob%numm = 1
+info_ob%ik_s = 1
+info_ob%ik_e = 1
+info_ob%numk = 1
+info_ob%io_s = 1
+info_ob%io_e = 1
+info_ob%numo = 1
+info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
+info_ob%irank_r(1) = iup_array(1)
+info_ob%irank_r(2) = idw_array(1)
+info_ob%irank_r(3) = jup_array(1)
+info_ob%irank_r(4) = jdw_array(1)
+info_ob%irank_r(5) = kup_array(1)
+info_ob%irank_r(6) = kdw_array(1)
+info_ob%icomm_r = nproc_group_korbital
 
 select case(iperiodic)
 case(0)
@@ -470,17 +481,21 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
-                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
       elp3(182)=get_wtime()
@@ -489,7 +504,8 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
+        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -553,7 +569,8 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
           end do
 
-          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
           do ik=k_sta,k_end
           do iob=1,iobnum
@@ -583,7 +600,8 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
 
           call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                         iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+                                      iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
           do ik=k_sta,k_end
           do iob=1,iobnum
@@ -696,7 +714,8 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         end do
 
-        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
         do ik=k_sta,k_end
         do iob=1,iobnum
@@ -725,7 +744,8 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
 
         call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                       iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol)
+                                    iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                    info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
         do ik=k_sta,k_end
         do iob=1,iobnum
@@ -784,23 +804,28 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(gscg)
         case('y')
           call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
+                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
           call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob)
+                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob)
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+                             info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock)
+        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -1244,19 +1269,21 @@ END subroutine Real_Space_DFT
 !=======================================================================
 !========================================= Grid generation and labelling
 
-SUBROUTINE init_mesh
+SUBROUTINE init_mesh(mg,itmg)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root
 use inputoutput, only: iperiodic
 use global_variables_scf
 implicit none
-
+type(s_rgrid) :: mg
+integer,intent(in) :: itmg
 real(8) :: rLsize1(3)
 
 if(comm_is_root(nproc_id_global))      &
     print *,"----------------------------------- init_mesh"
 
-rLsize1(:)=rLsize(:,img)
+rLsize1(:)=rLsize(:,itmg)
 call setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
            Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
 call check_fourier
@@ -1264,7 +1291,7 @@ call check_fourier
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
 
-call setmg(mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
+call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
            lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori

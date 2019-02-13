@@ -414,7 +414,8 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data
+SUBROUTINE IN_data(mg)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, nproc_id_spin
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -422,6 +423,7 @@ use scf_data
 use new_world_sub
 use allocate_mat_sub
 implicit none
+type(s_rgrid) :: mg
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
 integer :: ix,iy,iz
@@ -627,7 +629,7 @@ call set_gridcoo
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
 
-call setmg(mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
+call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
            lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential)
 
 if(ilsda == 0) then
