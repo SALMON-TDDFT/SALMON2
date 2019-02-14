@@ -22,6 +22,7 @@ use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use misc_routines, only: get_wtime
 use inputoutput
+use taylor_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
@@ -31,7 +32,7 @@ implicit none
 type(s_rgrid),intent(in) :: mg
 type(s_wf_info),intent(in) :: info
 type(s_wf_info),intent(inout) :: info_ob
-type(s_stencil),intent(in) :: stencil
+type(s_stencil),intent(inout) :: stencil
 type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
 integer :: ix,iy,iz,i1,mm,jj
 integer :: ii,iob,iatom,iik,ik
