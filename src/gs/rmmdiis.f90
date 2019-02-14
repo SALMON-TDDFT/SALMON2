@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module rmmdiis_sub
+  implicit none
+
+contains
+
 !=======================================================================
 !============================================================== RMM-DIIS
 ! This routine is RMM-DIIS
@@ -24,6 +29,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use diis_core_sub
   !$ use omp_lib
   implicit none
   
@@ -168,7 +174,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   ! Solve by Lagrange's method of undetermined multipliers, and obtain 
   ! Rbar from previous combinations of phi and R.
       if(iflagdiis(iob) == 1)then
-        call diis_core(mg,itotmst,mst,hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
+        call diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
       end if
     end if
   
@@ -391,7 +397,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
   use inputoutput, only: ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   implicit none
-  type(s_rgrid),intent(inout) :: mg
+  type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: iob_allob
@@ -427,7 +433,7 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_wf_info)       :: info_ob
-  type(s_rgrid),intent(inout) :: mg
+  type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
   integer :: nspin
   type(s_stencil) :: stencil
@@ -436,3 +442,5 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
   call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
 
 end subroutine hpsi_test_diis
+
+end module rmmdiis_sub
