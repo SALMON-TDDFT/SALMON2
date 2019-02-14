@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module eigen_subdiag_periodic_sub
+  implicit none
+
+contains
+
 subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
   implicit none
   character :: JOBZ, UPLO
@@ -40,3 +45,5 @@ subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
   deallocate(WORK,RWORK)
   
 end subroutine eigen_subdiag_periodic
+
+end module eigen_subdiag_periodic_sub
