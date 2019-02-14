@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module subspace_diag_periodic_sub
+  implicit none
+
+contains
+
 subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
                                   iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
                                   info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
@@ -338,3 +343,5 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
 
 
 end subroutine subspace_diag_periodic
+
+end module subspace_diag_periodic_sub
