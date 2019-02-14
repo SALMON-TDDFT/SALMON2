@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module gscg_sub
+  implicit none
+
+contains
+
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
@@ -380,3 +385,5 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   return
   
 end subroutine sgscg
+
+end module gscg_sub
