@@ -46,6 +46,7 @@ use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
+use dtcg_sub
 use global_variables_scf
 implicit none
 
