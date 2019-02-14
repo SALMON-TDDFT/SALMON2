@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module taylor_sub
+  implicit none
+
+contains
+
 subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,  &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
@@ -283,4 +288,6 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
   if(allocated(ppg%zproj)) deallocate(ppg%zproj)
 
 end subroutine taylor
+
+end module taylor_sub
 

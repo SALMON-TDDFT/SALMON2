@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module dtcg_periodic_sub
+  implicit none
+
+contains
+
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
@@ -37,7 +42,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: nproc_ob_spin
+  integer,intent(in)    :: nproc_ob_spin(2)
   integer,intent(in)    :: iparaway_ob
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
@@ -477,3 +482,4 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   
 end subroutine dtcg_periodic
 
+end module dtcg_periodic_sub
