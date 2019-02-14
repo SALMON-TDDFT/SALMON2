@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module eigen_subdiag_sub
+  implicit none
+
+contains
+
 subroutine eigen_subdiag(Rmat,evec,iter,ier2)
   implicit none
   
@@ -39,5 +44,6 @@ subroutine eigen_subdiag(Rmat,evec,iter,ier2)
   call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
   evec=A
 
-END subroutine eigen_subdiag
+end subroutine eigen_subdiag
  
+end module eigen_subdiag_sub
