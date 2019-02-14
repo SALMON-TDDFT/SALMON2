@@ -3,6 +3,7 @@ program main
   use salmon_parallel
   use inputoutput
   use math_constants
+  use timer
   implicit none
 
   call set_math_constants
@@ -13,6 +14,8 @@ program main
   endif
 
   call read_input
+
+  call timer_initialize
 
   select case(theory)
   case('TDDFT')

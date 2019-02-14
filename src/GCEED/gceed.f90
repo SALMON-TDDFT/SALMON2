@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine gceed
-
+  use timer, only: timer_initialize
   implicit none
   character(30) :: cfunction2
 

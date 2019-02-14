@@ -52,6 +52,7 @@ module timer
 
   ! Communication
   integer,public,parameter :: LOG_ALLREDUCE    = 40
+  integer,public,parameter :: LOG_SENDRECV_GRID= 41
 
   public :: timer_initialize
   public :: timer_set, timer_reset
