@@ -50,6 +50,7 @@ use dtcg_sub
 use gscg_sub
 use dtcg_periodic_sub
 use gscg_periodic_sub
+use rmmdiis_sub
 use global_variables_scf
 implicit none
 

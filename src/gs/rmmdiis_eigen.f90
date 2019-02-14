@@ -13,12 +13,16 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module diis_core_sub
+  implicit none
+
+contains
+
 !=======================================================================
 !============================================================== RMM-DIIS
-subroutine diis_core(mg,itotmst,mst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
+subroutine diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
   use inputoutput, only: ncg
   use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_group_korbital
   use inner_product_sub
   use eigen_sub
   !$ use omp_lib
@@ -26,7 +30,6 @@ subroutine diis_core(mg,itotmst,mst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
   
   type(s_rgrid),intent(in) :: mg
   integer,intent(in) :: itotmst
-  integer,intent(in) :: mst(2)
   real(8),intent(in) :: hvol
   integer :: ii,jj,iob,iter,ix,iy,iz,ier2
   integer :: ibox,icount
@@ -217,3 +220,5 @@ subroutine diis_core(mg,itotmst,mst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
   return
   
 end subroutine diis_core
+
+end module diis_core_sub
