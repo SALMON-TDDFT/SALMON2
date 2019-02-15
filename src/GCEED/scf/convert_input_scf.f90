@@ -79,9 +79,11 @@ else if(ispin == 1)then
       ifMST(2)=nelec/2
     end if
   else if(nstate == 0 .and. sum(nstate_spin) /=0)then
-    MST(1:2)=nstate_spin(1:2)
+    MST(1)=maxval(nstate_spin(1:2))
+    MST(2)=maxval(nstate_spin(1:2))
     if(temperature_k>=0.d0)then
-      ifMST(1:2)=nstate_spin(1:2)
+      ifMST(1)=maxval(nstate_spin(1:2))
+      ifMST(2)=maxval(nstate_spin(1:2))
       rNetot=dble(nelec_spin(1))+dble(nelec_spin(2))
     else
       ifMST(1:2)=nelec_spin(1:2)
