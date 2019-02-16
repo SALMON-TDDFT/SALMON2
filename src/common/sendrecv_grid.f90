@@ -141,7 +141,6 @@ module sendrecv_grid
     srg%pcomm_initialized = .false. ! Flag for persistent communication
   end subroutine
 
-
   ! Allocate cache region for persistent communication:
   subroutine alloc_cache_complex8(srg)
     implicit none
@@ -161,6 +160,25 @@ module sendrecv_grid
     srg%pcomm_initialized = .false. ! Flag for persistent communication
   end subroutine
 
+  subroutine dealloc_cache(srg)
+    use salmon_communication, only: comm_free_reqs
+    implicit none
+    type(s_sendrecv_grid4d), intent(inout) :: srg
+    integer :: idir, iside, itype
+
+    call comm_free_reqs(srg%ireg)
+    do idir = 1, 3
+      do iside = 1, 2
+        do itype = 1, 2
+          if (allocated(srg%s_pcomm_cache4d(idir, iside, itype)%dbuf)) &
+            deallocate(srg%s_pcomm_cache4d(idir, iside, itype)%dbuf))
+          if (allocated(srg%s_pcomm_cache4d(idir, iside, itype)%zbuf)) &
+            deallocate(srg%s_pcomm_cache4d(idir, iside, itype)%zbuf))
+        end do
+      end do
+    end do
+    return
+  end subroutine
 
   subroutine update_overlap_array4d_real8(srg, data)
     use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
