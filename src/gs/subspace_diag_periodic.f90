@@ -29,6 +29,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
   use misc_routines, only: get_wtime
   use hpsi_sub
   use eigen_subdiag_periodic_sub
+  use calc_iroot_sub
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_wavefunction),intent(inout) :: spsi

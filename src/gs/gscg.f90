@@ -30,6 +30,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
   use salmon_communication, only: comm_summation, comm_bcast
   use misc_routines, only: get_wtime
   use hpsi_sub
+  use calc_iroot_sub
   !$ use omp_lib
   implicit none
   

@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module calc_iroot_sub
+  implicit none
+
+contains
+
 subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
   use calc_iquotient_sub
   implicit none
@@ -43,3 +48,5 @@ subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
   end if
 
 end subroutine calc_iroot
+
+end module calc_iroot_sub

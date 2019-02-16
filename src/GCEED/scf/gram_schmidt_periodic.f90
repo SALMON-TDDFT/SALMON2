@@ -17,6 +17,7 @@
 subroutine Gram_Schmidt_periodic
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_group_k
 use salmon_communication, only: comm_summation, comm_bcast
+use calc_iroot_sub
 use scf_data
 use new_world_sub
 implicit none

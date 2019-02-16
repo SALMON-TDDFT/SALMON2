@@ -16,6 +16,7 @@
 subroutine projection(tzpsi)
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_iroot_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
