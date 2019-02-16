@@ -1006,8 +1006,8 @@ contains
     integer, intent(in) :: reqs(:)
     integer :: ierr
     integer :: i
-    do i = lbound(reqs), ubound(reqs)
-      MPI_ERROR_CHECK(call MPI_REQUEST_FREEE(reqs(i), ierr))
+    do i = lbound(reqs, 1), ubound(reqs, 1)
+      MPI_ERROR_CHECK(call MPI_REQUEST_FREE(reqs(i), ierr))
     end do
 #else
     implicit none

@@ -166,14 +166,16 @@ module sendrecv_grid
     type(s_sendrecv_grid), intent(inout) :: srg
     integer :: idir, iside, itype
 
-    call comm_free_reqs(srg%ireg)
     do idir = 1, 3
       do iside = 1, 2
+        ! Release persistent communication requests
+        call comm_free_reqs(srg%ireq(idir, iside, :))
         do itype = 1, 2
-          if (allocated(srg%s_pcomm_cache(idir, iside, itype)%dbuf)) &
-            deallocate(srg%s_pcomm_cache(idir, iside, itype)%dbuf))
-          if (allocated(srg%s_pcomm_cache(idir, iside, itype)%zbuf)) &
-            deallocate(srg%s_pcomm_cache(idir, iside, itype)%zbuf))
+          ! Release allocated cache regions
+          if (allocated(srg%cache(idir, iside, itype)%dbuf)) &
+            deallocate(srg%cache(idir, iside, itype)%dbuf)
+          if (allocated(srg%cache(idir, iside, itype)%zbuf)) &
+            deallocate(srg%cache(idir, iside, itype)%zbuf)
         end do
       end do
     end do
