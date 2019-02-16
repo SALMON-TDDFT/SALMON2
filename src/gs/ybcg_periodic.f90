@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -42,7 +42,6 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: nproc_ob_spin(2)
   integer,intent(in)    :: iparaway_ob
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)

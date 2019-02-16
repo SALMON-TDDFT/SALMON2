@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,  &
+subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
@@ -43,7 +43,6 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: nproc_ob_spin(2)
   integer,intent(in)    :: iparaway_ob
   real(8),intent(out)    :: elp3(3000)
   complex(8),intent(out) :: zxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:info%numo)

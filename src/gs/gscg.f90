@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
@@ -44,7 +44,6 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: nproc_ob_spin(2)
   integer,intent(in)    :: iparaway_ob
   real(8),intent(out)    :: elp3(3000)
   real(8),intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:info%numo)
@@ -101,7 +100,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
 
   allocate (gk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
-  call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  call set_isstaend(is_sta,is_end,ilsda)
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is_array(3),mg%ie_array(3)

@@ -499,21 +499,21 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
@@ -588,7 +588,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
           end do
 
-          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
           do ik=k_sta,k_end
@@ -619,7 +619,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
 
           call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                      iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                      iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                       info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
           do ik=k_sta,k_end
@@ -733,7 +733,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         end do
 
-        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
         do ik=k_sta,k_end
@@ -763,7 +763,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
 
         call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                    iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                    iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
         do ik=k_sta,k_end
@@ -822,21 +822,21 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select

@@ -19,7 +19,7 @@ module subspace_diag_periodic_sub
 contains
 
 subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                  iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                  iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                   info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
   use inputoutput, only: ispin,natom
@@ -42,7 +42,6 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
   integer,intent(in)  :: k_sta,k_end
-  integer,intent(in)  :: nproc_ob_spin(2)
   real(8),intent(in)  :: hvol
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)

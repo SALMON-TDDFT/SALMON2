@@ -18,7 +18,7 @@ module subspace_diag_sub
 
 contains
 
-subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
   use inputoutput, only: ispin
@@ -41,7 +41,6 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
   integer,intent(in)  :: k_sta,k_end
-  integer,intent(in)  :: nproc_ob_spin(2)
   real(8),intent(in)  :: hvol
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
