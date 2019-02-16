@@ -22,16 +22,15 @@ module sendrecv_grid
 
   public :: init_sendrecv_grid
   public :: alloc_cache_real8
+  public :: alloc_cache_complex8
+  public :: dealloc_cache
   public :: update_overlap
   public :: s_sendrecv_grid
-
 
   integer, parameter :: iside_up   = 1
   integer, parameter :: iside_down = 2
   integer, parameter :: itype_send = 1
   integer, parameter :: itype_recv = 2
-
-
 
   interface update_overlap
   module procedure update_overlap_real8
@@ -229,7 +228,8 @@ module sendrecv_grid
     end do
     call timer_end(LOG_SENDRECV_GRID)
 
-    srg%pcomm_initialized = .true. ! Update pcomm_initialized
+    if (.not. srg%pcomm_initialized) &
+      srg%pcomm_initialized = .true. ! Update pcomm_initialized
 
     contains
 
@@ -339,7 +339,8 @@ module sendrecv_grid
     end do
     call timer_end(LOG_SENDRECV_GRID)
 
-    srg%pcomm_initialized = .true. ! Update pcomm_initialized
+    if (.not. srg%pcomm_initialized) &
+      srg%pcomm_initialized = .true. ! Update pcomm_initialized
 
     contains
 
