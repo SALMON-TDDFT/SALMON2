@@ -218,7 +218,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
           end do
           end do
         end if
-        call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
         sum0=0.d0
         if(icorr_p==1)then
@@ -290,7 +290,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
       end do
     end if
   
-    call calc_iroot(p,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+    call calc_iroot(p,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
     call comm_bcast(xk,nproc_group_kgrid,iroot)
     call comm_bcast(hxk,nproc_group_kgrid,iroot)
     call comm_bcast(txk,nproc_group_kgrid,iroot)
@@ -344,7 +344,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
             end do
             end do
           end if
-          call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+          call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
           call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
           sum0=0.d0
   !$omp parallel do reduction(+ : sum0)

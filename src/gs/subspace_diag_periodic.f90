@@ -234,7 +234,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           end do
           end do
         end if
-        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
           call calc_allob(ii,i_allob)
@@ -285,7 +285,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           end do
           end do
         end if
-        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
           call calc_allob(ii,i_allob)

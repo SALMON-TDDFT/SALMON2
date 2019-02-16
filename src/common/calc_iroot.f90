@@ -13,11 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iroot
-  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin(2),mst(2)
+  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,mst(2)
   
   if(ilsda==0)then
     if(iparaway_ob==1)then

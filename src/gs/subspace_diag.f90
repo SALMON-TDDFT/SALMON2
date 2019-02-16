@@ -180,7 +180,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
           end do
           end do
         end if
-        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         
         do iob=1,iobnum
@@ -232,7 +232,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
           end do
           end do
         end if
-        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(rmatbox_m,nproc_group_kgrid,iroot)
         do iob=1,iobnum
           call calc_allob(iob,iob_allob)

@@ -238,7 +238,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
             end do
             end do
           end if
-          call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+          call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
           call comm_bcast(rmatbox_m,nproc_group_grid,iroot)
           sum0=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)

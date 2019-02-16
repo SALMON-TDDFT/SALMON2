@@ -58,7 +58,7 @@ do iob=pstart(is),pend(is)
     end do
     end do
   end if
-  call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+  call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
   call comm_bcast(matbox_m,nproc_group_kgrid,iroot)
 
   ovrp=0.d0

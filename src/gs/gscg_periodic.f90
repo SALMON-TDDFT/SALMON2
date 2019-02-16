@@ -277,7 +277,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
               end do
               end do
             end if
-            call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+            call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
             call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
             sum0=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)

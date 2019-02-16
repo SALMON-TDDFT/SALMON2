@@ -187,7 +187,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
         end do
         end do
       end if
-      call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+      call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
       call comm_bcast(gk,nproc_group_grid,iroot)
   
       do job=iobsta(is),iob-1
@@ -207,7 +207,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
           end do
         end if
   
-        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(gk,nproc_group_grid,iroot)
       end do
   
