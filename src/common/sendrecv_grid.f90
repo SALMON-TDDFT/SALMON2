@@ -16,14 +16,14 @@
 
 
 module sendrecv_grid
-  use structures, only: s_rgrid, s_pcomm_cache4d, s_sendrecv_grid4d
+  use structures, only: s_rgrid, s_pcomm_cache, s_sendrecv_grid
 
   implicit none
 
-  public :: init_sendrecv_grid4d
+  public :: init_sendrecv_grid
   public :: alloc_cache_real8
   public :: update_overlap
-  public :: s_sendrecv_grid4d
+  public :: s_sendrecv_grid
 
 
   integer, parameter :: iside_up   = 1
@@ -34,8 +34,8 @@ module sendrecv_grid
 
 
   interface update_overlap
-  module procedure update_overlap_array4d_real8
-  module procedure update_overlap_array4d_complex8
+  module procedure update_overlap_real8
+  module procedure update_overlap_complex8
   end interface
 
 
@@ -56,14 +56,14 @@ module sendrecv_grid
     tag = 2 * idir + iside
   end function tag
 
-  ! Initializing s_sendrecv_grid4d structure:
+  ! Initializing s_sendrecv_grid structure:
   ! NOTE:
   ! * This subroutine is commonly used for real type and complex type.
   ! * The cache region MUST be allocated after this initialization 
   !   by using `alloc_cache_real8/complex8`.
-  subroutine init_sendrecv_grid4d(srg, rg, nb, icomm, myrank, neig)
+  subroutine init_sendrecv_grid(srg, rg, nb, icomm, myrank, neig)
     implicit none
-    type(s_sendrecv_grid4d), intent(inout) :: srg
+    type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
     integer, intent(in) ::  nb, icomm, myrank, neig(1:3, 1:2)
 
@@ -110,7 +110,7 @@ module sendrecv_grid
       end do
     end do
 
-    ! Assign to s_sendrecv_grid4d structure:
+    ! Assign to s_sendrecv_grid structure:
     srg%rg = rg
     srg%nb = nb
     srg%neig = neig
@@ -119,13 +119,13 @@ module sendrecv_grid
     srg%icomm = icomm
     srg%myrank = myrank
     srg%ireq = -1
-  end subroutine init_sendrecv_grid4d
+  end subroutine init_sendrecv_grid
 
 
   ! Allocate cache region for persistent communication:
   subroutine alloc_cache_real8(srg)
     implicit none
-    type(s_sendrecv_grid4d), intent(inout) :: srg
+    type(s_sendrecv_grid), intent(inout) :: srg
     integer :: idir, iside, itype, is_b(3), ie_b(3)
 
     do idir = 1, 3 ! 1:x,2:y,3:z
@@ -144,7 +144,7 @@ module sendrecv_grid
   ! Allocate cache region for persistent communication:
   subroutine alloc_cache_complex8(srg)
     implicit none
-    type(s_sendrecv_grid4d), intent(inout) :: srg
+    type(s_sendrecv_grid), intent(inout) :: srg
     integer :: idir, iside, itype, is_b(3), ie_b(3)
 
     do idir = 1, 3 ! 1:x,2:y,3:z
@@ -163,28 +163,28 @@ module sendrecv_grid
   subroutine dealloc_cache(srg)
     use salmon_communication, only: comm_free_reqs
     implicit none
-    type(s_sendrecv_grid4d), intent(inout) :: srg
+    type(s_sendrecv_grid), intent(inout) :: srg
     integer :: idir, iside, itype
 
     call comm_free_reqs(srg%ireg)
     do idir = 1, 3
       do iside = 1, 2
         do itype = 1, 2
-          if (allocated(srg%s_pcomm_cache4d(idir, iside, itype)%dbuf)) &
-            deallocate(srg%s_pcomm_cache4d(idir, iside, itype)%dbuf))
-          if (allocated(srg%s_pcomm_cache4d(idir, iside, itype)%zbuf)) &
-            deallocate(srg%s_pcomm_cache4d(idir, iside, itype)%zbuf))
+          if (allocated(srg%s_pcomm_cache(idir, iside, itype)%dbuf)) &
+            deallocate(srg%s_pcomm_cache(idir, iside, itype)%dbuf))
+          if (allocated(srg%s_pcomm_cache(idir, iside, itype)%zbuf)) &
+            deallocate(srg%s_pcomm_cache(idir, iside, itype)%zbuf))
         end do
       end do
     end do
     return
   end subroutine
 
-  subroutine update_overlap_array4d_real8(srg, data)
+  subroutine update_overlap_real8(srg, data)
     use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
-    type(s_sendrecv_grid4d), intent(inout) :: srg
+    type(s_sendrecv_grid), intent(inout) :: srg
     real(8), intent(inout) :: data( &
       srg%rg%is_array(1):srg%rg%ie_array(1), &
       srg%rg%is_array(2):srg%rg%ie_array(2), &
@@ -287,14 +287,14 @@ module sendrecv_grid
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine copy_self
 
-  end subroutine update_overlap_array4d_real8
+  end subroutine update_overlap_real8
 
 
-  subroutine update_overlap_array4d_complex8(srg, data)
+  subroutine update_overlap_complex8(srg, data)
     use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
-    type(s_sendrecv_grid4d), intent(inout) :: srg
+    type(s_sendrecv_grid), intent(inout) :: srg
     complex(8), intent(inout) :: data( &
       srg%rg%is_array(1):srg%rg%ie_array(1), &
       srg%rg%is_array(2):srg%rg%ie_array(2), &
@@ -397,7 +397,7 @@ module sendrecv_grid
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine copy_self
 
-  end subroutine update_overlap_array4d_complex8
+  end subroutine update_overlap_complex8
 
 
 end module sendrecv_grid
