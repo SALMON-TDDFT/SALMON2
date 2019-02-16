@@ -164,7 +164,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
     iter_bak_ob(:)=0 
   
     do iob_myob=1,info%numo
-      call calc_allob(iob_myob,iob_allob)
+      call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
       elp2(2)=get_wtime()
       
@@ -210,11 +210,11 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
       end do
   
     end do
-    call inner_product5(mg,itotmst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+    call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
 
     Iteration : do iter=1,Ncg
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
@@ -308,10 +308,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         end do
         end do
       end if
-      call inner_product5(mg,itotmst,info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
         
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
         if(iter==1)then
     !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -336,10 +336,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         gkgk_ob(iob_allob)=sum_ob1(iob_allob)
       end do
 
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zpk_ob,zs_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zpk_ob,zs_ob,hvol)
 
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -349,10 +349,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         end do
         end do
       end do
-      call inner_product5(mg,itotmst,info%numo,zpko_ob,zpko_ob,sum_ob1,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zpko_ob,zpko_ob,sum_ob1,hvol)
 
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -394,12 +394,12 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         end do
         end do
       end do
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
-      call inner_product5(mg,itotmst,info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
         
     
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
 
         ev=0.5d0*((xkHxk_ob(iob_allob)+pkHpk_ob(iob_allob))   &
                  -sqrt((xkHxk_ob(iob_allob)-pkHpk_ob(iob_allob))**2+4.d0*abs(xkHpk_ob(iob_allob))**2))
@@ -418,11 +418,11 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         end do
       end do 
     
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zxk_ob,xkxk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zxk_ob,xkxk_ob,hvol)
 
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
 
         if(abs(xkxk_ob(iob_allob))<=1.d30)then
     !$OMP parallel do private(iz,iy,ix) collapse(2)

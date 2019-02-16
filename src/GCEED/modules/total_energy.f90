@@ -63,7 +63,7 @@ end do
 
 do iik=k_sta,k_end
 do iob=1,iobnum
-  call calc_allob(iob,iob_allob)
+  call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
 
 !$OMP parallel do private(iz,iy,ix) 
   do iz=mg_sta(3),mg_end(3)
@@ -180,7 +180,7 @@ elp3(862)=get_wtime()
 elp3(882)=elp3(882)+elp3(862)-elp3(861)
 do iik=k_sta,k_end
 do iob=1,iobnum
-  call calc_allob(iob,iob_allob)
+  call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
   elp3(863)=get_wtime()
 
 !$OMP parallel do private(iz,iy,ix) 

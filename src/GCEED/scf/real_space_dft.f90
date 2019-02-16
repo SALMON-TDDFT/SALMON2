@@ -524,7 +524,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       select case(iperiodic)
       case(0)
         call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -844,7 +844,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       select case(iperiodic)
       case(0)
         call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

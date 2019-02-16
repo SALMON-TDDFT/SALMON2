@@ -43,7 +43,7 @@ if(ilsda==0)then
   matbox_m=0d0
   do iik=k_sta,k_end
   do i1=1,iobnum
-    call calc_allob(i1,i1_allob)
+    call calc_allob(i1,i1_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -116,7 +116,7 @@ if(ilsda==0)then
   matbox_m=0d0
   do iik=k_sta,k_end
   do i1=1,iobnum
-    call calc_allob(i1,i1_allob)
+    call calc_allob(i1,i1_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)

@@ -129,7 +129,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
   end if
   
   do iob=1,info%numo
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
@@ -173,7 +173,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
     end do
   end do
   
-  call inner_product7(mg,itotmst,info%numo,rxk_ob,rhxk_ob,xkhxk_ob,elp3,hvol)
+  call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rxk_ob,rhxk_ob,xkhxk_ob,elp3,hvol)
   
   xkxk_ob(:)=1.d0 
   rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
@@ -181,7 +181,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
   Iteration : do iter=1,ncg
   elp2(2)=get_wtime()
     do iob=1,info%numo
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
   !$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -265,10 +265,10 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
       end do
       end do
     end if 
-    call inner_product7(mg,itotmst,info%numo,rgk_ob,rgk_ob,sum_ob0,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rgk_ob,rgk_ob,sum_ob0,elp3,hvol)
     if ( iter==1 ) then
       do iob=1,info%numo
-        call calc_allob(iob,iob_allob)
+        call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
   !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -280,7 +280,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
       end do
     else
       do iob=1,info%numo
-        call calc_allob(iob,iob_allob)
+        call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
         uk=sum_ob0(iob_allob)/gkgk_ob(iob_allob)
   !$OMP parallel do private(iz,iy,ix)
         do iz=mg%is(3),mg%ie(3)
@@ -293,12 +293,12 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
       end do
     end if 
     gkgk_ob(:)=sum_ob0(:)
-    call inner_product7(mg,itotmst,info%numo,rxk_ob,rpk_ob,xkpk_ob,elp3,hvol)
-    call inner_product7(mg,itotmst,info%numo,rpk_ob,rpk_ob,pkpk_ob,elp3,hvol)
-    call inner_product7(mg,itotmst,info%numo,rpk_ob,rhxk_ob,pkhxk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rxk_ob,rpk_ob,xkpk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rpk_ob,rpk_ob,pkpk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rpk_ob,rhxk_ob,pkhxk_ob,elp3,hvol)
   
     do iob=1,info%numo
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
   !$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -339,9 +339,9 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
       end do
       end do
     end do
-    call inner_product7(mg,itotmst,info%numo,rpk_ob,rgk_ob,pkHpk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rpk_ob,rgk_ob,pkHpk_ob,elp3,hvol)
     do iob=1,info%numo
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
       ak=pkHpk_ob(iob_allob)*xkpk_ob(iob_allob)-pkhxk_ob(iob_allob)*pkpk_ob(iob_allob)
       bk=pkHpk_ob(iob_allob)*xkxk_ob(iob_allob)-xkhxk_ob(iob_allob)*pkpk_ob(iob_allob)
       ck=pkhxk_ob(iob_allob)*xkxk_ob(iob_allob)-xkhxk_ob(iob_allob)*xkpk_ob(iob_allob)
@@ -357,16 +357,16 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
       end do
       end do
     end do
-    call inner_product7(mg,itotmst,info%numo,rxk_ob,rhxk_ob,xkhxk_ob,elp3,hvol)
-    call inner_product7(mg,itotmst,info%numo,rxk_ob,rxk_ob,xkxk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rxk_ob,rhxk_ob,xkhxk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rxk_ob,rxk_ob,xkxk_ob,elp3,hvol)
     rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
   
   
   end do Iteration
   
-  call inner_product7(mg,itotmst,info%numo,rxk_ob,rxk_ob,sum_ob0,elp3,hvol)
+  call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rxk_ob,rxk_ob,sum_ob0,elp3,hvol)
   do iob=1,info%numo
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
   !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)

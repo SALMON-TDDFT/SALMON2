@@ -187,7 +187,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         
         do iob=1,iobnum
-          call calc_allob(iob,iob_allob)
+          call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
           if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
             rbox=0.d0
   !$OMP parallel do reduction(+:rbox) private(iz,iy,ix)
@@ -208,7 +208,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
       call eigen_subdiag(amat,evec,iter,ier2)
      
       do job=1,iobnum
-        call calc_allob(job,job_allob)
+        call calc_allob(job,job_allob,iparaway_ob,itotmst,mst,iobnum)
         if(job_allob>=iobsta(is).and.job_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -238,7 +238,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
         call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(rmatbox_m,nproc_group_kgrid,iroot)
         do iob=1,iobnum
-          call calc_allob(iob,iob_allob)
+          call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
           if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
@@ -254,7 +254,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
       end do
     
       do iob=1,iobnum
-        call calc_allob(iob,iob_allob)
+        call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
         if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
           rbox=0.d0
   !$OMP parallel do reduction(+:rbox) private(iz,iy,ix)

@@ -102,7 +102,7 @@ else if(ifunc==4)then
   if(ilsda==0)then
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
       do iz=mg_sta(3),mg_end(3)
       do iy=mg_sta(2),mg_end(2)
@@ -119,7 +119,7 @@ else if(ifunc==4)then
   else
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       if(iob_allob<=MST(1))then
 !$OMP parallel do private(iz,iy,ix) 
         do iz=mg_sta(3),mg_end(3)
@@ -152,7 +152,7 @@ else if(ifunc==5)then
   if(ilsda==0)then
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       cbox=0.d0
 !$OMP parallel do reduction(+:cbox) private(iz,iy,ix)
       do iz=mg_sta(3),mg_end(3)
@@ -172,7 +172,7 @@ else if(ifunc==5)then
   else if(ilsda==1)then
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       cbox=0.d0
       if(iob_allob<=MST(1))then
 !$OMP parallel do reduction(+:cbox) private(iz,iy,ix) 
@@ -209,7 +209,7 @@ else if(ifunc==6)then
   if(ilsda==0)then
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
       do iz=mg_sta(3),mg_end(3)
       do iy=mg_sta(2),mg_end(2)
@@ -226,7 +226,7 @@ else if(ifunc==6)then
   else if(ilsda==1)then
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       if(iob_allob<=MST(1))then
 !$OMP parallel do private(iz,iy,ix) 
         do iz=mg_sta(3),mg_end(3)
@@ -278,7 +278,7 @@ else if(ifunc==7)then
   else if(ilsda==1)then
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       cbox=0.d0
       if(iob_allob<=MST(1))then
 !$OMP parallel do reduction(+:cbox) private(iz,iy,ix) 

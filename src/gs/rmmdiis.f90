@@ -24,7 +24,7 @@ contains
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
 subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
-                   info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+                   info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_global
@@ -50,6 +50,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  integer,intent(in)    :: iparaway_ob
   integer,parameter :: nd=4
   integer :: j,ind
   integer :: iob,iob_allob,iter,ix,iy,iz
@@ -130,7 +131,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   iflag_diisjump=0
   
   do iob=1,info%numo
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
   
     call setv(mg,vlocal,v,iob_allob,mst)
 
@@ -296,7 +297,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   
   iflag_diisjump=0
   do iob=1,info%numo
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
 
     call setv(mg,vlocal,v,iob_allob,mst)
 
@@ -334,7 +335,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
       psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
                       1:info%numo,info%ik_s:info%ik_e,1)
     do iob=1,info%numo
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
       call setv(mg,vlocal,v,iob_allob,mst)
 

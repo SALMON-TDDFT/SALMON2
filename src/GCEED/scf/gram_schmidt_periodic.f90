@@ -72,7 +72,7 @@ do ik=k_sta,k_end
 
     zovrp=0.d0
     do q=1,iobnum
-      call calc_allob(q,q_allob)
+      call calc_allob(q,q_allob,iparaway_ob,itotmst,mst,iobnum)
       if(q_allob >= iobsta(is) .and. q_allob <= iob-1)then
         cbox=0.d0
 !$OMP parallel do private(iz,iy,ix) collapse(2) reduction ( + : cbox )
@@ -91,7 +91,7 @@ do ik=k_sta,k_end
 
     cmatbox=0.d0
     do q=1,iobnum
-      call calc_allob(q,q_allob)
+      call calc_allob(q,q_allob,iparaway_ob,itotmst,mst,iobnum)
       if(q_allob >= iobsta(is) .and. q_allob <= iob-1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg_sta(3),mg_end(3)

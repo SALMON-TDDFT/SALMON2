@@ -108,7 +108,7 @@ case(0)
     end do
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       call set_ispin(iob_allob,jspin)
 !$OMP parallel private(iz)
       do iz=iwk3sta(3),iwk3end(3)
@@ -146,7 +146,7 @@ case(0)
   else
     do iik=k_sta,k_end
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       call set_ispin(iob_allob,jspin)
       fdN0=-0.5d0*cNmat(0,Nd)*f0
       do j=1,3
@@ -193,7 +193,7 @@ case(3)
       end do
     end do
     do iob=1,iobmax
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
       call set_ispin(iob_allob,jspin)
 !$OMP parallel do collapse(2) private(ix,iy,iz)
       do iz=iwk3sta(3),iwk3end(3)

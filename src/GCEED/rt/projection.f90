@@ -75,7 +75,7 @@ do iob=1,itotMST0
     end do
     end do
     end do
-    call calc_allob(job,job_allob)
+    call calc_allob(job,job_allob,iparaway_ob,itotmst,mst,iobnum)
     coef_mat(job_allob,iob,iik,1)=coef_mat(job_allob,iob,iik,1)+cbox
   end do
 end do

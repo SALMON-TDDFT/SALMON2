@@ -14,14 +14,16 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine inner_product7(mg,itotmst,iobnum,rmatbox1,rmatbox2,rbox2,elp3,hvol)
+subroutine inner_product7(mg,iparaway_ob,itotmst,mst,iobnum,rmatbox1,rmatbox2,rbox2,elp3,hvol)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_korbital
   use salmon_communication, only: comm_summation
   use misc_routines, only: get_wtime
   implicit none
   type(s_rgrid),intent(in) :: mg
+  integer,intent(in)  :: iparaway_ob
   integer,intent(in)  :: itotmst
+  integer,intent(in)  :: mst(2)
   integer,intent(in)  :: iobnum
   real(8),intent(in)  :: rmatbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:iobnum)
   real(8),intent(in)  :: rmatbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:iobnum)
@@ -34,7 +36,7 @@ subroutine inner_product7(mg,itotmst,iobnum,rmatbox1,rmatbox2,rbox2,elp3,hvol)
   rbox1(:)=0.d0
  
   do iob=1,iobnum
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
     rbox=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : rbox)
     do iz=mg%is(3),mg%ie(3)

@@ -202,7 +202,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
     
   !do jj=1,itotmst
       do jj=1,iobnum
-        call calc_allob(jj,j_allob)
+        call calc_allob(jj,j_allob,iparaway_ob,itotmst,mst,iobnum)
         if(j_allob>=iobsta(is).and.j_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -240,7 +240,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
         call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
-          call calc_allob(ii,i_allob)
+          call calc_allob(ii,i_allob,iparaway_ob,itotmst,mst,iobnum)
           if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then
             cbox=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction (+ : cbox)
@@ -261,7 +261,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
       call eigen_subdiag_periodic(amat2,evec,iter,ier2)
     
       do jj=1,iobnum
-        call calc_allob(jj,j_allob)
+        call calc_allob(jj,j_allob,iparaway_ob,itotmst,mst,iobnum)
         if(j_allob>=iobsta(is).and.j_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -291,7 +291,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
         call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
-          call calc_allob(ii,i_allob)
+          call calc_allob(ii,i_allob,iparaway_ob,itotmst,mst,iobnum)
           if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
@@ -306,7 +306,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
       end do
     
       do ii=1,iobnum
-        call calc_allob(ii,i_allob)
+        call calc_allob(ii,i_allob,iparaway_ob,itotmst,mst,iobnum)
         if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then
           rbox=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction(+:rbox)

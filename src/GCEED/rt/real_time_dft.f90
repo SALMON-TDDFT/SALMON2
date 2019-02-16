@@ -884,7 +884,7 @@ if(ilsda==0)then
   
   do iik=k_sta,k_end
   do iob=1,iobnum
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix)
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -909,7 +909,7 @@ else if(ilsda==1)then
   
   do iik=k_sta,k_end
   do iob=1,iobnum
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
     if(iob_allob<=MST(1))then
 !$OMP parallel do private(iz,iy,ix)
       do iz=mg_sta(3),mg_end(3)

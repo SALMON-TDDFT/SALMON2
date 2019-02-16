@@ -120,7 +120,7 @@ do iik=k_sta,k_end
     end do
   end do
   do iob=1,iobnum
-    call calc_allob(iob,p_allob)
+    call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(ix,iy,iz)
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -331,7 +331,7 @@ elp3(1455)=elp3(1455)+elp3(1406)-elp3(1405)
 
 do iik=k_sta,k_end
 do iob=1,iobnum
-  call calc_allob(iob,p_allob)
+  call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
   do iatom=1,MI
   ik=Kion(iatom)
   loop_lm4 : do lm=1,(Mlps(ik)+1)**2
