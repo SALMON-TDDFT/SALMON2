@@ -134,7 +134,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
     end do
 
   orbital : do iob=iobsta(is),iobend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,info%numo)
     call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
     elp2(2)=get_wtime()
   
@@ -192,7 +192,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin
   
       do job=iobsta(is),iob-1
         sum0=0.d0
-        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,info%numo)
         call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
         if(jcorr==1)then
           call inner_product(mg,spsi%rwf(:,:,:,1,job_myob,1,1),gk(:,:,:),sum0,commname)

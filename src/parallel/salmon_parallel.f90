@@ -27,10 +27,6 @@ module salmon_parallel
   integer, public :: nproc_id_tdks
   integer, public :: nproc_size_tdks
 
-  integer, public :: nproc_group_spin
-  integer, public :: nproc_id_spin
-  integer, public :: nproc_size_spin
-
   integer, public :: nproc_group_kgrid
   integer, public :: nproc_id_kgrid
   integer, public :: nproc_size_kgrid

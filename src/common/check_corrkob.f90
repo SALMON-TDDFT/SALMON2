@@ -14,59 +14,32 @@
 !  limitations under the License.
 !
 subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
-  use salmon_parallel, only: nproc_id_kgrid, nproc_id_spin
+  use salmon_parallel, only: nproc_id_kgrid
   implicit none
   integer,intent(in)  :: iob,ik
   integer,intent(out) :: icorr_p
   integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin(2),mst(2)
   integer :: iquotient
-  
-  if(ilsda==0.or.nproc_ob==1)then
-    if(iparaway_ob==1)then
-      call calc_iquotient(iob,nproc_ob,itotMST,iquotient)
-      if(nproc_id_kgrid==iquotient.and.ik>=k_sta.and.ik<=k_end)then
-        icorr_p=1
-      else
-        icorr_p=0
-      end if
-    else if(iparaway_ob==2)then
-      if(nproc_id_kgrid==mod(iob-1,nproc_ob).and.ik>=k_sta.and.ik<=k_end)then
-        icorr_p=1
-      else
-        icorr_p=0
-      end if
-    end if
+  integer :: iob_tmp
+
+  if(ilsda==0.or.iob<=mst(1))then
+    iob_tmp=iob
   else
-    if(iparaway_ob==1)then
-      if(nproc_id_spin<nproc_ob_spin(1))then
-        call calc_iquotient(iob,nproc_ob_spin(1),MST(1),iquotient)
-        if(iob<=MST(1).and.nproc_id_kgrid==iquotient.and.ik>=k_sta.and.ik<=k_end)then
-          icorr_p=1
-        else
-          icorr_p=0
-        end if
-      else
-        call calc_iquotient(iob-MST(1),nproc_ob_spin(2),MST(2),iquotient)
-        if(iob>=MST(1)+1.and.nproc_id_kgrid==iquotient.and.ik>=k_sta.and.ik<=k_end)then
-          icorr_p=1
-        else
-          icorr_p=0
-        end if
-      end if
-    else if(iparaway_ob==2)then
-      if(nproc_id_spin<nproc_ob_spin(1))then
-        if(iob<=MST(1).and.nproc_id_kgrid==mod(iob-1,nproc_ob_spin(1)).and.ik>=k_sta.and.ik<=k_end)then
-          icorr_p=1
-        else
-          icorr_p=0
-        end if
-      else
-        if(iob>=MST(1)+1.and.nproc_id_kgrid==mod(iob-1-MST(1),nproc_ob_spin(2)).and.ik>=k_sta.and.ik<=k_end)then
-          icorr_p=1
-        else
-          icorr_p=0
-        end if
-      end if
+    iob_tmp=iob-mst(1)
+  end if 
+
+  if(iparaway_ob==1)then
+    call calc_iquotient(iob_tmp,nproc_ob,mst(1),iquotient)
+    if(nproc_id_kgrid==iquotient.and.ik>=k_sta.and.ik<=k_end)then
+      icorr_p=1
+    else
+      icorr_p=0
+    end if
+  else if(iparaway_ob==2)then
+    if(nproc_id_kgrid==mod(iob_tmp-1,nproc_ob).and.ik>=k_sta.and.ik<=k_end)then
+      icorr_p=1
+    else
+      icorr_p=0
     end if
   end if
   

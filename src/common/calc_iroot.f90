@@ -14,13 +14,12 @@
 !  limitations under the License.
 !
 subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-  use salmon_parallel, only: nproc_id_spin
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iroot
   integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin(2),mst(2)
   
-  if(ilsda==0.or.nproc_ob==1)then
+  if(ilsda==0)then
     if(iparaway_ob==1)then
       call calc_iquotient(iob,nproc_ob,itotmst,iroot)
     else if(iparaway_ob==2)then
@@ -28,16 +27,16 @@ subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin
     end if
   else
     if(iparaway_ob==1)then
-      if(nproc_id_spin<nproc_ob_spin(1))then
-        call calc_iquotient(iob,nproc_ob_spin(1),mst(1),iroot)
+      if(iob<=mst(1))then
+        call calc_iquotient(iob,nproc_ob,mst(1),iroot)
       else
-        call calc_iquotient(iob-mst(1),nproc_ob_spin(2),mst(2),iroot)
+        call calc_iquotient(iob-mst(1),nproc_ob,mst(2),iroot)
       end if
     else if(iparaway_ob==2)then
-      if(nproc_id_spin<nproc_ob_spin(1))then
-        iroot=mod(iob-1,nproc_ob_spin(1))
+      if(iob<=mst(1))then
+        iroot=mod(iob-1,nproc_ob)
       else
-        iroot=mod(iob-1-mst(1),nproc_ob_spin(2))
+        iroot=mod(iob-1-mst(1),nproc_ob)
       end if
     end if 
   end if

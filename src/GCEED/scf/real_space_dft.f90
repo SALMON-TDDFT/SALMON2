@@ -41,8 +41,8 @@ END MODULE global_variables_scf
 subroutine Real_Space_DFT
 use structures, only: s_rgrid, s_wf_info, s_wavefunction
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
-                           nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
-                           nproc_group_spin, nproc_group_korbital
+                           nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
+                           nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
@@ -93,19 +93,7 @@ call set_filename
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 
-if(ilsda==0)then
-  call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
-else if(ilsda==1)then
-  if(nproc_ob==1)then
-    iobnum=itotMST
-  else
-    if(nproc_id_spin<nproc_ob_spin(1))then
-      call calc_iobnum(MST(1),nproc_ob_spin(1),nproc_id_kgrid,iobnum,nproc_ob_spin(1),iparaway_ob)
-    else
-      call calc_iobnum(MST(2),nproc_ob_spin(2),nproc_id_kgrid,iobnum,nproc_ob_spin(2),iparaway_ob)
-    end if
-  end if
-end if
+call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
 
 if(iflag_stopt==1)then
   call structure_opt_ini(MI)

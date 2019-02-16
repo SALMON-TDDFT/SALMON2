@@ -13,23 +13,35 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_iobnum(tMST,tproc,trank,tiobnum,nproc_ob,iparaway_ob)
+subroutine calc_iobnum(tmst,tproc,trank,tiobnum,nproc_ob,iparaway_ob)
+use inputoutput, only : ispin
 implicit none
-integer :: tMST,tproc,trank,tiobnum
+integer :: tmst,tproc,trank,tiobnum
+integer :: ttmst
 integer :: nproc_ob,iparaway_ob
 
+if(ispin==0)then
+  ttmst=tmst
+else if(ispin==1)then
+  ttmst=tmst/2
+end if
+
 if(iparaway_ob==1)then
-  tiobnum=(trank+1)*tMST/nproc_ob-trank*tMST/nproc_ob
+  tiobnum=(trank+1)*ttmst/nproc_ob-trank*ttmst/nproc_ob
 else if(iparaway_ob==2)then
-  if(mod(tMST,tproc)==0)then
-    tiobnum=tMST/tproc
+  if(mod(ttmst,tproc)==0)then
+    tiobnum=ttmst/tproc
   else
-    if(trank<mod(tMST,tproc))then
-      tiobnum=tMST/tproc+1
+    if(trank<mod(ttmst,tproc))then
+      tiobnum=ttmst/tproc+1
     else
-      tiobnum=tMST/tproc
+      tiobnum=ttmst/tproc
     end if
   end if
+end if
+
+if(ispin==1)then
+  tiobnum=tiobnum*2
 end if
 
 end subroutine calc_iobnum
