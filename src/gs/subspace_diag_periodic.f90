@@ -136,7 +136,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
   elp3(303)=get_wtime()
   elp3(353)=elp3(353)+elp3(303)-elp3(302)
   
-  call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  call set_isstaend(is_sta,is_end,ilsda)
   
   do ik=k_sta,k_end
   do is=is_sta,is_end

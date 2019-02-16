@@ -13,10 +13,10 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+subroutine set_isstaend(is_sta,is_end,ilsda)
   implicit none
   integer,intent(out) :: is_sta,is_end
-  integer,intent(in)  :: ilsda,nproc_ob,nproc_ob_spin(2)
+  integer,intent(in)  :: ilsda
   
   if(ilsda==0)then
     is_sta=1
