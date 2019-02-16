@@ -13,12 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-  use salmon_parallel, only: nproc_id_kgrid
+subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iob_myob
-  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin(2),mst(2),iobnum
+  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,mst(2),iobnum
   integer :: iquotient,iob_min
   integer :: iob_tmp
   

@@ -46,7 +46,7 @@ end if
 
 do is=is_sta,is_end
 do iob=pstart(is),pend(is)
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
   call check_corrkob(iob,1,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix)
