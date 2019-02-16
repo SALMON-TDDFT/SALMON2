@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module calc_iquotient_sub
+  implicit none
+
+contains
+
 subroutine calc_iquotient(iob,nproc_ob,itotmst,iquotient)
   implicit none
   integer,intent(in) :: iob,nproc_ob,itotmst
@@ -25,3 +30,5 @@ subroutine calc_iquotient(iob,nproc_ob,itotmst,iquotient)
   end if
 
 end subroutine calc_iquotient
+
+end module calc_iquotient_sub

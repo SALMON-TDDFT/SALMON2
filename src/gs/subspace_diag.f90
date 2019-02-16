@@ -27,6 +27,10 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
   use salmon_communication, only: comm_summation, comm_bcast
   use misc_routines, only: get_wtime
   use hpsi_sub
+  use calc_iroot_sub
+  use calc_myob_sub
+  use check_corrkob_sub
+  use set_isstaend_sub
   use eigen_subdiag_sub
   implicit none
   type(s_rgrid),intent(in) :: mg

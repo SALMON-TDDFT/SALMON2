@@ -30,6 +30,10 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, 
   use misc_routines, only: get_wtime
   use inner_product_sub
   use hpsi_sub
+  use calc_iroot_sub
+  use calc_myob_sub
+  use check_corrkob_sub
+  use set_isstaend_sub
   !$ use omp_lib
   implicit none
   

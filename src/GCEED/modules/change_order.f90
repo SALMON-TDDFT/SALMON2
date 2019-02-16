@@ -30,6 +30,8 @@ CONTAINS
 subroutine R_change_order(tpsi)
 use salmon_parallel, only: nproc_group_kgrid
 use salmon_communication, only: comm_summation
+use calc_myob_sub
+use check_corrkob_sub
 implicit none
 
 real(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
@@ -97,6 +99,8 @@ end subroutine R_change_order
 subroutine C_change_order(tpsi)
 use salmon_parallel, only: nproc_group_kgrid
 use salmon_communication, only: comm_summation
+use calc_myob_sub
+use check_corrkob_sub
 implicit none
 
 complex(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
@@ -128,27 +132,27 @@ end if
 do iik=k_sta,k_end
 do is=1,iss
   do iob=iobsta(is),iobend(is)-1
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
     imin=iob
     do job=iob+1,iobend(is)
       if(esp(job,iik)<esp(imin,iik)) imin=job
     end do
-    call calc_myob(imin,imin_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+    call calc_myob(imin,imin_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
     if(iob/=imin)then
       rbox=esp(iob,iik)
       esp(iob,iik)=esp(imin,iik)
       esp(imin,iik)=rbox
       matbox1=0.d0
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,mst)
+      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox1(:,:,:)=tpsi(:,:,:,iob_myob,iik)
       call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
       matbox3=0.d0
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,mst)
+      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox3(:,:,:)=tpsi(:,:,:,imin_myob,iik)
       call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,mst)
+      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,iob_myob,iik)=matbox4(:,:,:)
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,mst)
+      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,imin_myob,iik)=matbox2(:,:,:)
     end if
   end do

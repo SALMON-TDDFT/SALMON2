@@ -13,7 +13,13 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module calc_myob_sub
+  implicit none
+
+contains
+
 subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+  use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iob_myob
@@ -52,3 +58,5 @@ subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
   end if
 
 end subroutine calc_myob
+
+end module calc_myob_sub

@@ -30,6 +30,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
   use hpsi_sub
+  use calc_iroot_sub
+  use calc_myob_sub
+  use check_corrkob_sub
+  use set_isstaend_sub
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
@@ -266,10 +270,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
-          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,mst)
+          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
           do job=iobsta(is),iob-1
             call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
-            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,mst)
+            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
             if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)
               do iz=mg%is(3),mg%ie(3)

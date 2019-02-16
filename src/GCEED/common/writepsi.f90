@@ -19,6 +19,8 @@ subroutine writepsi
   use inputoutput, only: au_length_aa
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use calc_myob_sub
+  use check_corrkob_sub
   use scf_data
   use allocate_mat_sub
   implicit none
