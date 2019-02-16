@@ -31,6 +31,7 @@ subroutine R_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
 use calc_myob_sub
+use check_corrkob_sub
 implicit none
 real(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
 integer :: i1_allob
@@ -103,6 +104,7 @@ subroutine C_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
 use calc_myob_sub
+use check_corrkob_sub
 implicit none
 complex(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
 integer :: i1_allob

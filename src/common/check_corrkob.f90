@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module check_corrkob_sub
+  implicit none
+
+contains
+
 subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   use salmon_parallel, only: nproc_id_kgrid
   use calc_iquotient_sub
@@ -45,3 +50,5 @@ subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,m
   end if
   
 end subroutine check_corrkob
+
+end module check_corrkob_sub

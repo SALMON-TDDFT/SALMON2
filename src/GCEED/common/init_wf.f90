@@ -19,6 +19,7 @@
 SUBROUTINE init_wf_ns(ifunc)
 use scf_data
 use calc_myob_sub
+use check_corrkob_sub
 implicit none
 
 integer :: ik,iob,iseed,a,ix,iy,iz

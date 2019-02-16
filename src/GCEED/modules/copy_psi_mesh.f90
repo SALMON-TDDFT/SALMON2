@@ -30,6 +30,7 @@ subroutine R_copy_psi_mesh(tpsi_mesh)
 use salmon_parallel, only: nproc_group_global, nproc_group_h
 use salmon_communication, only: comm_summation
 use calc_myob_sub
+use check_corrkob_sub
 implicit none
 
 real(8) :: tpsi_mesh(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),   &
@@ -114,6 +115,7 @@ subroutine C_copy_psi_mesh(tpsi_mesh)
 use salmon_parallel, only: nproc_group_global, nproc_group_h
 use salmon_communication, only: comm_summation
 use calc_myob_sub
+use check_corrkob_sub
 implicit none
 
 complex(8) :: tpsi_mesh(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),   &
