@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 subroutine taylor(tzpsi_in,tzpsi_out,htpsi)
+use calc_allob_sub
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub

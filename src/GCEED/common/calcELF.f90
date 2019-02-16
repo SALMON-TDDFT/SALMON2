@@ -17,6 +17,7 @@ subroutine calcELF(filename_ELF,ttmp)
 use salmon_parallel, only: nproc_group_global,nproc_group_kgrid
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 use scf_data
 use gradient_sub
 use allocate_mat_sub

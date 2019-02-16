@@ -29,6 +29,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use calc_allob_sub
   use diis_core_sub
   !$ use omp_lib
   implicit none

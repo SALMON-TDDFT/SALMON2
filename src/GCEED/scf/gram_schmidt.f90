@@ -18,6 +18,7 @@
 SUBROUTINE Gram_Schmidt_ns
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_global
 use salmon_communication, only: comm_summation, comm_bcast
+use calc_allob_sub
 use calc_iroot_sub
 use calc_myob_sub
 use check_corrkob_sub

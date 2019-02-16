@@ -20,6 +20,7 @@ SUBROUTINE hpsi_groupob(tpsi,htpsi,tpsi_out,tVlocal,nn,isub)
 use salmon_parallel, only: nproc_group_korbital, nproc_group_h
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 use scf_data
 use new_world_sub
 use gradient2_sub

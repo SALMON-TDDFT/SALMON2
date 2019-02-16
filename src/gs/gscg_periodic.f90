@@ -30,6 +30,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
   use hpsi_sub
+  use calc_allob_sub
   use calc_iroot_sub
   use calc_myob_sub
   use check_corrkob_sub

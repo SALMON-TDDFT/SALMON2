@@ -30,6 +30,7 @@ CONTAINS
 subroutine R_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
+use calc_allob_sub
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
@@ -103,6 +104,7 @@ END SUBROUTINE R_calc_density
 subroutine C_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
+use calc_allob_sub
 use calc_myob_sub
 use check_corrkob_sub
 implicit none

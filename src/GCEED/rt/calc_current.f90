@@ -17,6 +17,7 @@ subroutine calc_current(tpsi)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 use scf_data
 use sendrecv_groupob_tmp_sub
 use allocate_psl_sub

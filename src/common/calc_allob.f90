@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module calc_allob_sub
+  implicit none
+
+contains
+
 subroutine calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
   use inputoutput, only: ispin,nproc_ob
   use salmon_parallel, only: nproc_id_kgrid
@@ -47,3 +52,5 @@ subroutine calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
   end if
   
 end subroutine calc_allob
+
+end module calc_allob_sub

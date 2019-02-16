@@ -18,6 +18,7 @@
 !         +4:  calculation of rhobox / +0: no calculation of rhobox
 !         -1:  special version for N_hamil=4 and nn=3
 subroutine add_polynomial(tpsi,htpsi,tpsi_out,iobmax,nn,ifunc)
+use calc_allob_sub
 use scf_data
 implicit none
 complex(8) :: tpsi(iwk2sta(1):iwk2end(1)+1,iwk2sta(2):iwk2end(2),iwk2sta(3):iwk2end(3),   &

@@ -19,6 +19,7 @@ subroutine inner_product7(mg,iparaway_ob,itotmst,mst,iobnum,rmatbox1,rmatbox2,rb
   use salmon_parallel, only: nproc_group_korbital
   use salmon_communication, only: comm_summation
   use misc_routines, only: get_wtime
+  use calc_allob_sub
   implicit none
   type(s_rgrid),intent(in) :: mg
   integer,intent(in)  :: iparaway_ob

@@ -18,6 +18,7 @@ use salmon_parallel, only: nproc_id_global, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: out_dos_start, out_dos_end, out_dos_method, &
                        out_dos_smearing, iout_dos_nenergy, out_dos_fshift, uenergy_from_au
+use calc_allob_sub
 use scf_data
 use allocate_psl_sub
 use new_world_sub

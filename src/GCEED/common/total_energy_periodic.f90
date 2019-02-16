@@ -17,6 +17,7 @@ subroutine Total_Energy_periodic(tzpsi_in,htpsi)
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_size_global, nproc_group_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 use scf_data
 use new_world_sub
 use read_pslfile_sub

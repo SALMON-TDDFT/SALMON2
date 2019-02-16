@@ -15,6 +15,7 @@
 !
 MODULE global_variables_rt
 use inputoutput
+use calc_allob_sub
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub

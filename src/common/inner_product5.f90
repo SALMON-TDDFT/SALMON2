@@ -3,6 +3,7 @@ subroutine inner_product5(mg,iparaway_ob,itotmst,mst,iobnum,zmatbox1,zmatbox2,zb
   use salmon_parallel, only: nproc_group_korbital
   use salmon_communication, only: comm_summation
   use misc_routines, only: get_wtime
+  use calc_allob_sub
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg

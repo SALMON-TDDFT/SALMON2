@@ -31,6 +31,7 @@ SUBROUTINE R_Total_Energy(psi_in)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital, nproc_group_h
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 implicit none
 
 real(8) :: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &
@@ -144,6 +145,7 @@ SUBROUTINE C_Total_Energy(psi_in)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital, nproc_group_h
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 implicit none
 
 complex(8) :: psi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),  &

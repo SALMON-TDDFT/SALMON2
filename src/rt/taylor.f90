@@ -23,6 +23,7 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
+  use calc_allob_sub
   implicit none
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
