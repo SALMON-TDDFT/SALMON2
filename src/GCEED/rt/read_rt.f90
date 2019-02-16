@@ -16,6 +16,7 @@
 SUBROUTINE OUT_data_rt
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_myob_sub
 use scf_data
 use writebox_rt_sub
 use allocate_mat_sub
@@ -260,6 +261,7 @@ END SUBROUTINE OUT_data_rt
 SUBROUTINE IN_data_rt(Ntime)
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_myob_sub
 use scf_data
 use new_world_sub
 use readbox_rt_sub

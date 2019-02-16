@@ -30,6 +30,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   use misc_routines, only: get_wtime
   use hpsi_sub
   use calc_iroot_sub
+  use calc_myob_sub
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in)           :: mg

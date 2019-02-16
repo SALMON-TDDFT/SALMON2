@@ -18,6 +18,7 @@
 SUBROUTINE OUT_data
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_myob_sub
 use scf_data
 use new_world_sub
 use read_pslfile_sub
@@ -419,6 +420,7 @@ use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_myob_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
