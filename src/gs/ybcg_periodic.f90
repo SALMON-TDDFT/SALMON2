@@ -178,7 +178,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
     end do
 
     call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,info%numo)
-    call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
+    call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,nproc_ob_spin,mst)
   
     elp2(2)=get_wtime()
   
@@ -207,7 +207,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
     else
       do q=pstart(is),p-1
         call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,info%numo)
-        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
+        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,nproc_ob_spin,mst)
         if(icorr_q==1)then
   !$omp parallel do
           do iz=mg%is(3),mg%ie(3)
@@ -333,7 +333,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
       else
         do q=pstart(is),p-1
           call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,info%numo)
-          call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
+          call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,nproc_ob_spin,mst)
           if(icorr_q==1)then
   !$omp parallel do
             do iz=mg%is(3),mg%ie(3)

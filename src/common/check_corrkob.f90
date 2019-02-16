@@ -13,12 +13,12 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
   use salmon_parallel, only: nproc_id_kgrid
   implicit none
   integer,intent(in)  :: iob,ik
   integer,intent(out) :: icorr_p
-  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin(2),mst(2)
+  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin(2),mst(2)
   integer :: iquotient
   integer :: iob_tmp
 

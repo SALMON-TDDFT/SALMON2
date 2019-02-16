@@ -160,7 +160,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
     
       do job=iobsta(is),iobend(is)
         call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -221,7 +221,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
        
       do job=iobsta(is),iobend(is)
         call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)

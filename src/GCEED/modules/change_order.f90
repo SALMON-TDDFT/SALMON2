@@ -72,16 +72,16 @@ do is=1,iss
       esp(iob,iik)=esp(imin,iik)
       esp(imin,iik)=rbox
       matbox1=0.d0
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
       if(icheck_corrkob==1) matbox1(:,:,:)=tpsi(:,:,:,iob_myob,iik)
       call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
       matbox3=0.d0
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
       if(icheck_corrkob==1) matbox3(:,:,:)=tpsi(:,:,:,imin_myob,iik)
       call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,iob_myob,iik)=matbox4(:,:,:)
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,imin_myob,iik)=matbox2(:,:,:)
     end if
   end do

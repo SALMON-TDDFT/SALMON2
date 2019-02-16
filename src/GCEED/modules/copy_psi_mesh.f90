@@ -46,7 +46,7 @@ if(icopy_psi_mesh==1)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
     matbox=0.d0
     if(icheck_corrkob==1)then
 !$OMP parallel do private(iz,iy,ix) 
@@ -75,7 +75,7 @@ else if(icopy_psi_mesh==2)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
     matbox=0.d0
 !$OMP parallel do private(iz,iy,ix) 
     do iz=ng_sta(3),ng_end(3)
@@ -128,7 +128,7 @@ if(icopy_psi_mesh==1)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
     matbox=0.d0
     if(icheck_corrkob==1)then
 !$OMP parallel do private(iz,iy,ix) 
@@ -157,7 +157,7 @@ else if(icopy_psi_mesh==2)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
     matbox=0.d0
 !$OMP parallel do private(iz,iy,ix) 
     do iz=ng_sta(3),ng_end(3)

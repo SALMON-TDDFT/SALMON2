@@ -33,7 +33,7 @@ subroutine writepsi
     do p0=1,itotMST
       call conv_p0(p0,iob)
       call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-      call check_corrkob(iob,1,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call check_corrkob(iob,1,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
   !OMP parallel do private(iz,iy,ix)
       do iz=lg_sta(3),lg_end(3)
       do iy=lg_sta(2),lg_end(2)
