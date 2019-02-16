@@ -20,6 +20,7 @@ use salmon_communication, only: comm_summation, comm_bcast
 use calc_iroot_sub
 use calc_myob_sub
 use check_corrkob_sub
+use set_isstaend_sub
 use scf_data
 use new_world_sub
 implicit none

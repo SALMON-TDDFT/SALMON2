@@ -32,6 +32,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
   use calc_iroot_sub
   use calc_myob_sub
   use check_corrkob_sub
+  use set_isstaend_sub
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_wavefunction),intent(inout) :: spsi

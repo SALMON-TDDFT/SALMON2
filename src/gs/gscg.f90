@@ -33,6 +33,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
   use calc_iroot_sub
   use calc_myob_sub
   use check_corrkob_sub
+  use set_isstaend_sub
   !$ use omp_lib
   implicit none
   

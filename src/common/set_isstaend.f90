@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module set_isstaend_sub
+  implicit none
+
+contains
+
 subroutine set_isstaend(is_sta,is_end,ilsda)
   implicit none
   integer,intent(out) :: is_sta,is_end
@@ -29,3 +34,5 @@ subroutine set_isstaend(is_sta,is_end,ilsda)
 return
 
 end subroutine set_isstaend
+
+end module set_isstaend_sub

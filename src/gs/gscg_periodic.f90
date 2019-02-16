@@ -33,6 +33,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   use calc_iroot_sub
   use calc_myob_sub
   use check_corrkob_sub
+  use set_isstaend_sub
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
