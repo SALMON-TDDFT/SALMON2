@@ -53,6 +53,7 @@ module salmon_communication
   public :: comm_send_init
   public :: comm_recv_init
   public :: comm_start_all
+  public :: comm_free_reqs
 
   ! collective communication
   public :: comm_sync_all
@@ -999,6 +1000,22 @@ contains
 #endif
   end subroutine
 
+  subroutine comm_free_reqs(reqs)
+#ifdef SALMON_USE_MPI
+    implicit none
+    integer, intent(in) :: reqs(:)
+    integer :: ierr
+    integer :: i
+    do i = lbound(reqs), ubound(reqs)
+      MPI_ERROR_CHECK(call MPI_REQUEST_FREEE(reqs(i), ierr))
+    end do
+#else
+    implicit none
+    integer, intent(in) :: reqs(:)
+    UNUSED_VARIABLE(reqs)
+    ! do nothing
+#endif
+      end subroutine
 
   subroutine comm_summation_integer(invalue, outvalue, ngroup, dest)
 #ifdef SALMON_USE_MPI
