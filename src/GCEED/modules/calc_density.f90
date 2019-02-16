@@ -65,8 +65,8 @@ else if(ilsda==1)then
     matbox_m=0d0
     do iik=k_sta,k_end
     do iob=iob_start(iss),iob_end(iss)
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix) 
         do iz=mg_sta(3),mg_end(3)
@@ -136,8 +136,8 @@ else if(ilsda==1)then
     matbox_m=0d0
     do iik=k_sta,k_end
     do iob=iob_start(iss),iob_end(iss)
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg_sta(3),mg_end(3)

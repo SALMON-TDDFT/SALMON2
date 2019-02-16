@@ -153,8 +153,8 @@ case(0)
   
     do ik=1,num_kpoints_rd
     do iob=1,itotMST
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+      call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   
       matbox_l=0.d0
       if(icorr_p==1)then
@@ -192,8 +192,8 @@ case(3)
     do ik=1,num_kpoints_rd
     do iob=1,itotMST
 
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+      call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       cmatbox_l=0.d0
       if(icorr_p==1)then
         cmatbox_l(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))   &
@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 SUBROUTINE IN_data(mg)
 use structures, only: s_rgrid
-use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, nproc_id_spin
+use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use scf_data
@@ -700,19 +700,8 @@ end if
 if(iSCFRT==2) call make_new_world
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
-if(ilsda==0)then
-  call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
-else if(ilsda==1)then
-  if(nproc_ob==1)then
-    iobnum=itotMST
-  else
-    if(nproc_id_spin<nproc_ob_spin(1))then
-      call calc_iobnum(MST(1),nproc_ob_spin(1),nproc_id_kgrid,iobnum,nproc_ob_spin(1),iparaway_ob)
-    else
-      call calc_iobnum(MST(2),nproc_ob_spin(2),nproc_id_kgrid,iobnum,nproc_ob_spin(2),iparaway_ob)
-    end if
-  end if
-end if
+
+call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
 
 if(iSCFRT==2)then
   call allocate_mat
@@ -767,19 +756,7 @@ else if(iSCFRT==2)then
 &                    1:iobnum,k_sta:k_end) = 0.d0
   end if
   if(iwrite_projection==1)then
-    if(ilsda==0)then
-      call calc_iobnum(itotMST0,nproc_ob,nproc_id_kgrid,iobnum0,nproc_ob,iparaway_ob)
-    else if(ilsda==1)then
-      if(nproc_ob==1)then
-        iobnum0=itotMST0
-      else
-        if(nproc_id_spin<nproc_ob_spin(1))then
-          call calc_iobnum(MST0(1),nproc_ob_spin(1),nproc_id_kgrid,iobnum0,nproc_ob_spin(1),iparaway_ob)
-        else
-          call calc_iobnum(MST0(2),nproc_ob_spin(2),nproc_id_kgrid,iobnum0,nproc_ob_spin(2),iparaway_ob)
-        end if
-      end if
-    end if
+    call calc_iobnum(itotMST0,nproc_ob,nproc_id_kgrid,iobnum0,nproc_ob,iparaway_ob)
     if(iobnum0.ge.1)then
       allocate( zpsi_t0(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
 &                  1:iobnum0,k_sta:k_end) )
@@ -948,8 +925,8 @@ do p0=pstart(is),pend(is)
 
 ! read file
   call conv_p0(p0,iob)
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-  call check_corrkob(iob,ik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+  call check_corrkob(iob,ik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
 
   if(IC<=2)then
     if(nproc_id_global<num_datafiles_IN)then

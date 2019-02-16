@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
@@ -44,7 +44,6 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
   real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: nproc_ob_spin(2)
   integer,intent(in)    :: iparaway_ob
   real(8),intent(out)    :: elp3(3000)
   real(8),intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:info%numo)
@@ -101,7 +100,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
 
   allocate (gk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
-  call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  call set_isstaend(is_sta,is_end,ilsda)
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is_array(3),mg%ie_array(3)
@@ -188,7 +187,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
       end do
       end do
     end do
-   if(nproc_ob==1)then
+    if(nproc_ob==1)then
       do is=is_sta,is_end
       do iob=iobsta(is),iobend(is)
         do job=iobsta(is),iob-1
@@ -221,12 +220,13 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
       end do
       end do
     else
+      do is=is_sta,is_end
       do iob=iobsta(is),iobend(is)
-        call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-        call check_corrkob(iob,1,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
+        call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
+        call check_corrkob(iob,1,icorr_iob,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         do job=iobsta(is),iob-1
-          call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-          call check_corrkob(job,1,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
+          call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
+          call check_corrkob(job,1,icorr_job,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
           if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)
             do iz=mg%is(3),mg%ie(3)
@@ -237,7 +237,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
             end do
             end do
           end if
-          call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+          call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
           call comm_bcast(rmatbox_m,nproc_group_grid,iroot)
           sum0=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
@@ -259,9 +259,10 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
           end do
         end do
       end do
+      end do
     end if 
-   call inner_product7(mg,itotmst,info%numo,rgk_ob,rgk_ob,sum_ob0,elp3,hvol)
-   if ( iter==1 ) then
+    call inner_product7(mg,itotmst,info%numo,rgk_ob,rgk_ob,sum_ob0,elp3,hvol)
+    if ( iter==1 ) then
       do iob=1,info%numo
         call calc_allob(iob,iob_allob)
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -335,7 +336,7 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spi
       end do
     end do
     call inner_product7(mg,itotmst,info%numo,rpk_ob,rgk_ob,pkHpk_ob,elp3,hvol)
-   do iob=1,info%numo
+    do iob=1,info%numo
       call calc_allob(iob,iob_allob)
       ak=pkHpk_ob(iob_allob)*xkpk_ob(iob_allob)-pkhxk_ob(iob_allob)*pkpk_ob(iob_allob)
       bk=pkHpk_ob(iob_allob)*xkxk_ob(iob_allob)-xkhxk_ob(iob_allob)*pkpk_ob(iob_allob)

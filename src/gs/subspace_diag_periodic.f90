@@ -19,7 +19,7 @@ module subspace_diag_periodic_sub
 contains
 
 subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                  iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                  iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                   info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
   use inputoutput, only: ispin,natom
@@ -42,7 +42,6 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
   integer,intent(in)  :: k_sta,k_end
-  integer,intent(in)  :: nproc_ob_spin(2)
   real(8),intent(in)  :: hvol
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
@@ -136,7 +135,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
   elp3(303)=get_wtime()
   elp3(353)=elp3(353)+elp3(303)-elp3(302)
   
-  call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  call set_isstaend(is_sta,is_end,ilsda)
   
   do ik=k_sta,k_end
   do is=is_sta,is_end
@@ -222,8 +221,8 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
       end do
     
       do jj=iobsta(is),iobend(is)
-        call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -234,7 +233,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           end do
           end do
         end if
-        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
           call calc_allob(ii,i_allob)
@@ -273,8 +272,8 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
       end do
       
       do jj=iobsta(is),iobend(is)
-        call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+        call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -285,7 +284,7 @@ subroutine subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
           end do
           end do
         end if
-        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
           call calc_allob(ii,i_allob)
