@@ -80,7 +80,7 @@ end if
 do iik=1,num_kpoints_rd
 do iob=1,itotMST
   call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
+  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
 
   cmatbox_l2=0.d0
     if(mod(itotNtime,2)==1)then
@@ -342,7 +342,7 @@ end if
 do iik=k_sta,k_end
 do iob=1,itotMST
   call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
+  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   
   if(num_datafiles_IN==1.or.num_datafiles_IN>nproc_size_global)then
     if(comm_is_root(nproc_id_global))then

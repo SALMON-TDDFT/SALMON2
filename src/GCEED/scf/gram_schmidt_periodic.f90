@@ -52,7 +52,7 @@ do ik=k_sta,k_end
   do is=is_sta,is_end
   do iob=iobsta(is),iobend(is)
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst,iobnum)
-    call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,nproc_ob_spin,mst)
+    call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
     if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=mg_sta(3),mg_end(3)
