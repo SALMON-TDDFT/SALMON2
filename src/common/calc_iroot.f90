@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+  use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iroot

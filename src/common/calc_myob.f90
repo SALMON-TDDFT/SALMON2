@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+  use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iob_myob

@@ -15,6 +15,7 @@
 !
 subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   use salmon_parallel, only: nproc_id_kgrid
+  use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob,ik
   integer,intent(out) :: icorr_p
