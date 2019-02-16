@@ -136,7 +136,6 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   end if
   
   do ik=info%ik_s,info%ik_e
-  do is=is_sta,is_end
 
     if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,1:1))
     do a=1,natom
@@ -226,6 +225,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
       if(nproc_ob==1)then
         sum_obmat0(:,:)=0.d0
         elp3(1506)=get_wtime()
+        do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           do job=iobsta(is),iob-1
             sum0=0.d0
@@ -240,11 +240,13 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
             sum_obmat0(iob,job)=sum0*hvol
           end do
         end do
+        end do
         elp3(1507)=get_wtime()
         elp3(1557)=elp3(1557)+elp3(1507)-elp3(1506)
         call comm_summation(sum_obmat0,sum_obmat1,itotmst*itotmst,nproc_group_k)
         elp3(1508)=get_wtime()
         elp3(1558)=elp3(1558)+elp3(1508)-elp3(1507)
+        do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           do job=iobsta(is),iob-1
     !$omp parallel do collapse(2)
@@ -257,9 +259,11 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
             end do
           end do
         end do
+        end do
         elp3(1507)=get_wtime()
         elp3(1557)=elp3(1557)+elp3(1507)-elp3(1508)
       else
+        do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
           call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,mst)
@@ -297,6 +301,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
             end do
             end do
           end do
+        end do
         end do
       end if
       call inner_product5(mg,itotmst,info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
@@ -434,7 +439,6 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
       end do
     end do Iteration
   
-  end do
   end do
   
   
