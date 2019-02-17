@@ -30,6 +30,7 @@ CONTAINS
 subroutine R_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
+use calc_allob_sub
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
@@ -43,7 +44,7 @@ if(ilsda==0)then
   matbox_m=0d0
   do iik=k_sta,k_end
   do i1=1,iobnum
-    call calc_allob(i1,i1_allob)
+    call calc_allob(i1,i1_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -103,6 +104,7 @@ END SUBROUTINE R_calc_density
 subroutine C_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
+use calc_allob_sub
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
@@ -116,7 +118,7 @@ if(ilsda==0)then
   matbox_m=0d0
   do iik=k_sta,k_end
   do i1=1,iobnum
-    call calc_allob(i1,i1_allob)
+    call calc_allob(i1,i1_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)

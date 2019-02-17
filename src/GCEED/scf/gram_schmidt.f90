@@ -18,6 +18,7 @@
 SUBROUTINE Gram_Schmidt_ns
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_global
 use salmon_communication, only: comm_summation, comm_bcast
+use calc_allob_sub
 use calc_iroot_sub
 use calc_myob_sub
 use check_corrkob_sub
@@ -67,7 +68,7 @@ do iob=pstart(is),pend(is)
 
   ovrp=0.d0
   do job=1,iobnum
-    call calc_allob(job,job_allob)
+    call calc_allob(job,job_allob,iparaway_ob,itotmst,mst,iobnum)
     if(job_allob >= pstart(is) .and. job_allob <= iob-1)then
       rbox=0.d0
 !$OMP parallel do reduction ( + : rbox ) private(iz,iy,ix)
@@ -86,7 +87,7 @@ do iob=pstart(is),pend(is)
 
   matbox_m=0.d0
   do job=1,iobnum
-    call calc_allob(job,job_allob)
+    call calc_allob(job,job_allob,iparaway_ob,itotmst,mst,iobnum)
     if(job_allob >= pstart(is) .and. job_allob <= iob-1)then
 !$OMP parallel do private(iz,iy,ix)
       do iz=mg_sta(3),mg_end(3)

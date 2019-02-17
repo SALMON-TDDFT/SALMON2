@@ -19,10 +19,11 @@ module taylor_sub
 contains
 
 subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,  &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk)
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
+  use calc_allob_sub
   implicit none
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
@@ -49,6 +50,7 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
   integer,intent(in)    :: ihpsieff
   real(8),intent(in)    :: rocc(itotmst,num_kpoints_rd)
   real(8),intent(in)    :: wtk(num_kpoints_rd)
+  integer,intent(in)    :: iparaway_ob
   type(s_wavefunction) :: stpsi_in_ob
   type(s_wavefunction) :: stpsi_out_ob
   type(s_wavefunction) :: shtpsi_ob
@@ -144,7 +146,7 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
     end do
   end if
   do iob=info%io_s,info%io_e
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     if(iperiodic==0.and.ihpsieff==1)then
       if(iob_allob<=MST(1))then
 !$OMP parallel do private(iz,iy,ix)

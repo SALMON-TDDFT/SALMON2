@@ -16,6 +16,7 @@
 subroutine projection(tzpsi)
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_allob_sub
 use calc_iroot_sub
 use calc_myob_sub
 use check_corrkob_sub
@@ -75,7 +76,7 @@ do iob=1,itotMST0
     end do
     end do
     end do
-    call calc_allob(job,job_allob)
+    call calc_allob(job,job_allob,iparaway_ob,itotmst,mst,iobnum)
     coef_mat(job_allob,iob,iik,1)=coef_mat(job_allob,iob,iik,1)+cbox
   end do
 end do

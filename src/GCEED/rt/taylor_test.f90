@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 subroutine taylor(tzpsi_in,tzpsi_out,htpsi)
+use calc_allob_sub
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
@@ -210,7 +211,7 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
           ,Nspin,iobnum,k_sta:k_end,1))
   do ik=k_sta,k_end
     do i=1,iobnum
-      call calc_allob(i,i_all)
+      call calc_allob(i,i_all,iparaway_ob,itotmst,mst,iobnum)
       call set_is(i_all,is)
       tpsi%zwf(:,:,:,is,i,ik,1) = tpsi0(:,:,:,i,ik)
     end do
@@ -241,7 +242,7 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
 
   do ik=k_sta,k_end
     do i=1,iobnum
-      call calc_allob(i,i_all)
+      call calc_allob(i,i_all,iparaway_ob,itotmst,mst,iobnum)
       call set_is(i_all,is)
       htpsi0(:,:,:,i,ik) = htpsi%zwf(:,:,:,is,i,ik,1)
     end do

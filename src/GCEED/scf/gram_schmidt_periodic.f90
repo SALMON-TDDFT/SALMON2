@@ -17,6 +17,7 @@
 subroutine Gram_Schmidt_periodic
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_group_k
 use salmon_communication, only: comm_summation, comm_bcast
+use calc_allob_sub
 use calc_iroot_sub
 use calc_myob_sub
 use check_corrkob_sub
@@ -72,7 +73,7 @@ do ik=k_sta,k_end
 
     zovrp=0.d0
     do q=1,iobnum
-      call calc_allob(q,q_allob)
+      call calc_allob(q,q_allob,iparaway_ob,itotmst,mst,iobnum)
       if(q_allob >= iobsta(is) .and. q_allob <= iob-1)then
         cbox=0.d0
 !$OMP parallel do private(iz,iy,ix) collapse(2) reduction ( + : cbox )
@@ -91,7 +92,7 @@ do ik=k_sta,k_end
 
     cmatbox=0.d0
     do q=1,iobnum
-      call calc_allob(q,q_allob)
+      call calc_allob(q,q_allob,iparaway_ob,itotmst,mst,iobnum)
       if(q_allob >= iobsta(is) .and. q_allob <= iob-1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg_sta(3),mg_end(3)

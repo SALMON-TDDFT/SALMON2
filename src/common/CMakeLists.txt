@@ -1,5 +1,6 @@
 set(SOURCES
    broyden.f90
+   calc_allob.f90
    calc_iquotient.f90
    calc_iroot.f90
    calc_myob.f90
