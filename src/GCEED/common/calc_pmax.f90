@@ -15,6 +15,7 @@
 !
 subroutine calc_pmax(iobmax)
 use salmon_parallel, only: nproc_id_kgrid
+use calc_iobnum_sub
 use scf_data
 use new_world_sub
 implicit none
