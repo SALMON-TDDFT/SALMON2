@@ -38,8 +38,6 @@ contains
     implicit none
 !$ integer :: omp_get_max_threads  
 
-    call timer_initialize
-
     if(comm_is_root(nproc_id_global)) then
        call print_optimize_message
     end if
