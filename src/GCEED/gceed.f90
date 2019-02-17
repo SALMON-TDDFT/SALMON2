@@ -14,7 +14,6 @@
 !  limitations under the License.
 !
 subroutine gceed
-
   implicit none
   character(30) :: cfunction2
 

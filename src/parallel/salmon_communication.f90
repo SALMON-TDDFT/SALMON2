@@ -53,6 +53,7 @@ module salmon_communication
   public :: comm_send_init
   public :: comm_recv_init
   public :: comm_start_all
+  public :: comm_free_reqs
 
   ! collective communication
   public :: comm_sync_all
@@ -124,6 +125,10 @@ module salmon_communication
     module procedure comm_send_init_array3d_double
     module procedure comm_send_init_array3d_dcomplex
 
+    ! 4-D array
+    module procedure comm_send_init_array4d_double
+    module procedure comm_send_init_array4d_dcomplex
+
     ! 5-D array
     module procedure comm_send_init_array5d_double
     module procedure comm_send_init_array5d_dcomplex
@@ -133,6 +138,10 @@ module salmon_communication
     ! 3-D array
     module procedure comm_recv_init_array3d_double
     module procedure comm_recv_init_array3d_dcomplex
+
+    ! 4-D array
+    module procedure comm_recv_init_array4d_double
+    module procedure comm_recv_init_array4d_dcomplex
 
     ! 5-D array
     module procedure comm_recv_init_array5d_double
@@ -767,6 +776,48 @@ contains
 #endif
   end function
 
+  function comm_send_init_array4d_double(invalue, ndest, ntag, ngroup) result(req)
+#ifdef SALMON_USE_MPI
+    use mpi, only: MPI_DOUBLE_PRECISION
+    implicit none
+    real(8), intent(in) :: invalue(:,:,:,:)
+    integer, intent(in) :: ndest, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, req, ierr))
+#else
+    implicit none
+    real(8), intent(in) :: invalue(:,:,:,:)
+    integer, intent(in) :: ndest, ntag, ngroup
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array4d_double")
+    req = DEAD_BEAF
+#endif
+  end function
+
+  function comm_send_init_array4d_dcomplex(invalue, ndest, ntag, ngroup) result(req)
+#ifdef SALMON_USE_MPI
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(in) :: invalue(:,:,:,:)
+    integer, intent(in)    :: ndest, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
+#else
+    implicit none
+    complex(8), intent(in) :: invalue(:,:,:,:)
+    integer, intent(in)    :: ndest, ntag, ngroup
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array4d_dcomplex")
+    req = DEAD_BEAF
+#endif
+  end function
+
   function comm_send_init_array5d_double(invalue, ndest, ntag, ngroup) result(req)
 #ifdef SALMON_USE_MPI
     use mpi, only: MPI_DOUBLE_PRECISION
@@ -851,6 +902,48 @@ contains
 #endif
   end function
 
+  function comm_recv_init_array4d_double(outvalue, nsrc, ntag, ngroup) result(req)
+#ifdef SALMON_USE_MPI
+    use mpi, only: MPI_DOUBLE_PRECISION
+    implicit none
+    real(8), intent(out) :: outvalue(:,:,:,:)
+    integer, intent(in)  :: nsrc, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
+#else
+    implicit none
+    real(8), intent(out) :: outvalue(:,:,:,:)
+    integer, intent(in)  :: nsrc, ntag, ngroup
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array4d_double")
+    req = DEAD_BEAF
+#endif
+  end function
+
+  function comm_recv_init_array4d_dcomplex(outvalue, nsrc, ntag, ngroup) result(req)
+#ifdef SALMON_USE_MPI
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(out) :: outvalue(:,:,:,:)
+    integer, intent(in)     :: nsrc, ntag, ngroup
+    integer :: ierr, req
+    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
+#else
+    implicit none
+    complex(8), intent(out) :: outvalue(:,:,:,:)
+    integer, intent(in)     :: nsrc, ntag, ngroup
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array4d_dcomplex")
+    req = DEAD_BEAF
+#endif
+  end function
+
   function comm_recv_init_array5d_double(outvalue, nsrc, ntag, ngroup) result(req)
 #ifdef SALMON_USE_MPI
     use mpi, only: MPI_DOUBLE_PRECISION
@@ -907,6 +1000,22 @@ contains
 #endif
   end subroutine
 
+  subroutine comm_free_reqs(reqs)
+#ifdef SALMON_USE_MPI
+    implicit none
+    integer, intent(in) :: reqs(:)
+    integer :: ierr
+    integer :: i
+    do i = lbound(reqs, 1), ubound(reqs, 1)
+      MPI_ERROR_CHECK(call MPI_REQUEST_FREE(reqs(i), ierr))
+    end do
+#else
+    implicit none
+    integer, intent(in) :: reqs(:)
+    UNUSED_VARIABLE(reqs)
+    ! do nothing
+#endif
+      end subroutine
 
   subroutine comm_summation_integer(invalue, outvalue, ngroup, dest)
 #ifdef SALMON_USE_MPI
