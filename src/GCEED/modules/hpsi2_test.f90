@@ -56,7 +56,7 @@ subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
   end do
 
   Nspin = numspin
-  call set_ispin(iob,is)
+  call set_is(iob,is)
 
   rg%is_array(1) = iwk3sta(1)
   rg%ie_array(1) = iwk3end(1)
@@ -111,7 +111,7 @@ subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
           ,Nspin,1,1,1) &
          ,htpsi%rwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,1,1,1))
-  call set_ispin(iob,is)
+  call set_is(iob,is)
   do iz=rg%is(3),rg%ie(3)
   do iy=rg%is(3),rg%ie(3)
   do ix=rg%is(3),rg%ie(3)
@@ -172,7 +172,7 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
   end do
 
   Nspin = numspin
-  call set_ispin(iob,is)
+  call set_is(iob,is)
 
   rg%is_array(1) = iwk3sta(1)
   rg%ie_array(1) = iwk3end(1)
@@ -227,7 +227,7 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
           ,Nspin,1,ik:ik,1) &
          ,htpsi%zwf(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3) &
           ,Nspin,1,ik:ik,1))
-  call set_ispin(iob,is)
+  call set_is(iob,is)
   do iz=rg%is(3),rg%ie(3)
   do iy=rg%is(3),rg%ie(3)
   do ix=rg%is(3),rg%ie(3)
@@ -257,7 +257,7 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
 
   call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
 
-  call set_ispin(iob,is)
+  call set_is(iob,is)
   htpsi0 = htpsi%zwf(:,:,:,is,1,ik,1)
 
   call deallocate_rgrid(rg)

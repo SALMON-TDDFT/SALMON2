@@ -57,13 +57,13 @@ real(8) :: wk2(iwk2sta(1):iwk2end(1),  &
                iwk2sta(2):iwk2end(2),      &
                iwk2sta(3):iwk2end(3))
 
-!integer :: ispin
+integer :: is
 
 #define UNUSED_VARIABLE(VAR) if(.false.) call salmon_unusedvar(VAR)
 UNUSED_VARIABLE(nn)
 UNUSED_VARIABLE(isub)
 
-call set_ispin(iob,ispin)
+call set_is(iob,is)
 
 if(iflag_ps==1) then
   allocate (uVpsibox(1:maxlm,1:MI))
@@ -114,7 +114,7 @@ if(ihpsieff==0)then
   do iz=iwk3sta(3),iwk3end(3)
   do iy=iwk3sta(2),iwk3end(2)
   do ix=iwk3sta(1),iwk3end(1)
-    htpsi(ix,iy,iz) = Vlocal(ix,iy,iz,ispin) *tpsi(ix,iy,iz) 
+    htpsi(ix,iy,iz) = Vlocal(ix,iy,iz,is) *tpsi(ix,iy,iz) 
   end do
   end do
   end do
@@ -123,7 +123,7 @@ else if(ihpsieff==1)then
   do iz=iwk3sta(3),iwk3end(3)
   do iy=iwk3sta(2),iwk3end(2)
   do ix=iwk3sta(1),iwk3end(1)
-    htpsi(ix,iy,iz) = (Vlocal(ix,iy,iz,ispin)+Vbox(ix,iy,iz)) *tpsi(ix,iy,iz) 
+    htpsi(ix,iy,iz) = (Vlocal(ix,iy,iz,is)+Vbox(ix,iy,iz)) *tpsi(ix,iy,iz) 
   end do
   end do
   end do
@@ -209,7 +209,7 @@ complex(8), parameter :: zi=(0.d0,1.d0)
 
 real(8) :: f0
 
-!integer :: ispin
+integer :: is
 
 real(8) :: fdN0
 real(8) :: fdN1(0:12,3)
@@ -219,7 +219,7 @@ real(8) :: x,y,z
 complex(8) :: ekr(maxMps,MI)
 integer :: j,ind
 
-call set_ispin(iob,ispin)
+call set_is(iob,is)
 
 if(nn<=1)then
 !$OMP parallel do private(iz,iy,ix) 
@@ -322,7 +322,7 @@ if(isub==0)then
   do iz=iwk3sta(3),iwk3end(3)
   do iy=iwk3sta(2),iwk3end(2)
   do ix=iwk3sta(1),iwk3end(1)
-    clap_wk(ix,iy,iz)=(Vlocal(ix,iy,iz,ispin)+fdN0)*tpsi(ix,iy,iz)     &
+    clap_wk(ix,iy,iz)=(Vlocal(ix,iy,iz,is)+fdN0)*tpsi(ix,iy,iz)     &
       +fdN1(1,1)*(tpsi(ix+1,iy,iz) + tpsi(ix-1,iy,iz))      &
       +fdN1(1,2)*(tpsi(ix,iy+1,iz) + tpsi(ix,iy-1,iz))      &
       +fdN1(1,3)*(tpsi(ix,iy,iz+1) + tpsi(ix,iy,iz-1))      &
@@ -377,7 +377,7 @@ else if(isub==1)then
     do ix=iwk3sta(1),iwk3end(1)
 !ocl prefetch_write(htpsi(ix+16,iy,iz))
 !ocl prefetch_write(zpsi(ix+16,iy,iz))
-      htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + Vlocal(ix,iy,iz,ispin) *tpsi(ix,iy,iz) -1d0/2d0*clap_wk(ix,iy,iz)
+      htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + Vlocal(ix,iy,iz,is) *tpsi(ix,iy,iz) -1d0/2d0*clap_wk(ix,iy,iz)
       zpsi(ix,iy,iz,iob,iiik)=zpsi(ix,iy,iz,iob,iiik)+zc(nn)*htpsi(ix,iy,iz)
       rhobox(ix,iy,iz)=rhobox(ix,iy,iz)+abs(zpsi(ix,iy,iz,iob,iiik))**2*rocc(iob,iiik)*wtk(iiik)
     end do
@@ -390,7 +390,7 @@ else if(isub==1)then
     do ix=iwk3sta(1),iwk3end(1)
 !ocl prefetch_write(htpsi(ix+16,iy,iz))
 !ocl prefetch_write(zpsi(ix+16,iy,iz))
-      htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + Vlocal(ix,iy,iz,ispin) *tpsi(ix,iy,iz) -1d0/2d0*clap_wk(ix,iy,iz)
+      htpsi(ix,iy,iz) = htpsi(ix,iy,iz) + Vlocal(ix,iy,iz,is) *tpsi(ix,iy,iz) -1d0/2d0*clap_wk(ix,iy,iz)
       zpsi(ix,iy,iz,iob,iiik)=zpsi(ix,iy,iz,iob,iiik)+zc(nn)*htpsi(ix,iy,iz)
       tpsi(ix,iy,iz)=htpsi(ix,iy,iz)
       htpsi(ix,iy,iz)=0.d0
