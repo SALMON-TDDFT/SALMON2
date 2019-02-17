@@ -211,7 +211,7 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
   do ik=k_sta,k_end
     do i=1,iobnum
       call calc_allob(i,i_all)
-      call set_ispin(i_all,is)
+      call set_is(i_all,is)
       tpsi%zwf(:,:,:,is,i,ik,1) = tpsi0(:,:,:,i,ik)
     end do
   end do
@@ -242,7 +242,7 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
   do ik=k_sta,k_end
     do i=1,iobnum
       call calc_allob(i,i_all)
-      call set_ispin(i_all,is)
+      call set_is(i_all,is)
       htpsi0(:,:,:,i,ik) = htpsi%zwf(:,:,:,is,i,ik,1)
     end do
   end do
