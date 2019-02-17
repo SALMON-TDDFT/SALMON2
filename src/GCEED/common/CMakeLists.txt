@@ -8,7 +8,6 @@ set(SOURCES
     calc_gradient_fast.f90
     calcJxyz_all.f90
     calcJxyz_all_periodic.f90
-    calc_ob_num.f90
     calc_pmax.f90
     calcuV.f90
     calcVpsl.f90
