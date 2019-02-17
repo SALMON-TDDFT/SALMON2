@@ -4,6 +4,7 @@ set(SOURCES
    calc_iquotient.f90
    calc_iroot.f90
    calc_myob.f90
+   calc_ob_num.f90
    check_corrkob.f90
    hpsi.f90
    inner_product.f90
