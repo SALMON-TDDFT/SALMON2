@@ -21,23 +21,22 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
+SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
   use structures
-  use update_overlap_sub, only: update_overlap_R, update_overlap_C
-  use stencil_sub, only: stencil_R, stencil_C
+  use update_overlap_sub
+  use stencil_sub
   implicit none
-  integer,intent(in)  :: Nspin
+  integer       ,intent(in)  :: Nspin
   type(s_wf_info),intent(in) :: info
-  type(s_rgrid)  ,intent(in) :: rg_wf
+  type(s_rgrid)  ,intent(in) :: mg
   type(s_scalar) ,intent(in) :: V_local(Nspin)
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction)          :: tpsi
-  type(s_wavefunction)          :: htpsi
+  type(s_wavefunction)       :: tpsi,htpsi
   type(s_wavefunction),optional :: ttpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  real(8) :: k_nabt(Nd,3),k_lap0 !?????
+  real(8) :: k_nabt(Nd,3),k_lap0,kAc(3) !?????
   logical :: if_kAc
 
   im_s = info%im_s
@@ -54,17 +53,17 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
 
   ! overlap region communication
     if(info%if_divide_rspace) then
-      call update_overlap_R(tpsi%rwf,rg_wf%is_array,rg_wf%ie_array,norb,Nd & !?????????
-                           ,rg_wf%is,rg_wf%ie,info%irank_r,info%icomm_r)
+      call update_overlap_R(tpsi%rwf,mg%is_array,mg%ie_array,norb,Nd & !?????????
+                           ,mg%is,mg%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      call stencil_R(tpsi%rwf(:,:,:,ispin,io,ik,im),htpsi%rwf(:,:,:,ispin,io,ik,im),rg_wf%is_array,rg_wf%ie_array &
-                    ,V_local(ispin)%f,rg_wf%is,rg_wf%ie &
-                    ,rg_wf%idx,rg_wf%idy,rg_wf%idz,stencil%lap0,stencil%lapt)
+      call stencil_R(tpsi%rwf(:,:,:,ispin,io,ik,im),htpsi%rwf(:,:,:,ispin,io,ik,im),mg%is_array,mg%ie_array &
+                    ,V_local(ispin)%f,mg%is,mg%ie &
+                    ,mg%idx,mg%idy,mg%idz,stencil%lap0,stencil%lapt)
     end do
     end do
     end do
@@ -76,32 +75,81 @@ SUBROUTINE hpsi(tpsi,htpsi,info,rg_wf,V_local,Nspin,stencil,ppg,ttpsi)
 
   ! overlap region communication
     if(info%if_divide_rspace) then
-      call update_overlap_C(tpsi%zwf,rg_wf%is_array,rg_wf%ie_array,norb,Nd & !????????
-                           ,rg_wf%is,rg_wf%ie,info%irank_r,info%icomm_r)
+      call update_overlap_C(tpsi%zwf,mg%is_array,mg%ie_array,norb,Nd & !????????
+                           ,mg%is,mg%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
-    do im=im_s,im_e
-    do ik=ik_s,ik_e
-      if(if_kAc) then
-        k_lap0 = stencil%lap0 + 0.5d0* sum(stencil%kAc(ik,:)**2)
-        k_nabt(:,1) = stencil%kAc(ik,1) * stencil%nabt(:,1)
-        k_nabt(:,2) = stencil%kAc(ik,2) * stencil%nabt(:,2)
-        k_nabt(:,3) = stencil%kAc(ik,3) * stencil%nabt(:,3)
-      else
-        k_lap0 = stencil%lap0
-        k_nabt = 0d0
-      end if
-      do io=io_s,io_e
-      do ispin=1,Nspin
-
-        ! spin collinear
-        call stencil_C(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im),rg_wf%is_array,rg_wf%ie_array &
-                      ,V_local(ispin)%f,rg_wf%is,rg_wf%ie &
-                      ,rg_wf%idx,rg_wf%idy,rg_wf%idz,k_lap0,stencil%lapt,k_nabt)
+    select case(mg%ndir)
+    case(3)
+    ! orthogonal lattice
+      do im=im_s,im_e
+      do ik=ik_s,ik_e
+        if(if_kAc) then
+          kAc = stencil%kAc(ik,:)
+          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc**2)
+          k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
+          k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
+          k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
+        else
+          k_lap0 = stencil%lap0
+          k_nabt = 0d0
+        end if
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call stencil_C(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im),mg%is_array,mg%ie_array &
+                        ,V_local(ispin)%f,mg%is,mg%ie &
+                        ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%lapt,k_nabt)
+        end do
+        end do
       end do
       end do
-    end do
-    end do
+    case(6)
+    ! non-orthogonal lattice (xyz direction)
+      do im=im_s,im_e
+      do ik=ik_s,ik_e
+        if(if_kAc) then
+          kAc = stencil%kAc(ik,:) ! Cartesian vector
+          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc**2)
+          k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
+          k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
+          k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
+        else
+          k_lap0 = stencil%lap0
+          k_nabt = 0d0
+        end if
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call stencil_nonorthogonal_xyz(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                        ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
+                                        ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%coef_lap,k_nabt,stencil%sign)
+        end do
+        end do
+      end do
+      end do
+    case(4)
+    ! non-orthogonal lattice (xy direction)
+      do im=im_s,im_e
+      do ik=ik_s,ik_e
+        if(if_kAc) then
+          kAc = stencil%kAc(ik,:) ! Cartesian vector
+          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc**2)
+          k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
+          k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
+          k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
+        else
+          k_lap0 = stencil%lap0
+          k_nabt = 0d0
+        end if
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call stencil_nonorthogonal_xy(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                       ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
+                                       ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%coef_lap,k_nabt,stencil%sign)
+        end do
+        end do
+      end do
+      end do
+    end select
   ! subtraction
     if(present(ttpsi)) then
       do im=im_s,im_e

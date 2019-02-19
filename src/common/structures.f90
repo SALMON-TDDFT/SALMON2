@@ -45,8 +45,12 @@ module structures
   end type s_wavefunction
 
   type s_stencil
-    real(8) :: lap0,lapt(4,3),nabt(4,3) !????? 4 --> Nd
+    real(8) :: lap0,lapt(4,3),nabt(4,3) !????? (4,3) --> (Nd,3)
     real(8),allocatable :: kAc(:,:) ! kAc(Nk,3)
+
+  ! for non-orthogonal lattice
+    integer,allocatable :: sign(:) ! sign(4:ndir) (for ndir=4~6) ???
+    real(8),allocatable :: coef_lap(:,:) !?????? --> lapt (future work)
   end type s_stencil
 
   type s_pp_info

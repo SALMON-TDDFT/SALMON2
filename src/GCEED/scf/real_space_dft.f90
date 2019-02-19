@@ -70,6 +70,8 @@ type(s_wf_info) :: info
 type(s_wf_info) :: info_ob
 type(s_wavefunction) :: spsi
 
+mg%ndir =3 !?????? debug: orthogonal lattice only
+
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
