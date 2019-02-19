@@ -67,6 +67,7 @@ real(8) :: rNebox1,rNebox2
 integer :: itmg
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
+type(s_rgrid) :: ng
 type(s_wf_info) :: info
 type(s_wf_info) :: info_ob
 type(s_wavefunction) :: spsi
@@ -121,7 +122,7 @@ if(istopt==1)then
     call set_imesh_oddeven(itmg)
     call init_mesh(lg,mg,itmg)
     call set_gridcoo
-    call init_mesh_s
+    call init_mesh_s(ng)
     call check_ng
 
     call init_updown
@@ -224,7 +225,7 @@ if(istopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg)
+    call Hartree_ns(lg,ng)
 
     
     if(ilsda == 0) then
@@ -261,7 +262,7 @@ if(istopt==1)then
 !------------------------------ Continue the previous calculation
 
   case(1,3)
-    call IN_data(mg)
+    call IN_data(lg,mg,ng)
 
     call allocate_mat
     call set_icoo1d
@@ -662,7 +663,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     elp3(125)=elp3(125)+elp3(115)-elp3(114)
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg)
+      call Hartree_ns(lg,ng)
     end if
   
     elp3(116)=get_wtime()
@@ -903,7 +904,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
     
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg)
+      call Hartree_ns(lg,ng)
     end if
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then

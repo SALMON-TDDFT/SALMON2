@@ -50,6 +50,7 @@ implicit none
 
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
+type(s_rgrid) :: ng
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -178,7 +179,7 @@ end if
 elp3(402)=get_wtime()
 
 ! Read SCF data
-call IN_data(lg,mg)
+call IN_data(lg,mg,ng)
 
 if(comm_is_root(nproc_id_global))then
   if(icalcforce==1.and.iflag_md==1)then
@@ -324,7 +325,7 @@ if(comm_is_root(nproc_id_global))then
   write(*, *) 
 end if
 
-call Time_Evolution(lg,mg)
+call Time_Evolution(lg,mg,ng)
 
 elp3(409)=get_wtime()
 
@@ -798,7 +799,7 @@ END subroutine Real_Time_DFT
 
 !=======================================================================
 
-SUBROUTINE Time_Evolution(lg,mg)
+SUBROUTINE Time_Evolution(lg,mg,ng)
 use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation
@@ -810,6 +811,7 @@ implicit none
 
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
+type(s_rgrid),intent(in) :: ng
 type(s_wf_info) :: info
 type(s_wf_info) :: info_ob
 type(s_stencil) :: stencil
@@ -1511,7 +1513,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1531,7 +1533,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1539,7 +1541,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1548,7 +1550,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE3
   elp3(415)=get_wtime()
 

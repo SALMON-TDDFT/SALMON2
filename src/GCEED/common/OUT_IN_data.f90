@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg)
+SUBROUTINE IN_data(lg,mg,ng)
 use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -430,6 +430,7 @@ use allocate_mat_sub
 implicit none
 type(s_rgrid),intent(out) :: lg
 type(s_rgrid),intent(out) :: mg
+type(s_rgrid),intent(out) :: ng
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
 integer :: ix,iy,iz
@@ -679,7 +680,7 @@ else if(ilsda == 1) then
   itotfMST=ifMST(1)+ifMST(2)
 end if
 
-call init_mesh_s
+call init_mesh_s(ng)
 call check_ng
 
 if(iflag_ps.eq.1)then
