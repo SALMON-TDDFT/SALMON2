@@ -1296,6 +1296,7 @@ use salmon_communication, only: comm_is_root
 use inputoutput, only: iperiodic
 use global_variables_scf
 implicit none
+type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 integer,intent(in) :: itmg
 real(8) :: rLsize1(3)
@@ -1304,8 +1305,8 @@ if(comm_is_root(nproc_id_global))      &
     print *,"----------------------------------- init_mesh"
 
 rLsize1(:)=rLsize(:,itmg)
-call setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
+call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
 call check_fourier
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
