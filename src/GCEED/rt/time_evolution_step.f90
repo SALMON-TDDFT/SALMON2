@@ -134,9 +134,9 @@ end if
 if(iperiodic==0)then
   if(ikind_eext==0.and.itt>=2)then
     if(mod(itt,2)==1)then
-      call Total_energy_groupob(zpsi_out,shtpsi,2)
+      call Total_energy_groupob(zpsi_out,shtpsi,1)
     else
-      call Total_energy_groupob(zpsi_in,shtpsi,2)
+      call Total_energy_groupob(zpsi_in,shtpsi,1)
     end if
     call subdip(rNe,2)
   end if
