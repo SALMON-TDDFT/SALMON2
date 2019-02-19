@@ -17,6 +17,7 @@ subroutine calc_current(tpsi)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 use scf_data
 use sendrecv_groupob_tmp_sub
 use allocate_psl_sub
@@ -47,7 +48,7 @@ elp3(1351)=elp3(1351)+elp3(1302)-elp3(1301)
 
 do iik=k_sta,k_end
 do iob=1,iobnum
-  call calc_allob(iob,p_allob)
+  call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
   jxt=0.d0
 !$OMP parallel do private(iz,iy,ix) reduction(+ : jxt)
   do iz=mg_sta(3),mg_end(3)
@@ -110,7 +111,7 @@ do iik=k_sta,k_end
     end do
   end do
   do iob=1,iobnum
-    call calc_allob(iob,p_allob)
+    call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iatom,lm,ik,uVpsi0,uVpsix,uVpsiy,uVpsiz,r)
     do iatom=1,MI
       ik=Kion(iatom)
@@ -150,7 +151,7 @@ elp3(1354)=elp3(1354)+elp3(1305)-elp3(1304)
 
 do iik=k_sta,k_end
   do iob=1,iobnum
-    call calc_allob(iob,p_allob)
+    call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
     do iatom=1,MI
       ik=Kion(iatom)
       do lm=1,(Mlps(ik)+1)**2

@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
-                 lg_sta,lg_num,nproc,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential)
+                 lg_sta,lg_num,nproc,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,iscfrt)
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(out) :: mg
@@ -27,6 +27,7 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
   integer :: nproc_ob
   integer :: mg_sta(3),mg_end(3),mg_num(3)
   integer :: lg_sta(3),lg_num(3)
+  integer,intent(in) :: iscfrt
   integer :: mg_sta_all(3,0:nproc-1),mg_end_all(3,0:nproc-1),mg_num_all(3,0:nproc-1)
   integer :: nproc_Mxin_mul
   integer :: j
@@ -81,8 +82,14 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
   mg%num(1:3)=mg_num(1:3)
   mg%is_overlap(1:3)=mg_sta(1:3)-nd
   mg%ie_overlap(1:3)=mg_end(1:3)+nd
-  mg%is_array(1:3)=mg_sta(1:3)-nd
-  mg%ie_array(1:3)=mg_end(1:3)+nd
+  if(iscfrt==1)then
+    mg%is_array(1:3)=mg_sta(1:3)-nd
+    mg%ie_array(1:3)=mg_end(1:3)+nd
+  else if(iscfrt==2)then
+    mg%is_array(1:3)=mg_sta(1:3)-nd
+    mg%ie_array(1)=mg_end(1)+nd+1
+    mg%ie_array(2:3)=mg_end(2:3)+nd
+  end if
 
   if(allocated(mg%idx)) deallocate(mg%idx)
   if(allocated(mg%idy)) deallocate(mg%idy)

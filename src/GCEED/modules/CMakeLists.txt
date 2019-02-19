@@ -25,7 +25,6 @@ set(SOURCES
     total_energy.f90
     writebox_rt.f90
     persistent_comm.f90
-    pack_unpack.f90
     structure_opt.f90
     )
   #  share_mesh_1d_old.f90

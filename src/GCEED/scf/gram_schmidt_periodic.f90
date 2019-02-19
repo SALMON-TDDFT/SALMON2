@@ -17,6 +17,11 @@
 subroutine Gram_Schmidt_periodic
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_group_k
 use salmon_communication, only: comm_summation, comm_bcast
+use calc_allob_sub
+use calc_iroot_sub
+use calc_myob_sub
+use check_corrkob_sub
+use set_isstaend_sub
 use scf_data
 use new_world_sub
 implicit none
@@ -33,7 +38,7 @@ integer :: icorr_p
 integer :: iroot
 integer :: is_sta,is_end
 
-call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+call set_isstaend(is_sta,is_end,ilsda)
 
 if(ilsda == 0)then
   iobsta(1)=1
@@ -51,8 +56,8 @@ allocate(cmatbox2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 do ik=k_sta,k_end
   do is=is_sta,is_end
   do iob=iobsta(is),iobend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-    call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+    call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
     if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=mg_sta(3),mg_end(3)
@@ -63,12 +68,12 @@ do ik=k_sta,k_end
       end do
       end do
     end if
-    call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+    call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
     call comm_bcast(cmatbox,nproc_group_kgrid,iroot)
 
     zovrp=0.d0
     do q=1,iobnum
-      call calc_allob(q,q_allob)
+      call calc_allob(q,q_allob,iparaway_ob,itotmst,mst,iobnum)
       if(q_allob >= iobsta(is) .and. q_allob <= iob-1)then
         cbox=0.d0
 !$OMP parallel do private(iz,iy,ix) collapse(2) reduction ( + : cbox )
@@ -87,7 +92,7 @@ do ik=k_sta,k_end
 
     cmatbox=0.d0
     do q=1,iobnum
-      call calc_allob(q,q_allob)
+      call calc_allob(q,q_allob,iparaway_ob,itotmst,mst,iobnum)
       if(q_allob >= iobsta(is) .and. q_allob <= iob-1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg_sta(3),mg_end(3)

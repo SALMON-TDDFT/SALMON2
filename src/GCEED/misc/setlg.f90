@@ -13,11 +13,14 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-                 Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
+subroutine setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+                 Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
+  use structures, only: s_rgrid
   implicit none
+  type(s_rgrid),intent(out) :: lg
   integer :: iperiodic
   integer :: lg_sta(3),lg_end(3),lg_num(3)
+  integer,intent(in) :: iscfrt
   integer :: ista_Mx_ori(3),iend_Mx_ori(3),inum_Mx_ori(3)
   integer :: Nd
   integer :: imesh_oddeven(3)
@@ -25,6 +28,7 @@ subroutine setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
   real(8) :: Hgs(3)
   real(8) :: rLsize1(3)
   real(8),parameter :: epsilon=1.d-10
+  integer :: j
   
   
   select case(iperiodic)
@@ -52,5 +56,35 @@ subroutine setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
 
   inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
   lg_num(:)=lg_end(:)-lg_sta(:)+1
+  
+  lg%is(1:3)=lg_sta(1:3)
+  lg%ie(1:3)=lg_end(1:3)
+  lg%num(1:3)=lg_num(1:3)
+  lg%is_overlap(1:3)=lg_sta(1:3)-nd
+  lg%ie_overlap(1:3)=lg_end(1:3)+nd
+  if(iscfrt==1)then
+    lg%is_array(1:3)=lg_sta(1:3)-nd
+    lg%ie_array(1:3)=lg_end(1:3)+nd
+  else if(iscfrt==2)then
+    lg%is_array(1:3)=lg_sta(1:3)-nd
+    lg%ie_array(1)=lg_end(1)+nd+1
+    lg%ie_array(2:3)=lg_end(2:3)+nd
+  end if
+
+  if(allocated(lg%idx)) deallocate(lg%idx)
+  if(allocated(lg%idy)) deallocate(lg%idy)
+  if(allocated(lg%idz)) deallocate(lg%idz)
+  allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
+          ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
+          ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
+  do j=lg%is_overlap(1),lg%ie_overlap(1)
+    lg%idx(j) = j
+  end do
+  do j=lg%is_overlap(2),lg%ie_overlap(2)
+    lg%idy(j) = j
+  end do
+  do j=lg%is_overlap(3),lg%ie_overlap(3)
+    lg%idz(j) = j
+  end do
   
 end subroutine setlg

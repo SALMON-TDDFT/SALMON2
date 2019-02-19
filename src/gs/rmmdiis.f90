@@ -13,17 +13,24 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module rmmdiis_sub
+  implicit none
+
+contains
+
 !=======================================================================
 !============================================================== RMM-DIIS
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
 subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
-                   info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+                   info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use calc_allob_sub
+  use diis_core_sub
   !$ use omp_lib
   implicit none
   
@@ -44,6 +51,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  integer,intent(in)    :: iparaway_ob
   integer,parameter :: nd=4
   integer :: j,ind
   integer :: iob,iob_allob,iter,ix,iy,iz
@@ -115,13 +123,16 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   
   if(info%numo >= 1) then
     phi=0.d0
-    psi_stock=spsi%rwf
+    psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
+                      1:info%numo,info%ik_s:info%ik_e,1)=   &
+      spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
+                      1:info%numo,info%ik_s:info%ik_e,1)
   end if
   
   iflag_diisjump=0
   
   do iob=1,info%numo
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
   
     call setv(mg,vlocal,v,iob_allob,mst)
 
@@ -131,7 +142,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   ! Obtain residual vector R_0
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
-        phi(:,:,iz,0)=spsi%rwf(:,:,iz,1,iob,1,1)
+        phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)=spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1)
       end do
 
   !$OMP parallel do private(iz,iy,ix)
@@ -168,7 +179,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   ! Solve by Lagrange's method of undetermined multipliers, and obtain 
   ! Rbar from previous combinations of phi and R.
       if(iflagdiis(iob) == 1)then
-        call diis_core(mg,itotmst,mst,hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
+        call diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
       end if
     end if
   
@@ -231,14 +242,14 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
         if(iter >= 3 .and. epsdiis(iob,iter) > epsdiis(iob,iter-1)) then
   !$OMP parallel do
           do iz=mg%is(3),mg%ie(3)
-            spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,iter-1)
+            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,iter-1)
           end do
           iflagdiis(iob)=0
         else if(-(epsdiis(iob,iter)-epsdiis(iob,iter-1)) <= 1.0d-8 .or.      &
                 Rnorm(iob,iter)/Rnorm(iob,0) <= 0.3d0) then
   !$OMP parallel do
           do iz=mg%is(3),mg%ie(3)
-            spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,iter)
+            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,iter)
           end do
           iflagdiis(iob)=0
         end if
@@ -247,13 +258,13 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
       if(iter == ncg) then
   !$OMP parallel do
         do iz=mg%is(3),mg%ie(3)
-          spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,ncg)
+          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,ncg)
         end do
        end if
       if(iter == 1 .and. iflag_diisjump == 1) then
   !$OMP parallel do
         do iz=mg%is(3),mg%ie(3)
-          spsi%rwf(:,:,iz,1,iob,1,1) = phi(:,:,iz,1)
+          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1)
         end do
       end if
   
@@ -287,7 +298,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   
   iflag_diisjump=0
   do iob=1,info%numo
-    call calc_allob(iob,iob_allob)
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
 
     call setv(mg,vlocal,v,iob_allob,mst)
 
@@ -311,24 +322,27 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
     end do
     end do
 
+    rbox1=sum(spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,iob,1,1)* &
+              htphi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))*hvol
 
-    call inner_product3(mg,spsi%rwf(mg%is(1),mg%is(2),mg%is(3),1,iob,1,1),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
-    rbox1=sum(spsi%rwf(:,:,:,1,iob,1,1)*htphi(:,:,:))*hvol
     if(rbox1-esp(iob,1)>5.d0) iflag_diisjump=1
   end do
   
   if(iflag_diisjump==0)then
     continue
   else if(iflag_diisjump==1)then
-    spsi%rwf=psi_stock
+    spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
+                      1:info%numo,info%ik_s:info%ik_e,1)=   &
+      psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
+                      1:info%numo,info%ik_s:info%ik_e,1)
     do iob=1,info%numo
-      call calc_allob(iob,iob_allob)
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
       call setv(mg,vlocal,v,iob_allob,mst)
 
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
-        phi(:,:,iz,0)=spsi%rwf(:,:,iz,1,iob,1,1)
+        phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)=spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1)
       end do
   
   !$OMP parallel do private(iz,iy,ix)
@@ -356,14 +370,17 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
         R1(:,:,iz,0)=htphi(:,:,iz)-rbox1*hvol*phi(:,:,iz,0)
-        spsi%rwf(:,:,iz,1,iob,1,1)=phi(:,:,iz,0)+lambda2_diis*R1(:,:,iz,0)
+        spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1)=phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)+  &
+                                                                     lambda2_diis*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)
       end do 
   
     end do
   
     rnorm_diff_psi=0.d0
     do iob=1,info%numo
-      phi(:,:,:,0)=abs(spsi%rwf(:,:,:,1,iob,1,1)-psi_stock(:,:,:,1,iob,1,1))
+      phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0)=    &
+                                       abs(spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,iob,1,1)-   &
+                                           psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,iob,1,1))
       rbox1=sum(phi(:,:,:,0)*phi(:,:,:,0))*hvol
       rnorm_diff_psi(iob,1)=rbox1
     end do
@@ -391,7 +408,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
   use inputoutput, only: ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   implicit none
-  type(s_rgrid),intent(inout) :: mg
+  type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: iob_allob
@@ -427,7 +444,7 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_wf_info)       :: info_ob
-  type(s_rgrid),intent(inout) :: mg
+  type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
   integer :: nspin
   type(s_stencil) :: stencil
@@ -436,3 +453,5 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
   call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
 
 end subroutine hpsi_test_diis
+
+end module rmmdiis_sub

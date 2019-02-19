@@ -13,10 +13,15 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module gscg_periodic_sub
+  implicit none
+
+contains
+
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,  &
+subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
@@ -25,6 +30,11 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
   use hpsi_sub
+  use calc_allob_sub
+  use calc_iroot_sub
+  use calc_myob_sub
+  use check_corrkob_sub
+  use set_isstaend_sub
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
@@ -38,7 +48,6 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: nproc_ob_spin
   integer,intent(in)    :: iparaway_ob
   real(8),intent(out)    :: elp3(3000)
   complex(8),intent(out) :: zxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:info%numo)
@@ -107,7 +116,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
 
-  call set_isstaend(is_sta,is_end,ilsda,nproc_ob,nproc_ob_spin)
+  call set_isstaend(is_sta,is_end,ilsda)
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
   do iz=mg%is_array(3),mg%ie_array(3)
@@ -132,7 +141,6 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   end if
   
   do ik=info%ik_s,info%ik_e
-  do is=is_sta,is_end
 
     if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,1:1))
     do a=1,natom
@@ -157,7 +165,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
     iter_bak_ob(:)=0 
   
     do iob_myob=1,info%numo
-      call calc_allob(iob_myob,iob_allob)
+      call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
       elp2(2)=get_wtime()
       
@@ -203,11 +211,11 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
       end do
   
     end do
-    call inner_product5(mg,itotmst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+    call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
 
     Iteration : do iter=1,Ncg
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
@@ -222,6 +230,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
       if(nproc_ob==1)then
         sum_obmat0(:,:)=0.d0
         elp3(1506)=get_wtime()
+        do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           do job=iobsta(is),iob-1
             sum0=0.d0
@@ -236,11 +245,13 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
             sum_obmat0(iob,job)=sum0*hvol
           end do
         end do
+        end do
         elp3(1507)=get_wtime()
         elp3(1557)=elp3(1557)+elp3(1507)-elp3(1506)
         call comm_summation(sum_obmat0,sum_obmat1,itotmst*itotmst,nproc_group_k)
         elp3(1508)=get_wtime()
         elp3(1558)=elp3(1558)+elp3(1508)-elp3(1507)
+        do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           do job=iobsta(is),iob-1
     !$omp parallel do collapse(2)
@@ -253,15 +264,17 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
             end do
           end do
         end do
+        end do
         elp3(1507)=get_wtime()
         elp3(1557)=elp3(1557)+elp3(1507)-elp3(1508)
       else
+        do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
-          call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
+          call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
+          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
           do job=iobsta(is),iob-1
-            call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,itotmst,info%ik_s,info%ik_e,nproc_ob_spin,mst)
+            call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
+            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
             if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)
               do iz=mg%is(3),mg%ie(3)
@@ -272,7 +285,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
               end do
               end do
             end if
-            call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
+            call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
             call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
             sum0=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
@@ -294,11 +307,12 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
             end do
           end do
         end do
+        end do
       end if
-      call inner_product5(mg,itotmst,info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
         
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     
         if(iter==1)then
     !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -323,10 +337,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
         gkgk_ob(iob_allob)=sum_ob1(iob_allob)
       end do
 
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zpk_ob,zs_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zpk_ob,zs_ob,hvol)
 
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -336,10 +350,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
         end do
         end do
       end do
-      call inner_product5(mg,itotmst,info%numo,zpko_ob,zpko_ob,sum_ob1,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zpko_ob,zpko_ob,sum_ob1,hvol)
 
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -381,12 +395,12 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
         end do
         end do
       end do
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
-      call inner_product5(mg,itotmst,info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
         
     
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
 
         ev=0.5d0*((xkHxk_ob(iob_allob)+pkHpk_ob(iob_allob))   &
                  -sqrt((xkHxk_ob(iob_allob)-pkHpk_ob(iob_allob))**2+4.d0*abs(xkHpk_ob(iob_allob))**2))
@@ -405,11 +419,11 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
         end do
       end do 
     
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
-      call inner_product5(mg,itotmst,info%numo,zxk_ob,zxk_ob,xkxk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,info%numo,zxk_ob,zxk_ob,xkxk_ob,hvol)
 
       do iob_myob=1,info%numo
-        call calc_allob(iob_myob,iob_allob)
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
 
         if(abs(xkxk_ob(iob_allob))<=1.d30)then
     !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -431,7 +445,6 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
     end do Iteration
   
   end do
-  end do
   
   
   if(iflag.eq.1) then
@@ -447,3 +460,5 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,npro
   return
   
 end subroutine gscg_periodic
+
+end module gscg_periodic_sub

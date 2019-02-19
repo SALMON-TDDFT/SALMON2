@@ -4,6 +4,7 @@ SUBROUTINE total_energy_periodic_scf_esp(psi_in)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital, nproc_group_h
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
+use calc_allob_sub
 use scf_data
 use hpsi2_sub
 implicit none
@@ -40,7 +41,7 @@ elp3(862)=get_wtime()
 elp3(882)=elp3(882)+elp3(862)-elp3(861)
 do iik=k_sta,k_end
 do iob=1,iobnum
-  call calc_allob(iob,iob_allob)
+  call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
   elp3(863)=get_wtime()
 
 !$OMP parallel do private(iz,iy,ix) 

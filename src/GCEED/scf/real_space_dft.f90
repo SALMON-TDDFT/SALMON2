@@ -41,11 +41,19 @@ END MODULE global_variables_scf
 subroutine Real_Space_DFT
 use structures, only: s_rgrid, s_wf_info, s_wavefunction
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
-                           nproc_group_h, nproc_id_kgrid, nproc_id_spin, nproc_id_orbitalgrid, &
-                           nproc_group_spin, nproc_group_korbital
+                           nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
+                           nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
+use calc_iobnum_sub
+use dtcg_sub
+use gscg_sub
+use dtcg_periodic_sub
+use gscg_periodic_sub
+use rmmdiis_sub
+use subspace_diag_sub
+use subspace_diag_periodic_sub
 use global_variables_scf
 implicit none
 
@@ -86,19 +94,7 @@ call set_filename
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 
-if(ilsda==0)then
-  call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
-else if(ilsda==1)then
-  if(nproc_ob==1)then
-    iobnum=itotMST
-  else
-    if(nproc_id_spin<nproc_ob_spin(1))then
-      call calc_iobnum(MST(1),nproc_ob_spin(1),nproc_id_kgrid,iobnum,nproc_ob_spin(1),iparaway_ob)
-    else
-      call calc_iobnum(MST(2),nproc_ob_spin(2),nproc_id_kgrid,iobnum,nproc_ob_spin(2),iparaway_ob)
-    end if
-  end if
-end if
+call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
 
 if(iflag_stopt==1)then
   call structure_opt_ini(MI)
@@ -394,21 +390,45 @@ info_ob%icomm_r = nproc_group_korbital
 
 select case(iperiodic)
 case(0)
-  allocate(spsi%rwf(mg%is(1):mg%ie(1),  &
-                    mg%is(2):mg%ie(2),  &
-                    mg%is(3):mg%ie(3),  &
+  allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                    mg%is_array(2):mg%ie_array(2),  &
+                    mg%is_array(3):mg%ie_array(3),  &
                     1,  &
                     info%io_s:info%io_e,  &
                     info%ik_s:info%ik_e,  &
                     1))
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do iz=mg%is_array(3),mg%ie_array(3)
+    do iy=mg%is_array(2),mg%ie_array(2)
+    do ix=mg%is_array(1),mg%ie_array(1)
+      spsi%rwf(ix,iy,iz,1,iob,ik,1)=0.d0
+    end do
+    end do
+    end do
+  end do
+  end do
 case(3)
-  allocate(spsi%zwf(mg%is(1):mg%ie(1),  &
-                    mg%is(2):mg%ie(2),  &
-                    mg%is(3):mg%ie(3),  &
+  allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                    mg%is_array(2):mg%ie_array(2),  &
+                    mg%is_array(3):mg%ie_array(3),  &
                     1,  &
                     info%io_s:info%io_e,  &
                     info%ik_s:info%ik_e,  &
                     1))
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do iz=mg%is_array(3),mg%ie_array(3)
+    do iy=mg%is_array(2),mg%ie_array(2)
+    do ix=mg%is_array(1),mg%ie_array(1)
+      spsi%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
+    end do
+    end do
+    end do
+  end do
+  end do
 end select
 
 DFT_Iteration : do iter=1,iDiter(img)
@@ -480,21 +500,21 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
@@ -505,7 +525,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       select case(iperiodic)
       case(0)
         call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -569,7 +589,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
           end do
 
-          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
           do ik=k_sta,k_end
@@ -600,7 +620,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
 
           call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                      iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                      iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                       info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
           do ik=k_sta,k_end
@@ -714,7 +734,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         end do
 
-        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,  &
+        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
         do ik=k_sta,k_end
@@ -744,7 +764,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
 
         call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
-                                    iobnum,itotmst,k_sta,k_end,nproc_ob_spin,mst,ifmst,hvol,   &
+                                    iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
         do ik=k_sta,k_end
@@ -803,21 +823,21 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3, &
+          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,  &
+          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,nproc_ob_spin,iparaway_ob,   &
+          call dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
@@ -825,7 +845,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       select case(iperiodic)
       case(0)
         call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -1276,6 +1296,7 @@ use salmon_communication, only: comm_is_root
 use inputoutput, only: iperiodic
 use global_variables_scf
 implicit none
+type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 integer,intent(in) :: itmg
 real(8) :: rLsize1(3)
@@ -1284,15 +1305,15 @@ if(comm_is_root(nproc_id_global))      &
     print *,"----------------------------------- init_mesh"
 
 rLsize1(:)=rLsize(:,itmg)
-call setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
+call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
 call check_fourier
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
 
 call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
-           lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential)
+           lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,iscfrt)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
 

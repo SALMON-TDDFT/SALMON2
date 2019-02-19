@@ -13,15 +13,21 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-  use salmon_parallel, only: nproc_id_spin
+module calc_myob_sub
+  implicit none
+
+contains
+
+subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+  use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iob_myob
-  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin(2),mst(2)
+  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,mst(2),iobnum
   integer :: iquotient,iob_min
+  integer :: iob_tmp
   
-  if(ilsda==0.or.nproc_ob==1)then
+  if(ilsda==0)then
     if(iparaway_ob==1)then
       call calc_iquotient(iob,nproc_ob,itotmst,iquotient)
       iob_min=itotmst*iquotient/nproc_ob
@@ -31,22 +37,26 @@ subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_sp
     end if
   else
     if(iparaway_ob==1)then
-      if(nproc_id_spin<nproc_ob_spin(1))then
-        call calc_iquotient(iob,nproc_ob_spin(1),mst(1),iquotient)
-        iob_min=mst(1)*iquotient/nproc_ob_spin(1)
+      if(iob<=mst(1))then
+        call calc_iquotient(iob,nproc_ob,mst(1),iquotient)
+        iob_min=mst(1)*iquotient/nproc_ob
         iob_myob=iob-iob_min
       else
-        call calc_iquotient(iob-mst(1),nproc_ob_spin(2),mst(2),iquotient)
-        iob_min=mst(2)*iquotient/nproc_ob_spin(2)
-        iob_myob=iob-mst(1)-iob_min
+        iob_tmp=iob-mst(1)
+        call calc_iquotient(iob_tmp,nproc_ob,mst(1),iquotient)
+        iob_min=mst(1)*iquotient/nproc_ob
+        iob_myob=iob_tmp-iob_min+iobnum/2
       end if
     else if(iparaway_ob==2)then
-      if(nproc_id_spin<nproc_ob_spin(1))then
-        iob_myob=(iob-1)/nproc_ob_spin(1)+1
+      if(iob<=mst(1))then
+        iob_myob=(iob-1)/nproc_ob+1
       else
-        iob_myob=(iob-mst(1)-1)/nproc_ob_spin(2)+1
+        iob_tmp=iob-mst(1)
+        iob_myob=(iob_tmp-1)/nproc_ob+1+iobnum/2
       end if
     end if
   end if
 
 end subroutine calc_myob
+
+end module calc_myob_sub

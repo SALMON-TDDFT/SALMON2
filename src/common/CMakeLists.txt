@@ -1,8 +1,10 @@
 set(SOURCES
    broyden.f90
+   calc_allob.f90
    calc_iquotient.f90
    calc_iroot.f90
    calc_myob.f90
+   calc_ob_num.f90
    check_corrkob.f90
    hpsi.f90
    inner_product.f90
@@ -15,6 +17,8 @@ set(SOURCES
    update_overlap.f90
    structures.f90
    density_matrix.f90
+   pack_unpack.f90
+   sendrecv_grid.f90
    )
 
 add_library(${SALMON_COMMON_LIB} STATIC ${SOURCES})

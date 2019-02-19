@@ -19,6 +19,8 @@ subroutine writepsi
   use inputoutput, only: au_length_aa
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use calc_myob_sub
+  use check_corrkob_sub
   use scf_data
   use allocate_mat_sub
   implicit none
@@ -32,8 +34,8 @@ subroutine writepsi
   if(iSCFRT==1)then
     do p0=1,itotMST
       call conv_p0(p0,iob)
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,1,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+      call check_corrkob(iob,1,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   !OMP parallel do private(iz,iy,ix)
       do iz=lg_sta(3),lg_end(3)
       do iy=lg_sta(2),lg_end(2)

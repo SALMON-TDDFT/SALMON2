@@ -1,7 +1,6 @@
 set(SOURCES
     allocate_sendrecv.f90
     bisection.f90
-    calc_allob.f90
     calcELF.f90
     calc_force_c.f90
     calc_force.f90
@@ -9,7 +8,6 @@ set(SOURCES
     calc_gradient_fast.f90
     calcJxyz_all.f90
     calcJxyz_all_periodic.f90
-    calc_ob_num.f90
     calc_pmax.f90
     calcuV.f90
     calcVpsl.f90
@@ -44,7 +42,7 @@ set(SOURCES
     set_gridcoo.f90
     set_icoo1d.f90
     set_imesh_oddeven.f90
-    set_ispin.f90
+    set_is.f90
     storevpp.f90
     total_energy_periodic.f90
     writeavs.f90

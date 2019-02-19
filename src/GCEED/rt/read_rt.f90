@@ -16,6 +16,8 @@
 SUBROUTINE OUT_data_rt
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_myob_sub
+use check_corrkob_sub
 use scf_data
 use writebox_rt_sub
 use allocate_mat_sub
@@ -79,8 +81,8 @@ end if
 
 do iik=1,num_kpoints_rd
 do iob=1,itotMST
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
 
   cmatbox_l2=0.d0
     if(mod(itotNtime,2)==1)then
@@ -260,6 +262,8 @@ END SUBROUTINE OUT_data_rt
 SUBROUTINE IN_data_rt(Ntime)
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use calc_myob_sub
+use check_corrkob_sub
 use scf_data
 use new_world_sub
 use readbox_rt_sub
@@ -341,8 +345,8 @@ end if
 
 do iik=k_sta,k_end
 do iob=1,itotMST
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   
   if(num_datafiles_IN==1.or.num_datafiles_IN>nproc_size_global)then
     if(comm_is_root(nproc_id_global))then

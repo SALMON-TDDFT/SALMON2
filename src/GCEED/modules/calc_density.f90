@@ -30,6 +30,9 @@ CONTAINS
 subroutine R_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
+use calc_allob_sub
+use calc_myob_sub
+use check_corrkob_sub
 implicit none
 real(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
 integer :: i1_allob
@@ -41,7 +44,7 @@ if(ilsda==0)then
   matbox_m=0d0
   do iik=k_sta,k_end
   do i1=1,iobnum
-    call calc_allob(i1,i1_allob)
+    call calc_allob(i1,i1_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -65,8 +68,8 @@ else if(ilsda==1)then
     matbox_m=0d0
     do iik=k_sta,k_end
     do iob=iob_start(iss),iob_end(iss)
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix) 
         do iz=mg_sta(3),mg_end(3)
@@ -101,6 +104,9 @@ END SUBROUTINE R_calc_density
 subroutine C_calc_density(tpsi)
 use salmon_parallel, only: nproc_group_rho
 use salmon_communication, only: comm_summation
+use calc_allob_sub
+use calc_myob_sub
+use check_corrkob_sub
 implicit none
 complex(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
 integer :: i1_allob
@@ -112,7 +118,7 @@ if(ilsda==0)then
   matbox_m=0d0
   do iik=k_sta,k_end
   do i1=1,iobnum
-    call calc_allob(i1,i1_allob)
+    call calc_allob(i1,i1_allob,iparaway_ob,itotmst,mst,iobnum)
 !$OMP parallel do private(iz,iy,ix) 
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
@@ -136,8 +142,8 @@ else if(ilsda==1)then
     matbox_m=0d0
     do iik=k_sta,k_end
     do iob=iob_start(iss),iob_end(iss)
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,nproc_ob_spin,mst)
-      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,itotmst,k_sta,k_end,nproc_ob_spin,mst)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+      call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
       if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg_sta(3),mg_end(3)

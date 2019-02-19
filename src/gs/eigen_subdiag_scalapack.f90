@@ -13,38 +13,43 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module eigen_subdiag_sub
+  implicit none
+
+contains
+
 subroutine eigen_subdiag(Rmat,evec,iter,ier2)
-use salmon_parallel, only: nproc_size_global
-implicit none
+  use salmon_parallel, only: nproc_size_global
+  implicit none
+  
+  integer :: iter,ier2
+  real(8) :: Rmat(iter,iter)
+  real(8) :: evec(iter,iter)
+  
+  character(1) :: JOBZ,UPLO
+  integer :: N
+  real(8) :: A(iter,iter)
+  integer :: LDA
+  real(8) :: W(iter)
+  real(8) :: WORK(3*iter-1)
+  integer :: LWORK
+  
+  ier2=0
+  
+  if(nproc_size_global==1)then
+    JOBZ='V'
+    UPLO='L'
+    N=iter
+    A=Rmat
+    LDA=iter
+    LWORK=3*iter-1
+    call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
+    evec=A
+  else
+    call SAMPLE_PDSYEV_CALL(Rmat,evec,iter)
+  end if
 
-integer :: iter,ier2
-real(8) :: Rmat(iter,iter)
-real(8) :: evec(iter,iter)
-
-character(1) :: JOBZ,UPLO
-integer :: N
-real(8) :: A(iter,iter)
-integer :: LDA
-real(8) :: W(iter)
-real(8) :: WORK(3*iter-1)
-integer :: LWORK
-
-ier2=0
-
-if(nproc_size_global==1)then
-  JOBZ='V'
-  UPLO='L'
-  N=iter
-  A=Rmat
-  LDA=iter
-  LWORK=3*iter-1
-  call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
-  evec=A
-else
-  call SAMPLE_PDSYEV_CALL(Rmat,evec,iter)
-end if
-
-END subroutine eigen_subdiag
+end subroutine eigen_subdiag
  
 !
       subroutine SAMPLE_PDSYEV_CALL(Rmat,evec,iter)
@@ -60,11 +65,11 @@ END subroutine eigen_subdiag
 !     pasted directly into matlab.
 !
 !     .. Parameters ..
-use inputoutput, only: nproc_domain
-use salmon_parallel, only: nproc_size_global
-integer :: iter
-real(8) :: Rmat(iter,iter)
-real(8) :: evec(iter,iter)
+      use inputoutput, only: nproc_domain
+      use salmon_parallel, only: nproc_size_global
+      integer :: iter
+      real(8) :: Rmat(iter,iter)
+      real(8) :: evec(iter,iter)
       INTEGER            LWORK, MAXN
       INTEGER            LIWORK
       INTEGER,allocatable :: IWORK(:)
@@ -82,10 +87,10 @@ real(8) :: evec(iter,iter)
 !     .. Local Scalars ..
       INTEGER            INFO, N, NB 
 !      INTEGER            CONTEXT, I, IAM, INFO, MYCOL, MYROW, N, NB, NPCOL, NPROCS, NPROW
-
+      integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 !     ..
 !     .. Local Arrays ..
-!      INTEGER            DESCA( 50 ), DESCZ( 50 )
+      INTEGER            DESCA( 50 ), DESCZ( 50 )
 !      DOUBLE PRECISION   A( LDA, LDA ), W( MAXN ), WORK( LWORK ), Z( LDA, LDA )
       DOUBLE PRECISION   A( iter, iter ), W( iter ), Z( iter, iter )
       real(8), allocatable :: WORK( : )
@@ -125,7 +130,7 @@ real(8) :: evec(iter,iter)
       allocate(WORK(LWORK))
 !
 !
-      if(iblacsinit==0)then
+!      if(iblacsinit==0)then
 !     Initialize the BLACS
 !
         CALL BLACS_PINFO( IAM, NPROCS2 )
@@ -140,7 +145,7 @@ real(8) :: evec(iter,iter)
         CALL BLACS_GRIDINIT( CONTEXT, 'R', NPROW, NPCOL )
         CALL BLACS_GRIDINFO( CONTEXT, NPROW, NPCOL, MYROW, MYCOL )
 !
-      end if
+!      end if
 !     Bail out if this process is not a part of this context.
 !
       IF( MYROW.EQ.-1 ) GO TO 20
@@ -148,11 +153,11 @@ real(8) :: evec(iter,iter)
 !
 !     These are basic array descriptors
 !
-      if(iblacsinit==0)then
+!      if(iblacsinit==0)then
         CALL DESCINIT( DESCA, N, N, NB, NB, 0, 0, CONTEXT, LDA, INFO )
         CALL DESCINIT( DESCZ, N, N, NB, NB, 0, 0, CONTEXT, LDA, INFO )
 !        CALL BLACS_GRIDINFO( DESCA( 2 ), NPROW, NPCOL, MYROW, MYCOL )
-      end if
+!      end if
 !
 !     Build a matrix that you can create with
 !     a one line matlab command:  hilb(n) + diag([1:-1/n:1/n])
@@ -220,7 +225,7 @@ real(8) :: evec(iter,iter)
 !      CALL BLACS_GRIDEXIT( CONTEXT )
 !
    20 CONTINUE
-      iblacsinit=1
+!      iblacsinit=1
 !
 !      CALL BLACS_EXIT( 0 )
 !      CALL BLACS_EXIT( 1 )
@@ -250,8 +255,8 @@ real(8) :: evec(iter,iter)
 !
 !
 !     .. Parameters ..
-integer :: iter
-real(8) :: Rmat(iter,iter)
+      integer :: iter
+      real(8) :: Rmat(iter,iter)
       INTEGER            BLOCK_CYCLIC_2D, DLEN_, DT_, CTXT_, M_, N_,  &
                          MB_, NB_, RSRC_, CSRC_, LLD_
       PARAMETER          ( BLOCK_CYCLIC_2D = 1, DLEN_ = 9, DT_ = 1,  &
@@ -316,4 +321,6 @@ real(8) :: Rmat(iter,iter)
 !
 !     End of PDLAMODHLIB
 !
-      END
+      END SUBROUTINE
+
+end module eigen_subdiag_sub

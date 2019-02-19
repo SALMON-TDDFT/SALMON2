@@ -19,11 +19,10 @@ set(SOURCES
     set_numcpu_rt_sp.f90
     set_vonf_sd.f90
     taylor_coe.f90
-    taylor${HPSI_TEST_SUFFIX}.f90
     time_evolution_step.f90
     total_energy_groupob.f90
     xc_fast.f90
     )
 
 add_library(${GCEED_RT_LIB} ${SOURCES})
-add_dependencies(${GCEED_RT_LIB} ${GCEED_MODULE_LIB} ${GCEED_SCF_LIB})
+add_dependencies(${GCEED_RT_LIB} ${SALMON_RT_LIB} ${GCEED_MODULE_LIB} ${GCEED_SCF_LIB})
