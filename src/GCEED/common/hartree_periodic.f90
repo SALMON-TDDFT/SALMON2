@@ -34,20 +34,20 @@ subroutine Hartree_periodic(lg,trho,tVh)
   integer :: n
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=lg_sta(3),lg_end(3)
-  do iy=lg_sta(2),lg_end(2)
-  do ix=lg_sta(1),lg_end(1)
+  do iz=lg%is(3),lg%ie(3)
+  do iy=lg%is(2),lg%ie(2)
+  do ix=lg%is(1),lg%ie(1)
     ff1(ix,iy,iz)=0.d0
   end do
   end do
   end do
 !$OMP parallel do
-  do n=1,lg_num(1)*lg_num(2)*lg_num(3)
+  do n=1,lg%num(1)*lg%num(2)*lg%num(3)
     rhoe_G_tmp(n)=0.d0
   end do
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=lg_sta(3),lg_end(3)
+  do iz=lg%is(3),lg%ie(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
     trho2z(ix,iy,iz)=0.d0
@@ -64,33 +64,33 @@ subroutine Hartree_periodic(lg,trho,tVh)
   end do
   end do
 
-  call comm_summation(trho2z,trho3z,ng_num(1)*ng_num(2)*lg_num(3),nproc_group_bound(3))
+  call comm_summation(trho2z,trho3z,ng_num(1)*ng_num(2)*lg%num(3),nproc_group_bound(3))
   
 !$OMP parallel do private(ix,kx)
-  do ix=lg_sta(1),lg_end(1)
-    do kx=lg_sta(1),lg_end(1)
-      eGx(kx,ix)=exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg_num(1))))
+  do ix=lg%is(1),lg%ie(1)
+    do kx=lg%is(1),lg%ie(1)
+      eGx(kx,ix)=exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg%num(1))))
       eGxc(kx,ix)=conjg(eGx(kx,ix))
     end do
   end do
 !$OMP parallel do private(iy,ky)
-  do iy=lg_sta(2),lg_end(2)
-    do ky=lg_sta(2),lg_end(2)
-      eGy(ky,iy)=exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg_num(2))))
+  do iy=lg%is(2),lg%ie(2)
+    do ky=lg%is(2),lg%ie(2)
+      eGy(ky,iy)=exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg%num(2))))
       eGyc(ky,iy)=conjg(eGy(ky,iy))
     end do
   end do
 !$OMP parallel do private(iz,kz)
-  do iz=lg_sta(3),lg_end(3)
-    do kz=lg_sta(3),lg_end(3)
-      eGz(kz,iz)=exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg_num(3))))
+  do iz=lg%is(3),lg%ie(3)
+    do kz=lg%is(3),lg%ie(3)
+      eGz(kz,iz)=exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg%num(3))))
       eGzc(kz,iz)=conjg(eGz(kz,iz))
     end do
   end do
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng_sta(3),ng_end(3)
-  do iy=lg_sta(2),lg_end(2)
+  do iy=lg%is(2),lg%ie(2)
   do ix=ng_sta(1),ng_end(1)
     ff1y(ix,iy,iz)=0.d0
   end do
@@ -105,12 +105,12 @@ subroutine Hartree_periodic(lg,trho,tVh)
   end do
   end do
   end do
-  call comm_summation(ff1y,ff2y,ng_num(1)*lg_num(2)*ng_num(3),nproc_group_bound(2))
+  call comm_summation(ff1y,ff2y,ng_num(1)*lg%num(2)*ng_num(3),nproc_group_bound(2))
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
-  do ix=lg_sta(1),lg_end(1)
+  do ix=lg%is(1),lg%ie(1)
     ff1x(ix,iy,iz)=0.d0
   end do
   end do
@@ -125,25 +125,25 @@ subroutine Hartree_periodic(lg,trho,tVh)
   end do
   end do
 
-  call comm_summation(ff1x,ff2x,lg_num(1)*ng_num(2)*ng_num(3),nproc_group_bound(1))
+  call comm_summation(ff1x,ff2x,lg%num(1)*ng_num(2)*ng_num(3),nproc_group_bound(1))
 
 !$OMP parallel do private(kz,ky,kx)
   do kz = ng_sta(3),ng_end(3)
   do ky = ng_sta(2),ng_end(2)
   do kx = ng_sta(1),ng_end(1)
-    ff1x(kx,ky,kz)=sum(eGxc(kx,:)*ff2x(:,ky,kz))/dble(lg_num(1)*lg_num(2)*lg_num(3))
+    ff1x(kx,ky,kz)=sum(eGxc(kx,:)*ff2x(:,ky,kz))/dble(lg%num(1)*lg%num(2)*lg%num(3))
   end do
   end do
   end do
 
-  call comm_summation(ff1x,ff2x,lg_num(1)*ng_num(2)*ng_num(3),nproc_group_bound(1))
+  call comm_summation(ff1x,ff2x,lg%num(1)*ng_num(2)*ng_num(3),nproc_group_bound(1))
 
-  bLx=2.d0*Pi/(Hgs(1)*dble(lg_num(1)))
-  bLy=2.d0*Pi/(Hgs(2)*dble(lg_num(2)))
-  bLz=2.d0*Pi/(Hgs(3)*dble(lg_num(3)))
+  bLx=2.d0*Pi/(Hgs(1)*dble(lg%num(1)))
+  bLy=2.d0*Pi/(Hgs(2)*dble(lg%num(2)))
+  bLz=2.d0*Pi/(Hgs(3)*dble(lg%num(3)))
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=lg_sta(3),lg_end(3)
+  do iz=lg%is(3),lg%ie(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
     ff1z(ix,iy,iz)=0.d0
@@ -155,13 +155,13 @@ subroutine Hartree_periodic(lg,trho,tVh)
   do kz = ng_sta(3),ng_end(3)
   do ky = ng_sta(2),ng_end(2)
   do kx = ng_sta(1),ng_end(1)
-    n=(kz-lg_sta(3))*lg_num(2)*lg_num(1)+(ky-lg_sta(2))*lg_num(1)+kx-lg_sta(1)+1
-!    Gx=2.d0*Pi*kx/lg_num(1)
-!    Gy=2.d0*Pi*ky/lg_num(2)
-!    Gz=2.d0*Pi*kz/lg_num(3)
-    kkx=kx-1-lg_num(1)*(1+sign(1,(kx-1-lg_num(1)/2)))/2
-    kky=ky-1-lg_num(2)*(1+sign(1,(ky-1-lg_num(2)/2)))/2
-    kkz=kz-1-lg_num(3)*(1+sign(1,(kz-1-lg_num(3)/2)))/2
+    n=(kz-lg%is(3))*lg%num(2)*lg%num(1)+(ky-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
+!    Gx=2.d0*Pi*kx/lg%num(1)
+!    Gy=2.d0*Pi*ky/lg%num(2)
+!    Gz=2.d0*Pi*kz/lg%num(3)
+    kkx=kx-1-lg%num(1)*(1+sign(1,(kx-1-lg%num(1)/2)))/2
+    kky=ky-1-lg%num(2)*(1+sign(1,(ky-1-lg%num(2)/2)))/2
+    kkz=kz-1-lg%num(3)*(1+sign(1,(kz-1-lg%num(3)/2)))/2
     Gx=kkx*bLx
     Gy=kky*bLy
     Gz=kkz*bLz
@@ -178,13 +178,13 @@ subroutine Hartree_periodic(lg,trho,tVh)
   end do
 
   if(iSCFRT==1)then
-    call comm_summation(rhoe_G_tmp,rhoe_G,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
+    call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
   else if(iSCFRT==2)then
     if(itt==1.or.mod(itt,itcalc_ene)==0)then
-      call comm_summation(rhoe_G_tmp,rhoe_G,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
+      call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
     end if
   end if
-  call comm_summation(ff1z,ff2z,ng_num(1)*ng_num(2)*lg_num(3),nproc_group_bound(3))
+  call comm_summation(ff1z,ff2z,ng_num(1)*ng_num(2)*lg%num(3),nproc_group_bound(3))
 
 !$OMP parallel do private(iz,ky,kx)
   do iz = ng_sta(3),ng_end(3)
@@ -194,7 +194,7 @@ subroutine Hartree_periodic(lg,trho,tVh)
   end do
   end do
   end do
-  call comm_summation(ff1y,ff2y,ng_num(1)*lg_num(2)*ng_num(3),nproc_group_bound(2))
+  call comm_summation(ff1y,ff2y,ng_num(1)*lg%num(2)*ng_num(3),nproc_group_bound(2))
 
 !$OMP parallel do private(iz,iy,kx)
   do iz = ng_sta(3),ng_end(3)
@@ -204,7 +204,7 @@ subroutine Hartree_periodic(lg,trho,tVh)
   end do
   end do
   end do
-  call comm_summation(ff1,ff2,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
+  call comm_summation(ff1,ff2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
 !$OMP parallel do private(iz,iy,ix)
   do iz = mg_sta(3),mg_end(3)
