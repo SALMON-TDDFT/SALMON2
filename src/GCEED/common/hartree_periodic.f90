@@ -27,8 +27,8 @@ subroutine Hartree_periodic(lg,mg,ng,trho,tVh)
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   integer :: ix,iy,iz,kx,ky,kz,kkx,kky,kkz
-  real(8) :: trho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
-  real(8) :: tVh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
+  real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8) :: tVh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8) :: Gx,Gy,Gz
   complex(8),parameter :: zI=(0.d0,1.d0)
   real(8) :: G2
@@ -209,9 +209,9 @@ subroutine Hartree_periodic(lg,mg,ng,trho,tVh)
   call comm_summation(ff1,ff2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz = mg_sta(3),mg_end(3)
-  do iy = mg_sta(2),mg_end(2)
-  do ix = mg_sta(1),mg_end(1)
+  do iz = mg%is(3),mg%ie(3)
+  do iy = mg%is(2),mg%ie(2)
+  do ix = mg%is(1),mg%ie(1)
     tVh(ix,iy,iz)=sum(eGx(:,ix)*ff2(:,iy,iz))
   end do
   end do
