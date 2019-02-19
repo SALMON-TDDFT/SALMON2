@@ -15,13 +15,15 @@
 !
 !SUBROUTINE Hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-subroutine Hartree_periodic(trho,tVh)
+subroutine Hartree_periodic(lg,trho,tVh)
+  use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global, nproc_group_bound
   use salmon_communication, only: comm_summation
   use scf_data
   use new_world_sub
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: lg
   integer :: ix,iy,iz,kx,ky,kz,kkx,kky,kkz
   real(8) :: trho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
   real(8) :: tVh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
