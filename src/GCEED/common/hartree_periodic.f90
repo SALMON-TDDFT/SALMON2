@@ -49,23 +49,23 @@ subroutine Hartree_periodic(lg,ng,trho,tVh)
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=lg%is(3),lg%ie(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     trho2z(ix,iy,iz)=0.d0
   end do
   end do
   end do
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     trho2z(ix,iy,iz)=trho(ix,iy,iz)
   end do
   end do
   end do
 
-  call comm_summation(trho2z,trho3z,ng_num(1)*ng_num(2)*lg%num(3),nproc_group_bound(3))
+  call comm_summation(trho2z,trho3z,ng%num(1)*ng%num(2)*lg%num(3),nproc_group_bound(3))
   
 !$OMP parallel do private(ix,kx)
   do ix=lg%is(1),lg%ie(1)
@@ -90,27 +90,27 @@ subroutine Hartree_periodic(lg,ng,trho,tVh)
   end do
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
+  do iz=ng%is(3),ng%ie(3)
   do iy=lg%is(2),lg%ie(2)
-  do ix=ng_sta(1),ng_end(1)
+  do ix=ng%is(1),ng%ie(1)
     ff1y(ix,iy,iz)=0.d0
   end do
   end do
   end do
 
 !$OMP parallel do private(kz,iy,ix)
-  do kz = ng_sta(3),ng_end(3)
-  do iy = ng_sta(2),ng_end(2)
-  do ix = ng_sta(1),ng_end(1)
+  do kz = ng%is(3),ng%ie(3)
+  do iy = ng%is(2),ng%ie(2)
+  do ix = ng%is(1),ng%ie(1)
     ff1y(ix,iy,kz)=sum(eGzc(kz,:)*trho3z(ix,iy,:))
   end do
   end do
   end do
-  call comm_summation(ff1y,ff2y,ng_num(1)*lg%num(2)*ng_num(3),nproc_group_bound(2))
+  call comm_summation(ff1y,ff2y,ng%num(1)*lg%num(2)*ng%num(3),nproc_group_bound(2))
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
   do ix=lg%is(1),lg%ie(1)
     ff1x(ix,iy,iz)=0.d0
   end do
@@ -118,26 +118,26 @@ subroutine Hartree_periodic(lg,ng,trho,tVh)
   end do
 
 !$OMP parallel do private(kz,ky,ix)
-  do kz = ng_sta(3),ng_end(3)
-  do ky = ng_sta(2),ng_end(2)
-  do ix = ng_sta(1),ng_end(1)
+  do kz = ng%is(3),ng%ie(3)
+  do ky = ng%is(2),ng%ie(2)
+  do ix = ng%is(1),ng%ie(1)
     ff1x(ix,ky,kz)=sum(eGyc(ky,:)*ff2y(ix,:,kz))
   end do
   end do
   end do
 
-  call comm_summation(ff1x,ff2x,lg%num(1)*ng_num(2)*ng_num(3),nproc_group_bound(1))
+  call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),nproc_group_bound(1))
 
 !$OMP parallel do private(kz,ky,kx)
-  do kz = ng_sta(3),ng_end(3)
-  do ky = ng_sta(2),ng_end(2)
-  do kx = ng_sta(1),ng_end(1)
+  do kz = ng%is(3),ng%ie(3)
+  do ky = ng%is(2),ng%ie(2)
+  do kx = ng%is(1),ng%ie(1)
     ff1x(kx,ky,kz)=sum(eGxc(kx,:)*ff2x(:,ky,kz))/dble(lg%num(1)*lg%num(2)*lg%num(3))
   end do
   end do
   end do
 
-  call comm_summation(ff1x,ff2x,lg%num(1)*ng_num(2)*ng_num(3),nproc_group_bound(1))
+  call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),nproc_group_bound(1))
 
   bLx=2.d0*Pi/(Hgs(1)*dble(lg%num(1)))
   bLy=2.d0*Pi/(Hgs(2)*dble(lg%num(2)))
@@ -145,17 +145,17 @@ subroutine Hartree_periodic(lg,ng,trho,tVh)
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=lg%is(3),lg%ie(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     ff1z(ix,iy,iz)=0.d0
   end do
   end do
   end do
 
 !$OMP parallel do private(kz,ky,kx,n,Gx,Gy,Gz,G2,kkx,kky,kkz)
-  do kz = ng_sta(3),ng_end(3)
-  do ky = ng_sta(2),ng_end(2)
-  do kx = ng_sta(1),ng_end(1)
+  do kz = ng%is(3),ng%ie(3)
+  do ky = ng%is(2),ng%ie(2)
+  do kx = ng%is(1),ng%ie(1)
     n=(kz-lg%is(3))*lg%num(2)*lg%num(1)+(ky-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
 !    Gx=2.d0*Pi*kx/lg%num(1)
 !    Gy=2.d0*Pi*ky/lg%num(2)
@@ -185,22 +185,22 @@ subroutine Hartree_periodic(lg,ng,trho,tVh)
       call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
     end if
   end if
-  call comm_summation(ff1z,ff2z,ng_num(1)*ng_num(2)*lg%num(3),nproc_group_bound(3))
+  call comm_summation(ff1z,ff2z,ng%num(1)*ng%num(2)*lg%num(3),nproc_group_bound(3))
 
 !$OMP parallel do private(iz,ky,kx)
-  do iz = ng_sta(3),ng_end(3)
-  do ky = ng_sta(2),ng_end(2)
-  do kx = ng_sta(1),ng_end(1)
+  do iz = ng%is(3),ng%ie(3)
+  do ky = ng%is(2),ng%ie(2)
+  do kx = ng%is(1),ng%ie(1)
     ff1y(kx,ky,iz)=sum(eGz(:,iz)*ff2z(kx,ky,:))
   end do
   end do
   end do
-  call comm_summation(ff1y,ff2y,ng_num(1)*lg%num(2)*ng_num(3),nproc_group_bound(2))
+  call comm_summation(ff1y,ff2y,ng%num(1)*lg%num(2)*ng%num(3),nproc_group_bound(2))
 
 !$OMP parallel do private(iz,iy,kx)
-  do iz = ng_sta(3),ng_end(3)
-  do iy = ng_sta(2),ng_end(2)
-  do kx = ng_sta(1),ng_end(1)
+  do iz = ng%is(3),ng%ie(3)
+  do iy = ng%is(2),ng%ie(2)
+  do kx = ng%is(1),ng%ie(1)
     ff1(kx,iy,iz)=sum(eGy(:,iy)*ff2y(kx,:,iz))
   end do
   end do
