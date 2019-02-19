@@ -225,7 +225,7 @@ if(istopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,ng)
+    call Hartree_ns(lg,mg,ng)
 
     
     if(ilsda == 0) then
@@ -663,7 +663,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     elp3(125)=elp3(125)+elp3(115)-elp3(114)
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,ng)
+      call Hartree_ns(lg,mg,ng)
     end if
   
     elp3(116)=get_wtime()
@@ -904,7 +904,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
     
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,ng)
+      call Hartree_ns(lg,mg,ng)
     end if
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then

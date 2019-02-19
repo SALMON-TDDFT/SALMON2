@@ -15,7 +15,7 @@
 !
 !SUBROUTINE Hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-subroutine Hartree_periodic(lg,ng,trho,tVh)
+subroutine Hartree_periodic(lg,mg,ng,trho,tVh)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global, nproc_group_bound
   use salmon_communication, only: comm_summation
@@ -24,6 +24,7 @@ subroutine Hartree_periodic(lg,ng,trho,tVh)
   use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   integer :: ix,iy,iz,kx,ky,kz,kkx,kky,kkz
   real(8) :: trho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
