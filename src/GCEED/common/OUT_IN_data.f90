@@ -424,6 +424,7 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_iobnum_sub
 use calc_myob_sub
 use check_corrkob_sub
+use check_mg_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
@@ -681,7 +682,7 @@ else if(ilsda == 1) then
 end if
 
 call init_mesh_s(ng)
-call check_ng
+call check_mg(mg)
 
 if(iflag_ps.eq.1)then
   call comm_bcast(MI_read,nproc_group_global)
