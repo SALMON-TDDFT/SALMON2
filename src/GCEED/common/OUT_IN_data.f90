@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(mg)
+SUBROUTINE IN_data(lg,mg,ng)
 use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -429,7 +429,9 @@ use scf_data
 use new_world_sub
 use allocate_mat_sub
 implicit none
-type(s_rgrid) :: mg
+type(s_rgrid),intent(out) :: lg
+type(s_rgrid),intent(out) :: mg
+type(s_rgrid),intent(out) :: ng
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
 integer :: ix,iy,iz
@@ -471,6 +473,7 @@ integer :: icomm
 integer :: ifMST0(2)
 integer :: imesh_oddeven0
 integer :: itmg
+integer :: j
 
 if(comm_is_root(nproc_id_global))then
   write(*,*) file_IN
@@ -628,6 +631,36 @@ inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
 
 lg_num(:)=lg_end(:)-lg_sta(:)+1
 
+lg%is(1:3)=lg_sta(1:3)
+lg%ie(1:3)=lg_end(1:3)
+lg%num(1:3)=lg_num(1:3)
+lg%is_overlap(1:3)=lg_sta(1:3)-nd
+lg%ie_overlap(1:3)=lg_end(1:3)+nd
+if(iscfrt==1)then
+  lg%is_array(1:3)=lg_sta(1:3)-nd
+  lg%ie_array(1:3)=lg_end(1:3)+nd
+else if(iscfrt==2)then
+  lg%is_array(1:3)=lg_sta(1:3)-nd
+  lg%ie_array(1)=lg_end(1)+nd+1
+  lg%ie_array(2:3)=lg_end(2:3)+nd
+end if
+
+if(allocated(lg%idx)) deallocate(lg%idx)
+if(allocated(lg%idy)) deallocate(lg%idy)
+if(allocated(lg%idz)) deallocate(lg%idz)
+allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
+        ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
+        ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
+do j=lg%is_overlap(1),lg%ie_overlap(1)
+  lg%idx(j) = j
+end do
+do j=lg%is_overlap(2),lg%ie_overlap(2)
+  lg%idy(j) = j
+end do
+do j=lg%is_overlap(3),lg%ie_overlap(3)
+  lg%idz(j) = j
+end do
+
 call check_fourier
 
 call set_gridcoo
@@ -648,9 +681,8 @@ else if(ilsda == 1) then
   itotfMST=ifMST(1)+ifMST(2)
 end if
 
-call init_mesh_s
+call init_mesh_s(ng)
 call check_mg(mg)
-call check_ng
 
 if(iflag_ps.eq.1)then
   call comm_bcast(MI_read,nproc_group_global)
