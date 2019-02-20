@@ -13,9 +13,13 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-!SUBROUTINE Hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-subroutine Hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
+module hartree_periodic_sub
+  implicit none
+
+contains
+
+subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc)
   use structures, only: s_rgrid
@@ -242,5 +246,7 @@ subroutine Hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
   end do
 
   return
-end subroutine Hartree_periodic
+end subroutine hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
+
+end module hartree_periodic_sub

@@ -55,4 +55,4 @@ set(SOURCES
     )
 
 add_library(${GCEED_COMMON_LIB} ${SOURCES})
-add_dependencies(${GCEED_COMMON_LIB} ${GCEED_MODULE_LIB})
+add_dependencies(${GCEED_COMMON_LIB} ${SALMON_POISSON_LIB} ${GCEED_MODULE_LIB})
