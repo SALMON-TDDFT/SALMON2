@@ -20,7 +20,6 @@ subroutine Hartree_periodic(lg,mg,ng,trho,tVh)
   use salmon_parallel, only: nproc_group_global, nproc_group_bound
   use salmon_communication, only: comm_summation
   use scf_data
-  use new_world_sub
   use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
