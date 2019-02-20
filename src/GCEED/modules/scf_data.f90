@@ -539,11 +539,11 @@ end do
 end subroutine snum_procs
 
 !======================================================================
-subroutine init_mesh_s
+subroutine init_mesh_s(ng)
 use salmon_parallel, only: nproc_size_global, nproc_id_global
 use structures, only: s_rgrid
 implicit none
-type(s_rgrid) :: ng
+type(s_rgrid),intent(out) :: ng
 
 nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
 
