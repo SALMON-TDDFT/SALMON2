@@ -648,6 +648,7 @@ else if(ilsda == 1) then
 end if
 
 call init_mesh_s
+call check_mg(mg)
 call check_ng
 
 if(iflag_ps.eq.1)then

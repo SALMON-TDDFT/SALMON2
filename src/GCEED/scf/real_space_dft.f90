@@ -121,6 +121,7 @@ if(istopt==1)then
     call init_mesh(mg,itmg)
     call set_gridcoo
     call init_mesh_s
+    call check_mg(mg)
     call check_ng
 
     call init_updown

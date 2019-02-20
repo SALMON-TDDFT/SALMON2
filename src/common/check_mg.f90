@@ -14,11 +14,13 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine check_mg
-  use scf_data
+subroutine check_mg(mg)
+  use structures, only: s_rgrid
   implicit none
+  type(s_rgrid)     :: mg
+  integer,parameter :: nd=4
 
-  if(mg_num(1)<Nd .or.mg_num(2)<Nd .or.mg_num(3)<Nd )then
+  if(mg%num(1)<nd .or.mg%num(2)<nd .or.mg%num(3)<nd)then
     stop "A system is small. Please use less number of processors."
   end if
 

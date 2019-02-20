@@ -6,6 +6,7 @@ set(SOURCES
    calc_myob.f90
    calc_ob_num.f90
    check_corrkob.f90
+   check_mg.f90
    hpsi.f90
    inner_product.f90
    inner_product3.f90
