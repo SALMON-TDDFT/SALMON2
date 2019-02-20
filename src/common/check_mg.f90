@@ -14,6 +14,11 @@
 !  limitations under the License.
 !
 !=======================================================================
+module check_mg_sub
+  implicit none
+
+contains
+
 subroutine check_mg(mg)
   use structures, only: s_rgrid
   implicit none
@@ -25,3 +30,5 @@ subroutine check_mg(mg)
   end if
 
 end subroutine check_mg
+
+end module check_mg_sub
