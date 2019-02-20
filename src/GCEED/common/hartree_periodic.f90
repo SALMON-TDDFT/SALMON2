@@ -15,19 +15,40 @@
 !
 !SUBROUTINE Hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-subroutine Hartree_periodic(lg,mg,ng,trho,tVh)
+subroutine Hartree_periodic(lg,mg,ng,trho,tVh,  &
+                 ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
+                 egx,egxc,egy,egyc,egz,egzc)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global, nproc_group_bound
   use salmon_communication, only: comm_summation
   use scf_data
-  use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
+  real(8),intent(in) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(out) :: tVh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8),intent(out) :: ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  complex(8),intent(out) :: ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  complex(8),intent(out) :: ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3))
+  complex(8),intent(out) :: ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
+  complex(8),intent(out) :: ff2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  complex(8),intent(out) :: ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  complex(8),intent(out) :: ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3))
+  complex(8),intent(out) :: ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
+  complex(8),intent(out) :: rhoe_g_tmp(lg%num(1)*lg%num(2)*lg%num(3))
+  complex(8),intent(out) :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
+  real(8),intent(out)    :: trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
+  real(8),intent(out)    :: trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
+  complex(8),intent(out) :: egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1))
+  complex(8),intent(out) :: egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1))
+  complex(8),intent(out) :: egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2))
+  complex(8),intent(out) :: egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2))
+  complex(8),intent(out) :: egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3))
+  complex(8),intent(out) :: egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3))
+
+
   integer :: ix,iy,iz,kx,ky,kz,kkx,kky,kkz
-  real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8) :: tVh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8) :: Gx,Gy,Gz
   complex(8),parameter :: zI=(0.d0,1.d0)
   real(8) :: G2
