@@ -48,12 +48,10 @@ for line in open("C2H2_info.data"):
         for name1, [resval1, refval1, error1] in checklist1.items():
             data = line.split()
             result1[name1] = float(data[1])
-            print("%s : %e" % (name1, result1[name1]))
     if linecount == 9: # a line for orbital 5
         for name2, [resval2, refval2, error2] in checklist2.items():
             data = line.split()
             result2[name2] = float(data[1])
-            print("%s : %e" % (name2, result2[name2]))
 
 for name1, [resval1, refval1, error1] in checklist1.items():
     if name1 not in result1:
