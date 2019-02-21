@@ -79,14 +79,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
                            ,mg%is,mg%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
-    select case(mg%ndir)
+    select case(3) ! select case(mg%ndir) !????????
     case(3)
     ! orthogonal lattice
       do im=im_s,im_e
       do ik=ik_s,ik_e
         if(if_kAc) then
-          kAc = stencil%kAc(ik,:)
-          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc**2)
+          kAc(1:3) = stencil%kAc(ik,1:3)
+          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
           k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
           k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
           k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
@@ -108,8 +108,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
       do im=im_s,im_e
       do ik=ik_s,ik_e
         if(if_kAc) then
-          kAc = stencil%kAc(ik,:) ! Cartesian vector
-          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc**2)
+          kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
+          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
           k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
           k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
           k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
@@ -131,8 +131,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
       do im=im_s,im_e
       do ik=ik_s,ik_e
         if(if_kAc) then
-          kAc = stencil%kAc(ik,:) ! Cartesian vector
-          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc**2)
+          kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
+          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
           k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
           k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
           k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)

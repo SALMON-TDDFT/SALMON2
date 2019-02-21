@@ -66,8 +66,6 @@ integer :: ia,ib
 real(8) :: rab
 real(8),allocatable :: tfourier_integrand(:,:)
 
-mg%ndir =3 !?????? debug: orthogonal lattice only
-
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 call check_cep
