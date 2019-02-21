@@ -22,7 +22,15 @@ for item in filelist:
         print("File not found: %s" % item)
         sys.exit(-1)  # Failure
 
+# test rule
+reference = {}
+
+reference['C2H2_info.data'] = [
+    # Row, Col, Reference, Tolerance, Info
+    [   8,  2-1,    -18.4139, 1e-03, 'orbital 1'],
+    [   9,  2-1,     -7.3403, 1e-03, 'orbital 5'],
+]
+
 print("# Verification end")
 print("#" * 60)
 
-sys.exit(0)  # Success
