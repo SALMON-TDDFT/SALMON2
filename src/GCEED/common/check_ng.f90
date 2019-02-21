@@ -14,11 +14,14 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine check_ng
-  use scf_data
+subroutine check_ng(ng)
+  use inputoutput, only: iperiodic
+  use structures, only: s_rgrid
   implicit none
+  type(s_rgrid)     :: ng
+  integer,parameter :: nd=4
 
-  if(iperiodic==0.and.(ng_num(1)<Ndh.or.ng_num(2)<Ndh.or.ng_num(3)<Ndh))then
+  if(iperiodic==0.and.(ng%num(1)<nd.or.ng%num(2)<nd.or.ng%num(3)<nd))then
     stop "A system is small. Please use less number of processors."
   end if
 
