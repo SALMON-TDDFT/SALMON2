@@ -15,7 +15,8 @@
 !
 !SUBROUTINE Hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder)
+subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder,   &
+                        a_ffte,b_ffte,rhoe_g,coef_poisson)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_parallel, only: nproc_id_icommy, nproc_group_icommy
@@ -25,13 +26,16 @@ subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use scf_data
-  use allocate_mat_sub
 !$  use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  integer,intent(in) :: icheck_ascorder
+  integer,intent(in)       :: icheck_ascorder
+  complex(8),intent(out)   :: a_ffte(lg%num(1),lg%num(2)/NPUY,lg%num(3)/NPUZ)
+  complex(8),intent(out)   :: b_ffte(lg%num(1),lg%num(2)/NPUY,lg%num(3)/NPUZ)
+  complex(8),intent(out)   :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
+  real(8),intent(in)       :: coef_poisson(lg%num(1),lg%num(2)/NPUY,lg%num(3)/NPUZ)
   integer :: ix,iy,iz
   integer :: iix,iiy,iiz
   integer :: iz_sta,iz_end,iy_sta,iy_end
@@ -42,6 +46,8 @@ subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder)
   integer :: n
   real(8) :: bLx,bLy,bLz
   complex(8) :: A_FFTE_tmp(1:lg%num(1),1:lg%num(2)/NPUY,1:lg%num(3)/NPUZ)
+  real(8) :: matbox_l(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  real(8) :: matbox_l2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
 
   bLx=2.d0*Pi/(Hgs(1)*dble(lg%num(1)))
   bLy=2.d0*Pi/(Hgs(2)*dble(lg%num(2)))
