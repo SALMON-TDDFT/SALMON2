@@ -7,15 +7,7 @@
 
 import sys
 import os
-import re
 import numpy as np
-
-print("#" * 60)
-print("# Verification start")
-
-filelist = [
-    "C2H2_info.data",
-]
 
 # test rule
 reference = {}
@@ -35,12 +27,6 @@ def main():
     print("# Verification start")
 
     return_code = 0
-
-    print("# Checking the existance of outputfile")
-    for item in filelist:
-        if not os.path.exists(item):
-            print("File not found: %s" % item)
-            sys.exit(-1)  # Failure
 
     for item, table in reference.items():
         if os.path.isfile(item):
