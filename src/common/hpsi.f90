@@ -483,4 +483,32 @@ end subroutine pseudo_C
 
 !===================================================================================================================================
 
+subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
+  use structures
+  implicit none
+  type(s_pp_grid)    :: ppg
+  integer,intent(in) :: ik_s,ik_e
+  real(8),intent(in) :: kAc(ik_s:ik_e,3)
+  !
+  integer :: ilma,iatom,j,ik
+  real(8) :: x,y,z,k(3)
+  complex(8) :: ekr
+  complex(8),parameter :: zi = (0d0,1d0)
+  if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,ik_s:ik_e))
+  do ik=ik_s,ik_e
+    k = kAc(ik,:)
+    do ilma=1,ppg%nlma
+      iatom = ppg%ia_tbl(ilma)
+      do j=1,ppg%mps(iatom)
+        x = ppg%rxyz(1,j,iatom)
+        y = ppg%rxyz(2,j,iatom)
+        z = ppg%rxyz(3,j,iatom)
+        ekr = exp(zi*(k(1)*x+k(2)*y+k(3)*z))
+        ppg%zproj(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
+      end do
+    end do
+  end do
+  return
+end subroutine update_kvector_nonlocalpt
+
 end module hpsi_sub

@@ -142,25 +142,10 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   
   do ik=info%ik_s,info%ik_e
 
-    if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,1:1))
-    do a=1,natom
-      do j=1,ppg%mps(a)
-        x=ppg%rxyz(1,j,a)
-        y=ppg%rxyz(2,j,a)
-        z=ppg%rxyz(3,j,a)
-        ekr(j,a)=exp(zi*(k_rd(1,ik)*x+k_rd(2,ik)*y+k_rd(3,ik)*z))
-      end do
-    end do
-    do ilma=1,ppg%nlma
-      iatom = ppg%ia_tbl(ilma)
-      do j=1,ppg%mps(iatom)
-        ppg%zproj(j,ilma,1) = conjg(ekr(j,iatom)) * ppg%uv(j,ilma)
-      end do
-    end do
-
     do j=1,3
       stencil%kAc(1,j) = k_rd(j,ik)
     end do
+    call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
 
     iter_bak_ob(:)=0 
   
