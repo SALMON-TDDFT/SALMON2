@@ -14,6 +14,11 @@
 !  limitations under the License.
 !
 !=======================================================================
+module check_ng_sub
+  implicit none
+
+contains
+
 subroutine check_ng(ng)
   use inputoutput, only: iperiodic
   use structures, only: s_rgrid
@@ -26,3 +31,5 @@ subroutine check_ng(ng)
   end if
 
 end subroutine check_ng
+
+end module check_ng_sub

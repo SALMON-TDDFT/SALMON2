@@ -48,6 +48,7 @@ use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
 use calc_iobnum_sub
 use check_mg_sub
+use check_ng_sub
 use dtcg_sub
 use gscg_sub
 use dtcg_periodic_sub

@@ -425,6 +425,7 @@ use calc_iobnum_sub
 use calc_myob_sub
 use check_corrkob_sub
 use check_mg_sub
+use check_ng_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
