@@ -15,7 +15,7 @@
 !
 !SUBROUTINE Hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-subroutine Hartree_FFTE(lg,mg,ng,trho,tVh)
+subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_parallel, only: nproc_id_icommy, nproc_group_icommy
@@ -25,13 +25,13 @@ subroutine Hartree_FFTE(lg,mg,ng,trho,tVh)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use scf_data
-  use new_world_sub
   use allocate_mat_sub
 !$  use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
+  integer,intent(in) :: icheck_ascorder
   integer :: ix,iy,iz
   integer :: iix,iiy,iiz
   integer :: iz_sta,iz_end,iy_sta,iy_end
