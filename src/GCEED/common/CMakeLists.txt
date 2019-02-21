@@ -15,7 +15,6 @@ set(SOURCES
     calcVpsl_periodic_FFTE.f90
     check_cep.f90
     check_fourier.f90
-    check_mg.f90
     check_ng.f90
     check_numcpu.f90
     conv_p0.f90
@@ -24,7 +23,6 @@ set(SOURCES
     hartree_boundary.f90
     hartree_cg.f90
     hartree_FFTE.f90
-    hartree_periodic.f90
     hartree.f90
     hpsi2_buf.f90
     init_wf.f90
@@ -56,4 +54,4 @@ set(SOURCES
     )
 
 add_library(${GCEED_COMMON_LIB} ${SOURCES})
-add_dependencies(${GCEED_COMMON_LIB} ${GCEED_MODULE_LIB})
+add_dependencies(${GCEED_COMMON_LIB} ${SALMON_POISSON_LIB} ${GCEED_MODULE_LIB})

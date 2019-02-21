@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(mg,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+SUBROUTINE time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
 use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -29,7 +29,9 @@ use allocate_mat_sub
 use read_pslfile_sub
 
 implicit none
+type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
+type(s_rgrid),intent(in) :: ng
 type(s_wf_info),intent(in) :: info
 type(s_wf_info),intent(inout) :: info_ob
 type(s_stencil),intent(inout) :: stencil
@@ -134,9 +136,9 @@ end if
 if(iperiodic==0)then
   if(ikind_eext==0.and.itt>=2)then
     if(mod(itt,2)==1)then
-      call Total_energy_groupob(zpsi_out,shtpsi,2)
+      call Total_energy_groupob(zpsi_out,shtpsi,1)
     else
-      call Total_energy_groupob(zpsi_in,shtpsi,2)
+      call Total_energy_groupob(zpsi_in,shtpsi,1)
     end if
     call subdip(rNe,2)
   end if
@@ -192,7 +194,7 @@ end if
    end if
 
   
-  call Hartree_ns
+  call Hartree_ns(lg,mg,ng)
 
   elp3(516)=get_wtime()
   elp3(536)=elp3(536)+elp3(516)-elp3(515)

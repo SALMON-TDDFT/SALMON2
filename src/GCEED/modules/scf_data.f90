@@ -539,17 +539,19 @@ end do
 end subroutine snum_procs
 
 !======================================================================
-subroutine init_mesh_s
+subroutine init_mesh_s(ng)
 use salmon_parallel, only: nproc_size_global, nproc_id_global
+use structures, only: s_rgrid
 implicit none
+type(s_rgrid),intent(out) :: ng
 
 nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
 
 allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
 allocate(inum_Mxin_s(3,0:nproc_size_global-1))
 
-call setng(ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-           nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
+call setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
+           nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,iscfrt)
 
 end subroutine init_mesh_s
 
