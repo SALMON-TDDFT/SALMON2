@@ -425,6 +425,7 @@ use calc_iobnum_sub
 use calc_myob_sub
 use check_corrkob_sub
 use check_mg_sub
+use check_ng_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
@@ -683,6 +684,7 @@ end if
 
 call init_mesh_s(ng)
 call check_mg(mg)
+call check_ng(ng)
 
 if(iflag_ps.eq.1)then
   call comm_bcast(MI_read,nproc_group_global)
