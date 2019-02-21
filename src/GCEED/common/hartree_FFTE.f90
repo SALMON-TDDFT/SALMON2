@@ -15,7 +15,7 @@
 !
 !SUBROUTINE Hartree_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder,   &
+subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder,hgs,npuw,npuy,npuz,  &
                         a_ffte,b_ffte,rhoe_g,coef_poisson)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
@@ -25,13 +25,15 @@ subroutine Hartree_FFTE(lg,mg,ng,trho,tVh,icheck_ascorder,   &
   use salmon_communication, only: comm_summation
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
-  use scf_data
 !$  use omp_lib
   implicit none
+  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   integer,intent(in)       :: icheck_ascorder
+  real(8),intent(in)       :: hgs(3)
+  integer,intent(in)       :: npuw,npuy,npuz
   complex(8),intent(out)   :: a_ffte(lg%num(1),lg%num(2)/NPUY,lg%num(3)/NPUZ)
   complex(8),intent(out)   :: b_ffte(lg%num(1),lg%num(2)/NPUY,lg%num(3)/NPUZ)
   complex(8),intent(out)   :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
