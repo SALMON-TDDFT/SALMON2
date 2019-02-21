@@ -27,7 +27,6 @@ subroutine Hartree_FFTE(lg,mg,ng,trho,tVh)
   use scf_data
   use new_world_sub
   use allocate_mat_sub
-  use allocate_psl_sub
 !$  use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: lg
@@ -184,4 +183,4 @@ subroutine Hartree_FFTE(lg,mg,ng,trho,tVh)
 
   return
 end subroutine Hartree_FFTE
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------130
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
