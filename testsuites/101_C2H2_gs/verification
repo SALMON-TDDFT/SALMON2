@@ -61,7 +61,7 @@ for name1, [resval1, refval1, error1] in checklist1.items():
         sys.exit(-1)  # Failure
     else:
         print("Result %s = %e (Reference = %e)" % (name1, result1[name1], refval1))
-        if abs(result1[name1] - refval1) > error:
+        if abs(result1[name1] - refval1) > error1:
             print("Mismatch |%e - %e| > %e)" % (result1[name1], refval1, error1))
             sys.exit(-1)  # Failure
 
@@ -71,7 +71,7 @@ for name2, [resval2, refval2, error2] in checklist2.items():
         sys.exit(-1)  # Failure
     else:
         print("Result %s = %e (Reference = %e)" % (name2, result2[name2], refval2))
-        if abs(result2[name2] - refval2) > error:
+        if abs(result2[name2] - refval2) > error2:
             print("Mismatch |%e - %e| > %e)" % (result2[name2], refval2, error2))
             sys.exit(-1)  # Failure
 
