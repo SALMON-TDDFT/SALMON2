@@ -17,7 +17,7 @@ filelist = [
 ]
 
 checklist1 = {
-    "orbital 1": [
+    "eigen energy for io=1": [
         100,  # Temporary value for result
         -18.4139,  # Reference value
         0.001,  # Permissible error
@@ -25,7 +25,7 @@ checklist1 = {
 }
 
 checklist2 = {
-    "orbital 5": [
+    "eigen energy for io=5": [
         100,  # Temporary value for result
         -7.3403,  # Reference value
         0.001,  # Permissible error
@@ -48,12 +48,10 @@ for line in open("C2H2_info.data"):
         for name1, [resval1, refval1, error1] in checklist1.items():
             data = line.split()
             result1[name1] = float(data[1])
-            print(result1[name1])
     if linecount == 9: # a line for orbital 5
         for name2, [resval2, refval2, error2] in checklist2.items():
             data = line.split()
             result2[name2] = float(data[1])
-            print(result2[name2])
 
 for name1, [resval1, refval1, error1] in checklist1.items():
     if name1 not in result1:
