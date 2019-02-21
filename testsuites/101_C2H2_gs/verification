@@ -42,7 +42,7 @@ print("# Checking calculated result")
 result1 = {}
 result2 = {}
 linecount = 0
-for line in open("C2H2_lr.data"):
+for line in open("C2H2_info.data"):
     linecount += 1
     if linecount == 8: # a line for orbital 1
         for name1, [resval1, refval1, error1] in checklist1.items():
