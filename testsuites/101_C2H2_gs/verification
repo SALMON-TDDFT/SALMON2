@@ -17,12 +17,6 @@ filelist = [
     "C2H2_info.data",
 ]
 
-print("# Checking the existance of outputfile")
-for item in filelist:
-    if not os.path.exists(item):
-        print("File not found: %s" % item)
-        sys.exit(-1)  # Failure
-
 # test rule
 reference = {}
 
@@ -32,6 +26,46 @@ reference['C2H2_info.data'] = [
     [   9,  2-1,     -7.3403, 1e-03, 'orbital 5'],
 ]
 
-print("# Verification end")
-print("#" * 60)
+message = """[{STATUS}] {INFO}
+    {ITEM}[{I:d},{J:d}]: {VAL:+.18e} (ref: {REF:+.4e})
+    err: {ERR:1.4e} {CMP} tol: {TOL:1.4e}"""
 
+def main():
+    print("#" * 60)
+    print("# Verification start")
+
+    return_code = 0
+
+    print("# Checking the existance of outputfile")
+    for item in filelist:
+        if not os.path.exists(item):
+            print("File not found: %s" % item)
+            sys.exit(-1)  # Failure
+
+    for item, table in reference.items():
+        if os.path.isfile(item):
+            data = np.loadtxt(item)
+            for i, j, ref, tol, info in table:
+                err = np.abs(data[i, j] - ref)
+                if err <= tol:
+                    status, cmp = 'Success', '<='
+                else:
+                    status, cmp = 'Failure', '>'
+                    return_code = -1
+                    
+                print(message.format(
+                    STATUS=status, INFO=info, ITEM=item, I=i, J=j, VAL=data[i, j],
+                    REF=ref, ERR=err, CMP=cmp, TOL=tol
+                ))
+        else:
+            print('[Error] "%s" is not found' % item)
+            return_code = -1
+
+    print("# Verification end")
+    print("#" * 60)
+
+    sys.exit(return_code)
+
+
+if __name__ == "__main__":
+    main()
