@@ -7,51 +7,75 @@
 
 import sys
 import os
-import numpy as np
+import re
 
-# test rule
-reference = {}
+print("#" * 60)
+print("# Verification start")
 
-reference['C2H2_info.data'] = [
-    # Row, Col, Reference, Tolerance, Info
-    [   8,  2-1,    -18.4139, 1e-03, 'orbital 1'],
-    [   9,  2-1,     -7.3403, 1e-03, 'orbital 5'],
+filelist = [
+    "C2H2_info.data",
 ]
 
-message = """[{STATUS}] {INFO}
-    {ITEM}[{I:d},{J:d}]: {VAL:+.18e} (ref: {REF:+.4e})
-    err: {ERR:1.4e} {CMP} tol: {TOL:1.4e}"""
+checklist1 = {
+    "orbital 1": [
+        100,  # Temporary value for result
+        -18.4139,  # Reference value
+        0.001,  # Permissible error
+    ],
+}
 
-def main():
-    print("#" * 60)
-    print("# Verification start")
+checklist2 = {
+    "orbital 5": [
+        100,  # Temporary value for result
+        -7.3403,  # Reference value
+        0.001,  # Permissible error
+    ],
+}
 
-    return_code = 0
+print("# Checking the existance of outputfile")
+for item in filelist:
+    if not os.path.exists(item):
+        print("File not found: %s" % item)
+        sys.exit(-1)  # Failure
 
-    for item, table in reference.items():
-        if os.path.isfile(item):
-            data = np.loadtxt(item)
-            for i, j, ref, tol, info in table:
-                err = np.abs(data[i, j] - ref)
-                if err <= tol:
-                    status, cmp = 'Success', '<='
-                else:
-                    status, cmp = 'Failure', '>'
-                    return_code = -1
-                    
-                print(message.format(
-                    STATUS=status, INFO=info, ITEM=item, I=i, J=j, VAL=data[i, j],
-                    REF=ref, ERR=err, CMP=cmp, TOL=tol
-                ))
-        else:
-            print('[Error] "%s" is not found' % item)
-            return_code = -1
+print("# Checking calculated result")
+result1 = {}
+result2 = {}
+linecount = 0
+for line in open("C2H2_lr.data"):
+    linecount += 1
+    if linecount == 8: # a line for orbital 1
+        for name1, [resval1, refval1, error1] in checklist1.items():
+            data = line.split()
+            result1[name1] = float(data[1])
+            print(result1[name1])
+    if linecount == 9: # a line for orbital 5
+        for name2, [resval2, refval2, error2] in checklist2.items():
+            data = line.split()
+            result2[name2] = float(data[1])
+            print(result2[name2])
 
-    print("# Verification end")
-    print("#" * 60)
+for name1, [resval1, refval1, error1] in checklist1.items():
+    if name1 not in result1:
+        print("Result %s (%s) is not found" % (name1, ptn))
+        sys.exit(-1)  # Failure
+    else:
+        print("Result %s = %e (Reference = %e)" % (name1, result1[name1], refval1))
+        if abs(result1[name1] - refval1) > error:
+            print("Mismatch |%e - %e| > %e)" % (result1[name1], refval1, error1))
+            sys.exit(-1)  # Failure
 
-    sys.exit(return_code)
+for name2, [resval2, refval2, error2] in checklist2.items():
+    if name2 not in result2:
+        print("Result %s (%s) is not found" % (name2, ptn))
+        sys.exit(-1)  # Failure
+    else:
+        print("Result %s = %e (Reference = %e)" % (name2, result2[name2], refval2))
+        if abs(result2[name2] - refval2) > error:
+            print("Mismatch |%e - %e| > %e)" % (result2[name2], refval2, error2))
+            sys.exit(-1)  # Failure
 
+print("# Verification end")
+print("#" * 60)
 
-if __name__ == "__main__":
-    main()
+sys.exit(0)  # Success
