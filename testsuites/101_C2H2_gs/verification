@@ -8,6 +8,7 @@
 import sys
 import os
 import re
+import numpy as np
 
 print("#" * 60)
 print("# Verification start")
