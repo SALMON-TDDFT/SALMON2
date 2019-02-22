@@ -50,7 +50,7 @@ real(8) :: pk(ng_sta(1)-Ndh:ng_end(1)+Ndh,   &
 iwk_size=12
 call make_iwksta_iwkend
 
-call hartree_boundary(trho,pk)
+call hartree_boundary(trho,pk,wkbound_h,wk2bound_h)
 
 !------------------------- C-G minimization
 
