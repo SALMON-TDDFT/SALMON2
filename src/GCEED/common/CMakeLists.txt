@@ -22,7 +22,6 @@ set(SOURCES
     exc_cor_ns.f90
     hartree_boundary.f90
     hartree_cg.f90
-    hartree_FFTE.f90
     hartree.f90
     hpsi2_buf.f90
     init_wf.f90

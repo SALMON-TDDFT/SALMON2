@@ -18,6 +18,7 @@
 SUBROUTINE Hartree_ns(lg,mg,ng)
 use structures, only: s_rgrid
 use hartree_periodic_sub
+use hartree_ffte_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
