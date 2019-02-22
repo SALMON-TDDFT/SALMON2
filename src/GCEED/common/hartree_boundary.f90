@@ -15,13 +15,14 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_boundary(trho,wk2,wkbound_h,wk2bound_h)
+SUBROUTINE Hartree_boundary(trho,wk2,wkbound_h,wk2bound_h,   &
+                            iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
+                            ibox_icoobox_bound,icoobox_bound)
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h, &
                            nproc_id_bound, nproc_size_bound, nproc_group_bound
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
 use scf_data
-use new_world_sub
 
 use omp_lib, only: omp_get_num_threads, omp_get_thread_num, omp_get_max_threads
 use misc_routines, only: ceiling_pow2
@@ -33,8 +34,16 @@ real(8) :: trho(mg_sta(1):mg_end(1),    &
 real(8) :: wk2(ng_sta(1)-Ndh:ng_end(1)+Ndh,    &
                ng_sta(2)-Ndh:ng_end(2)+Ndh,      &
                ng_sta(3)-Ndh:ng_end(3)+Ndh)
-real(8) :: wkbound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh)
-real(8) :: wk2bound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh)
+real(8),intent(out) :: wkbound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh)
+real(8),intent(out) :: wk2bound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh)
+integer,intent(in) :: iamax
+integer,intent(in) :: maxval_pole
+integer,intent(in) :: num_pole_myrank
+integer,intent(in) :: icorr_polenum(iamax)
+integer,intent(in) :: icount_pole(iamax)
+integer,intent(in) :: icorr_xyz_pole(3,maxval_pole,num_pole_myrank)
+integer,intent(in) :: ibox_icoobox_bound
+integer,intent(in) :: icoobox_bound(3,ibox_icoobox_bound,3)
 integer,parameter :: maxiter=1000
 integer :: ii,jj,kk,ix,iy,iz,lm,LL,icen,pl,cl
 integer :: ixbox,iybox,izbox
