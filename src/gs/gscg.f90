@@ -132,28 +132,21 @@ subroutine sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
   
   do iob=1,info%numo
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
-
-    if(ilsda==0.or.ilsda==1.and.iob<=info_2%numo)then 
-  !$OMP parallel do private(iz,iy,ix) collapse(2)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        rxk_ob(ix,iy,iz,iob)=spsi_2%rwf(ix,iy,iz,1,iob,1,1)
-        stpsi%rwf(ix,iy,iz,1,1,1,1)=rxk_ob(ix,iy,iz,iob)
-      end do
-      end do
-      end do
+    if(ilsda==0.or.ilsda==1.and.iob<=info_2%numo)then
+      is=1
     else
-  !$OMP parallel do private(iz,iy,ix) collapse(2)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        rxk_ob(ix,iy,iz,iob)=spsi_2%rwf(ix,iy,iz,2,iob-info_2%numo,1,1)
-        stpsi%rwf(ix,iy,iz,1,1,1,1)=rxk_ob(ix,iy,iz,iob)
-      end do
-      end do
-      end do
+      is=2
     end if
+
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rxk_ob(ix,iy,iz,iob)=spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)
+      stpsi%rwf(ix,iy,iz,1,1,1,1)=rxk_ob(ix,iy,iz,iob)
+    end do
+    end do
+    end do
 
     if(iob_allob<=mst(1))then
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -210,25 +203,14 @@ subroutine sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
       do iob=iobsta(is),iobend(is)
         do job=iobsta(is),iob-1
           sum0=0.d0
-          if(ilsda==0.or.ilsda==1.and.job<=info_2%numo)then 
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              sum0=sum0+spsi_2%rwf(ix,iy,iz,1,job,1,1)*rgk_ob(ix,iy,iz,iob)
-            end do
-            end do
-            end do
-          else
-    !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              sum0=sum0+spsi_2%rwf(ix,iy,iz,2,job-info_2%numo,1,1)*rgk_ob(ix,iy,iz,iob)
-            end do
-            end do
-            end do
-          end if
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            sum0=sum0+spsi_2%rwf(ix,iy,iz,is,job-(is-1)*info_2%numo,1,1)*rgk_ob(ix,iy,iz,iob)
+          end do
+          end do
+          end do
           sum_obmat0(iob,job)=sum0*hvol
         end do
       end do 
@@ -237,25 +219,14 @@ subroutine sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
       do is=is_sta,is_end
       do iob=iobsta(is),iobend(is)
         do job=iobsta(is),iob-1
-          if(ilsda==0.or.ilsda==1.and.job<=info_2%numo)then 
     !$omp parallel do private(iz,iy,ix) collapse(2)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi_2%rwf(ix,iy,iz,1,job,1,1)
-            end do
-            end do
-            end do
-          else
-    !$omp parallel do private(iz,iy,ix) collapse(2)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi_2%rwf(ix,iy,iz,2,job-info_2%numo,1,1)
-            end do
-            end do
-            end do
-          end if
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi_2%rwf(ix,iy,iz,is,job-(is-1)*info_2%numo,1,1)
+          end do
+          end do
+          end do
         end do
       end do
       end do
@@ -268,25 +239,14 @@ subroutine sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
           call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
           call check_corrkob(job,1,icorr_job,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
           if(icorr_job==1)then
-            if(ilsda==0.or.ilsda==1.and.job_myob<=info_2%numo)then 
     !$omp parallel do private(iz,iy,ix) collapse(2)
-              do iz=mg%is(3),mg%ie(3)
-              do iy=mg%is(2),mg%ie(2)
-              do ix=mg%is(1),mg%ie(1)
-                rmatbox_m(ix,iy,iz)=spsi_2%rwf(ix,iy,iz,1,job_myob,1,1)
-              end do
-              end do
-              end do
-            else
-    !$omp parallel do private(iz,iy,ix) collapse(2)
-              do iz=mg%is(3),mg%ie(3)
-              do iy=mg%is(2),mg%ie(2)
-              do ix=mg%is(1),mg%ie(1)
-                rmatbox_m(ix,iy,iz)=spsi_2%rwf(ix,iy,iz,2,job_myob-info_2%numo,1,1)
-              end do
-              end do
-              end do
-            end if
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              rmatbox_m(ix,iy,iz)=spsi_2%rwf(ix,iy,iz,is,job_myob-(is-1)*info_2%numo,1,1)
+            end do
+            end do
+            end do
           end if
           call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
           call comm_bcast(rmatbox_m,nproc_group_grid,iroot)
@@ -414,25 +374,19 @@ subroutine sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
   call inner_product7(mg,iparaway_ob,itotmst,mst,info%numo,rxk_ob,rxk_ob,sum_ob0,elp3,hvol)
   do iob=1,info%numo
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
-    if(ilsda==0.or.ilsda==1.and.iob<=info_2%numo)then 
-  !$OMP parallel do private(iz,iy,ix) collapse(2)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        spsi_2%rwf(ix,iy,iz,1,iob,1,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
-      end do
-      end do
-      end do
+    if(ilsda==0.or.ilsda==1.and.iob<=info_2%numo)then
+      is=1
     else
-  !$OMP parallel do private(iz,iy,ix) collapse(2)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        spsi_2%rwf(ix,iy,iz,2,iob-info_2%numo,1,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
-      end do
-      end do
-      end do
+      is=2
     end if
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
+    end do
+    end do
+    end do
   end do
   
   if(iflag.eq.1) then
