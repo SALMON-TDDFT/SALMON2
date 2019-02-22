@@ -18,7 +18,9 @@
 SUBROUTINE Hartree_ns(lg,mg,ng)
 use structures, only: s_rgrid
 use hartree_periodic_sub
+use hartree_ffte_sub
 use scf_data
+use new_world_sub
 use allocate_mat_sub
 implicit none
 type(s_rgrid),intent(in) :: lg
@@ -36,7 +38,8 @@ if(iSCFRT==1)then
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc)
     case(4)
-      call Hartree_FFTE(rho,Vh)
+      call Hartree_FFTE(lg,mg,ng,rho,Vh,icheck_ascorder,hgs,npuw,npuy,npuz,   &
+                        a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
     end select
   end select
 else if(iSCFRT==2)then
@@ -55,7 +58,8 @@ else if(iSCFRT==2)then
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc)
       case(4)
-        call Hartree_FFTE(rho,Vh_stock2)
+        call Hartree_FFTE(lg,mg,ng,rho,Vh_stock2,icheck_ascorder,hgs,npuw,npuy,npuz,   &
+                          a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
       end select
     else
       select case(iflag_hartree)
@@ -64,7 +68,8 @@ else if(iSCFRT==2)then
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc)
       case(4)
-        call Hartree_FFTE(rho,Vh_stock1)
+        call Hartree_FFTE(lg,mg,ng,rho,Vh_stock1,icheck_ascorder,hgs,npuw,npuy,npuz,   &
+                          a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
       end select
     end if
   end select
