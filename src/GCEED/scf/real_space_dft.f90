@@ -73,6 +73,9 @@ type(s_rgrid) :: ng
 type(s_wf_info) :: info
 type(s_wf_info) :: info_ob
 type(s_wavefunction) :: spsi
+type(s_wf_info) :: info_2
+integer :: nspin_2
+type(s_wavefunction) :: spsi_2
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -436,6 +439,68 @@ case(3)
   end do
 end select
 
+info_2%ik_s=k_sta
+info_2%ik_e=k_end
+info_2%numk=k_num
+if(ilsda==0)then
+  info_2%io_s=1
+  info_2%io_e=iobnum
+  info_2%numo=iobnum
+  nspin_2=1
+else
+  info_2%io_s=1
+  info_2%io_e=iobnum/2
+  info_2%numo=iobnum/2
+  nspin_2=2
+end if
+
+select case(iperiodic)
+case(0)
+  allocate(spsi_2%rwf(mg%is_array(1):mg%ie_array(1),  &
+                    mg%is_array(2):mg%ie_array(2),  &
+                    mg%is_array(3):mg%ie_array(3),  &
+                    nspin_2,  &
+                    info_2%io_s:info_2%io_e,  &
+                    info_2%ik_s:info_2%ik_e,  &
+                    1))
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(5)
+  do ik=info_2%ik_s,info_2%ik_e
+  do iob=info_2%io_s,info_2%io_e
+    do is=1,nspin_2
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+case(3)
+  allocate(spsi_2%zwf(mg%is_array(1):mg%ie_array(1),  &
+                      mg%is_array(2):mg%ie_array(2),  &
+                      mg%is_array(3):mg%ie_array(3),  &
+                      nspin_2,  &
+                      info_2%io_s:info_2%io_e,  &
+                      info_2%ik_s:info_2%ik_e,  &
+                      1))
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(5)
+  do ik=info_2%ik_s,info_2%ik_e
+  do iob=info_2%io_s,info_2%io_e
+    do is=1,nspin_2
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+end select
+
 DFT_Iteration : do iter=1,iDiter(img)
 
   elp3(111)=get_wtime()
@@ -505,9 +570,73 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
-                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+          select case(iperiodic)
+          case(0)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          case(3)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          end select
+          call sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+          select case(iperiodic)
+          case(0)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          case(3)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          end select
         case('n')
           call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
@@ -828,9 +957,73 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+          select case(iperiodic)
+          case(0)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          case(3)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          end select
+          call sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+          select case(iperiodic)
+          case(0)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          case(3)
+            do ik=k_sta,k_end
+            do iob=1,info_2%numo
+              do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+                do iz=mg%is(3),mg%ie(3)
+                do iy=mg%is(2),mg%ie(2)
+                do ix=mg%is(1),mg%ie(1)
+                  spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+                end do
+                end do
+                end do
+              end do
+            end do
+            end do
+          end select
         case('n')
           call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
