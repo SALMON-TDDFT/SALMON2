@@ -15,9 +15,10 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_boundary(trho,wk2,wkbound_h,wk2bound_h,   &
+SUBROUTINE Hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                             ibox_icoobox_bound,icoobox_bound)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h, &
                            nproc_id_bound, nproc_size_bound, nproc_group_bound
 use salmon_communication, only: comm_summation
@@ -28,6 +29,9 @@ use omp_lib, only: omp_get_num_threads, omp_get_thread_num, omp_get_max_threads
 use misc_routines, only: ceiling_pow2
 
 implicit none
+type(s_rgrid),intent(in) :: lg
+type(s_rgrid),intent(in) :: mg
+type(s_rgrid),intent(in) :: ng
 real(8) :: trho(mg_sta(1):mg_end(1),    &
                mg_sta(2):mg_end(2),      &
                mg_sta(3):mg_end(3))
