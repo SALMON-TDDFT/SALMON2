@@ -1,4 +1,5 @@
 set(SOURCES
+    hartree_boundary.f90
     hartree_ffte.f90
     hartree_periodic.f90
    )

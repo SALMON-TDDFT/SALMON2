@@ -21,7 +21,9 @@ integer :: ix,iy,iz
 integer :: itNd
 
 itNd=max(Nd,Ndh)
-allocate(gridcoo(minval(lg_sta(:))-itNd:maxval(lg_end(:))+itNd,3))
+igc_is=minval(lg_sta(:))-itNd
+igc_ie=maxval(lg_end(:))+itNd
+allocate(gridcoo(igc_is:igc_ie,3))
 
 select case(iperiodic)
 case(0)

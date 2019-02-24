@@ -15,9 +15,11 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_cg(trho,tVh)
+SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
+use hartree_boundary_sub
 use scf_data
 use new_world_sub
 use sendrecvh_sub
@@ -26,6 +28,9 @@ use deallocate_mat_sub
 use misc_routines, only: get_wtime
 
 implicit none
+type(s_rgrid),intent(in) :: lg
+type(s_rgrid),intent(in) :: mg
+type(s_rgrid),intent(in) :: ng
 real(8) :: trho(mg_sta(1):mg_end(1),    &
                mg_sta(2):mg_end(2),      &
                mg_sta(3):mg_end(3))
@@ -50,7 +55,10 @@ real(8) :: pk(ng_sta(1)-Ndh:ng_end(1)+Ndh,   &
 iwk_size=12
 call make_iwksta_iwkend
 
-call hartree_boundary(trho,pk)
+call hartree_boundary(lg,mg,ng,trho,pk,wkbound_h,wk2bound_h,   &
+                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,elp3,inum_mxin_s,   &
+                      iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
+                      ibox_icoobox_bound,icoobox_bound)
 
 !------------------------- C-G minimization
 
