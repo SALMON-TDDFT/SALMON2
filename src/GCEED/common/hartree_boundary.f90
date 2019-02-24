@@ -32,14 +32,14 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
-real(8) :: trho(mg_sta(1):mg_end(1),    &
-               mg_sta(2):mg_end(2),      &
-               mg_sta(3):mg_end(3))
-real(8) :: wk2(ng_sta(1)-Ndh:ng_end(1)+Ndh,    &
-               ng_sta(2)-Ndh:ng_end(2)+Ndh,      &
-               ng_sta(3)-Ndh:ng_end(3)+Ndh)
-real(8),intent(out) :: wkbound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh)
-real(8),intent(out) :: wk2bound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh)
+real(8) :: trho(mg%is(1):mg%ie(1),    &
+               mg%is(2):mg%ie(2),      &
+               mg%is(3):mg%ie(3))
+real(8) :: wk2(ng%is(1)-Ndh:ng%ie(1)+Ndh,    &
+               ng%is(2)-Ndh:ng%ie(2)+Ndh,      &
+               ng%is(3)-Ndh:ng%ie(3)+Ndh)
+real(8),intent(out) :: wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*Ndh)
+real(8),intent(out) :: wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*Ndh)
 integer,intent(in) :: iamax
 integer,intent(in) :: maxval_pole
 integer,intent(in) :: num_pole_myrank
@@ -102,9 +102,9 @@ do lm=LL**2+1,(LL+1)**2
   rholm2box=0.d0
 !$OMP parallel do reduction ( + : rholm2box)&
 !$OMP private(ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,Ylm)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     xx=gridcoo(ix,1)-center_trho(1,1)
     yy=gridcoo(iy,2)-center_trho(2,1)
     zz=gridcoo(iz,3)-center_trho(3,1)
@@ -327,9 +327,9 @@ else
 end if
 
 !$OMP parallel do private(iz,iy,ix) collapse(2)
-do iz=ng_sta(3)-Ndh,ng_end(3)+Ndh
-do iy=ng_sta(2)-Ndh,ng_end(2)+Ndh
-do ix=ng_sta(1)-Ndh,ng_end(1)+Ndh
+do iz=ng%is(3)-Ndh,ng%ie(3)+Ndh
+do iy=ng%is(2)-Ndh,ng%ie(2)+Ndh
+do ix=ng%is(1)-Ndh,ng%ie(1)+Ndh
   wk2(ix,iy,iz)=0.d0
 end do
 end do
@@ -338,7 +338,7 @@ end do
 do k=1,3
 
 !$OMP parallel do
-  do jj=1,lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh
+  do jj=1,lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*Ndh
     wk2bound_h(jj)=0.d0
   end do
 
