@@ -23,7 +23,7 @@ contains
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                    info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -36,7 +36,9 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   
   type(s_rgrid),intent(in) :: mg
   type(s_wf_info) :: info
-  type(s_wavefunction) :: spsi
+  type(s_wf_info) :: info_2
+  integer,intent(in)   :: nspin_2
+  type(s_wavefunction) :: spsi_2
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
   integer,intent(in)    :: itotmst
@@ -70,6 +72,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   real(8) :: rbox1
   real(8),allocatable :: epsdiis(:,:),Rnorm(:,:)
   real(8) :: rnorm_diff_psi(itotmst,1)
+  integer :: is
   
   allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
@@ -97,7 +100,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   allocate (R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
   allocate (phibar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
   allocate (Rbar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
-  allocate (psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
+  allocate (psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
                       1:info%numo,info%ik_s:info%ik_e,1))
   
   allocate (iobcheck(1:itotmst,0:ncg))
@@ -123,16 +126,21 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   
   if(info%numo >= 1) then
     phi=0.d0
-    psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
-                      1:info%numo,info%ik_s:info%ik_e,1)=   &
-      spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
-                      1:info%numo,info%ik_s:info%ik_e,1)
+    psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+                      1:info_2%numo,info%ik_s:info%ik_e,1)=   &
+      spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+                      1:info_2%numo,info%ik_s:info%ik_e,1)
   end if
   
   iflag_diisjump=0
   
   do iob=1,info%numo
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+    if(iob>info_2%numo)then
+      is=2
+    else
+      is=1
+    end if
   
     call setv(mg,vlocal,v,iob_allob,mst)
 
@@ -142,7 +150,8 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   ! Obtain residual vector R_0
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
-        phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)=spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1)
+        phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)=   &
+          spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,is,iob-(is-1)*info_2%numo,1,1)
       end do
 
   !$OMP parallel do private(iz,iy,ix)
@@ -242,14 +251,16 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
         if(iter >= 3 .and. epsdiis(iob,iter) > epsdiis(iob,iter-1)) then
   !$OMP parallel do
           do iz=mg%is(3),mg%ie(3)
-            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,iter-1)
+            spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,is,iob-(is-1)*info_2%numo,1,1) =   &
+              phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,iter-1)
           end do
           iflagdiis(iob)=0
         else if(-(epsdiis(iob,iter)-epsdiis(iob,iter-1)) <= 1.0d-8 .or.      &
                 Rnorm(iob,iter)/Rnorm(iob,0) <= 0.3d0) then
   !$OMP parallel do
           do iz=mg%is(3),mg%ie(3)
-            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,iter)
+            spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,is,iob-(is-1)*info_2%numo,1,1) =   &
+              phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,iter)
           end do
           iflagdiis(iob)=0
         end if
@@ -258,13 +269,15 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
       if(iter == ncg) then
   !$OMP parallel do
         do iz=mg%is(3),mg%ie(3)
-          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,ncg)
+          spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,is,iob-(is-1)*info_2%numo,1,1) =   &
+            phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,ncg)
         end do
        end if
       if(iter == 1 .and. iflag_diisjump == 1) then
   !$OMP parallel do
         do iz=mg%is(3),mg%ie(3)
-          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1) = phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1)
+          spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,is,iob-(is-1)*info_2%numo,1,1) =   &
+            phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1)
         end do
       end if
   
@@ -299,6 +312,11 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   iflag_diisjump=0
   do iob=1,info%numo
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+    if(iob>info_2%numo)then
+      is=2
+    else
+      is=1
+    end if
 
     call setv(mg,vlocal,v,iob_allob,mst)
 
@@ -306,7 +324,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      stpsi%rwf(ix,iy,iz,1,1,1,1)=spsi%rwf(ix,iy,iz,1,iob,1,1)
+      stpsi%rwf(ix,iy,iz,1,1,1,1)=spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)
     end do
     end do
     end do
@@ -322,7 +340,7 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
     end do
     end do
 
-    rbox1=sum(spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,iob,1,1)* &
+    rbox1=sum(spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob-(is-1)*info_2%numo,1,1)* &
               htphi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))*hvol
 
     if(rbox1-esp(iob,1)>5.d0) iflag_diisjump=1
@@ -331,18 +349,24 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   if(iflag_diisjump==0)then
     continue
   else if(iflag_diisjump==1)then
-    spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
-                      1:info%numo,info%ik_s:info%ik_e,1)=   &
-      psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,  &
-                      1:info%numo,info%ik_s:info%ik_e,1)
+    spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+                      1:info_2%numo,info%ik_s:info%ik_e,1)=   &
+      psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+                      1:info_2%numo,info%ik_s:info%ik_e,1)
     do iob=1,info%numo
       call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+      if(iob>info_2%numo)then
+        is=2
+      else
+        is=1
+      end if
     
       call setv(mg,vlocal,v,iob_allob,mst)
 
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
-        phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)=spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1)
+        phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)=   &
+          spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,is,iob-(is-1)*info_2%numo,1,1)
       end do
   
   !$OMP parallel do private(iz,iy,ix)
@@ -370,17 +394,23 @@ subroutine rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,e
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
         R1(:,:,iz,0)=htphi(:,:,iz)-rbox1*hvol*phi(:,:,iz,0)
-        spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,1,iob,1,1)=phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)+  &
-                                                                     lambda2_diis*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)
+        spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,is,iob-(is-1)*info_2%numo,1,1)=   &
+          phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)+  &
+            lambda2_diis*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),iz,0)
       end do 
   
     end do
   
     rnorm_diff_psi=0.d0
     do iob=1,info%numo
+      if(iob>info_2%numo)then
+        is=2
+      else
+        is=1
+      end if
       phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0)=    &
-                                       abs(spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,iob,1,1)-   &
-                                           psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,iob,1,1))
+         abs(spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob-(is-1)*info_2%numo,1,1)-   &
+             psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob-(is-1)*info_2%numo,1,1))
       rbox1=sum(phi(:,:,:,0)*phi(:,:,:,0))*hvol
       rnorm_diff_psi(iob,1)=rbox1
     end do

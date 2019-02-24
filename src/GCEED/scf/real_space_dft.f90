@@ -562,42 +562,42 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
     end select
+    select case(iperiodic)
+    case(0)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    end select
 
     if( amin_routine == 'cg' .or.       &
    (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       elp3(181)=get_wtime()
-      select case(iperiodic)
-      case(0)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      case(3)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      end select
 
       select case(iperiodic)
       case(0)
@@ -622,38 +622,6 @@ DFT_Iteration : do iter=1,iDiter(img)
         end select
       end select
 
-      select case(iperiodic)
-      case(0)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      case(3)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      end select
 
       elp3(182)=get_wtime()
       elp3(183)=elp3(183)+elp3(182)-elp3(181)
@@ -661,7 +629,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+        call rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
@@ -670,6 +638,39 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(184)=elp3(184)+elp3(182)-elp3(181)
     end if
   
+    select case(iperiodic)
+    case(0)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    end select
+
     select case(iperiodic)
     case(0)
       do ik=k_sta,k_end
@@ -955,39 +956,40 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
     end select
 
+    select case(iperiodic)
+    case(0)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    end select
+
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
-      select case(iperiodic)
-      case(0)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      case(3)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      end select
 
       select case(iperiodic)
       case(0)
@@ -1012,48 +1014,49 @@ DFT_Iteration : do iter=1,iDiter(img)
         end select
       end select
 
-      select case(iperiodic)
-      case(0)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      case(3)
-        do ik=k_sta,k_end
-        do iob=1,info_2%numo
-          do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
-      end select
 
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,info,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+        call rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
     end if
+
+    select case(iperiodic)
+    case(0)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+      do ik=k_sta,k_end
+      do iob=1,info_2%numo
+        do is=1,nspin_2
+    !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    end select
 
     select case(iperiodic)
     case(0)
