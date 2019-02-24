@@ -19,6 +19,7 @@ SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh)
 use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
+use hartree_boundary_sub
 use scf_data
 use new_world_sub
 use sendrecvh_sub

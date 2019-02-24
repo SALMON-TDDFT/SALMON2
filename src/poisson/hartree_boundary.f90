@@ -14,7 +14,13 @@
 !  limitations under the License.
 !
 !=======================================================================
+module hartree_boundary_sub
+  implicit none
+
+contains
+
 !============================ Hartree potential (Solve Poisson equation)
+
 subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
                             meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,elp3,inum_mxin_s,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
@@ -469,3 +475,5 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
   return
   
 end subroutine hartree_boundary
+
+end module hartree_boundary_sub
