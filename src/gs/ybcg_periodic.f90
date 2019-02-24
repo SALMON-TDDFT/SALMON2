@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
+subroutine dtcg_periodic(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -37,7 +37,8 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   implicit none
   type(s_rgrid),intent(in)           :: mg
   type(s_wf_info),intent(in)         :: info
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_wf_info),intent(in)         :: info_2
+  type(s_wavefunction),intent(inout) :: spsi_2
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
@@ -177,7 +178,8 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          sum0=sum0+conjg(spsi%zwf(ix,iy,iz,1,q,ik,1))*spsi%zwf(ix,iy,iz,1,p,ik,1)
+          sum0=sum0+conjg(spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1))*   &
+                          spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info_2%numo,ik,1)
         end do
         end do
         end do
@@ -187,7 +189,8 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          spsi%zwf(ix,iy,iz,1,p,ik,1)=spsi%zwf(ix,iy,iz,1,p,ik,1)-sum1*spsi%zwf(ix,iy,iz,1,q,ik,1)
+          spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info_2%numo,ik,1)=   &
+            spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info_2%numo,ik,1)-sum1*spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1)
         end do
         end do
         end do
@@ -201,7 +204,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            zmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,q_myob,ik,1)
+            zmatbox_m(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,q_myob-(is-1)*info_2%numo,ik,1)
           end do
           end do
           end do
@@ -214,7 +217,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*spsi%zwf(ix,iy,iz,1,p_myob,ik,1)
+            sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)
           end do
           end do
           end do
@@ -226,7 +229,8 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,1,p_myob,ik,1)=spsi%zwf(ix,iy,iz,1,p_myob,ik,1)-sum1*zmatbox_m(ix,iy,iz)
+            spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)=   &
+              spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)-sum1*zmatbox_m(ix,iy,iz)
           end do
           end do
           end do
@@ -239,7 +243,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        sum0=sum0+abs(spsi%zwf(ix,iy,iz,1,p_myob,ik,1))**2
+        sum0=sum0+abs(spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1))**2
       end do
       end do
       end do
@@ -251,7 +255,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        xk(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,p_myob,ik,1)/sqrt(sum1)
+        xk(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)/sqrt(sum1)
         stpsi%zwf(ix,iy,iz,1,1,1,1)=xk(ix,iy,iz)
       end do
       end do
@@ -304,7 +308,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+conjg(spsi%zwf(ix,iy,iz,1,q,ik,1))*gk(ix,iy,iz)
+            sum0=sum0+conjg(spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1))*gk(ix,iy,iz)
           end do
           end do
           end do
@@ -313,7 +317,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            gk(ix,iy,iz)=gk(ix,iy,iz)-sum1*spsi%zwf(ix,iy,iz,1,q,ik,1)
+            gk(ix,iy,iz)=gk(ix,iy,iz)-sum1*spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1)
           end do
           end do
           end do
@@ -327,7 +331,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,q_myob,ik,1)
+              zmatbox_m(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,q_myob-(is-1)*info_2%numo,ik,1)
             end do
             end do
             end do
@@ -443,7 +447,7 @@ subroutine dtcg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi%zwf(ix,iy,iz,1,p_myob,ik,1)=xk(ix,iy,iz)/sqrt(sum0)
+        spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)=xk(ix,iy,iz)/sqrt(sum0)
       end do
       end do
       end do

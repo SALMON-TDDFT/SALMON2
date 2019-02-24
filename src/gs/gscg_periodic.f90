@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
+subroutine gscg_periodic(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
@@ -39,7 +39,8 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_wf_info) :: info
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_wf_info) :: info_2
+  type(s_wavefunction),intent(inout) :: spsi_2
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
@@ -151,14 +152,19 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   
     do iob_myob=1,info%numo
       call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+      if(ilsda==0.or.ilsda==1.and.iob_myob<=info_2%numo)then
+        is=1
+      else
+        is=2
+      end if
     
       elp2(2)=get_wtime()
-      
+ 
     !$omp parallel do private(iz,iy,ix) collapse(2) 
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        zxk_ob(ix,iy,iz,iob_myob)=spsi%zwf(ix,iy,iz,1,iob_myob,ik,1)
+        zxk_ob(ix,iy,iz,iob_myob)=spsi_2%zwf(ix,iy,iz,is,iob_myob-(is-1)*info_2%numo,ik,1)
         stpsi%zwf(ix,iy,iz,1,1,1,1)=zxk_ob(ix,iy,iz,iob_myob)
       end do
       end do
@@ -223,7 +229,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              sum0=sum0+conjg(spsi%zwf(ix,iy,iz,1,job,ik,1))*zgk_ob(ix,iy,iz,iob)
+              sum0=sum0+conjg(spsi_2%zwf(ix,iy,iz,is,job-(is-1)*info_2%numo,ik,1))*zgk_ob(ix,iy,iz,iob)
             end do
             end do
             end do
@@ -243,7 +249,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zgk_ob(ix,iy,iz,iob)=zgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%zwf(ix,iy,iz,1,job,ik,1)
+              zgk_ob(ix,iy,iz,iob)=zgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi_2%zwf(ix,iy,iz,is,job-(is-1)*info_2%numo,ik,1)
             end do
             end do
             end do
@@ -265,7 +271,7 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
               do ix=mg%is(1),mg%ie(1)
-                zmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,1,job_myob,ik,1)
+                zmatbox_m(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,job_myob-(is-1)*info_2%numo,ik,1)
               end do
               end do
               end do
@@ -409,13 +415,18 @@ subroutine gscg_periodic(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
 
       do iob_myob=1,info%numo
         call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+        if(ilsda==0.or.ilsda==1.and.iob_myob<=info_2%numo)then
+          is=1
+        else
+          is=2
+        end if
 
         if(abs(xkxk_ob(iob_allob))<=1.d30)then
     !$OMP parallel do private(iz,iy,ix) collapse(2)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,1,iob_myob,ik,1)=zxk_ob(ix,iy,iz,iob_myob)/sqrt(xkxk_ob(iob_allob))
+            spsi_2%zwf(ix,iy,iz,is,iob_myob-(is-1)*info_2%numo,ik,1)=zxk_ob(ix,iy,iz,iob_myob)/sqrt(xkxk_ob(iob_allob))
           end do
           end do
           end do
