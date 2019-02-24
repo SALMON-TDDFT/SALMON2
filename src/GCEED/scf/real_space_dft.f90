@@ -568,78 +568,79 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
+        select case(iperiodic)
+        case(0)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
+        case(3)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
+        end select
+
         select case(gscg)
         case('y')
-          select case(iperiodic)
-          case(0)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          case(3)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          end select
           call sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-          select case(iperiodic)
-          case(0)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          case(3)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          end select
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
+          call dtcg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+        end select
+        select case(iperiodic)
+        case(0)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
+        case(3)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
         end select
       case(3)
         select case(gscg)
@@ -955,78 +956,78 @@ DFT_Iteration : do iter=1,iDiter(img)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
       case(0)
+        select case(iperiodic)
+        case(0)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
+        case(3)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
+        end select
         select case(gscg)
         case('y')
-          select case(iperiodic)
-          case(0)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          case(3)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          end select
           call sgscg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-          select case(iperiodic)
-          case(0)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          case(3)
-            do ik=k_sta,k_end
-            do iob=1,info_2%numo
-              do is=1,nspin_2
-      !$OMP parallel do private(iz,iy,ix)
-                do iz=mg%is(3),mg%ie(3)
-                do iy=mg%is(2),mg%ie(2)
-                do ix=mg%is(1),mg%ie(1)
-                  spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
-                end do
-                end do
-                end do
-              end do
-            end do
-            end do
-          end select
         case('n')
-          call dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+          call dtcg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+        end select
+        select case(iperiodic)
+        case(0)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi%rwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
+        case(3)
+          do ik=k_sta,k_end
+          do iob=1,info_2%numo
+            do is=1,nspin_2
+      !$OMP parallel do private(iz,iy,ix)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi%zwf(ix,iy,iz,1,iob+(is-1)*info_2%numo,ik,1)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+              end do
+              end do
+              end do
+            end do
+          end do
+          end do
         end select
       case(3)
         select case(gscg)

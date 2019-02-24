@@ -21,12 +21,12 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+subroutine dtcg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_grid
-  use salmon_communication, only: comm_bcast
+  use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
+  use salmon_communication, only: comm_bcast,comm_summation
   use misc_routines, only: get_wtime
   use inner_product_sub
   use hpsi_sub
@@ -39,7 +39,8 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, 
   
   type(s_rgrid),intent(in) :: mg
   type(s_wf_info) :: info
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_wf_info) :: info_2
+  type(s_wavefunction),intent(inout) :: spsi_2
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
@@ -62,7 +63,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, 
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
-  real(8) :: sum0,xkhxk,xkxk,Rk,gkgk,xkpk,pkpk,pkhxk,pkhpk
+  real(8) :: sum0,xkhxk,xkxk,Rk,gkgk,xkpk,pkpk,pkhxk,pkhpk,sum1
   real(8) :: uk,alpha,ak,bk,ck
   real(8) , allocatable :: xk(:,:,:),hxk(:,:,:),gk(:,:,:),pk(:,:,:)
   real(8) , allocatable :: gk2(:,:,:)
@@ -147,7 +148,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, 
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        xk(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,iob_myob,1,1)
+        xk(ix,iy,iz)=spsi_2%rwf(ix,iy,iz,is,iob_myob-(is-1)*info_2%numo,1,1)
       end do
       end do
       end do
@@ -198,13 +199,21 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, 
         call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
         call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(jcorr==1)then
-          call inner_product(mg,spsi%rwf(:,:,:,1,job_myob,1,1),gk(:,:,:),sum0,commname)
-          sum0=sum0*hvol
+  !$OMP parallel do reduction(+ : sum0) private(iz,iy,ix) 
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            sum0=sum0+spsi_2%rwf(ix,iy,iz,is,job_myob-(is-1)*info_2%numo,1,1)*gk(ix,iy,iz)
+          end do
+          end do
+          end do
+          call comm_summation(sum0,sum1,nproc_group_korbital)
+          sum0=sum1*hvol
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi%rwf(ix,iy,iz,1,job_myob,1,1)
+            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi_2%rwf(ix,iy,iz,is,job_myob-(is-1)*info_2%numo,1,1)
           end do
           end do
           end do
@@ -301,7 +310,7 @@ subroutine dtcg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, 
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi%rwf(ix,iy,iz,1,iob_myob,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
+        spsi_2%rwf(ix,iy,iz,is,iob_myob-(is-1)*info_2%numo,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
       end do
       end do
       end do
