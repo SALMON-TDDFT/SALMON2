@@ -55,6 +55,7 @@ iwk_size=12
 call make_iwksta_iwkend
 
 call hartree_boundary(lg,mg,ng,trho,pk,wkbound_h,wk2bound_h,   &
+                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,elp3,inum_mxin_s,   &
                       iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                       ibox_icoobox_bound,icoobox_bound)
 

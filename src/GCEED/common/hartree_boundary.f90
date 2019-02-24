@@ -16,19 +16,21 @@
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
 SUBROUTINE Hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
+                            meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,elp3,inum_mxin_s,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                             ibox_icoobox_bound,icoobox_bound)
+use inputoutput, only: natom,rion
 use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h, &
                            nproc_id_bound, nproc_size_bound, nproc_group_bound
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
-use scf_data
 
 use omp_lib, only: omp_get_num_threads, omp_get_thread_num, omp_get_max_threads
 use misc_routines, only: ceiling_pow2
 
 implicit none
+integer,parameter :: ndh=4
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
@@ -40,6 +42,16 @@ real(8) :: wk2(ng%is(1)-Ndh:ng%ie(1)+Ndh,    &
                ng%is(3)-Ndh:ng%ie(3)+Ndh)
 real(8),intent(out) :: wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*Ndh)
 real(8),intent(out) :: wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*Ndh)
+integer,intent(in) :: meo
+integer,intent(in) :: lmax_meo
+integer,intent(in) :: igc_is
+integer,intent(in) :: igc_ie
+real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
+real(8),intent(in) :: hvol
+integer,intent(in) :: iflag_ps
+integer,intent(in) :: num_pole
+real(8),intent(out) :: elp3(3000)
+integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
 integer,intent(in) :: iamax
 integer,intent(in) :: maxval_pole
 integer,intent(in) :: num_pole_myrank
@@ -71,10 +83,7 @@ real(8) :: xp2,yp2,zp2,xy,yz,xz
 real(8) :: deno(25)
 real(8) :: rinv
 real(8) :: rbox
-real(8),allocatable :: Rion2(:,:)
-
-iwk_size=12
-call make_iwksta_iwkend
+real(8),allocatable :: rion2(:,:)
 
 !------------------------- Boundary condition (multipole expansion)
 
@@ -121,13 +130,13 @@ end do
 case(2)
 
 if(iflag_ps==1)then
-  num_center=MI
-  allocate (rholm((lmax_MEO+1)**2,MI))
-  allocate (rholm2((lmax_MEO+1)**2,MI))
-  allocate(itrho(MI))
-  allocate(center_trho(3,MI))
-  allocate(Rion2(3,MI))
-  Rion2(:,:)=Rion(:,:)
+  num_center=natom
+  allocate (rholm((lmax_MEO+1)**2,natom))
+  allocate (rholm2((lmax_MEO+1)**2,natom))
+  allocate(itrho(natom))
+  allocate(center_trho(3,natom))
+  allocate(rion2(3,natom))
+  rion2(:,:)=rion(:,:)
 end if
 
 !$OMP parallel do private(icen, lm, jj)
@@ -137,7 +146,7 @@ do icen=1,num_center
     rholm2(lm,icen)=0.d0
   end do
   do jj=1,3
-    center_trho(jj,icen)=Rion2(jj,icen)
+    center_trho(jj,icen)=rion2(jj,icen)
   end do
   itrho(icen)=1
 end do
@@ -152,9 +161,9 @@ do icen=1,num_pole_myrank
       ix=icorr_xyz_pole(1,jj,icen)
       iy=icorr_xyz_pole(2,jj,icen)
       iz=icorr_xyz_pole(3,jj,icen)
-      xx=gridcoo(ix,1)-Rion2(1,icorr_polenum(icen))
-      yy=gridcoo(iy,2)-Rion2(2,icorr_polenum(icen))
-      zz=gridcoo(iz,3)-Rion2(3,icorr_polenum(icen))
+      xx=gridcoo(ix,1)-rion2(1,icorr_polenum(icen))
+      yy=gridcoo(iy,2)-rion2(2,icorr_polenum(icen))
+      zz=gridcoo(iz,3)-rion2(3,icorr_polenum(icen))
       rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
       call Ylm_sub(xxxx,yyyy,zzzz,lm,Ylm)
       rholm2box=rholm2box+rr**LL*Ylm*trho(ix,iy,iz)*Hvol

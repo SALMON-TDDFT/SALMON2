@@ -268,6 +268,7 @@ integer :: mg_old_sta(3),mg_old_end(3),mg_old_num(3)
 integer :: ng_old_sta(3),ng_old_end(3),ng_old_num(3)
 
 real(8),allocatable :: gridcoo(:,:)
+integer :: igc_is,igc_ie
 
 integer :: iobnum
 
