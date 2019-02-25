@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+subroutine sgscg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
@@ -90,14 +90,6 @@ subroutine sgscg(mg,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,
   allocate(shtpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
-
-  stencil%lap0 = 0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
-  do j=1,3
-    do ind=1,4
-      stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
-      stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
-    end do
-  end do
 
   nspin=1
   allocate(v(1))

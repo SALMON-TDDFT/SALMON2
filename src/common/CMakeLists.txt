@@ -20,6 +20,7 @@ set(SOURCES
    density_matrix.f90
    pack_unpack.f90
    sendrecv_grid.f90
+   total_energy.f90
    )
 
 add_library(${SALMON_COMMON_LIB} STATIC ${SOURCES})
