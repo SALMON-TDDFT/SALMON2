@@ -72,7 +72,6 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_wf_info) :: info
 type(s_wf_info) :: info_ob
-type(s_wavefunction) :: spsi
 type(s_wf_info) :: info_2
 integer :: nspin_2
 type(s_wavefunction) :: spsi_2
@@ -395,49 +394,6 @@ info_ob%irank_r(4) = jdw_array(1)
 info_ob%irank_r(5) = kup_array(1)
 info_ob%irank_r(6) = kdw_array(1)
 info_ob%icomm_r = nproc_group_korbital
-
-select case(iperiodic)
-case(0)
-  allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
-                    mg%is_array(2):mg%ie_array(2),  &
-                    mg%is_array(3):mg%ie_array(3),  &
-                    1,  &
-                    info%io_s:info%io_e,  &
-                    info%ik_s:info%ik_e,  &
-                    1))
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do iz=mg%is_array(3),mg%ie_array(3)
-    do iy=mg%is_array(2),mg%ie_array(2)
-    do ix=mg%is_array(1),mg%ie_array(1)
-      spsi%rwf(ix,iy,iz,1,iob,ik,1)=0.d0
-    end do
-    end do
-    end do
-  end do
-  end do
-case(3)
-  allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1),  &
-                    mg%is_array(2):mg%ie_array(2),  &
-                    mg%is_array(3):mg%ie_array(3),  &
-                    1,  &
-                    info%io_s:info%io_e,  &
-                    info%ik_s:info%ik_e,  &
-                    1))
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do iz=mg%is_array(3),mg%ie_array(3)
-    do iy=mg%is_array(2),mg%ie_array(2)
-    do ix=mg%is_array(1),mg%ie_array(1)
-      spsi%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
-    end do
-    end do
-    end do
-  end do
-  end do
-end select
 
 info_2%ik_s=k_sta
 info_2%ik_e=k_end
@@ -1175,9 +1131,9 @@ end do DFT_Iteration
 
 select case(iperiodic)
 case(0)
-  deallocate(spsi%rwf)
+  deallocate(spsi_2%rwf)
 case(3)
-  deallocate(spsi%zwf)
+  deallocate(spsi_2%zwf)
 end select
 
 elp3(104)=get_wtime()
