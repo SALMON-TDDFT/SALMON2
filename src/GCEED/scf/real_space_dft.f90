@@ -39,7 +39,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine Real_Space_DFT
-use structures, only: s_rgrid, s_wf_info, s_wavefunction, s_system, s_scalar, s_stencil
+use structures, only: s_rgrid, s_wf_info, s_wavefunction, s_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
                            nproc_group_korbital, nproc_group_rho
@@ -73,7 +73,6 @@ type(s_wf_info) :: info
 type(s_wf_info) :: info_ob
 type(s_wavefunction) :: spsi
 type(s_system) :: system
-type(s_scalar) :: V_local(1)
 type(s_stencil) :: stencil
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -369,8 +368,6 @@ else
   end do
   end do
 end if
-
-allocate(V_local(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
 system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
 system%nspin = 1
