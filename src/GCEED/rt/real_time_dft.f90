@@ -812,7 +812,6 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
-type(s_wf_info) :: info
 type(s_wf_info) :: info_2
 type(s_wf_info) :: info_ob
 type(s_stencil) :: stencil
@@ -1414,16 +1413,6 @@ call taylor_coe
 
 elp3(407)=get_wtime()
 
-info%im_s=1
-info%im_e=1
-info%numm=1
-info%ik_s=k_sta
-info%ik_e=k_end
-info%numk=k_num
-info%io_s=1
-info%io_e=iobnum
-info%numo=iobnum
-
 nspin_2=ispin+1
 
 info_2%im_s=1
@@ -1533,7 +1522,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin_2,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1553,7 +1542,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin_2,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1561,7 +1550,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,nspin_2,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1570,7 +1559,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,nspin_2,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE3
   elp3(415)=get_wtime()
 

@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+SUBROUTINE time_evolution_step(lg,mg,ng,nspin_2,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
 use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -33,7 +33,6 @@ type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
 integer,intent(in) :: nspin_2
-type(s_wf_info),intent(in) :: info
 type(s_wf_info),intent(in) :: info_2
 type(s_wf_info),intent(inout) :: info_ob
 type(s_stencil),intent(inout) :: stencil
@@ -107,10 +106,10 @@ elp3(532)=elp3(532)+elp3(512)-elp3(511)
 
 if(iobnum.ge.1)then
   if(mod(itt,2)==1)then
-    call taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,spsi_in,spsi_out,   &
+    call taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stencil,spsi_in,spsi_out,   &
                 ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
   else
-    call taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,spsi_out,spsi_in,   &
+    call taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stencil,spsi_out,spsi_in,   &
                 ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
   end if
 end if

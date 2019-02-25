@@ -18,7 +18,7 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,  &
+subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stencil,tspsi_in,tspsi_out,  &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -34,7 +34,6 @@ subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob
   integer,intent(in) :: lg_sta(3)
   integer,intent(in) :: lg_end(3)
   integer,intent(in)    :: ilsda
-  type(s_wf_info),intent(in) :: info
   type(s_wf_info),intent(inout) :: info_ob
   type(s_stencil),intent(inout) :: stencil
   type(s_wavefunction),intent(inout) :: tspsi_in
@@ -127,15 +126,15 @@ subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob
   end if
   
 
-  do ik=info%ik_s,info%ik_e
+  do ik=info_2%ik_s,info_2%ik_e
   if(iperiodic==3)then
     do j=1,3
       stencil%kAc(1,j) = k_rd(j,ik)
     end do
     call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
   end if
-  do iob=info%io_s,info%io_e
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+  do iob=1,nspin_2*info_2%numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
     if(iob>info_2%numo)then
       is=2
     else
