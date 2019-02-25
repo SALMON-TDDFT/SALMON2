@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+subroutine dtcg(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -38,7 +38,7 @@ subroutine dtcg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   implicit none
   
   type(s_rgrid),intent(in) :: mg
-  type(s_wf_info) :: info
+  integer,intent(in)    :: nspin_2
   type(s_wf_info) :: info_2
   type(s_wavefunction),intent(inout) :: spsi_2
   type(s_stencil) :: stencil
@@ -138,8 +138,8 @@ subroutine dtcg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
     end do
 
   orbital : do iob=iobsta(is),iobend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
-    call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
+    call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,info_2%ik_s,info_2%ik_e,mst)
     elp2(2)=get_wtime()
   
     if(icorr==1)then
@@ -196,8 +196,8 @@ subroutine dtcg(mg,info,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipar
   
       do job=iobsta(is),iob-1
         sum0=0.d0
-        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
-        call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
+        call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,info_2%ik_s,info_2%ik_e,mst)
         if(jcorr==1)then
   !$OMP parallel do reduction(+ : sum0) private(iz,iy,ix) 
           do iz=mg%is(3),mg%ie(3)

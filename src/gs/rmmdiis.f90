@@ -23,7 +23,7 @@ contains
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+subroutine rmmdiis(mg,nspin_2,info_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                    info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -35,9 +35,8 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
   implicit none
   
   type(s_rgrid),intent(in) :: mg
-  type(s_wf_info) :: info
-  type(s_wf_info) :: info_2
   integer,intent(in)   :: nspin_2
+  type(s_wf_info) :: info_2
   type(s_wavefunction) :: spsi_2
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
@@ -52,7 +51,7 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: hgs(3)
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin_2)
   integer,intent(in)    :: iparaway_ob
   integer,parameter :: nd=4
   integer :: j,ind
@@ -101,7 +100,7 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
   allocate (phibar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
   allocate (Rbar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
   allocate (psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
-                      1:info%numo,info%ik_s:info%ik_e,1))
+                      1:nspin_2*info_2%numo,info_2%ik_s:info_2%ik_e,1))
   
   allocate (iobcheck(1:itotmst,0:ncg))
   iobcheck=0
@@ -115,27 +114,27 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
   end do
   end do
   
-  if(info%numo>=1)then
-    allocate (iflagdiis(1:info%numo))
-    allocate (epsdiis(1:info%numo,0:ncg))
-    allocate (Rnorm(1:info%numo,0:ncg))
+  if(nspin_2*info_2%numo>=1)then
+    allocate (iflagdiis(1:nspin_2*info_2%numo))
+    allocate (epsdiis(1:nspin_2*info_2%numo,0:ncg))
+    allocate (Rnorm(1:nspin_2*info_2%numo,0:ncg))
   end if 
   
   ! Flag for convergence
-  if(info%numo >= 1) iflagdiis=1
+  if(nspin_2*info_2%numo >= 1) iflagdiis=1
   
-  if(info%numo >= 1) then
+  if(nspin_2*info_2%numo >= 1) then
     phi=0.d0
     psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
-                      1:info_2%numo,info%ik_s:info%ik_e,1)=   &
+                      1:info_2%numo,info_2%ik_s:info_2%ik_e,1)=   &
       spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
-                      1:info_2%numo,info%ik_s:info%ik_e,1)
+                      1:info_2%numo,info_2%ik_s:info_2%ik_e,1)
   end if
   
   iflag_diisjump=0
   
-  do iob=1,info%numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+  do iob=1,nspin_2*info_2%numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
     if(iob>info_2%numo)then
       is=2
     else
@@ -310,8 +309,8 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
   end do        ! loop for iob
   
   iflag_diisjump=0
-  do iob=1,info%numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+  do iob=1,nspin_2*info_2%numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
     if(iob>info_2%numo)then
       is=2
     else
@@ -350,11 +349,11 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
     continue
   else if(iflag_diisjump==1)then
     spsi_2%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
-                      1:info_2%numo,info%ik_s:info%ik_e,1)=   &
+                      1:info_2%numo,info_2%ik_s:info_2%ik_e,1)=   &
       psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
-                      1:info_2%numo,info%ik_s:info%ik_e,1)
-    do iob=1,info%numo
-      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+                      1:info_2%numo,info_2%ik_s:info_2%ik_e,1)
+    do iob=1,nspin_2*info_2%numo
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
       if(iob>info_2%numo)then
         is=2
       else
@@ -402,7 +401,7 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
     end do
   
     rnorm_diff_psi=0.d0
-    do iob=1,info%numo
+    do iob=1,nspin_2*info_2%numo
       if(iob>info_2%numo)then
         is=2
       else
@@ -421,7 +420,7 @@ subroutine rmmdiis(mg,info,info_2,nspin_2,spsi_2,itotmst,mst,num_kpoints_rd,hvol
   deallocate(htphi)
   deallocate(phibox,Rbox,phi,R1,phibar,Rbar)
   
-  if(info%numo>=1)then
+  if(nspin_2*info_2%numo>=1)then
     deallocate (iflagdiis,epsdiis,Rnorm)
   end if 
   deallocate(iobcheck) 
