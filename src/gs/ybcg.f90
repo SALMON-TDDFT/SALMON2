@@ -21,12 +21,12 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+subroutine dtcg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_grid
-  use salmon_communication, only: comm_bcast
+  use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
+  use salmon_communication, only: comm_bcast,comm_summation
   use misc_routines, only: get_wtime
   use inner_product_sub
   use hpsi_sub
@@ -38,6 +38,7 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
   implicit none
   
   type(s_rgrid),intent(in) :: mg
+  integer,intent(in)    :: nspin
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
@@ -58,11 +59,11 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
   integer :: iter,iob,job
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
-  integer :: nspin
+  integer :: nspin_1
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
-  real(8) :: sum0,xkhxk,xkxk,Rk,gkgk,xkpk,pkpk,pkhxk,pkhpk
+  real(8) :: sum0,xkhxk,xkxk,Rk,gkgk,xkpk,pkpk,pkhxk,pkhpk,sum1
   real(8) :: uk,alpha,ak,bk,ck
   real(8) , allocatable :: xk(:,:,:),hxk(:,:,:),gk(:,:,:),pk(:,:,:)
   real(8) , allocatable :: gk2(:,:,:)
@@ -82,9 +83,9 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
-  nspin=1
-  allocate(v(1))
-  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  nspin_1=1
+  allocate(v(nspin_1))
+  allocate(v(nspin_1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
   allocate (xk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   allocate (hxk(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
@@ -129,7 +130,7 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
     end do
 
   orbital : do iob=iobsta(is),iobend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
     call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
     elp2(2)=get_wtime()
   
@@ -139,7 +140,7 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        xk(ix,iy,iz)=spsi%rwf(ix,iy,iz,1,iob_myob,1,1)
+        xk(ix,iy,iz)=spsi%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)
       end do
       end do
       end do
@@ -153,7 +154,7 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
       end do
       end do
  
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
  
   !$OMP parallel do private(iz,iy,ix) 
       do iz=mg%is(3),mg%ie(3)
@@ -187,16 +188,24 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
   
       do job=iobsta(is),iob-1
         sum0=0.d0
-        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,info%numo)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
         call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(jcorr==1)then
-          call inner_product(mg,spsi%rwf(:,:,:,1,job_myob,1,1),gk(:,:,:),sum0,commname)
-          sum0=sum0*hvol
+  !$OMP parallel do reduction(+ : sum0) private(iz,iy,ix) 
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            sum0=sum0+spsi%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)*gk(ix,iy,iz)
+          end do
+          end do
+          end do
+          call comm_summation(sum0,sum1,nproc_group_korbital)
+          sum0=sum1*hvol
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi%rwf(ix,iy,iz,1,job_myob,1,1)
+            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)
           end do
           end do
           end do
@@ -253,7 +262,7 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
         end do
         end do
 
-        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
   
   !$OMP parallel do private(iz,iy,ix) 
         do iz=mg%is(3),mg%ie(3)
@@ -293,7 +302,7 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi%rwf(ix,iy,iz,1,iob_myob,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
+        spsi%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
       end do
       end do
       end do
@@ -309,7 +318,7 @@ subroutine dtcg(mg,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipara
   
   deallocate (xk,hxk,gk,pk,gk2)
   
-  deallocate(v(1)%f)
+  deallocate(v(nspin_1)%f)
   deallocate(v)
 
   return
