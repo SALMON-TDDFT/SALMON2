@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
+subroutine dtcg_periodic(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -37,7 +37,7 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
   implicit none
   type(s_rgrid),intent(in)           :: mg
   integer,intent(in)    :: nspin_2
-  type(s_wf_info),intent(in)         :: info_2
+  type(s_wf_info),intent(in)         :: info
   type(s_wavefunction),intent(inout) :: spsi_2
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
@@ -147,7 +147,7 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
     pend(2)=itotMST
   end if
   
-  do ik=info_2%ik_s,info_2%ik_e
+  do ik=info%ik_s,info%ik_e
   do is=is_sta,is_end
 
   !$OMP parallel do private(iz,iy,ix) 
@@ -166,8 +166,8 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
     end do
     call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
 
-    call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
-    call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,info_2%ik_s,info_2%ik_e,mst)
+    call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+    call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
   
     elp2(2)=get_wtime()
   
@@ -178,8 +178,8 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          sum0=sum0+conjg(spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1))*   &
-                          spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info_2%numo,ik,1)
+          sum0=sum0+conjg(spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info%numo,ik,1))*   &
+                          spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info%numo,ik,1)
         end do
         end do
         end do
@@ -189,22 +189,22 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info_2%numo,ik,1)=   &
-            spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info_2%numo,ik,1)-sum1*spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1)
+          spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info%numo,ik,1)=   &
+            spsi_2%zwf(ix,iy,iz,is,p-(is-1)*info%numo,ik,1)-sum1*spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info%numo,ik,1)
         end do
         end do
         end do
       end do
     else
       do q=pstart(is),p-1
-        call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
-        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info_2%ik_s,info_2%ik_e,mst)
+        call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(icorr_q==1)then
   !$omp parallel do
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            zmatbox_m(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,q_myob-(is-1)*info_2%numo,ik,1)
+            zmatbox_m(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,q_myob-(is-1)*info%numo,ik,1)
           end do
           end do
           end do
@@ -217,7 +217,7 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)
+            sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info%numo,ik,1)
           end do
           end do
           end do
@@ -229,8 +229,8 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)=   &
-              spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)-sum1*zmatbox_m(ix,iy,iz)
+            spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info%numo,ik,1)=   &
+              spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info%numo,ik,1)-sum1*zmatbox_m(ix,iy,iz)
           end do
           end do
           end do
@@ -243,7 +243,7 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        sum0=sum0+abs(spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1))**2
+        sum0=sum0+abs(spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info%numo,ik,1))**2
       end do
       end do
       end do
@@ -255,7 +255,7 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        xk(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)/sqrt(sum1)
+        xk(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info%numo,ik,1)/sqrt(sum1)
         stpsi%zwf(ix,iy,iz,1,1,1,1)=xk(ix,iy,iz)
       end do
       end do
@@ -308,7 +308,7 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+conjg(spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1))*gk(ix,iy,iz)
+            sum0=sum0+conjg(spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info%numo,ik,1))*gk(ix,iy,iz)
           end do
           end do
           end do
@@ -317,21 +317,21 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            gk(ix,iy,iz)=gk(ix,iy,iz)-sum1*spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info_2%numo,ik,1)
+            gk(ix,iy,iz)=gk(ix,iy,iz)-sum1*spsi_2%zwf(ix,iy,iz,is,q-(is-1)*info%numo,ik,1)
           end do
           end do
           end do
         end do
       else
         do q=pstart(is),p-1
-          call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
-          call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info_2%ik_s,info_2%ik_e,mst)
+          call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+          call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
           if(icorr_q==1)then
   !$omp parallel do
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zmatbox_m(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,q_myob-(is-1)*info_2%numo,ik,1)
+              zmatbox_m(ix,iy,iz)=spsi_2%zwf(ix,iy,iz,is,q_myob-(is-1)*info%numo,ik,1)
             end do
             end do
             end do
@@ -447,7 +447,7 @@ subroutine dtcg_periodic(mg,nspin_2,info_2,spsi_2,iflag,itotmst,mst,hvol,ilsda,n
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info_2%numo,ik,1)=xk(ix,iy,iz)/sqrt(sum0)
+        spsi_2%zwf(ix,iy,iz,is,p_myob-(is-1)*info%numo,ik,1)=xk(ix,iy,iz)/sqrt(sum0)
       end do
       end do
       end do

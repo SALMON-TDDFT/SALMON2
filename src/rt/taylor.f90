@@ -18,7 +18,7 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stencil,tspsi_in,tspsi_out,  &
+subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stencil,tspsi_in,tspsi_out,  &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -28,7 +28,7 @@ subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,sten
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
   integer,intent(in)    :: nspin_2
-  type(s_wf_info),intent(in) :: info_2
+  type(s_wf_info),intent(in) :: info
   integer,intent(in) :: itotmst
   integer,intent(in) :: mst(2)
   integer,intent(in) :: lg_sta(3)
@@ -126,16 +126,16 @@ subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,sten
   end if
   
 
-  do ik=info_2%ik_s,info_2%ik_e
+  do ik=info%ik_s,info%ik_e
   if(iperiodic==3)then
     do j=1,3
       stencil%kAc(1,j) = k_rd(j,ik)
     end do
     call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
   end if
-  do iob=1,nspin_2*info_2%numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info_2%numo)
-    if(iob>info_2%numo)then
+  do iob=1,nspin_2*info%numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+    if(iob>info%numo)then
       is=2
     else
       is=1
@@ -186,7 +186,7 @@ subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,sten
     do iz=mg%is_array(3),mg%ie_array(3)
     do iy=mg%is_array(2),mg%ie_array(2)
     do ix=mg%is_array(1),mg%ie_array(1)
-      stpsi_in_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,ik,1)
+      stpsi_in_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,is,iob-(is-1)*info%numo,ik,1)
     end do
     end do
     end do
@@ -194,7 +194,7 @@ subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,sten
     do iz=mg%is_array(3),mg%ie_array(3)
     do iy=mg%is_array(2),mg%ie_array(2)
     do ix=mg%is_array(1),mg%ie_array(1)
-      stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,ik,1)
+      stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,is,iob-(is-1)*info%numo,ik,1)
     end do
     end do
     end do
@@ -236,7 +236,7 @@ subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,sten
     do iz=mg%is_array(3),mg%ie_array(3)
     do iy=mg%is_array(2),mg%ie_array(2)
     do ix=mg%is_array(1),mg%ie_array(1)
-      tspsi_out%zwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,ik,1)=stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)
+      tspsi_out%zwf(ix,iy,iz,is,iob-(is-1)*info%numo,ik,1)=stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)
     end do
     end do
     end do
