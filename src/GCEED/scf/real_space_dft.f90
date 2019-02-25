@@ -552,7 +552,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
     case(3)
       do ik=k_sta,k_end
-      do iob=1,iobnum
+      do iob=1,info_2%numo
         do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -658,61 +658,69 @@ DFT_Iteration : do iter=1,iDiter(img)
         select case(iperiodic)
         case(0)
           do ik=k_sta,k_end
-          do iob=1,iobnum
+          do iob=1,info_2%numo
+            do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
-            end do
-            end do
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)
+              end do
+              end do
+              end do
             end do
           end do
           end do
 
-          call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+          call subspace_diag(mg,info_2,spsi_2,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
           do ik=k_sta,k_end
-          do iob=1,iobnum
+          do iob=1,info_2%numo
+            do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
-            end do
-            end do
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                psi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+              end do
+              end do
+              end do
             end do
           end do
           end do
 
         case(3)
           do ik=k_sta,k_end
-          do iob=1,iobnum
+          do iob=1,info_2%numo
+            do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,1,iob,ik,1)=zpsi(ix,iy,iz,iob,ik)
-            end do
-            end do
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)
+              end do
+              end do
+              end do
             end do
           end do
           end do
 
-          call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+          call subspace_diag_periodic(mg,info_2,spsi_2,elp3,ilsda,nproc_ob,iparaway_ob,  &
                                       iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                       info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
           do ik=k_sta,k_end
-          do iob=1,iobnum
+          do iob=1,info_2%numo
+            do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,iob,ik,1)
-            end do
-            end do
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                zpsi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+              end do
+              end do
+              end do
             end do
           end do
           end do
@@ -803,60 +811,68 @@ DFT_Iteration : do iter=1,iDiter(img)
       select case(iperiodic)
       case(0)
         do ik=k_sta,k_end
-        do iob=1,iobnum
+        do iob=1,info_2%numo
+          do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,1,iob,ik,1)=psi(ix,iy,iz,iob,ik)
-          end do
-          end do
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi_2%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)
+            end do
+            end do
+            end do
           end do
         end do
         end do
 
-        call subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+        call subspace_diag(mg,info_2,spsi_2,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
         do ik=k_sta,k_end
-        do iob=1,iobnum
+        do iob=1,info_2%numo
+          do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            psi(ix,iy,iz,iob,ik)=spsi%rwf(ix,iy,iz,1,iob,ik,1)
-          end do
-          end do
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              psi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)=spsi_2%rwf(ix,iy,iz,is,iob,ik,1)
+            end do
+            end do
+            end do
           end do
         end do
         end do
       case(3)
         do ik=k_sta,k_end
-        do iob=1,iobnum
+        do iob=1,info_2%numo
+          do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,1,iob,ik,1)=zpsi(ix,iy,iz,iob,ik)
-          end do
-          end do
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi_2%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)
+            end do
+            end do
+            end do
           end do
         end do
         end do
 
-        call subspace_diag_periodic(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+        call subspace_diag_periodic(mg,info_2,spsi_2,elp3,ilsda,nproc_ob,iparaway_ob,  &
                                     iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
         do ik=k_sta,k_end
-        do iob=1,iobnum
+        do iob=1,info_2%numo
+          do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            zpsi(ix,iy,iz,iob,ik)=spsi%zwf(ix,iy,iz,1,iob,ik,1)
-          end do
-          end do
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              zpsi(ix,iy,iz,iob+(is-1)*info_2%numo,ik)=spsi_2%zwf(ix,iy,iz,is,iob,ik,1)
+            end do
+            end do
+            end do
           end do
         end do
         end do
@@ -942,7 +958,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     select case(iperiodic)
     case(0)
       do ik=k_sta,k_end
-      do iob=1,iobnum
+      do iob=1,info_2%numo
         do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -957,7 +973,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
     case(3)
       do ik=k_sta,k_end
-      do iob=1,iobnum
+      do iob=1,info_2%numo
         do is=1,nspin_2
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)

@@ -18,7 +18,7 @@ module subspace_diag_sub
 
 contains
 
-subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+subroutine subspace_diag(mg,info_2,spsi_2,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
   use inputoutput, only: ispin
@@ -35,7 +35,8 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
   use eigen_subdiag_sub
   implicit none
   type(s_rgrid),intent(in) :: mg
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_wf_info)       :: info_2
+  type(s_wavefunction),intent(inout) :: spsi_2
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
   real(8),intent(out) :: elp3(3000)
@@ -170,7 +171,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            stpsi%rwf(ix,iy,iz,1,1,1,1)=spsi%rwf(ix,iy,iz,1,job_myob,1,1)
+            stpsi%rwf(ix,iy,iz,1,1,1,1)=spsi_2%rwf(ix,iy,iz,is,job_myob-(is-1)*info_2%numo,1,1)
           end do
           end do
           end do
@@ -195,7 +196,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              rbox=rbox+spsi%rwf(ix,iy,iz,1,iob,1,1)*htpsi(ix,iy,iz)
+              rbox=rbox+spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)*htpsi(ix,iy,iz)
             end do
             end do
             end do
@@ -215,8 +216,8 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            psi_box(ix,iy,iz,job)=spsi%rwf(ix,iy,iz,1,job,1,1)
-            spsi%rwf(ix,iy,iz,1,job,1,1)=0.d0
+            psi_box(ix,iy,iz,job)=spsi_2%rwf(ix,iy,iz,is,job-(is-1)*info_2%numo,1,1)
+            spsi_2%rwf(ix,iy,iz,is,job-(is-1)*info_2%numo,1,1)=0.d0
           end do
           end do
           end do
@@ -245,7 +246,8 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,1,iob,1,1)=spsi%rwf(ix,iy,iz,1,iob,1,1)  &
+              spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)=   &
+                spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)  &
                                              +evec(job-iobsta(is)+1,iob_allob-iobsta(is)+1)*rmatbox_m(ix,iy,iz)
             end do
             end do
@@ -262,7 +264,7 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            rbox=rbox+abs(spsi%rwf(ix,iy,iz,1,iob,1,1))**2
+            rbox=rbox+abs(spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1))**2
           end do
           end do
           end do
@@ -271,7 +273,8 @@ subroutine subspace_diag(mg,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,1,iob,1,1)=spsi%rwf(ix,iy,iz,1,iob,1,1)/sqrt(rbox1*Hvol)
+            spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)=   &
+              spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,1,1)/sqrt(rbox1*Hvol)
           end do
           end do
           end do
