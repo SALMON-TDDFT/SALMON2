@@ -813,17 +813,20 @@ type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
 type(s_wf_info) :: info
+type(s_wf_info) :: info_2
 type(s_wf_info) :: info_ob
 type(s_stencil) :: stencil
 type(s_wavefunction) :: spsi_in,spsi_out
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
+integer :: nspin_2
 real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
 integer :: iob_allob
 real(8) :: absr2
 integer :: j,ind
+integer :: is
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -1421,42 +1424,59 @@ info%io_s=1
 info%io_e=iobnum
 info%numo=iobnum
 
+nspin_2=ispin+1
+
+info_2%im_s=1
+info_2%im_e=1
+info_2%numm=1
+info_2%ik_s=k_sta
+info_2%ik_e=k_end
+info_2%numk=k_num
+info_2%io_s=1
+info_2%io_e=iobnum/nspin_2
+info_2%numo=iobnum/nspin_2
+
+
   allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
-                        mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),  &
-                        1,  &
-                        info%io_s:info%io_e,  &
-                        info%ik_s:info%ik_e,  &
-                        1))
-  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &
                        mg%is_array(3):mg%ie_array(3),  &
-                       1,  &
-                       info%io_s:info%io_e,  &
-                       info%ik_s:info%ik_e,  &
+                       1:nspin_2,  &
+                       info_2%io_s:info_2%io_e,  &
+                       info_2%ik_s:info_2%ik_e,  &
                        1))
+  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        1:nspin_2,  &
+                        info_2%io_s:info_2%io_e,  &
+                        info_2%ik_s:info_2%ik_e,  &
+                        1))
 
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do iz=mg%is_array(3),mg%ie_array(3)
-    do iy=mg%is_array(2),mg%ie_array(2)
-    do ix=mg%is_array(1),mg%ie_array(1)
-      spsi_in%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
-    end do
-    end do
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info_2%ik_s,info_2%ik_e
+  do iob=info_2%io_s,info_2%io_e
+    do is=1,nspin_2
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
     end do
   end do
   end do
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do iz=mg%is_array(3),mg%ie_array(3)
-    do iy=mg%is_array(2),mg%ie_array(2)
-    do ix=mg%is_array(1),mg%ie_array(1)
-      spsi_out%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
-    end do
-    end do
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info_2%ik_s,info_2%ik_e
+  do iob=info_2%io_s,info_2%io_e
+    do is=1,nspin_2
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_out%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
     end do
   end do
   end do
@@ -1513,7 +1533,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1533,7 +1553,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1541,7 +1561,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1550,7 +1570,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,nspin_2,info,info_2,info_ob,stencil,spsi_in,spsi_out,shtpsi)
   end do TE3
   elp3(415)=get_wtime()
 

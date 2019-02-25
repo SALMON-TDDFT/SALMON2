@@ -18,7 +18,7 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,  &
+subroutine taylor(mg,nspin_2,info_2,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_in,tspsi_out,  &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -27,6 +27,8 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
   implicit none
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
+  integer,intent(in)    :: nspin_2
+  type(s_wf_info),intent(in) :: info_2
   integer,intent(in) :: itotmst
   integer,intent(in) :: mst(2)
   integer,intent(in) :: lg_sta(3)
@@ -64,6 +66,7 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
   integer :: ilma,j
   real(8) :: x,y,z
   complex(8),parameter :: zi=(0.d0,1.d0)
+  integer :: is
   
   allocate(stpsi_in_ob%zwf(mg%is_array(1):mg%ie_array(1),  &
                            mg%is_array(2):mg%ie_array(2),  &
@@ -133,6 +136,11 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
   end if
   do iob=info%io_s,info%io_e
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,info%numo)
+    if(iob>info_2%numo)then
+      is=2
+    else
+      is=1
+    end if
     if(iperiodic==0.and.ihpsieff==1)then
       if(iob_allob<=MST(1))then
 !$OMP parallel do private(iz,iy,ix)
@@ -179,7 +187,7 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
     do iz=mg%is_array(3),mg%ie_array(3)
     do iy=mg%is_array(2),mg%ie_array(2)
     do ix=mg%is_array(1),mg%ie_array(1)
-      stpsi_in_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,1,iob,ik,1)
+      stpsi_in_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,ik,1)
     end do
     end do
     end do
@@ -187,7 +195,7 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
     do iz=mg%is_array(3),mg%ie_array(3)
     do iy=mg%is_array(2),mg%ie_array(2)
     do ix=mg%is_array(1),mg%ie_array(1)
-      stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,1,iob,ik,1)
+      stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)=tspsi_in%zwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,ik,1)
     end do
     end do
     end do
@@ -229,7 +237,7 @@ subroutine taylor(mg,itotmst,mst,lg_sta,lg_end,ilsda,info,info_ob,stencil,tspsi_
     do iz=mg%is_array(3),mg%ie_array(3)
     do iy=mg%is_array(2),mg%ie_array(2)
     do ix=mg%is_array(1),mg%ie_array(1)
-      tspsi_out%zwf(ix,iy,iz,1,iob,ik,1)=stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)
+      tspsi_out%zwf(ix,iy,iz,is,iob-(is-1)*info_2%numo,ik,1)=stpsi_out_ob%zwf(ix,iy,iz,1,1,1,1)
     end do
     end do
     end do
