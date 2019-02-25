@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+subroutine sgscg(mg,nspin_2,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
@@ -41,7 +41,7 @@ subroutine sgscg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ip
   type(s_rgrid),intent(in) :: mg
   integer,intent(in) :: nspin_2
   type(s_wf_info) :: info
-  type(s_wavefunction),intent(inout) :: spsi_2
+  type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
@@ -142,7 +142,7 @@ subroutine sgscg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ip
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rxk_ob(ix,iy,iz,iob)=spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)
+      rxk_ob(ix,iy,iz,iob)=spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)
       stpsi%rwf(ix,iy,iz,1,1,1,1)=rxk_ob(ix,iy,iz,iob)
     end do
     end do
@@ -207,7 +207,7 @@ subroutine sgscg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ip
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+spsi_2%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)*rgk_ob(ix,iy,iz,iob)
+            sum0=sum0+spsi%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)*rgk_ob(ix,iy,iz,iob)
           end do
           end do
           end do
@@ -223,7 +223,7 @@ subroutine sgscg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ip
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi_2%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)
+            rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)
           end do
           end do
           end do
@@ -243,7 +243,7 @@ subroutine sgscg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ip
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              rmatbox_m(ix,iy,iz)=spsi_2%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)
+              rmatbox_m(ix,iy,iz)=spsi%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)
             end do
             end do
             end do
@@ -383,7 +383,7 @@ subroutine sgscg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ip
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      spsi_2%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
+      spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
     end do
     end do
     end do

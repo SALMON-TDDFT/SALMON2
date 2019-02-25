@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+subroutine dtcg(mg,nspin_2,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -40,7 +40,7 @@ subroutine dtcg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
   type(s_rgrid),intent(in) :: mg
   integer,intent(in)    :: nspin_2
   type(s_wf_info) :: info
-  type(s_wavefunction),intent(inout) :: spsi_2
+  type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
@@ -148,7 +148,7 @@ subroutine dtcg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        xk(ix,iy,iz)=spsi_2%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)
+        xk(ix,iy,iz)=spsi%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)
       end do
       end do
       end do
@@ -203,7 +203,7 @@ subroutine dtcg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+spsi_2%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)*gk(ix,iy,iz)
+            sum0=sum0+spsi%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)*gk(ix,iy,iz)
           end do
           end do
           end do
@@ -213,7 +213,7 @@ subroutine dtcg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi_2%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)
+            gk(ix,iy,iz)=gk(ix,iy,iz)-sum0*spsi%rwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,1,1)
           end do
           end do
           end do
@@ -310,7 +310,7 @@ subroutine dtcg(mg,nspin_2,info,spsi_2,iflag,itotmst,mst,hvol,ilsda,nproc_ob,ipa
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi_2%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
+        spsi%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
       end do
       end do
       end do
