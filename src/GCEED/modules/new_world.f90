@@ -23,8 +23,11 @@ integer :: num_pole_myrank
 integer,allocatable :: icorr_polenum(:)
 integer,allocatable :: icount_pole(:)
 integer,allocatable :: icorr_xyz_pole(:,:,:)
+integer :: iamax
+integer :: maxval_pole
 
 integer,allocatable :: icoobox_bound(:,:,:)
+integer :: ibox_icoobox_bound
 
 ! FFTE routine
 integer :: iquot
@@ -688,6 +691,7 @@ if(MEO==2)then
     Rion2(:,:)=Rion(:,:)
   end if
 
+  iamax=amax
   allocate(icount_pole(1:amax))
   allocate(nearatomnum(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
   icount_pole=0
@@ -723,6 +727,7 @@ if(MEO==2)then
   end do
   num_pole_myrank=ibox
 
+  maxval_pole=maxval(icount_pole(:)) 
   allocate(icorr_xyz_pole(3,maxval(icount_pole(:)),num_pole_myrank))
 
   icount_pole(:)=0
@@ -789,6 +794,7 @@ else if(MEO==3)then
     end if
   end do
 
+  iamax=num_pole_myrank
   allocate(icorr_polenum(1:num_pole_myrank))
   allocate(icount_pole(1:num_pole_myrank))
 
@@ -815,7 +821,8 @@ else if(MEO==3)then
   end do
   end do
   end do
-  
+
+  maxval_pole=maxval(icount_pole(:)) 
   allocate(icorr_xyz_pole(3,maxval(icount_pole(:)),num_pole_myrank))
  
   icount_pole=0
@@ -855,6 +862,7 @@ integer :: icount
 ibox=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)  &
      *inum_Mxin_s(3,nproc_id_global)/minval(inum_Mxin_s(1:3,nproc_id_global))*2*Ndh
 
+ibox_icoobox_bound=ibox
 allocate( icoobox_bound(3,ibox,3) )
 
 icount=0

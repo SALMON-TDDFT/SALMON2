@@ -17,11 +17,16 @@ module structures
   implicit none
 
   type s_system
-    integer :: norb,nspin,nk
+    integer :: ngrid,nspin,no,nk ! # of r-grid points, spin indices, orbitals, and k points
     real(8) :: Hvol,Hgs(3)
-    real(8),allocatable :: occ(:,:),wk(:),esp(:,:) ! occ(NB,NK),wk(NK),esp(NB,NK)
+    real(8),allocatable :: wk(:) ! wk(1:nk)
     real(8),allocatable :: Rion(:,:) ! atom position
+    real(8),allocatable :: occ(:,:,:),esp(:,:,:) ! (1:no,1:nk,1:nspin)
   end type s_system
+
+  type s_energy
+    real(8) :: E_tot,E_ion,E_xc,E_h,E_kin,E_loc,E_nloc
+  end type s_energy
 
   type s_rgrid
     integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
@@ -33,7 +38,10 @@ module structures
 
   type s_wf_info
     logical :: if_divide_rspace
-    integer :: irank_r(6),icomm_r,icomm_ko ! icomm_r = communicator for r-space, icomm_ko = communicator for k-space & orbital.
+    integer :: irank_r(6)
+    integer :: icomm_r   ! communicator for r-space
+    integer :: icomm_ko  ! communicator for k-space & orbital
+    integer :: icomm_rko ! communicator for r-space, k-space & orbital
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1

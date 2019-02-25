@@ -18,7 +18,7 @@ module subspace_diag_periodic_sub
 
 contains
 
-subroutine subspace_diag_periodic(mg,info,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+subroutine subspace_diag_periodic(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
                                   iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                   info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
@@ -93,14 +93,6 @@ subroutine subspace_diag_periodic(mg,info,spsi,elp3,ilsda,nproc_ob,iparaway_ob, 
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
   allocate(stencil%kAc(1:1,3))
-
-  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-  do j=1,3
-    do ind=1,4
-      stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
-      stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
-    end do
-  end do
 
   nspin=1
   allocate(v(1))

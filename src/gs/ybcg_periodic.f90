@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg_periodic(mg,nspin_2,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
+subroutine dtcg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -97,14 +97,6 @@ subroutine dtcg_periodic(mg,nspin_2,info,spsi,iflag,itotmst,mst,hvol,ilsda,nproc
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
   allocate(stencil%kAc(1:1,3))
-
-  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-  do j=1,3
-    do ind=1,4
-      stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
-      stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
-    end do
-  end do
 
   nspin=1
   allocate(v(1))
