@@ -74,7 +74,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,ipara
   integer :: icorr_j
   integer :: is,is_sta,is_end
   integer :: iobsta(2),iobend(2)
-  integer :: nspin
+  integer :: nspin_1
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
@@ -94,9 +94,9 @@ subroutine subspace_diag_periodic(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,ipara
 
   allocate(stencil%kAc(1:1,3))
 
-  nspin=1
-  allocate(v(1))
-  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  nspin_1=1
+  allocate(v(nspin_1))
+  allocate(v(nspin_1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
   allocate(htpsi(mg%is(1):mg%ie(1),  &
                  mg%is(2):mg%ie(2),  &
@@ -191,7 +191,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,ipara
           end do
           end do
           end do
-          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -322,7 +322,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,ipara
 
   deallocate(stpsi%zwf,shtpsi%zwf)
   deallocate(stencil%kAc)
-  deallocate(v(1)%f)
+  deallocate(v(nspin_1)%f)
   deallocate(v)
   if(allocated(ppg%zproj)) deallocate(ppg%zproj)
 

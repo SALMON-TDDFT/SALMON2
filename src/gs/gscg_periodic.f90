@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
+subroutine gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
@@ -38,7 +38,7 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
-  integer,intent(in)    :: nspin_2
+  integer,intent(in)    :: nspin
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
@@ -51,12 +51,12 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
   real(8),intent(out)    :: elp3(3000)
-  complex(8),intent(out) :: zxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2*info%numo)
-  complex(8),intent(out) :: zhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2*info%numo)
-  complex(8),intent(out) :: zgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2*info%numo)
-  complex(8),intent(out) :: zpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2*info%numo)
-  complex(8),intent(out) :: zpko_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2*info%numo)
-  complex(8),intent(out) :: zhtpsi_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2*info%numo)
+  complex(8),intent(out) :: zxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
+  complex(8),intent(out) :: zhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
+  complex(8),intent(out) :: zgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
+  complex(8),intent(out) :: zpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
+  complex(8),intent(out) :: zpko_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
+  complex(8),intent(out) :: zhtpsi_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: hgs(3)
@@ -69,7 +69,7 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
   integer :: ik
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
-  integer :: nspin
+  integer :: nspin_1
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
@@ -104,9 +104,9 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
 
   allocate(stencil%kAc(1:1,3))
 
-  nspin=1
-  allocate(v(1))
-  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  nspin_1=1
+  allocate(v(nspin_1))
+  allocate(v(nspin_1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
 
   call set_isstaend(is_sta,is_end,ilsda)
@@ -142,8 +142,8 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
 
     iter_bak_ob(:)=0 
   
-    do iob_myob=1,nspin_2*info%numo
-      call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+    do iob_myob=1,nspin*info%numo
+      call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
       if(ilsda==0.or.ilsda==1.and.iob_myob<=info%numo)then
         is=1
       else
@@ -182,7 +182,7 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
         end do
       end if
 
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
       
     !$omp parallel do private(iz,iy,ix) collapse(2) 
       do iz=mg%is(3),mg%ie(3)
@@ -194,11 +194,11 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
       end do
   
     end do
-    call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+    call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
 
     Iteration : do iter=1,Ncg
-      do iob_myob=1,nspin_2*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+      do iob_myob=1,nspin*info%numo
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
@@ -253,10 +253,10 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
       else
         do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
-          call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+          call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
           call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
           do job=iobsta(is),iob-1
-            call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+            call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
             call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
             if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)
@@ -292,10 +292,10 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
         end do
         end do
       end if
-      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zgk_ob,zgk_ob,sum_ob1,hvol)
         
-      do iob_myob=1,nspin_2*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+      do iob_myob=1,nspin*info%numo
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     
         if(iter==1)then
     !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -320,10 +320,10 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
         gkgk_ob(iob_allob)=sum_ob1(iob_allob)
       end do
 
-      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zxk_ob,zpk_ob,zs_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zxk_ob,zpk_ob,zs_ob,hvol)
 
-      do iob_myob=1,nspin_2*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+      do iob_myob=1,nspin*info%numo
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -333,10 +333,10 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
         end do
         end do
       end do
-      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zpko_ob,zpko_ob,sum_ob1,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zpko_ob,zpko_ob,sum_ob1,hvol)
 
-      do iob_myob=1,nspin_2*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+      do iob_myob=1,nspin*info%numo
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -367,7 +367,7 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
           end do
         end if
 
-        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
 
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
@@ -378,12 +378,12 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
         end do
         end do
       end do
-      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
-      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,hvol)
         
     
-      do iob_myob=1,nspin_2*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+      do iob_myob=1,nspin*info%numo
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
 
         ev=0.5d0*((xkHxk_ob(iob_allob)+pkHpk_ob(iob_allob))   &
                  -sqrt((xkHxk_ob(iob_allob)-pkHpk_ob(iob_allob))**2+4.d0*abs(xkHpk_ob(iob_allob))**2))
@@ -402,11 +402,11 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
         end do
       end do 
     
-      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
-      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin_2*info%numo,zxk_ob,zxk_ob,xkxk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zxk_ob,zxk_ob,xkxk_ob,hvol)
 
-      do iob_myob=1,nspin_2*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+      do iob_myob=1,nspin*info%numo
+        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
         if(ilsda==0.or.ilsda==1.and.iob_myob<=info%numo)then
           is=1
         else
@@ -441,7 +441,7 @@ subroutine gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ils
   
   deallocate(stpsi%zwf,shtpsi%zwf)
   deallocate(stencil%kAc)
-  deallocate(v(1)%f)
+  deallocate(v(nspin_1)%f)
   deallocate(v)
   if(allocated(ppg%zproj)) deallocate(ppg%zproj)
 

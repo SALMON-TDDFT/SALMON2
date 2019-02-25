@@ -72,7 +72,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
-integer :: nspin_2
+integer :: nspin
 type(s_wavefunction) :: spsi
 type(s_system) :: system
 type(s_stencil) :: stencil
@@ -378,24 +378,21 @@ system%nk = num_kpoints_rd
 system%Hvol = Hvol
 system%Hgs = Hgs
 
+if(ispin==0)then
+  nspin=1
+else
+  nspin=2
+end if
+
 info%im_s = 1
 info%im_e = 1
 info%numm = 1
 info%ik_s=k_sta
 info%ik_e=k_end
 info%numk=k_num
-
-if(ilsda==0)then
-  info%io_s=1
-  info%io_e=iobnum
-  info%numo=iobnum
-  nspin_2=1
-else
-  info%io_s=1
-  info%io_e=iobnum/2
-  info%numo=iobnum/2
-  nspin_2=2
-end if
+info%io_s=1
+info%io_e=iobnum/nspin
+info%numo=iobnum/nspin
 
 info%if_divide_rspace = nproc_mxin_mul.ne.1
 info%irank_r(1) = iup_array(1)
@@ -445,14 +442,14 @@ case(0)
   allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
                     mg%is_array(2):mg%ie_array(2),  &
                     mg%is_array(3):mg%ie_array(3),  &
-                    nspin_2,  &
+                    nspin,  &
                     info%io_s:info%io_e,  &
                     info%ik_s:info%ik_e,  &
                     1))
 !$OMP parallel do private(ik,iob,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
-    do is=1,nspin_2
+    do is=1,nspin
       do iz=mg%is_array(3),mg%ie_array(3)
       do iy=mg%is_array(2),mg%ie_array(2)
       do ix=mg%is_array(1),mg%ie_array(1)
@@ -467,14 +464,14 @@ case(3)
   allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1),  &
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),  &
-                      nspin_2,  &
+                      nspin,  &
                       info%io_s:info%io_e,  &
                       info%ik_s:info%ik_e,  &
                       1))
 !$OMP parallel do private(ik,iob,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
-    do is=1,nspin_2
+    do is=1,nspin
       do iz=mg%is_array(3),mg%ie_array(3)
       do iy=mg%is_array(2),mg%ie_array(2)
       do ix=mg%is_array(1),mg%ie_array(1)
@@ -524,7 +521,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -539,7 +536,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -561,21 +558,21 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+          call sgscg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
+          call dtcg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
+          call dtcg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
@@ -587,7 +584,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+        call rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
@@ -600,7 +597,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -615,7 +612,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -645,7 +642,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         case(0)
           do ik=k_sta,k_end
           do iob=1,info%numo
-            do is=1,nspin_2
+            do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
@@ -663,7 +660,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
           do ik=k_sta,k_end
           do iob=1,info%numo
-            do is=1,nspin_2
+            do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
@@ -679,7 +676,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         case(3)
           do ik=k_sta,k_end
           do iob=1,info%numo
-            do is=1,nspin_2
+            do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
@@ -698,7 +695,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
           do ik=k_sta,k_end
           do iob=1,info%numo
-            do is=1,nspin_2
+            do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
@@ -798,7 +795,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         do ik=k_sta,k_end
         do iob=1,info%numo
-          do is=1,nspin_2
+          do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
@@ -816,7 +813,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
         do ik=k_sta,k_end
         do iob=1,info%numo
-          do is=1,nspin_2
+          do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
@@ -831,7 +828,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         do ik=k_sta,k_end
         do iob=1,info%numo
-          do is=1,nspin_2
+          do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
@@ -850,7 +847,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
         do ik=k_sta,k_end
         do iob=1,info%numo
-          do is=1,nspin_2
+          do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
@@ -876,7 +873,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -891,7 +888,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -911,21 +908,21 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+          call sgscg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
-          call dtcg(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+          call dtcg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,nspin_2,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
+          call dtcg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
@@ -934,7 +931,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+        call rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
@@ -945,7 +942,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -960,7 +957,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       do ik=k_sta,k_end
       do iob=1,info%numo
-        do is=1,nspin_2
+        do is=1,nspin
 !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)

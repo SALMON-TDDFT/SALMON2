@@ -23,7 +23,7 @@ contains
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                    info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -35,7 +35,7 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
   implicit none
   
   type(s_rgrid),intent(in) :: mg
-  integer,intent(in)   :: nspin_2
+  integer,intent(in)   :: nspin
   type(s_wf_info) :: info
   type(s_wavefunction) :: spsi
   type(s_stencil) :: stencil
@@ -51,12 +51,12 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: hgs(3)
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin_2)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin)
   integer,intent(in)    :: iparaway_ob
   integer,parameter :: nd=4
   integer :: j,ind
   integer :: iob,iob_allob,iter,ix,iy,iz
-  integer :: nspin
+  integer :: nspin_1
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
@@ -80,9 +80,9 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
-  nspin=1
-  allocate(v(1))
-  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  nspin_1=1
+  allocate(v(nspin_1))
+  allocate(v(nspin_1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
   allocate (htphi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   allocate (phibox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
@@ -91,8 +91,8 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
   allocate (R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
   allocate (phibar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
   allocate (Rbar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),0:ncg))
-  allocate (psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
-                      1:nspin_2*info%numo,info%ik_s:info%ik_e,1))
+  allocate (psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin,  &
+                      1:nspin*info%numo,info%ik_s:info%ik_e,1))
   
   allocate (iobcheck(1:itotmst,0:ncg))
   iobcheck=0
@@ -106,27 +106,27 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
   end do
   end do
   
-  if(nspin_2*info%numo>=1)then
-    allocate (iflagdiis(1:nspin_2*info%numo))
-    allocate (epsdiis(1:nspin_2*info%numo,0:ncg))
-    allocate (Rnorm(1:nspin_2*info%numo,0:ncg))
+  if(nspin*info%numo>=1)then
+    allocate (iflagdiis(1:nspin*info%numo))
+    allocate (epsdiis(1:nspin*info%numo,0:ncg))
+    allocate (Rnorm(1:nspin*info%numo,0:ncg))
   end if 
   
   ! Flag for convergence
-  if(nspin_2*info%numo >= 1) iflagdiis=1
+  if(nspin*info%numo >= 1) iflagdiis=1
   
-  if(nspin_2*info%numo >= 1) then
+  if(nspin*info%numo >= 1) then
     phi=0.d0
-    psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+    psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin,  &
                       1:info%numo,info%ik_s:info%ik_e,1)=   &
-      spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+      spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin,  &
                       1:info%numo,info%ik_s:info%ik_e,1)
   end if
   
   iflag_diisjump=0
   
-  do iob=1,nspin_2*info%numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+  do iob=1,nspin*info%numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     if(iob>info%numo)then
       is=2
     else
@@ -154,7 +154,7 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -213,7 +213,7 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -281,7 +281,7 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -301,8 +301,8 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
   end do        ! loop for iob
   
   iflag_diisjump=0
-  do iob=1,nspin_2*info%numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+  do iob=1,nspin*info%numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     if(iob>info%numo)then
       is=2
     else
@@ -320,7 +320,7 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
     end do
     end do
 
-    call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+    call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -340,12 +340,12 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
   if(iflag_diisjump==0)then
     continue
   else if(iflag_diisjump==1)then
-    spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+    spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin,  &
                       1:info%numo,info%ik_s:info%ik_e,1)=   &
-      psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin_2,  &
+      psi_stock(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin,  &
                       1:info%numo,info%ik_s:info%ik_e,1)
-    do iob=1,nspin_2*info%numo
-      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+    do iob=1,nspin*info%numo
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
       if(iob>info%numo)then
         is=2
       else
@@ -369,7 +369,7 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -393,7 +393,7 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
     end do
   
     rnorm_diff_psi=0.d0
-    do iob=1,nspin_2*info%numo
+    do iob=1,nspin*info%numo
       if(iob>info%numo)then
         is=2
       else
@@ -412,13 +412,13 @@ subroutine rmmdiis(mg,nspin_2,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,
   deallocate(htphi)
   deallocate(phibox,Rbox,phi,R1,phibar,Rbar)
   
-  if(nspin_2*info%numo>=1)then
+  if(nspin*info%numo>=1)then
     deallocate (iflagdiis,epsdiis,Rnorm)
   end if 
   deallocate(iobcheck) 
   
   deallocate(stpsi%rwf,shtpsi%rwf)
-  deallocate(v(1)%f)
+  deallocate(v(nspin_1)%f)
   deallocate(v)
 
   return
@@ -458,7 +458,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
 
 end subroutine
 
-subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub, only: hpsi
   implicit none
@@ -467,11 +467,11 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
   type(s_wf_info)       :: info_ob
   type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
-  integer :: nspin
+  integer :: nspin_1
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
 
-  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin,stencil,ppg)
+  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
 
 end subroutine hpsi_test_diis
 

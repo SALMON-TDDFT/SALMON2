@@ -18,7 +18,7 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stencil,tspsi_in,tspsi_out,  &
+subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stencil,tspsi_in,tspsi_out,  &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -27,7 +27,7 @@ subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stenci
   implicit none
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
-  integer,intent(in)    :: nspin_2
+  integer,intent(in)    :: nspin
   type(s_wf_info),intent(in) :: info
   integer,intent(in) :: itotmst
   integer,intent(in) :: mst(2)
@@ -57,7 +57,7 @@ subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stenci
   type(s_wavefunction) :: shtpsi_ob
   type(s_scalar),allocatable :: v(:)
   real(8)              :: vlocal2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
-  integer :: nspin
+  integer :: nspin_1
   integer :: nn,ix,iy,iz
   integer :: ik,iob,iob_allob
   complex(8) :: ekr(ppg%nps,natom)
@@ -77,9 +77,9 @@ subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stenci
                          mg%is_array(2):mg%ie_array(2),  &
                          mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
-  nspin=1
-  allocate(v(1))
-  allocate(v(1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  nspin_1=1
+  allocate(v(nspin_1))
+  allocate(v(nspin_1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
   if(ilsda==0)then
   !$OMP parallel do private(iz,iy,ix)
@@ -133,8 +133,8 @@ subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stenci
     end do
     call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
   end if
-  do iob=1,nspin_2*info%numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin_2*info%numo)
+  do iob=1,nspin*info%numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     if(iob>info%numo)then
       is=2
     else
@@ -209,7 +209,7 @@ subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stenci
 
     do nn=1,n_hamil
       if(mod(nn,2)==1)then
-        call hpsi(stpsi_in_ob,shtpsi_ob,info_ob,mg,v,nspin,stencil,ppg)
+        call hpsi(stpsi_in_ob,shtpsi_ob,info_ob,mg,v,nspin_1,stencil,ppg)
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg%is_array(3),mg%ie_array(3)
         do iy=mg%is_array(2),mg%ie_array(2)
@@ -220,7 +220,7 @@ subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stenci
         end do
         end do
       else
-        call hpsi(shtpsi_ob,stpsi_in_ob,info_ob,mg,v,nspin,stencil,ppg)
+        call hpsi(shtpsi_ob,stpsi_in_ob,info_ob,mg,v,nspin_1,stencil,ppg)
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg%is_array(3),mg%ie_array(3)
         do iy=mg%is_array(2),mg%ie_array(2)
@@ -278,7 +278,7 @@ subroutine taylor(mg,nspin_2,info,itotmst,mst,lg_sta,lg_end,ilsda,info_ob,stenci
   end do
 
   deallocate(stpsi_in_ob%zwf,stpsi_out_ob%zwf,shtpsi_ob%zwf)
-  deallocate(v(1)%f)
+  deallocate(v(nspin_1)%f)
   deallocate(v)
   if(allocated(ppg%zproj)) deallocate(ppg%zproj)
 
