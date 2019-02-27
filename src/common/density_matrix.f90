@@ -25,14 +25,13 @@ contains
 ! dmat(r,-dr) = conjg(dmat(r-dr,dr))
 ! j(r) = sum occ aimag( conjg(psi(r))* (sum nabt*psi)(r) ) = aimag( sum_dr nabt(dr)* dmat(r,dr) )
 
-  subroutine calc_density_matrix(dmat,psi,info,rg,nspin,occ)
+  subroutine calc_density_matrix(dmat,psi,info,rg,nspin)
     use structures
     use update_overlap_sub
     use salmon_communication, only: comm_summation
     implicit none
     integer        ,intent(in) :: nspin
     type(s_wf_info),intent(in) :: info
-    real(8)        ,intent(in) :: occ(info%io_s:info%io_e,info%ik_s:info%ik_e)
     type(s_rgrid)  ,intent(in) :: rg
     type(s_wavefunction)       :: psi
     type(s_dmatrix)            :: dmat
@@ -68,7 +67,7 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         call calc_dm(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),rg%is_array,rg%ie_array,is,ie,rg%idx,rg%idy,rg%idz,rg%ndir)
-        wrk = wrk + wrk2 * occ(io,ik)
+        wrk = wrk + wrk2 * info%occ(io,ik,ispin)
       end do
       end do
       call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
@@ -108,13 +107,12 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_density(rho,psi,info,rg,nspin,occ)
+  subroutine calc_density(rho,psi,info,rg,nspin)
     use structures
     use salmon_communication, only: comm_summation
     implicit none
     integer        ,intent(in) :: nspin
     type(s_wf_info),intent(in) :: info
-    real(8)        ,intent(in) :: occ(info%io_s:info%io_e,info%ik_s:info%ik_e)
     type(s_rgrid)  ,intent(in) :: rg
     type(s_wavefunction),intent(in) :: psi
     type(s_scalar) :: rho(nspin,info%im_s:info%im_e)
@@ -134,7 +132,7 @@ contains
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           wrk2 = abs( psi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )**2
-          wrk = wrk + wrk2 * occ(io,ik)
+          wrk = wrk + wrk2 * info%occ(io,ik,ispin)
         end do
         end do
         call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
@@ -148,7 +146,7 @@ contains
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           wrk2 = abs( psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )**2
-          wrk = wrk + wrk2 * occ(io,ik)
+          wrk = wrk + wrk2 * info%occ(io,ik,ispin)
         end do
         end do
         call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
@@ -163,7 +161,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_current(curr,nspin,ngrid,rg,stencil,info,psi,ppg,occ,dmat)
+  subroutine calc_current(curr,nspin,ngrid,rg,stencil,info,psi,ppg,dmat)
     use structures
     use salmon_communication, only: comm_summation
     implicit none
@@ -173,7 +171,6 @@ contains
     type(s_wf_info),intent(in) :: info
     type(s_wavefunction),intent(in) :: psi
     type(s_pp_grid),intent(in) :: ppg
-    real(8)        ,intent(in) :: occ(info%io_s:info%io_e,info%ik_s:info%ik_e)
     type(s_dmatrix),intent(in) :: dmat
     real(8) :: curr(3,nspin,info%im_s:info%im_e)
     !
@@ -188,10 +185,10 @@ contains
       do io=info%io_s,info%io_e
 
         call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%kAc(ik,:),rg%is_array,rg%ie_array,rg%is,rg%ie)
-        wrk2 = wrk2 + wrk * occ(io,ik)
+        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin)
 
         call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,rg%is_array,rg%ie_array,ik)
-        wrk2 = wrk2 + wrk * occ(io,ik)
+        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin)
 
       end do
       end do
@@ -304,7 +301,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_microscopic_current(curr,nspin,rg,stencil,info,psi,occ,dmat)
+  subroutine calc_microscopic_current(curr,nspin,rg,stencil,info,psi,dmat)
     use structures
     use salmon_communication, only: comm_summation
     implicit none
@@ -313,7 +310,6 @@ contains
     type(s_stencil),intent(in) :: stencil
     type(s_wf_info),intent(in) :: info
     type(s_wavefunction),intent(in) :: psi
-    real(8)        ,intent(in) :: occ(info%io_s:info%io_e,info%ik_s:info%ik_e)
     type(s_dmatrix),intent(in) :: dmat
     type(s_vector)             :: curr(nspin,info%im_s:info%im_e)
     !
@@ -332,7 +328,7 @@ contains
       do io=info%io_s,info%io_e
 
         call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%kAc(ik,:),rg%is_array,rg%ie_array,is,ie)
-        wrk2 = wrk2 + wrk * occ(io,ik)
+        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin)
 
 !       call nonlocal_part
 

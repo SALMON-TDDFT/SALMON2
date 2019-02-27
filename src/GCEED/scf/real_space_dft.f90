@@ -32,6 +32,9 @@ use read_pslfile_sub
 use allocate_psl_sub
 use persistent_comm
 use structure_opt_sub
+use calc_allob_sub
+use salmon_total_energy
+use hpsi_sub
 implicit none
 
 END MODULE global_variables_scf
@@ -39,7 +42,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine Real_Space_DFT
-use structures, only: s_rgrid, s_wf_info, s_wavefunction, s_system, s_stencil
+use structures!, only: s_rgrid, s_wf_info, s_wavefunction, s_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
                            nproc_group_korbital, nproc_group_rho
@@ -61,8 +64,8 @@ implicit none
 
 integer :: ix,iy,iz,ik,ikoa
 integer :: is
-integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag
-real(8) :: sum0,sum1
+integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
+real(8) :: sum0,sum1,Etot_test
 character(100) :: file_atoms_coo
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
@@ -73,9 +76,11 @@ type(s_rgrid) :: ng
 type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
 integer :: nspin
-type(s_wavefunction) :: spsi
+type(s_wavefunction) :: spsi,shpsi
 type(s_system) :: system
 type(s_stencil) :: stencil
+type(s_scalar) :: sVh
+type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -371,18 +376,33 @@ else
   end do
 end if
 
-system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-system%nspin = 1
-system%no = itotMST
-system%nk = num_kpoints_rd
-system%Hvol = Hvol
-system%Hgs = Hgs
-
 if(ispin==0)then
   nspin=1
 else
   nspin=2
 end if
+
+system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+system%nspin = nspin
+system%no = itotMST
+system%nk = num_kpoints_rd
+system%nion = MI
+system%Hvol = Hvol
+system%Hgs = Hgs
+allocate(system%Rion(3,system%nion) &
+        ,system%wtk(system%nk) &
+        ,system%esp(system%no,system%nk,system%nspin) &
+        ,system%rocc(system%no,system%nk,system%nspin))
+system%wtk = wtk
+system%rion = rion
+
+allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
+do jspin=1,system%nspin
+  allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(srho(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+end do
+allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
 info%im_s = 1
 info%im_e = 1
@@ -404,6 +424,13 @@ info%irank_r(6) = kdw_array(1)
 info%icomm_r = nproc_group_korbital
 info%icomm_ko = nproc_group_rho
 info%icomm_rko = nproc_group_global
+allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+        ,info%io_tbl(info%io_s:info%io_e))
+do iob=info%io_s,info%io_e
+  call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+  info%io_tbl(iob) = jj
+end do
+
 
 info_ob%im_s = 1
 info_ob%im_e = 1
@@ -446,7 +473,14 @@ case(0)
                     info%io_s:info%io_e,  &
                     info%ik_s:info%ik_e,  &
                     1))
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(5)
+  allocate(shpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,  &
+                     info%io_s:info%io_e,  &
+                     info%ik_s:info%ik_e,  &
+                     1))
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
     do is=1,nspin
@@ -462,13 +496,20 @@ case(0)
   end do
 case(3)
   allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1),  &
-                      mg%is_array(2):mg%ie_array(2),  &
-                      mg%is_array(3):mg%ie_array(3),  &
-                      nspin,  &
-                      info%io_s:info%io_e,  &
-                      info%ik_s:info%ik_e,  &
-                      1))
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(5)
+                    mg%is_array(2):mg%ie_array(2),  &
+                    mg%is_array(3):mg%ie_array(3),  &
+                    nspin,  &
+                    info%io_s:info%io_e,  &
+                    info%ik_s:info%ik_e,  &
+                    1))
+  allocate(shpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,  &
+                     info%io_s:info%io_e,  &
+                     info%ik_s:info%ik_e,  &
+                     1))
+!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
     do is=1,nspin
@@ -511,6 +552,17 @@ DFT_Iteration : do iter=1,iDiter(img)
   else
     call calc_occupation
   endif
+
+  system%rocc(:,:,1) = rocc
+
+  do jspin=1,system%nspin
+    do ik=info%ik_s,info%ik_e
+      do iob=info%io_s,info%io_e
+        jj = info%io_tbl(iob)
+        info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+      end do
+    end do
+  end do
 
   call copy_density
 
@@ -1029,6 +1081,31 @@ DFT_Iteration : do iter=1,iDiter(img)
       call Total_Energy_periodic_scf(zpsi_tmp)
     end select
   end if
+
+!+++++ test: total energy
+  if(iperiodic==3) then
+    allocate(stencil%kAc(k_sta:k_end,3))
+    do jj=1,3
+      stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+    end do
+    call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+  end if
+  do jspin=1,system%nspin
+    V_local(jspin)%f = Vlocal(:,:,:,jspin)
+  end do
+  if(ilsda == 1) then
+    do jspin=1,system%nspin
+      srho(jspin)%f = rho_s(:,:,:,jspin)
+      sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+    end do
+  else
+    srho(1)%f = rho
+    sVxc(1)%f = Vxc
+  end if
+  sVh%f = Vh
+  call calc_eigen_energy(system,spsi,shpsi,info,mg,V_local,stencil,ppg)
+  call calc_Total_Energy(Etot_test,Exc,system,info,mg,ng,stencil,pp,ppg,srho,sVh,sVxc)
+  if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
 
   select case(convergence)
     case('rho_dne')
