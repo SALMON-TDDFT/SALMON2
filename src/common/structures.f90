@@ -13,15 +13,16 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module structures
   implicit none
 
   type s_system
-    integer :: ngrid,nspin,no,nk ! # of r-grid points, spin indices, orbitals, and k points
+    integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
     real(8) :: Hvol,Hgs(3)
-    real(8),allocatable :: wk(:) ! wk(1:nk)
-    real(8),allocatable :: Rion(:,:) ! atom position
-    real(8),allocatable :: occ(:,:,:),esp(:,:,:) ! (1:no,1:nk,1:nspin)
+    real(8),allocatable :: wtk(:) ! (1:nk), weight of k points
+    real(8),allocatable :: Rion(:,:) ! (1:3,1:nion), atom position
+    real(8),allocatable :: esp(:,:,:),rocc(:,:,:) ! (1:no,1:nk,1:nspin), esp= single-particle energy, rocc= occupation rate
   end type s_system
 
   type s_energy
@@ -45,6 +46,8 @@ module structures
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
+    real(8),allocatable :: occ(:,:,:) ! occ(io_s:io_e,ik_s:ik_e,1:nspin) = rocc*wk, occupation numbers
+    integer,allocatable :: io_tbl(:)  ! jo=io_tbl(io), io=io_s~io_e, jo=1~no
   end type s_wf_info
 
   type s_wavefunction
@@ -161,8 +164,8 @@ contains
 
   subroutine deallocate_system(system)
     type(s_system) :: system
-    DEAL(system%occ)
-    DEAL(system%wk)
+    DEAL(system%rocc)
+    DEAL(system%wtk)
     DEAL(system%esp)
     DEAL(system%Rion)
   end subroutine deallocate_system
@@ -174,6 +177,12 @@ contains
     DEAL(rg%idz)
   end subroutine deallocate_rgrid
 
+  subroutine deallocate_wf_info(info)
+    type(s_wf_info) :: info
+    DEAL(info%io_tbl)
+    DEAL(info%occ)
+  end subroutine deallocate_wf_info
+
   subroutine deallocate_wavefunction(psi)
     type(s_wavefunction) :: psi
     DEAL(psi%rwf)
@@ -183,6 +192,8 @@ contains
   subroutine deallocate_stencil(stencil)
     type(s_stencil) :: stencil
     DEAL(stencil%kAc)
+    DEAL(stencil%sign)
+    DEAL(stencil%coef_lap)
   end subroutine deallocate_stencil
 
   subroutine deallocate_pp_info(pp)
