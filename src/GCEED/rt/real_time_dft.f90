@@ -813,17 +813,19 @@ type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
 type(s_wf_info) :: info
-type(s_wf_info) :: info_ob
 type(s_stencil) :: stencil
 type(s_wavefunction) :: spsi_in,spsi_out
+type(s_wavefunction) :: sshtpsi
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
+integer :: nspin
 real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
 integer :: iob_allob
 real(8) :: absr2
 integer :: j,ind
+integer :: is
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -1411,75 +1413,97 @@ call taylor_coe
 
 elp3(407)=get_wtime()
 
-info%im_s=1
-info%im_e=1
-info%numm=1
-info%ik_s=k_sta
-info%ik_e=k_end
-info%numk=k_num
-info%io_s=1
-info%io_e=iobnum
-info%numo=iobnum
+  if(ispin==0)then
+    nspin=1
+  else
+    nspin=2
+  end if
+  
+  info%im_s=1
+  info%im_e=1
+  info%numm=1
+  info%ik_s=k_sta
+  info%ik_e=k_end
+  info%numk=k_num
+  info%io_s=1
+  info%io_e=iobnum/nspin
+  info%numo=iobnum/nspin
+
+  info%if_divide_rspace = nproc_mxin_mul.ne.1
+  info%irank_r(1) = iup_array(1)
+  info%irank_r(2) = idw_array(1)
+  info%irank_r(3) = jup_array(1)
+  info%irank_r(4) = jdw_array(1)
+  info%irank_r(5) = kup_array(1)
+  info%irank_r(6) = kdw_array(1)
+  info%icomm_r = nproc_group_korbital
 
   allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
-                        mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),  &
-                        1,  &
-                        info%io_s:info%io_e,  &
-                        info%ik_s:info%ik_e,  &
-                        1))
-  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &
                        mg%is_array(3):mg%ie_array(3),  &
-                       1,  &
+                       1:nspin,  &
                        info%io_s:info%io_e,  &
                        info%ik_s:info%ik_e,  &
                        1))
+  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        1:nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+  allocate(sshtpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        1:nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
 
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
-    do iz=mg%is_array(3),mg%ie_array(3)
-    do iy=mg%is_array(2),mg%ie_array(2)
-    do ix=mg%is_array(1),mg%ie_array(1)
-      spsi_in%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
-    end do
-    end do
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
     end do
   end do
   end do
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
-    do iz=mg%is_array(3),mg%ie_array(3)
-    do iy=mg%is_array(2),mg%ie_array(2)
-    do ix=mg%is_array(1),mg%ie_array(1)
-      spsi_out%zwf(ix,iy,iz,1,iob,ik,1)=0.d0
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_out%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
     end do
-    end do
+  end do
+  end do
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        sshtpsi%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
     end do
   end do
   end do
 
-  info_ob%im_s = 1
-  info_ob%im_e = 1
-  info_ob%numm = 1
-  info_ob%ik_s = 1
-  info_ob%ik_e = 1
-  info_ob%numk = 1
-  info_ob%io_s = 1
-  info_ob%io_e = 1
-  info_ob%numo = 1
-  info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
-  info_ob%irank_r(1) = iup_array(1)
-  info_ob%irank_r(2) = idw_array(1)
-  info_ob%irank_r(3) = jup_array(1)
-  info_ob%irank_r(4) = jdw_array(1)
-  info_ob%irank_r(5) = kup_array(1)
-  info_ob%irank_r(6) = kdw_array(1)
-  info_ob%icomm_r = nproc_group_korbital
-  
-  if(iperiodic==3) allocate(stencil%kAc(1:1,3))
+  if(iperiodic==3) allocate(stencil%kAc(info%ik_s:info%ik_e,3))
 
   stencil%lap0 = -0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
 
@@ -1513,7 +1537,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1533,7 +1557,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1541,7 +1565,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1550,7 +1574,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,info,info_ob,stencil,spsi_in,spsi_out,shtpsi)
+    call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE3
   elp3(415)=get_wtime()
 
