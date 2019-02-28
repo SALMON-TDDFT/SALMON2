@@ -32,7 +32,7 @@ CONTAINS
     real(8)                    :: Etot
     !
     integer :: io,ik,ispin,Nspin
-    integer :: ix,iy,iz
+    integer :: ix,iy,iz,is
     real(8) :: sum1,sum2,Eion
     Nspin = system%Nspin
 
@@ -48,14 +48,17 @@ CONTAINS
     end do
 
     sum1 = 0d0
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      sum1 = sum1 - 0.5d0* Vh%f(ix,iy,iz) * sum( rho(1:Nspin)%f(ix,iy,iz) )   &
-                  - sum( Vxc(1:Nspin)%f(ix,iy,iz) * rho(1:Nspin)%f(ix,iy,iz) )
+    do is=1,Nspin
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        sum1 = sum1 - 0.5d0* Vh%f(ix,iy,iz) * rho(is)%f(ix,iy,iz)    &
+                    - ( Vxc(is)%f(ix,iy,iz) * rho(is)%f(ix,iy,iz) )
+      end do
+      end do
+      end do
     end do
-    end do
-    end do
+    
     call comm_summation(sum1,sum2,info%icomm_r)
 
     Etot = Etot + sum2*system%Hvol + Exc + Eion
