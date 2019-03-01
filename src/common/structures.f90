@@ -62,6 +62,9 @@ module structures
   ! for non-orthogonal lattice
     integer,allocatable :: sign(:) ! sign(4:ndir) (for ndir=4~6) ???
     real(8),allocatable :: coef_lap(:,:) !?????? --> lapt (future work)
+
+  ! Experimental implementation of srg
+    type(s_sendrecv_grid) :: srg
   end type s_stencil
 
   type s_pp_info
