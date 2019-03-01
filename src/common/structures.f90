@@ -18,8 +18,9 @@ module structures
   implicit none
 
   type s_system
+    integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
-    real(8) :: Hvol,Hgs(3)
+    real(8) :: Hvol,Hgs(3),al(3,3),det_al
     real(8),allocatable :: wtk(:) ! (1:nk), weight of k points
     real(8),allocatable :: Rion(:,:) ! (1:3,1:nion), atom position
     real(8),allocatable :: esp(:,:,:),rocc(:,:,:) ! (1:no,1:nk,1:nspin), esp= single-particle energy, rocc= occupation rate
@@ -156,6 +157,13 @@ module structures
     logical :: pcomm_initialized
   end type s_sendrecv_grid
 
+  type s_fourier_grid
+    integer :: icomm_fourier
+    integer :: NG_s,NG_e,nGzero
+    real(8),allocatable :: Gx(:),Gy(:),Gz(:)
+    complex(8),allocatable :: rhoion_G(:)
+  end type s_fourier_grid
+
 !===================================================================================================================================
 
 contains
@@ -260,5 +268,13 @@ contains
     type(s_dmatrix) :: dm
     DEAL(dm%rho)
   end subroutine deallocate_dmatrix
+
+  subroutine deallocate_fourier_grid(fg)
+    type(s_fourier_grid) :: fg
+    DEAL(fg%Gx)
+    DEAL(fg%Gy)
+    DEAL(fg%Gz)
+    DEAL(fg%rhoion_G)
+  end subroutine deallocate_fourier_grid
 
 end module structures
