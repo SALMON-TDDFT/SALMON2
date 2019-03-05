@@ -800,8 +800,9 @@ END subroutine Real_Time_DFT
 !=======================================================================
 
 SUBROUTINE Time_Evolution(lg,mg,ng)
-use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil
-use salmon_parallel, only: nproc_id_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
+use structures, only: s_system,s_rgrid,s_wf_info,s_wavefunction,s_stencil
+use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
+                           nproc_group_h, nproc_group_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation
 use misc_routines, only: get_wtime
 use global_variables_rt
@@ -812,6 +813,7 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
+type(s_system) :: system
 type(s_wf_info) :: info
 type(s_stencil) :: stencil
 type(s_wavefunction) :: spsi_in,spsi_out
@@ -825,7 +827,7 @@ integer:: idensity, idiffDensity, ielf
 integer :: iob_allob
 real(8) :: absr2
 integer :: j,ind
-integer :: is
+integer :: is,jspin
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -1418,7 +1420,23 @@ elp3(407)=get_wtime()
   else
     nspin=2
   end if
-  
+
+  system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+  system%nspin = nspin
+  system%no = itotMST
+  system%nk = num_kpoints_rd
+  system%nion = MI
+  system%Hvol = Hvol
+  system%Hgs = Hgs
+  allocate(system%Rion(3,system%nion) &
+          ,system%wtk(system%nk) &
+          ,system%esp(system%no,system%nk,system%nspin) &
+          ,system%rocc(system%no,system%nk,system%nspin))
+  system%wtk = wtk
+  system%rion = rion
+
+  system%rocc(:,:,1) = rocc(:,:)
+
   info%im_s=1
   info%im_e=1
   info%numm=1
@@ -1437,6 +1455,24 @@ elp3(407)=get_wtime()
   info%irank_r(5) = kup_array(1)
   info%irank_r(6) = kdw_array(1)
   info%icomm_r = nproc_group_korbital
+  info%icomm_ko = nproc_group_rho
+  info%icomm_rko = nproc_group_global
+
+  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+          ,info%io_tbl(info%io_s:info%io_e))
+  do iob=info%io_s,info%io_e
+    call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+    info%io_tbl(iob) = jj
+  end do
+
+  do ik=info%ik_s,info%ik_e
+    do iob=info%io_s,info%io_e
+      do jspin=1,system%nspin
+        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+        info%occ(iob,ik,jspin) = system%rocc(jj,ik,1)*system%wtk(ik)
+      end do
+    end do
+  end do
 
   allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &
