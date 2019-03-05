@@ -19,7 +19,7 @@ module taylor_sub
 contains
 
 subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in,tspsi_out,sshtpsi,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
@@ -45,8 +45,6 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
                                 lg_sta(3)-nd:lg_end(3)+nd)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
-  real(8),intent(out)   :: rhobox(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(out)   :: rhobox_s(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2)
   complex(8),intent(in) :: zc(n_hamil)
   integer,intent(in)    :: ihpsieff
   real(8),intent(in)    :: rocc(itotmst,num_kpoints_rd)
@@ -67,27 +65,6 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
     allocate(v(is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   end do
 
-  if(ilsda==0)then
-  !$OMP parallel do private(iz,iy,ix)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      rhobox(ix,iy,iz) = 0.d0
-    end do
-    end do
-    end do
-  else if(ilsda==1)then
-  !$OMP parallel do private(iz,iy,ix)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      rhobox_s(ix,iy,iz,1) = 0.d0
-      rhobox_s(ix,iy,iz,2) = 0.d0
-    end do
-    end do
-    end do
-  end if
-  
   if(iperiodic==0.and.ihpsieff==1)then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
     do is=1,nspin
@@ -175,42 +152,6 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
       end do
     end if
   end do
-
-  if(ilsda==0)then
-    do ik=info%ik_s,info%ik_e
-    do io=info%io_s,info%io_e
-      do is=1,nspin
-        call calc_allob(io+(is-1)*info%numo,io_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          rhobox(ix,iy,iz)=rhobox(ix,iy,iz)+tspsi_out%zwf(ix,iy,iz,is,io,ik,1)&
-                                             *conjg(tspsi_out%zwf(ix,iy,iz,is,io,ik,1))*rocc(io_allob,ik)*wtk(ik)
-        end do
-        end do
-        end do
-      end do
-    end do
-    end do
-  else if(ilsda==1)then
-    do ik=info%ik_s,info%ik_e
-    do io=info%io_s,info%io_e
-      do is=1,nspin
-        call calc_allob(io+(is-1)*info%numo,io_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          rhobox_s(ix,iy,iz,is)=rhobox_s(ix,iy,iz,is)+tspsi_out%zwf(ix,iy,iz,is,io,ik,1)&
-                                           *conjg(tspsi_out%zwf(ix,iy,iz,is,io,ik,1))*rocc(io_allob,ik)*wtk(ik)
-        end do
-        end do
-        end do
-      end do
-    end do
-    end do
-  end if
 
   do is=1,nspin
     deallocate(v(is)%f)

@@ -111,10 +111,10 @@ elp3(532)=elp3(532)+elp3(512)-elp3(511)
 if(iobnum.ge.1)then
   if(mod(itt,2)==1)then
     call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,spsi_in,spsi_out,sshtpsi,   &
-                ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
+                ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
   else
     call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,spsi_out,spsi_in,sshtpsi,   &
-                ppg,vlocal,vbox,num_kpoints_rd,k_rd,rhobox,rhobox_s,zc,ihpsieff,rocc,wtk,iparaway_ob)
+                ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
   end if
 end if
 
