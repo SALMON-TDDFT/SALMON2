@@ -17,9 +17,10 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
-use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil
+use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use density_matrix, only: calc_density
 use misc_routines, only: get_wtime
 use inputoutput
 use taylor_sub
@@ -53,6 +54,9 @@ complex(8) :: shtpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_st
 
 complex(8) :: cbox1,cbox2,cbox3
 integer :: is
+
+type(s_scalar),allocatable :: srho(:,:)
+type(s_scalar),allocatable :: srho_s(:,:)
 
 elp3(511)=get_wtime()
 
@@ -157,28 +161,55 @@ end if
 elp3(513)=get_wtime()
 elp3(533)=elp3(533)+elp3(513)-elp3(512)
 
-if(ilsda == 0) then
+  if(ilsda==0)then  
+    allocate(srho(1,1))
+    allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  else
+    allocate(srho_s(nspin,1))
+    allocate(srho_s(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(srho_s(2,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  end if
 
-  elp3(761)=get_wtime()
-  call comm_summation(rhobox,rho,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_grid)
-  elp3(762)=get_wtime()
-  elp3(760)=elp3(760)+elp3(762)-elp3(761)
-
-else if(ilsda==1)then
-
-  elp3(761)=get_wtime()
-  call comm_summation(rhobox_s,rho_s,mg_num(1)*mg_num(2)*mg_num(3)*2,nproc_group_grid)
-!$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
-    rho(ix,iy,iz)=rho_s(ix,iy,iz,1)+rho_s(ix,iy,iz,2)
-  end do
-  end do
-  end do
-  elp3(762)=get_wtime()
-  elp3(760)=elp3(760)+elp3(762)-elp3(761)
-end if
+  if(mod(itt,2)==1)then
+    if(ilsda==0)then
+      call calc_density(srho,spsi_out,info,mg,nspin)
+    else
+      call calc_density(srho_s,spsi_out,info,mg,nspin)
+    end if
+  else
+    if(ilsda==0)then
+      call calc_density(srho,spsi_in,info,mg,nspin)
+    else
+      call calc_density(srho_s,spsi_in,info,mg,nspin)
+    end if
+  end if
+  
+  if(ilsda==0)then  
+!$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    deallocate(srho(1,1)%f)
+    deallocate(srho)
+  else if(ilsda==1)then
+!$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
+      rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
+      rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    deallocate(srho_s(1,1)%f)
+    deallocate(srho_s(2,1)%f)
+    deallocate(srho_s)
+  end if
 
   elp3(515)=get_wtime()
    if(itt/=1)then
