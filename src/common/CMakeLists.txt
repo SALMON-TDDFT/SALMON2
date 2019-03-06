@@ -8,6 +8,7 @@ set(SOURCES
    check_corrkob.f90
    check_mg.f90
    check_ng.f90
+   check_numcpu.f90
    hpsi.f90
    inner_product.f90
    inner_product3.f90
