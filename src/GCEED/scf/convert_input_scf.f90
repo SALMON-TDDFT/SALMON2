@@ -178,7 +178,7 @@ nproc_Mxin_s = nproc_domain_s
 
 if(nproc_ob==0.and.nproc_mxin(1)==0.and.nproc_mxin(2)==0.and.nproc_mxin(3)==0.and.  &
                    nproc_mxin_s(1)==0.and.nproc_mxin_s(2)==0.and.nproc_mxin_s(3)==0) then
-  call set_numcpu_scf
+  call set_numcpu_scf(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
 else
   call check_numcpu
 end if
