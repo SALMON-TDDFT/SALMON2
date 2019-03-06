@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+module check_numcpu_sub
+  implicit none
+
+contains
+
 subroutine check_numcpu(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
   use inputoutput, only: nproc_k,nproc_ob
   use salmon_parallel, only: nproc_size_global
@@ -57,3 +62,5 @@ subroutine check_numcpu(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
   nproc_mxin_s_dm(1:3)=nproc_mxin_s(1:3)/nproc_mxin(1:3)
   
 end subroutine check_numcpu
+
+end module check_numcpu_sub
