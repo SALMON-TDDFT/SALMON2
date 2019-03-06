@@ -13,7 +13,12 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine set_numcpu_scf(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+module set_numcpu
+  implicit none
+
+contains
+
+subroutine set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
   use inputoutput, only: nproc_k,nproc_ob
   use salmon_parallel, only: nproc_size_global
   implicit none
@@ -105,4 +110,6 @@ subroutine set_numcpu_scf(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
   nproc_mxin_s(1:3)=nproc_mxin_tmp(1:3)
   nproc_mxin_s_dm(1:3)=nproc_mxin_s(1:3)/nproc_mxin(1:3)
   
-end subroutine set_numcpu_scf
+end subroutine set_numcpu_gs
+
+end module set_numcpu

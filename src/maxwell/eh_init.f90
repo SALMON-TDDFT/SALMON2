@@ -1547,6 +1547,7 @@ end subroutine eh_find_point
 subroutine eh_prep_GCEED(grid,tmp)
   use inputoutput,       only: nproc_domain,nproc_domain_s,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
   use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global
+  use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_Mxin,nproc_Mxin_s,nproc_Mxin_mul,nproc_Mxin_mul_s_dm,nproc_Mxin_s_dm,&
                                k_sta,k_end,k_num,num_kpoints_3d,num_kpoints_rd,&
                                rLsize,Harray,Hgs,Hvol,imesh_oddeven,&
@@ -1570,7 +1571,7 @@ subroutine eh_prep_GCEED(grid,tmp)
   num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
   nproc_Mxin=nproc_domain
   nproc_Mxin_s=nproc_domain_s
-  call set_numcpu_scf
+  call set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
   nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
   nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
   call make_new_world
