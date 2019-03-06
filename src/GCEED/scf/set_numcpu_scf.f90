@@ -16,7 +16,6 @@
 subroutine set_numcpu_scf
   use salmon_parallel, only: nproc_size_global
   use scf_data
-  use new_world_sub
   implicit none
   integer :: ii
   integer :: nproc_size_global_tmp
