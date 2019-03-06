@@ -71,11 +71,7 @@ nproc_Mxin_s = nproc_domain_s
 
 if(nproc_ob==0.and.nproc_mxin(1)==0.and.nproc_mxin(2)==0.and.nproc_mxin(3)==0.and.  &
                    nproc_mxin_s(1)==0.and.nproc_mxin_s(2)==0.and.nproc_mxin_s(3)==0) then
-  if(ilsda==0)then
-    call set_numcpu_rt
-  else if(ilsda==1)then
-    call set_numcpu_rt_sp
-  end if
+  call set_numcpu_rt(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
 else
   call check_numcpu
 end if

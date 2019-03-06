@@ -13,11 +13,13 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine set_numcpu_rt
+subroutine set_numcpu_rt(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+  use inputoutput, only: nproc_k,nproc_ob
   use salmon_parallel, only: nproc_size_global
-  use scf_data
-  use new_world_sub
   implicit none
+  integer,intent(out) :: nproc_mxin(3)
+  integer,intent(out) :: nproc_mxin_s(3)
+  integer,intent(out) :: nproc_mxin_s_dm(3)
   integer :: ii
   integer :: nproc_size_global_tmp
   integer :: nproc_ob_tmp
