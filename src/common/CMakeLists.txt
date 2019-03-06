@@ -17,6 +17,7 @@ set(SOURCES
    set_isstaend.f90
    stencil.f90
    update_overlap.f90
+   set_numcpu.f90
    structures.f90
    density_matrix.f90
    pack_unpack.f90
