@@ -17,6 +17,7 @@ subroutine convert_input_scf(file_atoms_coo)
 use salmon_global
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_bcast
+use check_numcpu_sub
 use set_numcpu, only: set_numcpu_gs
 use inputoutput
 use scf_data
@@ -181,7 +182,7 @@ if(nproc_ob==0.and.nproc_mxin(1)==0.and.nproc_mxin(2)==0.and.nproc_mxin(3)==0.an
                    nproc_mxin_s(1)==0.and.nproc_mxin_s(2)==0.and.nproc_mxin_s(3)==0) then
   call set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
 else
-  call check_numcpu
+  call check_numcpu(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
 end if
 
 nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
