@@ -25,7 +25,6 @@ set(SOURCES
     init_wf.f90
     init_k_rd.f90
     laplacianh.f90
-    nabla.f90
     OUT_IN_data.f90
     psl.f90
     prep_poisson_fft.f90
