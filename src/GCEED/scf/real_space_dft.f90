@@ -586,7 +586,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)
+        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
         info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
       end do
     end do
