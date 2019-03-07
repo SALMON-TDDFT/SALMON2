@@ -18,6 +18,7 @@ subroutine writeestatic(lg)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use writefile3d
   use scf_data
   use allocate_mat_sub
   implicit none

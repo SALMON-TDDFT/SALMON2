@@ -15,6 +15,11 @@
 !
 !======================================================================
 !======================================================================
+module writefile3d
+  implicit none
+
+contains
+
 subroutine writevtk(lg,fp,suffix,rmat,hgs,igc_is,igc_ie,gridcoo)
   use inputoutput, only: au_length_aa
   use structures, only: s_rgrid
@@ -65,3 +70,4 @@ subroutine writevtk(lg,fp,suffix,rmat,hgs,igc_is,igc_ie,gridcoo)
 
 end subroutine writevtk
 
+end module writefile3d

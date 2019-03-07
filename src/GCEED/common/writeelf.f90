@@ -17,6 +17,7 @@
 !======================================================================
 subroutine writeelf(lg)
   use structures, only: s_rgrid
+  use writefile3d
   use scf_data
   use allocate_mat_sub
   implicit none
