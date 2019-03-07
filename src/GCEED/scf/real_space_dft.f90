@@ -1325,7 +1325,7 @@ if(out_psi=='y') then
 end if
 
 if(out_dns=='y') then
-  call writedns
+  call writedns(lg)
 end if
 
 if(out_dos=='y') then
@@ -1344,7 +1344,7 @@ if(out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
   call calcELF
-  call writeelf
+  call writeelf(lg)
   deallocate(elf)
 end if
 

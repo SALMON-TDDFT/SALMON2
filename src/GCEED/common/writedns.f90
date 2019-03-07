@@ -14,13 +14,16 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine writedns
+subroutine writedns(lg)
   use inputoutput, only: au_length_aa
+  use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use writefile3d
   use scf_data
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: lg
   integer :: ix,iy,iz
   character(30) :: suffix
   character(30) :: phys_quantity
@@ -71,7 +74,7 @@ subroutine writedns
   else if(format3d=='cube')then
     call writecube(103,suffix,phys_quantity,matbox_l2)
   else if(format3d=='vtk')then
-    call writevtk(103,suffix,matbox_l2)
+    call writevtk(lg,103,suffix,matbox_l2,hgs,igc_is,igc_ie,gridcoo)
   end if
 
   if(iSCFRT==2)then
@@ -115,7 +118,7 @@ subroutine writedns
     else if(format3d=='cube')then
       call writecube(103,suffix,phys_quantity,matbox_l2)
     else if(format3d=='vtk')then
-      call writevtk(103,suffix,matbox_l2)
+      call writevtk(lg,103,suffix,matbox_l2,hgs,igc_is,igc_ie,gridcoo)
     end if
   end if
  

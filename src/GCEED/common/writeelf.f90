@@ -15,10 +15,13 @@
 !
 !======================================================================
 !======================================================================
-subroutine writeelf
+subroutine writeelf(lg)
+  use structures, only: s_rgrid
+  use writefile3d
   use scf_data
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: lg
   character(30) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
@@ -37,7 +40,7 @@ subroutine writeelf
   else if(format3d=='cube')then
     call writecube(103,suffix,phys_quantity,elf)
   else if(format3d=='vtk')then
-    call writevtk(103,suffix,elf)
+    call writevtk(lg,103,suffix,elf,hgs,igc_is,igc_ie,gridcoo)
   end if
   
 end subroutine writeelf

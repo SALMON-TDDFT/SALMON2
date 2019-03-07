@@ -1424,15 +1424,15 @@ end do
 
   do itt=0,0
     if(out_dns_rt=='y')then
-      call writedns
+      call writedns(lg)
     end if
     if(out_elf_rt=='y')then
       call calcELF
-      call writeelf
+      call writeelf(lg)
     end if
     if(out_estatic_rt=='y')then
       call calcEstatic
-      call writeestatic
+      call writeestatic(lg)
     end if
   end do
 
