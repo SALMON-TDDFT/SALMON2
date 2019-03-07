@@ -800,9 +800,11 @@ END subroutine Real_Time_DFT
 !=======================================================================
 
 SUBROUTINE Time_Evolution(lg,mg,ng)
-use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil
-use salmon_parallel, only: nproc_id_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
+use structures, only: s_system,s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
+use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
+                           nproc_group_h, nproc_group_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation
+use density_matrix, only: calc_density
 use misc_routines, only: get_wtime
 use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
@@ -812,6 +814,7 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
+type(s_system) :: system
 type(s_wf_info) :: info
 type(s_stencil) :: stencil
 type(s_wavefunction) :: spsi_in,spsi_out
@@ -825,7 +828,7 @@ integer:: idensity, idiffDensity, ielf
 integer :: iob_allob
 real(8) :: absr2
 integer :: j,ind
-integer :: is
+integer :: is,jspin
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -834,6 +837,153 @@ real(8)    :: rbox_arrayq2(3,3)
 real(8)    :: rbox1q,rbox1q12,rbox1q23,rbox1q31
 
 complex(8), allocatable :: shtpsi(:,:,:,:,:)
+
+type(s_scalar),allocatable :: srho(:,:)
+type(s_scalar),allocatable :: srho_s(:,:)
+
+  if(ispin==0)then
+    nspin=1
+  else
+    nspin=2
+  end if
+
+  system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+  system%nspin = nspin
+  system%no = itotMST
+  system%nk = num_kpoints_rd
+  system%nion = MI
+  system%Hvol = Hvol
+  system%Hgs = Hgs
+  allocate(system%Rion(3,system%nion) &
+          ,system%wtk(system%nk) &
+          ,system%esp(system%no,system%nk,system%nspin) &
+          ,system%rocc(system%no,system%nk,system%nspin))
+  system%wtk = wtk
+  system%rion = rion
+
+  system%rocc(:,:,1) = rocc(:,:)
+
+  info%im_s=1
+  info%im_e=1
+  info%numm=1
+  info%ik_s=k_sta
+  info%ik_e=k_end
+  info%numk=k_num
+  info%io_s=1
+  info%io_e=iobnum/nspin
+  info%numo=iobnum/nspin
+
+  info%if_divide_rspace = nproc_mxin_mul.ne.1
+  info%irank_r(1) = iup_array(1)
+  info%irank_r(2) = idw_array(1)
+  info%irank_r(3) = jup_array(1)
+  info%irank_r(4) = jdw_array(1)
+  info%irank_r(5) = kup_array(1)
+  info%irank_r(6) = kdw_array(1)
+  info%icomm_r = nproc_group_korbital
+  info%icomm_ko = nproc_group_rho
+  info%icomm_rko = nproc_group_global
+
+  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+          ,info%io_tbl(info%io_s:info%io_e))
+  do iob=info%io_s,info%io_e
+    call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+    info%io_tbl(iob) = jj
+  end do
+
+  do ik=info%ik_s,info%ik_e
+    do iob=info%io_s,info%io_e
+      do jspin=1,system%nspin
+        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+        info%occ(iob,ik,jspin) = system%rocc(jj,ik,1)*system%wtk(ik)
+      end do
+    end do
+  end do
+
+  allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
+                       mg%is_array(2):mg%ie_array(2),  &
+                       mg%is_array(3):mg%ie_array(3),  &
+                       1:nspin,  &
+                       info%io_s:info%io_e,  &
+                       info%ik_s:info%ik_e,  &
+                       1))
+  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        1:nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+  allocate(sshtpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        1:nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_out%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        sshtpsi%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+
+  if(iperiodic==3) allocate(stencil%kAc(info%ik_s:info%ik_e,3))
+
+  stencil%lap0 = -0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+
+  if(iperiodic==0)then
+    do j=1,3
+      do ind=1,4
+        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+        stencil%nabt(ind,j) = 0.d0
+      end do
+    end do
+  else if(iperiodic==3)then
+    do j=1,3
+      do ind=1,4
+        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
+        stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
+      end do
+    end do
+  end if
 
 if(comm_is_root(nproc_id_global).and.iflag_md==1)then
   open(15,file="distance.data")
@@ -879,78 +1029,64 @@ allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
   allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
-if(ilsda==0)then
-!$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
-    rhobox(ix,iy,iz) = 0.d0
-  end do
-  end do
-  end do
-  
-  do iik=k_sta,k_end
-  do iob=1,iobnum
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
-!$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
-      rhobox(ix,iy,iz)=rhobox(ix,iy,iz)+zpsi_in(ix,iy,iz,iob,iik)*conjg(zpsi_in(ix,iy,iz,iob,iik))*rocc(iob_allob,iik)*wtk(iik)
-    end do
-    end do
-    end do
-  end do
-  end do
-  call comm_summation(rhobox,rho,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_grid)
-else if(ilsda==1)then
-!$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
-    rhobox(ix,iy,iz) = 0.d0
-    rhobox_s(ix,iy,iz,1:2) = 0.d0
-  end do
-  end do
-  end do
-  
-  do iik=k_sta,k_end
-  do iob=1,iobnum
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
-    if(iob_allob<=MST(1))then
-!$OMP parallel do private(iz,iy,ix)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
-        rhobox_s(ix,iy,iz,1)=rhobox_s(ix,iy,iz,1)   &
-                               +zpsi_in(ix,iy,iz,iob,iik)*conjg(zpsi_in(ix,iy,iz,iob,iik))*rocc(iob_allob,iik)*wtk(iik)
-      end do
-      end do
-      end do
-    else
-!$OMP parallel do private(iz,iy,ix)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
-        rhobox_s(ix,iy,iz,2)=rhobox_s(ix,iy,iz,2)   &
-                               +zpsi_in(ix,iy,iz,iob,iik)*conjg(zpsi_in(ix,iy,iz,iob,iik))*rocc(iob_allob,iik)*wtk(iik)
-      end do
-      end do
-      end do
-    end if
-  end do
-  end do
-  call comm_summation(rhobox_s,rho_s,mg_num(1)*mg_num(2)*mg_num(3)*2,nproc_group_grid)
-!$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
-    rho(ix,iy,iz)=rho_s(ix,iy,iz,1)+rho_s(ix,iy,iz,2)
-  end do
-  end do
-  end do
-end if
 
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob+(is-1)*info%numo,ik)
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+
+  if(ilsda==0)then  
+    allocate(srho(1,1))
+    allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  else
+    allocate(srho_s(nspin,1))
+    allocate(srho_s(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(srho_s(2,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  end if
+
+  if(ilsda==0)then
+    call calc_density(srho,spsi_in,info,mg,nspin)
+  else
+    call calc_density(srho_s,spsi_in,info,mg,nspin)
+  end if
+
+  if(ilsda==0)then  
+!$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    deallocate(srho(1,1)%f)
+    deallocate(srho)
+  else if(ilsda==1)then
+!$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
+      rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
+      rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    deallocate(srho_s(1,1)%f)
+    deallocate(srho_s(2,1)%f)
+    deallocate(srho_s)
+  end if
+  
 !$OMP parallel do private(iz,iy,ix)
 do iz=mg_sta(3),mg_end(3)
 do iy=mg_sta(2),mg_end(2)
@@ -1412,116 +1548,6 @@ elp3(406)=get_wtime()
 call taylor_coe
 
 elp3(407)=get_wtime()
-
-  if(ispin==0)then
-    nspin=1
-  else
-    nspin=2
-  end if
-  
-  info%im_s=1
-  info%im_e=1
-  info%numm=1
-  info%ik_s=k_sta
-  info%ik_e=k_end
-  info%numk=k_num
-  info%io_s=1
-  info%io_e=iobnum/nspin
-  info%numo=iobnum/nspin
-
-  info%if_divide_rspace = nproc_mxin_mul.ne.1
-  info%irank_r(1) = iup_array(1)
-  info%irank_r(2) = idw_array(1)
-  info%irank_r(3) = jup_array(1)
-  info%irank_r(4) = jdw_array(1)
-  info%irank_r(5) = kup_array(1)
-  info%irank_r(6) = kdw_array(1)
-  info%icomm_r = nproc_group_korbital
-
-  allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
-                       mg%is_array(2):mg%ie_array(2),  &
-                       mg%is_array(3):mg%ie_array(3),  &
-                       1:nspin,  &
-                       info%io_s:info%io_e,  &
-                       info%ik_s:info%ik_e,  &
-                       1))
-  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
-                        mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),  &
-                        1:nspin,  &
-                        info%io_s:info%io_e,  &
-                        info%ik_s:info%ik_e,  &
-                        1))
-  allocate(sshtpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
-                        mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),  &
-                        1:nspin,  &
-                        info%io_s:info%io_e,  &
-                        info%ik_s:info%ik_e,  &
-                        1))
-
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi_out%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        sshtpsi%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-
-  if(iperiodic==3) allocate(stencil%kAc(info%ik_s:info%ik_e,3))
-
-  stencil%lap0 = -0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
-
-  if(iperiodic==0)then
-    do j=1,3
-      do ind=1,4
-        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
-        stencil%nabt(ind,j) = 0.d0
-      end do
-    end do
-  else if(iperiodic==3)then
-    do j=1,3
-      do ind=1,4
-        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
-        stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
-      end do
-    end do
-  end if
 
 if(itotNtime-Miter_rt<=10000)then
 

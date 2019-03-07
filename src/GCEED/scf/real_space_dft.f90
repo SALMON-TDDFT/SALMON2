@@ -81,6 +81,7 @@ type(s_system) :: system
 type(s_stencil) :: stencil
 type(s_scalar) :: sVh
 type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
+type(s_fourier_grid) :: fg
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -382,13 +383,22 @@ else
   nspin=2
 end if
 
+system%iperiodic = iperiodic
 system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
 system%nspin = nspin
 system%no = itotMST
 system%nk = num_kpoints_rd
 system%nion = MI
+
 system%Hvol = Hvol
 system%Hgs = Hgs
+
+system%al = 0d0
+system%al(1,1) = lg_num(1)*Hgs(1)
+system%al(2,2) = lg_num(2)*Hgs(2)
+system%al(3,3) = lg_num(3)*Hgs(3)
+system%det_al = lg_num(1)*lg_num(2)*lg_num(3) * Hvol
+
 allocate(system%Rion(3,system%nion) &
         ,system%wtk(system%nk) &
         ,system%esp(system%no,system%nk,system%nspin) &
@@ -462,6 +472,24 @@ if(iperiodic==3) then
 !  do jj=1,3
 !    stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
 !  end do
+end if
+
+if(iperiodic==3)then
+  if(iflag_hartree/=2) stop "s_fourier_grid: iflag_hartree/=2"
+  jj = system%ngrid/nproc_size_global
+  fg%NG_s = nproc_id_global*jj+1
+  fg%NG_e = (nproc_id_global+1)*jj
+  if(nproc_id_global==nproc_size_global-1) fg%NG_e = system%ngrid
+  fg%icomm_fourier = nproc_group_global
+  fg%nGzero = nGzero
+  allocate(fg%Gx(system%ngrid))
+  allocate(fg%Gy(system%ngrid))
+  allocate(fg%Gz(system%ngrid))
+  allocate(fg%rhoion_G(system%ngrid))
+  fg%Gx = Gx
+  fg%Gy = Gy
+  fg%Gz = Gz
+  fg%rhoion_G = rhoion_G
 end if
 
 select case(iperiodic)
@@ -1104,7 +1132,8 @@ DFT_Iteration : do iter=1,iDiter(img)
   end if
   sVh%f = Vh
   call calc_eigen_energy(system,spsi,shpsi,info,mg,V_local,stencil,ppg)
-  call calc_Total_Energy(Etot_test,Exc,system,info,mg,ng,stencil,pp,ppg,srho,sVh,sVxc)
+  call calc_Total_Energy(Etot_test,Exc,system,info,ng,pp,srho,sVh,sVxc,fg)
+  if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",Etot_test*2d0*Ry,Etot*2d0*Ry
   if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
 
   select case(convergence)

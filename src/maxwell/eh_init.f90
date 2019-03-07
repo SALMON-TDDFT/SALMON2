@@ -1547,6 +1547,8 @@ end subroutine eh_find_point
 subroutine eh_prep_GCEED(grid,tmp)
   use inputoutput,       only: nproc_domain,nproc_domain_s,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
   use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global
+  use structures,        only: s_rgrid
+  use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_Mxin,nproc_Mxin_s,nproc_Mxin_mul,nproc_Mxin_mul_s_dm,nproc_Mxin_s_dm,&
                                k_sta,k_end,k_num,num_kpoints_3d,num_kpoints_rd,&
                                rLsize,Harray,Hgs,Hvol,imesh_oddeven,&
@@ -1562,6 +1564,7 @@ subroutine eh_prep_GCEED(grid,tmp)
   use persistent_comm,   only: init_persistent_requests
   use salmon_maxwell,    only: fdtd_grid,fdtd_tmp
   implicit none
+  type(s_rgrid)    :: lg,mg,ng
   type(fdtd_grid)  :: grid
   type(fdtd_tmp)   :: tmp
   
@@ -1570,7 +1573,7 @@ subroutine eh_prep_GCEED(grid,tmp)
   num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
   nproc_Mxin=nproc_domain
   nproc_Mxin_s=nproc_domain_s
-  call set_numcpu_scf
+  call set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
   nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
   nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
   call make_new_world
@@ -1580,16 +1583,16 @@ subroutine eh_prep_GCEED(grid,tmp)
   rLsize(:,1)=grid%rlsize(:); Harray(:,1)=grid%hgs(:);
   Hgs(:)=Harray(:,1); Hvol=Hgs(1)*Hgs(2)*Hgs(3);
   call set_imesh_oddeven(1)
-  call setlg(lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori, &
-             Hgs,Nd,rLsize(:,1),imesh_oddeven,iperiodic)
+  call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+             Hgs,Nd,rLsize(:,1),imesh_oddeven,iperiodic,1)
   allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1), &
            inum_Mxin(3,0:nproc_size_global-1))
-  call setmg(mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin, &
-             lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential)
+  call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
+             lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,1)
   allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
   allocate(inum_Mxin_s(3,0:nproc_size_global-1))
-  call setng(ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-             nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
+  call setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
+             nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,1)
   grid%lg_sta(:)=lg_sta(:); grid%lg_end(:)=lg_end(:);
   grid%ng_sta(:)=ng_sta(:); grid%ng_end(:)=ng_end(:);
   

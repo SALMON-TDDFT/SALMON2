@@ -17,6 +17,7 @@ subroutine convert_input_rt(Ntime)
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use inputoutput
+use set_numcpu, only: set_numcpu_rt
 use scf_data
 use new_world_sub
 implicit none
@@ -71,11 +72,7 @@ nproc_Mxin_s = nproc_domain_s
 
 if(nproc_ob==0.and.nproc_mxin(1)==0.and.nproc_mxin(2)==0.and.nproc_mxin(3)==0.and.  &
                    nproc_mxin_s(1)==0.and.nproc_mxin_s(2)==0.and.nproc_mxin_s(3)==0) then
-  if(ilsda==0)then
-    call set_numcpu_rt
-  else if(ilsda==1)then
-    call set_numcpu_rt_sp
-  end if
+  call set_numcpu_rt(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
 else
   call check_numcpu
 end if
