@@ -15,7 +15,6 @@ set(SOURCES
     calcVpsl_periodic_FFTE.f90
     check_cep.f90
     check_fourier.f90
-    check_numcpu.f90
     conv_p0.f90
     conv_p.f90
     exc_cor_ns.f90
@@ -45,7 +44,6 @@ set(SOURCES
     writeelf.f90
     writeestatic.f90
     writepsi.f90
-    writevtk.f90
     ylm.f90
     )
 

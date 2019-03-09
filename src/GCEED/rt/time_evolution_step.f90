@@ -549,19 +549,19 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
 
   if(out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call writedns
+      call writedns(lg)
     end if
   end if
   if(out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call calcELF
-      call writeelf
+      call writeelf(lg)
     end if
   end if
   if(out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
       call calcEstatic
-      call writeestatic
+      call writeestatic(lg)
     end if
   end if
 

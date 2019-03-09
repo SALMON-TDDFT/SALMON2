@@ -586,7 +586,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)
+        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
         info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
       end do
     end do
@@ -1325,7 +1325,7 @@ if(out_psi=='y') then
 end if
 
 if(out_dns=='y') then
-  call writedns
+  call writedns(lg)
 end if
 
 if(out_dos=='y') then
@@ -1344,7 +1344,7 @@ if(out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
   call calcELF
-  call writeelf
+  call writeelf(lg)
   deallocate(elf)
 end if
 
