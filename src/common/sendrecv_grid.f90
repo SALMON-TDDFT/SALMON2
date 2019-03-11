@@ -338,14 +338,14 @@ module sendrecv_grid
       srg%ireq(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%zbuf, &
         srg%neig(jdir, jside), &
-        tag(jdir, jside), &
+        get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
       call alloc_cache(jdir, jside, itype_recv)
       srg%ireq(jdir, jside, itype_recv) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%zbuf, &
         srg%neig(jdir, jside), &
-        tag(jdir, flip(jside)), & ! `jside` in sender
+        get_tag(jdir, flip(jside)), & ! `jside` in sender
         srg%icomm)
     end subroutine init_pcomm
 
