@@ -1149,7 +1149,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     sVxc(1)%f = Vxc
   end if
   sVh%f = Vh
-  call calc_eigen_energy(system,spsi,shpsi,info,mg,V_local,stencil,ppg)
+  call calc_eigen_energy(system,spsi,shpsi,info,mg,V_local,stencil,srg,ppg)
   call calc_Total_Energy(Etot_test,Exc,system,info,ng,pp,srho,sVh,sVxc,fg)
   if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",Etot_test*2d0*Ry,Etot*2d0*Ry
   if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)

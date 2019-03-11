@@ -57,7 +57,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     if(info%if_divide_rspace) then
       call update_overlap_R(tpsi%rwf,mg%is_array,mg%ie_array,norb,Nd & !?????????
                            ,mg%is,mg%ie,info%irank_r,info%icomm_r)
-      !call update_overlap_real8(stencil%srg, mg, tpsi%rwf)
+      !call update_overlap_real8(srg, mg, tpsi%rwf)
     end if
   ! stencil
     do im=im_s,im_e
@@ -80,7 +80,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     if(info%if_divide_rspace) then
       call update_overlap_C(tpsi%zwf,mg%is_array,mg%ie_array,norb,Nd & !????????
                            ,mg%is,mg%ie,info%irank_r,info%icomm_r)
-      !call update_overlap_complex8(stencil%srg, mg, tpsi%rwf)
+      !call update_overlap_complex8(srg, mg, tpsi%rwf)
     end if
   ! stencil
     select case(3) ! select case(mg%ndir) !????????

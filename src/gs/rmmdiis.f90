@@ -154,7 +154,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -213,7 +213,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -281,7 +281,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -320,7 +320,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
     end do
     end do
 
-    call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+    call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -369,7 +369,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -458,7 +458,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
 
 end subroutine
 
-subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub, only: hpsi
   implicit none
