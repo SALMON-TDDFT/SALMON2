@@ -200,8 +200,8 @@ module sendrecv_grid
       implicit none
       integer, intent(in) :: jdir, jside, jtype
       integer :: is_b(3), ie_b(3)
-      is_b(1:3) = srg%is_block(idir, iside, itype, 1:3)
-      ie_b(1:3) = srg%ie_block(idir, iside, itype, 1:3)
+      is_b(1:3) = srg%is_block(jdir, jside, jtype, 1:3)
+      ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
       allocate(srg%cache(idir, iside, itype)%rbuf( &
         is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
       return
