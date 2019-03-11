@@ -38,7 +38,7 @@ subroutine writeelf(lg)
     header_unit = "none"
     call writeavs(103,suffix,header_unit,elf)
   else if(format3d=='cube')then
-    call writecube(103,suffix,phys_quantity,elf)
+    call writecube(lg,103,suffix,phys_quantity,elf,hgs,igc_is,igc_ie,gridcoo)
   else if(format3d=='vtk')then
     call writevtk(lg,103,suffix,elf,hgs,igc_is,igc_ie,gridcoo)
   end if

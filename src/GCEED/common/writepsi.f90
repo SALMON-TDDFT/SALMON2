@@ -15,15 +15,18 @@
 !
 !======================================================================
 !======================================================================
-subroutine writepsi
+subroutine writepsi(lg)
   use inputoutput, only: au_length_aa
+  use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
+  use writefile3d
   use calc_myob_sub
   use check_corrkob_sub
   use scf_data
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: lg
   integer :: iob,ix,iy,iz
   integer :: p0,iob_myob,icheck_corrkob
   character(30) :: suffix
@@ -75,7 +78,7 @@ subroutine writepsi
         header_unit = "A**(-3/2)"
         call writeavs(103,suffix,header_unit,matbox_l2)
       else if(format3d=='cube')then
-        call writecube(103,suffix,phys_quantity,matbox_l2)
+        call writecube(lg,103,suffix,phys_quantity,matbox_l2,hgs,igc_is,igc_ie,gridcoo)
       end if
     end do
   end if

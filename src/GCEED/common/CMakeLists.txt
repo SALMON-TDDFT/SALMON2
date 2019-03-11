@@ -39,7 +39,6 @@ set(SOURCES
     storevpp.f90
     total_energy_periodic.f90
     writeavs.f90
-    writecube.f90
     writedns.f90
     writeelf.f90
     writeestatic.f90

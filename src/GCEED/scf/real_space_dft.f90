@@ -1321,7 +1321,7 @@ end do Structure_Optimization_Iteration
 call write_eigen
 
 if(out_psi=='y') then
-  call writepsi
+  call writepsi(lg)
 end if
 
 if(out_dns=='y') then
