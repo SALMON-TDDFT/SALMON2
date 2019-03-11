@@ -21,16 +21,18 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
+SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   use structures
   use update_overlap_sub
   use stencil_sub
+  use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   integer       ,intent(in)  :: Nspin
   type(s_wf_info),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
   type(s_scalar) ,intent(in) :: V_local(Nspin)
   type(s_stencil),intent(in) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg
   type(s_pp_grid),intent(in) :: ppg
   type(s_wavefunction)       :: tpsi,htpsi
   type(s_wavefunction),optional :: ttpsi

@@ -471,7 +471,7 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
   type(s_stencil) :: stencil
   type(s_pp_grid) :: ppg
 
-  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
 end subroutine hpsi_test_diis
 

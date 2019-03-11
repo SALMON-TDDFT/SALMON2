@@ -154,7 +154,7 @@ subroutine dtcg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob
       end do
       end do
  
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
  
   !$OMP parallel do private(iz,iy,ix) 
       do iz=mg%is(3),mg%ie(3)
@@ -262,7 +262,7 @@ subroutine dtcg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob
         end do
         end do
 
-        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   
   !$OMP parallel do private(iz,iy,ix) 
         do iz=mg%is(3),mg%ie(3)

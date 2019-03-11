@@ -97,7 +97,7 @@ CONTAINS
     allocate(wrk1(no,nk),wrk2(no,nk))
     wrk1 = 0d0
 
-    call hpsi(psi,hpsi_tmp,info,mg,V_local,Nspin,stencil,ppg)
+    call hpsi(psi,hpsi_tmp,info,mg,V_local,Nspin,stencil,srg,ppg)
 
     if(allocated(psi%rwf)) then
       do ispin=1,Nspin

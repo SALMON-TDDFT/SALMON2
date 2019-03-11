@@ -117,7 +117,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
 
   do nn=1,n_hamil
     if(mod(nn,2)==1)then
-      call hpsi(tspsi_in,sshtpsi,info,mg,v,nspin,stencil,ppg)
+      call hpsi(tspsi_in,sshtpsi,info,mg,v,nspin,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -134,7 +134,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
       end do
       end do
     else
-      call hpsi(sshtpsi,tspsi_in,info,mg,v,nspin,stencil,ppg)
+      call hpsi(sshtpsi,tspsi_in,info,mg,v,nspin,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e

@@ -167,7 +167,7 @@ subroutine subspace_diag(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,iparaway_ob,io
           end do
           end do
           end do
-          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)

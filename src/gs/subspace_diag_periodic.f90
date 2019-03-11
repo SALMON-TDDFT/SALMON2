@@ -191,7 +191,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,ipara
           end do
           end do
           end do
-          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)

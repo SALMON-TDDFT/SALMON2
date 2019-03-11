@@ -182,7 +182,7 @@ subroutine gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda
         end do
       end if
 
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
       
     !$omp parallel do private(iz,iy,ix) collapse(2) 
       do iz=mg%is(3),mg%ie(3)
@@ -367,7 +367,7 @@ subroutine gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda
           end do
         end if
 
-        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)

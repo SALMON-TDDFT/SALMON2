@@ -253,7 +253,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda
       end do
       end do
    
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg,sttpsi)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg,sttpsi)
     
   !$OMP parallel do private(iz,iy,ix) 
       do iz=mg%is(3),mg%ie(3)
@@ -393,7 +393,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda
       end do
       end do
 
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg,sttpsi)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg,sttpsi)
 
   !$OMP parallel do private(iz,iy,ix) 
       do iz=mg%is(3),mg%ie(3)
