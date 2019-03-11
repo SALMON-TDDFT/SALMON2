@@ -44,8 +44,6 @@ module structures
   end type s_pcomm_cache
 
   type s_sendrecv_grid
-    ! Size of grid system
-    type(s_rgrid) :: rg
     ! Number of orbitals (4-th dimension of grid)
     integer :: nb
     ! Communicator
