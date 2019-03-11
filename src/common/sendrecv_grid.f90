@@ -21,8 +21,6 @@ module sendrecv_grid
   implicit none
 
   public :: init_sendrecv_grid
-  public :: alloc_cache_real8
-  public :: alloc_cache_complex8
   public :: dealloc_cache
   public :: update_overlap
   public :: s_sendrecv_grid
@@ -49,11 +47,11 @@ module sendrecv_grid
 
   ! Prepare unique MPI tag number (3~8) for send/recv based on
   ! the communication direction (idir, iside) from the sender:
-  integer function tag(idir, iside)
+  integer function get_tag(idir, iside)
     implicit none
     integer, intent(in) :: idir, iside
-    tag = 2 * idir + iside
-  end function tag
+    get_tag = 2 * idir + iside
+  end function get_tag
 
   ! Initializing s_sendrecv_grid structure:
   ! NOTE:
@@ -118,46 +116,11 @@ module sendrecv_grid
     srg%icomm = icomm
     srg%myrank = myrank
     srg%ireq = -1
+    ! Flag for persistent communication
+    srg%pcomm_initialized = .false.
+
+    return
   end subroutine init_sendrecv_grid
-
-
-  ! Allocate cache region for persistent communication:
-  subroutine alloc_cache_real8(srg)
-    implicit none
-    type(s_sendrecv_grid), intent(inout) :: srg
-    integer :: idir, iside, itype, is_b(3), ie_b(3)
-
-    do idir = 1, 3 ! 1:x,2:y,3:z
-      do iside = 1, 2 ! 1:up,2:down
-        do itype = 1, 2 ! 1:send, 2:recv
-            is_b(1:3) = srg%is_block(idir, iside, itype, 1:3)
-            ie_b(1:3) = srg%ie_block(idir, iside, itype, 1:3)
-            allocate(srg%cache(idir, iside, itype)%dbuf( &
-              is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
-        end do
-      end do
-    end do
-    srg%pcomm_initialized = .false. ! Flag for persistent communication
-  end subroutine
-
-  ! Allocate cache region for persistent communication:
-  subroutine alloc_cache_complex8(srg)
-    implicit none
-    type(s_sendrecv_grid), intent(inout) :: srg
-    integer :: idir, iside, itype, is_b(3), ie_b(3)
-
-    do idir = 1, 3 ! 1:x,2:y,3:z
-      do iside = 1, 2 ! 1:up,2:down
-        do itype = 1, 2 ! 1:send, 2:recv
-            is_b(1:3) = srg%is_block(idir, iside, itype, 1:3)
-            ie_b(1:3) = srg%ie_block(idir, iside, itype, 1:3)
-            allocate(srg%cache(idir, iside, itype)%zbuf( &
-              is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
-        end do
-      end do
-    end do
-    srg%pcomm_initialized = .false. ! Flag for persistent communication
-  end subroutine
 
   subroutine dealloc_cache(srg)
     use salmon_communication, only: comm_free_reqs
@@ -233,21 +196,33 @@ module sendrecv_grid
 
     contains
 
+    subroutine alloc_cache(jdir, jside, jtype)
+      implicit none
+      integer :: is_b(3), ie_b(3)
+      is_b(1:3) = srg%is_block(idir, iside, itype, 1:3)
+      ie_b(1:3) = srg%ie_block(idir, iside, itype, 1:3)
+      allocate(srg%cache(idir, iside, itype)%rbuf( &
+        is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
+      return
+    end subroutine
+
     subroutine init_pcomm(jdir, jside)
       use salmon_communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
+      call alloc_cache(jdir, jside, itype_send)
       srg%ireq(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%dbuf, &
         srg%neig(jdir, jside), &
-        tag(jdir, jside), &
+        get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
+      call alloc_cache(jdir, jside, itype_recv)
       srg%ireq(jdir, jside, itype_recv) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%dbuf, &
         srg%neig(jdir, jside), &
-        tag(jdir, flip(jside)), & ! `jside` in sender
+        get_tag(jdir, flip(jside)), & ! `jside` in sender side
         srg%icomm)
     end subroutine init_pcomm
 
@@ -344,17 +319,29 @@ module sendrecv_grid
 
     contains
 
+    subroutine alloc_cache(jdir, jside, jtype)
+      implicit none
+      integer :: is_b(3), ie_b(3)
+      is_b(1:3) = srg%is_block(idir, iside, itype, 1:3)
+      ie_b(1:3) = srg%ie_block(idir, iside, itype, 1:3)
+      allocate(srg%cache(idir, iside, itype)%zbuf( &
+        is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
+      return
+    end subroutine
+
     subroutine init_pcomm(jdir, jside)
       use salmon_communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
+      call alloc_cache(jdir, jside, itype_send)
       srg%ireq(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%zbuf, &
         srg%neig(jdir, jside), &
         tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
+      call alloc_cache(jdir, jside, itype_recv)
       srg%ireq(jdir, jside, itype_recv) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%zbuf, &
         srg%neig(jdir, jside), &
