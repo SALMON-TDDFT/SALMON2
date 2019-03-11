@@ -51,6 +51,7 @@ module sendrecv_grid
     implicit none
     integer, intent(in) :: idir, iside
     get_tag = 2 * idir + iside
+    return
   end function get_tag
 
   ! Initializing s_sendrecv_grid structure:
@@ -108,7 +109,6 @@ module sendrecv_grid
     end do
 
     ! Assign to s_sendrecv_grid structure:
-    srg%rg = rg
     srg%nb = nb
     srg%neig = neig
     srg%is_block(:, :, :, :) = is_block
@@ -141,18 +141,20 @@ module sendrecv_grid
         end do
       end do
     end do
+
     return
   end subroutine
 
-  subroutine update_overlap_real8(srg, data)
+  subroutine update_overlap_real8(srg, rg, data)
     use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
+    type(s_rgrid), intent(in) :: rg
     real(8), intent(inout) :: data( &
-      srg%rg%is_array(1):srg%rg%ie_array(1), &
-      srg%rg%is_array(2):srg%rg%ie_array(2), &
-      srg%rg%is_array(3):srg%rg%ie_array(3), &
+      rg%is_array(1):rg%ie_array(1), &
+      rg%is_array(2):rg%ie_array(2), &
+      rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
     integer :: idir, iside
 
@@ -193,7 +195,8 @@ module sendrecv_grid
 
     if (.not. srg%pcomm_initialized) &
       srg%pcomm_initialized = .true. ! Update pcomm_initialized
-
+    
+    return
     contains
 
     subroutine alloc_cache(jdir, jside, jtype)
@@ -204,7 +207,6 @@ module sendrecv_grid
       ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
       allocate(srg%cache(jdir, jside, jtype)%dbuf( &
         is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
-      return
     end subroutine
 
     subroutine init_pcomm(jdir, jside)
@@ -268,15 +270,16 @@ module sendrecv_grid
   end subroutine update_overlap_real8
 
 
-  subroutine update_overlap_complex8(srg, data)
+  subroutine update_overlap_complex8(srg, rg, data)
     use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
+    type(s_rgrid), intent(in) :: rg
     complex(8), intent(inout) :: data( &
-      srg%rg%is_array(1):srg%rg%ie_array(1), &
-      srg%rg%is_array(2):srg%rg%ie_array(2), &
-      srg%rg%is_array(3):srg%rg%ie_array(3), &
+      rg%is_array(1):rg%ie_array(1), &
+      rg%is_array(2):rg%ie_array(2), &
+      rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
     integer :: idir, iside
 
@@ -318,6 +321,7 @@ module sendrecv_grid
     if (.not. srg%pcomm_initialized) &
       srg%pcomm_initialized = .true. ! Update pcomm_initialized
 
+    return
     contains
 
     subroutine alloc_cache(jdir, jside, jtype)
@@ -328,7 +332,6 @@ module sendrecv_grid
       ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
       allocate(srg%cache(jdir, jside, jtype)%zbuf( &
         is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
-      return
     end subroutine
 
     subroutine init_pcomm(jdir, jside)
