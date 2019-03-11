@@ -24,6 +24,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
   use calc_allob_sub
+  use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
@@ -35,6 +36,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
   integer,intent(in) :: lg_end(3)
   integer,intent(in)    :: ilsda
   type(s_stencil),intent(inout) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg
   type(s_wavefunction),intent(inout) :: tspsi_in
   type(s_wavefunction),intent(inout) :: tspsi_out
   type(s_wavefunction),intent(inout) :: sshtpsi
