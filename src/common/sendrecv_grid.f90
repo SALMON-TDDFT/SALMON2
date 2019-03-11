@@ -275,7 +275,7 @@ module sendrecv_grid
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
-    type(s_rgrid), intent(inout) :: rg
+    type(s_rgrid), intent(in) :: rg
     complex(8), intent(inout) :: data( &
       rg%is_array(1):rg%ie_array(1), &
       rg%is_array(2):rg%ie_array(2), &
