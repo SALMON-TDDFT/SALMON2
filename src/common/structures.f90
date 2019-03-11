@@ -38,6 +38,11 @@ module structures
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
   end type s_rgrid
 
+  type s_pcomm_cache
+    real(8), allocatable :: dbuf(:, :, :, :)
+    complex(8), allocatable :: zbuf(:, :, :, :)
+  end type s_pcomm_cache
+
   type s_sendrecv_grid
     ! Size of grid system
     type(s_rgrid) :: rg
@@ -154,11 +159,6 @@ module structures
   type s_dmatrix
     complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
-
-  type s_pcomm_cache
-    real(8), allocatable :: dbuf(:, :, :, :)
-    complex(8), allocatable :: zbuf(:, :, :, :)
-  end type s_pcomm_cache
 
   type s_fourier_grid
     integer :: icomm_fourier
