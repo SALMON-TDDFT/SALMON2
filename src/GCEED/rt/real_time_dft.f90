@@ -1576,7 +1576,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1596,7 +1596,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1604,7 +1604,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1613,7 +1613,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE3
   elp3(415)=get_wtime()
 
