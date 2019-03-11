@@ -70,7 +70,7 @@ subroutine writedns(lg)
   phys_quantity = "dns"
   if(format3d=='avs')then
     header_unit='A**(-3)'
-    call writeavs(103,suffix,header_unit,matbox_l2)
+    call writeavs(lg,103,suffix,header_unit,matbox_l2,icoo1d)
   else if(format3d=='cube')then
     call writecube(lg,103,suffix,phys_quantity,matbox_l2,hgs,igc_is,igc_ie,gridcoo)
   else if(format3d=='vtk')then
@@ -114,7 +114,7 @@ subroutine writedns(lg)
     phys_quantity = "dnsdiff"
     if(format3d=='avs')then
       header_unit='A**(-3)'
-      call writeavs(103,suffix,header_unit,matbox_l2)
+      call writeavs(lg,103,suffix,header_unit,matbox_l2,icoo1d)
     else if(format3d=='cube')then
       call writecube(lg,103,suffix,phys_quantity,matbox_l2,hgs,igc_is,igc_ie,gridcoo)
     else if(format3d=='vtk')then

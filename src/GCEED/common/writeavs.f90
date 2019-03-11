@@ -13,15 +13,18 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine writeavs(fp,suffix,header_unit,tmatbox_l)
+subroutine writeavs(lg,fp,suffix,header_unit,rmat,icoo1d)
+  use inputoutput, only: numfiles_out_3d
   use salmon_parallel, only: nproc_id_global
+  use structures, only: s_rgrid
   use salmon_communication, only: comm_is_root
-  use scf_data
   implicit none
-  integer, intent(IN) :: fp
-  character(20), intent(IN) :: header_unit
-  real(8), intent(IN) :: tmatbox_l(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),  &
-                                   lg_sta(3):lg_end(3))
+  type(s_rgrid),intent(in) :: lg
+  integer,intent(in) :: fp
+  character(20),intent(in) :: header_unit
+  real(8),intent(in) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
+                                   lg%is(3):lg%ie(3))
+  integer,intent(in) :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
   character(30),intent(in):: suffix
   character(30):: filename
   integer::ix,iy,iz
@@ -38,11 +41,11 @@ subroutine writeavs(fp,suffix,header_unit,tmatbox_l)
       if(comm_is_root(nproc_id_global))then
         write(fp,'("# unit is ",a)') header_unit
       end if
-      jsta=nproc_id_global*(lg_num(1)*lg_num(2)*lg_num(3))/numfiles_out_3d+1
-      jend=(nproc_id_global+1)*(lg_num(1)*lg_num(2)*lg_num(3))/numfiles_out_3d
+      jsta=nproc_id_global*(lg%num(1)*lg%num(2)*lg%num(3))/numfiles_out_3d+1
+      jend=(nproc_id_global+1)*(lg%num(1)*lg%num(2)*lg%num(3))/numfiles_out_3d
       do jj=jsta,jend
-        if(abs(tmatbox_l(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj)))>=1.0d-10)then
-          write(fp,'(e20.8)') tmatbox_l(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj))
+        if(abs(rmat(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj)))>=1.0d-10)then
+          write(fp,'(e20.8)') rmat(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj))
         else
           write(fp,'(a1)') "0"
         end if
@@ -54,11 +57,11 @@ subroutine writeavs(fp,suffix,header_unit,tmatbox_l)
       filename=trim(suffix)
       open(fp,file=filename)
       write(fp,'("# unit is ",a)') header_unit
-      do iz=lg_sta(3),lg_end(3)
-      do iy=lg_sta(2),lg_end(2)
-      do ix=lg_sta(1),lg_end(1)
-        if(abs(tmatbox_l(ix,iy,iz))>=1.0d-10)then
-          write(fp,'(e20.8)') tmatbox_l(ix,iy,iz)
+      do iz=lg%is(3),lg%ie(3)
+      do iy=lg%is(2),lg%ie(2)
+      do ix=lg%is(1),lg%ie(1)
+        if(abs(rmat(ix,iy,iz))>=1.0d-10)then
+          write(fp,'(e20.8)') rmat(ix,iy,iz)
         else
           write(fp,'(a1)') "0"
         end if
