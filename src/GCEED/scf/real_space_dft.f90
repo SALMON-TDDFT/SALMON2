@@ -76,7 +76,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
-type(s_sendrecv_grid) :: srg, srg_ob
+type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob_2
 integer :: nspin
 type(s_wavefunction) :: spsi,shpsi
 type(s_system) :: system
@@ -480,7 +480,9 @@ neig(3, 1) = kup_array(1)
 neig(3, 2) = kdw_array(1)
 call init_sendrecv_grid(srg, mg, iobnum * k_num, &
   & nproc_group_korbital, nproc_id_korbital, neig)
-call init_sendrecv_grid(srg_ob, mg, nspin, &
+call init_sendrecv_grid(srg_ob_2, mg, 2, &
+  & nproc_group_korbital, nproc_id_korbital, neig)
+call init_sendrecv_grid(srg_ob_1, mg, 1, &
   & nproc_group_korbital, nproc_id_korbital, neig)
 
 if(iperiodic==3) then
