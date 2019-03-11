@@ -45,7 +45,7 @@ subroutine Real_Space_DFT
 use structures!, only: s_rgrid, s_wf_info, s_wavefunction, s_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
-                           nproc_group_korbital, nproc_group_rho
+                           nproc_group_korbital, nproc_id_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
