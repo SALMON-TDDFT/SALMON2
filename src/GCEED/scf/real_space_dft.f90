@@ -1497,14 +1497,6 @@ deallocate(Vlocal)
 
 call finalize_xc(xc_func)
 
-contains
-
-subroutine setup_sendrecv_grid()
-  implicit none
-  integer :: neig()
-  call init_sendrecv_grid(srg, rg, nb, icomm, myrank, neig)
-end subroutine setup_sendrecv_grid
-
 END subroutine Real_Space_DFT
 
 !=======================================================================
