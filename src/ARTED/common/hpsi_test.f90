@@ -191,7 +191,7 @@ contains
     if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,1))
     ppg%zproj(:,:,1) = zproj(:,:,ik)
 
-    call hpsi(tpsi,htpsi,info,rg,V_local,1,stencil,ppg,ttpsi)
+    call hpsi(tpsi,htpsi,info,rg,V_local,1,stencil,srg,ppg,ttpsi)
 
     htpsi0 = htpsi%zwf(:,:,:,1,1,1,1)
     if(present(ttpsi0)) ttpsi0 = ttpsi%zwf(:,:,:,1,1,1,1)

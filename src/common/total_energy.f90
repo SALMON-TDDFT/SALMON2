@@ -68,10 +68,11 @@ CONTAINS
     return
   end SUBROUTINE calc_Total_Energy
 
-  Subroutine calc_eigen_energy(system,psi,hpsi_tmp,info,mg,V_local,stencil,ppg)
+  Subroutine calc_eigen_energy(system,psi,hpsi_tmp,info,mg,V_local,stencil,srg,ppg)
     use structures
     use salmon_communication, only: comm_summation
     use hpsi_sub
+    use sendrecv_grid, only: s_sendrecv_grid
     implicit none
     type(s_system)             :: system
     type(s_wavefunction)       :: psi,hpsi_tmp
@@ -79,6 +80,7 @@ CONTAINS
     type(s_rgrid)  ,intent(in) :: mg
     type(s_scalar) ,intent(in) :: V_local(system%Nspin)
     type(s_stencil),intent(in) :: stencil
+    type(s_sendrecv_grid),intent(in) :: srg
     type(s_pp_grid),intent(in) :: ppg
     !
     integer :: ik,io,jo,ispin,im,nk,no,is(3),ie(3),Nspin
@@ -97,7 +99,7 @@ CONTAINS
     allocate(wrk1(no,nk),wrk2(no,nk))
     wrk1 = 0d0
 
-    call hpsi(psi,hpsi_tmp,info,mg,V_local,Nspin,stencil,ppg)
+    call hpsi(psi,hpsi_tmp,info,mg,V_local,Nspin,stencil,srg,ppg)
 
     if(allocated(psi%rwf)) then
       do ispin=1,Nspin

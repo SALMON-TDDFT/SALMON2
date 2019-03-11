@@ -126,7 +126,7 @@ subroutine hpsi_test2_R(tpsi0,htpsi0,iob,ik,nn,isub)
     V(j)%f = Vlocal(:,:,:,j)
   end do
 
-  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,srg,ppg)
 
   htpsi0 = htpsi%rwf(:,:,:,is,1,1,1)
 
@@ -255,7 +255,7 @@ subroutine hpsi_test2_C(tpsi0,htpsi0,iob,ik,nn,isub)
   end if
   call convert_pseudo_GCEED(ppg,ik,ik,ekr)
 
-  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,srg,ppg)
 
   call set_is(iob,is)
   htpsi0 = htpsi%zwf(:,:,:,is,1,ik,1)
