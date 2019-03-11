@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
+subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
@@ -35,6 +35,7 @@ subroutine gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda
   use calc_myob_sub
   use check_corrkob_sub
   use set_isstaend_sub
+  use sendrecv_grid, only: s_sendrecv_grid
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
@@ -42,6 +43,7 @@ subroutine gscg_periodic(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg_ob_1
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst

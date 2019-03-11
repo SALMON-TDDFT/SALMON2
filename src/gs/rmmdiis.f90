@@ -461,6 +461,7 @@ end subroutine
 subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub, only: hpsi
+  use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
@@ -469,6 +470,7 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg
   type(s_scalar)        :: v(1)
   integer :: nspin_1
   type(s_stencil) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg_ob_1
   type(s_pp_grid) :: ppg
 
   call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
