@@ -270,7 +270,7 @@ module sendrecv_grid
   end subroutine update_overlap_real8
 
 
-  subroutine update_overlap_complex8(srg, data)
+  subroutine update_overlap_complex8(srg, rg, data)
     use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
