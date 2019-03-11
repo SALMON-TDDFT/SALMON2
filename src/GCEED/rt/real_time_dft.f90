@@ -808,6 +808,7 @@ use density_matrix, only: calc_density
 use misc_routines, only: get_wtime
 use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
+use sendrecv_grid, only: init_sendrecv_grid
 
 implicit none
 
