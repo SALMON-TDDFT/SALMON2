@@ -60,6 +60,7 @@ use rmmdiis_sub
 use subspace_diag_sub
 use subspace_diag_periodic_sub
 use global_variables_scf
+use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa
@@ -75,6 +76,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
+type(s_sendrecv_grid) :: srg, srg_ob
 integer :: nspin
 type(s_wavefunction) :: spsi,shpsi
 type(s_system) :: system
@@ -82,6 +84,7 @@ type(s_stencil) :: stencil
 type(s_scalar) :: sVh
 type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
 type(s_fourier_grid) :: fg
+integer :: neig(1:3, 1:2)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -467,6 +470,19 @@ do jj=1,3
     stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
   end do
 end do
+
+! Initialization of s_sendrecv_grid structure (experimental implementation)
+neig(1, 1) = iup_array(1)
+neig(1, 2) = idw_array(1)
+neig(2, 1) = jup_array(1)
+neig(2, 2) = jdw_array(1)
+neig(3, 1) = kup_array(1)
+neig(3, 2) = kdw_array(1)
+call init_sendrecv_grid(srg, mg, iobnum * k_num, &
+  & nproc_group_korbital, nproc_id_korbital, neig)
+call init_sendrecv_grid(srg_ob, mg, nspin, &
+  & nproc_group_korbital, nproc_id_korbital, neig)
+
 if(iperiodic==3) then
 !  allocate(stencil%kAc(k_sta:k_end,3))
 !  do jj=1,3
@@ -1480,6 +1496,14 @@ end if
 deallocate(Vlocal)
 
 call finalize_xc(xc_func)
+
+contains
+
+subroutine setup_sendrecv_grid()
+  implicit none
+  integer :: neig()
+  call init_sendrecv_grid(srg, rg, nb, icomm, myrank, neig)
+end subroutine setup_sendrecv_grid
 
 END subroutine Real_Space_DFT
 
