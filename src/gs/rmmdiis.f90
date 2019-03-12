@@ -23,7 +23,7 @@ contains
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
                    info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -31,6 +31,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
   use salmon_communication, only: comm_summation
   use calc_allob_sub
   use diis_core_sub
+  use sendrecv_grid, only: s_sendrecv_grid
   !$ use omp_lib
   implicit none
   
@@ -39,6 +40,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
   type(s_wf_info) :: info
   type(s_wavefunction) :: spsi
   type(s_stencil) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg_ob_1
   type(s_pp_grid) :: ppg
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
@@ -154,7 +156,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -213,7 +215,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -281,7 +283,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -320,7 +322,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
     end do
     end do
 
-    call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+    call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -369,7 +371,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,spsi,itotmst,mst,num_kpoints_rd,hvol,if
       end do
       end do
 
-      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
@@ -458,9 +460,10 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
 
 end subroutine
 
-subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub, only: hpsi
+  use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
@@ -469,9 +472,10 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
   type(s_scalar)        :: v(1)
   integer :: nspin_1
   type(s_stencil) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg_ob_1
   type(s_pp_grid) :: ppg
 
-  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
 
 end subroutine hpsi_test_diis
 

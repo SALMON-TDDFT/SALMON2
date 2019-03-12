@@ -238,7 +238,7 @@ subroutine hpsi_test1(tpsi0,htpsi0,V0)
   end if
   call convert_pseudo_GCEED(ppg,k_sta,k_end,ekr)
 
-  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,ppg)
+  call hpsi(tpsi,htpsi,info,rg,V,Nspin,stencil,srg,ppg)
 
   do ik=k_sta,k_end
     do i=1,iobnum

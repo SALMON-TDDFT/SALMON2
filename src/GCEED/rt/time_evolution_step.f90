@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+SUBROUTINE time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
 use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -28,6 +28,7 @@ use scf_data
 use new_world_sub
 use allocate_mat_sub
 use read_pslfile_sub
+use sendrecv_grid, only: s_sendrecv_grid
 
 implicit none
 type(s_rgrid),intent(in) :: lg
@@ -36,6 +37,7 @@ type(s_rgrid),intent(in) :: ng
 integer,intent(in) :: nspin
 type(s_wf_info),intent(in) :: info
 type(s_stencil),intent(inout) :: stencil
+type(s_sendrecv_grid),intent(in) :: srg
 type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
 type(s_wavefunction),intent(inout) :: sshtpsi
 integer :: ix,iy,iz,i1,mm,jj
@@ -110,10 +112,10 @@ elp3(532)=elp3(532)+elp3(512)-elp3(511)
 
 if(iobnum.ge.1)then
   if(mod(itt,2)==1)then
-    call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,spsi_in,spsi_out,sshtpsi,   &
+    call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,sshtpsi,   &
                 ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
   else
-    call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,spsi_out,spsi_in,sshtpsi,   &
+    call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,sshtpsi,   &
                 ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
   end if
 end if

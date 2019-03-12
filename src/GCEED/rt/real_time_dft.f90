@@ -800,14 +800,15 @@ END subroutine Real_Time_DFT
 !=======================================================================
 
 SUBROUTINE Time_Evolution(lg,mg,ng)
-use structures, only: s_system,s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
+use structures, only: s_system,s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_sendrecv_grid
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
-                           nproc_group_h, nproc_group_korbital, nproc_group_rho
+                           nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use misc_routines, only: get_wtime
 use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
+use sendrecv_grid, only: init_sendrecv_grid
 
 implicit none
 
@@ -819,6 +820,7 @@ type(s_wf_info) :: info
 type(s_stencil) :: stencil
 type(s_wavefunction) :: spsi_in,spsi_out
 type(s_wavefunction) :: sshtpsi
+type(s_sendrecv_grid) :: srg
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
 integer :: nspin
@@ -829,6 +831,7 @@ integer :: iob_allob
 real(8) :: absr2
 integer :: j,ind
 integer :: is,jspin
+integer :: neig(1:3, 1:2)
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -899,6 +902,16 @@ type(s_scalar),allocatable :: srho_s(:,:)
       end do
     end do
   end do
+
+  ! Initialization of s_sendrecv_grid structure (experimental implementation)
+  neig(1, 1) = iup_array(1)
+  neig(1, 2) = idw_array(1)
+  neig(2, 1) = jup_array(1)
+  neig(2, 2) = jdw_array(1)
+  neig(3, 1) = kup_array(1)
+  neig(3, 2) = kdw_array(1)
+  call init_sendrecv_grid(srg, mg, iobnum * k_num, &
+    & nproc_group_korbital, nproc_id_korbital, neig)
 
   allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &
@@ -1563,7 +1576,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1583,7 +1596,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1591,7 +1604,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1600,7 +1613,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,nspin,info,stencil,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE3
   elp3(415)=get_wtime()
 
