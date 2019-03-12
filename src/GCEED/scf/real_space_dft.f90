@@ -59,6 +59,7 @@ use gscg_periodic_sub
 use rmmdiis_sub
 use subspace_diag_sub
 use subspace_diag_periodic_sub
+use writefield
 use global_variables_scf
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 implicit none
@@ -1343,7 +1344,7 @@ if(out_psi=='y') then
 end if
 
 if(out_dns=='y') then
-  call writedns(lg)
+  call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
 end if
 
 if(out_dos=='y') then
