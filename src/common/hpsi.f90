@@ -25,7 +25,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   use structures
   use update_overlap_sub
   use stencil_sub
-  use sendrecv_grid, only: s_sendrecv_grid
+  use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   implicit none
   integer       ,intent(in)  :: Nspin
   type(s_wf_info),intent(in) :: info
