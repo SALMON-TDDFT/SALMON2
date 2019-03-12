@@ -805,6 +805,7 @@ use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid
                            nproc_group_h, nproc_group_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
+use writefield
 use misc_routines, only: get_wtime
 use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
@@ -1424,7 +1425,7 @@ end do
 
   do itt=0,0
     if(out_dns_rt=='y')then
-      call writedns(lg)
+      call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
     if(out_elf_rt=='y')then
       call calcELF

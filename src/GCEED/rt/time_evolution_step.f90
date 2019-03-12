@@ -21,6 +21,7 @@ use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use density_matrix, only: calc_density
+use writefield
 use misc_routines, only: get_wtime
 use inputoutput
 use taylor_sub
@@ -549,7 +550,7 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
 
   if(out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call writedns(lg)
+      call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
   end if
   if(out_elf_rt=='y')then
