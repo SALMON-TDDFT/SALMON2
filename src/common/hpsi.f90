@@ -55,19 +55,19 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     write(*,*) "#debug:nb", srg%nb
     stop "orbital number mismatch"
   endif
-  write(*,*) "RWF1", lbound(tpsi%rwf, 1), ubound(tpsi%rwf, 1)
-  write(*,*) "RWF2", lbound(tpsi%rwf, 2), ubound(tpsi%rwf, 2)
-  write(*,*) "RWF3", lbound(tpsi%rwf, 3), ubound(tpsi%rwf, 3)
-  write(*,*) "RWF4", lbound(tpsi%rwf, 4), ubound(tpsi%rwf, 4)
-  write(*,*) "RWF5", lbound(tpsi%rwf, 5), ubound(tpsi%rwf, 5)
-  write(*,*) "RWF6", lbound(tpsi%rwf, 6), ubound(tpsi%rwf, 6)
-  write(*,*) "zWF1", lbound(tpsi%zwf, 1), ubound(tpsi%zwf, 1)
-  write(*,*) "zWF2", lbound(tpsi%zwf, 2), ubound(tpsi%zwf, 2)
-  write(*,*) "zWF3", lbound(tpsi%zwf, 3), ubound(tpsi%zwf, 3)
-  write(*,*) "zWF4", lbound(tpsi%zwf, 4), ubound(tpsi%zwf, 4)
-  write(*,*) "zWF5", lbound(tpsi%zwf, 5), ubound(tpsi%zwf, 5)
-  write(*,*) "zWF6", lbound(tpsi%zwf, 6), ubound(tpsi%zwf, 6)
-  write(*,*) "NORB", norb, "NB", srg%nb
+  ! write(*,*) "RWF1", lbound(tpsi%rwf, 1), ubound(tpsi%rwf, 1)
+  ! write(*,*) "RWF2", lbound(tpsi%rwf, 2), ubound(tpsi%rwf, 2)
+  ! write(*,*) "RWF3", lbound(tpsi%rwf, 3), ubound(tpsi%rwf, 3)
+  ! write(*,*) "RWF4", lbound(tpsi%rwf, 4), ubound(tpsi%rwf, 4)
+  ! write(*,*) "RWF5", lbound(tpsi%rwf, 5), ubound(tpsi%rwf, 5)
+  ! write(*,*) "RWF6", lbound(tpsi%rwf, 6), ubound(tpsi%rwf, 6)
+  ! write(*,*) "zWF1", lbound(tpsi%zwf, 1), ubound(tpsi%zwf, 1)
+  ! write(*,*) "zWF2", lbound(tpsi%zwf, 2), ubound(tpsi%zwf, 2)
+  ! write(*,*) "zWF3", lbound(tpsi%zwf, 3), ubound(tpsi%zwf, 3)
+  ! write(*,*) "zWF4", lbound(tpsi%zwf, 4), ubound(tpsi%zwf, 4)
+  ! write(*,*) "zWF5", lbound(tpsi%zwf, 5), ubound(tpsi%zwf, 5)
+  ! write(*,*) "zWF6", lbound(tpsi%zwf, 6), ubound(tpsi%zwf, 6)
+  ! write(*,*) "NORB", norb, "NB", srg%nb
   if_kAc = allocated(stencil%kAc)
 
   if(allocated(tpsi%rwf)) then
