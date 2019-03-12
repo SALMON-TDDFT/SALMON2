@@ -36,7 +36,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tsps
   integer,intent(in) :: lg_end(3)
   integer,intent(in)    :: ilsda
   type(s_stencil),intent(inout) :: stencil
-  type(s_sendrecv_grid),intent(in) :: srg
+  type(s_sendrecv_grid),intent(inout) :: srg
   type(s_wavefunction),intent(inout) :: tspsi_in
   type(s_wavefunction),intent(inout) :: tspsi_out
   type(s_wavefunction),intent(inout) :: sshtpsi

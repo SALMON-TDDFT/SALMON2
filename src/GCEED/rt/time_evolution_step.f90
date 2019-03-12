@@ -37,7 +37,7 @@ type(s_rgrid),intent(in) :: ng
 integer,intent(in) :: nspin
 type(s_wf_info),intent(in) :: info
 type(s_stencil),intent(inout) :: stencil
-type(s_sendrecv_grid),intent(in) :: srg
+type(s_sendrecv_grid),intent(inout) :: srg
 type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
 type(s_wavefunction),intent(inout) :: sshtpsi
 integer :: ix,iy,iz,i1,mm,jj
