@@ -48,6 +48,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   io_s = info%io_s
   io_e = info%io_e
   norb = Nspin* info%numo * info%numk * info%numm
+  write(*,*) "#debug:norb", norb
+  write(*,*) "#debug:nb", srg%nb
+  if (srg%nb .ne. NORB) then
+    stop "orbital number mismatch"
+  endif
 
   if_kAc = allocated(stencil%kAc)
 
