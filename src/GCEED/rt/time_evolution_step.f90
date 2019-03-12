@@ -39,7 +39,7 @@ type(s_system),intent(in) :: system
 integer,intent(in) :: nspin
 type(s_wf_info),intent(in) :: info
 type(s_stencil),intent(inout) :: stencil
-type(s_sendrecv_grid),intent(in) :: srg
+type(s_sendrecv_grid),intent(inout) :: srg
 type(s_pp_nlcc), intent(in) :: ppn
 type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
 type(s_wavefunction),intent(inout) :: sshtpsi

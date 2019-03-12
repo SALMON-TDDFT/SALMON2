@@ -43,7 +43,7 @@ subroutine dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
-  type(s_sendrecv_grid),intent(in) :: srg_ob_1
+  type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst

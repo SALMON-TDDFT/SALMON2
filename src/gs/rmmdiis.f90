@@ -40,7 +40,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_r
   type(s_wf_info) :: info
   type(s_wavefunction) :: spsi
   type(s_stencil) :: stencil
-  type(s_sendrecv_grid),intent(in) :: srg_ob_1
+  type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
@@ -472,7 +472,7 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg
   type(s_scalar)        :: v(1)
   integer :: nspin_1
   type(s_stencil) :: stencil
-  type(s_sendrecv_grid),intent(in) :: srg_ob_1
+  type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
 
   call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
