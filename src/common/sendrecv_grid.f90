@@ -162,6 +162,7 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:132 ';FLUSH(777)!uemoto!@c
 
 WRITE(777,'(A)')'@./common/sendrecv_grid.f90:163 ';FLUSH(777)!uemoto!@c
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
+    if (.not. srg%pcomm_initialized) call alloc_cache()
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
@@ -202,15 +203,21 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:163 ';FLUSH(777)!uemoto!@c
     return
     contains
 
-    subroutine alloc_cache(jdir, jside, jtype)
+    subroutine alloc_cache()
       implicit none
-      integer, intent(in) :: jdir, jside, jtype
+      integer :: jdir, jside, jtype
       integer :: is_b(3), ie_b(3)
 WRITE(777,'(A)')'@./common/sendrecv_grid.f90:209 ';FLUSH(777)!uemoto!@c
-      is_b(1:3) = srg%is_block(jdir, jside, jtype, 1:3)
-      ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
-      allocate(srg%cache(jdir, jside, jtype)%dbuf( &
-        is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
+      do jdir = 1, 3
+        do jside = 1, 2
+          do jtype = 1, 2
+            is_b(1:3) = srg%is_block(jdir, jside, jtype, 1:3)
+            ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
+            allocate(srg%cache(jdir, jside, jtype)%dbuf( &
+              is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
+          end do
+        end do
+      end do
     end subroutine
 
     subroutine init_pcomm(jdir, jside)
@@ -219,14 +226,12 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:209 ';FLUSH(777)!uemoto!@c
       integer, intent(in) :: jdir, jside
 WRITE(777,'(A)')'@./common/sendrecv_grid.f90:220 ';FLUSH(777)!uemoto!@c
       ! Send (and initialize persistent communication)
-      call alloc_cache(jdir, jside, itype_send)
       srg%ireq(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%dbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      call alloc_cache(jdir, jside, itype_recv)
       srg%ireq(jdir, jside, itype_recv) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%dbuf, &
         srg%neig(jdir, jside), &
@@ -293,6 +298,7 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:268 ';FLUSH(777)!uemoto!@c
 WRITE(777,'(A)')'@./common/sendrecv_grid.f90:293 ';FLUSH(777)!uemoto!@c
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
+    if (.not. srg%pcomm_initialized) call alloc_cache()
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
@@ -333,15 +339,21 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:293 ';FLUSH(777)!uemoto!@c
     return
     contains
 
-    subroutine alloc_cache(jdir, jside, jtype)
+    subroutine alloc_cache()
       implicit none
-      integer, intent(in) :: jdir, jside, jtype
+      integer :: jdir, jside, jtype
       integer :: is_b(3), ie_b(3)
 WRITE(777,'(A)')'@./common/sendrecv_grid.f90:340 ';FLUSH(777)!uemoto!@c
-      is_b(1:3) = srg%is_block(jdir, jside, jtype, 1:3)
-      ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
-      allocate(srg%cache(jdir, jside, jtype)%zbuf( &
-        is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
+      do jdir = 1, 3
+        do jside = 1, 2
+          do jtype = 1, 2
+            is_b(1:3) = srg%is_block(jdir, jside, jtype, 1:3)
+            ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
+            allocate(srg%cache(jdir, jside, jtype)%zbuf( &
+              is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
+          end do
+        end do
+      end do
     end subroutine
 
     subroutine init_pcomm(jdir, jside)
