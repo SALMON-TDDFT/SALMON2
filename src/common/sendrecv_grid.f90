@@ -362,14 +362,12 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:340 ';FLUSH(777)!uemoto!@c
       integer, intent(in) :: jdir, jside
 WRITE(777,'(A)')'@./common/sendrecv_grid.f90:351 ';FLUSH(777)!uemoto!@c
       ! Send (and initialize persistent communication)
-      call alloc_cache(jdir, jside, itype_send)
       srg%ireq(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%zbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      call alloc_cache(jdir, jside, itype_recv)
       srg%ireq(jdir, jside, itype_recv) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%zbuf, &
         srg%neig(jdir, jside), &
