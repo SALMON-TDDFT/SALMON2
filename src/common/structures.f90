@@ -38,6 +38,28 @@ module structures
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
   end type s_rgrid
 
+  type s_pcomm_cache
+    real(8), allocatable :: dbuf(:, :, :, :)
+    complex(8), allocatable :: zbuf(:, :, :, :)
+  end type s_pcomm_cache
+
+  type s_sendrecv_grid
+    ! Number of orbitals (4-th dimension of grid)
+    integer :: nb
+    ! Communicator
+    integer :: icomm, myrank
+    ! Neightboring MPI id (1:x,2:y,3:z, 1:upside,2:downside):
+    integer :: neig(1:3, 1:2) 
+    ! Communication requests (1:x,2:y,3:z, 1:upside,2:downside, 1:send,2:recv):
+    integer :: ireq(1:3, 1:2, 1:2)
+    ! PComm cache (1:x,2:y,3:z, 1:upside,2:downside, 1:src/2:dst)
+    type(s_pcomm_cache) :: cache(1:3, 1:2, 1:2)
+    ! Range (dim=1:x,2:y,3:z, dir=1:upside,2:downside, 1:src/2:dst, axis=1...3)
+    integer :: is_block(1:3, 1:2, 1:2, 1:3)
+    integer :: ie_block(1:3, 1:2, 1:2, 1:3)
+    logical :: pcomm_initialized
+  end type s_sendrecv_grid
+
   type s_wf_info
     logical :: if_divide_rspace
     integer :: irank_r(6)
@@ -66,6 +88,9 @@ module structures
     real(8),allocatable :: coef_lap(:,:),coef_nab(:,:) !?????? --> lapt,nabt (future work)
     real(8) :: B(3,3),coef_F(6)
     complex(8) :: wrk(:,:,:,:)
+
+  ! Experimental implementation of srg
+    type(s_sendrecv_grid) :: srg
   end type s_stencil
 
   type s_pp_info
@@ -135,30 +160,6 @@ module structures
   type s_dmatrix
     complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
-
-  type s_pcomm_cache
-    real(8), allocatable :: dbuf(:, :, :, :)
-    complex(8), allocatable :: zbuf(:, :, :, :)
-  end type s_pcomm_cache
-
-  type s_sendrecv_grid
-    ! Size of grid system
-    type(s_rgrid) :: rg
-    ! Number of orbitals (4-th dimension of grid)
-    integer :: nb
-    ! Communicator
-    integer :: icomm, myrank
-    ! Neightboring MPI id (1:x,2:y,3:z, 1:upside,2:downside):
-    integer :: neig(1:3, 1:2) 
-    ! Communication requests (1:x,2:y,3:z, 1:upside,2:downside, 1:send,2:recv):
-    integer :: ireq(1:3, 1:2, 1:2)
-    ! PComm cache (1:x,2:y,3:z, 1:upside,2:downside, 1:src/2:dst)
-    type(s_pcomm_cache) :: cache(1:3, 1:2, 1:2)
-    ! Range (dim=1:x,2:y,3:z, dir=1:upside,2:downside, 1:src/2:dst, axis=1...3)
-    integer :: is_block(1:3, 1:2, 1:2, 1:3)
-    integer :: ie_block(1:3, 1:2, 1:2, 1:3)
-    logical :: pcomm_initialized
-  end type s_sendrecv_grid
 
   type s_fourier_grid
     integer :: icomm_fourier

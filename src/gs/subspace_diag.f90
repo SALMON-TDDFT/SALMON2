@@ -18,7 +18,7 @@ module subspace_diag_sub
 
 contains
 
-subroutine subspace_diag(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
   use inputoutput, only: ispin
@@ -33,11 +33,13 @@ subroutine subspace_diag(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,iparaway_ob,io
   use check_corrkob_sub
   use set_isstaend_sub
   use eigen_subdiag_sub
+  use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_wf_info)       :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg_ob_1
   type(s_pp_grid) :: ppg
   real(8),intent(out) :: elp3(3000)
   integer,intent(in)  :: ilsda
@@ -167,7 +169,7 @@ subroutine subspace_diag(mg,info,stencil,spsi,elp3,ilsda,nproc_ob,iparaway_ob,io
           end do
           end do
           end do
-          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)

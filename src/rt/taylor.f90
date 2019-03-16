@@ -18,12 +18,13 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in,tspsi_out,sshtpsi,   &
+subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
   use inputoutput, only: iperiodic,ispin,natom,n_hamil
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
   use calc_allob_sub
+  use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
@@ -35,6 +36,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
   integer,intent(in) :: lg_end(3)
   integer,intent(in)    :: ilsda
   type(s_stencil),intent(inout) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg
   type(s_wavefunction),intent(inout) :: tspsi_in
   type(s_wavefunction),intent(inout) :: tspsi_out
   type(s_wavefunction),intent(inout) :: sshtpsi
@@ -117,7 +119,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
 
   do nn=1,n_hamil
     if(mod(nn,2)==1)then
-      call hpsi(tspsi_in,sshtpsi,info,mg,v,nspin,stencil,ppg)
+      call hpsi(tspsi_in,sshtpsi,info,mg,v,nspin,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -134,7 +136,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,tspsi_in
       end do
       end do
     else
-      call hpsi(sshtpsi,tspsi_in,info,mg,v,nspin,stencil,ppg)
+      call hpsi(sshtpsi,tspsi_in,info,mg,v,nspin,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e

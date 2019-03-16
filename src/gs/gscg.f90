@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
@@ -35,6 +35,7 @@ subroutine sgscg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_o
   use calc_myob_sub
   use check_corrkob_sub
   use set_isstaend_sub
+  use sendrecv_grid, only: s_sendrecv_grid
   !$ use omp_lib
   implicit none
   
@@ -43,6 +44,7 @@ subroutine sgscg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_o
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
+  type(s_sendrecv_grid),intent(in) :: srg_ob_1
   type(s_pp_grid) :: ppg
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst
@@ -160,7 +162,7 @@ subroutine sgscg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_o
       end do
     end if
 
-    call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+    call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
     
   !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
@@ -327,7 +329,7 @@ subroutine sgscg(mg,nspin,info,stencil,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_o
         end do
       end if
 
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,ppg)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
       
   !$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=mg%is(3),mg%ie(3)
