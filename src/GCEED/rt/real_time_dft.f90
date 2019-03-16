@@ -46,7 +46,6 @@ use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
 use global_variables_rt
-use init_nonorthogonal
 implicit none
 
 type(s_rgrid) :: lg
@@ -811,7 +810,7 @@ use misc_routines, only: get_wtime
 use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
 use sendrecv_grid, only: init_sendrecv_grid
-
+use init_nonorthogonal
 implicit none
 
 type(s_rgrid) :: lg,mg,ng

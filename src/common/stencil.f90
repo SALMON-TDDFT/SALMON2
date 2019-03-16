@@ -131,7 +131,6 @@ end subroutine stencil_C
 
 !===================================================================================================================================
 
-!?????????
 subroutine stencil_nonorthogonal(tpsi,htpsi,is_array,ie_array,V_local,is,ie,idx,idy,idz,lap0,lapt,nabt,Bk,F,wrk)
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &

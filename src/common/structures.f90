@@ -76,6 +76,7 @@ module structures
   type s_wavefunction
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! rwf(x,y,z,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! zwf(x,y,z,ispin,io,ik,im)
+    complex(8),allocatable :: wrk(:,:,:,:)
   end type s_wavefunction
 
   type s_stencil
@@ -87,7 +88,6 @@ module structures
     integer,allocatable :: sign(:,:) ! sign(3,4:ndir) (for ndir=4~6) 
     real(8),allocatable :: coef_lap(:,:),coef_nab(:,:) !?????? --> lapt,nabt (future work)
     real(8) :: B(3,3),coef_F(6)
-    complex(8) :: wrk(:,:,:,:)
 
   ! Experimental implementation of srg
     type(s_sendrecv_grid) :: srg
@@ -199,6 +199,7 @@ contains
     type(s_wavefunction) :: psi
     DEAL(psi%rwf)
     DEAL(psi%zwf)
+    DEAL(psi%wrk)
   end subroutine deallocate_wavefunction
 
   subroutine deallocate_stencil(stencil)

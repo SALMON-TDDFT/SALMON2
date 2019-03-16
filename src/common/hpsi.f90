@@ -109,9 +109,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     else
       if(mg%ndir==3) then
       ! non-orthogonal lattice (general)
-        if(.not.allocated(stencil%wrk)) allocate(stencil%wrk(mg%is_array(1):mg%ie_array(1) &
-                                                            ,mg%is_array(2):mg%ie_array(2) &
-                                                            ,mg%is_array(3):mg%ie_array(3),2) )
+        if(.not.allocated(htpsi%wrk)) allocate(htpsi%wrk(mg%is_array(1):mg%ie_array(1) &
+                                                        ,mg%is_array(2):mg%ie_array(2) &
+                                                        ,mg%is_array(3):mg%ie_array(3),2) )
         do im=im_s,im_e
         do ik=ik_s,ik_e
           kAc = 0d0
@@ -126,7 +126,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
             call stencil_nonorthogonal(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                                           ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
                                           ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%lapt,stencil%nabt &
-                                          ,kAc,stencil%coef_F,stencil%wrk)
+                                          ,kAc,stencil%coef_F,htpsi%wrk)
           end do
           end do
         end do
