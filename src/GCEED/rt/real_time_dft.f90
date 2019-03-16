@@ -46,6 +46,7 @@ use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
 use misc_routines, only: get_wtime
 use global_variables_rt
+use init_nonorthogonal
 implicit none
 
 type(s_rgrid) :: lg
@@ -811,9 +812,7 @@ use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,k
 
 implicit none
 
-type(s_rgrid),intent(in) :: lg
-type(s_rgrid),intent(in) :: mg
-type(s_rgrid),intent(in) :: ng
+type(s_rgrid) :: lg,mg,ng
 type(s_system) :: system
 type(s_wf_info) :: info
 type(s_stencil) :: stencil
@@ -967,7 +966,21 @@ type(s_scalar),allocatable :: srho_s(:,:)
 
   if(iperiodic==3) allocate(stencil%kAc(info%ik_s:info%ik_e,3))
 
-  stencil%lap0 = -0.5d0*cNmat(0,nd)*(1.d0/hgs(1)**2+1.d0/hgs(2)**2+1.d0/hgs(3)**2)
+  stencil%if_orthogonal = .true.
+  if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
+  .or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) then
+    call init_nonorthogonal_lattice(system,stencil)
+    stencil%if_orthogonal = .false.
+    lg%ndir = 3
+    mg%ndir = 3
+    ng%ndir = 3
+  end if
+
+  if(stencil%if_orthogonal) then
+    stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+  else
+    stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+  end if
 
   if(iperiodic==0)then
     do j=1,3

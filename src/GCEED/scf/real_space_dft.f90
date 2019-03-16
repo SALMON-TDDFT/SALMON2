@@ -60,6 +60,7 @@ use rmmdiis_sub
 use subspace_diag_sub
 use subspace_diag_periodic_sub
 use global_variables_scf
+use init_nonorthogonal
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa
@@ -460,7 +461,21 @@ info_ob%irank_r(5) = kup_array(1)
 info_ob%irank_r(6) = kdw_array(1)
 info_ob%icomm_r = nproc_group_korbital
 
-stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+stencil%if_orthogonal = .true.
+if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
+.or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) then
+  call init_nonorthogonal_lattice(system,stencil)
+  stencil%if_orthogonal = .false.
+  lg%ndir = 3
+  mg%ndir = 3
+  ng%ndir = 3
+end if
+
+if(stencil%if_orthogonal) then
+  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+else
+  stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+end if
 do jj=1,3
   do ii=1,4
     stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2

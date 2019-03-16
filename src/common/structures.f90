@@ -20,7 +20,7 @@ module structures
   type s_system
     integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
-    real(8) :: Hvol,Hgs(3),al(3,3),det_al
+    real(8) :: Hvol,Hgs(3),al(3,3),det_al,brl(3,3)
     real(8),allocatable :: wtk(:) ! (1:nk), weight of k points
     real(8),allocatable :: Rion(:,:) ! (1:3,1:nion), atom position
     real(8),allocatable :: esp(:,:,:),rocc(:,:,:) ! (1:no,1:nk,1:nspin), esp= single-particle energy, rocc= occupation rate
@@ -61,8 +61,11 @@ module structures
     real(8),allocatable :: kAc(:,:) ! kAc(Nk,3)
 
   ! for non-orthogonal lattice
-    integer,allocatable :: sign(:) ! sign(4:ndir) (for ndir=4~6) ???
-    real(8),allocatable :: coef_lap(:,:) !?????? --> lapt (future work)
+    logical :: if_orthogonal
+    integer,allocatable :: sign(:,:) ! sign(3,4:ndir) (for ndir=4~6) 
+    real(8),allocatable :: coef_lap(:,:),coef_nab(:,:) !?????? --> lapt,nabt (future work)
+    real(8) :: B(3,3),coef_F(6)
+    complex(8) :: wrk(:,:,:,:)
   end type s_stencil
 
   type s_pp_info
@@ -202,6 +205,7 @@ contains
     DEAL(stencil%kAc)
     DEAL(stencil%sign)
     DEAL(stencil%coef_lap)
+    DEAL(stencil%coef_nab)
   end subroutine deallocate_stencil
 
   subroutine deallocate_pp_info(pp)

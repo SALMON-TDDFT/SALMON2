@@ -26,7 +26,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
   use update_overlap_sub
   use stencil_sub
   implicit none
-  integer       ,intent(in)  :: Nspin
+  integer        ,intent(in) :: Nspin
   type(s_wf_info),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
   type(s_scalar) ,intent(in) :: V_local(Nspin)
@@ -79,8 +79,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
                            ,mg%is,mg%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
-    select case(3) ! select case(mg%ndir) !????????
-    case(3)
+    if(stencil%if_orthogonal) then
     ! orthogonal lattice
       do im=im_s,im_e
       do ik=ik_s,ik_e
@@ -103,53 +102,56 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,ppg,ttpsi)
         end do
       end do
       end do
-    case(6)
-    ! non-orthogonal lattice (xyz direction)
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-        if(if_kAc) then
-          kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
-          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
-          k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
-          k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
-          k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
-        else
-          k_lap0 = stencil%lap0
-          k_nabt = 0d0
-        end if
-        do io=io_s,io_e
-        do ispin=1,Nspin
-          call stencil_nonorthogonal_xyz(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                        ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
-                                        ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%coef_lap,k_nabt,stencil%sign)
+    else
+      if(mg%ndir==3) then
+      ! non-orthogonal lattice (general)
+        if(.not.allocated(stencil%wrk)) allocate(stencil%wrk(mg%is_array(1):mg%ie_array(1) &
+                                                            ,mg%is_array(2):mg%ie_array(2) &
+                                                            ,mg%is_array(3):mg%ie_array(3),2) )
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+          kAc = 0d0
+          k_lap0 = 0d0
+          if(if_kAc) then
+            kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
+            k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
+            kAc(1:3) = matmul(stencil%B,kAc) ! B* (k+A/c)
+          end if
+          do io=io_s,io_e
+          do ispin=1,Nspin
+            call stencil_nonorthogonal(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                          ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
+                                          ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%lapt,stencil%nabt &
+                                          ,kAc,stencil%coef_F,stencil%wrk)
+          end do
+          end do
         end do
         end do
-      end do
-      end do
-    case(4)
-    ! non-orthogonal lattice (xy direction)
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-        if(if_kAc) then
-          kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
-          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
-          k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
-          k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
-          k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
-        else
-          k_lap0 = stencil%lap0
-          k_nabt = 0d0
-        end if
-        do io=io_s,io_e
-        do ispin=1,Nspin
-          call stencil_nonorthogonal_xy(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                       ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
-                                       ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%coef_lap,k_nabt,stencil%sign)
+      else if(mg%ndir > 3) then
+      ! non-orthogonal lattice (high symmetry)
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+          if(if_kAc) then
+            kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
+            k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
+            k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
+            k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
+            k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
+          else
+            k_lap0 = stencil%lap0
+            k_nabt = 0d0
+          end if
+          do io=io_s,io_e
+          do ispin=1,Nspin
+            call stencil_nonorthogonal_highsymmetry(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                          ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
+                                          ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%coef_lap,k_nabt,mg%ndir,stencil%sign)
+          end do
+          end do
         end do
         end do
-      end do
-      end do
-    end select
+      end if
+    end if
   ! subtraction
     if(present(ttpsi)) then
       do im=im_s,im_e
