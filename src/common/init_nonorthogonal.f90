@@ -28,7 +28,7 @@ SUBROUTINE init_nonorthogonal_lattice(system,stencil)
   type(s_stencil) :: stencil
   !
   real(8),dimension(3,3) :: A,B,F,wrk
-  real(8) :: f_uu,f_vv,f_ww,f_uv,f_uw,f_vw
+  real(8) :: detA,f_uu,f_vv,f_ww,f_uv,f_uw,f_vw
   real(8),parameter :: Pi=3.141592653589793d0 !??????????? salmon_math ? global parameter ?
 
 ! al = [ al_vec1, al_vec2, al_vec3 ]
@@ -36,15 +36,18 @@ SUBROUTINE init_nonorthogonal_lattice(system,stencil)
   A(1:3,2) = al_vec2(1:3)
   A(1:3,3) = al_vec3(1:3)
   system%al = A ! a (primitive lattice vectors)
-  call calc_inverse(A,wrk)
+  call calc_inverse(A,wrk,detA)
+  system%det_al = detA
+  system%Hvol = detA/dble(system%ngrid)
   system%brl = 2d0*pi* transpose(wrk) ! b (reciprocal primitive lattice vectors)
   ! [ b1 b2 b3 ]^{T} = 2*pi* [ a1 a2 a3 ]^{-1}
 
-! A = [ u, v, w ]
+! cf. A. Natan et al., PRB 78, 075109 (2008).
+! A = [ u, v, w ], B = A^{-1}
   A(1:3,1) = al_vec1(1:3) / sqrt(sum(al_vec1**2)) ! u
   A(1:3,2) = al_vec2(1:3) / sqrt(sum(al_vec2**2)) ! v
   A(1:3,3) = al_vec3(1:3) / sqrt(sum(al_vec3**2)) ! w
-  call calc_inverse(A,B)
+  call calc_inverse(A,B,detA)
 
   wrk = transpose(B)
   F = matmul(B,wrk)
@@ -66,12 +69,10 @@ SUBROUTINE init_nonorthogonal_lattice(system,stencil)
   return
 end SUBROUTINE init_nonorthogonal_lattice
 
-SUBROUTINE calc_inverse(a,b) ! b = a^{-1}
+SUBROUTINE calc_inverse(a,b,detA) ! b = a^{-1}
   implicit none
   real(8),intent(in) :: a(3,3)
-  real(8)            :: b(3,3)
-  !
-  real(8) :: detA
+  real(8)            :: b(3,3),detA
 
   detA=a(1,1)*a(2,2)*a(3,3)+a(2,1)*a(3,2)*a(1,3)+a(3,1)*a(1,2)*a(2,3) &
     -a(1,3)*a(2,2)*a(3,1)-a(2,3)*a(3,2)*a(1,1)-a(3,3)*a(1,2)*a(2,1)

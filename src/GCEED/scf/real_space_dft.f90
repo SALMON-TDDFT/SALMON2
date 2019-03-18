@@ -160,7 +160,7 @@ if(istopt==1)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_k_rd(k_rd,ksquare,1)
+!      call init_k_rd(k_rd,ksquare,1)
     end if
 
     allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -290,7 +290,7 @@ if(istopt==1)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_k_rd(k_rd,ksquare,1)
+!      call init_k_rd(k_rd,ksquare,1)
     end if
 
     if(iperiodic==3)then
@@ -469,10 +469,12 @@ stencil%if_orthogonal = .true.
 if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
 .or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) then
   call init_nonorthogonal_lattice(system,stencil)
+  Hvol = system%Hvol
   stencil%if_orthogonal = .false.
   lg%ndir = 3
   mg%ndir = 3
   ng%ndir = 3
+  call init_k_rd(k_rd,ksquare,1,system%brl)
 end if
 
 if(stencil%if_orthogonal) then

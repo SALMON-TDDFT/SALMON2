@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine init_k_rd(tk_rd,tksquare,imode)
+subroutine init_k_rd(tk_rd,tksquare,imode,B0)
 use scf_data
 !$ use omp_lib
 implicit none
@@ -21,10 +21,18 @@ integer :: jj
 real(8) :: tk_rd(3,num_kpoints_rd)
 real(8) :: tksquare(num_kpoints_rd)
 integer :: imode
+real(8),intent(in),optional :: B0(3,3)
+!
 integer :: ix,iy,iz
 integer :: ik
 complex(8) :: vecA(3)
-real(8) :: shift_k(3)
+real(8) :: shift_k(3),k(3),B(3,3)
+
+B = 0d0
+B(1,1) = 2.d0*Pi/(Hgs(1)*lg_num(1))
+B(2,2) = 2.d0*Pi/(Hgs(2)*lg_num(2))
+B(3,3) = 2.d0*Pi/(Hgs(3)*lg_num(3))
+if(present(B0)) B = B0
 
 if(iSCFRT==1)then
   vecA=0.d0
@@ -54,26 +62,18 @@ else if(ik_oddeven==2)then
   shift_k(1:3)=0.5d0
 end if
 
-if(imode==3)then
-  do ik=1,num_kpoints_rd
-    ix=mod(ik-1,num_kpoints_3d(1))+1
-    iy=mod((ik-1)/num_kpoints_3d(1),num_kpoints_3d(2))+1
-    iz=mod((ik-1)/(num_kpoints_3d(1)*num_kpoints_3d(2)),num_kpoints_3d(3))+1
-    tk_rd(1,ik)=((dble(ix)-shift_k(1))/dble(num_kpoints_3d(1))-0.5d0)*2.d0*Pi/(Hgs(1)*lg_num(1))
-    tk_rd(2,ik)=((dble(iy)-shift_k(2))/dble(num_kpoints_3d(2))-0.5d0)*2.d0*Pi/(Hgs(2)*lg_num(2))
-    tk_rd(3,ik)=((dble(iz)-shift_k(3))/dble(num_kpoints_3d(3))-0.5d0)*2.d0*Pi/(Hgs(3)*lg_num(3))
-    tksquare(ik)=tk_rd(1,ik)**2+tk_rd(2,ik)**2+tk_rd(3,ik)**2
-  end do
-else
-  do ik=1,num_kpoints_rd
-    ix=mod(ik-1,num_kpoints_3d(1))+1
-    iy=mod((ik-1)/num_kpoints_3d(1),num_kpoints_3d(2))+1
-    iz=mod((ik-1)/(num_kpoints_3d(1)*num_kpoints_3d(2)),num_kpoints_3d(3))+1
-    tk_rd(1,ik)=((dble(ix)-shift_k(1))/dble(num_kpoints_3d(1))-0.5d0)*2.d0*Pi/(Hgs(1)*lg_num(1))+vecA(1)
-    tk_rd(2,ik)=((dble(iy)-shift_k(2))/dble(num_kpoints_3d(2))-0.5d0)*2.d0*Pi/(Hgs(2)*lg_num(2))+vecA(2)
-    tk_rd(3,ik)=((dble(iz)-shift_k(3))/dble(num_kpoints_3d(3))-0.5d0)*2.d0*Pi/(Hgs(3)*lg_num(3))+vecA(3)
-    tksquare(ik)=tk_rd(1,ik)**2+tk_rd(2,ik)**2+tk_rd(3,ik)**2
-  end do
-end if
+do ik=1,num_kpoints_rd
+  ix=mod(ik-1,num_kpoints_3d(1))+1
+  iy=mod((ik-1)/num_kpoints_3d(1),num_kpoints_3d(2))+1
+  iz=mod((ik-1)/(num_kpoints_3d(1)*num_kpoints_3d(2)),num_kpoints_3d(3))+1
+  k(1) = (dble(ix)-shift_k(1))/dble(num_kpoints_3d(1))-0.5d0
+  k(2) = (dble(iy)-shift_k(2))/dble(num_kpoints_3d(2))-0.5d0
+  k(3) = (dble(iz)-shift_k(3))/dble(num_kpoints_3d(3))-0.5d0
+  tk_rd(1,ik) = k(1)*B(1,1) + k(2)*B(1,2) + k(3)*B(1,3)
+  tk_rd(2,ik) = k(1)*B(2,1) + k(2)*B(2,2) + k(3)*B(2,3)
+  tk_rd(3,ik) = k(1)*B(3,1) + k(2)*B(3,2) + k(3)*B(3,3)
+  tk_rd(:,ik) = tk_rd(:,ik) + vecA
+  tksquare(ik)=tk_rd(1,ik)**2+tk_rd(2,ik)**2+tk_rd(3,ik)**2
+end do
 
 end subroutine init_k_rd
