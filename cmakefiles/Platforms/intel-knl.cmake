@@ -14,7 +14,7 @@ set(C_FLAGS_General             "-Wall -diag-disable=10388 -restrict")
 
 set(CMAKE_Fortran_COMPILER      "mpiifort")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
-set(CMAKE_Fortran_FLAGS_RELEASE "-O3")
+set(CMAKE_Fortran_FLAGS_RELEASE "-O3 -CB -traceback")
 set(CMAKE_C_COMPILER            "mpiicc")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-O3")
