@@ -24,6 +24,7 @@ set(SOURCES
    pack_unpack.f90
    sendrecv_grid.f90
    total_energy.f90
+   writefield.f90
    writefile3d.f90
    )
 
