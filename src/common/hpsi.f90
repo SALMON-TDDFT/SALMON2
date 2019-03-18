@@ -75,9 +75,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   ! overlap region communication
     if(info%if_divide_rspace) then
 WRITE(777,'(A)')'@./common/hpsi.f90:77 overlap_R';FLUSH(777)!uemoto!@c overlap_R
-      !call update_overlap_R(tpsi%rwf,mg%is_array,mg%ie_array,norb,Nd & !?????????
-      !                     ,mg%is,mg%ie,info%irank_r,info%icomm_r)
       call update_overlap_real8(srg, mg, tpsi%rwf)
+      call update_overlap_R(tpsi%rwf,mg%is_array,mg%ie_array,norb,Nd & !?????????
+                           ,mg%is,mg%ie,info%irank_r,info%icomm_r)
     end if
   ! stencil
     do im=im_s,im_e
