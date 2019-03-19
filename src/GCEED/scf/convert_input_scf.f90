@@ -56,7 +56,14 @@ Harray(1:3,1:maxntmg)=0.d0
 rLsize(1:3,1:maxntmg)=0.d0
 iDiter(1:maxntmg)=1000
 
-Harray(1:3,1)=dl(1:3)
+if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) /= 0d0)then
+  call err_finalize('Error: [num_rgrid] and [dl] are incompatible input parameters.')
+else if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) == 0d0)then
+  Harray(1:3,1)=al(1:3)/dble(num_rgrid(1:3))
+else if(sum(abs(num_rgrid)) == 0d0 .and. sum(abs(dl)) /= 0d0)then
+  Harray(1:3,1)=dl(1:3)
+end if
+
 rLsize(1:3,1)=al(1:3)
 iDiter(1) = nscf
 
