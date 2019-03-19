@@ -21,7 +21,7 @@ contains
 
 subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
-                 egx,egxc,egy,egyc,egz,egzc)
+                 egx,egxc,egy,egyc,egz,egzc,Brl)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global, nproc_group_bound
   use salmon_communication, only: comm_summation
@@ -54,13 +54,13 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
   complex(8),intent(out) :: egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2))
   complex(8),intent(out) :: egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3))
   complex(8),intent(out) :: egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3))
-
+  real(8),intent(in),optional :: Brl(3,3)
 
   integer :: ix,iy,iz,kx,ky,kz,kkx,kky,kkz
   real(8) :: gx,gy,gz
   complex(8),parameter :: zI=(0.d0,1.d0)
   real(8) :: g2
-  real(8) :: blx,bly,blz
+  real(8) :: blx,bly,blz,B(3,3)
   integer :: n
 
 !$OMP parallel do private(iz,iy,ix)
@@ -168,9 +168,14 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
 
   call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),nproc_group_bound(1))
 
-  blx=2.d0*Pi/(Hgs(1)*dble(lg%num(1)))
+  blx=2.d0*Pi/(Hgs(1)*dble(lg%num(1))) !??????
   bly=2.d0*Pi/(Hgs(2)*dble(lg%num(2)))
   blz=2.d0*Pi/(Hgs(3)*dble(lg%num(3)))
+  B = 0d0
+  B(1,1) = blx
+  B(2,2) = bly
+  B(3,3) = blz
+  if(present(Brl)) B = Brl
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=lg%is(3),lg%ie(3)
@@ -192,9 +197,12 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
     kkx=kx-1-lg%num(1)*(1+sign(1,(kx-1-lg%num(1)/2)))/2
     kky=ky-1-lg%num(2)*(1+sign(1,(ky-1-lg%num(2)/2)))/2
     kkz=kz-1-lg%num(3)*(1+sign(1,(kz-1-lg%num(3)/2)))/2
-    gx=kkx*blx
-    gy=kky*bly
-    gz=kkz*blz
+    gx = kkx*B(1,1) + kky*B(1,2) + kkz*B(1,3)
+    gy = kkx*B(2,1) + kky*B(2,2) + kkz*B(2,3)
+    gz = kkx*B(3,1) + kky*B(3,2) + kkz*B(3,3)
+!    gx=kkx*blx
+!    gy=kky*bly
+!    gz=kkz*blz
     g2=gx**2+gy**2+gz**2
     if(kx-1==0.and.ky-1==0.and.kz-1==0)then
       rhoe_G_tmp(n)=0.d0
