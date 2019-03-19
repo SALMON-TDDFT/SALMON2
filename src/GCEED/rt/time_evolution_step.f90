@@ -558,7 +558,7 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
   if(out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call calcELF
-      call writeelf(lg)
+      call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
   end if
   if(out_estatic_rt=='y')then
