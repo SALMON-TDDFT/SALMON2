@@ -1442,7 +1442,7 @@ end do
     end if
     if(out_elf_rt=='y')then
       call calcELF
-      call writeelf(lg)
+      call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
     if(out_estatic_rt=='y')then
       call calcEstatic

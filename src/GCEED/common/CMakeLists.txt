@@ -38,7 +38,6 @@ set(SOURCES
     set_is.f90
     storevpp.f90
     total_energy_periodic.f90
-    writeelf.f90
     writeestatic.f90
     writepsi.f90
     ylm.f90

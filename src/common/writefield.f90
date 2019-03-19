@@ -139,4 +139,43 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
  
 end subroutine writedns
 
+!======================================================================
+subroutine writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
+  use inputoutput, only: format3d
+  use structures, only: s_rgrid
+  use writefile3d
+  implicit none
+  type(s_rgrid),intent(in) :: lg
+  real(8),intent(in) :: elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  integer,intent(in) :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
+  real(8),intent(in) :: hgs(3)
+  integer,intent(in) :: igc_is,igc_ie
+  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
+  integer,intent(in) :: iscfrt
+  integer,intent(in),optional :: itt
+  character(30) :: suffix
+  character(30) :: phys_quantity
+  character(10) :: filenum
+  character(20) :: header_unit
+
+  if(iSCFRT==1)then 
+    suffix = "elf"
+  else if(iSCFRT==2)then
+    write(filenum, '(i6.6)') itt
+    suffix = "elf_"//adjustl(filenum)
+  end if
+  phys_quantity = "elf"
+  if(format3d=='avs')then
+    header_unit = "none"
+    call writeavs(lg,103,suffix,header_unit,elf,icoo1d)
+  else if(format3d=='cube')then
+    call writecube(lg,103,suffix,phys_quantity,elf,hgs,igc_is,igc_ie,gridcoo)
+  else if(format3d=='vtk')then
+    call writevtk(lg,103,suffix,elf,hgs,igc_is,igc_ie,gridcoo)
+  end if
+  
+end subroutine writeelf
+
+!======================================================================
+
 end module writefield
