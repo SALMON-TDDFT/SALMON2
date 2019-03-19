@@ -19,7 +19,6 @@ subroutine writeelf(lg)
   use structures, only: s_rgrid
   use writefile3d
   use scf_data
-  use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
   character(30) :: suffix
