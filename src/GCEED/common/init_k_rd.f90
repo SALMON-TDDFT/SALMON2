@@ -79,7 +79,7 @@ end if
 end subroutine init_k_rd
 
 
-subroutine init_k_rd_noc(tk_rd,tksquare,imode,B)
+subroutine init_k_rd_noc(tk_rd,tksquare,imode,Brl)
 use scf_data
 !$ use omp_lib
 implicit none
@@ -87,7 +87,7 @@ integer :: jj
 real(8) :: tk_rd(3,num_kpoints_rd)
 real(8) :: tksquare(num_kpoints_rd)
 integer :: imode
-real(8),intent(in) B(3,3)
+real(8),intent(in) :: Brl(3,3)
 !
 integer :: ix,iy,iz
 integer :: ik
@@ -129,9 +129,9 @@ do ik=1,num_kpoints_rd
   k(1) = (dble(ix)-shift_k(1))/dble(num_kpoints_3d(1))-0.5d0
   k(2) = (dble(iy)-shift_k(2))/dble(num_kpoints_3d(2))-0.5d0
   k(3) = (dble(iz)-shift_k(3))/dble(num_kpoints_3d(3))-0.5d0
-  tk_rd(1,ik) = k(1)*B(1,1) + k(2)*B(1,2) + k(3)*B(1,3)
-  tk_rd(2,ik) = k(1)*B(2,1) + k(2)*B(2,2) + k(3)*B(2,3)
-  tk_rd(3,ik) = k(1)*B(3,1) + k(2)*B(3,2) + k(3)*B(3,3)
+  tk_rd(1,ik) = k(1)*Brl(1,1) + k(2)*Brl(1,2) + k(3)*Brl(1,3)
+  tk_rd(2,ik) = k(1)*Brl(2,1) + k(2)*Brl(2,2) + k(3)*Brl(2,3)
+  tk_rd(3,ik) = k(1)*Brl(3,1) + k(2)*Brl(3,2) + k(3)*Brl(3,3)
   tk_rd(:,ik) = tk_rd(:,ik) + vecA
   tksquare(ik)=tk_rd(1,ik)**2+tk_rd(2,ik)**2+tk_rd(3,ik)**2
 end do

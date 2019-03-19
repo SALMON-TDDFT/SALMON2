@@ -475,7 +475,6 @@ if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
   mg%ndir = 3
   ng%ndir = 3
   call init_k_rd_noc(k_rd,ksquare,1,system%brl)
-  call prep_poisson_fft_noc(system%brl)
 end if
 
 if(stencil%if_orthogonal) then
