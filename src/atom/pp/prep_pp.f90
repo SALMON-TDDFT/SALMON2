@@ -62,7 +62,7 @@ end subroutine calc_vloc
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
-                     ngzero,gx,gy,gz,ng,ng_s,ng_e,nl,alxyz,lx,ly,lz,hx,hy,hz)
+                     ngzero,gx,gy,gz,ng,ng_s,ng_e,nl,alxyz,lx,ly,lz,hx,hy,hz,matrix_A0)
   use salmon_global,only : natom, nelem, kion, rion
   use salmon_parallel,only : nproc_group_tdks
   use salmon_communication, only: comm_summation
@@ -81,13 +81,20 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
   complex(8),intent(out) :: rhoion_g(ng_s:ng_e)
   real(8),intent(out) :: vpsl_ia(nl,natom)
   real(8),intent(out) :: vpsl(nl)
+  real(8),intent(in),optional :: matrix_A0(3,3)
   integer :: a,i,n,ik
-  real(8) :: gd
+  real(8) :: gd,r(3),matrix_A(3,3)
   real(8) :: g2
   complex(8) :: vion_g_ia(ng_s:ng_e,natom),tmp_exp !, Vion_G(NG_s:NG_e)
   real(8) :: vpsl_ia_l(nl,natom)
   real(8) :: gr
   complex(8),parameter :: zi=(0.d0,1.d0)
+
+  matrix_A = 0d0
+  matrix_A(1,1) = 1d0
+  matrix_A(2,2) = 1d0
+  matrix_A(3,3) = 1d0
+  if(present(matrix_A0)) matrix_A = matrix_A0
 
   !(Local pseudopotential: Vlocal in G-space(=Vion_G))
   vion_g_ia=0.d0
@@ -120,7 +127,11 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
   do n=ng_s,ng_e
 !$omp do private(i,gr,a,tmp_exp)
     do i=1,NL
-      gr = gx(n)*lx(i)*hx+gy(n)*ly(i)*hy+gz(n)*lz(i)*hz
+      r(1) = lx(i)*hx*matrix_A(1,1) + ly(i)*hy*matrix_A(1,2) + lz(i)*hz*matrix_A(1,3)
+      r(2) = lx(i)*hx*matrix_A(2,1) + ly(i)*hy*matrix_A(2,2) + lz(i)*hz*matrix_A(2,3)
+      r(3) = lx(i)*hx*matrix_A(3,1) + ly(i)*hy*matrix_A(3,2) + lz(i)*hz*matrix_A(3,3)
+      gr = gx(n)*r(1) + gy(n)*r(2) + gz(n)*r(3)
+!      gr = gx(n)*lx(i)*hx+gy(n)*ly(i)*hy+gz(n)*lz(i)*hz
       tmp_exp = exp(zi*gr)
       !vpsl_l(i) = vpsl_l(i) + vion_G(n)*tmp_exp
       do a=1,natom
@@ -181,7 +192,7 @@ subroutine finalize_jxyz(ppg)
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
+subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
   use structures,only : s_pp_info,s_pp_grid
   implicit none
@@ -192,11 +203,24 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
+  real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
   integer :: a,i,ik,ix,iy,iz,j
   integer :: nc
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: x,y,z,r
-  real(8) :: rshift(3)
+  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
+
+  matrix_a = 0d0
+  matrix_a(1,1) = 1d0
+  matrix_a(2,2) = 1d0
+  matrix_a(3,3) = 1d0
+  if(present(matrix_A0)) matrix_a = matrix_A0
+
+  al = 0d0
+  al(1,1) = alx
+  al(2,2) = aly
+  al(3,3) = alz
+  if(present(al0)) al = al0
 
   if(iperiodic==0)then
     nc=0
@@ -239,13 +263,25 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
     do ix=-nc,nc
     do iy=-nc,nc
     do iz=-nc,nc
-      tmpx = rion(1,a)+ix*alx
-      tmpy = rion(2,a)+iy*aly
-      tmpz = rion(3,a)+iz*alz
+      rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
+      rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
+      rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
+      tmpx = rion(1,a)+ rr(1)
+      tmpy = rion(2,a)+ rr(2)
+      tmpz = rion(3,a)+ rr(3)
+!      tmpx = rion(1,a)+ix*alx
+!      tmpy = rion(2,a)+iy*aly
+!      tmpz = rion(3,a)+iz*alz
       do i=1,ml
-        x=mx(i)*Hx+rshift(1)-tmpx
-        y=my(i)*Hy+rshift(2)-tmpy
-        z=mz(i)*Hz+rshift(3)-tmpz
+        rr(1) = lx(i)*hx*matrix_a(1,1) + ly(i)*hy*matrix_a(1,2) + lz(i)*hz*matrix_a(1,3)
+        rr(2) = lx(i)*hx*matrix_a(2,1) + ly(i)*hy*matrix_a(2,2) + lz(i)*hz*matrix_a(2,3)
+        rr(3) = lx(i)*hx*matrix_a(3,1) + ly(i)*hy*matrix_a(3,2) + lz(i)*hz*matrix_a(3,3)
+        x=rr(1)+rshift(1)-tmpx
+        y=rr(2)+rshift(2)-tmpy
+        z=rr(3)+rshift(3)-tmpz
+!        x=mx(i)*Hx+rshift(1)-tmpx
+!        y=my(i)*Hy+rshift(2)-tmpy
+!        z=mz(i)*Hz+rshift(3)-tmpz
         r=sqrt(x*x+y*y+z*z)
         if (r<pp%rps(ik)) j=j+1
       enddo
@@ -262,7 +298,7 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
 end subroutine calc_mps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
+subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
   use structures,only : s_pp_info,s_pp_grid
   implicit none
@@ -273,11 +309,25 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
+  real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
   integer :: a,i,ik,ix,iy,iz,j
   integer :: nc
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: r,x,y,z
-  real(8) :: rshift(3)
+  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
+
+  matrix_a = 0d0
+  matrix_a(1,1) = 1d0
+  matrix_a(2,2) = 1d0
+  matrix_a(3,3) = 1d0
+  if(present(matrix_A0)) matrix_a = matrix_A0
+
+  al = 0d0
+  al(1,1) = alx
+  al(2,2) = aly
+  al(3,3) = alz
+  if(present(al0)) al = al0
+
 
   if(iperiodic==0)then
     nc=0
@@ -319,13 +369,25 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
     do ix=-nc,nc
     do iy=-nc,nc
     do iz=-nc,nc
-      tmpx = rion(1,a)+ix*aLx
-      tmpy = rion(2,a)+iy*aLy
-      tmpz = rion(3,a)+iz*aLz
+      rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
+      rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
+      rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
+      tmpx = rion(1,a)+ rr(1)
+      tmpy = rion(2,a)+ rr(2)
+      tmpz = rion(3,a)+ rr(3)
+!      tmpx = rion(1,a)+ix*aLx
+!      tmpy = rion(2,a)+iy*aLy
+!      tmpz = rion(3,a)+iz*aLz
       do i=1,ml
-        x=mx(i)*Hx+rshift(1)-tmpx
-        y=my(i)*Hy+rshift(2)-tmpy
-        z=mz(i)*Hz+rshift(3)-tmpz
+        rr(1) = lx(i)*hx*matrix_a(1,1) + ly(i)*hy*matrix_a(1,2) + lz(i)*hz*matrix_a(1,3)
+        rr(2) = lx(i)*hx*matrix_a(2,1) + ly(i)*hy*matrix_a(2,2) + lz(i)*hz*matrix_a(2,3)
+        rr(3) = lx(i)*hx*matrix_a(3,1) + ly(i)*hy*matrix_a(3,2) + lz(i)*hz*matrix_a(3,3)
+        x=rr(1)+rshift(1)-tmpx
+        y=rr(2)+rshift(2)-tmpy
+        z=rr(3)+rshift(3)-tmpz
+!        x=mx(i)*Hx+rshift(1)-tmpx
+!        y=my(i)*Hy+rshift(2)-tmpy
+!        z=mz(i)*Hz+rshift(3)-tmpz
         r=sqrt(x*x+y*y+z*z)
         if (r<pp%rps(ik)) then
           j=j+1
@@ -336,9 +398,12 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz)
             ppg%jxx( j,a)=ix
             ppg%jyy( j,a)=iy
             ppg%jzz( j,a)=iz
-            ppg%rxyz(1,j,a)=dble(mx(i))*hx+rshift(1)-(rion(1,a)+dble(ix)*alx)
-            ppg%rxyz(2,j,a)=dble(my(i))*hy+rshift(2)-(rion(2,a)+dble(iy)*aly)
-            ppg%rxyz(3,j,a)=dble(mz(i))*hz+rshift(3)-(rion(3,a)+dble(iz)*alz)
+            ppg%rxyz(1,j,a) = x
+            ppg%rxyz(2,j,a) = y
+            ppg%rxyz(3,j,a) = z
+!            ppg%rxyz(1,j,a)=dble(mx(i))*hx+rshift(1)-(rion(1,a)+dble(ix)*alx)
+!            ppg%rxyz(2,j,a)=dble(my(i))*hy+rshift(2)-(rion(2,a)+dble(iy)*aly)
+!            ppg%rxyz(3,j,a)=dble(mz(i))*hz+rshift(3)-(rion(3,a)+dble(iz)*alz)
           endif
         endif
       enddo
@@ -445,7 +510,7 @@ end subroutine set_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                    lx,ly,lz,nl,hx,hy,hz,  &
-                   flag_use_grad_wf_on_force,property)
+                   flag_use_grad_wf_on_force,property,hvol0)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
   use structures,only : s_pp_info,s_pp_grid
   implicit none
@@ -461,6 +526,7 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   real(8),intent(out) :: save_udvtbl_b(pp%nrmax,0:pp%lmax,natom)
   real(8),intent(out) :: save_udvtbl_c(pp%nrmax,0:pp%lmax,natom)
   real(8),intent(out) :: save_udvtbl_d(pp%nrmax,0:pp%lmax,natom)
+  real(8),intent(in),optional :: hvol0
   integer :: a,ik,j,l,lm,m
   integer :: ilma,intr,ir,lma
   real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
@@ -474,6 +540,7 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   real(8) :: hvol
 
   hvol=hx*hy*hz
+  if(present(hvol0)) hvol = hvol0
 
   if(iperiodic==0)then
     if(mod(lx(nl)-lx(1)+1,2)==1)then

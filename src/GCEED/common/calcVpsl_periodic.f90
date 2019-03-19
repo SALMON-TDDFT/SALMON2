@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic
+subroutine calcVpsl_periodic(al0,brl,if_orthogonal)
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
@@ -21,6 +21,9 @@ subroutine calcVpsl_periodic
   use allocate_psl_sub
   use allocate_mat_sub
   implicit none
+
+  real(8),intent(in),optional :: al0(3,3),brl(3,3)
+  logical,intent(in),optional :: if_orthogonal
   
   integer :: ii,ix,iy,iz,ak
   integer :: iix,iiy,iiz
@@ -39,13 +42,18 @@ subroutine calcVpsl_periodic
   real(8),allocatable :: vpsl_ia(:,:)
   real(8),allocatable :: vpsl_tmp2(:)
   integer :: i
-  real(8) :: hx,hy,hz
+  real(8) :: hx,hy,hz,B(3,3)
 
 !calculate reciprocal lattice vector
   bLx=2.d0*Pi/(Hgs(1)*dble(lg_num(1)))
   bLy=2.d0*Pi/(Hgs(2)*dble(lg_num(2)))
   bLz=2.d0*Pi/(Hgs(3)*dble(lg_num(3)))
-  
+
+  B = 0d0
+  B(1,1) = bLx
+  B(2,2) = bLy
+  B(3,3) = blz
+  if(.not.if_orthogonal) B = Brl
  
   NG_s=1
   NG_e=lg_num(1)*lg_num(2)*lg_num(3)
@@ -75,9 +83,12 @@ subroutine calcVpsl_periodic
     iix=ix-1-lg_num(1)*(1+sign(1,(ix-1-(lg_num(1)+1)/2)))/2
     iiy=iy-1-lg_num(2)*(1+sign(1,(iy-1-(lg_num(2)+1)/2)))/2
     iiz=iz-1-lg_num(3)*(1+sign(1,(iz-1-(lg_num(3)+1)/2)))/2
-    Gx(n)=dble(iix)*bLx
-    Gy(n)=dble(iiy)*bLy
-    Gz(n)=dble(iiz)*bLz
+    Gx(n) = dble(iix)*B(1,1) + dble(iiy)*B(1,2) + dble(iiz)*B(1,3)
+    Gy(n) = dble(iix)*B(2,1) + dble(iiy)*B(2,2) + dble(iiz)*B(2,3)
+    Gz(n) = dble(iix)*B(3,1) + dble(iiy)*B(3,2) + dble(iiz)*B(3,3)
+!    Gx(n)=dble(iix)*bLx
+!    Gy(n)=dble(iiy)*bLy
+!    Gz(n)=dble(iiz)*bLz
   enddo
   enddo
   enddo
@@ -115,7 +126,7 @@ subroutine calcVpsl_periodic
   allocate(vpsl_tmp2(ng_s:ng_e))
  
   call calc_vpsl(pp,rhoion_g_tmp2,vpsl_ia,vpsl_tmp2,dvloc_g_tmp2,  &
-                     ngzero,gx,gy,gz,ng_e,ng_l_s_para,ng_l_e_para,ng_e,alxyz,lx,ly,lz,hx,hy,hz)
+                     ngzero,gx,gy,gz,ng_e,ng_l_s_para,ng_l_e_para,ng_e,alxyz,lx,ly,lz,hx,hy,hz,al0)
 
   deallocate(dvloc_g_tmp2)
 

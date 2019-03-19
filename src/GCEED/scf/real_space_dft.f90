@@ -177,7 +177,7 @@ if(istopt==1)then
     else
       call read_pslfile
       call allocate_psl
-      call init_ps
+!      call init_ps
     end if
 
     if(iobnum >= 1)then
@@ -468,13 +468,17 @@ info_ob%icomm_r = nproc_group_korbital
 stencil%if_orthogonal = .true.
 if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
 .or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) then
-  call init_nonorthogonal_lattice(system,stencil)
+  call init_nonorthogonal_lattice(system,stencil,lg)
   Hvol = system%Hvol
+  Hgs = system%Hgs
   stencil%if_orthogonal = .false.
   lg%ndir = 3
   mg%ndir = 3
   ng%ndir = 3
   call init_k_rd_noc(k_rd,ksquare,1,system%brl)
+  call calcVpsl_periodic(system%al,system%brl,stencil%if_orthogonal)
+  call calcJxyz_all_periodic(system%al,stencil%matrix_A)
+  call calcuV
 end if
 
 if(stencil%if_orthogonal) then

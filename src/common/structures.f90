@@ -87,7 +87,7 @@ module structures
     logical :: if_orthogonal
     integer,allocatable :: sign(:,:) ! sign(3,4:ndir) (for ndir=4~6) 
     real(8),allocatable :: coef_lap(:,:),coef_nab(:,:) !?????? --> lapt,nabt (future work)
-    real(8) :: B(3,3),coef_F(6)
+    real(8) :: matrix_A(3,3),matrix_B(3,3),coef_F(6)
 
   ! Experimental implementation of srg
     type(s_sendrecv_grid) :: srg

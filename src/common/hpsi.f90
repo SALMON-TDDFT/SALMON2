@@ -119,7 +119,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
           if(if_kAc) then
             kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
             k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
-            kAc(1:3) = matmul(stencil%B,kAc) ! B* (k+A/c)
+            kAc(1:3) = matmul(stencil%matrix_B,kAc) ! B* (k+A/c)
           end if
           do io=io_s,io_e
           do ispin=1,Nspin
