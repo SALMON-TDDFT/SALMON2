@@ -1446,7 +1446,7 @@ end do
     end if
     if(out_estatic_rt=='y')then
       call calcEstatic
-      call writeestatic(lg)
+      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end do
 

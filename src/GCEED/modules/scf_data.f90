@@ -363,7 +363,7 @@ real(8), allocatable :: Vh_n(:,:,:)
 real(8), allocatable :: Vh0(:,:,:)
 complex(8), allocatable :: zpsi_n(:,:,:,:,:)
 
-complex(8), allocatable :: Ex_static(:,:,:),Ey_static(:,:,:),Ez_static(:,:,:)
+real(8),allocatable :: Ex_static(:,:,:),Ey_static(:,:,:),Ez_static(:,:,:)
 
 real(8),allocatable :: curr(:,:) 
 real(8),allocatable :: sumcurr(:,:)

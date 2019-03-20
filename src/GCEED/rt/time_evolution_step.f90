@@ -564,7 +564,7 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
   if(out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
       call calcEstatic
-      call writeestatic(lg)
+      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
 

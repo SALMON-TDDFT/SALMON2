@@ -21,13 +21,12 @@ use new_world_sub
 use sendrecvh_sub
 implicit none
 integer :: ist,ix,iy,iz
-complex(8),parameter :: zi=(0.d0,1.d0)
 real(8) :: Vh_wk(ng_sta(1)-Ndh:ng_end(1)+Ndh,   &
                  ng_sta(2)-Ndh:ng_end(2)+Ndh,   &
                  ng_sta(3)-Ndh:ng_end(3)+Ndh)
-complex(8) :: Ex_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
-complex(8) :: Ey_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
-complex(8) :: Ez_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
+real(8) :: Ex_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
+real(8) :: Ey_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
+real(8) :: Ez_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 
 iwk_size=11
 call make_iwksta_iwkend

@@ -178,4 +178,110 @@ end subroutine writeelf
 
 !======================================================================
 
+subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
+  use inputoutput, only: format3d
+  use structures, only: s_rgrid
+  use salmon_parallel, only: nproc_group_global
+  use salmon_communication, only: comm_summation
+  use writefile3d
+  implicit none
+  type(s_rgrid),intent(in) :: lg,mg,ng
+  real(8),intent(in) :: ex_static(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(in) :: ey_static(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(in) :: ez_static(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(out) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  real(8),intent(out) :: rmat2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  integer,intent(in) :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
+  real(8),intent(in) :: hgs(3)
+  integer,intent(in) :: igc_is,igc_ie
+  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
+  integer,intent(in),optional :: itt
+  integer :: ix,iy,iz,jj
+  character(30) :: suffix
+  character(30) :: phys_quantity
+  character(10) :: filenum
+  character(20) :: header_unit
+
+  do jj=1,3
+
+    !$OMP parallel do collapse(2) private(iz,iy,ix)
+    do iz=lg%is(3),lg%ie(3)
+    do iy=lg%is(2),lg%ie(2)
+    do ix=lg%is(1),lg%ie(1)
+      rmat(ix,iy,iz)=0.d0
+    end do
+    end do
+    end do
+    
+    if(jj==1)then
+      !$OMP parallel do collapse(2) private(iz,iy,ix)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        rmat(ix,iy,iz)=ex_static(ix,iy,iz)
+      end do
+      end do
+      end do
+    else if(jj==2)then
+      !$OMP parallel do collapse(2) private(iz,iy,ix)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        rmat(ix,iy,iz)=ey_static(ix,iy,iz)
+      end do
+      end do
+      end do
+    else if(jj==3)then
+      !$OMP parallel do collapse(2) private(iz,iy,ix)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        rmat(ix,iy,iz)=ez_static(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
+   
+    if(format3d=='avs')then
+      !$OMP parallel do collapse(2) private(iz,iy,ix)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        rmat(ix,iy,iz)=rmat(ix,iy,iz)*5.14223d1
+      end do
+      end do
+      end do
+    end if
+ 
+    call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+  
+    write(filenum, '(i6.6)') itt
+    if(jj==1)then
+      suffix = "Exsta_"//adjustl(filenum)
+      phys_quantity = "exsta"
+    else if(jj==2)then
+      suffix = "Eysta_"//adjustl(filenum)
+      phys_quantity = "eysta"
+    else if(jj==3)then
+      suffix = "Ezsta_"//adjustl(filenum)
+      phys_quantity = "ezsta"
+    end if
+
+    if(format3d=='avs')then
+      header_unit = "V/A"
+      call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
+    else if(format3d=='cube')then
+      call writecube(lg,103,suffix,phys_quantity,rmat2,hgs,igc_is,igc_ie,gridcoo)
+    else if(format3d=='vtk')then
+      call writevtk(lg,103,suffix,rmat2,hgs,igc_is,igc_ie,gridcoo)
+    end if
+
+  end do  
+ 
+end subroutine writeestatic
+
+
+
+
+
 end module writefield
