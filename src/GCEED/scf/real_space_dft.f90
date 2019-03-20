@@ -101,6 +101,10 @@ elp3(101)=get_wtime()
 
 inumcpu_check=0
 
+stencil%if_orthogonal = .true.
+if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
+.or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) stencil%if_orthogonal = .false.
+
 call setbN
 call setcN
 
@@ -136,7 +140,7 @@ if(istopt==1)then
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
-    call init_mesh(lg,mg,itmg)
+    call init_mesh(lg,mg,itmg,stencil%if_orthogonal)
     call set_gridcoo
     call init_mesh_s(ng)
     call check_mg(mg)
@@ -465,13 +469,11 @@ info_ob%irank_r(5) = kup_array(1)
 info_ob%irank_r(6) = kdw_array(1)
 info_ob%icomm_r = nproc_group_korbital
 
-stencil%if_orthogonal = .true.
-if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
-.or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) then
+if(.not. stencil%if_orthogonal) then
+  if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
   call init_nonorthogonal_lattice(system,stencil,lg)
   Hvol = system%Hvol
   Hgs = system%Hgs
-  stencil%if_orthogonal = .false.
   lg%ndir = 3
   mg%ndir = 3
   ng%ndir = 3
@@ -1526,7 +1528,7 @@ END subroutine Real_Space_DFT
 !=======================================================================
 !========================================= Grid generation and labelling
 
-SUBROUTINE init_mesh(lg,mg,itmg)
+SUBROUTINE init_mesh(lg,mg,itmg,if_orthogonal)
 use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root
@@ -1536,6 +1538,8 @@ implicit none
 type(s_rgrid),intent(out) :: lg
 type(s_rgrid),intent(out) :: mg
 integer,intent(in) :: itmg
+logical,intent(in) :: if_orthogonal
+integer :: j
 real(8) :: rLsize1(3)
 
 if(comm_is_root(nproc_id_global))      &
@@ -1553,6 +1557,51 @@ call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
            lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,iscfrt)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
+
+if(.not. if_orthogonal) then
+  if(comm_is_root(nproc_id_global)) write(*,*) "nonorthogonal lattice"
+  if(nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3).ne.1) stop "error: nonorthogonal lattice and r-space parallelization"
+  lg%is(1:3)=lg_sta(1:3)
+  lg%ie(1:3)=lg_end(1:3)
+  lg%num(1:3)=lg_num(1:3)
+  lg%is_overlap(1:3)=lg_sta(1:3)-nd
+  lg%ie_overlap(1:3)=lg_end(1:3)+nd
+  lg%is_array(1:3)=lg_sta(1:3)
+  lg%ie_array(1:3)=lg_end(1:3)
+
+  if(allocated(lg%idx)) deallocate(lg%idx)
+  if(allocated(lg%idy)) deallocate(lg%idy)
+  if(allocated(lg%idz)) deallocate(lg%idz)
+  allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
+          ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
+          ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
+  do j=lg%is_overlap(1),lg%ie_overlap(1)
+    lg%idx(j) = mod(j+lg%num(1)-1,lg%num(1))+1
+  end do
+  do j=lg%is_overlap(2),lg%ie_overlap(2)
+    lg%idy(j) = mod(j+lg%num(2)-1,lg%num(2))+1
+  end do
+  do j=lg%is_overlap(3),lg%ie_overlap(3)
+    lg%idz(j) = mod(j+lg%num(3)-1,lg%num(3))+1
+  end do
+
+  mg%is(1:3)=lg%is(1:3)
+  mg%ie(1:3)=lg%ie(1:3)
+  mg%num(1:3)=lg%num(1:3)
+  mg%is_overlap(1:3)=lg%is_overlap(1:3)
+  mg%ie_overlap(1:3)=lg%ie_overlap(1:3)
+  mg%is_array(1:3)=lg%is_array(1:3)
+  mg%ie_array(1:3)=lg%ie_array(1:3)
+  if(allocated(mg%idx)) deallocate(mg%idx)
+  if(allocated(mg%idy)) deallocate(mg%idy)
+  if(allocated(mg%idz)) deallocate(mg%idz)
+  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
+          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
+          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
+  mg%idx = lg%idx
+  mg%idy = lg%idy
+  mg%idz = lg%idz
+end if
 
 return
 
