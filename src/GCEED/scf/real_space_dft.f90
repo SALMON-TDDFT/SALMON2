@@ -101,9 +101,10 @@ elp3(101)=get_wtime()
 
 inumcpu_check=0
 
-stencil%if_orthogonal = .true.
-if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
-.or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) stencil%if_orthogonal = .false.
+stencil%if_orthogonal = .false. !+++++++++ test
+!stencil%if_orthogonal = .true.
+!if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
+!.or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) stencil%if_orthogonal = .false.
 
 call setbN
 call setcN
@@ -478,7 +479,7 @@ if(.not. stencil%if_orthogonal) then
   mg%ndir = 3
   ng%ndir = 3
   call init_k_rd_noc(k_rd,ksquare,1,system%brl)
-  call calcVpsl_periodic(system%al,system%brl,stencil%if_orthogonal)
+  call calcVpsl_periodic(stencil%matrix_A,system%brl,stencil%if_orthogonal)
   call calcJxyz_all_periodic(system%al,stencil%matrix_A)
   call calcuV
 end if
@@ -1558,9 +1559,8 @@ call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
 
-if(.not. if_orthogonal) then
-  if(comm_is_root(nproc_id_global)) write(*,*) "nonorthogonal lattice"
-  if(nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3).ne.1) stop "error: nonorthogonal lattice and r-space parallelization"
+if(nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
+  if(comm_is_root(nproc_id_global)) write(*,*) "no r-space parallelization"
   lg%is(1:3)=lg_sta(1:3)
   lg%ie(1:3)=lg_end(1:3)
   lg%num(1:3)=lg_num(1:3)

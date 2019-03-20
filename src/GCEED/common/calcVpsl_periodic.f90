@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic(al0,brl,if_orthogonal)
+subroutine calcVpsl_periodic(matrix_A0,brl,if_orthogonal)
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
@@ -22,7 +22,7 @@ subroutine calcVpsl_periodic(al0,brl,if_orthogonal)
   use allocate_mat_sub
   implicit none
 
-  real(8),intent(in),optional :: al0(3,3),brl(3,3)
+  real(8),intent(in),optional :: matrix_A0(3,3),brl(3,3)
   logical,intent(in),optional :: if_orthogonal
   
   integer :: ii,ix,iy,iz,ak
@@ -126,7 +126,7 @@ subroutine calcVpsl_periodic(al0,brl,if_orthogonal)
   allocate(vpsl_tmp2(ng_s:ng_e))
  
   call calc_vpsl(pp,rhoion_g_tmp2,vpsl_ia,vpsl_tmp2,dvloc_g_tmp2,  &
-                     ngzero,gx,gy,gz,ng_e,ng_l_s_para,ng_l_e_para,ng_e,alxyz,lx,ly,lz,hx,hy,hz,al0)
+                     ngzero,gx,gy,gz,ng_e,ng_l_s_para,ng_l_e_para,ng_e,alxyz,lx,ly,lz,hx,hy,hz,matrix_A0)
 
   deallocate(dvloc_g_tmp2)
 
