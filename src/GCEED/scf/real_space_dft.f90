@@ -62,6 +62,7 @@ use subspace_diag_periodic_sub
 use writefield
 use global_variables_scf
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
+use salmon_pp, only: calc_nlcc
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa
@@ -85,6 +86,7 @@ type(s_stencil) :: stencil
 type(s_scalar) :: sVh
 type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
 type(s_fourier_grid) :: fg
+type(s_pp_nlcc) :: ppn
 integer :: neig(1:3, 1:2)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -177,6 +179,7 @@ if(istopt==1)then
       call read_pslfile
       call allocate_psl
       call init_ps
+      call calc_nlcc(pp, system, mg, ppn)
     end if
 
     if(iobnum >= 1)then
