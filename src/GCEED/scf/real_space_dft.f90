@@ -141,11 +141,19 @@ if(istopt==1)then
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
-    call init_mesh(lg,mg,itmg,stencil%if_orthogonal)
+    call init_mesh(lg,mg,itmg)
     call set_gridcoo
     call init_mesh_s(ng)
     call check_mg(mg)
     call check_ng(ng)
+    lg%ndir = 3
+    mg%ndir = 3
+    ng%ndir = 3
+    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+
+    call init_lattice(system,stencil,lg)
+    Hvol = system%Hvol
+    Hgs = system%Hgs
 
     call init_updown
     call init_itype
@@ -165,7 +173,8 @@ if(istopt==1)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_k_rd(k_rd,ksquare,1)
+!      call init_k_rd(k_rd,ksquare,1)
+      call init_k_rd_noc(k_rd,ksquare,1,system%brl)
     end if
 
     allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -183,6 +192,9 @@ if(istopt==1)then
       call read_pslfile
       call allocate_psl
 !      call init_ps
+      call calcVpsl_periodic(stencil%matrix_A,system%brl,stencil%if_orthogonal)
+      call calcJxyz_all_periodic(system%al,stencil%matrix_A)
+      call calcuV
     end if
 
     if(iobnum >= 1)then
@@ -400,15 +412,6 @@ system%no = itotMST
 system%nk = num_kpoints_rd
 system%nion = MI
 
-system%Hvol = Hvol
-system%Hgs = Hgs
-
-system%al = 0d0
-system%al(1,1) = lg_num(1)*Hgs(1)
-system%al(2,2) = lg_num(2)*Hgs(2)
-system%al(3,3) = lg_num(3)*Hgs(3)
-system%det_al = lg_num(1)*lg_num(2)*lg_num(3) * Hvol
-
 allocate(system%Rion(3,system%nion) &
         ,system%wtk(system%nk) &
         ,system%esp(system%no,system%nk,system%nspin) &
@@ -451,7 +454,6 @@ do iob=info%io_s,info%io_e
   info%io_tbl(iob) = jj
 end do
 
-
 info_ob%im_s = 1
 info_ob%im_e = 1
 info_ob%numm = 1
@@ -470,23 +472,10 @@ info_ob%irank_r(5) = kup_array(1)
 info_ob%irank_r(6) = kdw_array(1)
 info_ob%icomm_r = nproc_group_korbital
 
-if(.not. stencil%if_orthogonal) then
-  if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-  call init_lattice(system,stencil,lg)
-  Hvol = system%Hvol
-  Hgs = system%Hgs
-  lg%ndir = 3
-  mg%ndir = 3
-  ng%ndir = 3
-  call init_k_rd_noc(k_rd,ksquare,1,system%brl)
-  call calcVpsl_periodic(stencil%matrix_A,system%brl,stencil%if_orthogonal)
-  call calcJxyz_all_periodic(system%al,stencil%matrix_A)
-  call calcuV
-end if
-
 if(stencil%if_orthogonal) then
   stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
 else
+  if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
   stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
 end if
 do jj=1,3
@@ -1529,7 +1518,7 @@ END subroutine Real_Space_DFT
 !=======================================================================
 !========================================= Grid generation and labelling
 
-SUBROUTINE init_mesh(lg,mg,itmg,if_orthogonal)
+SUBROUTINE init_mesh(lg,mg,itmg)
 use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root
@@ -1539,7 +1528,6 @@ implicit none
 type(s_rgrid),intent(out) :: lg
 type(s_rgrid),intent(out) :: mg
 integer,intent(in) :: itmg
-logical,intent(in) :: if_orthogonal
 integer :: j
 real(8) :: rLsize1(3)
 
