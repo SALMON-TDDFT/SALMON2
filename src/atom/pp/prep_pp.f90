@@ -604,6 +604,90 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
  
 end subroutine calc_uv
 
+
+subroutine calc_nlcc(ppn, ss, rg, pp)
+  use salmon_global, only : kion
+  use structures, only : s_system, s_pp_info, s_pp_nlcc, s_rgrid
+  type(s_pp_nlcc), intent(inout) :: ppn
+  type(s_system), intent(in) :: sys
+  type(s_rgrid), intent(in) :: rg
+  type(s_pp_info), intent(in) :: pp
+
+  integer :: i(1:3), j(1:3)
+  integer :: irepr_min, irepr_max
+  real(8) :: rion_repr(3)
+
+  ! Allocate
+  allocate(ppn%rho_nlcc( &
+  & rg%is_array(1):rg%ie_array(1), &
+  & rg%is_array(2):rg%ie_array(2), &
+  & rg%is_array(3):rg%ie_array(3)))
+  allocate(ppn%tau_nlcc( &
+  & rg%is_array(1):rg%ie_array(1), &
+  & rg%is_array(2):rg%ie_array(2), &
+  & rg%is_array(3):rg%ie_array(3)))
+
+  if (sys%iperiodic == 0) then
+    irepr_min = 0
+    irepr_max = 0
+  elseif (sys%iperiodic == 3) then
+    irepr_min = -2
+    irepr_max = +2
+  else
+    stop "Sorry, not implemented (calc_nlcc@prep_pp.f90)"
+  endif
+
+  ppn%rho_nlcc = 0d0
+  ppn%tau_nlcc = 0d0
+
+  if (.not. pp%flag_nlcc) return
+
+  do a=1, nion
+    ik = Kion(a)
+    rc = 15d0 ! maximum
+    do i=1, pp%nrmax
+      if(pp%rho_nlcc_tbl(i,ik) + pp%tau_nlcc_tbl(i,ik) < 1d-6)then
+        rc = pp%rad(i,ik)
+        exit
+      end if
+      if(i == pp%nrmax) stop "no-cut-off found (calc_nlcc@prep_pp.f90)"
+    end do
+
+    do i(1) = irepr_min, irepr_max
+    do i(2) = irepr_min, irepr_max
+    do i(3) = irepr_min, irepr_max
+      rion_repr(1) = (sys%rion(1, a) + i(1) * sys%al(1, 1))
+      rion_repr(2) = (sys%rion(2, a) + i(2) * sys%al(2, 2))
+      rion_repr(3) = (sys%rion(3, a) + i(3) * sys%al(3, 3))
+      do j(1) = rg%is(1), rg%ie(1)
+      do j(2) = rg%is(2), rg%ie(2)
+      do j(3) = rg%is(3), rg%ie(3)
+        dr = j * sys%hgs - rion_repr
+        r = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
+        if(r <= rc) then
+          do i(r) = 1, pp%nrmax
+            if (pp%rad(ir,ik) .gt. r) exit
+          end do
+          intr = ir - 1
+          if (intr.lt.0.or.intr.ge.pp%NRmax) stop 'bad intr at prep_ps'
+          ratio1=(r-pp%rad(intr,ik))/(pp%rad(intr+1,ik)-pp%rad(intr,ik))
+          ratio2=1-ratio1
+          ppn%rho_nlcc(i) = ppn%rho_nlcc(i) &
+            +ratio1*pp%rho_nlcc_tbl(intr+1,ik)+ratio2*pp%rho_nlcc_tbl(intr,ik)
+          ppn%tau_nlcc(i) = ppn%tau_nlcc(i) &
+            +ratio1*pp%tau_nlcc_tbl(intr+1,ik)+ratio2*pp%tau_nlcc_tbl(intr,ik)
+        end if
+      end do
+      end do
+      end do
+    end do
+    end do
+    end do
+  end do
+
+  return
+end subroutine
+
 subroutine spline(Np,xn,yn,an,bn,cn,dn)
   integer,intent(in) :: Np
   real(8),intent(in) :: xn(0:Np-1),yn(0:Np-1)
