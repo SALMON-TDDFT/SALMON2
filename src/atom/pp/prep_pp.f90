@@ -606,8 +606,8 @@ end subroutine calc_uv
 
 
 subroutine calc_nlcc(ppn, sys, rg, pp)
+  use salmon_global,only : kion
   use structures, only : s_system, s_pp_info, s_pp_nlcc, s_rgrid
-  use salmon_global, only : kion
   implicit none
   
   type(s_pp_nlcc), intent(inout) :: ppn
@@ -691,7 +691,7 @@ subroutine calc_nlcc(ppn, sys, rg, pp)
   end do
 
   return
-end subroutine
+end subroutine calc_nlcc
 
 subroutine spline(Np,xn,yn,an,bn,cn,dn)
   integer,intent(in) :: Np
