@@ -13,14 +13,14 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-module init_nonorthogonal
+module lattice
   implicit none
 
 contains
 
 !===================================================================================================================================
 
-SUBROUTINE init_nonorthogonal_lattice(system,stencil,lg)
+SUBROUTINE init_lattice(system,stencil,lg)
   use structures
   use inputoutput,only: al_vec1,al_vec2,al_vec3
   implicit none
@@ -77,7 +77,7 @@ SUBROUTINE init_nonorthogonal_lattice(system,stencil,lg)
   stencil%coef_F(6) = f_uv ! xy
 
   return
-end SUBROUTINE init_nonorthogonal_lattice
+end SUBROUTINE init_lattice
 
 SUBROUTINE calc_inverse(a,b,detA) ! b = a^{-1}
   implicit none
@@ -103,4 +103,4 @@ SUBROUTINE calc_inverse(a,b,detA) ! b = a^{-1}
   return
 end SUBROUTINE calc_inverse
 
-end module init_nonorthogonal
+end module lattice

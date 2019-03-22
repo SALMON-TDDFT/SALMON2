@@ -61,7 +61,7 @@ use subspace_diag_sub
 use subspace_diag_periodic_sub
 use writefield
 use global_variables_scf
-use init_nonorthogonal
+use lattice
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 implicit none
 
@@ -472,7 +472,7 @@ info_ob%icomm_r = nproc_group_korbital
 
 if(.not. stencil%if_orthogonal) then
   if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-  call init_nonorthogonal_lattice(system,stencil,lg)
+  call init_lattice(system,stencil,lg)
   Hvol = system%Hvol
   Hgs = system%Hgs
   lg%ndir = 3

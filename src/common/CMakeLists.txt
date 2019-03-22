@@ -26,7 +26,7 @@ set(SOURCES
    total_energy.f90
    writefield.f90
    writefile3d.f90
-   init_nonorthogonal.f90
+   lattice.f90
    )
 
 add_library(${SALMON_COMMON_LIB} STATIC ${SOURCES})
