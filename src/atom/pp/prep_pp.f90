@@ -615,10 +615,12 @@ subroutine calc_nlcc(ppn, sys, rg, pp)
   type(s_rgrid), intent(in) :: rg
   type(s_pp_info), intent(in) :: pp
 
-  integer :: a, i, i1, i2, i3, j1, j2, j3
+  integer :: a, ik, ir
+  integer :: i, i1, i2, i3, j1, j2, j3
   integer :: irepr_min, irepr_max
   real(8) :: rion_repr(3)
   real(8) :: r, rc, r1, r2, r3
+  real(8) :: ratio1, ratio2
 
   ! Allocate
   allocate(ppn%rho_nlcc( &
@@ -677,9 +679,9 @@ subroutine calc_nlcc(ppn, sys, rg, pp)
           if (intr.lt.0.or.intr.ge.pp%NRmax) stop 'bad intr at prep_ps'
           ratio1=(r-pp%rad(intr,ik))/(pp%rad(intr+1,ik)-pp%rad(intr,ik))
           ratio2=1-ratio1
-          ppn%rho_nlcc(i) = ppn%rho_nlcc(i) &
+          ppn%rho_nlcc(i1, i2, i3) = ppn%rho_nlcc(i1, i2, i3) &
             +ratio1*pp%rho_nlcc_tbl(intr+1,ik)+ratio2*pp%rho_nlcc_tbl(intr,ik)
-          ppn%tau_nlcc(i) = ppn%tau_nlcc(i) &
+          ppn%tau_nlcc(i1, i2, i3) = ppn%tau_nlcc(i1, i2, i3) &
             +ratio1*pp%tau_nlcc_tbl(intr+1,ik)+ratio2*pp%tau_nlcc_tbl(intr,ik)
         end if
       end do
