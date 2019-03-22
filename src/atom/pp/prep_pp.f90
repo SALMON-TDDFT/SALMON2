@@ -620,7 +620,7 @@ subroutine calc_nlcc(ppn, sys, rg, pp)
   integer :: irepr_min, irepr_max
   real(8) :: rion_repr(3)
   real(8) :: r, rc, r1, r2, r3
-  real(8) :: ratio1, ratio2
+  real(8) :: ratio1, ratio2, intr
 
   ! Allocate
   allocate(ppn%rho_nlcc( &
