@@ -616,16 +616,17 @@ subroutine calc_nlcc(ppn, ss, rg, pp)
   integer :: i(1:3), j(1:3)
   integer :: irepr_min, irepr_max
   real(8) :: rion_repr(3)
+  real(8) :: r, rc, dr(3)
 
   ! Allocate
   allocate(ppn%rho_nlcc( &
-  & rg%is_array(1):rg%ie_array(1), &
-  & rg%is_array(2):rg%ie_array(2), &
-  & rg%is_array(3):rg%ie_array(3)))
+    & rg%is_array(1):rg%ie_array(1), &
+    & rg%is_array(2):rg%ie_array(2), &
+    & rg%is_array(3):rg%ie_array(3)))
   allocate(ppn%tau_nlcc( &
-  & rg%is_array(1):rg%ie_array(1), &
-  & rg%is_array(2):rg%ie_array(2), &
-  & rg%is_array(3):rg%ie_array(3)))
+    & rg%is_array(1):rg%ie_array(1), &
+    & rg%is_array(2):rg%ie_array(2), &
+    & rg%is_array(3):rg%ie_array(3)))
 
   if (sys%iperiodic == 0) then
     irepr_min = 0
@@ -640,9 +641,9 @@ subroutine calc_nlcc(ppn, ss, rg, pp)
   ppn%rho_nlcc = 0d0
   ppn%tau_nlcc = 0d0
 
-  if (.not. pp%flag_nlcc) return
+  if (.not. pp%flag_nlcc) return ! Do nothing
 
-  do a=1, nion
+  do a=1, sys%nion
     ik = Kion(a)
     rc = 15d0 ! maximum
     do i=1, pp%nrmax
