@@ -183,7 +183,7 @@ if(istopt==1)then
     end if
     
     if(iperiodic==3)then
-      call prep_poisson_fft
+!      call prep_poisson_fft
     end if
 
     if(iflag_ps.eq.0)then
