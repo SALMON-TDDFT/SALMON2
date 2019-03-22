@@ -606,6 +606,7 @@ end subroutine calc_uv
 
 
 subroutine calc_nlcc(ppn, ss, rg, pp)
+  implicit none
   use salmon_global, only : kion
   use structures, only : s_system, s_pp_info, s_pp_nlcc, s_rgrid
   type(s_pp_nlcc), intent(inout) :: ppn
@@ -613,7 +614,7 @@ subroutine calc_nlcc(ppn, ss, rg, pp)
   type(s_rgrid), intent(in) :: rg
   type(s_pp_info), intent(in) :: pp
 
-  integer :: i(1:3), j(1:3)
+  integer :: a, i, ir(1:3), j(1:3)
   integer :: irepr_min, irepr_max
   real(8) :: rion_repr(3)
   real(8) :: r, rc, dr(3)
@@ -654,19 +655,19 @@ subroutine calc_nlcc(ppn, ss, rg, pp)
       if(i == pp%nrmax) stop "no-cut-off found (calc_nlcc@prep_pp.f90)"
     end do
 
-    do i(1) = irepr_min, irepr_max
-    do i(2) = irepr_min, irepr_max
-    do i(3) = irepr_min, irepr_max
-      rion_repr(1) = (sys%rion(1, a) + i(1) * sys%al(1, 1))
-      rion_repr(2) = (sys%rion(2, a) + i(2) * sys%al(2, 2))
-      rion_repr(3) = (sys%rion(3, a) + i(3) * sys%al(3, 3))
+    do ir(1) = irepr_min, irepr_max
+    do ir(2) = irepr_min, irepr_max
+    do ir(3) = irepr_min, irepr_max
+      rion_repr(1) = (sys%rion(1, a) + ir(1) * sys%al(1, 1))
+      rion_repr(2) = (sys%rion(2, a) + ir(2) * sys%al(2, 2))
+      rion_repr(3) = (sys%rion(3, a) + ir(3) * sys%al(3, 3))
       do j(1) = rg%is(1), rg%ie(1)
       do j(2) = rg%is(2), rg%ie(2)
       do j(3) = rg%is(3), rg%ie(3)
         dr = j * sys%hgs - rion_repr
         r = sqrt(dr(1)**2 + dr(2)**2 + dr(3)**2)
-        if(r <= rc) then
-          do i(r) = 1, pp%nrmax
+        if (r <= rc) then
+          do i = 1, pp%nrmax
             if (pp%rad(ir,ik) .gt. r) exit
           end do
           intr = ir - 1
