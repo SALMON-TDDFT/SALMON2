@@ -606,9 +606,11 @@ end subroutine calc_uv
 
 
 subroutine calc_nlcc(ppn, ss, rg, pp)
-  implicit none
   use salmon_global, only : kion
   use structures, only : s_system, s_pp_info, s_pp_nlcc, s_rgrid
+  
+  implicit none
+  
   type(s_pp_nlcc), intent(inout) :: ppn
   type(s_system), intent(in) :: sys
   type(s_rgrid), intent(in) :: rg
