@@ -605,10 +605,9 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
 end subroutine calc_uv
 
 
-subroutine calc_nlcc(ppn, ss, rg, pp)
-  use salmon_global, only : kion
+subroutine calc_nlcc(ppn, sys, rg, pp)
   use structures, only : s_system, s_pp_info, s_pp_nlcc, s_rgrid
-  
+  use salmon_global, only : kion
   implicit none
   
   type(s_pp_nlcc), intent(inout) :: ppn
