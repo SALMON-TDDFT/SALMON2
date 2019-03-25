@@ -302,13 +302,13 @@ module salmon_pp
   
     ! Allocate
     allocate(ppn%rho_nlcc( &
-      & rg%is_array(1):rg%ie_array(1), &
-      & rg%is_array(2):rg%ie_array(2), &
-      & rg%is_array(3):rg%ie_array(3)))
+      & rg%is(1):rg%ie(1), &
+      & rg%is(2):rg%ie(2), &
+      & rg%is(3):rg%ie(3)))
     allocate(ppn%tau_nlcc( &
-      & rg%is_array(1):rg%ie_array(1), &
-      & rg%is_array(2):rg%ie_array(2), &
-      & rg%is_array(3):rg%ie_array(3)))
+      & rg%is(1):rg%ie(1), &
+      & rg%is(2):rg%ie(2), &
+      & rg%is(3):rg%ie(3)))
   
     if (sys%iperiodic == 0) then
       irepr_min = 0
