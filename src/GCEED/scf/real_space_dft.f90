@@ -183,8 +183,8 @@ if(istopt==1)then
 
     call calc_nlcc(pp, system, mg, ppn)
     if (comm_is_root(nproc_id_global)) then
-      write(*, '(a, es23.15e4)') "Maximal rho_NLCC=", max(ppn&rho_nlcc)
-      write(*, '(a, es23.15e4)') "Maximal tau_NLCC=", max(ppn&tau_nlcc)
+      write(*, '(a, es23.15e3)') "Maximal rho_NLCC=", max(ppn&rho_nlcc)
+      write(*, '(a, es23.15e3)') "Maximal tau_NLCC=", max(ppn&tau_nlcc)
     end if    
 
     if(iobnum >= 1)then
