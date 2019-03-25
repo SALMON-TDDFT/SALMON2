@@ -179,8 +179,13 @@ if(istopt==1)then
       call read_pslfile
       call allocate_psl
       call init_ps
-      call calc_nlcc(pp, system, mg, ppn)
     end if
+
+    call calc_nlcc(pp, system, mg, ppn)
+    if (comm_is_root(nproc_id_global)) then
+      write(*, '(a, es23.15+4)') "Maximal rho_NLCC=", max(ppn&rho_nlcc)
+      write(*, '(a, es23.15+4)') "Maximal tau_NLCC=", max(ppn&tau_nlcc)
+    end if    
 
     if(iobnum >= 1)then
       select case(iperiodic)

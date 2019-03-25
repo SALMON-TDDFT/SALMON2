@@ -1072,6 +1072,10 @@ allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   end if
 
   call calc_nlcc(pp, system, mg, ppn)
+  if (comm_is_root(nproc_id_global)) then
+    write(*, '(a, es23.15+4)') "Maximal rho_NLCC=", max(ppn&rho_nlcc)
+    write(*, '(a, es23.15+4)') "Maximal tau_NLCC=", max(ppn&tau_nlcc)
+  end if
 
   if(ilsda==0)then
     call calc_density(srho,spsi_in,info,mg,nspin)
