@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
-use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
+use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_nlcc
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use density_matrix, only: calc_density
