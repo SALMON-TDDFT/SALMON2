@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine exc_cor_ns
+subroutine exc_cor_ns(ppn)
   use salmon_parallel, only: nproc_group_h
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
@@ -21,7 +21,10 @@ subroutine exc_cor_ns
   use new_world_sub
   use allocate_mat_sub
   use sendrecvh_sub
+  use structures, only: s_pp_nlcc
   implicit none
+  type(s_pp_nlcc), intent(in) :: ppn
+
   integer :: ix,iy,iz,is
   real(8) :: tot_exc
   real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:)
@@ -100,12 +103,12 @@ subroutine exc_cor_ns
 
   if(xc=='pz'.or.xc=='PZ')then
     if(ilsda==0)then
-      call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp)
+      call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
     else if(ilsda==1)then
-      call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp)
+      call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
     end if
   else
-    call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp)
+    call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
   end if
 
   if(ilsda==0)then
