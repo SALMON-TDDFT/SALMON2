@@ -695,3 +695,28 @@ subroutine spline(Np,xn,yn,an,bn,cn,dn)
 
   return
 end subroutine spline
+
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine bisection(xx,inode,iak,nr,rad_psl)
+  use salmon_global,only : nelem
+  implicit none
+  integer,intent(out) :: inode
+  integer,intent(in)  :: iak
+  integer,intent(in)  :: nr
+  real(8),intent(in)  :: rad_psl(0:nr,nelem)
+  real(8),intent(in)  :: xx
+  integer :: imin,imax
+  
+  imin=0
+  imax=nr
+  do while (imax-imin>1)
+    inode=(imin+imax)/2
+    if(xx>rad_psl(inode,iak))then
+      imin=inode
+    else
+      imax=inode
+    end if
+  end do
+  inode=imin
+
+end subroutine bisection

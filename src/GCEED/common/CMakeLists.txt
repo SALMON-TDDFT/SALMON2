@@ -1,6 +1,5 @@
 set(SOURCES
     allocate_sendrecv.f90
-    bisection.f90
     calcELF.f90
     calc_force_c.f90
     calc_force.f90

@@ -74,7 +74,7 @@ do iob=1,iobmax
           yy=gridcoo(iy,2)-Rion(2,iatom)
           zz=gridcoo(iz,3)-Rion(3,iatom)
           rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
-          call bisection(rr,intr,ikoa)
+          call bisection(rr,intr,ikoa,nr,rad_psl)
           ratio1=(rr-rad_psl(intr,ikoa))/(rad_psl(intr+1,ikoa)-rad_psl(intr,ikoa)) ; ratio2=1.d0-ratio1
           phi_r= ratio1*uppr(intr+1,Lref(ikoa),ikoa)+ratio2*uppr(intr,Lref(ikoa),ikoa)
           call Ylm_sub(xx,yy,zz,lm,Ylm)
