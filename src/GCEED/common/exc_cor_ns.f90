@@ -30,10 +30,6 @@ subroutine exc_cor_ns(ppn)
   real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:)
   integer :: iwk_dum
 
-  write(*,*) "dim1",ng_num(1),lbound(ppn%rho_nlcc,1), ubound(ppn%rho_nlcc,1)
-  write(*,*) "dim2",ng_num(2),lbound(ppn%rho_nlcc,2), ubound(ppn%rho_nlcc,2)
-  write(*,*) "dim3",ng_num(3),lbound(ppn%rho_nlcc,3), ubound(ppn%rho_nlcc,3)
-
   if(ilsda==0)then
     do iz=1,ng_num(3)
     do iy=1,ng_num(2)
