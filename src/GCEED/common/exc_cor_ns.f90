@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine exc_cor_ns
+subroutine exc_cor_ns(ppn)
   use salmon_parallel, only: nproc_group_h
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
@@ -21,11 +21,18 @@ subroutine exc_cor_ns
   use new_world_sub
   use allocate_mat_sub
   use sendrecvh_sub
+  use structures, only: s_pp_nlcc
   implicit none
+  type(s_pp_nlcc), intent(in) :: ppn
+
   integer :: ix,iy,iz,is
   real(8) :: tot_exc
   real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:)
   integer :: iwk_dum
+
+  write(*,*) "dim1",ng_num(1),lbound(ppn%rho_nlcc,1), ubound(ppn%rho_nlcc,1)
+  write(*,*) "dim2",ng_num(2),lbound(ppn%rho_nlcc,2), ubound(ppn%rho_nlcc,2)
+  write(*,*) "dim3",ng_num(3),lbound(ppn%rho_nlcc,3), ubound(ppn%rho_nlcc,3)
 
   if(ilsda==0)then
     do iz=1,ng_num(3)
