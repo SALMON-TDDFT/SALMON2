@@ -173,7 +173,7 @@ if(istopt==1)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-!      call init_k_rd(k_rd,ksquare,1)
+!      call init_k_rd(k_rd,ksquare,1) !+++++++++
       call init_k_rd_noc(k_rd,ksquare,1,system%brl)
     end if
 
@@ -191,7 +191,7 @@ if(istopt==1)then
     else
       call read_pslfile
       call allocate_psl
-!      call init_ps
+!      call init_ps !+++++++
       call calcVpsl_periodic(stencil%matrix_A,system%brl,stencil%if_orthogonal)
       call calcJxyz_all_periodic(system%al,stencil%matrix_A)
       call calcuV
@@ -1547,7 +1547,7 @@ call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
 
-if(nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
+if(iperiodic==3 .and. nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
   if(comm_is_root(nproc_id_global)) write(*,*) "no r-space parallelization"
   lg%is(1:3)=lg_sta(1:3)
   lg%ie(1:3)=lg_end(1:3)
