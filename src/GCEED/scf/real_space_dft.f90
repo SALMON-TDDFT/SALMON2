@@ -1350,6 +1350,8 @@ end do Structure_Optimization_Iteration
 
 !---------------------------------------- Output
 
+call band_information
+
 call write_eigen
 
 if(out_psi=='y') then
@@ -1512,6 +1514,40 @@ end if
 deallocate(Vlocal)
 
 call finalize_xc(xc_func)
+
+contains
+
+subroutine band_information
+  implicit none
+  integer :: ik
+  real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
+  if(comm_is_root(nproc_id_global)) then
+    do ik=1,num_kpoints_rd
+      esp_vb_min(ik)=minval(esp(1:itotfMST,ik))
+      esp_vb_max(ik)=maxval(esp(1:itotfMST,ik))
+      esp_cb_min(ik)=minval(esp(itotfMST+1:itotMST,ik))
+      esp_cb_max(ik)=maxval(esp(itotfMST+1:itotMST,ik))
+    end do
+    write(*,*) 'band information-----------------------------------------'
+    write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
+    write(*,*) 'Top of VB',maxval(esp_vb_max(:))
+    write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
+    write(*,*) 'Top of CB',maxval(esp_cb_max(:))
+    write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
+    write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
+    write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
+    write(*,*) 'Physicaly upper bound of CB for eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
+    write(*,*) '---------------------------------------------------------'
+    write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*2.0*Ry
+    write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*2.0*Ry
+    write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*2.0*Ry
+    write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*2.0*Ry
+    write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*2.0*Ry
+    write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*2.0*Ry
+    write(*,*) '---------------------------------------------------------'
+  end if
+  return
+end subroutine band_information
 
 END subroutine Real_Space_DFT
 
