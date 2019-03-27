@@ -181,7 +181,6 @@ if(istopt==1)then
       call init_ps
     end if
 
-    call calc_nlcc(pp, system, mg, ppn)
     if (comm_is_root(nproc_id_global)) then
       write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
       write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
@@ -479,6 +478,9 @@ do jj=1,3
     stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
   end do
 end do
+
+! Setup NLCC term from pseudopotential
+call calc_nlcc(pp, system, mg, ppn)
 
 ! Initialization of s_sendrecv_grid structure (experimental implementation)
 neig(1, 1) = iup_array(1)
