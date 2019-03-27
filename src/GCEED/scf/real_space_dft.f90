@@ -157,31 +157,6 @@ if(istopt==1)then
     call allocate_sendrecv
     call init_persistent_requests
 
-    ! Setup system structure
-    system%iperiodic = iperiodic
-    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-    system%nspin = nspin
-    system%no = itotMST
-    system%nk = num_kpoints_rd
-    system%nion = MI
-
-    system%Hvol = Hvol
-    system%Hgs = Hgs
-
-    system%al = 0d0
-    system%al(1,1) = lg_num(1)*Hgs(1)
-    system%al(2,2) = lg_num(2)*Hgs(2)
-    system%al(3,3) = lg_num(3)*Hgs(3)
-    system%det_al = lg_num(1)*lg_num(2)*lg_num(3) * Hvol
-
-    allocate(system%Rion(3,system%nion) &
-            ,system%wtk(system%nk) &
-            ,system%esp(system%no,system%nk,system%nspin) &
-            ,system%rocc(system%no,system%nk,system%nspin))
-    system%wtk = wtk
-    system%rion = rion
-
-
     if(iperiodic==3)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
@@ -193,8 +168,6 @@ if(istopt==1)then
     if(icalcforce==1)then
       allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
     end if
-
-
     
     if(iperiodic==3)then
       call prep_poisson_fft
@@ -208,7 +181,6 @@ if(istopt==1)then
       call init_ps
     end if
 
-    call calc_nlcc(pp, system, mg, ppn)
     if (comm_is_root(nproc_id_global)) then
       write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
       write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
@@ -422,6 +394,28 @@ else
   nspin=2
 end if
 
+system%iperiodic = iperiodic
+system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+system%nspin = nspin
+system%no = itotMST
+system%nk = num_kpoints_rd
+system%nion = MI
+
+system%Hvol = Hvol
+system%Hgs = Hgs
+
+system%al = 0d0
+system%al(1,1) = lg_num(1)*Hgs(1)
+system%al(2,2) = lg_num(2)*Hgs(2)
+system%al(3,3) = lg_num(3)*Hgs(3)
+system%det_al = lg_num(1)*lg_num(2)*lg_num(3) * Hvol
+
+allocate(system%Rion(3,system%nion) &
+        ,system%wtk(system%nk) &
+        ,system%esp(system%no,system%nk,system%nspin) &
+        ,system%rocc(system%no,system%nk,system%nspin))
+system%wtk = wtk
+system%rion = rion
 
 allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
 do jspin=1,system%nspin
@@ -484,6 +478,9 @@ do jj=1,3
     stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
   end do
 end do
+
+! Setup NLCC term from pseudopotential
+call calc_nlcc(pp, system, mg, ppn)
 
 ! Initialization of s_sendrecv_grid structure (experimental implementation)
 neig(1, 1) = iup_array(1)
