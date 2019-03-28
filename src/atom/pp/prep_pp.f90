@@ -83,7 +83,7 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
   real(8),intent(out) :: vpsl(nl)
   real(8),intent(in),optional :: matrix_A0(3,3)
   integer :: a,i,n,ik
-  real(8) :: gd,r(3),matrix_A(3,3)
+  real(8) :: gd,r(3),matrix_A(3,3),u,v,w
   real(8) :: g2
   complex(8) :: vion_g_ia(ng_s:ng_e,natom),tmp_exp !, Vion_G(NG_s:NG_e)
   real(8) :: vpsl_ia_l(nl,natom)
@@ -127,9 +127,12 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
   do n=ng_s,ng_e
 !$omp do private(i,gr,a,tmp_exp)
     do i=1,NL
-      r(1) = lx(i)*hx*matrix_A(1,1) + ly(i)*hy*matrix_A(1,2) + lz(i)*hz*matrix_A(1,3)
-      r(2) = lx(i)*hx*matrix_A(2,1) + ly(i)*hy*matrix_A(2,2) + lz(i)*hz*matrix_A(2,3)
-      r(3) = lx(i)*hx*matrix_A(3,1) + ly(i)*hy*matrix_A(3,2) + lz(i)*hz*matrix_A(3,3)
+      u = lx(i)*hx
+      v = ly(i)*hy
+      w = lz(i)*hz
+      r(1) = u*matrix_A(1,1) + v*matrix_A(1,2) + w*matrix_A(1,3)
+      r(2) = u*matrix_A(2,1) + v*matrix_A(2,2) + w*matrix_A(2,3)
+      r(3) = u*matrix_A(3,1) + v*matrix_A(3,2) + w*matrix_A(3,3)
       gr = gx(n)*r(1) + gy(n)*r(2) + gz(n)*r(3)
 !      gr = gx(n)*lx(i)*hx+gy(n)*ly(i)*hy+gz(n)*lz(i)*hz
       tmp_exp = exp(zi*gr)
@@ -207,7 +210,7 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   integer :: a,i,ik,ix,iy,iz,j
   integer :: nc
   real(8) :: tmpx,tmpy,tmpz
-  real(8) :: x,y,z,r
+  real(8) :: x,y,z,r,u,v,w
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
 
   matrix_a = 0d0
@@ -273,9 +276,12 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 !      tmpy = rion(2,a)+iy*aly
 !      tmpz = rion(3,a)+iz*alz
       do i=1,ml
-        rr(1) = lx(i)*hx*matrix_a(1,1) + ly(i)*hy*matrix_a(1,2) + lz(i)*hz*matrix_a(1,3)
-        rr(2) = lx(i)*hx*matrix_a(2,1) + ly(i)*hy*matrix_a(2,2) + lz(i)*hz*matrix_a(2,3)
-        rr(3) = lx(i)*hx*matrix_a(3,1) + ly(i)*hy*matrix_a(3,2) + lz(i)*hz*matrix_a(3,3)
+        u = mx(i)*hx
+        v = my(i)*hy
+        w = mz(i)*hz
+        rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
+        rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
+        rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
         x=rr(1)+rshift(1)-tmpx
         y=rr(2)+rshift(2)-tmpy
         z=rr(3)+rshift(3)-tmpz
@@ -313,7 +319,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer :: a,i,ik,ix,iy,iz,j
   integer :: nc
   real(8) :: tmpx,tmpy,tmpz
-  real(8) :: r,x,y,z
+  real(8) :: r,x,y,z,u,v,w
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
 
   matrix_a = 0d0
@@ -379,9 +385,12 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
 !      tmpy = rion(2,a)+iy*aLy
 !      tmpz = rion(3,a)+iz*aLz
       do i=1,ml
-        rr(1) = lx(i)*hx*matrix_a(1,1) + ly(i)*hy*matrix_a(1,2) + lz(i)*hz*matrix_a(1,3)
-        rr(2) = lx(i)*hx*matrix_a(2,1) + ly(i)*hy*matrix_a(2,2) + lz(i)*hz*matrix_a(2,3)
-        rr(3) = lx(i)*hx*matrix_a(3,1) + ly(i)*hy*matrix_a(3,2) + lz(i)*hz*matrix_a(3,3)
+        u = mx(i)*hx
+        v = my(i)*hy
+        w = mz(i)*hz
+        rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
+        rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
+        rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
         x=rr(1)+rshift(1)-tmpx
         y=rr(2)+rshift(2)-tmpy
         z=rr(3)+rshift(3)-tmpz
