@@ -41,6 +41,7 @@ module read_pslfile_sub
   subroutine read_pslfile
     use salmon_communication, only: comm_is_root
     use salmon_pp, only: init_pp
+    use prep_pp_sub, only: init_mps
     implicit none
     integer :: ak,i,ll
     

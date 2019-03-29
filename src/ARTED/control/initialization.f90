@@ -31,6 +31,7 @@ contains
     use salmon_communication
     use salmon_xc, only: init_xc
     use salmon_pp, only: init_pp
+    use prep_pp_sub, only: init_mps
     use misc_routines
     use inputfile,only: transfer_input
     use restart,only: prep_restart_read

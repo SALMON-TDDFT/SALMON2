@@ -14,6 +14,11 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+module prep_pp_sub
+  implicit none
+
+contains
+
 subroutine calc_vloc(pp,dvloc_g,gx,gy,gz,ng,ng_s,ng_e,ngzero)
   use salmon_global,only : nelem
   use structures,only : s_pp_info
@@ -720,3 +725,5 @@ subroutine bisection(xx,inode,iak,nr,rad_psl)
   inode=imin
 
 end subroutine bisection
+
+end module prep_pp_sub
