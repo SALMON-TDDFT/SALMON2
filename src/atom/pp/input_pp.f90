@@ -14,6 +14,11 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+module input_pp_sub
+  implicit none
+
+contains
+
 subroutine input_pp(pp,hx,hy,hz)
   use structures,only : s_pp_info
   use salmon_global,only : pseudo_file
@@ -716,115 +721,115 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
 
   return
 
-  contains
-
+end subroutine ps_masking
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-  subroutine make_mask_function(pp,rmask,dmask,ik)
+subroutine make_mask_function(pp,rmask,dmask,ik)
 !Subroutine Make_mask_function
 !Name of variables are taken from ***
-    use structures,only : s_pp_info
-    use salmon_global, only : eta_mask
-    implicit none
-    real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
-    type(s_pp_info),intent(inout) :: pp
+  use structures,only : s_pp_info
+  use salmon_global, only : eta_mask
+  implicit none
+  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
+  type(s_pp_info),intent(inout) :: pp
 !Arguments
-    integer,intent(in) :: ik
-    real(8),intent(inout) :: rmask(pp%nrps(ik)),dmask(pp%nrps(ik))
+  integer,intent(in) :: ik
+  real(8),intent(inout) :: rmask(pp%nrps(ik)),dmask(pp%nrps(ik))
 !local variables
-    integer,parameter :: M = 200
+  integer,parameter :: M = 200
 !  real(8),parameter :: eta = 15.d0
-    integer :: i,j, i3,i2,i1
-    real(8) :: xp,xm,dx,nmask0,kx1,dk
-    real(8) :: x(M),nmask(M),mat(M,M),k(M),nmask_k(M)
+  integer :: i,j, i3,i2,i1
+  real(8) :: xp,xm,dx,nmask0,kx1,dk
+  real(8) :: x(M),nmask(M),mat(M,M),k(M),nmask_k(M)
 !Lapack dsyev
-    integer :: INFO,LWORK
-    real(8),allocatable :: WORK(:),W(:)
+  integer :: INFO,LWORK
+  real(8),allocatable :: WORK(:),W(:)
 
 !Making normalized mask function in radial coordinate
-    do i = 1,M
-      x(i) = dble(i)/dble(M)
+  do i = 1,M
+    x(i) = dble(i)/dble(M)
+  end do
+  do i = 1,M
+    xp = 2.d0*x(i)
+    mat(i,i) = sin(xp*eta_mask)/xp + dble(M)*pi - eta_mask
+    do j = i+1,M
+      xp = x(i) + x(j)
+      xm = x(i) - x(j)
+      mat(i,j) = sin(xp*eta_mask)/xp - sin(xm*eta_mask)/xm
+      mat(j,i) = mat(i,j)
     end do
-    do i = 1,M
-      xp = 2.d0*x(i)
-      mat(i,i) = sin(xp*eta_mask)/xp + dble(M)*pi - eta_mask
-      do j = i+1,M
-        xp = x(i) + x(j)
-        xm = x(i) - x(j)
-        mat(i,j) = sin(xp*eta_mask)/xp - sin(xm*eta_mask)/xm
-        mat(j,i) = mat(i,j)
-      end do
-    end do
-  
-    allocate(W(M))
-    LWORK = max(1,3*M - 1)
-    allocate(WORK(LWORK))
-    call dsyev('V','U',M,mat,M,W,WORK,LWORK,INFO)
-    deallocate(WORK,W)
-    nmask0 = 3.d0*mat(1,1)/x(1) - 3.d0*mat(2,1)/x(2) + mat(3,1)/x(3)
-    do i = 1,M
-      nmask(i) = mat(i,1)/x(i)/nmask0
-    end do
-    nmask0 = nmask0/nmask0
-  
-    open(4,file="nmask.dat")
-    write(4,*) "# M =",M
-    write(4,*) 0,nmask0
-    do i= 1,M
-      write(4,*) x(i),nmask(i)
-    end do
-    close(4)
-  
+  end do
+
+  allocate(W(M))
+  LWORK = max(1,3*M - 1)
+  allocate(WORK(LWORK))
+  call dsyev('V','U',M,mat,M,W,WORK,LWORK,INFO)
+  deallocate(WORK,W)
+  nmask0 = 3.d0*mat(1,1)/x(1) - 3.d0*mat(2,1)/x(2) + mat(3,1)/x(3)
+  do i = 1,M
+    nmask(i) = mat(i,1)/x(i)/nmask0
+  end do
+  nmask0 = nmask0/nmask0
+
+  open(4,file="nmask.dat")
+  write(4,*) "# M =",M
+  write(4,*) 0,nmask0
+  do i= 1,M
+    write(4,*) x(i),nmask(i)
+  end do
+  close(4)
+
 !Taking Fourier transformation
-    do i = 1,M
-      k(i)=pi*dble(i)
+  do i = 1,M
+    k(i)=pi*dble(i)
+  end do
+  dx = x(2)-x(1)
+  nmask_k(:) = 0.d0
+  do i = 1,M
+    do j = 1,M
+      kx1 = k(i)*x(j)
+      nmask_k(i) = nmask_k(i) + nmask(j)*kx1*sin(kx1) 
     end do
-    dx = x(2)-x(1)
-    nmask_k(:) = 0.d0
-    do i = 1,M
-      do j = 1,M
-        kx1 = k(i)*x(j)
-        nmask_k(i) = nmask_k(i) + nmask(j)*kx1*sin(kx1) 
-      end do
-      nmask_k(i) = nmask_k(i)*dx/k(i)**2
-    end do
-  
-    open(4,file="nmask_k.dat")
-    write(4,*) 0,  3.d0*nmask_k(1) - 3.d0*nmask_k(2) + nmask_k(3)
-    do i= 1,M
-      write(4,*) k(i),nmask_k(i)
-    end do
-    close(4)
-  
+    nmask_k(i) = nmask_k(i)*dx/k(i)**2
+  end do
+
+  open(4,file="nmask_k.dat")
+  write(4,*) 0,  3.d0*nmask_k(1) - 3.d0*nmask_k(2) + nmask_k(3)
+  do i= 1,M
+    write(4,*) k(i),nmask_k(i)
+  end do
+  close(4)
+
 !  allocate(mask(M),dmask(M))!debug
 !Making normalized mask function in radial coordinate
-    rmask(:) = 0.d0; dmask(:)=0.d0
-    dk = k(2) - k(1)
-    do i=2,pp%nrps(ik) !Avoiding divide by zero
-      do j = 1,M
-        kx1 = k(j)*pp%rad(i,ik)/pp%rps(ik)
-        rmask(i) =  rmask(i) + nmask_k(j)*kx1*sin(kx1)
-        dmask(i)= dmask(i) + nmask_k(j)*(kx1**2*cos(kx1)-kx1*sin(kx1))
-      end do
-      rmask(i) = (2.d0/pi)* rmask(i)*dk*pp%rps(ik)**2/pp%rad(i,ik)**2
-      dmask(i)= (2.d0/pi)*dmask(i)*dk*pp%rps(ik)**2/pp%rad(i,ik)**3 
+  rmask(:) = 0.d0; dmask(:)=0.d0
+  dk = k(2) - k(1)
+  do i=2,pp%nrps(ik) !Avoiding divide by zero
+    do j = 1,M
+      kx1 = k(j)*pp%rad(i,ik)/pp%rps(ik)
+      rmask(i) =  rmask(i) + nmask_k(j)*kx1*sin(kx1)
+      dmask(i)= dmask(i) + nmask_k(j)*(kx1**2*cos(kx1)-kx1*sin(kx1))
     end do
-    rmask(1) =  rmask(2)-( rmask(3)- rmask(2))/(pp%rad(3,ik)-pp%rad(2,ik))*(pp%rad(2,ik)-pp%rad(1,ik))
-    dmask(1)= dmask(2)-(dmask(3)-dmask(2))/(pp%rad(3,ik)-pp%rad(2,ik))*(pp%rad(2,ik)-pp%rad(1,ik))
-    i1=pp%nrps(ik)-2
-    i2=pp%nrps(ik)-1
-    i3=pp%nrps(ik)
-     rmask(i3)=  rmask(i2)+( rmask(i2)- rmask(i1))/(pp%rad(i2,ik)-pp%rad(i1,ik))*(pp%rad(i3,ik)-pp%rad(i2,ik))
-    dmask(i3)= dmask(i2)+(dmask(i2)-dmask(i1))/(pp%rad(i2,ik)-pp%rad(i1,ik))*(pp%rad(i3,ik)-pp%rad(i2,ik))
-  
-    open(4,file="mask.dat")
-    write(4,*) "# rps(ik), nrps(ik) =",pp%rps(ik), pp%nrps(ik)
-    do i= 1,pp%nrps(ik)
-      write(4,'(8e22.10)') pp%rad(i,ik),rmask(i),dmask(i)
-    end do
-    close(4)
-  
-    return
-  end subroutine make_mask_function
+    rmask(i) = (2.d0/pi)* rmask(i)*dk*pp%rps(ik)**2/pp%rad(i,ik)**2
+    dmask(i)= (2.d0/pi)*dmask(i)*dk*pp%rps(ik)**2/pp%rad(i,ik)**3 
+  end do
+  rmask(1) =  rmask(2)-( rmask(3)- rmask(2))/(pp%rad(3,ik)-pp%rad(2,ik))*(pp%rad(2,ik)-pp%rad(1,ik))
+  dmask(1)= dmask(2)-(dmask(3)-dmask(2))/(pp%rad(3,ik)-pp%rad(2,ik))*(pp%rad(2,ik)-pp%rad(1,ik))
+  i1=pp%nrps(ik)-2
+  i2=pp%nrps(ik)-1
+  i3=pp%nrps(ik)
+   rmask(i3)=  rmask(i2)+( rmask(i2)- rmask(i1))/(pp%rad(i2,ik)-pp%rad(i1,ik))*(pp%rad(i3,ik)-pp%rad(i2,ik))
+  dmask(i3)= dmask(i2)+(dmask(i2)-dmask(i1))/(pp%rad(i2,ik)-pp%rad(i1,ik))*(pp%rad(i3,ik)-pp%rad(i2,ik))
+
+  open(4,file="mask.dat")
+  write(4,*) "# rps(ik), nrps(ik) =",pp%rps(ik), pp%nrps(ik)
+  do i= 1,pp%nrps(ik)
+    write(4,'(8e22.10)') pp%rad(i,ik),rmask(i),dmask(i)
+  end do
+  close(4)
+
+  return
+end subroutine make_mask_function
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-end subroutine ps_masking
+
+end module input_pp_sub
