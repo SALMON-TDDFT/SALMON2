@@ -854,6 +854,7 @@ type(s_scalar),allocatable :: srho_s(:,:)
     nspin=2
   end if
 
+  system%iperiodic = iperiodic
   system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
   system%nspin = nspin
   system%no = itotMST

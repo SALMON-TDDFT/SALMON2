@@ -15,6 +15,7 @@
 !
 SUBROUTINE calcVpsl
 use salmon_parallel, only: nproc_id_global
+use prep_pp_sub, only: bisection
 use scf_data
 use allocate_psl_sub
 implicit none

@@ -15,6 +15,7 @@
 !
 subroutine calcJxyz_all
 use salmon_communication, only: comm_is_root, comm_summation
+use prep_pp_sub, only: calc_mps,init_jxyz,calc_jxyz
 use scf_data
 use allocate_psl_sub
 implicit none
