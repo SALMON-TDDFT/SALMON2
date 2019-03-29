@@ -1168,6 +1168,8 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",Etot_test*2d0*Ry,Etot*2d0*Ry
   if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
 
+  esp = system%esp(:,:,1) !++++++++++
+
   select case(convergence)
     case('rho_dne')
       sum0=0.d0

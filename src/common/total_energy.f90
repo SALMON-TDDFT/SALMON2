@@ -143,7 +143,7 @@ CONTAINS
     real(8)                    :: Eion
     !
     integer :: ia,ib,ix,iy,iz,n
-    real(8) :: r,rab(3),Eion_wrk,Eion_wrk2,G2
+    real(8) :: r,rab(3),rr(3),Eion_wrk,Eion_wrk2,G2
     real(8),parameter :: Pi=3.141592653589793d0 !??????????? salmon_math ? global parameter ?
 
     Eion = 0d0
@@ -166,9 +166,12 @@ CONTAINS
             if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) then
               cycle
             end if
-            rab(1) = system%Rion(1,ia)-ix*system%al(1,1) - system%Rion(1,ib)
-            rab(2) = system%Rion(2,ia)-iy*system%al(2,2) - system%Rion(2,ib)
-            rab(3) = system%Rion(3,ia)-iz*system%al(3,3) - system%Rion(3,ib)
+            rr(1) = ix*system%al(1,1) + iy*system%al(1,2) + iz*system%al(1,3)
+            rr(2) = ix*system%al(2,1) + iy*system%al(2,2) + iz*system%al(2,3)
+            rr(3) = ix*system%al(3,1) + iy*system%al(3,2) + iz*system%al(3,3)
+            rab(1) = system%Rion(1,ia)-rr(1) - system%Rion(1,ib)
+            rab(2) = system%Rion(2,ia)-rr(2) - system%Rion(2,ib)
+            rab(3) = system%Rion(3,ia)-rr(3) - system%Rion(3,ib)
             r=sum(rab(:)**2)
             Eion = Eion + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*r))/sqrt(r)
           end do
