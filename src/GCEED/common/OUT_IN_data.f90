@@ -416,8 +416,8 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng)
-use structures, only: s_rgrid
+SUBROUTINE IN_data(lg,mg,ng,system,stencil)
+use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -429,10 +429,13 @@ use check_ng_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
+use lattice
 implicit none
-type(s_rgrid),intent(out) :: lg
-type(s_rgrid),intent(out) :: mg
-type(s_rgrid),intent(out) :: ng
+type(s_rgrid) :: lg
+type(s_rgrid) :: mg
+type(s_rgrid) :: ng
+type(s_system) :: system
+type(s_stencil) :: stencil
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
 integer :: ix,iy,iz
@@ -672,6 +675,50 @@ allocate(inum_Mxin(3,0:nproc_size_global-1))
 call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
            lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,iscfrt)
 
+if(iperiodic==3 .and. nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
+  if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
+  lg%is(1:3)=lg_sta(1:3)
+  lg%ie(1:3)=lg_end(1:3)
+  lg%num(1:3)=lg_num(1:3)
+  lg%is_overlap(1:3)=lg_sta(1:3)-nd
+  lg%ie_overlap(1:3)=lg_end(1:3)+nd
+  lg%is_array(1:3)=lg_sta(1:3)
+  lg%ie_array(1:3)=lg_end(1:3)
+
+  if(allocated(lg%idx)) deallocate(lg%idx)
+  if(allocated(lg%idy)) deallocate(lg%idy)
+  if(allocated(lg%idz)) deallocate(lg%idz)
+  allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
+          ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
+          ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
+  do j=lg%is_overlap(1),lg%ie_overlap(1)
+    lg%idx(j) = mod(j+lg%num(1)-1,lg%num(1))+1
+  end do
+  do j=lg%is_overlap(2),lg%ie_overlap(2)
+    lg%idy(j) = mod(j+lg%num(2)-1,lg%num(2))+1
+  end do
+  do j=lg%is_overlap(3),lg%ie_overlap(3)
+    lg%idz(j) = mod(j+lg%num(3)-1,lg%num(3))+1
+  end do
+
+  mg%is(1:3)=lg%is(1:3)
+  mg%ie(1:3)=lg%ie(1:3)
+  mg%num(1:3)=lg%num(1:3)
+  mg%is_overlap(1:3)=lg%is_overlap(1:3)
+  mg%ie_overlap(1:3)=lg%ie_overlap(1:3)
+  mg%is_array(1:3)=lg%is_array(1:3)
+  mg%ie_array(1:3)=lg%ie_array(1:3)
+  if(allocated(mg%idx)) deallocate(mg%idx)
+  if(allocated(mg%idy)) deallocate(mg%idy)
+  if(allocated(mg%idz)) deallocate(mg%idz)
+  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
+          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
+          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
+  mg%idx = lg%idx
+  mg%idy = lg%idy
+  mg%idz = lg%idz
+end if
+
 if(ilsda == 0) then
   itotMST0=MST0(1)
   itotMST=MST(1)
@@ -694,7 +741,14 @@ if(iflag_ps.eq.1)then
   MI=MI_read
 end if
 
+lg%ndir = 3
+mg%ndir = 3
+ng%ndir = 3
+system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
 
+call init_lattice(system,stencil,lg)
+Hvol = system%Hvol
+Hgs = system%Hgs
 
 if(iflag_ps.eq.1)then
    if(comm_is_root(nproc_id_global))then
@@ -751,7 +805,7 @@ end if
 
 allocate(k_rd0(3,num_kpoints_rd),ksquare0(num_kpoints_rd))
 if(iperiodic==3)then
-  call init_k_rd(k_rd0,ksquare0,3)
+  call init_k_rd(k_rd0,ksquare0,3,system%brl)
 end if
 
 allocate( matbox(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )

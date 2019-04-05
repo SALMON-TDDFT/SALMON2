@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcJxyz_all_periodic
+subroutine calcJxyz_all_periodic(al0,matrix_A0)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation
   use prep_pp_sub, only: calc_mps,init_jxyz,calc_jxyz
@@ -21,6 +21,7 @@ subroutine calcJxyz_all_periodic
   use read_pslfile_sub
   use allocate_psl_sub
   implicit none
+  real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
   
   integer :: ix,iy,iz
   integer :: iatom
@@ -74,10 +75,10 @@ subroutine calcJxyz_all_periodic
  
   call calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                    mmx,mmy,mmz,mg_num(1)*mg_num(2)*mg_num(3),   &
-                                   hx,hy,hz)
+                                   hx,hy,hz,al0,matrix_A0)
   call calc_mps(pp,ppg_all,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                        lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
-                                       hx,hy,hz)
+                                       hx,hy,hz,al0,matrix_A0)
   Mps(1:MI)=ppg%mps(1:MI) 
   Mps_all(1:MI)=ppg_all%mps(1:MI) 
 
@@ -86,10 +87,10 @@ subroutine calcJxyz_all_periodic
  
   call calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                     mmx,mmy,mmz,mg_num(1)*mg_num(2)*mg_num(3),   &
-                                    hx,hy,hz)
+                                    hx,hy,hz,al0,matrix_A0)
   call calc_jxyz(pp,ppg_all,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                     lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
-                                    hx,hy,hz)
+                                    hx,hy,hz,al0,matrix_A0)
   Jxyz=0
   Jxyz_all=0
   Jxxyyzz=0

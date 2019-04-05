@@ -61,6 +61,7 @@ use subspace_diag_sub
 use subspace_diag_periodic_sub
 use writefield
 use global_variables_scf
+use lattice
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 implicit none
@@ -109,6 +110,23 @@ call check_dos_pdos
 
 call convert_input_scf(file_atoms_coo)
 
+if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+   al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+  stencil%if_orthogonal = .true.
+  al_vec1(1) = al(1)
+  al_vec2(2) = al(2)
+  al_vec3(3) = al(3)
+else
+  if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal mode: using al_vec[1,2,3]"
+  stencil%if_orthogonal = .false.
+  rLsize(1,1) = sqrt(sum(al_vec1**2))
+  rLsize(2,1) = sqrt(sum(al_vec2**2))
+  rLsize(3,1) = sqrt(sum(al_vec3**2))
+  if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) == 0d0) then
+    Harray(1:3,1) = rLsize(1:3,1) / dble(num_rgrid(1:3))
+  end if
+end if
+
 call set_filename
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
@@ -142,6 +160,14 @@ if(istopt==1)then
     call init_mesh_s(ng)
     call check_mg(mg)
     call check_ng(ng)
+    lg%ndir = 3
+    mg%ndir = 3
+    ng%ndir = 3
+    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+
+    call init_lattice(system,stencil,lg)
+    Hvol = system%Hvol
+    Hgs = system%Hgs
 
     call init_updown
     call init_itype
@@ -161,7 +187,7 @@ if(istopt==1)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_k_rd(k_rd,ksquare,1)
+      call init_k_rd(k_rd,ksquare,1,system%brl)
     end if
 
     allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -169,7 +195,7 @@ if(istopt==1)then
       allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
     end if
     
-    if(iperiodic==3)then
+    if(iperiodic==3 .and. iflag_hartree==4)then
       call prep_poisson_fft
     end if
 
@@ -178,7 +204,7 @@ if(istopt==1)then
     else
       call read_pslfile
       call allocate_psl
-      call init_ps
+      call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
 
@@ -244,7 +270,7 @@ if(istopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng)
+    call Hartree_ns(lg,mg,ng,system%Brl)
 
     
     if(ilsda == 0) then
@@ -281,7 +307,7 @@ if(istopt==1)then
 !------------------------------ Continue the previous calculation
 
   case(1,3)
-    call IN_data(lg,mg,ng)
+    call IN_data(lg,mg,ng,system,stencil)
 
     call allocate_mat
     call set_icoo1d
@@ -302,7 +328,7 @@ if(istopt==1)then
     if(iflag_ps/=0) then
       call read_pslfile
       call allocate_psl
-      call init_ps
+      call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
     call init_updown
@@ -315,7 +341,7 @@ if(istopt==1)then
 else if(istopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
-    call init_ps
+    call init_ps(system%al,system%brl,stencil%matrix_A)
   end if
 end if
 
@@ -397,15 +423,6 @@ system%no = itotMST
 system%nk = num_kpoints_rd
 system%nion = MI
 
-system%Hvol = Hvol
-system%Hgs = Hgs
-
-system%al = 0d0
-system%al(1,1) = lg_num(1)*Hgs(1)
-system%al(2,2) = lg_num(2)*Hgs(2)
-system%al(3,3) = lg_num(3)*Hgs(3)
-system%det_al = lg_num(1)*lg_num(2)*lg_num(3) * Hvol
-
 allocate(system%Rion(3,system%nion) &
         ,system%wtk(system%nk) &
         ,system%esp(system%no,system%nk,system%nspin) &
@@ -448,7 +465,6 @@ do iob=info%io_s,info%io_e
   info%io_tbl(iob) = jj
 end do
 
-
 info_ob%im_s = 1
 info_ob%im_e = 1
 info_ob%numm = 1
@@ -467,7 +483,12 @@ info_ob%irank_r(5) = kup_array(1)
 info_ob%irank_r(6) = kdw_array(1)
 info_ob%icomm_r = nproc_group_korbital
 
-stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+if(stencil%if_orthogonal) then
+  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+else
+  if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
+  stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+end if
 do jj=1,3
   do ii=1,4
     stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
@@ -843,7 +864,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     elp3(125)=elp3(125)+elp3(115)-elp3(114)
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng)
+      call Hartree_ns(lg,mg,ng,system%Brl)
     end if
   
     elp3(116)=get_wtime()
@@ -1103,7 +1124,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
     
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng)
+      call Hartree_ns(lg,mg,ng,system%brl)
     end if
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
@@ -1165,6 +1186,8 @@ DFT_Iteration : do iter=1,iDiter(img)
   call calc_Total_Energy(Etot_test,Exc,system,info,ng,pp,srho,sVh,sVxc,fg)
   if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",Etot_test*2d0*Ry,Etot*2d0*Ry
   if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
+
+  esp = system%esp(:,:,1) !++++++++++
 
   select case(convergence)
     case('rho_dne')
@@ -1348,6 +1371,8 @@ end do Structure_Optimization_Iteration
 
 !---------------------------------------- Output
 
+call band_information
+
 call write_eigen
 
 if(out_psi=='y') then
@@ -1511,6 +1536,40 @@ deallocate(Vlocal)
 
 call finalize_xc(xc_func)
 
+contains
+
+subroutine band_information
+  implicit none
+  integer :: ik
+  real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
+  if(comm_is_root(nproc_id_global)) then
+    do ik=1,num_kpoints_rd
+      esp_vb_min(ik)=minval(esp(1:itotfMST,ik))
+      esp_vb_max(ik)=maxval(esp(1:itotfMST,ik))
+      esp_cb_min(ik)=minval(esp(itotfMST+1:itotMST,ik))
+      esp_cb_max(ik)=maxval(esp(itotfMST+1:itotMST,ik))
+    end do
+    write(*,*) 'band information-----------------------------------------'
+    write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
+    write(*,*) 'Top of VB',maxval(esp_vb_max(:))
+    write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
+    write(*,*) 'Top of CB',maxval(esp_cb_max(:))
+    write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
+    write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
+    write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
+    write(*,*) 'Physicaly upper bound of CB for eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
+    write(*,*) '---------------------------------------------------------'
+    write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*2.0*Ry
+    write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*2.0*Ry
+    write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*2.0*Ry
+    write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*2.0*Ry
+    write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*2.0*Ry
+    write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*2.0*Ry
+    write(*,*) '---------------------------------------------------------'
+  end if
+  return
+end subroutine band_information
+
 END subroutine Real_Space_DFT
 
 !=======================================================================
@@ -1526,6 +1585,7 @@ implicit none
 type(s_rgrid),intent(out) :: lg
 type(s_rgrid),intent(out) :: mg
 integer,intent(in) :: itmg
+integer :: j
 real(8) :: rLsize1(3)
 
 if(comm_is_root(nproc_id_global))      &
@@ -1543,6 +1603,50 @@ call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
            lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,iscfrt)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
+
+if(iperiodic==3 .and. nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
+  if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
+  lg%is(1:3)=lg_sta(1:3)
+  lg%ie(1:3)=lg_end(1:3)
+  lg%num(1:3)=lg_num(1:3)
+  lg%is_overlap(1:3)=lg_sta(1:3)-nd
+  lg%ie_overlap(1:3)=lg_end(1:3)+nd
+  lg%is_array(1:3)=lg_sta(1:3)
+  lg%ie_array(1:3)=lg_end(1:3)
+
+  if(allocated(lg%idx)) deallocate(lg%idx)
+  if(allocated(lg%idy)) deallocate(lg%idy)
+  if(allocated(lg%idz)) deallocate(lg%idz)
+  allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
+          ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
+          ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
+  do j=lg%is_overlap(1),lg%ie_overlap(1)
+    lg%idx(j) = mod(j+lg%num(1)-1,lg%num(1))+1
+  end do
+  do j=lg%is_overlap(2),lg%ie_overlap(2)
+    lg%idy(j) = mod(j+lg%num(2)-1,lg%num(2))+1
+  end do
+  do j=lg%is_overlap(3),lg%ie_overlap(3)
+    lg%idz(j) = mod(j+lg%num(3)-1,lg%num(3))+1
+  end do
+
+  mg%is(1:3)=lg%is(1:3)
+  mg%ie(1:3)=lg%ie(1:3)
+  mg%num(1:3)=lg%num(1:3)
+  mg%is_overlap(1:3)=lg%is_overlap(1:3)
+  mg%ie_overlap(1:3)=lg%ie_overlap(1:3)
+  mg%is_array(1:3)=lg%is_array(1:3)
+  mg%ie_array(1:3)=lg%ie_array(1:3)
+  if(allocated(mg%idx)) deallocate(mg%idx)
+  if(allocated(mg%idy)) deallocate(mg%idy)
+  if(allocated(mg%idz)) deallocate(mg%idz)
+  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
+          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
+          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
+  mg%idx = lg%idx
+  mg%idy = lg%idy
+  mg%idz = lg%idz
+end if
 
 return
 

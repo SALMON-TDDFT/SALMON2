@@ -95,11 +95,11 @@ integer :: iatom,jj,lm
 
   call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                lx,ly,lz,nl,hx,hy,hz,  &
-               flag_use_grad_wf_on_force,property)
+               flag_use_grad_wf_on_force,property,Hvol)
 
   call calc_uv(pp,ppg_all,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                lx,ly,lz,nl,hx,hy,hz,  &
-               flag_use_grad_wf_on_force,property)
+               flag_use_grad_wf_on_force,property,Hvol)
 
   rinv_hvol=1.d0/Hvol
 

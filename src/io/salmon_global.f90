@@ -82,6 +82,7 @@ module salmon_global
   integer        :: iperiodic
   integer        :: ispin
   real(8)        :: al(3)
+  real(8)        :: al_vec1(3),al_vec2(3),al_vec3(3)
   integer        :: isym
   character(32)  :: crystal_structure
   integer        :: nstate
