@@ -16,8 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
-use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
+use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use density_matrix, only: calc_density
@@ -35,6 +35,7 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
+type(s_system),intent(in) :: system
 integer,intent(in) :: nspin
 type(s_wf_info),intent(in) :: info
 type(s_stencil),intent(inout) :: stencil
@@ -68,7 +69,7 @@ idensity=0
 idiffDensity=1
 ielf=2 
 
-if(iperiodic==3) call init_k_rd(k_rd,ksquare,1)
+if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%brl)
 
 select case(ikind_eext)
   case(0,3,9:12)
@@ -238,7 +239,7 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
    end if
 
   
-  call Hartree_ns(lg,mg,ng)
+  call Hartree_ns(lg,mg,ng,system%brl)
 
   elp3(516)=get_wtime()
   elp3(536)=elp3(536)+elp3(516)-elp3(515)
@@ -448,7 +449,7 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
       enddo
     end if
     call comm_bcast(Rion,nproc_group_global)
-    call init_ps
+    call init_ps(system%al,system%brl,stencil%matrix_A)
     if(comm_is_root(nproc_id_global))then
       dRion(:,:,-1)=dRion(:,:,0)
       dRion(:,:,0)=dRion(:,:,1)

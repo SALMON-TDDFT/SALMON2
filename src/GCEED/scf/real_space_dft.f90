@@ -101,17 +101,29 @@ elp3(101)=get_wtime()
 
 inumcpu_check=0
 
-stencil%if_orthogonal = .false. !+++++++++ test
-!stencil%if_orthogonal = .true.
-!if(al_vec1(2)/=0d0 .or. al_vec1(3)/=0d0 .or. al_vec2(1)/=0d0 &
-!.or. al_vec2(3)/=0d0 .or. al_vec3(1)/=0d0 .or. al_vec3(2)/=0d0) stencil%if_orthogonal = .false.
-
 call setbN
 call setcN
 
 call check_dos_pdos
 
 call convert_input_scf(file_atoms_coo)
+
+if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+   al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+  stencil%if_orthogonal = .true.
+  al_vec1(1) = al(1)
+  al_vec2(2) = al(2)
+  al_vec3(3) = al(3)
+else
+  if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal mode: using al_vec[1,2,3]"
+  stencil%if_orthogonal = .false.
+  rLsize(1,1) = sqrt(sum(al_vec1**2))
+  rLsize(2,1) = sqrt(sum(al_vec2**2))
+  rLsize(3,1) = sqrt(sum(al_vec3**2))
+  if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) == 0d0) then
+    Harray(1:3,1) = rLsize(1:3,1) / dble(num_rgrid(1:3))
+  end if
+end if
 
 call set_filename
 
@@ -173,8 +185,7 @@ if(istopt==1)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-!      call init_k_rd(k_rd,ksquare,1) !+++++++++
-      call init_k_rd_noc(k_rd,ksquare,1,system%brl)
+      call init_k_rd(k_rd,ksquare,1,system%brl)
     end if
 
     allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -182,8 +193,8 @@ if(istopt==1)then
       allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
     end if
     
-    if(iperiodic==3)then
-!      call prep_poisson_fft
+    if(iperiodic==3 .and. iflag_hartree==4)then
+      call prep_poisson_fft
     end if
 
     if(iflag_ps.eq.0)then
@@ -191,10 +202,7 @@ if(istopt==1)then
     else
       call read_pslfile
       call allocate_psl
-!      call init_ps !+++++++
-      call calcVpsl_periodic(stencil%matrix_A,system%brl,stencil%if_orthogonal)
-      call calcJxyz_all_periodic(system%al,stencil%matrix_A)
-      call calcuV
+      call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
     if(iobnum >= 1)then
@@ -296,7 +304,7 @@ if(istopt==1)then
 !------------------------------ Continue the previous calculation
 
   case(1,3)
-    call IN_data(lg,mg,ng)
+    call IN_data(lg,mg,ng,system,stencil)
 
     call allocate_mat
     call set_icoo1d
@@ -317,7 +325,7 @@ if(istopt==1)then
     if(iflag_ps/=0) then
       call read_pslfile
       call allocate_psl
-      call init_ps
+      call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
     call init_updown
@@ -330,7 +338,7 @@ if(istopt==1)then
 else if(istopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
-    call init_ps
+    call init_ps(system%al,system%brl,stencil%matrix_A)
   end if
 end if
 
@@ -1586,7 +1594,7 @@ call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
 
 if(iperiodic==3 .and. nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
-  if(comm_is_root(nproc_id_global)) write(*,*) "no r-space parallelization"
+  if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
   lg%is(1:3)=lg_sta(1:3)
   lg%ie(1:3)=lg_end(1:3)
   lg%num(1:3)=lg_num(1:3)

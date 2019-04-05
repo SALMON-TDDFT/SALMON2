@@ -40,7 +40,7 @@ END MODULE global_variables_rt
 !=======================================================================
 
 subroutine Real_Time_DFT
-use structures, only: s_rgrid
+use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
@@ -51,6 +51,8 @@ implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
+type(s_system) :: system
+type(s_stencil) :: stencil
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -85,6 +87,16 @@ idensum=0
 posplane=0.d0
 
 inumcpu_check=0
+
+if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+   al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+  stencil%if_orthogonal = .true.
+  al_vec1(1) = al(1)
+  al_vec2(2) = al(2)
+  al_vec3(3) = al(3)
+else
+  stencil%if_orthogonal = .false.
+end if
 
 call setbN
 call setcN
@@ -179,7 +191,7 @@ end if
 elp3(402)=get_wtime()
 
 ! Read SCF data
-call IN_data(lg,mg,ng)
+call IN_data(lg,mg,ng,system,stencil)
 
 if(comm_is_root(nproc_id_global))then
   if(icalcforce==1.and.iflag_md==1)then
@@ -192,13 +204,13 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-if(iperiodic==3)then
+if(iperiodic==3 .and. iflag_hartree==4)then
   call prep_poisson_fft
 end if
 
 call read_pslfile
 call allocate_psl
-call init_ps
+call init_ps(system%al,system%brl,stencil%matrix_A)
 
 call init_updown
 call init_itype
@@ -325,7 +337,7 @@ if(comm_is_root(nproc_id_global))then
   write(*, *) 
 end if
 
-call Time_Evolution(lg,mg,ng)
+call Time_Evolution(lg,mg,ng,system,stencil)
 
 elp3(409)=get_wtime()
 
@@ -799,8 +811,8 @@ END subroutine Real_Time_DFT
 
 !=======================================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng)
-use structures, only: s_system,s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_sendrecv_grid
+SUBROUTINE Time_Evolution(lg,mg,ng,system,stencil)
+use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
                            nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation
@@ -978,29 +990,18 @@ type(s_scalar),allocatable :: srho_s(:,:)
 
   if(iperiodic==3) allocate(stencil%kAc(info%ik_s:info%ik_e,3))
 
-  stencil%if_orthogonal = .true.!??????
-
   if(stencil%if_orthogonal) then
     stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
+    if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
     stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
-
-  if(iperiodic==0)then
-    do j=1,3
-      do ind=1,4
-        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
-        stencil%nabt(ind,j) = 0.d0
-      end do
+  do jj=1,3
+    do ii=1,4
+      stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+      stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
     end do
-  else if(iperiodic==3)then
-    do j=1,3
-      do ind=1,4
-        stencil%lapt(ind,j) = cnmat(ind,4)/hgs(j)**2
-        stencil%nabt(ind,j) = bnmat(ind,4)/hgs(j)
-      end do
-    end do
-  end if
+  end do
 
 if(comm_is_root(nproc_id_global).and.iflag_md==1)then
   open(15,file="distance.data")
@@ -1580,7 +1581,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1600,7 +1601,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1608,7 +1609,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1617,7 +1618,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE3
   elp3(415)=get_wtime()
 

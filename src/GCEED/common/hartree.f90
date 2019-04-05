@@ -26,7 +26,7 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
-real(8),intent(in),optional :: Brl(3,3)
+real(8)      ,intent(in) :: Brl(3,3)
 
 if(iSCFRT==1)then
   select case(iperiodic)
