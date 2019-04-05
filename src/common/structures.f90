@@ -161,6 +161,11 @@ module structures
     complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
 
+  type s_pp_nlcc
+    real(8), allocatable :: rho_nlcc(:,:,:)
+    real(8), allocatable :: tau_nlcc(:,:,:)
+  end type s_pp_nlcc
+
   type s_fourier_grid
     integer :: icomm_fourier
     integer :: NG_s,NG_e,nGzero

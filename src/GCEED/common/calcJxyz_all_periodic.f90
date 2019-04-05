@@ -16,6 +16,7 @@
 subroutine calcJxyz_all_periodic(al0,matrix_A0)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation
+  use prep_pp_sub, only: calc_mps,init_jxyz,calc_jxyz
   use scf_data
   use read_pslfile_sub
   use allocate_psl_sub

@@ -63,6 +63,7 @@ use writefield
 use global_variables_scf
 use lattice
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
+use salmon_pp, only: calc_nlcc
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa
@@ -86,6 +87,7 @@ type(s_stencil) :: stencil
 type(s_scalar) :: sVh
 type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
 type(s_fourier_grid) :: fg
+type(s_pp_nlcc) :: ppn
 integer :: neig(1:3, 1:2)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -205,6 +207,7 @@ if(istopt==1)then
       call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
+
     if(iobnum >= 1)then
       select case(iperiodic)
       case(0)
@@ -277,7 +280,7 @@ if(istopt==1)then
     end if
     allocate( esp(itotMST,num_kpoints_rd) )
 
-    call exc_cor_ns
+    call exc_cor_ns(ppn)
 
     call allgatherv_vlocal
 
@@ -492,6 +495,14 @@ do jj=1,3
     stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
   end do
 end do
+
+! Setup NLCC term from pseudopotential
+call calc_nlcc(pp, system, mg, ppn)
+if (comm_is_root(nproc_id_global)) then
+  write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
+  write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+end if    
+
 
 ! Initialization of s_sendrecv_grid structure (experimental implementation)
 neig(1, 1) = iup_array(1)
@@ -860,7 +871,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     elp3(126)=elp3(126)+elp3(116)-elp3(115)
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call exc_cor_ns
+      call exc_cor_ns(ppn)
     end if
    
     call allgatherv_vlocal
@@ -1117,7 +1128,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call exc_cor_ns
+      call exc_cor_ns(ppn)
     end if
    
     call allgatherv_vlocal
@@ -1388,7 +1399,7 @@ if(out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
   call calcELF
-  call writeelf(lg)
+  call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
   deallocate(elf)
 end if
 

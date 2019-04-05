@@ -22,6 +22,9 @@ Subroutine prep_ps_periodic(property)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_summation, comm_is_root
   use salmon_math
+  use prep_pp_sub, only: calc_uv,set_lma_tbl,init_uv,finalize_uv,   &
+                         set_nlma,calc_jxyz,init_jxyz,finalize_jxyz,calc_mps, &
+                         calc_vpsl,calc_vloc,init_lma_tbl
   use opt_variables, only: zJxyz,zKxyz,init_for_padding, nprojector,idx_proj,idx_lma,pseudo_start_idx, init_projector
 #ifdef ARTED_LBLK
   use opt_variables, only: t4ppt_nlma,t4ppt_nlma,t4ppt_i2vi,t4ppt_vi2i,t4ppt_ilma,t4ppt_j,  opt_vars_init_t4ppt
