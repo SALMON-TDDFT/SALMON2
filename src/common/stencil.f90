@@ -24,9 +24,8 @@ contains
 # define DY(dt) ix,idy(iy+(dt)),iz
 # define DZ(dt) ix,iy,idz(iz+(dt))
 
-subroutine stencil_R(tpsi,htpsi,is_array,ie_array &
-                    ,V_local,is,ie &
-                    ,idx,idy,idz,lap0,lapt)
+subroutine stencil_R(is_array,ie_array,is,ie,idx,idy,idz &
+                    ,tpsi,htpsi,V_local,lap0,lapt)
   implicit none
   integer,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                         ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -70,9 +69,8 @@ end subroutine stencil_R
 
 !===================================================================================================================================
 
-subroutine stencil_C(tpsi,htpsi,is_array,ie_array &
-                    ,V_local,is,ie &
-                    ,idx,idy,idz,lap0,lapt,nabt)
+subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
+                    ,tpsi,htpsi,V_local,lap0,lapt,nabt)
   implicit none
   integer,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                         ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -131,7 +129,8 @@ end subroutine stencil_C
 
 !===================================================================================================================================
 
-subroutine stencil_nonorthogonal(tpsi,htpsi,is_array,ie_array,V_local,is,ie,idx,idy,idz,lap0,lapt,nabt,Bk,F,wrk)
+subroutine stencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz,wrk &
+                                ,tpsi,htpsi,V_local,lap0,lapt,nabt,Bk,F)
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -229,8 +228,8 @@ end subroutine stencil_nonorthogonal
 
 # define DR(dt) idx(ix+(sx)*(dt)),idy(iy+(sy)*(dt)),idz(iz+(sz)*(dt))
 
-subroutine stencil_nonorthogonal_highsymmetry(tpsi,htpsi,is_array,ie_array,V_local,is,ie &
-                    ,idx,idy,idz,lap0,lapt,nabt,ndir,sign)
+subroutine stencil_nonorthogonal_highsymmetry(is_array,ie_array,is,ie,idx,idy,idz,ndir &
+                                             ,tpsi,htpsi,V_local,lap0,lapt,nabt,sign)
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4),ndir,sign(3,4:ndir)
