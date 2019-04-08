@@ -77,52 +77,14 @@ subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
   complex(8),intent(in)  :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
   real(8)   ,intent(in)  :: V_local(is(1):ie(1),is(2):ie(2),is(3):ie(3)),lap0,lapt(4,3),nabt(4,3)
   complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-  !
-  integer :: iz,iy,ix
-  complex(8) :: v,w
 
-!$OMP parallel
-!$OMP do private(iz,iy,ix,v,w)
-  do iz=is(3),ie(3)
-  do iy=is(2),ie(2)
-  do ix=is(1),ie(1)
-
-    v =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1))) &
-      & +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
-      & +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
-      & +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
-
-    v =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1))) &
-      & +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
-      & +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
-      & +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
-
-    v =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1))) &
-      & +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
-      & +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
-      & +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
-
-    w =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
-      & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
-      & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
-      & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
-
-    w =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
-      & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
-      & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
-      & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4))) + w
-
-    w =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
-      & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
-      & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
-      & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4))) + w
-
-    htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )*tpsi(ix,iy,iz) - 0.5d0 * v - zI * w
-  end do
-  end do
-  end do
-!$OMP end do
-!$OMP end parallel
+  if (.true.) then ! (stencil_is_parallelized_by_omp)
+    call stencil_C_omp(is_array,ie_array,is,ie,idx,idy,idz &
+                      ,tpsi,htpsi,V_local,lap0,lapt,nabt)
+  else
+    call stencil_C_seq(is_array,ie_array,is,ie,idx,idy,idz &
+                      ,tpsi,htpsi,V_local,lap0,lapt,nabt)
+  end if
 
   return
 end subroutine stencil_C

@@ -33,6 +33,12 @@ set(SOURCES
    print.f90
    )
 
+set(SOURCES
+    ${SOURCES}
+    stencil_c_core/intel_simd/explicit_vectorized_omp.c
+    stencil_c_core/intel_simd/explicit_vectorized_seq.c
+    )
+
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
 list(APPEND SALMON_SOURCES ${SOURCES})
 set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)

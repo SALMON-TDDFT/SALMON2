@@ -7,7 +7,7 @@ set(OPENMP_FLAGS                "-qopenmp")
 set(LAPACK_FLAGS                "-mkl=parallel")
 set(ScaLAPACK_FLAGS             "-mkl=cluster")
 set(ADDITIONAL_MACRO            "")
-set(ADDITIONAL_OPTIMIZE_FLAGS   "-qopt-ra-region-strategy=block -ansi-alias -fno-alias")
+set(ADDITIONAL_OPTIMIZE_FLAGS   "-qopt-ra-region-strategy=block -ansi-alias -fno-alias -qopt-report=5 -qopt-report-phase=openmp,loop,vec")
 
 set(Fortran_FLAGS_General       "-traceback -fpp -nogen-interface -std03 -warn all -diag-disable 6477,7025")
 set(C_FLAGS_General             "-Wall -diag-disable=10388 -restrict")

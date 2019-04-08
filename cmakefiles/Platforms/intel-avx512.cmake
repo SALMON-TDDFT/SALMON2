@@ -10,7 +10,7 @@ set(ADDITIONAL_MACRO            "")
 set(ADDITIONAL_OPTIMIZE_FLAGS   "-ansi-alias -fno-alias")
 
 set(Fortran_FLAGS_General       "-fpp -nogen-interface -std03 -warn all -diag-disable 6477,7025")
-set(C_FLAGS_General             "-Wall -diag-disable=10388 -restrict")
+set(C_FLAGS_General             "-Wall -diag-disable=10388 -restrict -std=c99")
 
 set(CMAKE_Fortran_COMPILER      "mpiifort")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
