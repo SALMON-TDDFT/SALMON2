@@ -90,12 +90,18 @@ inumcpu_check=0
 
 if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
    al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+  if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
   stencil%if_orthogonal = .true.
-  al_vec1(1) = al(1)
-  al_vec2(2) = al(2)
-  al_vec3(3) = al(3)
+  system%al = 0d0
+  system%al(1,1) = al(1)
+  system%al(2,2) = al(2)
+  system%al(3,3) = al(3)
 else
+  if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
   stencil%if_orthogonal = .false.
+  system%al(1:3,1) = al_vec1
+  system%al(1:3,2) = al_vec2
+  system%al(1:3,3) = al_vec3
 end if
 
 call setbN
