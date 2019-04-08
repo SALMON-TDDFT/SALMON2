@@ -15,6 +15,7 @@
 !
 SUBROUTINE calcVpsl
 use salmon_parallel, only: nproc_id_global
+use prep_pp_sub, only: bisection
 use scf_data
 use allocate_psl_sub
 implicit none
@@ -42,7 +43,7 @@ do a=1,MI
     r=sqrt( (gridcoo(ix,1)-Rion(1,a))**2      &
            +(gridcoo(iy,2)-Rion(2,a))**2      &
            +(gridcoo(iz,3)-Rion(3,a))**2 )+1.d-50
-    call bisection(r,intr,ak)
+    call bisection(r,intr,ak,nr,rad_psl)
     ratio1=(r-rad_psl(intr,ak))/(rad_psl(intr+1,ak)-rad_psl(intr,ak)) ; ratio2=1.d0-ratio1
     if(intr>=0.and.intr<=Nr)then
       continue

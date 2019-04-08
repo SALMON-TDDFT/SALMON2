@@ -15,6 +15,7 @@
 !
 SUBROUTINE calcuV
 use salmon_communication, only: comm_is_root
+use prep_pp_sub, only: set_nlma,init_lma_tbl,init_uv,set_lma_tbl,calc_uv
 use scf_data
 use allocate_psl_sub
 implicit none
@@ -94,11 +95,11 @@ integer :: iatom,jj,lm
 
   call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                lx,ly,lz,nl,hx,hy,hz,  &
-               flag_use_grad_wf_on_force,property)
+               flag_use_grad_wf_on_force,property,Hvol)
 
   call calc_uv(pp,ppg_all,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                lx,ly,lz,nl,hx,hy,hz,  &
-               flag_use_grad_wf_on_force,property)
+               flag_use_grad_wf_on_force,property,Hvol)
 
   rinv_hvol=1.d0/Hvol
 

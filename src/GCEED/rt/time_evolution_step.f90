@@ -16,8 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,nspin,info,stencil,srg,spsi_in,spsi_out,shtpsi,sshtpsi)
-use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use density_matrix, only: calc_density
@@ -35,10 +35,12 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
+type(s_system),intent(in) :: system
 integer,intent(in) :: nspin
 type(s_wf_info),intent(in) :: info
 type(s_stencil),intent(inout) :: stencil
 type(s_sendrecv_grid),intent(inout) :: srg
+type(s_pp_nlcc), intent(in) :: ppn
 type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
 type(s_wavefunction),intent(inout) :: sshtpsi
 integer :: ix,iy,iz,i1,mm,jj
@@ -68,7 +70,7 @@ idensity=0
 idiffDensity=1
 ielf=2 
 
-if(iperiodic==3) call init_k_rd(k_rd,ksquare,1)
+if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%brl)
 
 select case(ikind_eext)
   case(0,3,9:12)
@@ -238,13 +240,13 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
    end if
 
   
-  call Hartree_ns(lg,mg,ng)
+  call Hartree_ns(lg,mg,ng,system%brl)
 
   elp3(516)=get_wtime()
   elp3(536)=elp3(536)+elp3(516)-elp3(515)
 
   if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-    call exc_cor_ns
+    call exc_cor_ns(ppn)
   end if
 
   elp3(517)=get_wtime()
@@ -448,7 +450,7 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
       enddo
     end if
     call comm_bcast(Rion,nproc_group_global)
-    call init_ps
+    call init_ps(system%al,system%brl,stencil%matrix_A)
     if(comm_is_root(nproc_id_global))then
       dRion(:,:,-1)=dRion(:,:,0)
       dRion(:,:,0)=dRion(:,:,1)
@@ -558,13 +560,13 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
   if(out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call calcELF
-      call writeelf(lg)
+      call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
   end if
   if(out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
       call calcEstatic
-      call writeestatic(lg)
+      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
 

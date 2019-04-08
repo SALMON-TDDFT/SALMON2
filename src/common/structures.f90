@@ -20,7 +20,7 @@ module structures
   type s_system
     integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
-    real(8) :: Hvol,Hgs(3),al(3,3),det_al
+    real(8) :: Hvol,Hgs(3),al(3,3),det_al,brl(3,3)
     real(8),allocatable :: wtk(:) ! (1:nk), weight of k points
     real(8),allocatable :: Rion(:,:) ! (1:3,1:nion), atom position
     real(8),allocatable :: esp(:,:,:),rocc(:,:,:) ! (1:no,1:nk,1:nspin), esp= single-particle energy, rocc= occupation rate
@@ -76,6 +76,7 @@ module structures
   type s_wavefunction
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! rwf(x,y,z,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! zwf(x,y,z,ispin,io,ik,im)
+    complex(8),allocatable :: wrk(:,:,:,:)
   end type s_wavefunction
 
   type s_stencil
@@ -83,8 +84,10 @@ module structures
     real(8),allocatable :: kAc(:,:) ! kAc(Nk,3)
 
   ! for non-orthogonal lattice
-    integer,allocatable :: sign(:) ! sign(4:ndir) (for ndir=4~6) ???
-    real(8),allocatable :: coef_lap(:,:) !?????? --> lapt (future work)
+    logical :: if_orthogonal
+    integer,allocatable :: sign(:,:) ! sign(3,4:ndir) (for ndir=4~6) 
+    real(8),allocatable :: coef_lap(:,:),coef_nab(:,:) !?????? --> lapt,nabt (future work)
+    real(8) :: matrix_A(3,3),matrix_B(3,3),coef_F(6)
 
   ! Experimental implementation of srg
     type(s_sendrecv_grid) :: srg
@@ -158,6 +161,11 @@ module structures
     complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
 
+  type s_pp_nlcc
+    real(8), allocatable :: rho_nlcc(:,:,:)
+    real(8), allocatable :: tau_nlcc(:,:,:)
+  end type s_pp_nlcc
+
   type s_fourier_grid
     integer :: icomm_fourier
     integer :: NG_s,NG_e,nGzero
@@ -196,6 +204,7 @@ contains
     type(s_wavefunction) :: psi
     DEAL(psi%rwf)
     DEAL(psi%zwf)
+    DEAL(psi%wrk)
   end subroutine deallocate_wavefunction
 
   subroutine deallocate_stencil(stencil)
@@ -203,6 +212,7 @@ contains
     DEAL(stencil%kAc)
     DEAL(stencil%sign)
     DEAL(stencil%coef_lap)
+    DEAL(stencil%coef_nab)
   end subroutine deallocate_stencil
 
   subroutine deallocate_pp_info(pp)

@@ -15,7 +15,7 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_ns(lg,mg,ng)
+SUBROUTINE Hartree_ns(lg,mg,ng,Brl)
 use structures, only: s_rgrid
 use hartree_periodic_sub
 use hartree_ffte_sub
@@ -26,6 +26,7 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
+real(8)      ,intent(in) :: Brl(3,3)
 
 if(iSCFRT==1)then
   select case(iperiodic)
@@ -36,7 +37,7 @@ if(iSCFRT==1)then
     case(2)
       call Hartree_periodic(lg,mg,ng,rho,Vh,hgs,iscfrt,itcalc_ene,itt,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
-                 egx,egxc,egy,egyc,egz,egzc)
+                 egx,egxc,egy,egyc,egz,egzc,Brl)
     case(4)
       call Hartree_FFTE(lg,mg,ng,rho,Vh,icheck_ascorder,hgs,npuw,npuy,npuz,   &
                         a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
@@ -56,7 +57,7 @@ else if(iSCFRT==2)then
       case(2)
         call Hartree_periodic(lg,mg,ng,rho,Vh_stock2,hgs,iscfrt,itcalc_ene,itt,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
-                 egx,egxc,egy,egyc,egz,egzc)
+                 egx,egxc,egy,egyc,egz,egzc,Brl)
       case(4)
         call Hartree_FFTE(lg,mg,ng,rho,Vh_stock2,icheck_ascorder,hgs,npuw,npuy,npuz,   &
                           a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
@@ -66,7 +67,7 @@ else if(iSCFRT==2)then
       case(2)
         call Hartree_periodic(lg,mg,ng,rho,Vh_stock1,hgs,iscfrt,itcalc_ene,itt,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
-                 egx,egxc,egy,egyc,egz,egzc)
+                 egx,egxc,egy,egyc,egz,egzc,Brl)
       case(4)
         call Hartree_FFTE(lg,mg,ng,rho,Vh_stock1,icheck_ascorder,hgs,npuw,npuy,npuz,   &
                           a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
