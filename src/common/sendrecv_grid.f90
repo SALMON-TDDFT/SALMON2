@@ -68,7 +68,6 @@ module sendrecv_grid
     integer :: idir, iaxis
     integer :: is_block(1:3, 1:2, 1:2, 1:3)
     integer :: ie_block(1:3, 1:2, 1:2, 1:3)
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:71 ';FLUSH(777)!uemoto!@c
     
     ! Calculate shape (upper and lower bounds) of overlapped region:
     ! NOTE:
@@ -129,7 +128,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:71 ';FLUSH(777)!uemoto!@c
     type(s_sendrecv_grid), intent(inout) :: srg
     integer :: idir, iside, itype
 
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:132 ';FLUSH(777)!uemoto!@c
     do idir = 1, 3
       do iside = 1, 2
         ! Release persistent communication requests
@@ -160,7 +158,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:132 ';FLUSH(777)!uemoto!@c
       1:srg%nb)
     integer :: idir, iside
 
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:163 ';FLUSH(777)!uemoto!@c
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
     if (.not. srg%pcomm_initialized) call alloc_cache()
     call timer_begin(LOG_SENDRECV_GRID)
@@ -207,7 +204,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:163 ';FLUSH(777)!uemoto!@c
       implicit none
       integer :: jdir, jside, jtype
       integer :: is_b(3), ie_b(3)
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:210 ';FLUSH(777)!uemoto!@c
       do jdir = 1, 3
         do jside = 1, 2
           do jtype = 1, 2
@@ -224,7 +220,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:210 ';FLUSH(777)!uemoto!@c
       use salmon_communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:227 ';FLUSH(777)!uemoto!@c
       ! Send (and initialize persistent communication)
       srg%ireq(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%dbuf, &
@@ -244,7 +239,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:227 ';FLUSH(777)!uemoto!@c
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:247 ';FLUSH(777)!uemoto!@c
       is_s(1:3) = srg%is_block(jdir, jside, itype_send, 1:3)
       ie_s(1:3) = srg%ie_block(jdir, jside, itype_send, 1:3)
       call copy_data( &
@@ -257,7 +251,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:247 ';FLUSH(777)!uemoto!@c
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:260 ';FLUSH(777)!uemoto!@c
       is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
       ie_d(1:3) = srg%ie_block(jdir, jside, itype_recv, 1:3)
       call copy_data( &
@@ -270,7 +263,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:260 ';FLUSH(777)!uemoto!@c
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:273 ';FLUSH(777)!uemoto!@c
       is_s(1:3) = srg%is_block(jdir, flip(jside), itype_send, 1:3)
       ie_s(1:3) = srg%ie_block(jdir, flip(jside), itype_send, 1:3)
       is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
@@ -295,7 +287,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:273 ';FLUSH(777)!uemoto!@c
       rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
     integer :: idir, iside
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:298 ';FLUSH(777)!uemoto!@c
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
     if (.not. srg%pcomm_initialized) call alloc_cache()
@@ -343,7 +334,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:298 ';FLUSH(777)!uemoto!@c
       implicit none
       integer :: jdir, jside, jtype
       integer :: is_b(3), ie_b(3)
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:346 ';FLUSH(777)!uemoto!@c
       do jdir = 1, 3
         do jside = 1, 2
           do jtype = 1, 2
@@ -360,7 +350,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:346 ';FLUSH(777)!uemoto!@c
       use salmon_communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:363 ';FLUSH(777)!uemoto!@c
       ! Send (and initialize persistent communication)
       srg%ireq(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%zbuf, &
@@ -380,7 +369,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:363 ';FLUSH(777)!uemoto!@c
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:383 ';FLUSH(777)!uemoto!@c
       is_s(1:3) = srg%is_block(jdir, jside, itype_send, 1:3)
       ie_s(1:3) = srg%ie_block(jdir, jside, itype_send, 1:3)
       call copy_data( &
@@ -393,7 +381,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:383 ';FLUSH(777)!uemoto!@c
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:396 ';FLUSH(777)!uemoto!@c
       is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
       ie_d(1:3) = srg%ie_block(jdir, jside, itype_recv, 1:3)
       call copy_data( &
@@ -406,7 +393,6 @@ WRITE(777,'(A)')'@./common/sendrecv_grid.f90:396 ';FLUSH(777)!uemoto!@c
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-WRITE(777,'(A)')'@./common/sendrecv_grid.f90:409 ';FLUSH(777)!uemoto!@c
       is_s(1:3) = srg%is_block(jdir, flip(jside), itype_send, 1:3)
       ie_s(1:3) = srg%ie_block(jdir, flip(jside), itype_send, 1:3)
       is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
