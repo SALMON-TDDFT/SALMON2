@@ -879,7 +879,6 @@ type(s_scalar),allocatable :: srho_s(:,:)
   system%Hgs = Hgs
   allocate(system%Rion(3,system%nion) &
           ,system%wtk(system%nk) &
-          ,system%esp(system%no,system%nk,system%nspin) &
           ,system%rocc(system%no,system%nk,system%nspin))
   system%wtk = wtk
   system%rion = rion

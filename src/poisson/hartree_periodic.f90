@@ -215,13 +215,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
   end do
   end do
 
-  if(iSCFRT==1)then
-    call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
-  else if(iSCFRT==2)then
-    if(itt==1.or.mod(itt,itcalc_ene)==0)then
-      call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
-    end if
-  end if
+  call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
   call comm_summation(ff1z,ff2z,ng%num(1)*ng%num(2)*lg%num(3),nproc_group_bound(3))
 
 !$OMP parallel do private(iz,ky,kx)
