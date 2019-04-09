@@ -110,4 +110,6 @@ subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   
     ng%idz(j) = j
   end do
 
+  ng%nd=4
+  
 end subroutine setng
