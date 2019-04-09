@@ -23,11 +23,12 @@ module structures
     real(8) :: Hvol,Hgs(3),al(3,3),det_al,brl(3,3)
     real(8),allocatable :: wtk(:) ! (1:nk), weight of k points
     real(8),allocatable :: Rion(:,:) ! (1:3,1:nion), atom position
-    real(8),allocatable :: esp(:,:,:),rocc(:,:,:) ! (1:no,1:nk,1:nspin), esp= single-particle energy, rocc= occupation rate
+    real(8),allocatable :: rocc(:,:,:) ! (1:no,1:nk,1:nspin), occupation rate
   end type s_system
 
   type s_energy
-    real(8) :: E_tot,E_ion,E_xc,E_h,E_kin,E_loc,E_nloc
+    real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
+    real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
   end type s_energy
 
   type s_rgrid
@@ -168,9 +169,9 @@ module structures
 
   type s_fourier_grid
     integer :: icomm_fourier
-    integer :: NG_s,NG_e,nGzero
+    integer :: ng,iG_s,iG_e,iGzero
     real(8),allocatable :: Gx(:),Gy(:),Gz(:)
-    complex(8),allocatable :: rhoion_G(:)
+    complex(8),allocatable :: rhoG_ion(:),rhoG_elec(:),dVG_ion(:,:)
   end type s_fourier_grid
 
 !===================================================================================================================================
@@ -183,9 +184,13 @@ contains
     type(s_system) :: system
     DEAL(system%rocc)
     DEAL(system%wtk)
-    DEAL(system%esp)
     DEAL(system%Rion)
   end subroutine deallocate_system
+
+  subroutine deallocate_energy(energy)
+    type(s_energy) :: energy
+    DEAL(energy%esp)
+  end subroutine deallocate_energy
 
   subroutine deallocate_rgrid(rg)
     type(s_rgrid) :: rg
@@ -285,7 +290,9 @@ contains
     DEAL(fg%Gx)
     DEAL(fg%Gy)
     DEAL(fg%Gz)
-    DEAL(fg%rhoion_G)
+    DEAL(fg%rhoG_ion)
+    DEAL(fg%rhoG_elec)
+    DEAL(fg%dVG_ion)
   end subroutine deallocate_fourier_grid
 
 end module structures

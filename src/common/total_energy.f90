@@ -15,36 +15,46 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 MODULE salmon_Total_Energy
+implicit none
+real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math !?????????
+complex(8),parameter :: zI=(0d0,1d0)
 
 CONTAINS
 
-  SUBROUTINE calc_Total_Energy(Etot,Exc,system,info,ng,pp,rho,Vh,Vxc,fg)
+  SUBROUTINE calc_Total_Energy_isolated(energy,system,info,ng,pp,rho,Vh,Vxc)
     use structures
+    use salmon_global, only: kion
     use salmon_communication, only: comm_summation
     implicit none
-    real(8)        ,intent(in) :: Exc
     type(s_system) ,intent(in) :: system
     type(s_wf_info),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: ng
     type(s_pp_info),intent(in) :: pp
     type(s_scalar) ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
-    type(s_fourier_grid),intent(in) :: fg
-    real(8)                    :: Etot
+    type(s_energy)             :: energy
     !
     integer :: io,ik,ispin,Nspin
-    integer :: ix,iy,iz,is
-    real(8) :: sum1,sum2,Eion
+    integer :: ix,iy,iz,is,ia,ib
+    real(8) :: sum1,sum2,Eion,Etot,r
     Nspin = system%Nspin
 
 !    if (Rion_update) then
-    call calc_ion_energy(Eion,system,pp,fg) ! ion-ion energy
+      Eion = 0d0
+      do ia=1,system%nion
+        do ib=1,ia-1
+          r = sqrt((system%Rion(1,ia)-system%Rion(1,ib))**2      &
+                  +(system%Rion(2,ia)-system%Rion(2,ib))**2      &
+                  +(system%Rion(3,ia)-system%Rion(3,ib))**2)
+          Eion = Eion + pp%Zps(Kion(ia)) * pp%Zps(Kion(ib)) /r
+        end do
+      end do
 !    end if
 
     Etot = 0d0
     do ispin=1,Nspin
     do ik=1,system%nk
     do io=1,system%no
-      Etot = Etot + system%rocc(io,ik,ispin) * system%esp(io,ik,ispin)
+      Etot = Etot + system%rocc(io,ik,ispin) * energy%esp(io,ik,ispin)
     end do
     end do
     end do
@@ -63,75 +73,15 @@ CONTAINS
     
     call comm_summation(sum1,sum2,info%icomm_r)
 
-    Etot = Etot + sum2*system%Hvol + Exc + Eion
+    Etot = Etot + sum2*system%Hvol + energy%E_xc + Eion
+
+    energy%E_ion_ion = Eion
+    energy%E_tot = Etot
 
     return
-  end SUBROUTINE calc_Total_Energy
+  end SUBROUTINE calc_Total_Energy_isolated
 
-  Subroutine calc_eigen_energy(system,psi,hpsi_tmp,info,mg,V_local,stencil,srg,ppg)
-    use structures
-    use salmon_communication, only: comm_summation
-    use hpsi_sub
-    use sendrecv_grid, only: s_sendrecv_grid
-    implicit none
-    type(s_system)             :: system
-    type(s_wavefunction)       :: psi,hpsi_tmp
-    type(s_wf_info),intent(in) :: info
-    type(s_rgrid)  ,intent(in) :: mg
-    type(s_scalar) ,intent(in) :: V_local(system%Nspin)
-    type(s_stencil),intent(in) :: stencil
-    type(s_sendrecv_grid),intent(in) :: srg
-    type(s_pp_grid),intent(in) :: ppg
-    !
-    integer :: ik,io,jo,ispin,im,nk,no,is(3),ie(3),Nspin
-    real(8),allocatable :: wrk1(:,:),wrk2(:,:)
-
-    Nspin = system%Nspin
-    if(info%im_s/=1 .or. info%im_e/=1) then
-      write(*,*) "error: calc_eigen_energy"
-      stop
-    end if
-    im = 1
-    is = mg%is
-    ie = mg%ie
-    no = system%no
-    nk = system%nk
-    allocate(wrk1(no,nk),wrk2(no,nk))
-    wrk1 = 0d0
-
-    call hpsi(psi,hpsi_tmp,info,mg,V_local,Nspin,stencil,srg,ppg)
-
-    if(allocated(psi%rwf)) then
-      do ispin=1,Nspin
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-          jo = info%io_tbl(io)
-          wrk1(jo,ik) = sum( psi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
-                      * hpsi_tmp%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
-        end do
-        end do
-        call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
-        system%esp(:,:,ispin) = wrk2
-      end do
-    else
-      do ispin=1,Nspin
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-          jo = info%io_tbl(io)
-          wrk1(jo,ik) = sum( conjg( psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
-                             * hpsi_tmp%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
-        end do
-        end do
-        call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
-        system%esp(:,:,ispin) = wrk2
-      end do
-    end if
-
-    deallocate(wrk1,wrk2)
-    return
-  End Subroutine calc_eigen_energy
-
-  Subroutine calc_ion_energy(Eion,system,pp,fg)
+  SUBROUTINE calc_Total_Energy_periodic(energy,system,pp,fg)
     use structures
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
@@ -140,57 +90,167 @@ CONTAINS
     type(s_system) ,intent(in) :: system
     type(s_pp_info),intent(in) :: pp
     type(s_fourier_grid),intent(in) :: fg
-    real(8)                    :: Eion
+    type(s_energy)             :: energy
     !
-    integer :: ia,ib,ix,iy,iz,n
-    real(8) :: r,rab(3),rr(3),Eion_wrk,Eion_wrk2,G2
-    real(8),parameter :: Pi=3.141592653589793d0 !??????????? salmon_math ? global parameter ?
+    integer :: ix,iy,iz,ia,ib,ig
+    real(8) :: r,rab(3),rr(3),E_tmp,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
+    complex(8) :: rho_e,rho_i
 
-    Eion = 0d0
-    if(system%iperiodic==0) then
+    sysvol = system%det_al
+
+!    if (Rion_update) then ! Ewald sum
+    E_tmp = 0d0
+    do ia=1,system%nion
+      do ix=-NEwald,NEwald
+      do iy=-NEwald,NEwald
+      do iz=-NEwald,NEwald
+        do ib=1,system%nion
+          if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+          rr(1) = ix*system%al(1,1) + iy*system%al(1,2) + iz*system%al(1,3)
+          rr(2) = ix*system%al(2,1) + iy*system%al(2,2) + iz*system%al(2,3)
+          rr(3) = ix*system%al(3,1) + iy*system%al(3,2) + iz*system%al(3,3)
+          rab(1) = system%Rion(1,ia)-rr(1) - system%Rion(1,ib)
+          rab(2) = system%Rion(2,ia)-rr(2) - system%Rion(2,ib)
+          rab(3) = system%Rion(3,ia)-rr(3) - system%Rion(3,ib)
+          r = sum(rab(:)**2)
+          E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*r))/sqrt(r)
+        end do
+      end do
+      end do
+      end do
+    end do
+    E_tmp = E_tmp - Pi*sum(pp%Zps(Kion(:)))**2/(2*aEwald*sysvol)-sqrt(aEwald/Pi)*sum(pp%Zps(Kion(:))**2)
+!    end if
+
+    E_wrk = 0d0
+    do ig=fg%ig_s,fg%ig_e
+      if(ig == fg%iGzero ) cycle
+      g(1) = fg%Gx(ig)
+      g(2) = fg%Gy(ig)
+      g(3) = fg%Gz(ig)
+      G2 = g(1)**2 + g(2)**2 + g(3)**2
+      rho_i = fg%rhoG_ion(ig)
+      rho_e = fg%rhoG_elec(ig)
+      E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
+      E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
+      E_wrk(3) = E_wrk(3) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
       do ia=1,system%nion
-      do ib=1,ia-1
-        r = sqrt((system%Rion(1,ia)-system%Rion(1,ib))**2      &
-                +(system%Rion(2,ia)-system%Rion(2,ib))**2      &
-                +(system%Rion(3,ia)-system%Rion(3,ib))**2)
-        Eion = Eion + pp%Zps(Kion(ia)) * pp%Zps(Kion(ib)) /r
+        rr = system%Rion(1:3,ia)
+        Gd = g(1)*rr(1) + g(2)*rr(2) + g(3)*rr(3)
+        E_wrk(4) = E_wrk(4) + conjg(rho_e)*fg%dVG_ion(ig,Kion(ia))*exp(-zI*Gd)          ! electron-ion (core)
       end do
-      end do
-    else if(system%iperiodic==3) then
-    ! Ewald sum
-      do ia=1,system%nion
-        do ix=-NEwald,NEwald
-        do iy=-NEwald,NEwald
-        do iz=-NEwald,NEwald
-          do ib=1,system%nion
-            if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) then
-              cycle
-            end if
-            rr(1) = ix*system%al(1,1) + iy*system%al(1,2) + iz*system%al(1,3)
-            rr(2) = ix*system%al(2,1) + iy*system%al(2,2) + iz*system%al(2,3)
-            rr(3) = ix*system%al(3,1) + iy*system%al(3,2) + iz*system%al(3,3)
-            rab(1) = system%Rion(1,ia)-rr(1) - system%Rion(1,ib)
-            rab(2) = system%Rion(2,ia)-rr(2) - system%Rion(2,ib)
-            rab(3) = system%Rion(3,ia)-rr(3) - system%Rion(3,ib)
-            r=sum(rab(:)**2)
-            Eion = Eion + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*r))/sqrt(r)
-          end do
-        end do
-        end do
-        end do
-      end do
+    enddo
+    call comm_summation(E_wrk,E_sum,4,fg%icomm_fourier)
 
-      Eion_wrk = 0d0
-      do n=fg%NG_s,fg%NG_e
-        if(n == fg%nGzero) cycle
-        G2 = fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2
-        Eion_wrk = Eion_wrk + system%det_al*(4*Pi/G2)*(abs(fg%rhoion_G(n))**2*exp(-G2/(4*aEwald))*0.5d0)
-      end do
-      call comm_summation(Eion_wrk,Eion_wrk2,fg%icomm_fourier)
+  ! ion-ion energy
+    energy%E_ion_ion = E_tmp + E_sum(1)
 
-      Eion = Eion + Eion_wrk2 - Pi*sum(pp%Zps(Kion(:)))**2/(2*aEwald*system%det_al)-sqrt(aEwald/Pi)*sum(pp%Zps(Kion(:))**2)
-    end if
+  ! Hartree energy
+    energy%E_h = E_sum(2)
+
+  ! electron-ion energy (local part)
+    energy%E_ion_loc = E_sum(3) + E_sum(4)
+
+  ! total energy
+    energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion
+
     return
-  end Subroutine calc_ion_energy
+  end SUBROUTINE calc_Total_Energy_periodic
+
+! eigen energies (esp), kinetic energy (E_kin), & nonlocal part of electron-ion energy (E_ion_nloc)
+  Subroutine calc_eigen_energy(energy,tpsi,htpsi,ttpsi,system,info,mg,V_local,stencil,srg,ppg)
+    use structures
+    use salmon_communication, only: comm_summation
+    use hpsi_sub
+    implicit none
+    type(s_energy)             :: energy
+    type(s_wavefunction)       :: tpsi,htpsi,ttpsi
+    type(s_system) ,intent(in) :: system
+    type(s_wf_info),intent(in) :: info
+    type(s_rgrid)  ,intent(in) :: mg
+    type(s_scalar) ,intent(in) :: V_local(system%Nspin)
+    type(s_stencil),intent(in) :: stencil
+    type(s_sendrecv_grid),intent(in) :: srg
+    type(s_pp_grid),intent(in) :: ppg
+    !
+    integer :: ik,io,jo,ispin,im,nk,no,is(3),ie(3),Nspin
+    real(8) :: E_kin,E_ion_nloc,E_tmp
+    real(8),allocatable :: wrk1(:,:),wrk2(:,:)
+
+    if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_eigen_energy"
+    im = 1
+
+    Nspin = system%Nspin
+    is = mg%is
+    ie = mg%ie
+    no = system%no
+    nk = system%nk
+    allocate(wrk1(no,nk),wrk2(no,nk))
+    wrk1 = 0d0
+
+    call hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
+
+    if(allocated(tpsi%rwf)) then
+      do ispin=1,Nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          jo = info%io_tbl(io)
+          wrk1(jo,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                        * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+        end do
+        end do
+        call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
+        energy%esp(:,:,ispin) = wrk2
+      end do
+    else
+    ! eigen energies (esp)
+      do ispin=1,Nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          jo = info%io_tbl(io)
+          wrk1(jo,ik) = sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
+                                 * htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+        end do
+        end do
+        call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
+        energy%esp(:,:,ispin) = wrk2
+      end do
+
+    ! kinetic energy (E_kin)
+      E_tmp = 0d0
+      do ispin=1,Nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          E_tmp = E_tmp + info%occ(io,ik,ispin) &
+                      * sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
+                                 * ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+        end do
+        end do
+      end do
+      call comm_summation(E_tmp,E_kin,info%icomm_rko)
+
+    ! nonlocal part (E_ion_nloc)
+      ttpsi%zwf = 0d0
+      call pseudo_C(tpsi,ttpsi,info,nspin,ppg)
+      E_tmp = 0d0
+      do ispin=1,Nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          E_tmp = E_tmp + info%occ(io,ik,ispin) &
+                      * sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
+                                 * ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+        end do
+        end do
+      end do
+      call comm_summation(E_tmp,E_ion_nloc,info%icomm_rko)
+
+      energy%E_kin = E_kin
+      energy%E_ion_nloc = E_ion_nloc
+
+    end if
+
+    deallocate(wrk1,wrk2)
+    return
+  End Subroutine calc_eigen_energy
 
 END MODULE salmon_Total_Energy

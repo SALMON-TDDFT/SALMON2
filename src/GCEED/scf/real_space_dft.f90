@@ -69,7 +69,7 @@ implicit none
 integer :: ix,iy,iz,ik,ikoa
 integer :: is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
-real(8) :: sum0,sum1,Etot_test
+real(8) :: sum0,sum1
 character(100) :: file_atoms_coo
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
@@ -81,13 +81,14 @@ type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
 type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob
 integer :: nspin
-type(s_wavefunction) :: spsi,shpsi
+type(s_wavefunction) :: spsi,shpsi,sttpsi
 type(s_system) :: system
 type(s_stencil) :: stencil
 type(s_scalar) :: sVh
 type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
 type(s_fourier_grid) :: fg
 type(s_pp_nlcc) :: ppn
+type(s_energy) :: energy
 integer :: neig(1:3, 1:2)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -112,13 +113,18 @@ call convert_input_scf(file_atoms_coo)
 
 if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
    al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+  if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
   stencil%if_orthogonal = .true.
-  al_vec1(1) = al(1)
-  al_vec2(2) = al(2)
-  al_vec3(3) = al(3)
+  system%al = 0d0
+  system%al(1,1) = al(1)
+  system%al(2,2) = al(2)
+  system%al(3,3) = al(3)
 else
-  if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal mode: using al_vec[1,2,3]"
+  if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
   stencil%if_orthogonal = .false.
+  system%al(1:3,1) = al_vec1
+  system%al(1:3,2) = al_vec2
+  system%al(1:3,3) = al_vec3
   rLsize(1,1) = sqrt(sum(al_vec1**2))
   rLsize(2,1) = sqrt(sum(al_vec2**2))
   rLsize(3,1) = sqrt(sum(al_vec3**2))
@@ -425,10 +431,11 @@ system%nion = MI
 
 allocate(system%Rion(3,system%nion) &
         ,system%wtk(system%nk) &
-        ,system%esp(system%no,system%nk,system%nspin) &
         ,system%rocc(system%no,system%nk,system%nspin))
 system%wtk = wtk
 system%rion = rion
+
+allocate(energy%esp(system%no,system%nk,system%nspin))
 
 allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
 do jspin=1,system%nspin
@@ -528,19 +535,19 @@ end if
 if(iperiodic==3)then
   if(iflag_hartree/=2) stop "s_fourier_grid: iflag_hartree/=2"
   jj = system%ngrid/nproc_size_global
-  fg%NG_s = nproc_id_global*jj+1
-  fg%NG_e = (nproc_id_global+1)*jj
-  if(nproc_id_global==nproc_size_global-1) fg%NG_e = system%ngrid
+  fg%ig_s = nproc_id_global*jj+1
+  fg%ig_e = (nproc_id_global+1)*jj
+  if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
   fg%icomm_fourier = nproc_group_global
-  fg%nGzero = nGzero
-  allocate(fg%Gx(system%ngrid))
-  allocate(fg%Gy(system%ngrid))
-  allocate(fg%Gz(system%ngrid))
-  allocate(fg%rhoion_G(system%ngrid))
+  fg%ng = system%ngrid
+  fg%iGzero = nGzero
+  allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+  allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
   fg%Gx = Gx
   fg%Gy = Gy
   fg%Gz = Gz
-  fg%rhoion_G = rhoion_G
+  fg%rhoG_ion = rhoion_G
+  fg%dVG_ion = dVloc_G
 end if
 
 select case(iperiodic)
@@ -582,6 +589,13 @@ case(3)
                     info%ik_s:info%ik_e,  &
                     1))
   allocate(shpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,  &
+                     info%io_s:info%io_e,  &
+                     info%ik_s:info%ik_e,  &
+                     1))
+  allocate(sttpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,  &
@@ -1182,12 +1196,19 @@ DFT_Iteration : do iter=1,iDiter(img)
     sVxc(1)%f = Vxc
   end if
   sVh%f = Vh
-  call calc_eigen_energy(system,spsi,shpsi,info,mg,V_local,stencil,srg,ppg)
-  call calc_Total_Energy(Etot_test,Exc,system,info,ng,pp,srho,sVh,sVxc,fg)
-  if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",Etot_test*2d0*Ry,Etot*2d0*Ry
+  energy%E_xc = Exc
+  call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+  select case(iperiodic)
+  case(0)
+    call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+  case(3)
+    fg%rhoG_elec = rhoe_G
+    call calc_Total_Energy_periodic(energy,system,pp,fg)
+  end select
+  if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
   if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
 
-  esp = system%esp(:,:,1) !++++++++++
+  esp = energy%esp(:,:,1) !++++++++++
 
   select case(convergence)
     case('rho_dne')

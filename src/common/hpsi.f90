@@ -37,7 +37,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   type(s_wavefunction)       :: tpsi,htpsi
   type(s_wavefunction),optional :: ttpsi
   !
-  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3) !?????
   logical :: if_kAc
 
@@ -162,8 +162,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,Nspin
-        ttpsi%zwf(:,:,:,ispin,io,ik,im) = htpsi%zwf(:,:,:,ispin,io,ik,im) &
-          - V_local(ispin)%f(:,:,:) * tpsi%zwf(:,:,:,ispin,io,ik,im)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          ttpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+                                             - V_local(ispin)%f(ix,iy,iz) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        end do
+        end do
+        end do
       end do
       end do
       end do
