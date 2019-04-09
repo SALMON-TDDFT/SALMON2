@@ -107,5 +107,6 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
     mg%idz(j) = j
   end do
 
+  mg%nd=4
   
 end subroutine setmg
