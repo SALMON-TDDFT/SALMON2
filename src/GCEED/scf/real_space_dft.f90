@@ -1208,6 +1208,13 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
   if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
 
+  if(comm_is_root(nproc_id_global)) then
+    write(*,'(a,f10.5,a)') "total energy E_tot =",energy%E_tot," a.u."
+    write(*,'(a,f10.5,a,f10.5,a,f10.5)') "E_kin =",energy%E_kin, ",  E_h =",energy%E_h,",  E_xc =",energy%E_xc
+    write(*,'(a,f10.5,a,f10.5)') "E_{electron-ion}: local part =",energy%E_ion_loc, ",  nonlocal part =",energy%E_ion_nloc
+    write(*,'(a,f10.5)') "E_{ion-ion} =",energy%E_ion_ion
+  end if
+
   esp = energy%esp(:,:,1) !++++++++++
 
   select case(convergence)

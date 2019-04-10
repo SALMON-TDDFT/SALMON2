@@ -93,7 +93,7 @@ CONTAINS
     type(s_energy)             :: energy
     !
     integer :: ix,iy,iz,ia,ib,ig
-    real(8) :: r,rab(3),rr(3),E_tmp,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
+    real(8) :: rr,rab(3),r(3),E_tmp,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
     complex(8) :: rho_e,rho_i
 
     sysvol = system%det_al
@@ -106,14 +106,14 @@ CONTAINS
       do iz=-NEwald,NEwald
         do ib=1,system%nion
           if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
-          rr(1) = ix*system%al(1,1) + iy*system%al(1,2) + iz*system%al(1,3)
-          rr(2) = ix*system%al(2,1) + iy*system%al(2,2) + iz*system%al(2,3)
-          rr(3) = ix*system%al(3,1) + iy*system%al(3,2) + iz*system%al(3,3)
-          rab(1) = system%Rion(1,ia)-rr(1) - system%Rion(1,ib)
-          rab(2) = system%Rion(2,ia)-rr(2) - system%Rion(2,ib)
-          rab(3) = system%Rion(3,ia)-rr(3) - system%Rion(3,ib)
-          r = sum(rab(:)**2)
-          E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*r))/sqrt(r)
+          r(1) = ix*system%al(1,1) + iy*system%al(1,2) + iz*system%al(1,3)
+          r(2) = ix*system%al(2,1) + iy*system%al(2,2) + iz*system%al(2,3)
+          r(3) = ix*system%al(3,1) + iy*system%al(3,2) + iz*system%al(3,3)
+          rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
+          rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
+          rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
+          rr = sum(rab(:)**2)
+          E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
         end do
       end do
       end do
@@ -135,9 +135,9 @@ CONTAINS
       E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
       E_wrk(3) = E_wrk(3) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
       do ia=1,system%nion
-        rr = system%Rion(1:3,ia)
-        Gd = g(1)*rr(1) + g(2)*rr(2) + g(3)*rr(3)
-        E_wrk(4) = E_wrk(4) + conjg(rho_e)*fg%dVG_ion(ig,Kion(ia))*exp(-zI*Gd)          ! electron-ion (core)
+        r = system%Rion(1:3,ia)
+        Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
+        E_wrk(4) = E_wrk(4) + conjg(rho_e)*fg%dVG_ion(ig,Kion(ia))*exp(-zI*Gd)         ! electron-ion (core)
       end do
     enddo
     call comm_summation(E_wrk,E_sum,4,fg%icomm_fourier)
