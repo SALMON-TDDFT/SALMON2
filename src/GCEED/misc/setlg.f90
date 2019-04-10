@@ -86,5 +86,7 @@ subroutine setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,   
   do j=lg%is_overlap(3),lg%ie_overlap(3)
     lg%idz(j) = j
   end do
+
+  lg%nd=4
   
 end subroutine setlg

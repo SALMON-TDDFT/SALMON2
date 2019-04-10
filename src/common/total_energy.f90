@@ -170,7 +170,7 @@ CONTAINS
     type(s_rgrid)  ,intent(in) :: mg
     type(s_scalar) ,intent(in) :: V_local(system%Nspin)
     type(s_stencil),intent(in) :: stencil
-    type(s_sendrecv_grid),intent(in) :: srg
+    type(s_sendrecv_grid),intent(inout) :: srg
     type(s_pp_grid),intent(in) :: ppg
     !
     integer :: ik,io,jo,ispin,im,nk,no,is(3),ie(3),Nspin

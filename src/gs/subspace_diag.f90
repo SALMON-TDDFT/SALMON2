@@ -39,7 +39,7 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,ipara
   type(s_wf_info)       :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
-  type(s_sendrecv_grid),intent(in) :: srg_ob_1
+  type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
   real(8),intent(out) :: elp3(3000)
   integer,intent(in)  :: ilsda
