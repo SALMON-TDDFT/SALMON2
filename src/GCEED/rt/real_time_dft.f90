@@ -837,7 +837,7 @@ type(s_wf_info) :: info
 type(s_stencil) :: stencil
 type(s_wavefunction) :: spsi_in,spsi_out
 type(s_wavefunction) :: sshtpsi
-type(s_sendrecv_grid) :: srg
+type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_nlcc) :: ppn
 
 complex(8),parameter :: zi=(0.d0,1.d0)
@@ -851,6 +851,7 @@ real(8) :: absr2
 integer :: j,ind
 integer :: is,jspin
 integer :: neig(1:3, 1:2)
+integer :: neig_ng(1:3, 1:2)
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -931,6 +932,15 @@ type(s_scalar),allocatable :: srho_s(:,:)
   neig(3, 2) = kdw_array(1)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, &
     & nproc_group_korbital, nproc_id_korbital, neig)
+
+  neig_ng(1, 1) = iup_array(2)
+  neig_ng(1, 2) = idw_array(2)
+  neig_ng(2, 1) = jup_array(2)
+  neig_ng(2, 2) = jdw_array(2)
+  neig_ng(3, 1) = kup_array(2)
+  neig_ng(3, 2) = kdw_array(2)
+  call init_sendrecv_grid(srg_ng, ng, 1, &
+    & nproc_group_global, nproc_id_global, neig_ng)
 
   allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &
@@ -1596,7 +1606,7 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE
   elp3(414)=get_wtime()
   elp3(415)=get_wtime()
@@ -1616,7 +1626,7 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE1
   elp3(413)=get_wtime()
 
@@ -1624,7 +1634,7 @@ else
   elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE2
 
   elp5(1:400)=elp3(1:400)
@@ -1633,7 +1643,7 @@ else
   elp3(414)=get_wtime()
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE3
   elp3(415)=get_wtime()
 

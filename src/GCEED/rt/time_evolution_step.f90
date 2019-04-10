@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -39,7 +39,7 @@ type(s_system),intent(in) :: system
 integer,intent(in) :: nspin
 type(s_wf_info),intent(in) :: info
 type(s_stencil),intent(inout) :: stencil
-type(s_sendrecv_grid),intent(inout) :: srg
+type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
 type(s_pp_nlcc), intent(in) :: ppn
 type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
 type(s_wavefunction),intent(inout) :: sshtpsi
@@ -240,7 +240,7 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
    end if
 
   
-  call Hartree_ns(lg,mg,ng,system%brl)
+  call Hartree_ns(lg,mg,ng,system%brl,srg_ng)
 
   elp3(516)=get_wtime()
   elp3(536)=elp3(536)+elp3(516)-elp3(515)

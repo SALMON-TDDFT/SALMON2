@@ -79,7 +79,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
-type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob
+type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob, srg_ng
 integer :: nspin
 type(s_wavefunction) :: spsi,shpsi,sttpsi
 type(s_system) :: system
@@ -90,6 +90,7 @@ type(s_fourier_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_energy) :: energy
 integer :: neig(1:3, 1:2)
+integer :: neig_ng(1:3, 1:2)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -276,7 +277,7 @@ if(istopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%Brl)
+    call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,neig_ng)
 
     
     if(ilsda == 0) then
@@ -524,6 +525,15 @@ call init_sendrecv_grid(srg_ob, mg, nspin, &
   & nproc_group_korbital, nproc_id_korbital, neig)
 call init_sendrecv_grid(srg_ob_1, mg, 1, &
   & nproc_group_korbital, nproc_id_korbital, neig)
+
+neig_ng(1, 1) = iup_array(2)
+neig_ng(1, 2) = idw_array(2)
+neig_ng(2, 1) = jup_array(2)
+neig_ng(2, 2) = jdw_array(2)
+neig_ng(3, 1) = kup_array(2)
+neig_ng(3, 2) = kdw_array(2)
+call init_sendrecv_grid(srg_ng, ng, 1, &
+  & nproc_group_global, nproc_id_global, neig_ng)
 
 if(iperiodic==3) then
 !  allocate(stencil%kAc(k_sta:k_end,3))
@@ -878,7 +888,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     elp3(125)=elp3(125)+elp3(115)-elp3(114)
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%Brl)
+      call Hartree_ns(lg,mg,ng,system%Brl,srg_ng)
     end if
   
     elp3(116)=get_wtime()
@@ -1138,7 +1148,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
     
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%brl)
+      call Hartree_ns(lg,mg,ng,system%brl,srg_ng)
     end if
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
