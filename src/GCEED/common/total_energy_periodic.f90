@@ -32,7 +32,7 @@ complex(8) :: htpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta
                 1:iobnum,k_sta:k_end)
 
 complex(8),parameter :: zi=(0.d0,1.d0)
-integer :: ii,jj,iatom,iob,ia,ib,lm,ind
+integer :: ii,jj,iatom,iob,ia,ib,lm,ind,lm_end
 integer :: ia_sta,ia_end
 real(8) :: x,y,z
 integer :: ik,iik
@@ -69,6 +69,8 @@ real(8) :: sum_temp4(4)
 
 integer :: iy_sta,iy_end,iz_sta,iz_end
 real(8) :: rbox13,rbox14,rbox15,rbox16
+
+real(8) :: inv_NPUW
 
 if(iperiodic==1)then
   Etot=0.d0
@@ -156,7 +158,11 @@ end if
 
 !    Eion_tmp1=Eion_tmp1-Pi*sum(Zps(Kion(:)))**2/(2*aEwald*aLxyz) - sqrt(aEwald/Pi)*sum(Zps(Kion(:))**2)
 if(aewald_num>=1)then
+  sum_temp1 = 0.d0
 ! 2:Eion
+!$omp parallel do collapse(2) &
+!$omp          reduction(+:sum_temp1) &
+!$omp          private(ia,ii,iix,iiy,iiz,ib,rab,rab2)
   do ia=1,MI
   do ii=aewald_sta,aewald_end
     iix=mod((ii-1)/((NEwald*2+1)**2),NEwald*2+1)-NEwald
@@ -168,13 +174,13 @@ if(aewald_num>=1)then
       rab(2)=Rion(2,ia)-dble(iiy)*Hgs(2)*lg_num(2)-Rion(2,ib)
       rab(3)=Rion(3,ia)-dble(iiz)*Hgs(3)*lg_num(3)-Rion(3,ib)
       rab2=sum(rab(:)**2)
-      Ebox1(2)=Ebox1(2) + 0.5d0*Zps(Kion(ia))*Zps(Kion(ib))*erfc(sqrt(aEwald*rab2))/sqrt(rab2)
+      sum_temp1=sum_temp1 + 0.5d0*Zps(Kion(ia))*Zps(Kion(ib))*erfc(sqrt(aEwald*rab2))/sqrt(rab2)
     enddo
   enddo
   enddo
+!$omp end parallel do
 end if
 
-sum_temp1=Ebox1(2)
 call comm_summation(sum_temp1,sum_temp2,nproc_group_global)
 Ebox2(2)=sum_temp2
 
@@ -232,13 +238,17 @@ case(4)
   iy_sta=1
   iy_end=lg_num(2)/NPUY
 
+  inv_NPUW = 1.0d0/dble(NPUW)
+
+  rbox13=0.d0
+  rbox14=0.d0
+  rbox15=0.d0
+  rbox16=0.d0
+!$omp parallel do collapse(2) &
+!$omp          private(iz,iy,ix,n,G2,Gd) &
+!$omp          reduction(+:rbox13,rbox14,rbox15,rbox16)
   do iz=iz_sta,iz_end
-    do iy=iy_sta,iy_end
-      rbox13=0.d0
-      rbox14=0.d0
-      rbox15=0.d0
-      rbox16=0.d0
-!$OMP parallel do reduction (+ : rbox13,rbox14,rbox15,rbox16) private(n,G2,iix,Gd)
+  do iy=iy_sta,iy_end
       do ix=1,lg_num(1)
         n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
         if(n == nGzero ) cycle
@@ -248,15 +258,16 @@ case(4)
         rbox15=rbox15+sysvol*(4*Pi/G2)*(-rhoe_G(n)*conjg(rhoion_G(n)))
         do ia=1,MI
           Gd=Gx(n)*Rion(1,ia)+Gy(n)*Rion(2,ia)+Gz(n)*Rion(3,ia)
-          rbox16=rbox16+conjg(rhoe_G(n))*dVloc_G(n,Kion(ia))*exp(-zI*Gd)
+          rbox16=rbox16+dble(conjg(rhoe_G(n))*dVloc_G(n,Kion(ia))*exp(-zI*Gd))
         end do
       end do
-      Ebox1(3)=Ebox1(3)+rbox13/dble(NPUW)
-      Ebox1(4)=Ebox1(4)+rbox14/dble(NPUW)
-      Ebox1(5)=Ebox1(5)+rbox15/dble(NPUW)
-      Ebox1(6)=Ebox1(6)+rbox16/dble(NPUW)
-    end do
   end do
+  end do
+!$omp end parallel do
+  Ebox1(3)=rbox13*inv_NPUW
+  Ebox1(4)=rbox14*inv_NPUW
+  Ebox1(5)=rbox15*inv_NPUW
+  Ebox1(6)=rbox16*inv_NPUW
 end select
 
 sum_temp3(1:4)=Ebox1(3:6)
@@ -266,19 +277,18 @@ Ebox2(3:6)=sum_temp4(1:4)
 elp3(1405)=get_wtime()
 elp3(1454)=elp3(1454)+elp3(1405)-elp3(1404)
 
+!$omp parallel do private(iatom,jj) collapse(4)
 do iik=k_sta,k_end
 do iob=1,iobnum
-!$OMP parallel
-!$OMP do private(iatom,jj)
-  do iatom=1,MI
-  do jj=1,maxlm
+do iatom=1,MI
+do jj=1,maxlm
     uVpsibox3(jj,iatom,iob,iik)=0.d0
     uVpsibox4(jj,iatom,iob,iik)=0.d0
-  end do
-  end do
-!$OMP end parallel
 end do
 end do
+end do
+end do
+!$omp end parallel do
 
 ! 7:Enl_l
 do iatom=1,MI
@@ -293,22 +303,26 @@ do iatom=1,MI
   end do
 end do
 
-
+!$omp parallel do collapse(3) &
+!$omp          private(iik,iob,iatom,lm_end)
 do iik=k_sta,k_end
 do iob=1,iobnum
-  do iatom=1,MI
-    ik=Kion(iatom)
-    loop_lm3 : do lm=1,(Mlps(ik)+1)**2
-      if ( abs(uVu(lm,iatom))<1.d-5 ) cycle loop_lm3
+do iatom=1,MI
+
+    lm_end=(Mlps(Kion(iatom))+1)**2
+    do lm=1,lm_end
+      if ( abs(uVu(lm,iatom))<1.d-5 ) cycle
       sumbox=0.d0
-        do jj=1,Mps(iatom)
-          sumbox=sumbox+uV(jj,lm,iatom)*tzpsi_in(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),Jxyz(3,jj,iatom),iob,iik)*ekr(jj,iatom,iik)
-        end do
+      do jj=1,Mps(iatom)
+        sumbox=sumbox+uV(jj,lm,iatom)*tzpsi_in(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),Jxyz(3,jj,iatom),iob,iik)*ekr(jj,iatom,iik)
+      end do
       uVpsibox3(lm,iatom,iob,iik)=sumbox*Hvol
-    end do loop_lm3
-  end do
+    end do
+
 end do
 end do
+end do
+!$omp end parallel do
 
 call comm_summation(uVpsibox3,uVpsibox4,maxlm*MI*iobnum*k_num,nproc_group_korbital)
 
