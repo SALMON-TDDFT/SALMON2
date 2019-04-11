@@ -533,7 +533,6 @@ if(iperiodic==3) then
 end if
 
 if(iperiodic==3)then
-  if(iflag_hartree/=2) stop "s_fourier_grid: iflag_hartree/=2"
   jj = system%ngrid/nproc_size_global
   fg%ig_s = nproc_id_global*jj+1
   fg%ig_e = (nproc_id_global+1)*jj
