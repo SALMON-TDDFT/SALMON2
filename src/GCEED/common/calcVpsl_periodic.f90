@@ -40,7 +40,7 @@ subroutine calcVpsl_periodic(matrix_A,brl)
   complex(8),allocatable :: rhoion_g_tmp2(:)
   real(8),allocatable :: vpsl_ia(:,:)
   real(8),allocatable :: vpsl_tmp2(:)
-  integer :: i
+  integer :: i,ia
   real(8) :: hx,hy,hz
  
   NG_s=1
@@ -123,11 +123,16 @@ subroutine calcVpsl_periodic(matrix_A,brl)
 
   call comm_summation(rhoion_G_tmp,rhoion_G,NG_e-NG_s+1,nproc_group_global)
 
+  allocate(ppg%Vpsl_ia(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI))
+
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
   do ix=mg_sta(1),mg_end(1)
     i=(iz-1)*lg_num(1)*lg_num(2)+(iy-1)*lg_num(1)+ix
     Vpsl(ix,iy,iz)=vpsl_tmp2(i)
+    do ia=1,MI
+      ppg%Vpsl_ia(ix,iy,iz,ia) = Vpsl_ia(i,ia)
+    end do
   enddo
   enddo
   enddo

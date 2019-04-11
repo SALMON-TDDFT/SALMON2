@@ -21,6 +21,8 @@ complex(8),parameter :: zI=(0d0,1d0)
 
 CONTAINS
 
+!===================================================================================================================================
+
   SUBROUTINE calc_Total_Energy_isolated(energy,system,info,ng,pp,rho,Vh,Vxc)
     use structures
     use salmon_global, only: kion
@@ -80,6 +82,8 @@ CONTAINS
 
     return
   end SUBROUTINE calc_Total_Energy_isolated
+
+!===================================================================================================================================
 
   SUBROUTINE calc_Total_Energy_periodic(energy,system,pp,fg)
     use structures
@@ -156,6 +160,8 @@ CONTAINS
 
     return
   end SUBROUTINE calc_Total_Energy_periodic
+
+!===================================================================================================================================
 
 ! eigen energies (esp), kinetic energy (E_kin), & nonlocal part of electron-ion energy (E_ion_nloc)
   Subroutine calc_eigen_energy(energy,tpsi,htpsi,ttpsi,system,info,mg,V_local,stencil,srg,ppg)
