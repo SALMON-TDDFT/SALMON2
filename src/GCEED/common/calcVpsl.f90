@@ -28,6 +28,7 @@ real(8) :: r
 
 Vpsl=0.d0 
 
+allocate(ppg%Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI))
 do a=1,MI
   ak=Kion(a)
   do j=1,3
@@ -60,6 +61,7 @@ do a=1,MI
                 +ratio1*vpp(intr+1,Lref(ak),ak)      &
                 +ratio2*vpp(intr,Lref(ak),ak)
     end if
+    ppg%Vpsl_atom(ix,iy,iz,a) = ratio1*vpp(intr+1,Lref(ak),ak) + ratio2*vpp(intr,Lref(ak),ak)
   end do
   end do
   end do

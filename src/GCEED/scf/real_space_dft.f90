@@ -1206,8 +1206,8 @@ DFT_Iteration : do iter=1,iDiter(img)
   case(3)
     fg%rhoG_elec = rhoe_G
     call calc_Total_Energy_periodic(energy,system,pp,fg)
-    call calc_force_periodic(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
   end select
+  call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
   if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
   if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
 
