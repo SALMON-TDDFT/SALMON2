@@ -308,7 +308,6 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,iorb,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma
-  logical :: if_zproj
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox(:,:),uVpsibox2(:,:)
 
@@ -321,7 +320,6 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   norb = Nspin* info%numo * info%numk * info%numm
 
   Nlma = ppg%Nlma
-  if_zproj = allocated(ppg%zproj)
 
 !      ! gather (load) pseudo potential point
 !      do i=1,NPI
@@ -331,162 +329,79 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   if(info%if_divide_rspace) then
 
     allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
-    if(if_zproj) then
-
-      iorb = 0
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        iorb = iorb + 1
-        do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
-          uVpsi=0.d0
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            uVpsi = uVpsi + conjg(ppg%zproj(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          end do
-          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-          uVpsibox(ilma,iorb) = uVpsi
+    iorb = 0
+    do im=im_s,im_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      iorb = iorb + 1
+      do ilma=1,Nlma
+        ia = ppg%ia_tbl(ilma)
+        uVpsi = 0.d0
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        end do
+        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+        uVpsibox(ilma,iorb) = uVpsi
+      end do
+    end do
+    end do
+    end do
+    end do
+    call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
+    iorb = 0
+    do im=im_s,im_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      iorb = iorb + 1
+      do ilma=1,Nlma
+        ia = ppg%ia_tbl(ilma)
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          wrk = uVpsibox2(ilma,iorb) * ppg%ekr_uV(j,ilma,ik)
+          htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
         end do
       end do
-      end do
-      end do
-      end do
-      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
-      iorb = 0
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        iorb = iorb + 1
-        do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            wrk = uVpsibox2(ilma,iorb) * ppg%zproj(j,ilma,ik)
-            htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
-          end do
-        end do
-      end do
-      end do
-      end do
-      end do
-
-    else
-
-      iorb = 0
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        iorb = iorb + 1
-        do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
-          uVpsi=0.d0
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          end do
-          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-          uVpsibox(ilma,iorb) = uVpsi
-        end do
-      end do
-      end do
-      end do
-      end do
-      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
-      iorb = 0
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        iorb = iorb + 1
-        do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            wrk = uVpsibox2(ilma,iorb) * ppg%uV(j,ilma)
-            htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
-          end do
-        end do
-      end do
-      end do
-      end do
-      end do
-
-    end if
+    end do
+    end do
+    end do
+    end do
     deallocate(uVpsibox,uVpsibox2)
 
   else
 
-    if(if_zproj) then
-
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
-          uVpsi=0.d0
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            uVpsi = uVpsi + conjg(ppg%zproj(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          end do
-          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            wrk = uVpsi * ppg%zproj(j,ilma,ik)
-            htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
-          end do
+    do im=im_s,im_e
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,Nspin
+      do ilma=1,Nlma
+        ia = ppg%ia_tbl(ilma)
+        uVpsi = 0.d0
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        end do
+        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+        do j=1,ppg%mps(ia)
+          ix = ppg%jxyz(1,j,ia)
+          iy = ppg%jxyz(2,j,ia)
+          iz = ppg%jxyz(3,j,ia)
+          wrk = uVpsi * ppg%ekr_uV(j,ilma,ik)
+          htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
         end do
       end do
-      end do
-      end do
-      end do
-
-    else
-
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
-          uVpsi=0.d0
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          end do
-          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            wrk = uVpsi * ppg%uV(j,ilma)
-            htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
-          end do
-        end do
-      end do
-      end do
-      end do
-      end do
-
-    end if
+    end do
+    end do
+    end do
+    end do
 
   end if
 
@@ -506,7 +421,7 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   real(8) :: x,y,z,k(3)
   complex(8) :: ekr
   complex(8),parameter :: zi = (0d0,1d0)
-  if(.not.allocated(ppg%zproj)) allocate(ppg%zproj(ppg%nps,ppg%nlma,ik_s:ik_e))
+  if(.not.allocated(ppg%ekr_uV)) allocate(ppg%ekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ik=ik_s,ik_e
     k = kAc(ik,:)
     do ilma=1,ppg%nlma
@@ -516,7 +431,7 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
         y = ppg%rxyz(2,j,iatom)
         z = ppg%rxyz(3,j,iatom)
         ekr = exp(zi*(k(1)*x+k(2)*y+k(3)*z))
-        ppg%zproj(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
+        ppg%ekr_uV(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
       end do
     end do
   end do

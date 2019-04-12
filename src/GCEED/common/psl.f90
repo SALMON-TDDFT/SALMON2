@@ -35,6 +35,8 @@ case(0)
   call calcJxyz_all
   call calcuV
   call calcVpsl
+  allocate(ppg%ekr_uV(ppg%nps,ppg%nlma,1))
+  ppg%ekr_uV(:,:,1) = cmplx(ppg%uV)
 case(3)
   select case(iflag_hartree)
   case(2)

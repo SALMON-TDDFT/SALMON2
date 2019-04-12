@@ -44,7 +44,7 @@ contains
     type(s_force)              :: force
     !
     integer :: ix,iy,iz,ia,ib,ig,nion,im,Nspin,ik_s,ik_e,io_s,io_e,norb,iorb,nlma,ik,io,ispin,ilma,j
-    real(8) :: rr,rab(3),r(3),g(3),G2,Gd,sysvol
+    real(8) :: rr,rab(3),r(3),g(3),G2,Gd,sysvol,kAc(3)
     real(8),allocatable :: F_tmp(:,:),F_sum(:,:)
     complex(8) :: rho_i,w(3),uVpsi,duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:),uVpsibox2(:,:)
@@ -130,7 +130,7 @@ contains
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%zproj(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         uVpsibox(ilma,iorb) = uVpsi
@@ -146,6 +146,7 @@ contains
       !call update_overlap_complex8(srg, mg, tpsi%rwf)
     end if
 
+    kAc = 0d0
     F_tmp = 0d0
     iorb = 0
     do ik=ik_s,ik_e
@@ -163,13 +164,14 @@ contains
       do ix=mg%is(1),mg%ie(1)
         w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         do ia=1,nion
-          F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin) * dble(w(:))* ppg%Vpsl_ia(ix,iy,iz,ia) * system%Hvol
+          F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin) * dble(w(:))* ppg%Vpsl_atom(ix,iy,iz,ia) * system%Hvol
         end do
       end do
       end do
       end do
 
     ! nonlocal part
+      if(allocated(stencil%kAc)) kAc(1:3) = stencil%kAc(ik,1:3)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         duVpsi = 0d0
@@ -177,8 +179,8 @@ contains
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          w = gtpsi(:,ix,iy,iz) + zI* stencil%kAc(ik,:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          duVpsi = duVpsi + conjg(ppg%zproj(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
+          w = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          duVpsi = duVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
         end do
         F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin) * dble( conjg(duVpsi(:)) * uVpsibox2(ilma,iorb) ) * system%Hvol
       end do

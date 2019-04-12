@@ -1209,7 +1209,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call calc_force_periodic(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
   end select
   if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
-  if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
+  if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
 
   if(comm_is_root(nproc_id_global)) then
     write(*,'(a,f10.5,a)') "total energy E_tot =",energy%E_tot," a.u."
