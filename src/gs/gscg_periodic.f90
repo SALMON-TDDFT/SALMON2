@@ -445,7 +445,7 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   deallocate(stencil%kAc)
   deallocate(v(nspin_1)%f)
   deallocate(v)
-  if(allocated(ppg%zproj)) deallocate(ppg%zproj)
+  if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
 
   return
   

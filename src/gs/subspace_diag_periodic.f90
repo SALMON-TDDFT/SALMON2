@@ -326,7 +326,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
   deallocate(stencil%kAc)
   deallocate(v(nspin_1)%f)
   deallocate(v)
-  if(allocated(ppg%zproj)) deallocate(ppg%zproj)
+  if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
 
 
 end subroutine subspace_diag_periodic
