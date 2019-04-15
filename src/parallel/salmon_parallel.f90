@@ -86,6 +86,7 @@ module salmon_parallel
 
   ! util
   public :: get_thread_id
+  public :: get_nthreads
   public :: is_distributed_parallel
 
 contains
@@ -112,6 +113,19 @@ contains
     nid = omp_get_thread_num()
 #else
     nid = 0
+#endif
+  end function
+
+  function get_nthreads() result(nsize)
+#ifdef _OPENMP
+    use omp_lib
+#endif
+    implicit none
+    integer :: nsize
+#ifdef _OPENMP
+    nsize = omp_get_max_threads()
+#else
+    nsize = 1
 #endif
   end function
 
