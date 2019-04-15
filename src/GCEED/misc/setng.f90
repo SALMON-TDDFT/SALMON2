@@ -85,14 +85,8 @@ subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   
   ng%num(1:3)=ng_num(1:3)
   ng%is_overlap(1:3)=ng_sta(1:3)-nd
   ng%ie_overlap(1:3)=ng_end(1:3)+nd
-  if(iscfrt==1)then
-    ng%is_array(1:3)=ng_sta(1:3)-nd
-    ng%ie_array(1:3)=ng_end(1:3)+nd
-  else if(iscfrt==2)then
-    ng%is_array(1:3)=ng_sta(1:3)-nd
-    ng%ie_array(1)=ng_end(1)+nd+1
-    ng%ie_array(2:3)=ng_end(2:3)+nd
-  end if
+  ng%is_array(1:3)=ng_sta(1:3)-nd
+  ng%ie_array(1:3)=ng_end(1:3)+nd
 
   if(allocated(ng%idx)) deallocate(ng%idx)
   if(allocated(ng%idy)) deallocate(ng%idy)
