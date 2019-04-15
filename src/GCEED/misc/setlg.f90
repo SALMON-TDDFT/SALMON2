@@ -62,14 +62,8 @@ subroutine setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,   
   lg%num(1:3)=lg_num(1:3)
   lg%is_overlap(1:3)=lg_sta(1:3)-nd
   lg%ie_overlap(1:3)=lg_end(1:3)+nd
-  if(iscfrt==1)then
-    lg%is_array(1:3)=lg_sta(1:3)-nd
-    lg%ie_array(1:3)=lg_end(1:3)+nd
-  else if(iscfrt==2)then
-    lg%is_array(1:3)=lg_sta(1:3)-nd
-    lg%ie_array(1)=lg_end(1)+nd+1
-    lg%ie_array(2:3)=lg_end(2:3)+nd
-  end if
+  lg%is_array(1:3)=lg_sta(1:3)-nd
+  lg%ie_array(1:3)=lg_end(1:3)+nd
 
   if(allocated(lg%idx)) deallocate(lg%idx)
   if(allocated(lg%idy)) deallocate(lg%idy)
