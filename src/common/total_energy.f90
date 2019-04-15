@@ -168,6 +168,7 @@ CONTAINS
     use structures
     use salmon_communication, only: comm_summation
     use hpsi_sub
+    use pseudo_pt_sub, only: pseudo_C
     implicit none
     type(s_energy)             :: energy
     type(s_wavefunction)       :: tpsi,htpsi,ttpsi
