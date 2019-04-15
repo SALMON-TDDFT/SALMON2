@@ -216,7 +216,10 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
     deallocate(srho_s)
   end if
 
-  elp3(515)=get_wtime()
+elp3(515)=get_wtime()
+elp3(534)=elp3(534)+elp3(515)-elp3(513)
+
+
    if(itt/=1)then
      if(mod(itt,2)==1)then
 !$OMP parallel do private(iz,iy,ix)
