@@ -19,10 +19,10 @@ SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh,srg_ng)
 use structures, only: s_rgrid,s_sendrecv_grid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
+use sendrecv_grid, only: update_overlap_real8
 use hartree_boundary_sub
 use scf_data
 use new_world_sub
-use sendrecvh_sub
 use allocate_mat_sub
 use deallocate_mat_sub
 use misc_routines, only: get_wtime
@@ -81,7 +81,7 @@ do ix=ng_sta(1),ng_end(1)
 end do
 end do
 end do
-call sendrecvh(pk)
+call update_overlap_real8(srg_ng, ng, pk)
 call calc_laplacianh(pk,rlap_wk)
 
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -124,7 +124,7 @@ end if
 
 Iteration : do iter=1,maxiter
 
-  call sendrecvh(pk)
+  call update_overlap_real8(srg_ng, ng, pk)
   call calc_laplacianh(pk,rlap_wk)
 
   totbox=0d0

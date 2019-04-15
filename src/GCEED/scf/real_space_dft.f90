@@ -190,6 +190,15 @@ if(istopt==1)then
     call allocate_sendrecv
     call init_persistent_requests
 
+    neig_ng(1, 1) = iup_array(2)
+    neig_ng(1, 2) = idw_array(2)
+    neig_ng(2, 1) = jup_array(2)
+    neig_ng(2, 2) = jdw_array(2)
+    neig_ng(3, 1) = kup_array(2)
+    neig_ng(3, 2) = kdw_array(2)
+    call init_sendrecv_grid(srg_ng, ng, 1, &
+      & nproc_group_global, nproc_id_global, neig_ng)
+    
     if(iperiodic==3)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
@@ -321,6 +330,15 @@ if(istopt==1)then
     call allocate_sendrecv
     call init_persistent_requests
 
+    neig_ng(1, 1) = iup_array(2)
+    neig_ng(1, 2) = idw_array(2)
+    neig_ng(2, 1) = jup_array(2)
+    neig_ng(2, 2) = jdw_array(2)
+    neig_ng(3, 1) = kup_array(2)
+    neig_ng(3, 2) = kdw_array(2)
+    call init_sendrecv_grid(srg_ng, ng, 1, &
+      & nproc_group_global, nproc_id_global, neig_ng)
+    
     if(iperiodic==3)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
@@ -525,15 +543,6 @@ call init_sendrecv_grid(srg_ob, mg, nspin, &
   & nproc_group_korbital, nproc_id_korbital, neig)
 call init_sendrecv_grid(srg_ob_1, mg, 1, &
   & nproc_group_korbital, nproc_id_korbital, neig)
-
-neig_ng(1, 1) = iup_array(2)
-neig_ng(1, 2) = idw_array(2)
-neig_ng(2, 1) = jup_array(2)
-neig_ng(2, 2) = jdw_array(2)
-neig_ng(3, 1) = kup_array(2)
-neig_ng(3, 2) = kdw_array(2)
-call init_sendrecv_grid(srg_ng, ng, 1, &
-  & nproc_group_global, nproc_id_global, neig_ng)
 
 if(iperiodic==3) then
 !  allocate(stencil%kAc(k_sta:k_end,3))
