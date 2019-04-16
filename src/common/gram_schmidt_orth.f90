@@ -19,7 +19,7 @@ module gram_schmidt_orth
 
 contains
 
-  subroutine Gram_Schmidt()
+  subroutine gram_schmidt()
     implicit none
     ! We need a few types of implementetaion for the following cases:
     ! 1. GS for isolated system
@@ -31,4 +31,23 @@ contains
 
     return
   end subroutine
+
+  ! Gram_Schmitd for orbital(b) omp
+  subroutine gram_schmidt_omp_b()
+    implicit none
+    return
+  end subroutine gram_schmidt_omp_b
+
+  ! Gram_Schmitd for k-space omp
+  subroutine gram_schmidt_omp_k()
+    implicit none
+    return
+  end subroutine gram_schmidt_omp_k
+
+  ! Gram_Schmitd for realspace(r) omp
+  subroutine gram_schmidt_omp_r()
+    implicit none
+    return
+  end subroutine gram_schmidt_omp_r
+
 end module gram_schmidt_orth
