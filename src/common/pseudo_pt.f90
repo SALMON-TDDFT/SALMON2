@@ -28,10 +28,11 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
   type(s_wavefunction),intent(in) :: tpsi
   type(s_wavefunction) :: htpsi
   !
-  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,iorb,norb
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma
   real(8) :: uVpsi,wrk
-  real(8),allocatable :: uVpsibox(:,:),uVpsibox2(:,:)
+  real(8),allocatable :: uVpsibox (:,:,:,:,:)
+  real(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
   im_s = info%im_s
   im_e = info%im_e
@@ -45,14 +46,16 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
 
   if(info%if_divide_rspace) then
 
-    allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
+    allocate(uVpsibox (Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+    allocate(uVpsibox2(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
 
-    iorb = 0
+!$omp parallel do collapse(4) &
+!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      iorb = iorb + 1
+
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi = 0.d0
@@ -63,33 +66,41 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
           uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%rwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-        uVpsibox(ilma,iorb) = uVpsi
+        uVpsibox(ilma,ispin,io,ik,im) = uVpsi
       end do
+
     end do
     end do
     end do
     end do
+!$omp end parallel do
+
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
-    iorb = 0
+
+!$omp parallel do collapse(4) &
+!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      iorb = iorb + 1
+
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
+        uVpsi = uVpsibox2(ilma,ispin,io,ik,im)
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          wrk = uVpsibox2(ilma,iorb) * ppg%uV(j,ilma)
+          wrk = uVpsi * ppg%uV(j,ilma)
           htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) + wrk
         end do
       end do
+
     end do
     end do
     end do
     end do
+!$omp end parallel do
 
     deallocate(uVpsibox,uVpsibox2)
 
@@ -144,10 +155,11 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   type(s_wavefunction),intent(in) :: tpsi
   type(s_wavefunction) :: htpsi
   !
-  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,iorb,norb
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma
   complex(8) :: uVpsi,wrk
-  complex(8),allocatable :: uVpsibox(:,:),uVpsibox2(:,:)
+  complex(8),allocatable :: uVpsibox (:,:,:,:,:)
+  complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
   im_s = info%im_s
   im_e = info%im_e
@@ -159,20 +171,18 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
 
   Nlma = ppg%Nlma
 
-!      ! gather (load) pseudo potential point
-!      do i=1,NPI
-!        spseudo(i) = tpsi(idx_proj(i))
-!      end do
-
   if(info%if_divide_rspace) then
 
-    allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
-    iorb = 0
+    allocate(uVpsibox (Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+    allocate(uVpsibox2(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+
+!$omp parallel do collapse(4) &
+!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      iorb = iorb + 1
+
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi = 0.d0
@@ -183,33 +193,42 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
           uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-        uVpsibox(ilma,iorb) = uVpsi
+        uVpsibox(ilma,ispin,io,ik,im) = uVpsi
       end do
+
     end do
     end do
     end do
     end do
+!$omp end parallel do
+
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
-    iorb = 0
+
+!$omp parallel do collapse(4) &
+!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      iorb = iorb + 1
+
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
+        uVpsi = uVpsibox2(ilma,ispin,io,ik,im)
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          wrk = uVpsibox2(ilma,iorb) * ppg%ekr_uV(j,ilma,ik)
+          wrk = uVpsi * ppg%ekr_uV(j,ilma,ik)
           htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
         end do
       end do
+
     end do
     end do
     end do
     end do
+!$omp end parallel do
+
     deallocate(uVpsibox,uVpsibox2)
 
   else
