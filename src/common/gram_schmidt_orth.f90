@@ -15,12 +15,20 @@
 !
 !=======================================================================
 module gram_schmidt_orth
+  use structures, only: s_rgrid, s_wf_info, s_wavefunction
   implicit none
 
 contains
 
-  subroutine gram_schmidt()
+  subroutine gram_schmidt(rg, wfi, wf)
+    use timer
     implicit none
+    type(s_rgrid),        intent(in)    :: rg
+    type(s_wf_info),      intent(in)    :: wfi
+    type(s_wavefunction), intent(inout) :: wf
+
+    ! 
+
     ! We need a few types of implementetaion for the following cases:
     ! 1. GS for isolated system
     ! 2. GS for large-scale isolated system (domain parallel)
@@ -28,6 +36,11 @@ contains
     !  3-1. Small number of k-points (based on ARTED Gram-Schmidt type-1)
     !  3-2. Large number of k-points (based on ARTED Gram-Schmidt type-2)
     ! 4. GS for large-scale periodic system (domain parallel)
+
+    call timer_begin(LOG_GRAM_SCHMIDT)
+
+
+    call timer_end(LOG_GRAM_SCHMIDT)
 
     return
   end subroutine
