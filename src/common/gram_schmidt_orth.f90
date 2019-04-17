@@ -20,29 +20,56 @@ module gram_schmidt_orth
 
 contains
 
-  subroutine gram_schmidt(rg, wfi, wf)
+  subroutine gram_schmidt(sys, rg, wfi, wf)
     use timer
     implicit none
+    type(s_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
     type(s_wf_info),      intent(in)    :: wfi
     type(s_wavefunction), intent(inout) :: wf
 
-    ! 
-
-    ! We need a few types of implementetaion for the following cases:
-    ! 1. GS for isolated system
-    ! 2. GS for large-scale isolated system (domain parallel)
-    ! 3. GS for regular periodic system 
-    !  3-1. Small number of k-points (based on ARTED Gram-Schmidt type-1)
-    !  3-2. Large number of k-points (based on ARTED Gram-Schmidt type-2)
-    ! 4. GS for large-scale periodic system (domain parallel)
-
     call timer_begin(LOG_GRAM_SCHMIDT)
 
+    !if (if_divide_rspace) then:
+    if (allocated(wf%rwf)) then
+      call gram_schmidt_col_real8()
+    elseif (allocated(wf%zwf)) then
+      call gram_schmidt_col_complex8()
+    else
+      stop "Wavefunctions are not allocated!"
+    end if
 
     call timer_end(LOG_GRAM_SCHMIDT)
 
     return
+    continue
+
+
+    subroutine gram_schmidt_col_real8
+      implicit none
+       ! Only for the colinear L(S)DA:
+      type(s_wavefunction) :: tmp
+      integer :: is(1:3), ie(1:3)
+
+      is(1:3) = rg%is(1:3)
+      ie(1:3) = rg%ie(1:3)
+
+      allocate(tmp%rwf(is(1):rg%ie(1), is(2):rg%ie(2), is(3):rg%ie(3), 1, 1, 1, 1))
+      
+      do im = sys%im_s, sys%im_e
+        do is = 1, sys%nspin
+          do ik = sys%ik_s, sys%ik_e
+            do io = 1, sys%no
+              if (wfi%io_s <= io .and. io <= wfi%io_e) then
+              ! orbital #io is stored in the present node:
+              call copy_data(wf%rwf(is(1):rg%ie(1), is(2):rg%ie(2), is(3):rg%ie(3), is, io, ik, im), tmp%rwf)
+              end if
+              ! store root_table
+              call comm_bcast()
+    
+
+    
+
   end subroutine
 
   ! Gram_Schmitd for orbital(b) omp
