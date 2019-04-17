@@ -48,24 +48,30 @@ contains
     subroutine gram_schmidt_col_real8
       implicit none
        ! Only for the colinear L(S)DA:
-      type(s_wavefunction) :: tmp
-      integer :: is(1:3), ie(1:3)
-
-      is(1:3) = rg%is(1:3)
-      ie(1:3) = rg%ie(1:3)
-
-      allocate(tmp%rwf(is(1):rg%ie(1), is(2):rg%ie(2), is(3):rg%ie(3), 1, 1, 1, 1))
+      real(8) :: tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
       
       do im = sys%im_s, sys%im_e
         do is = 1, sys%nspin
           do ik = sys%ik_s, sys%ik_e
             do io = 1, sys%no
               if (wfi%io_s <= io .and. io <= wfi%io_e) then
-              ! orbital #io is stored in the present node:
-              call copy_data(wf%rwf(is(1):rg%ie(1), is(2):rg%ie(2), is(3):rg%ie(3), is, io, ik, im), tmp%rwf)
+                ! orbital #io is stored in the present node:
+                call copy_data( &
+                  wf%rwf(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3), is, io, ik, im), tmp &
+                )
               end if
               ! store root_table
-              call comm_bcast()
+              call comm_bcast(tmp, iroot)
+
+              do jo = 1, io - 1
+                if (wfi%io_s <= jo .and. jo <= wfi%io_e) then
+                  
+                end if
+              end do
+            end do
+          end do
+        end do
+
     
 
     
