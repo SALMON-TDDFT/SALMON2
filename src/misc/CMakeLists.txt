@@ -3,6 +3,7 @@ set(SOURCES
     misc_routines.f90
     backup_routines.f90
     unusedvar.f90
+    write_performance_results.f90
    )
 
 add_library(${SALMON_MISC_LIB} STATIC ${SOURCES})

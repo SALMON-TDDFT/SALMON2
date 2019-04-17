@@ -22,7 +22,7 @@ use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use density_matrix, only: calc_density
 use writefield
-use misc_routines, only: get_wtime
+use timer
 use inputoutput
 use taylor_sub
 use scf_data
@@ -63,9 +63,8 @@ integer :: is
 type(s_scalar),allocatable :: srho(:,:)
 type(s_scalar),allocatable :: srho_s(:,:)
 
-elp3(511)=get_wtime()
 
-
+call timer_begin(LOG_CALC_VBOX)
 idensity=0
 idiffDensity=1
 ielf=2 
@@ -80,10 +79,10 @@ select case(ikind_eext)
 end select
 
 if(ikind_eext==1) call calcVbox
+call timer_end(LOG_CALC_VBOX)
 
-elp3(512)=get_wtime()
-elp3(532)=elp3(532)+elp3(512)-elp3(511)
 
+call timer_begin(LOG_CALC_TIME_PROPAGATION)
 !$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
@@ -162,10 +161,10 @@ if(iperiodic==0)then
     call subdip(rNe,2)
   end if
 end if
+call timer_end(LOG_CALC_TIME_PROPAGATION)
 
-elp3(513)=get_wtime()
-elp3(533)=elp3(533)+elp3(513)-elp3(512)
 
+call timer_begin(LOG_CALC_RHO)
   if(ilsda==0)then  
     allocate(srho(1,1))
     allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
@@ -215,11 +214,10 @@ elp3(533)=elp3(533)+elp3(513)-elp3(512)
     deallocate(srho_s(2,1)%f)
     deallocate(srho_s)
   end if
-
-elp3(515)=get_wtime()
-elp3(534)=elp3(534)+elp3(515)-elp3(513)
+call timer_end(LOG_CALC_RHO)
 
 
+call timer_begin(LOG_CALC_HARTREE)
    if(itt/=1)then
      if(mod(itt,2)==1)then
 !$OMP parallel do private(iz,iy,ix)
@@ -244,27 +242,25 @@ elp3(534)=elp3(534)+elp3(515)-elp3(513)
 
   
   call Hartree_ns(lg,mg,ng,system%brl,srg_ng)
+call timer_end(LOG_CALC_HARTREE)
 
-  elp3(516)=get_wtime()
-  elp3(536)=elp3(536)+elp3(516)-elp3(515)
 
+call timer_begin(LOG_CALC_EXC_COR)
   if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
     call exc_cor_ns(ppn)
   end if
+call timer_end(LOG_CALC_EXC_COR)
 
-  elp3(517)=get_wtime()
-  elp3(537)=elp3(537)+elp3(517)-elp3(516)
 
+call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
   call allgatherv_vlocal
+call timer_end(LOG_CALC_VLOCAL)
 
-  elp3(518)=get_wtime()
-  elp3(538)=elp3(538)+elp3(518)-elp3(517)
 
 ! result
 
   if(iperiodic==0)then
     if(ikind_eext/=0.or.(ikind_eext==0.and.itt==itotNtime))then
-      elp3(526)=get_wtime()
   
       ihpsieff=0
       if(mod(itt,2)==1)then
@@ -272,16 +268,15 @@ elp3(534)=elp3(534)+elp3(515)-elp3(513)
       else
         call Total_Energy_groupob(zpsi_in,shtpsi,1)              ! Total energy
       end if
-      elp3(527)=get_wtime()
-      elp3(540)=elp3(540)+elp3(527)-elp3(526)
-      
+
+      call timer_begin(LOG_CALC_DP)
       call subdip(rNe,1)
-      elp3(528)=get_wtime()
-      elp3(539)=elp3(539)+elp3(528)-elp3(527)
+      call timer_end(LOG_CALC_DP)
   
     end if
   end if
 
+call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
     if(mod(itt,2)==1)then
       call projection(zpsi_out)
@@ -289,7 +284,10 @@ elp3(534)=elp3(534)+elp3(515)-elp3(513)
       call projection(zpsi_in)
     end if
   end if
+call timer_end(LOG_CALC_PROJECTION)
 
+
+call timer_begin(LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
   if(iflag_dip2==1)then
     do jj=1,num_dip2
       do i1=1,3
@@ -385,30 +383,22 @@ elp3(534)=elp3(534)+elp3(515)-elp3(513)
       end do
     end if
   end if
+call timer_end(LOG_CALC_QUADRUPOLE)
 
 
+call timer_begin(LOG_WRITE_ENERGIES)
   if(iperiodic==3)then
     call subdip(rNe,1)
     if(mod(itt,2)==1)then
-      elp3(526)=get_wtime()
       call calc_current(zpsi_out)
-      elp3(527)=get_wtime()
       if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
         call Total_Energy_periodic(zpsi_out,shtpsi)              ! Total energy
       end if
-      elp3(528)=get_wtime()
-      elp3(539)=elp3(539)+elp3(527)-elp3(526)
-      elp3(540)=elp3(540)+elp3(528)-elp3(527)
     else
-      elp3(526)=get_wtime()
       call calc_current(zpsi_in)
-      elp3(527)=get_wtime()
       if(itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
         call Total_Energy_periodic(zpsi_in,shtpsi)              ! Total energy
       end if
-      elp3(528)=get_wtime()
-      elp3(539)=elp3(539)+elp3(527)-elp3(526)
-      elp3(540)=elp3(540)+elp3(528)-elp3(527)
     end if
     rbox1=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction( + : rbox1 )
@@ -436,9 +426,10 @@ elp3(534)=elp3(534)+elp3(515)-elp3(513)
         dble(itt)*dt*2.41888d-2, (E_ind(i1,itt),i1=1,3)
     end if
   end if
+call timer_end(LOG_WRITE_ENERGIES)
 
-  elp3(520)=get_wtime()
 
+call timer_begin(LOG_WRITE_INFOS)
   if(icalcforce==1)then
     if(mod(itt,2)==1)then
       call calc_force_c(zpsi_out)
@@ -572,12 +563,7 @@ elp3(534)=elp3(534)+elp3(515)-elp3(513)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
-
-  elp3(521)=get_wtime()
-  elp3(541)=elp3(541)+elp3(521)-elp3(520)
-  elp3(542)=elp3(542)+elp3(521)-elp3(511)
-
-
+call timer_end(LOG_WRITE_INFOS)
 
 return
 

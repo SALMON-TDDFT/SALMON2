@@ -16,7 +16,7 @@
 subroutine calc_current(tpsi)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation
-use misc_routines, only: get_wtime
+use timer
 use calc_allob_sub
 use scf_data
 use sendrecv_groupob_tmp_sub
@@ -34,18 +34,20 @@ real(8) :: jxt,jyt,jzt
 real(8) :: curr1(3),curr2(3)
 integer :: p_allob
 
+call timer_begin(LOG_CALC_CURRENT)
+
 iwk_size=2
 call make_iwksta_iwkend
 
 curr1(1:3)=0.d0
 
-elp3(1301)=get_wtime()
 
+call timer_begin(LOG_CUR_SENDRECV)
 call sendrecv_groupob_tmp(tpsi)
+call timer_end(LOG_CUR_SENDRECV)
 
-elp3(1302)=get_wtime()
-elp3(1351)=elp3(1351)+elp3(1302)-elp3(1301)
 
+call timer_begin(LOG_CUR_LOCAL)
 do iik=k_sta,k_end
 do iob=1,iobnum
   call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
@@ -92,10 +94,10 @@ do iob=1,iobnum
 end do
 end do
 curr1(1:3)=curr1(1:3)*Hvol/(dble(lg_num(1)*lg_num(2)*lg_num(3))*Hvol)
+call timer_end(LOG_CUR_LOCAL)
 
-elp3(1303)=get_wtime()
-elp3(1352)=elp3(1352)+elp3(1303)-elp3(1302)
 
+call timer_begin(LOG_CUR_NONLOCAL1)
 jxt=0.d0;jyt=0.d0;jzt=0.d0
 do iik=k_sta,k_end
 !$OMP parallel do private(iatom,jj,ik,r)
@@ -142,13 +144,17 @@ do iik=k_sta,k_end
     end do
   end do
 end do
-elp3(1304)=get_wtime()
-elp3(1353)=elp3(1353)+elp3(1304)-elp3(1303)
+call timer_end(LOG_CUR_NONLOCAL1)
 
+
+call timer_begin(LOG_ALLREDUCE_CURRENT)
+call timer_begin(LOG_CUR_NONLOCAL1_ALLREDUCE)
 call comm_summation(uVpsibox1_j,uVpsibox2_j,4*maxlm*MI*iobnum*k_num,nproc_group_korbital)
-elp3(1305)=get_wtime()
-elp3(1354)=elp3(1354)+elp3(1305)-elp3(1304)
+call timer_end(LOG_CUR_NONLOCAL1_ALLREDUCE)
+call timer_end(LOG_ALLREDUCE_CURRENT)
 
+
+call timer_begin(LOG_CUR_NONLOCAL2)
 do iik=k_sta,k_end
   do iob=1,iobnum
     call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
@@ -172,14 +178,13 @@ end do
 curr1(1)=curr1(1)+jxt
 curr1(2)=curr1(2)+jyt
 curr1(3)=curr1(3)+jzt
+call timer_end(LOG_CUR_NONLOCAL2)
 
-elp3(1306)=get_wtime()
-elp3(1355)=elp3(1355)+elp3(1306)-elp3(1305)
 
+call timer_begin(LOG_CUR_NONLOCAL2_ALLREDUCE)
 call comm_summation(curr1,curr2,3,nproc_group_global)
+call timer_end(LOG_CUR_NONLOCAL2_ALLREDUCE)
 
-elp3(1307)=get_wtime()
-elp3(1356)=elp3(1356)+elp3(1307)-elp3(1306)
 
 curr(1:3,itt)=curr2(1:3)
 
@@ -194,5 +199,7 @@ A_tot(:,itt+1)=A_ext(:,itt+1)+A_ind(:,itt+1)
 E_ext(:,itt)=-(A_ext(:,itt+1)-A_ext(:,itt-1))/(2.d0*dt)
 E_ind(:,itt)=-(A_ind(:,itt+1)-A_ind(:,itt-1))/(2.d0*dt)
 E_tot(:,itt)=-(A_tot(:,itt+1)-A_tot(:,itt-1))/(2.d0*dt)
+
+call timer_end(LOG_CALC_CURRENT)
 
 end subroutine calc_current

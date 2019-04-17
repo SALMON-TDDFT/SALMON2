@@ -54,6 +54,71 @@ module timer
   integer,public,parameter :: LOG_ALLREDUCE    = 40
   integer,public,parameter :: LOG_SENDRECV_GRID= 41
 
+
+  ! for unified version
+  ! ===============================================================
+  integer,public,parameter :: LOG_TOTAL                 = 100
+
+  integer,public,parameter :: LOG_READ_LDA_DATA         = 110
+  integer,public,parameter :: LOG_READ_RT_DATA          = 111
+  integer,public,parameter :: LOG_WRITE_LDA_DATA        = 112
+  integer,public,parameter :: LOG_WRITE_RT_DATA         = 113
+  integer,public,parameter :: LOG_WRITE_ENERGIES        = 114
+  integer,public,parameter :: LOG_WRITE_INFOS           = 115
+  integer,public,parameter :: LOG_WRITE_RESULTS         = 116
+
+  integer,public,parameter :: LOG_INIT_GS               = 120
+  integer,public,parameter :: LOG_INIT_RT               = 121
+  integer,public,parameter :: LOG_INIT_TIME_PROPAGATION = 122
+
+  integer,public,parameter :: LOG_GS_ITERATION          = 130
+  integer,public,parameter :: LOG_RT_ITERATION          = 131
+
+  integer,public,parameter :: LOG_CALC_VBOX             = 140
+  integer,public,parameter :: LOG_CALC_TIME_PROPAGATION = 141
+  integer,public,parameter :: LOG_CALC_RHO              = 142
+  integer,public,parameter :: LOG_CALC_HARTREE          = 143
+  integer,public,parameter :: LOG_CALC_EXC_COR          = 144
+  integer,public,parameter :: LOG_CALC_DP               = 145
+  integer,public,parameter :: LOG_CALC_CURRENT          = 146
+  integer,public,parameter :: LOG_CALC_TOTAL_ENERGY     = 147
+  integer,public,parameter :: LOG_CALC_VLOCAL           = 148 ! FIXME: wrong name
+  integer,public,parameter :: LOG_CALC_PROJECTION       = 149
+  integer,public,parameter :: LOG_CALC_QUADRUPOLE       = 150 ! FIXME: wrong name
+
+!  integer,public,parameter :: LOG_SENDRECV_TOTAL            = 200
+  integer,public,parameter :: LOG_SENDRECV_TIME_PROPAGATION = 201
+
+!  integer,public,parameter :: LOG_ALLREDUCE_TOTAL       = 300
+  integer,public,parameter :: LOG_ALLREDUCE_RHO         = 301
+  integer,public,parameter :: LOG_ALLREDUCE_HARTREE     = 302
+  integer,public,parameter :: LOG_ALLREDUCE_DIPOLE      = 303
+  integer,public,parameter :: LOG_ALLREDUCE_TOTAL_ENERGY= 304
+  integer,public,parameter :: LOG_ALLREDUCE_CURRENT     = 305
+
+  integer,public,parameter :: LOG_ALLGATHERV_TOTAL      = 400
+
+  ! for specific routines
+  ! total_energy_periodic (GCEED part)
+  integer,public,parameter :: LOG_TEP_TOTAL             = 1000
+  integer,public,parameter :: LOG_TEP_SENDRECV          = 1001
+  integer,public,parameter :: LOG_TEP_ORBITAL_ENERGY    = 1002
+  integer,public,parameter :: LOG_TEP_ION_ION           = 1003
+  integer,public,parameter :: LOG_TEP_ION_ELECTRON      = 1004
+  integer,public,parameter :: LOG_TEP_NONLOCAL_1        = 1005
+  integer,public,parameter :: LOG_TEP_NONLOCAL_2        = 1006
+
+  ! current (GCEED part)
+  integer,public,parameter :: LOG_CUR_TOTAL               = 1010
+  integer,public,parameter :: LOG_CUR_SENDRECV            = 1011
+  integer,public,parameter :: LOG_CUR_LOCAL               = 1012
+  integer,public,parameter :: LOG_CUR_NONLOCAL1           = 1013
+  integer,public,parameter :: LOG_CUR_NONLOCAL1_ALLREDUCE = 1014
+  integer,public,parameter :: LOG_CUR_NONLOCAL2           = 1015
+  integer,public,parameter :: LOG_CUR_NONLOCAL2_ALLREDUCE = 1016
+  ! ===============================================================
+
+
   public :: timer_initialize
   public :: timer_set, timer_reset
   public :: timer_get, timer_thread_get
@@ -66,12 +131,14 @@ module timer
   public :: timer_write, timer_thread_write
 
 
-  integer,private,parameter   :: LOG_SIZE = 50
+  integer,private,parameter   :: LOG_SIZE = 2000
   real(8),private,allocatable :: log_time(:)
   real(8),private,allocatable :: log_temp(:)
 
   real(8),private,allocatable :: log_time_t(:,:)
   real(8),private,allocatable :: log_temp_t(:,:)
+
+  character(*),private,parameter :: SHOW_FORMAT = '(a,f10.2,a,f10.2,a)'
 
 private
 contains
@@ -168,7 +235,7 @@ contains
     real(8) :: time,hour
     time = log_time(id)
     hour = time / 3600
-    write(*,*) str,time,'sec =',hour,'hour'
+    write(*,SHOW_FORMAT) str,time,'sec =',hour,'hour'
   end subroutine
 
   subroutine timer_show_current_hour(str, id)
@@ -178,7 +245,7 @@ contains
     real(8) :: time,hour
     time = get_wtime() - log_temp(id) + log_time(id)
     hour = time / 3600
-    write(*,*) str,time,'sec =',hour,'hour'
+    write(*,SHOW_FORMAT) str,time,'sec =',hour,'hour'
   end subroutine
 
   subroutine timer_show_min(str, id)
@@ -188,7 +255,7 @@ contains
     real(8) :: time,mini
     time = log_time(id)
     mini = time / 60
-    write(*,*) str,time,'sec =',mini,'min'
+    write(*,SHOW_FORMAT) str,time,'sec =',mini,'min'
   end subroutine
 
   subroutine timer_show_current_min(str, id)
@@ -198,7 +265,7 @@ contains
     real(8) :: time,mini
     time = get_wtime() - log_temp(id) + log_time(id)
     mini = time / 60
-    write(*,*) str,time,'sec =',mini,'min'
+    write(*,SHOW_FORMAT) str,time,'sec =',mini,'min'
   end subroutine
 
   subroutine timer_write(fd,str,id)
@@ -207,7 +274,7 @@ contains
     integer,intent(in)      :: fd,id
     real(8) :: time
     time = log_time(id)
-    write(fd,*) str,time,'sec'
+    write(fd,'(a,f16.8,a)') str,time,'[s]'
   end subroutine
 
   subroutine timer_thread_write(fd,str,id)
@@ -220,7 +287,7 @@ contains
     write(fd,*) str
     do i=0,omp_get_max_threads()-1
       time = log_time_t(id,i)
-      write(fd,*) 'tid =',i,': ',time,'sec'
+      write(fd,'(a,i4,a,f16.8,a)') 'tid =',i,': ',time,'[s]'
     end do
   end subroutine
 
