@@ -65,6 +65,8 @@ module structures
     logical :: if_divide_rspace
     integer :: irank_r(6)
     integer :: icomm_r   ! communicator for r-space
+    integer :: icomm_o   ! communicator for orbital
+    integer :: icomm_ro  ! communicator for r-space & orbital
     integer :: icomm_ko  ! communicator for k-space & orbital
     integer :: icomm_rko ! communicator for r-space, k-space & orbital
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
@@ -72,6 +74,8 @@ module structures
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
     real(8),allocatable :: occ(:,:,:) ! occ(io_s:io_e,ik_s:ik_e,1:nspin) = rocc*wk, occupation numbers
     integer,allocatable :: io_tbl(:)  ! jo=io_tbl(io), io=io_s~io_e, jo=1~no
+    integer,allocatable :: jo_tbl(:)  ! io=io_tbl(jo), jo=1~no, io=io_s~io_e
+    integer,allocatable :: irank_jo(:) ! MPI rank of the orbital index #jo
   end type s_wf_info
 
   type s_wavefunction
@@ -203,7 +207,9 @@ contains
   subroutine deallocate_wf_info(info)
     type(s_wf_info) :: info
     DEAL(info%io_tbl)
+    DEAL(info%jo_tbl)
     DEAL(info%occ)
+    DEAL(info%irank_jo)
   end subroutine deallocate_wf_info
 
   subroutine deallocate_wavefunction(psi)

@@ -45,7 +45,8 @@ subroutine Real_Space_DFT
 use structures!, only: s_rgrid, s_wf_info, s_wavefunction, s_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
-                           nproc_group_korbital, nproc_id_korbital, nproc_group_rho
+                           nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
+                           nproc_group_kgrid, nproc_group_k
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -67,6 +68,7 @@ use lattice
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
+use calc_iroot_sub
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa,ia
@@ -512,13 +514,23 @@ info%irank_r(4) = jdw_array(1)
 info%irank_r(5) = kup_array(1)
 info%irank_r(6) = kdw_array(1)
 info%icomm_r = nproc_group_korbital
+info%icomm_o = nproc_group_kgrid
 info%icomm_ko = nproc_group_rho
+info%icomm_ro = nproc_group_k
 info%icomm_rko = nproc_group_global
 allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
-        ,info%io_tbl(info%io_s:info%io_e))
+          ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
+          ,irank_jo(1:system%no))
+
+info%jo_tbl(:) = 0 !(initial value)
 do iob=info%io_s,info%io_e
   call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
   info%io_tbl(iob) = jj
+  info%jo_tbl(jj) = iob
+end do
+
+do jj=1, system%no
+  call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
 end do
 
 info_ob%im_s = 1

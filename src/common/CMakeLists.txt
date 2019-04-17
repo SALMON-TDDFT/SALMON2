@@ -29,6 +29,7 @@ set(SOURCES
    writefile3d.f90
    lattice.f90
    force.f90
+   gram_schmidt_orth.f90
    )
 
 add_library(${SALMON_COMMON_LIB} STATIC ${SOURCES})
