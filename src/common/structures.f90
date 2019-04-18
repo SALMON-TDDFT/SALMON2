@@ -143,7 +143,8 @@ module structures
     integer,allocatable :: lma_tbl(:,:)
     integer,allocatable :: ia_tbl(:)
     real(8),allocatable :: rinv_uvu(:)
-    complex(8),allocatable :: zproj(:,:,:) ! zproj(j,ilma,ik) = exp(-i(k+A/c)r)*uv ! j=1~Mps(ia), ilma=1~Nlma
+    complex(8),allocatable :: ekr_uV(:,:,:) ! ekr_uV(j,ilma,ik) = exp(-i(k+A/c)r)*uv ! j=1~Mps(ia), ilma=1~Nlma
+    real(8),allocatable :: Vpsl_atom(:,:,:,:)
   end type s_pp_grid
 
 ! rho%f, V_local(1:nspin)%f, tau%f, V_H%f, V_xc%f, current(3)%f?
@@ -157,7 +158,7 @@ module structures
   end type s_vector
 
   type s_force
-    real(8),allocatable :: force(:,:) ! force(1:3,1:NI)
+    real(8),allocatable :: F(:,:) ! (1:3,1:Nion)
   end type s_force
 
   type s_dmatrix
@@ -265,7 +266,8 @@ contains
     DEAL(ppg%lma_tbl)
     DEAL(ppg%ia_tbl)
     DEAL(ppg%rinv_uvu)
-    DEAL(ppg%zproj)
+    DEAL(ppg%ekr_uV)
+    DEAL(ppg%Vpsl_atom)
   end subroutine deallocate_pp_grid
 
   subroutine deallocate_scalar(x)
@@ -280,7 +282,7 @@ contains
 
   subroutine deallocate_force(x)
     type(s_force) :: x
-    DEAL(x%force)
+    DEAL(x%F)
   end subroutine deallocate_force
 
   subroutine deallocate_dmatrix(dm)

@@ -64,9 +64,10 @@ use global_variables_scf
 use lattice
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
+use force_sub
 implicit none
 
-integer :: ix,iy,iz,ik,ikoa
+integer :: ix,iy,iz,ik,ikoa,ia
 integer :: is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
 real(8) :: sum0,sum1
@@ -79,7 +80,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
-type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob
+type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob, srg_ng
 integer :: nspin
 type(s_wavefunction) :: spsi,shpsi,sttpsi
 type(s_system) :: system
@@ -89,7 +90,9 @@ type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
 type(s_fourier_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_energy) :: energy
+type(s_force)  :: force
 integer :: neig(1:3, 1:2)
+integer :: neig_ng(1:3, 1:2)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -189,6 +192,15 @@ if(istopt==1)then
     call allocate_sendrecv
     call init_persistent_requests
 
+    neig_ng(1, 1) = iup_array(2)
+    neig_ng(1, 2) = idw_array(2)
+    neig_ng(2, 1) = jup_array(2)
+    neig_ng(2, 2) = jdw_array(2)
+    neig_ng(3, 1) = kup_array(2)
+    neig_ng(3, 2) = kdw_array(2)
+    call init_sendrecv_grid(srg_ng, ng, 1, &
+      & nproc_group_global, nproc_id_global, neig_ng)
+    
     if(iperiodic==3)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
@@ -276,7 +288,7 @@ if(istopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%Brl)
+    call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,neig_ng)
 
     
     if(ilsda == 0) then
@@ -320,6 +332,15 @@ if(istopt==1)then
     call allocate_sendrecv
     call init_persistent_requests
 
+    neig_ng(1, 1) = iup_array(2)
+    neig_ng(1, 2) = idw_array(2)
+    neig_ng(2, 1) = jup_array(2)
+    neig_ng(2, 2) = jdw_array(2)
+    neig_ng(3, 1) = kup_array(2)
+    neig_ng(3, 2) = kdw_array(2)
+    call init_sendrecv_grid(srg_ng, ng, 1, &
+      & nproc_group_global, nproc_id_global, neig_ng)
+    
     if(iperiodic==3)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
@@ -877,7 +898,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     elp3(125)=elp3(125)+elp3(115)-elp3(114)
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%Brl)
+      call Hartree_ns(lg,mg,ng,system%Brl,srg_ng)
     end if
   
     elp3(116)=get_wtime()
@@ -1137,7 +1158,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
     
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%brl)
+      call Hartree_ns(lg,mg,ng,system%brl,srg_ng)
     end if
   
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
@@ -1204,8 +1225,21 @@ DFT_Iteration : do iter=1,iDiter(img)
     fg%rhoG_elec = rhoe_G
     call calc_Total_Energy_periodic(energy,system,pp,fg)
   end select
+  call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
   if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
-  if(iperiodic==3) deallocate(stencil%kAc,ppg%zproj)
+  if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
+
+  if(comm_is_root(nproc_id_global)) then
+    write(*,'(a,f10.5,a)') "total energy E_tot =",energy%E_tot," a.u."
+    write(*,'(a,f10.5,a,f10.5,a,f10.5)') "E_kin =",energy%E_kin, ",  E_h =",energy%E_h,",  E_xc =",energy%E_xc
+    write(*,'(a,f10.5,a,f10.5)') "E_{electron-ion}: local part =",energy%E_ion_loc, ",  nonlocal part =",energy%E_ion_nloc
+    write(*,'(a,f10.5)') "E_{ion-ion} =",energy%E_ion_ion
+
+    write(*,*) '(forces on atoms)'
+    do ia=1,system%nion
+       write(*,'(1x,i7,3f15.6)') ia,force%f(1,ia),force%f(2,ia),force%f(3,ia)
+    end do
+  end if
 
   esp = energy%esp(:,:,1) !++++++++++
 

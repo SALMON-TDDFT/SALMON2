@@ -110,6 +110,8 @@ contains
   subroutine calc_density(rho,psi,info,rg,nspin)
     use structures
     use salmon_communication, only: comm_summation
+    use salmon_parallel, only: get_thread_id,get_nthreads
+    use misc_routines, only: ceiling_pow2
     implicit none
     integer        ,intent(in) :: nspin
     type(s_wf_info),intent(in) :: info
@@ -117,45 +119,93 @@ contains
     type(s_wavefunction),intent(in) :: psi
     type(s_scalar) :: rho(nspin,info%im_s:info%im_e)
     !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize
-    real(8),allocatable :: wrk(:,:,:),wrk2(:,:,:)
+    integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz
+    real(8) :: wrk2
+    real(8),allocatable :: wrk(:,:,:,:)
     is = rg%is
     ie = rg%ie
     nsize = rg%num(1) * rg%num(2) * rg%num(3)
-    allocate( wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
-            ,wrk2(is(1):ie(1),is(2):ie(2),is(3):ie(3)) )
+    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:get_nthreads()-1))
 
     if(allocated(psi%rwf)) then
+
       do im=info%im_s,info%im_e
       do ispin=1,nspin
-        wrk = 0d0
+        tid = 0
+!$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
+!$      tid = get_thread_id()
+        wrk(:,:,:,tid) = 0.d0
+
+!$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          wrk2 = abs( psi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )**2
-          wrk = wrk + wrk2 * info%occ(io,ik,ispin)
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          wrk2 = abs( psi%rwf(ix,iy,iz,ispin,io,ik,im) )**2
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin)
         end do
         end do
-        call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
-        rho(ispin,im)%f(:,:,:) = wrk2(:,:,:)
+        end do
+        end do
+        end do
+!$omp end do
+
+        ix = ceiling_pow2(size(wrk,4))/2
+        do while(ix > 0)
+          if(tid < ix) then
+            wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
+          end if
+          ix = ix/2
+!$omp barrier
+        end do
+
+!$omp end parallel
+        call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
       end do
       end do
+
     else
+
       do im=info%im_s,info%im_e
       do ispin=1,nspin
-        wrk = 0d0
+        tid = 0
+!$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
+!$      tid = get_thread_id()
+        wrk(:,:,:,tid) = 0.d0
+
+!$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          wrk2 = abs( psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) )**2
-          wrk = wrk + wrk2 * info%occ(io,ik,ispin)
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          wrk2 = abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin)
         end do
         end do
-        call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
-        rho(ispin,im)%f(:,:,:) = wrk2(:,:,:)
+        end do
+        end do
+        end do
+!$omp end do
+
+        ix = ceiling_pow2(size(wrk,4))/2
+        do while(ix > 0)
+          if(tid < ix) then
+            wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
+          end if
+          ix = ix/2
+!$omp barrier
+        end do
+
+!$omp end parallel
+        call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
       end do
       end do
+
     end if
 
-    deallocate(wrk,wrk2)
+    deallocate(wrk)
     return
   end subroutine calc_density
 
@@ -286,10 +336,10 @@ contains
           ix = ppg%Jxyz(1,j,ia)
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
-          uVpsi = uVpsi +conjg(ppg%zproj(j,ilma,ik))  *psi(ix,iy,iz)
-          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zproj(j,ilma,ik))*x*psi(ix,iy,iz)
-          uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zproj(j,ilma,ik))*y*psi(ix,iy,iz)
-          uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zproj(j,ilma,ik))*z*psi(ix,iy,iz)
+          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * psi(ix,iy,iz)
+          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%ekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
+          uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%ekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
+          uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%ekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)

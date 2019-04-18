@@ -159,7 +159,6 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tsps
     deallocate(v(is)%f)
   end do
   deallocate(v)
-  if(allocated(ppg%zproj)) deallocate(ppg%zproj)
 
 end subroutine taylor
 

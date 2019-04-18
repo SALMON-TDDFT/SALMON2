@@ -15,8 +15,8 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_ns(lg,mg,ng,Brl)
-use structures, only: s_rgrid
+SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng)
+use structures, only: s_rgrid,s_sendrecv_grid
 use hartree_periodic_sub
 use hartree_ffte_sub
 use scf_data
@@ -27,11 +27,12 @@ type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
 real(8)      ,intent(in) :: Brl(3,3)
+type(s_sendrecv_grid),intent(inout) :: srg_ng
 
 if(iSCFRT==1)then
   select case(iperiodic)
   case(0)
-    call Hartree_cg(lg,mg,ng,rho,Vh)
+    call Hartree_cg(lg,mg,ng,rho,Vh,srg_ng)
   case(3)
     select case(iflag_hartree)
     case(2)
@@ -47,9 +48,9 @@ else if(iSCFRT==2)then
   select case(iperiodic)
   case(0)
     if(mod(itt,2)==1)then
-      call Hartree_cg(lg,mg,ng,rho,Vh_stock2)
+      call Hartree_cg(lg,mg,ng,rho,Vh_stock2,srg_ng)
     else
-      call Hartree_cg(lg,mg,ng,rho,Vh_stock1)
+      call Hartree_cg(lg,mg,ng,rho,Vh_stock1,srg_ng)
     end if
   case(3)
     if(mod(itt,2)==1)then

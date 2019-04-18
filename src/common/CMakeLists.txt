@@ -17,6 +17,7 @@ set(SOURCES
    inner_product7.f90
    set_isstaend.f90
    stencil.f90
+   pseudo_pt.f90
    update_overlap.f90
    set_numcpu.f90
    structures.f90
@@ -27,6 +28,7 @@ set(SOURCES
    writefield.f90
    writefile3d.f90
    lattice.f90
+   force.f90
    )
 
 add_library(${SALMON_COMMON_LIB} STATIC ${SOURCES})

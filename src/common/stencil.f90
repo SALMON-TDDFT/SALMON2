@@ -144,6 +144,8 @@ subroutine stencil_nonorthogonal(tpsi,htpsi,is_array,ie_array,V_local,is,ie,idx,
   integer :: ix,iy,iz
   complex(8) :: w(3),v(3)
 
+!$OMP parallel
+!$OMP do private(iz,iy,ix,w,v)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -185,7 +187,11 @@ subroutine stencil_nonorthogonal(tpsi,htpsi,is_array,ie_array,V_local,is,ie,idx,
   end do
   end do
   end do
+!$OMP end do
+!$OMP end parallel
 
+!$OMP parallel
+!$OMP do private(iz,iy,ix,w)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -213,6 +219,8 @@ subroutine stencil_nonorthogonal(tpsi,htpsi,is_array,ie_array,V_local,is,ie,idx,
   end do
   end do
   end do
+!$OMP end do
+!$OMP end parallel
 
   return
 end subroutine stencil_nonorthogonal
@@ -233,6 +241,8 @@ subroutine stencil_nonorthogonal_highsymmetry(tpsi,htpsi,is_array,ie_array,V_loc
   integer :: iz,iy,ix,sx,sy,sz,idir
   complex(8) :: v,w
 
+!$OMP parallel
+!$OMP do private(iz,iy,ix,w,v,idir,sx,sy,sz)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -281,9 +291,55 @@ subroutine stencil_nonorthogonal_highsymmetry(tpsi,htpsi,is_array,ie_array,V_loc
   end do
   end do
   end do
+!$OMP end do
+!$OMP end parallel
 
   return
 end subroutine stencil_nonorthogonal_highsymmetry
+
+!===================================================================================================================================
+
+subroutine calc_gradient_psi(tpsi,gtpsi,is_array,ie_array,is,ie,idx,idy,idz,nabt,matrix_B)
+  implicit none
+  integer,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
+                        ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  complex(8),intent(in)  :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  real(8)   ,intent(in)  :: nabt(4,3),matrix_B(3,3)
+  complex(8),intent(out) :: gtpsi(3,is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+  !
+  integer :: iz,iy,ix
+  complex(8) :: w(3)
+
+!$OMP parallel
+!$OMP do private(iz,iy,ix,w)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+
+    w(1) =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
+           +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+           +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+           +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+
+    w(2) =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
+           +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+           +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+           +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
+
+    w(3) =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
+           +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+           +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+           +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
+
+    gtpsi(:,ix,iy,iz) = matmul(transpose(matrix_B),w) ! B^{T} * (nabla) psi
+  end do
+  end do
+  end do
+!$OMP end do
+!$OMP end parallel
+
+  return
+end subroutine calc_gradient_psi
 
 !===================================================================================================================================
 

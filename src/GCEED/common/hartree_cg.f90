@@ -15,14 +15,14 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh)
-use structures, only: s_rgrid
+SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh,srg_ng)
+use structures, only: s_rgrid,s_sendrecv_grid
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
+use sendrecv_grid, only: update_overlap_real8
 use hartree_boundary_sub
 use scf_data
 use new_world_sub
-use sendrecvh_sub
 use allocate_mat_sub
 use deallocate_mat_sub
 use misc_routines, only: get_wtime
@@ -37,6 +37,7 @@ real(8) :: trho(mg_sta(1):mg_end(1),    &
 real(8) :: tVh(mg_sta(1):mg_end(1),    &
                mg_sta(2):mg_end(2),      &
                mg_sta(3):mg_end(3))
+type(s_sendrecv_grid),intent(inout) :: srg_ng
 
 integer,parameter :: maxiter=1000
 integer :: ix,iy,iz,iter
@@ -80,7 +81,7 @@ do ix=ng_sta(1),ng_end(1)
 end do
 end do
 end do
-call sendrecvh(pk)
+call update_overlap_real8(srg_ng, ng, pk)
 call calc_laplacianh(pk,rlap_wk)
 
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -123,7 +124,7 @@ end if
 
 Iteration : do iter=1,maxiter
 
-  call sendrecvh(pk)
+  call update_overlap_real8(srg_ng, ng, pk)
   call calc_laplacianh(pk,rlap_wk)
 
   totbox=0d0
