@@ -76,7 +76,6 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   complex(8) , allocatable :: txk(:,:,:),htpsi(:,:,:),pko(:,:,:)
   complex(8) , allocatable :: gk2(:,:,:)
   complex(8) , allocatable :: ttpsi(:,:,:)
-  real(8) :: elp2(2000)
   complex(8):: zmatbox_m(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer :: p_myob,q_myob
   integer :: icorr_p,icorr_q
@@ -128,8 +127,8 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   end do
   end do
   
-  elp2(:)=0d0
-  elp2(1)=get_wtime()
+
+
   
   if(ilsda == 0)then
     pstart(1)=1
@@ -163,7 +162,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
     call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
     call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
   
-    elp2(2)=get_wtime()
+
   
     if(nproc_ob==1)then
       do q=pstart(is),p-1

@@ -232,7 +232,7 @@ if(nn<=1)then
   end do
 end if
 
-elp3(751)=get_wtime()
+
 
 ! Pseudopotential 1 (non-local)
 
@@ -292,9 +292,9 @@ if(iflag_ps==1) then
   end do
 end if
  
-elp3(755)=get_wtime()
-elp3(775)=elp3(775)+elp3(755)-elp3(754)
-elp3(785)=elp3(785)+elp3(755)-elp3(751)
+
+
+
 
 ! Kinetic energy
       
@@ -317,7 +317,7 @@ if(isub==0)then
     end do
   end do
 
-  elp3(757)=get_wtime()
+
 !$OMP parallel do private(iz,iy,ix) 
   do iz=iwk3sta(3),iwk3end(3)
   do iy=iwk3sta(2),iwk3end(2)
@@ -356,8 +356,8 @@ if(isub==0)then
   end do
   end do
 
-  elp3(758)=get_wtime()
-  elp3(778)=elp3(778)+elp3(758)-elp3(757)
+
+
 
 else if(isub==1)then
   select case(iperiodic)
@@ -366,7 +366,7 @@ else if(isub==1)then
   case(3) 
     call sendrecv_tmp(tpsi)
   end select
-  elp3(757)=get_wtime()
+
   call calc_laplacian2(tpsi,clap_wk)
   call calc_gradient2(tpsi,grad_wk)
 
@@ -398,12 +398,12 @@ else if(isub==1)then
     end do
     end do
   end if
-  elp3(758)=get_wtime()
-  elp3(778)=elp3(778)+elp3(758)-elp3(757)
+
+
 end if
 
-elp3(759)=get_wtime()
-elp3(780)=elp3(780)+elp3(759)-elp3(751)
+
+
 
 return
 

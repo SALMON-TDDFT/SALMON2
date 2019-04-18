@@ -14,11 +14,11 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine inner_product7(mg,iparaway_ob,itotmst,mst,iobnum,rmatbox1,rmatbox2,rbox2,elp3,hvol)
+subroutine inner_product7(mg,iparaway_ob,itotmst,mst,iobnum,rmatbox1,rmatbox2,rbox2,hvol)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_korbital
   use salmon_communication, only: comm_summation
-  use misc_routines, only: get_wtime
+  use timer
   use calc_allob_sub
   implicit none
   type(s_rgrid),intent(in) :: mg
@@ -29,7 +29,6 @@ subroutine inner_product7(mg,iparaway_ob,itotmst,mst,iobnum,rmatbox1,rmatbox2,rb
   real(8),intent(in)  :: rmatbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:iobnum)
   real(8),intent(in)  :: rmatbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:iobnum)
   real(8),intent(out) :: rbox2(itotmst)
-  real(8),intent(out) :: elp3(3000)
   real(8),intent(in)  :: hvol
   integer :: ix,iy,iz,iob,iob_allob
   real(8) :: rbox,rbox1(itotmst)
@@ -50,9 +49,8 @@ subroutine inner_product7(mg,iparaway_ob,itotmst,mst,iobnum,rmatbox1,rmatbox2,rb
     rbox1(iob_allob)=rbox*hvol
   end do
   
-  elp3(186)=get_wtime()
+  call timer_begin(LOG_ALLREDUCE_INNER_PRODUCT7)
   call comm_summation(rbox1,rbox2,itotmst,nproc_group_korbital)
-  elp3(187)=get_wtime()
-  elp3(190)=elp3(190)+elp3(187)-elp3(186)
+  call timer_end(LOG_ALLREDUCE_INNER_PRODUCT7)
   
 end subroutine inner_product7
