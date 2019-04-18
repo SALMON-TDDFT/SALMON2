@@ -65,6 +65,7 @@ module structures
     logical :: if_divide_rspace
     integer :: irank_r(6)
     integer :: icomm_r   ! communicator for r-space
+    integer :: icomm_o   ! communicator for orbital
     integer :: icomm_ko  ! communicator for k-space & orbital
     integer :: icomm_rko ! communicator for r-space, k-space & orbital
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1

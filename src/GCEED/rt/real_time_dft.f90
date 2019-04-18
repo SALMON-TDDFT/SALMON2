@@ -895,6 +895,9 @@ type(s_scalar),allocatable :: srho_s(:,:)
   info%io_e=iobnum/nspin
   info%numo=iobnum/nspin
 
+  allocate(info%irank_o(1:numo))
+  irank_o(:) = 0
+
   info%if_divide_rspace = nproc_mxin_mul.ne.1
   info%irank_r(1) = iup_array(1)
   info%irank_r(2) = idw_array(1)
@@ -903,6 +906,7 @@ type(s_scalar),allocatable :: srho_s(:,:)
   info%irank_r(5) = kup_array(1)
   info%irank_r(6) = kdw_array(1)
   info%icomm_r = nproc_group_korbital
+  info%icomm_o = nproc_group_kgrid
   info%icomm_ko = nproc_group_rho
   info%icomm_rko = nproc_group_global
 
@@ -912,6 +916,7 @@ type(s_scalar),allocatable :: srho_s(:,:)
     call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
     info%io_tbl(iob) = jj
   end do
+
 
   do ik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
