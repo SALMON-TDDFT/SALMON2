@@ -73,7 +73,8 @@ module structures
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
     real(8),allocatable :: occ(:,:,:) ! occ(io_s:io_e,ik_s:ik_e,1:nspin) = rocc*wk, occupation numbers
     integer,allocatable :: io_tbl(:)  ! jo=io_tbl(io), io=io_s~io_e, jo=1~no
-    integer,allocatable :: irank_o(:) ! MPI rank of the orbital index #io
+    integer,allocatable :: jo_tbl(:)  ! io=io_tbl(jo), jo=1~no, io=io_s~io_e
+    integer,allocatable :: irank_jo(:) ! MPI rank of the orbital index #jo
   end type s_wf_info
 
   type s_wavefunction
@@ -206,7 +207,7 @@ contains
     type(s_wf_info) :: info
     DEAL(info%io_tbl)
     DEAL(info%occ)
-    DEAL(info%irank_o)
+    DEAL(info%irank_jo
   end subroutine deallocate_wf_info
 
   subroutine deallocate_wavefunction(psi)

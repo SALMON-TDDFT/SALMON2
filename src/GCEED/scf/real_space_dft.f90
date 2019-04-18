@@ -484,13 +484,21 @@ info%irank_r(4) = jdw_array(1)
 info%irank_r(5) = kup_array(1)
 info%irank_r(6) = kdw_array(1)
 info%icomm_r = nproc_group_korbital
+info%icomm_o = nproc_group_kgrid
 info%icomm_ko = nproc_group_rho
 info%icomm_rko = nproc_group_global
 allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
-        ,info%io_tbl(info%io_s:info%io_e))
+          ,info%io_tbl(info%io_s:info%io_e), irank_jo(1:system%no), info%jo_tbl(1:system%no))
+
+info%jo_tbl(:) = 0 !(initial value)
 do iob=info%io_s,info%io_e
   call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
   info%io_tbl(iob) = jj
+  info%jo_tbl(jj) = iob
+end do
+
+do jj=1, system%no
+  calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
 end do
 
 info_ob%im_s = 1
