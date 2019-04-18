@@ -52,10 +52,10 @@ contains
       return
     end function has_orbit
 
-    real(8) function prod_real8(tmp, is, io, ik, im)
+    real(8) function prod_real8(phi1, phi2)
       implicit none
-      real(8), intent(in) :: tmp(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
-      integer, intent(in) :: is, io, ik, im
+      real(8), intent(in) :: phi1(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
+      real(8), intent(in) :: phi2(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
       integer :: i1, i2, i3
       prod_real8 = 0d0
 !$omp parallel do collapse(2) default(shared) private(i1, i2, i3) reduction(+: prod_real8)
@@ -63,7 +63,7 @@ contains
         do i2 = rg%is(2), rg%ie(2)
           do i1 = rg%is(1), rg%ie(1)
             prod_real8 = prod_real8 + &
-            & tmp(i1, i2, i3) * wf%rwf(i1, i2, i3, is, io, ik, im)
+            & phi1(i1, i2, i3) * phi2(i1, i2, i3)
           end do
         end do
       end do
@@ -71,25 +71,40 @@ contains
       return
     end function prod_real8
 
-    subroutine add_real8(tmp, coeff, is, io, ik, im)
+    subroutine add_real8(phi1, coeff, phi2)
       implicit none
-      real(8), intent(in) :: tmp(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
+      real(8), intent(inout) :: phi1(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
+      real(8), intent(in) :: phi2(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
       real(8), intent(in) :: coeff
-      integer, intent(in) :: io
       integer :: i1, i2, i3
-      prod_real8 = 0d0
 !$omp parallel do collapse(2) default(shared) private(i1, i2, i3)
       do i3 = rg%is(3), rg%ie(3)
         do i2 = rg%is(2), rg%ie(2)
           do i1 = rg%is(1), rg%ie(1)
-            tmp(i1, i2, i3) = tmp(i1, i2, i3) &
-            & + coeff * wf%rwf(i1, i2, i3, is, io, ik, im)
+            phi1(i1, i2, i3) = phi1(i1, i2, i3) &
+            & + coeff * phi2(i1, i2, i3)
           end do
         end do
       end do
   !$omp end parallel do
       return
     end subroutine add_real8
+
+    subroutine scale_real8(phi, coeff)
+      implicit none
+      real(8), intent(inout) :: phi(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
+      real(8), intent(in) :: coeff
+!$omp parallel do collapse(2) default(shared) private(i1, i2, i3)
+      do i3 = rg%is(3), rg%ie(3)
+        do i2 = rg%is(2), rg%ie(2)
+          do i1 = rg%is(1), rg%ie(1)
+            phi(i1, i2, i3) = phi(i1, i2, i3) * coeff
+          end do
+        end do
+      end do
+  !$omp end parallel do
+      return
+    end subroutine scale_real8
 
 
 
