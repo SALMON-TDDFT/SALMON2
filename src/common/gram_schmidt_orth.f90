@@ -15,7 +15,7 @@
 !
 !=======================================================================
 module gram_schmidt_orth
-  use structures, only: s_rgrid, s_wf_info, s_wavefunction
+  use structures, only: s_system, s_rgrid, s_wf_info, s_wavefunction
   implicit none
 
 contains
@@ -44,6 +44,7 @@ contains
     return
   end subroutine
 
+
   subroutine gram_schmidt_col_real8(sys, rg, wfi, rwf)
     ! Only for the colinear L(S)DA:
     use timer
@@ -68,9 +69,10 @@ contains
     
     real(8) :: c_ovlp(1:sys%no), c_ovlp_tmp(1:sys%no)
     
-    do ispin = 1, sys%nspin
     do im = sys%im_s, sys%im_e
     do ik = sys%ik_s, sys%ik_e
+    do ispin = 1, sys%nspin
+
       ! Loop for each orbit #jo1:
       do jo1 = 1, sys%no
 
@@ -79,7 +81,7 @@ contains
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
             & rwf(:, :, :, ispin, io1, ik, im), &
-            & rwf_jo1) 
+            & rwf_jo1)
         end if
         call comm_bcast(rwf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
         
@@ -101,11 +103,10 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             call axpy_real8( &
-              & c_ovlp(io2), &
-              & wf%rwf(:, :, :, ispin, io2, ik, im), &
+              & c_ovlp(io2), wf%rwf(:, :, :, ispin, io2, ik, im), &
               & s_exc_tmp)
           end if
-        end do 
+        end do
         call comm_summation(s_exc_tmp, s_exc, &
           & rg%num(1) * rg%num(2) * rg%num(3), wfi%icomm_o)
 
@@ -124,9 +125,9 @@ contains
         end if
       end do !jo1
     
+    end do !ispin
     end do !ik
     end do !im
-    end do !ispin
     
     return
   contains
@@ -134,7 +135,7 @@ contains
   logical function has_orbit(jo) result(f)
     implicit none
     integer, intent(in) :: jo
-    f = (0 <= wfi%jo_tbl(jo))
+    f = (1 <= wfi%jo_tbl(jo))
     return
   end function has_orbit
 
