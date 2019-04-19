@@ -177,6 +177,7 @@ if(istopt==1)then
     call init_lattice(system,stencil,lg)
     Hvol = system%Hvol
     Hgs = system%Hgs
+    info%if_divide_rspace = nproc_mxin_mul.ne.1
 
     call init_updown
     call init_itype
@@ -325,7 +326,7 @@ if(istopt==1)then
 !------------------------------ Continue the previous calculation
 
   case(1,3)
-    call IN_data(lg,mg,ng,system,stencil)
+    call IN_data(lg,mg,ng,system,info,stencil)
 
     call allocate_mat
     call set_icoo1d
@@ -476,7 +477,7 @@ info%io_s=1
 info%io_e=iobnum/nspin
 info%numo=iobnum/nspin
 
-info%if_divide_rspace = nproc_mxin_mul.ne.1
+!info%if_divide_rspace = nproc_mxin_mul.ne.1 ! moved just after init_lattice
 info%irank_r(1) = iup_array(1)
 info%irank_r(2) = idw_array(1)
 info%irank_r(3) = jup_array(1)

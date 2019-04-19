@@ -52,6 +52,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_system) :: system
+type(s_wf_info) :: info
 type(s_stencil) :: stencil
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
@@ -197,7 +198,7 @@ end if
 elp3(402)=get_wtime()
 
 ! Read SCF data
-call IN_data(lg,mg,ng,system,stencil)
+call IN_data(lg,mg,ng,system,info,stencil)
 
 if(comm_is_root(nproc_id_global))then
   if(icalcforce==1.and.iflag_md==1)then
@@ -896,7 +897,7 @@ type(s_scalar),allocatable :: srho_s(:,:)
   info%io_e=iobnum/nspin
   info%numo=iobnum/nspin
 
-  info%if_divide_rspace = nproc_mxin_mul.ne.1
+!  info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
   info%irank_r(1) = iup_array(1)
   info%irank_r(2) = idw_array(1)
   info%irank_r(3) = jup_array(1)
