@@ -34,7 +34,7 @@ contains
     if (allocated(wf%rwf)) then
       call gram_schmidt_col_real8(sys, rg, wfi, wf)
     elseif (allocated(wf%zwf)) then
-      call gram_schmidt_col_complex8()
+      !call gram_schmidt_col_complex8()
     else
       stop "Wavefunctions are not allocated!"
     end if
