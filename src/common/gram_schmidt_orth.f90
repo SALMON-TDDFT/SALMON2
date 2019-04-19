@@ -32,7 +32,7 @@ contains
 
     !if (if_divide_rspace) then:
     if (allocated(wf%rwf)) then
-      call gram_schmidt_col_real8()
+      call gram_schmidt_col_real8(sys, rg, wfi, wf)
     elseif (allocated(wf%zwf)) then
       call gram_schmidt_col_complex8()
     else
@@ -42,148 +42,176 @@ contains
     call timer_end(LOG_GRAM_SCHMIDT)
 
     return
-    continue
-
-    logical function has_orbit(jo)
-      implicit none
-      integer, intent(in) :: jo
-      has_orbit = (wfi%io_s <= wfi%jo_tbl(jo)) &
-          & .and. (wfi%jo_tbl(jo) <= wfi%io_e)
-      return
-    end function has_orbit
-
-    real(8) function prod_real8(phi1, phi2)
-      implicit none
-      real(8), intent(in) :: phi1(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
-      real(8), intent(in) :: phi2(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
-      integer :: i1, i2, i3
-      prod_real8 = 0d0
-!$omp parallel do collapse(2) default(shared) private(i1, i2, i3) reduction(+: prod_real8)
-      do i3 = rg%is(3), rg%ie(3)
-        do i2 = rg%is(2), rg%ie(2)
-          do i1 = rg%is(1), rg%ie(1)
-            prod_real8 = prod_real8 + &
-            & phi1(i1, i2, i3) * phi2(i1, i2, i3)
-          end do
-        end do
-      end do
-  !$omp end parallel do
-      return
-    end function prod_real8
-
-    subroutine add_real8(phi1, coeff, phi2)
-      implicit none
-      real(8), intent(inout) :: phi1(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
-      real(8), intent(in) :: phi2(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
-      real(8), intent(in) :: coeff
-      integer :: i1, i2, i3
-!$omp parallel do collapse(2) default(shared) private(i1, i2, i3)
-      do i3 = rg%is(3), rg%ie(3)
-        do i2 = rg%is(2), rg%ie(2)
-          do i1 = rg%is(1), rg%ie(1)
-            phi1(i1, i2, i3) = phi1(i1, i2, i3) &
-            & + coeff * phi2(i1, i2, i3)
-          end do
-        end do
-      end do
-  !$omp end parallel do
-      return
-    end subroutine add_real8
-
-    subroutine scale_real8(phi, coeff)
-      implicit none
-      real(8), intent(inout) :: phi(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
-      real(8), intent(in) :: coeff
-!$omp parallel do collapse(2) default(shared) private(i1, i2, i3)
-      do i3 = rg%is(3), rg%ie(3)
-        do i2 = rg%is(2), rg%ie(2)
-          do i1 = rg%is(1), rg%ie(1)
-            phi(i1, i2, i3) = phi(i1, i2, i3) * coeff
-          end do
-        end do
-      end do
-  !$omp end parallel do
-      return
-    end subroutine scale_real8
-
-
-
-    subroutine gram_schmidt_col_real8
-      implicit none
-       ! Only for the colinear L(S)DA:
-      real(8) :: tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
-      
-      do im = sys%im_s, sys%im_e
-        do is = 1, sys%nspin
-          do ik = sys%ik_s, sys%ik_e
-            do jo1 = 1, sys%no
-              ! Retrieve #jo1-th orbit into tmp variable:
-              if (has_orbit(jo1))
-                call copy_data( &
-                & wf%rwf( &
-                &   rg%is(1):rg%ie(1), &
-                &   rg%is(2):rg%ie(2), &
-                &   rg%is(3):rg%ie(3), &
-                &   is, io, ik, im), &
-                & tmp)
-              call comm_bcast(tmp, wfi%irank_jo(jo1))
-              
-              ! Calculate overlap coefficients: c(1:jo1-1)
-              c_ovlp_tmp(:) = 0d0
-              do jo2 = 1, jo1 - 1
-                if (has_orbit(jo2)) then
-                  io2 = wfi%jo_tbl(jo2)
-                  c_ovlp_tmp(jo2) = prod_real8(tmp, io2) 
-                end if
-              end do
-              call comm_sum_all(c_ovlp_tmp, c_ovlp, wfi%icomm_ro)
-
-              ! Calculate exclusion term:
-              tmp2 = 0d0
-              do jo2 = 1, jo1 - 1
-                if (has_orbit(jo2)) then
-                  io2 = wfi%jo_tbl(jo2)
-                  call add_real8(tmp2, c_ovlp(jo2), is, io, ik, im)
-                end if
-              end do
-
-              call comm_sum(tmp2, tmp3, wfi%icomm_o, wfi%irank_jo(jo1)))
-
-              tmp = tmp - tmp3
-
-              ! Calculate norm term:
-              norm_tmp = snorm()
-              call comm_sum_all(norm_tmp, norm, comm_r)
-
-              tmp = tmp * (1.0 / sqrt(norm2))
-            end do !jo1
-          end do !ik
-        end do !is
-      end do !im
-    end subroutine gram_schmidt_real8
-
-    
-
-    
-
   end subroutine
 
-  ! Gram_Schmitd for orbital(b) omp
-  subroutine gram_schmidt_omp_b()
+  subroutine gram_schmidt_col_real8(sys, rg, wfi, rwf)
+    ! Only for the colinear L(S)DA:
+    use timer
     implicit none
-    return
-  end subroutine gram_schmidt_omp_b
+    type(s_system), intent(in) :: sys
+    type(s_rgrid),  intent(in) :: rg
+    type(s_wf_info),intent(in) :: wfi
+    real(8), intent(inout) :: rwf( &
+      & rg%is_array(1):rg%ie_array(1), &
+      & rg%is_array(2):rg%ie_array(2), &
+      & rg%is_array(3):rg%ie_array(3), &
+      & 1:sys%nspin, &
+      & wfi%io_s:wfi%io_e, &
+      & sys%ik_s:sys%ik_e, &
+      & sys%im_s:sys%im_e)
 
-  ! Gram_Schmitd for k-space omp
-  subroutine gram_schmidt_omp_k()
-    implicit none
-    return
-  end subroutine gram_schmidt_omp_k
+    real(8), dimension( &
+      & rg%is(1):rg%ie(1), &
+      & rg%is(2):rg%ie(2), &
+      & rg%is(3):rg%ie(3)) &
+    & :: rwf_jo1, s_exc, s_exc_tmp
+    
+    real(8) :: c_ovlp(1:sys%no), c_ovlp_tmp(1:sys%no)
+    
+    do ispin = 1, sys%nspin
+    do im = sys%im_s, sys%im_e
+    do ik = sys%ik_s, sys%ik_e
+      ! Loop for each orbit #jo1:
+      do jo1 = 1, sys%no
 
-  ! Gram_Schmitd for realspace(r) omp
-  subroutine gram_schmidt_omp_r()
-    implicit none
+        ! Retrieve orbit #jo1 into `rwf_jo1`:
+        if (has_orbit(jo1)) then
+          io1 = wfi%jo_tbl(jo1)
+          call copy_data( &
+            & rwf( &
+              & rg%is(1):rg%ie(1), &
+              & rg%is(2):rg%ie(2), &
+              & rg%is(3):rg%ie(3), &
+              & ispin, io1, ik, im), &
+            & rwf_jo1) 
+        end if
+        call comm_bcast(rwf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
+        
+        ! Calculate overlap coefficients "c(1:jo1-1)": 
+        c_ovlp_tmp(:) = 0d0
+        do jo2 = 1, jo1 - 1
+          if (has_orbit(jo2)) then
+            io2 = wfi%jo_tbl(jo2)
+            c_ovlp_tmp(jo2) = dot_real8( &
+              & tmp1_jo1, &
+              & wf%rwf( &
+                & rg%is(1):rg%ie(1), &
+                & rg%is(2):rg%ie(2), &
+                & rg%is(3):rg%ie(3), &
+                & ispin, io2, ik, im) &
+              & )
+          end if
+        end do 
+        call comm_summation(c_ovlp_tmp, c_ovlp, sys%no, wfi%icomm_ro)
+
+        ! Calculate exclusion term "s_exc":
+        s_exc_tmp = 0d0
+        do jo2 = 1, jo1 - 1
+          if (has_orbit(jo2)) then
+            io2 = wfi%jo_tbl(jo2)
+            call axpy_real8( &
+              & c_ovlp(io2), &
+              & wf%rwf( &
+                & rg%is(1):rg%ie(1), &
+                & rg%is(2):rg%ie(2), &
+                & rg%is(3):rg%ie(3), &
+                & ispin, io2, ik, im), &
+              & tmp)
+          end if
+        end do 
+        call comm_summation(s_exc_tmp, s_exc, &
+        & rg%num(1) * rg%num(2) * rg%num(3), wfi%icomm_o)
+
+        if (has_orbit(jo1)) then
+          ! Exclude non-orthonormal component:
+          call axpy_real8(-1d0, s_exc, rwf_jo1)
+          ! Normalization:
+          norm2_tmp = dot_real8(rwf_jo1, rwf_jo1)
+          call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
+          call scal_real8(1d0 / sqrt(norm2), rwf_jo1)
+          ! Write back to "rwf":
+          io1 = wfi%jo_tbl(jo1)
+          call copy_data( &
+            & rwf_jo1,
+            & rwf( &
+              & rg%is(1):rg%ie(1), &
+              & rg%is(2):rg%ie(2), &
+              & rg%is(3):rg%ie(3), &
+              & ispin, io1, ik, im)) 
+        end if
+      end do !jo1
+    
+    end do !ik
+    end do !im
+    end do !ispin
+    
     return
-  end subroutine gram_schmidt_omp_r
+  contains
+
+  ! Dot product of two wavefunctions:
+  real(8) function dot_real8(x, y) result(p)
+    implicit none
+    real(8), intent(in) :: x(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    real(8), intent(in) :: y(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    integer :: i1, i2, i3
+    p = 0d0
+    !$omp parallel do collapse(2) default(shared) private(i1,i2,i3) reduction(+:p)
+    do i3 = rg%is(3), rg%ie(3)
+      do i2 = rg%is(2), rg%ie(2)
+        do i1 = rg%is(1), rg%ie(1)
+          p = p + x(i1, i2, i3) * y(i1, i2, i3)
+        end do
+      end do
+    end do
+    !$omp end parallel do
+    p = p * sys%hvol
+    return
+  end function dot_real8
+
+  ! Constant times a wavefunction plus a wavefunction:
+  subroutine axpy_real8(a, x, y)
+    implicit none
+    real(8), intent(in) :: a
+    real(8), intent(in) :: x(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    real(8), intent(inout) :: y(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    integer :: i1, i2, i3
+    !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
+    do i3 = rg%is(3), rg%ie(3)
+      do i2 = rg%is(2), rg%ie(2)
+        do i1 = rg%is(1), rg%ie(1)
+          y(i1, i2, i3) = a * x(i1, i2, i3) + y(i1, i2, i3)
+        end do
+      end do
+    end do
+    !$omp end parallel do
+    return
+  end subroutine axpy_real8
+
+
+  ! Scales a wavefunction by a constant 
+  subroutine scal_real8(a, x)
+    implicit none
+    real(8), intent(in) :: a
+    real(8), intent(inout) :: x(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    integer :: i1, i2, i3
+    !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
+    do i3 = rg%is(3), rg%ie(3)
+      do i2 = rg%is(2), rg%ie(2)
+        do i1 = rg%is(1), rg%ie(1)
+          x(i1, i2, i3) = a * x(i1, i2, i3)
+        end do
+      end do
+    end do
+    !$omp end parallel do
+    return
+  end subroutine scal_real8
+
+
+
+  end subroutine gram_schmidt_col_real8
+
+
+
+
 
 end module gram_schmidt_orth
