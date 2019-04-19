@@ -61,13 +61,13 @@ contains
       & sys%ik_s:sys%ik_e, &
       & sys%im_s:sys%im_e)
 
+    integer :: jo1, jo2, io1, io2
+    real(8) :: c_ovlp(1:sys%no), c_ovlp_tmp(1:sys%no)
     real(8), dimension( &
       & rg%is_array(1):rg%ie_array(1), &
       & rg%is_array(2):rg%ie_array(2), &
       & rg%is_array(3):rg%ie_array(3)) &
-      & :: rwf_jo1, s_exc, s_exc_tmp
-    
-    real(8) :: c_ovlp(1:sys%no), c_ovlp_tmp(1:sys%no)
+      & :: rwf1, s_exc, s_exc_tmp
     
     do im = sys%im_s, sys%im_e
     do ik = sys%ik_s, sys%ik_e
@@ -76,14 +76,14 @@ contains
       ! Loop for each orbit #jo1:
       do jo1 = 1, sys%no
 
-        ! Retrieve orbit #jo1 into `rwf_jo1`:
+        ! Retrieve orbit #jo1 into "rwf1":
         if (has_orbit(jo1)) then
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
             & rwf(:, :, :, ispin, io1, ik, im), &
-            & rwf_jo1)
+            & rwf1)
         end if
-        call comm_bcast(rwf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
+        call comm_bcast(rwf1, wfi%icomm_o, wfi%irank_jo(jo1))
         
         ! Calculate overlap coefficients "c(1:jo1-1)": 
         c_ovlp_tmp = 0d0
@@ -103,7 +103,7 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             call axpy_real8( &
-              & c_ovlp(io2), wf%rwf(:, :, :, ispin, io2, ik, im), &
+              & c_ovlp(jo2), wf%rwf(:, :, :, ispin, io2, ik, im), &
               & s_exc_tmp)
           end if
         end do
@@ -112,15 +112,15 @@ contains
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
-          call axpy_real8(-1d0, s_exc, rwf_jo1)
+          call axpy_real8(-1d0, s_exc, rwf1)
           ! Normalization:
-          norm2_tmp = dot_real8(rwf_jo1, rwf_jo1)
+          norm2_tmp = dot_real8(rwf1, rwf1)
           call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
-          call scal_real8(1d0 / sqrt(norm2), rwf_jo1)
+          call scal_real8(1d0 / sqrt(norm2), rwf1)
           ! Write back to "rwf":
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
-            & rwf_jo1,
+            & rwf1,
             & rwf(:, :, :, ispin, io1, ik, im)) 
         end if
       end do !jo1
