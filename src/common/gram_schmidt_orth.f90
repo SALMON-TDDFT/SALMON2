@@ -131,6 +131,13 @@ contains
     return
   contains
 
+  logical function has_orbit(jo) result(f)
+    implicit none
+    integer, intent(in) :: jo
+    f = (0 <= wfi%jo_tbl(jo))
+    return
+  end function has_orbit
+
   ! Dot product of two wavefunctions:
   real(8) function dot_real8(x, y) result(p)
     implicit none
