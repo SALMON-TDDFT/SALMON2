@@ -61,10 +61,10 @@ contains
       & sys%im_s:sys%im_e)
 
     real(8), dimension( &
-      & rg%is(1):rg%ie(1), &
-      & rg%is(2):rg%ie(2), &
-      & rg%is(3):rg%ie(3)) &
-    & :: rwf_jo1, s_exc, s_exc_tmp
+      & rg%is_array(1):rg%ie_array(1), &
+      & rg%is_array(2):rg%ie_array(2), &
+      & rg%is_array(3):rg%ie_array(3)) &
+      & :: rwf_jo1, s_exc, s_exc_tmp
     
     real(8) :: c_ovlp(1:sys%no), c_ovlp_tmp(1:sys%no)
     
@@ -78,28 +78,19 @@ contains
         if (has_orbit(jo1)) then
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
-            & rwf( &
-              & rg%is(1):rg%ie(1), &
-              & rg%is(2):rg%ie(2), &
-              & rg%is(3):rg%ie(3), &
-              & ispin, io1, ik, im), &
+            & rwf(:, :, :, ispin, io1, ik, im), &
             & rwf_jo1) 
         end if
         call comm_bcast(rwf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
         
         ! Calculate overlap coefficients "c(1:jo1-1)": 
-        c_ovlp_tmp(:) = 0d0
+        c_ovlp_tmp = 0d0
         do jo2 = 1, jo1 - 1
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             c_ovlp_tmp(jo2) = dot_real8( &
               & tmp1_jo1, &
-              & wf%rwf( &
-                & rg%is(1):rg%ie(1), &
-                & rg%is(2):rg%ie(2), &
-                & rg%is(3):rg%ie(3), &
-                & ispin, io2, ik, im) &
-              & )
+              & wf%rwf(:, :, :, ispin, io2, ik, im))
           end if
         end do 
         call comm_summation(c_ovlp_tmp, c_ovlp, sys%no, wfi%icomm_ro)
@@ -111,16 +102,12 @@ contains
             io2 = wfi%jo_tbl(jo2)
             call axpy_real8( &
               & c_ovlp(io2), &
-              & wf%rwf( &
-                & rg%is(1):rg%ie(1), &
-                & rg%is(2):rg%ie(2), &
-                & rg%is(3):rg%ie(3), &
-                & ispin, io2, ik, im), &
-              & tmp)
+              & wf%rwf(:, :, :, ispin, io2, ik, im), &
+              & s_exc_tmp)
           end if
         end do 
         call comm_summation(s_exc_tmp, s_exc, &
-        & rg%num(1) * rg%num(2) * rg%num(3), wfi%icomm_o)
+          & rg%num(1) * rg%num(2) * rg%num(3), wfi%icomm_o)
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
@@ -133,11 +120,7 @@ contains
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
             & rwf_jo1,
-            & rwf( &
-              & rg%is(1):rg%ie(1), &
-              & rg%is(2):rg%ie(2), &
-              & rg%is(3):rg%ie(3), &
-              & ispin, io1, ik, im)) 
+            & rwf(:, :, :, ispin, io1, ik, im)) 
         end if
       end do !jo1
     
@@ -151,8 +134,14 @@ contains
   ! Dot product of two wavefunctions:
   real(8) function dot_real8(x, y) result(p)
     implicit none
-    real(8), intent(in) :: x(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
-    real(8), intent(in) :: y(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    real(8), intent(in) :: x( &
+      & rg%is_array(1):rg%ie_array(1), &
+      & rg%is_array(2):rg%ie_array(2), &
+      & rg%is_array(3):rg%ie_array(3))
+    real(8), intent(in) :: y( &
+      & rg%is_array(1):rg%ie_array(1), &
+      & rg%is_array(2):rg%ie_array(2), &
+      & rg%is_array(3):rg%ie_array(3))
     integer :: i1, i2, i3
     p = 0d0
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3) reduction(+:p)
@@ -172,13 +161,19 @@ contains
   subroutine axpy_real8(a, x, y)
     implicit none
     real(8), intent(in) :: a
-    real(8), intent(in) :: x(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
-    real(8), intent(inout) :: y(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    real(8), intent(in) :: x( &
+      & rg%is_array(1):rg%ie_array(1), &
+      & rg%is_array(2):rg%ie_array(2), &
+      & rg%is_array(3):rg%ie_array(3))
+    real(8), intent(inout) :: y( &
+      & rg%is_array(1):rg%ie_array(1), &
+      & rg%is_array(2):rg%ie_array(2), &
+      & rg%is_array(3):rg%ie_array(3))
     integer :: i1, i2, i3
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
-    do i3 = rg%is(3), rg%ie(3)
-      do i2 = rg%is(2), rg%ie(2)
-        do i1 = rg%is(1), rg%ie(1)
+    do i3 = rg%is_overlap(3), rg%ie_overlap(3)
+      do i2 = rg%is_overlap(2), rg%ie_overlap(2)
+        do i1 = rg%is_overlap(1), rg%ie_overlap(1)
           y(i1, i2, i3) = a * x(i1, i2, i3) + y(i1, i2, i3)
         end do
       end do
@@ -192,12 +187,15 @@ contains
   subroutine scal_real8(a, x)
     implicit none
     real(8), intent(in) :: a
-    real(8), intent(inout) :: x(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
+    real(8), intent(inout) :: x( &
+      & rg%is_array(1):rg%ie_array(1), &
+      & rg%is_array(2):rg%ie_array(2), &
+      & rg%is_array(3):rg%ie_array(3))
     integer :: i1, i2, i3
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
-    do i3 = rg%is(3), rg%ie(3)
-      do i2 = rg%is(2), rg%ie(2)
-        do i1 = rg%is(1), rg%ie(1)
+    do i3 = rg%is_overlap(3), rg%ie_overlap(3)
+      do i2 = rg%is_overlap(2), rg%ie_overlap(2)
+        do i1 = rg%is_overlap(1), rg%ie_overlap(1)
           x(i1, i2, i3) = a * x(i1, i2, i3)
         end do
       end do
