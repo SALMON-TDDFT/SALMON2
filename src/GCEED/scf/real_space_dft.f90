@@ -49,6 +49,8 @@ use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
+use write_performance_results, only: write_gs_performance
+use iso_fortran_env, only: output_unit
 use calc_iobnum_sub
 use check_mg_sub
 use check_ng_sub
@@ -1584,48 +1586,7 @@ call timer_end(LOG_TOTAL)
 
 
 if(comm_is_root(nproc_id_global))then
-   write(*,'(a)') "==================== elapsed time ===================="
-   if(IC==0)then
-     call timer_show_hour('elapsed time initializing [s]         = ', LOG_INIT_GS)
-   else if(IC==1)then
-     call timer_show_hour('elapsed time before reading data [s]  = ', LOG_INIT_GS)
-     call timer_show_hour('elapsed time for reading data [s]     = ', LOG_INIT_GS_RESTART)
-   end if
-   call timer_show_hour('elapsed time for init. scf iter. [s]  = ', LOG_INIT_GS_ITERATION)
-   call timer_show_hour('elapsed time for scf iterations [s]   = ', LOG_GS_ITERATION)
-   call timer_show_hour('elapsed time for deinit. scf iter. [s]= ', LOG_DEINIT_GS_ITERATION)
-   call timer_show_hour('elapsed time for writing data [s]     = ', LOG_WRITE_RESULTS)
-   call timer_show_hour('elapsed time for writing LDA data [s] = ', LOG_WRITE_LDA_DATA)
-   call timer_show_hour('elapsed time for writing infos [s]    = ', LOG_WRITE_INFOS)
-   call timer_show_hour('total time [s]                        = ', LOG_TOTAL)
-   write(*,'(a)') "======================================================"
-   write(*,'(a)') "================== in scf iterations ================="
-   call timer_show_hour('elapsed time for Gram Schmidt [s]     = ', LOG_CALC_GRAM_SCHMIDT)
-   call timer_show_hour('elapsed time for subspace-diag. [s]   = ', LOG_CALC_SUBSPACE_DIAG)
-   call timer_show_hour('elapsed time for calculating rho  [s] = ', LOG_CALC_RHO)
-   call timer_show_hour('elapsed time for Hartree routine  [s] = ', LOG_CALC_HARTREE)
-   call timer_show_hour('elapsed time for Exc_Cor routine  [s] = ', LOG_CALC_EXC_COR)
-   call timer_show_hour('elapsed time for calculating Etot [s] = ', LOG_CALC_TOTAL_ENERGY)
-   call timer_show_hour('elapsed time for writing info. [s]    = ', LOG_WRITE_RESULTS)
-   write(*,'(a)') "======================================================"
-   write(*,'(a)') "================== in subspace-diag. ================="
-   call timer_show_hour('elapsed time for initialization [s]   = ', LOG_DIAG_INIT)
-   call timer_show_hour('elapsed time for Vlocal [s]           = ', LOG_DIAG_VLOCAL)
-   call timer_show_hour('elapsed time for Amat [s]             = ', LOG_DIAG_AMAT)
-   call timer_show_hour('elapsed time for allreduce [s]        = ', LOG_DIAG_ALLREDUCE)
-   call timer_show_hour('elapsed time for eigen [s]            = ', LOG_DIAG_EIGEN)
-   call timer_show_hour('elapsed time for set orbital [s]      = ', LOG_DIAG_SET_ORBITAL)
-   call timer_show_hour('elapsed time for set orbital [s]      = ', LOG_DIAG_UPDATE)
-   write(*,'(a)') "======================================================"
-   write(*,'(a)') "================== in CG. ============================"
-   call timer_show_hour('total time for CG [s]                 = ', LOG_GSCG_TOTAL)
-   call timer_show_hour('elapsed time for init. CG [s]         = ', LOG_GSCG_INIT)
-   call timer_show_hour('elapsed time for init. iter. CG [s]   = ', LOG_GSCG_INIT_ITERATION)
-   call timer_show_hour('elapsed time for iterations CG [s]    = ', LOG_GSCG_ITERATION)
-   call timer_show_hour('elapsed time for deinit. CG [s]       = ', LOG_GSCG_DEINIT)
-   call timer_show_hour('comm. for inner product (5) in CG [s] = ', LOG_ALLREDUCE_INNER_PRODUCT5)
-   call timer_show_hour('comm. for inner product (7) in CG [s] = ', LOG_ALLREDUCE_INNER_PRODUCT7)
-   write(*,'(a)') "======================================================"
+  call write_gs_performance(output_unit)
 end if
 
 contains

@@ -634,7 +634,7 @@ call timer_end(LOG_TOTAL)
 
 
 if(comm_is_root(nproc_id_global))then
-  call write_rt_performance(output_unit, system)
+  call write_rt_performance(output_unit)
 end if
 
 if(timer_process=='y')then
@@ -643,7 +643,7 @@ if(timer_process=='y')then
   timeFile = "timer_proc"//adjustl(fileNumber)
   open(79,file=timeFile)
 
-  call write_rt_performance(79, system)
+  call write_rt_performance(79)
 end if
 
 call deallocate_mat
@@ -662,7 +662,6 @@ use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
 use timer
-use write_performance_results
 use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
 use sendrecv_grid, only: init_sendrecv_grid
