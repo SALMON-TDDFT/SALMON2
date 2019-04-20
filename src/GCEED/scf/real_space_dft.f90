@@ -179,6 +179,19 @@ if(istopt==1)then
     Hgs = system%Hgs
     info%if_divide_rspace = nproc_mxin_mul.ne.1
 
+    if(stencil%if_orthogonal) then
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+    else
+      if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+    end if
+    do jj=1,3
+      do ii=1,4
+        stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+        stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+      end do
+    end do
+    
     call init_updown
     call init_itype
     call init_sendrecv_matrix
@@ -511,19 +524,6 @@ info_ob%irank_r(4) = jdw_array(1)
 info_ob%irank_r(5) = kup_array(1)
 info_ob%irank_r(6) = kdw_array(1)
 info_ob%icomm_r = nproc_group_korbital
-
-if(stencil%if_orthogonal) then
-  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-else
-  if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-  stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
-end if
-do jj=1,3
-  do ii=1,4
-    stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-    stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
-  end do
-end do
 
 ! Setup NLCC term from pseudopotential
 call calc_nlcc(pp, system, mg, ppn)
