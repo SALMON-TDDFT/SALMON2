@@ -15,8 +15,8 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh,srg_ng)
-use structures, only: s_rgrid,s_sendrecv_grid
+SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil)
+use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
 use sendrecv_grid, only: update_overlap_real8
@@ -38,6 +38,7 @@ real(8) :: tVh(mg_sta(1):mg_end(1),    &
                mg_sta(2):mg_end(2),      &
                mg_sta(3):mg_end(3))
 type(s_sendrecv_grid),intent(inout) :: srg_ng
+type(s_stencil),intent(in) :: stencil
 
 integer,parameter :: maxiter=1000
 integer :: ix,iy,iz,iter

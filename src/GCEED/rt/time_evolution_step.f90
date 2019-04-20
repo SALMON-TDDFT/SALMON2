@@ -243,7 +243,7 @@ elp3(534)=elp3(534)+elp3(515)-elp3(513)
    end if
 
   
-  call Hartree_ns(lg,mg,ng,system%brl,srg_ng)
+  call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
 
   elp3(516)=get_wtime()
   elp3(536)=elp3(536)+elp3(516)-elp3(515)
