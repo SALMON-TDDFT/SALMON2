@@ -45,9 +45,9 @@ integer :: ix,iy,iz,iter
 real(8) :: sum1,sum2,ak,ck
 real(8) :: tottmp
 real(8) :: totbox
-real(8) :: rlap_wk(ng_sta(1):ng_end(1),    &
-                   ng_sta(2):ng_end(2),      &
-                   ng_sta(3):ng_end(3))
+real(8) :: rlap_wk(ng_sta(1)-Ndh:ng_end(1)+Ndh,    &
+                   ng_sta(2)-Ndh:ng_end(2)+Ndh,      &
+                   ng_sta(3)-Ndh:ng_end(3)+Ndh)
 real(8) :: zk(ng_sta(1)-Ndh:ng_end(1)+Ndh,   &
               ng_sta(2)-Ndh:ng_end(2)+Ndh,   &
               ng_sta(3)-Ndh:ng_end(3)+Ndh)
@@ -83,7 +83,7 @@ end do
 end do
 end do
 call update_overlap_real8(srg_ng, ng, pk)
-call calc_laplacianh(pk,rlap_wk)
+call laplacian_poisson(ng,pk,rlap_wk,stencil%lap0,stencil%lapt)
 
 !$OMP parallel do private(iz,iy,ix) collapse(2)
 do iz=ng_sta(3)-Ndh,ng_end(3)+Ndh
@@ -126,7 +126,7 @@ end if
 Iteration : do iter=1,maxiter
 
   call update_overlap_real8(srg_ng, ng, pk)
-  call calc_laplacianh(pk,rlap_wk)
+  call laplacian_poisson(ng,pk,rlap_wk,stencil%lap0,stencil%lapt)
 
   totbox=0d0
 !$OMP parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)
@@ -205,3 +205,41 @@ end if
 return
 
 END SUBROUTINE Hartree_cg
+
+subroutine laplacian_poisson(ng,pk,rlap_wk,lap0,lapt)
+  use structures, only: s_rgrid
+  implicit none
+  type(s_rgrid),intent(in) :: ng
+  real(8),intent(in) :: pk(ng%is_array(1):ng%ie_array(1),  &
+                           ng%is_array(2):ng%ie_array(2),  &
+                           ng%is_array(3):ng%ie_array(3))
+  real(8),intent(out) :: rlap_wk(ng%is_array(1):ng%ie_array(1),  &
+                                 ng%is_array(2):ng%ie_array(2),  &
+                                 ng%is_array(3):ng%ie_array(3))
+  real(8),intent(in)  :: lap0,lapt(4,3)
+  integer :: ix,iy,iz
+
+!$OMP parallel do private(iz,iy,ix) collapse(2)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    rlap_wk(ix,iy,iz)=-2.d0*lap0*pk(ix,iy,iz)+(  &
+                      lapt(1,1)*(pk(ix+1,iy,iz) + pk(ix-1,iy,iz)) &
+                     +lapt(2,1)*(pk(ix+2,iy,iz) + pk(ix-2,iy,iz)) &
+                     +lapt(3,1)*(pk(ix+3,iy,iz) + pk(ix-3,iy,iz)) &
+                     +lapt(4,1)*(pk(ix+4,iy,iz) + pk(ix-4,iy,iz)) &
+                     +lapt(1,2)*(pk(ix,iy+1,iz) + pk(ix,iy-1,iz)) &
+                     +lapt(2,2)*(pk(ix,iy+2,iz) + pk(ix,iy-2,iz)) &
+                     +lapt(3,2)*(pk(ix,iy+3,iz) + pk(ix,iy-3,iz)) &
+                     +lapt(4,2)*(pk(ix,iy+4,iz) + pk(ix,iy-4,iz)) &
+                     +lapt(1,3)*(pk(ix,iy,iz+1) + pk(ix,iy,iz-1)) &
+                     +lapt(2,3)*(pk(ix,iy,iz+2) + pk(ix,iy,iz-2)) &
+                     +lapt(3,3)*(pk(ix,iy,iz+3) + pk(ix,iy,iz-3)) &
+                     +lapt(4,3)*(pk(ix,iy,iz+4) + pk(ix,iy,iz-4)))
+  end do
+  end do
+  end do
+
+  return 
+
+end subroutine laplacian_poisson

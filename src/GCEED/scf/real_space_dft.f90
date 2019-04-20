@@ -302,8 +302,7 @@ if(istopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,neig_ng,stencil)
-
+    call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,stencil)
     
     if(ilsda == 0) then
       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
