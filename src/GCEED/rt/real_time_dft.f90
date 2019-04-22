@@ -41,7 +41,7 @@ END MODULE global_variables_rt
 
 subroutine Real_Time_DFT
 use structures
-use salmon_parallel, only: nproc_id_global, nproc_group_h, nproc_group_kgrid
+use salmon_parallel, only: nproc_id_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -657,7 +657,7 @@ END subroutine Real_Time_DFT
 SUBROUTINE Time_Evolution(lg,mg,ng,system,stencil)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
-                           nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho
+                           nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho, , nproc_group_kgrid
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
