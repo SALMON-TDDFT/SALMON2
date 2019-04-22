@@ -89,7 +89,7 @@ contains
         do jo2 = 1, jo1 - 1
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
-            coeff_tmp(jo2) = dot_real8( &
+            coeff_tmp(jo2) = dot_wf( &
               & rwf1, &
               & wf%rwf(:, :, :, ispin, io2, ik, im))
           end if
