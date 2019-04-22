@@ -48,6 +48,7 @@ contains
   subroutine gram_schmidt_col_real8(sys, rg, wfi, wf)
     ! Only for the colinear L(S)DA:
     use timer
+    use salmon_communication, only: comm_bcast, comm_summation
     implicit none
     type(s_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
@@ -221,6 +222,7 @@ contains
   subroutine gram_schmidt_col_complex8(sys, rg, wfi, wf)
     ! Only for the colinear L(S)DA:
     use timer
+    use salmon_communication, only: comm_bcast, comm_summation
     implicit none
     type(s_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
