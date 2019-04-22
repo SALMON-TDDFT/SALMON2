@@ -101,7 +101,7 @@ contains
         do jo2 = 1, jo1 - 1
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
-            call axpy_real8( &
+            call axpy_wf_ovlp( &
               & coeff(jo2), wf%rwf(:, :, :, ispin, io2, ik, im), &
               & s_exc_tmp)
           end if
@@ -112,7 +112,7 @@ contains
           ! Exclude non-orthonormal component:
           call axpy_wf_ovlp(-1d0, s_exc, rwf1)
           ! Normalization:
-          norm2_tmp = dot_real8(rwf1, rwf1)
+          norm2_tmp = dot_wf(rwf1, rwf1)
           call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
           call scal_wf_ovlp(1d0 / sqrt(norm2), rwf1)
           ! Write back to "rwf":
