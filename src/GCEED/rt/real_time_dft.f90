@@ -41,7 +41,7 @@ END MODULE global_variables_rt
 
 subroutine Real_Time_DFT
 use structures
-use salmon_parallel, only: nproc_id_global, nproc_group_h
+use salmon_parallel, only: nproc_id_global, nproc_group_h, nproc_group_kgrid
 use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
 use timer
