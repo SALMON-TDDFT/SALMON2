@@ -520,7 +520,7 @@ info%icomm_ro = nproc_group_k
 info%icomm_rko = nproc_group_global
 allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
           ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
-          ,irank_jo(1:system%no))
+          ,info%irank_jo(1:system%no))
 
 info%jo_tbl(:) = 0 !(initial value)
 do iob=info%io_s,info%io_e
