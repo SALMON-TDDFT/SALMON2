@@ -58,6 +58,7 @@ contains
     integer :: ik, im, ispin
     integer :: jo1, jo2, io1, io2
     real(8) :: coeff(1:sys%no), coeff_tmp(1:sys%no)
+    real(8) :: norm2, norm2_tmp
     real(8), dimension( &
       & rg%is_array(1):rg%ie_array(1), &
       & rg%is_array(2):rg%ie_array(2), &
