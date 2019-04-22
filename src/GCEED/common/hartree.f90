@@ -15,8 +15,9 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng)
-use structures, only: s_rgrid,s_sendrecv_grid
+SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil)
+use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
+use hartree_cg_sub
 use hartree_periodic_sub
 use hartree_ffte_sub
 use scf_data
@@ -28,11 +29,15 @@ type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
 real(8)      ,intent(in) :: Brl(3,3)
 type(s_sendrecv_grid),intent(inout) :: srg_ng
+type(s_stencil),intent(in) :: stencil
 
 if(iSCFRT==1)then
   select case(iperiodic)
   case(0)
-    call Hartree_cg(lg,mg,ng,rho,Vh,srg_ng)
+    call Hartree_cg(lg,mg,ng,rho,Vh,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,   &
+                    meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
+                    iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole, &
+                    ibox_icoobox_bound,icoobox_bound)
   case(3)
     select case(iflag_hartree)
     case(2)
@@ -48,9 +53,15 @@ else if(iSCFRT==2)then
   select case(iperiodic)
   case(0)
     if(mod(itt,2)==1)then
-      call Hartree_cg(lg,mg,ng,rho,Vh_stock2,srg_ng)
+      call Hartree_cg(lg,mg,ng,rho,Vh_stock2,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,  &
+                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
+                      iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole, &
+                      ibox_icoobox_bound,icoobox_bound)
     else
-      call Hartree_cg(lg,mg,ng,rho,Vh_stock1,srg_ng)
+      call Hartree_cg(lg,mg,ng,rho,Vh_stock1,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,  &
+                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
+                      iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole, &
+                      ibox_icoobox_bound,icoobox_bound)
     end if
   case(3)
     if(mod(itt,2)==1)then

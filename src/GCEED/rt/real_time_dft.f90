@@ -54,6 +54,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_system) :: system
+type(s_wf_info) :: info
 type(s_stencil) :: stencil
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
@@ -199,7 +200,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,system,stencil)
+call IN_data(lg,mg,ng,system,info,stencil)
 
 if(comm_is_root(nproc_id_global))then
   if(icalcforce==1.and.iflag_md==1)then
@@ -350,7 +351,7 @@ end if
 call timer_end(LOG_INIT_RT)
 
 
-call Time_Evolution(lg,mg,ng,system,stencil)
+call Time_Evolution(lg,mg,ng,system,info,stencil)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -654,7 +655,7 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,stencil)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
                            nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho
@@ -735,7 +736,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%io_e=iobnum/nspin
   info%numo=iobnum/nspin
 
-  info%if_divide_rspace = nproc_mxin_mul.ne.1
+!  info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
   info%irank_r(1) = iup_array(1)
   info%irank_r(2) = idw_array(1)
   info%irank_r(3) = jup_array(1)
@@ -847,19 +848,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   end do
 
   if(iperiodic==3) allocate(stencil%kAc(info%ik_s:info%ik_e,3))
-
-  if(stencil%if_orthogonal) then
-    stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-  else
-    if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-    stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
-  end if
-  do jj=1,3
-    do ii=1,4
-      stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-      stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
-    end do
-  end do
 
 if(comm_is_root(nproc_id_global).and.iflag_md==1)then
   open(15,file="distance.data")

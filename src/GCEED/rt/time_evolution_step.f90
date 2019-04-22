@@ -241,7 +241,7 @@ call timer_begin(LOG_CALC_HARTREE)
    end if
 
   
-  call Hartree_ns(lg,mg,ng,system%brl,srg_ng)
+  call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
 call timer_end(LOG_CALC_HARTREE)
 
 

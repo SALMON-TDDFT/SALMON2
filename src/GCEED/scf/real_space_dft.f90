@@ -182,7 +182,21 @@ if(istopt==1)then
     call init_lattice(system,stencil,lg)
     Hvol = system%Hvol
     Hgs = system%Hgs
+    info%if_divide_rspace = nproc_mxin_mul.ne.1
 
+    if(stencil%if_orthogonal) then
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+    else
+      if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+    end if
+    do jj=1,3
+      do ii=1,4
+        stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+        stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+      end do
+    end do
+    
     call init_updown
     call init_itype
     call init_sendrecv_matrix
@@ -293,8 +307,7 @@ if(istopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,neig_ng)
-
+    call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,stencil)
     
     if(ilsda == 0) then
       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -332,10 +345,9 @@ if(istopt==1)then
 !------------------------------ Continue the previous calculation
 
   case(1,3)
-
     call timer_begin(LOG_INIT_GS_RESTART)
 
-    call IN_data(lg,mg,ng,system,stencil)
+    call IN_data(lg,mg,ng,system,info,stencil)
 
     call allocate_mat
     call set_icoo1d
@@ -492,7 +504,7 @@ info%io_s=1
 info%io_e=iobnum/nspin
 info%numo=iobnum/nspin
 
-info%if_divide_rspace = nproc_mxin_mul.ne.1
+!info%if_divide_rspace = nproc_mxin_mul.ne.1 ! moved just after init_lattice
 info%irank_r(1) = iup_array(1)
 info%irank_r(2) = idw_array(1)
 info%irank_r(3) = jup_array(1)
@@ -526,19 +538,6 @@ info_ob%irank_r(4) = jdw_array(1)
 info_ob%irank_r(5) = kup_array(1)
 info_ob%irank_r(6) = kdw_array(1)
 info_ob%icomm_r = nproc_group_korbital
-
-if(stencil%if_orthogonal) then
-  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-else
-  if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-  stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
-end if
-do jj=1,3
-  do ii=1,4
-    stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-    stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
-  end do
-end do
 
 ! Setup NLCC term from pseudopotential
 call calc_nlcc(pp, system, mg, ppn)
@@ -902,7 +901,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%Brl,srg_ng)
+      call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,stencil)
     end if
     call timer_end(LOG_CALC_HARTREE)
   
@@ -1181,7 +1180,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%brl,srg_ng)
+      call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
     end if
     call timer_end(LOG_CALC_HARTREE)
 

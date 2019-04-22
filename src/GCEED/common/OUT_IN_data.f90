@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng,system,stencil)
+SUBROUTINE IN_data(lg,mg,ng,system,info,stencil)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -435,6 +435,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_system) :: system
+type(s_wf_info) :: info
 type(s_stencil) :: stencil
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
@@ -749,6 +750,21 @@ system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
 call init_lattice(system,stencil,lg)
 Hvol = system%Hvol
 Hgs = system%Hgs
+
+info%if_divide_rspace = nproc_mxin_mul.ne.1
+
+if(stencil%if_orthogonal) then
+  stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+else
+  if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
+  stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+end if
+do jj=1,3
+  do ii=1,4
+    stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+    stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+  end do
+end do
 
 if(iflag_ps.eq.1)then
    if(comm_is_root(nproc_id_global))then
