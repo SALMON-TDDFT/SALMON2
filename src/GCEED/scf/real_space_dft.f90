@@ -505,7 +505,12 @@ info%icomm_o = nproc_group_kgrid
 info%icomm_ko = nproc_group_rho
 info%icomm_rko = nproc_group_global
 allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+<<<<<<< HEAD
           ,info%io_tbl(info%io_s:info%io_e), info%irank_jo(1:system%no), info%jo_tbl(1:system%no))
+=======
+          ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
+          ,irank_jo(1:system%no))
+>>>>>>> 895b758fa00eed8fb55a20a21343b9662d48abcd
 
 info%jo_tbl(:) = 0 !(initial value)
 do iob=info%io_s,info%io_e

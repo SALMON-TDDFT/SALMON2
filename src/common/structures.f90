@@ -206,8 +206,9 @@ contains
   subroutine deallocate_wf_info(info)
     type(s_wf_info) :: info
     DEAL(info%io_tbl)
+    DEAL(info%jo_tbl)
     DEAL(info%occ)
-    DEAL(info%irank_jo
+    DEAL(info%irank_jo)
   end subroutine deallocate_wf_info
 
   subroutine deallocate_wavefunction(psi)
