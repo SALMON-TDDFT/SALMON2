@@ -2,6 +2,7 @@ set(SOURCES
     inputoutput.f90
     salmon_file.f90
     salmon_global.f90
+    write_performance_results.f90
    )
 
 add_library(${SALMON_IO_LIB} STATIC ${SOURCES})

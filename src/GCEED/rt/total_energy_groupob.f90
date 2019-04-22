@@ -78,20 +78,20 @@ if(ifunc==1)then
   end do
   end do
   
-  elp3(761)=get_wtime()
+
   call comm_summation(esp2,esp,itotMST*num_kpoints_rd,nproc_group_global)
   
   
-  elp3(762)=get_wtime()
-  elp3(782)=elp3(782)+elp3(762)-elp3(761)
+
+
 
 else if(ifunc==2)then
 
-  elp3(761)=get_wtime()
+
   call comm_summation(esp2,esp,itotMST*num_kpoints_rd,nproc_group_global)
 
-  elp3(762)=get_wtime()
-  elp3(782)=elp3(782)+elp3(762)-elp3(761)
+
+
 
 end if
 
@@ -141,10 +141,10 @@ if(ilsda == 0)then
     end do
     end do
   end if
-  elp3(761)=get_wtime()
+
   call comm_summation(sum1,sum2,nproc_group_h)
-  elp3(762)=get_wtime()
-  elp3(783)=elp3(783)+elp3(762)-elp3(761)
+
+
   Etot=Etot+sum2*Hvol+Exc
 else if(ilsda == 1)then
   sum1=0.d0

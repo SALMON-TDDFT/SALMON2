@@ -63,7 +63,7 @@ real(8) :: rho_half(mg_sta(1):mg_end(1),   &
                     mg_sta(3):mg_end(3))
 character(50) :: filename_ELF
 
-elp3(801)=get_wtime()
+
 
 !$OMP parallel do private(iz,iy,ix)
 do iz=mg_sta(3),mg_end(3)
@@ -76,8 +76,8 @@ end do
 mrelftau=0.d0
 mrcurden=0.d0
 
-elp3(802)=get_wtime()
-elp3(832)=elp3(832)+elp3(802)-elp3(801)
+
+
 
 iwk_size=1
 call make_iwksta_iwkend
@@ -186,7 +186,7 @@ else
  
       call calc_gradient(cmatbox_m(:,:,:),gradzpsi(:,:,:,:))
 
-      elp3(807)=get_wtime()
+
 
 !$OMP parallel do private(iz,iy,ix)
       do iz=mg_sta(3),mg_end(3)
@@ -209,25 +209,25 @@ else
       end do
       end do
       
-      elp3(808)=get_wtime()
-      elp3(838)=elp3(838)+elp3(808)-elp3(807)
+
+
 
     end if
   end do
 
-  elp3(809)=get_wtime()
-  elp3(839)=elp3(839)+elp3(809)-elp3(808)
+
+
   
   call comm_summation(mrelftau,elftau,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
   call comm_summation(mrcurden,curden,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
 
   
-  elp3(810)=get_wtime()
-  elp3(840)=elp3(840)+elp3(810)-elp3(809)
+
+
   
   call calc_gradient(rho_half(:,:,:),gradrho(:,:,:,:))
 
-  elp3(815)=get_wtime()
+
 
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
@@ -241,8 +241,8 @@ else
   end do
   end do
 
-elp3(816)=get_wtime()
-elp3(846)=elp3(846)+elp3(816)-elp3(815)
+
+
 
 end if
 
@@ -260,7 +260,7 @@ end do
 
 call comm_summation(matbox_l,elf,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
-elp3(817)=get_wtime()
-elp3(847)=elp3(847)+elp3(817)-elp3(816)
+
+
 
 end subroutine calcELF

@@ -21,14 +21,14 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,  &
+subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                          info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_id_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
-  use misc_routines, only: get_wtime
+  use timer
   use hpsi_sub
   use calc_allob_sub
   use calc_iroot_sub
@@ -52,7 +52,6 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
-  real(8),intent(out)    :: elp3(3000)
   complex(8),intent(out) :: zxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
   complex(8),intent(out) :: zhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
   complex(8),intent(out) :: zgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
@@ -83,7 +82,6 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   real(8) :: ev
   complex(8) :: cx,cp
   complex(8) :: zs_ob(itotmst)
-  real(8) :: elp2(2000)
   complex(8):: zmatbox_m(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer :: iob_myob,job_myob
   integer :: iob_allob
@@ -97,6 +95,9 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   integer :: a,iatom
   complex(8),parameter :: zi=(0.d0,1.d0)
 
+  call timer_begin(LOG_GSCG_TOTAL)
+
+  call timer_begin(LOG_GSCG_INIT)
   allocate(stpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
@@ -122,9 +123,6 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   end do
   end do
   
-  elp2(:)=0d0
-  elp2(1)=get_wtime()
-  
   if(ilsda == 0)then
     iobsta(1)=1
     iobend(1)=itotmst
@@ -134,9 +132,12 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
     iobsta(2)=mst(1)+1
     iobend(2)=itotmst
   end if
+  call timer_end(LOG_GSCG_INIT)
+
   
   do ik=info%ik_s,info%ik_e
 
+    call timer_begin(LOG_GSCG_INIT_ITERATION)
     do j=1,3
       stencil%kAc(1,j) = k_rd(j,ik)
     end do
@@ -152,8 +153,6 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
         is=2
       end if
     
-      elp2(2)=get_wtime()
- 
     !$omp parallel do private(iz,iy,ix) collapse(2) 
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -197,7 +196,10 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   
     end do
     call inner_product5(mg,iparaway_ob,itotmst,mst,nspin*info%numo,zxk_ob,zhxk_ob,xkHxk_ob,hvol)
+    call timer_end(LOG_GSCG_INIT_ITERATION)
 
+
+    call timer_begin(LOG_GSCG_ITERATION)
     Iteration : do iter=1,Ncg
       do iob_myob=1,nspin*info%numo
         call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
@@ -214,7 +216,7 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
 
       if(nproc_ob==1)then
         sum_obmat0(:,:)=0.d0
-        elp3(1506)=get_wtime()
+
         do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           do job=iobsta(is),iob-1
@@ -231,11 +233,13 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
           end do
         end do
         end do
-        elp3(1507)=get_wtime()
-        elp3(1557)=elp3(1557)+elp3(1507)-elp3(1506)
+
+
+        call timer_begin(LOG_GSCG_ALLREDUCE)
         call comm_summation(sum_obmat0,sum_obmat1,itotmst*itotmst,nproc_group_k)
-        elp3(1508)=get_wtime()
-        elp3(1558)=elp3(1558)+elp3(1508)-elp3(1507)
+        call timer_end(LOG_GSCG_ALLREDUCE)
+
+
         do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
           do job=iobsta(is),iob-1
@@ -250,8 +254,6 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
           end do
         end do
         end do
-        elp3(1507)=get_wtime()
-        elp3(1557)=elp3(1557)+elp3(1507)-elp3(1508)
       else
         do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
@@ -432,11 +434,12 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
         end if
     
       end do
-    end do Iteration
-  
+    end do Iteration  
+    call timer_end(LOG_GSCG_ITERATION)
+
   end do
   
-  
+  call timer_begin(LOG_GSCG_DEINIT)
   if(iflag.eq.1) then
     iflag=0
   end if
@@ -446,6 +449,9 @@ subroutine gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   deallocate(v(nspin_1)%f)
   deallocate(v)
   if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
+  call timer_end(LOG_GSCG_DEINIT)
+
+  call timer_end(LOG_GSCG_TOTAL)
 
   return
   

@@ -29,7 +29,7 @@ SUBROUTINE calcVbox
   integer :: ipulse
   real(8) :: env_trigon_1,env_trigon_2
 
-  elp3(511)=get_wtime()
+
 
   if(iperiodic==0)then
     if(alocal_laser=='y')then

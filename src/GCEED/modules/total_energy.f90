@@ -160,7 +160,7 @@ real(8) :: sum1,sum2
 complex(8) :: cbox
 integer :: iob_allob
 
-elp3(861)=get_wtime()
+
 
 iwk_size=2
 call make_iwksta_iwkend
@@ -178,12 +178,12 @@ end do
 end do
 end do
 
-elp3(862)=get_wtime()
-elp3(882)=elp3(882)+elp3(862)-elp3(861)
+
+
 do iik=k_sta,k_end
 do iob=1,iobnum
   call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
-  elp3(863)=get_wtime()
+
 
 !$OMP parallel do private(iz,iy,ix) 
   do iz=mg_sta(3),mg_end(3)
@@ -196,8 +196,8 @@ do iob=1,iobnum
 
   call hpsi2(tpsi,htpsi,iob_allob,iik,0,0)
 
-  elp3(864)=get_wtime()
-  elp3(884)=elp3(884)+elp3(864)-elp3(863)
+
+
 
   cbox=0.d0
 !$OMP parallel do reduction ( + : cbox ) private(iz,iy,ix) 
@@ -211,24 +211,24 @@ do iob=1,iobnum
   
   esp3(iob_allob,iik)=dble(cbox)*Hvol
 
-  elp3(865)=get_wtime()
-  elp3(885)=elp3(885)+elp3(865)-elp3(864)
+
+
 end do
 end do
-elp3(866)=get_wtime()
+
 
 call comm_summation(esp3,esp,itotMST*num_kpoints_rd,nproc_group_global)
 
-elp3(867)=get_wtime()
-elp3(887)=elp3(887)+elp3(867)-elp3(866)
+
+
 
 Etot=0.d0
 do iik=1,num_kpoints_rd
   Etot = Etot + sum( rocc(:itotMST,iik)*esp(:itotMST,iik) )*wtk(iik)
 end do
 
-elp3(868)=get_wtime()
-elp3(888)=elp3(888)+elp3(868)-elp3(867)
+
+
 
 do ia=1,MI
 do ib=1,ia-1
@@ -239,8 +239,8 @@ do ib=1,ia-1
 end do
 end do
 
-elp3(869)=get_wtime()
-elp3(889)=elp3(889)+elp3(869)-elp3(868)
+
+
 
 if(ilsda == 0)then
   sum1=0.d0
@@ -268,9 +268,9 @@ else if(ilsda == 1)then
   Etot=Etot+sum2*Hvol+Exc
 end if
 
-elp3(870)=get_wtime()
-elp3(890)=elp3(890)+elp3(870)-elp3(869)
-elp3(891)=elp3(891)+elp3(870)-elp3(861)
+
+
+
 
 return
 

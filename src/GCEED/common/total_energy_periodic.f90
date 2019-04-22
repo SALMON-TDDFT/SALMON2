@@ -16,7 +16,7 @@
 subroutine Total_Energy_periodic(tzpsi_in,htpsi)
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_size_global, nproc_group_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation
-use misc_routines, only: get_wtime
+use timer
 use calc_allob_sub
 use scf_data
 use new_world_sub
@@ -72,6 +72,8 @@ real(8) :: rbox13,rbox14,rbox15,rbox16
 
 real(8) :: inv_NPUW
 
+call timer_begin(LOG_CALC_TOTAL_ENERGY)
+
 if(iperiodic==1)then
   Etot=0.d0
 
@@ -82,14 +84,13 @@ f0=(1.d0/Hgs(1)**2   &
    +1.d0/Hgs(2)**2   &
    +1.d0/Hgs(3)**2)
 
-elp3(1401)=get_wtime()
-
+call timer_begin(LOG_TEP_SENDRECV)
 call sendrecv_groupob_tmp(tzpsi_in)
+call timer_end(LOG_TEP_SENDRECV)
+
 !call calc_gradient_fast_c(tzpsi_in,cgrad_wk)
 
-elp3(1402)=get_wtime()
-elp3(1451)=elp3(1451)+elp3(1402)-elp3(1401)
-
+call timer_begin(LOG_TEP_ORBITAL_ENERGY)
 Ebox1(1:9)=0.d0
 
 do iik=k_sta,k_end
@@ -135,14 +136,17 @@ do iik=k_sta,k_end
     Ebox1(1)=Ebox1(1)+Ekin_tmp + rocc(p_allob,iik)*wtk(iik)*(ksquare(iik))/2.d0/dble(nproc_Mxin_mul)
   end do
 end do
+call timer_end(LOG_TEP_ORBITAL_ENERGY)
 
+
+call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
 sum_temp1=Ebox1(1)
 call comm_summation(sum_temp1,sum_temp2,nproc_group_global)
 Ebox2(1)=sum_temp2
+call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
-elp3(1403)=get_wtime()
-elp3(1452)=elp3(1452)+elp3(1403)-elp3(1402)
 
+call timer_begin(LOG_TEP_ION_ION)
 totnum_aewald=MI*(NEwald*2+1)**3
 
 if(nproc_id_global==nproc_size_global-1)then
@@ -193,16 +197,19 @@ do ia=ia_sta,ia_end
   rbox1=rbox1+Zps(ik)
   rbox2=rbox2+Zps(ik)**2
 end do
+call timer_end(LOG_TEP_ION_ION)
+
+
+call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
 call comm_summation(rbox1,rbox3,nproc_group_global)
 call comm_summation(rbox2,rbox4,nproc_group_global)
 Ebox2(2)=Ebox2(2)-Pi*rbox3**2/(2*aEwald*Hvol*lg_num(1)*lg_num(2)*lg_num(3))  &
                  - sqrt(aEwald/Pi)*rbox4
+call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
-
-elp3(1404)=get_wtime()
-elp3(1453)=elp3(1453)+elp3(1404)-elp3(1403)
 
 !calculate reciprocal lattice vector
+call timer_begin(LOG_TEP_ION_ELECTRON)
 bLx=2.d0*Pi/(Hgs(1)*dble(lg_num(1)))
 bLy=2.d0*Pi/(Hgs(2)*dble(lg_num(2)))
 bLz=2.d0*Pi/(Hgs(3)*dble(lg_num(3)))
@@ -269,14 +276,17 @@ case(4)
   Ebox1(5)=rbox15*inv_NPUW
   Ebox1(6)=rbox16*inv_NPUW
 end select
+call timer_end(LOG_TEP_ION_ELECTRON)
 
+
+call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
 sum_temp3(1:4)=Ebox1(3:6)
 call comm_summation(sum_temp3,sum_temp4,4,nproc_group_global)
 Ebox2(3:6)=sum_temp4(1:4)
+call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
-elp3(1405)=get_wtime()
-elp3(1454)=elp3(1454)+elp3(1405)-elp3(1404)
 
+call timer_begin(LOG_TEP_NONLOCAL_1)
 !$omp parallel do private(iatom,jj) collapse(4)
 do iik=k_sta,k_end
 do iob=1,iobnum
@@ -323,12 +333,15 @@ end do
 end do
 end do
 !$omp end parallel do
+call timer_end(LOG_TEP_NONLOCAL_1)
 
+
+call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
 call comm_summation(uVpsibox3,uVpsibox4,maxlm*MI*iobnum*k_num,nproc_group_korbital)
+call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
-elp3(1406)=get_wtime()
-elp3(1455)=elp3(1455)+elp3(1406)-elp3(1405)
 
+call timer_begin(LOG_TEP_NONLOCAL_2)
 do iik=k_sta,k_end
 do iob=1,iobnum
   call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
@@ -341,17 +354,22 @@ do iob=1,iobnum
   end do
 end do
 end do
+call timer_end(LOG_TEP_NONLOCAL_2)
 
+
+call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
 sum_temp1=Ebox1(7)
 call comm_summation(sum_temp1,sum_temp2,nproc_group_rho)
 Ebox2(7)=sum_temp2
+call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
-elp3(1407)=get_wtime()
-elp3(1456)=elp3(1456)+elp3(1407)-elp3(1406)
 
 Etot=sum(Ebox2(1:7))+Exc
 
 end if
+
+call timer_end(LOG_CALC_TOTAL_ENERGY)
+
 return
 
 end subroutine Total_Energy_periodic
