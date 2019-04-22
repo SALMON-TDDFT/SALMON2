@@ -16,6 +16,7 @@
 !=======================================================================
 module gram_schmidt_orth
   use structures, only: s_system, s_rgrid, s_wf_info, s_wavefunction
+  use pack_unpack, only: copy_data
   implicit none
 
 contains
@@ -61,18 +62,23 @@ contains
       & sys%im_s:sys%im_e)
 
     integer :: jo1, jo2, io1, io2
-    real(8) :: c_ovlp(1:sys%no), c_ovlp_tmp(1:sys%no)
+    real(8) :: coeff(1:sys%no), coeff_tmp(1:sys%no)
     real(8), dimension( &
       & rg%is_array(1):rg%ie_array(1), &
       & rg%is_array(2):rg%ie_array(2), &
       & rg%is_array(3):rg%ie_array(3)) &
       & :: rwf1, s_exc, s_exc_tmp
-    
+    integer :: nsize_rg
+
+    nsize_rg =  (rg%ie_array(1) - rg%is_array(1)) &
+      & * (rg%ie_array(2) - rg%is_array(2)) &
+      & * (rg%ie_array(3) - rg%is_array(3))
+      
     do im = sys%im_s, sys%im_e
     do ik = sys%ik_s, sys%ik_e
     do ispin = 1, sys%nspin
 
-      ! Loop for each orbit #jo1:
+      ! Loop for all orbit #jo1:
       do jo1 = 1, sys%no
 
         ! Retrieve orbit #jo1 into "rwf1":
@@ -84,17 +90,17 @@ contains
         end if
         call comm_bcast(rwf1, wfi%icomm_o, wfi%irank_jo(jo1))
         
-        ! Calculate overlap coefficients "c(1:jo1-1)": 
-        c_ovlp_tmp = 0d0
+        ! Calculate overlap coefficients: 
+        coeff_tmp = 0d0
         do jo2 = 1, jo1 - 1
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
-            c_ovlp_tmp(jo2) = dot_real8( &
+            coeff_tmp(jo2) = dot_real8( &
               & tmp1_jo1, &
               & wf%rwf(:, :, :, ispin, io2, ik, im))
           end if
         end do 
-        call comm_summation(c_ovlp_tmp, c_ovlp, sys%no, wfi%icomm_ro)
+        call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
 
         ! Calculate exclusion term "s_exc":
         s_exc_tmp = 0d0
@@ -102,20 +108,19 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             call axpy_real8( &
-              & c_ovlp(jo2), wf%rwf(:, :, :, ispin, io2, ik, im), &
+              & coeff(jo2), wf%rwf(:, :, :, ispin, io2, ik, im), &
               & s_exc_tmp)
           end if
         end do
-        call comm_summation(s_exc_tmp, s_exc, &
-          & rg%num(1) * rg%num(2) * rg%num(3), wfi%icomm_o)
+        call comm_summation(s_exc_tmp, s_exc, nsize_rg, wfi%icomm_o)
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
-          call axpy_real8(-1d0, s_exc, rwf1)
+          call axpy_wf_ovlp(-1d0, s_exc, rwf1)
           ! Normalization:
           norm2_tmp = dot_real8(rwf1, rwf1)
           call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
-          call scal_real8(1d0 / sqrt(norm2), rwf1)
+          call scal_wf_ovlp(1d0 / sqrt(norm2), rwf1)
           ! Write back to "rwf":
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
@@ -139,7 +144,7 @@ contains
   end function has_orbit
 
   ! Dot product of two wavefunctions:
-  real(8) function dot_real8(x, y) result(p)
+  real(8) function dot_wf(x, y) result(p)
     implicit none
     real(8), intent(in) :: x( &
       & rg%is_array(1):rg%ie_array(1), &
@@ -162,10 +167,10 @@ contains
     !$omp end parallel do
     p = p * sys%hvol
     return
-  end function dot_real8
+  end function dot_wf
 
   ! Constant times a wavefunction plus a wavefunction:
-  subroutine axpy_real8(a, x, y)
+  subroutine axpy_wf_ovlp(a, x, y)
     implicit none
     real(8), intent(in) :: a
     real(8), intent(in) :: x( &
@@ -187,11 +192,11 @@ contains
     end do
     !$omp end parallel do
     return
-  end subroutine axpy_real8
+  end subroutine axpy_wf_ovlp
 
 
   ! Scales a wavefunction by a constant 
-  subroutine scal_real8(a, x)
+  subroutine scal_wf_ovlp(a, x)
     implicit none
     real(8), intent(in) :: a
     real(8), intent(inout) :: x( &
@@ -209,9 +214,7 @@ contains
     end do
     !$omp end parallel do
     return
-  end subroutine scal_real8
-
-
+  end subroutine scal_wf_ovlp
 
   end subroutine gram_schmidt_col_real8
 
