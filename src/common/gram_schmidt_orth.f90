@@ -49,17 +49,10 @@ contains
     ! Only for the colinear L(S)DA:
     use timer
     implicit none
-    type(s_system), intent(in) :: sys
-    type(s_rgrid),  intent(in) :: rg
-    type(s_wf_info),intent(in) :: wfi
-    real(8), intent(inout) :: rwf( &
-      & rg%is_array(1):rg%ie_array(1), &
-      & rg%is_array(2):rg%ie_array(2), &
-      & rg%is_array(3):rg%ie_array(3), &
-      & 1:sys%nspin, &
-      & wfi%io_s:wfi%io_e, &
-      & wfi%ik_s:wfi%ik_e, &
-      & wfi%im_s:wfi%im_e)
+    type(s_system),       intent(in)    :: sys
+    type(s_rgrid),        intent(in)    :: rg
+    type(s_wf_info),      intent(in)    :: wfi
+    type(s_wavefunction), intent(inout) :: wf
 
     integer :: nsize_rg
     integer :: ik, im, ispin
@@ -70,7 +63,6 @@ contains
       & rg%is_array(2):rg%ie_array(2), &
       & rg%is_array(3):rg%ie_array(3)) &
       & :: rwf1, s_exc, s_exc_tmp
-
 
     nsize_rg =  (rg%ie_array(1) - rg%is_array(1)) &
       & * (rg%ie_array(2) - rg%is_array(2)) &
@@ -87,7 +79,7 @@ contains
         if (has_orbit(jo1)) then
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
-            & rwf(:, :, :, ispin, io1, ik, im), &
+            & wf%rwf(:, :, :, ispin, io1, ik, im), &
             & rwf1)
         end if
         call comm_bcast(rwf1, wfi%icomm_o, wfi%irank_jo(jo1))
@@ -127,7 +119,7 @@ contains
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
             & rwf1, &
-            & rwf(:, :, :, ispin, io1, ik, im)) 
+            & wf%rwf(:, :, :, ispin, io1, ik, im)) 
         end if
       end do !jo1
     
