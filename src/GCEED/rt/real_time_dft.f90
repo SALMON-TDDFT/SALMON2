@@ -757,7 +757,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     info%jo_tbl(jj) = iob
   end do
   do jj=1, system%no
-    calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
   end do
 
 
