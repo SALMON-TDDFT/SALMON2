@@ -33,7 +33,7 @@ contains
 
     !if (if_divide_rspace) then:
     if (allocated(wf%rwf)) then
-      call gram_schmidt_col_real8(sys, rg, wfi, wf%rwf)
+      call gram_schmidt_col_real8(sys, rg, wfi, wf)
     elseif (allocated(wf%zwf)) then
       !call gram_schmidt_col_complex8()
     else
@@ -45,7 +45,7 @@ contains
     return
   end subroutine
 
-  subroutine gram_schmidt_col_real8(sys, rg, wfi, rwf)
+  subroutine gram_schmidt_col_real8(sys, rg, wfi, wf)
     ! Only for the colinear L(S)DA:
     use timer
     implicit none
@@ -90,7 +90,7 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             coeff_tmp(jo2) = dot_real8( &
-              & tmp1_jo1, &
+              & rwf1, &
               & wf%rwf(:, :, :, ispin, io2, ik, im))
           end if
         end do 
