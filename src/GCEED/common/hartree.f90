@@ -17,6 +17,7 @@
 !============================ Hartree potential (Solve Poisson equation)
 SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil)
 use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
+use hartree_cg_sub
 use hartree_periodic_sub
 use hartree_ffte_sub
 use scf_data

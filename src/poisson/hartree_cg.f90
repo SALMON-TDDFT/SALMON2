@@ -14,214 +14,219 @@
 !  limitations under the License.
 !
 !=======================================================================
+module hartree_cg_sub
+  implicit none
+
+contains
+
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,  &
+subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,  &
                       meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                       iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                       ibox_icoobox_bound,icoobox_bound)
-use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
-use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
-use salmon_communication, only: comm_is_root, comm_summation
-use sendrecv_grid, only: update_overlap_real8
-use hartree_boundary_sub
-use timer
-
-implicit none
-real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
-integer,parameter :: ndh=4
-type(s_rgrid),intent(in) :: lg
-type(s_rgrid),intent(in) :: mg
-type(s_rgrid),intent(in) :: ng
-real(8) :: trho(mg%is(1):mg%ie(1),    &
-                mg%is(2):mg%ie(2),      &
-                mg%is(3):mg%ie(3))
-real(8) :: tVh(mg%is(1):mg%ie(1),    &
-               mg%is(2):mg%ie(2),      &
-               mg%is(3):mg%ie(3))
-type(s_sendrecv_grid),intent(inout) :: srg_ng
-type(s_stencil),intent(in) :: stencil
-real(8),intent(in) :: hconv
-integer,intent(out) :: itervh
-real(8),intent(out) :: wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
-real(8),intent(out) :: wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
-integer,intent(in) :: meo
-integer,intent(in) :: lmax_meo
-integer,intent(in) :: igc_is
-integer,intent(in) :: igc_ie
-real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
-real(8),intent(in) :: hvol
-integer,intent(in) :: iflag_ps
-integer,intent(in) :: num_pole
-integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
-integer,intent(in) :: iamax
-integer,intent(in) :: maxval_pole
-integer,intent(in) :: num_pole_myrank
-integer,intent(in) :: icorr_polenum(iamax)
-integer,intent(in) :: icount_pole(iamax)
-integer,intent(in) :: icorr_xyz_pole(3,maxval_pole,num_pole_myrank)
-integer,intent(in) :: ibox_icoobox_bound
-integer,intent(in) :: icoobox_bound(3,ibox_icoobox_bound,3)
-
-integer,parameter :: maxiter=1000
-integer :: ix,iy,iz,iter
-real(8) :: sum1,sum2,ak,ck
-real(8) :: tottmp
-real(8) :: totbox
-real(8) :: rlap_wk(ng%is_array(1):ng%ie_array(1),    &
-                   ng%is_array(2):ng%ie_array(2),      &
-                   ng%is_array(3):ng%ie_array(3))
-real(8) :: zk(ng%is_array(1):ng%ie_array(1),   &
-              ng%is_array(2):ng%ie_array(2),   &
-              ng%is_array(3):ng%ie_array(3))
-real(8) :: pk(ng%is_array(1):ng%ie_array(1),   &
-              ng%is_array(2):ng%ie_array(2),   &
-              ng%is_array(3):ng%ie_array(3))
-
-call hartree_boundary(lg,mg,ng,trho,pk,wkbound_h,wk2bound_h,   &
-                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
-                      iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
-                      ibox_icoobox_bound,icoobox_bound)
-
+  use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
+  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
+  use salmon_communication, only: comm_is_root, comm_summation
+  use sendrecv_grid, only: update_overlap_real8
+  use hartree_boundary_sub
+  use timer
+  
+  implicit none
+  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
+  integer,parameter :: ndh=4
+  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid),intent(in) :: ng
+  real(8) :: trho(mg%is(1):mg%ie(1),    &
+                  mg%is(2):mg%ie(2),      &
+                  mg%is(3):mg%ie(3))
+  real(8) :: tVh(mg%is(1):mg%ie(1),    &
+                 mg%is(2):mg%ie(2),      &
+                 mg%is(3):mg%ie(3))
+  type(s_sendrecv_grid),intent(inout) :: srg_ng
+  type(s_stencil),intent(in) :: stencil
+  real(8),intent(in) :: hconv
+  integer,intent(out) :: itervh
+  real(8),intent(out) :: wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
+  real(8),intent(out) :: wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
+  integer,intent(in) :: meo
+  integer,intent(in) :: lmax_meo
+  integer,intent(in) :: igc_is
+  integer,intent(in) :: igc_ie
+  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
+  real(8),intent(in) :: hvol
+  integer,intent(in) :: iflag_ps
+  integer,intent(in) :: num_pole
+  integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
+  integer,intent(in) :: iamax
+  integer,intent(in) :: maxval_pole
+  integer,intent(in) :: num_pole_myrank
+  integer,intent(in) :: icorr_polenum(iamax)
+  integer,intent(in) :: icount_pole(iamax)
+  integer,intent(in) :: icorr_xyz_pole(3,maxval_pole,num_pole_myrank)
+  integer,intent(in) :: ibox_icoobox_bound
+  integer,intent(in) :: icoobox_bound(3,ibox_icoobox_bound,3)
+  
+  integer,parameter :: maxiter=1000
+  integer :: ix,iy,iz,iter
+  real(8) :: sum1,sum2,ak,ck
+  real(8) :: tottmp
+  real(8) :: totbox
+  real(8) :: rlap_wk(ng%is_array(1):ng%ie_array(1),    &
+                     ng%is_array(2):ng%ie_array(2),      &
+                     ng%is_array(3):ng%ie_array(3))
+  real(8) :: zk(ng%is_array(1):ng%ie_array(1),   &
+                ng%is_array(2):ng%ie_array(2),   &
+                ng%is_array(3):ng%ie_array(3))
+  real(8) :: pk(ng%is_array(1):ng%ie_array(1),   &
+                ng%is_array(2):ng%ie_array(2),   &
+                ng%is_array(3):ng%ie_array(3))
+  
+  call hartree_boundary(lg,mg,ng,trho,pk,wkbound_h,wk2bound_h,   &
+                        meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
+                        iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
+                        ibox_icoobox_bound,icoobox_bound)
+  
 !------------------------- C-G minimization
-
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-do iz=ng%is_array(3),ng%ie_array(3)
-do iy=ng%is_array(2),ng%ie_array(2)
-do ix=ng%is_array(1),ng%ie_array(1)
-  zk(ix,iy,iz)=0.d0
-end do
-end do
-end do
-
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-do iz=ng%is(3),ng%ie(3)
-do iy=ng%is(2),ng%ie(2)
-do ix=ng%is(1),ng%ie(1)
-  pk(ix,iy,iz)=tVh(ix,iy,iz)
-  zk(ix,iy,iz)=-4.d0*pi*trho(ix,iy,iz)
-end do
-end do
-end do
-call update_overlap_real8(srg_ng, ng, pk)
-call laplacian_poisson(ng,pk,rlap_wk,stencil%lap0,stencil%lapt)
-
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-do iz=ng%is_array(3),ng%ie_array(3)
-do iy=ng%is_array(2),ng%ie_array(2)
-do ix=ng%is_array(1),ng%ie_array(1)
-  pk(ix,iy,iz)=0.d0
-end do
-end do
-end do
-
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-do iz=ng%is(3),ng%ie(3)
-do iy=ng%is(2),ng%ie(2)
-do ix=ng%is(1),ng%ie(1)
-  zk(ix,iy,iz)=zk(ix,iy,iz)-rlap_wk(ix,iy,iz)
-  pk(ix,iy,iz)=zk(ix,iy,iz)
-end do
-end do
-end do
-
-sum1=0.d0
-!$OMP parallel do reduction(+ : sum1) private(iz,iy,ix) collapse(2)
-do iz=ng%is(3),ng%ie(3)
-do iy=ng%is(2),ng%ie(2)
-do ix=ng%is(1),ng%ie(1)
-  sum1=sum1+zk(ix,iy,iz)**2*Hvol
-end do
-end do
-end do
-
-if(nproc_size_global==1)then
-else
-  call timer_begin(LOG_ALLREDUCE_HARTREE)
-  call comm_summation(sum1,sum2,nproc_group_h)
-  call timer_end(LOG_ALLREDUCE_HARTREE)
-  sum1=sum2
-end if
-
-Iteration : do iter=1,maxiter
-
+  
+!$omp parallel do private(iz,iy,ix) collapse(2)
+  do iz=ng%is_array(3),ng%ie_array(3)
+  do iy=ng%is_array(2),ng%ie_array(2)
+  do ix=ng%is_array(1),ng%ie_array(1)
+    zk(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+  
+!$omp parallel do private(iz,iy,ix) collapse(2)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    pk(ix,iy,iz)=tVh(ix,iy,iz)
+    zk(ix,iy,iz)=-4.d0*pi*trho(ix,iy,iz)
+  end do
+  end do
+  end do
   call update_overlap_real8(srg_ng, ng, pk)
   call laplacian_poisson(ng,pk,rlap_wk,stencil%lap0,stencil%lapt)
-
-  totbox=0d0
-!$OMP parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)
+  
+!$omp parallel do private(iz,iy,ix) collapse(2)
+  do iz=ng%is_array(3),ng%ie_array(3)
+  do iy=ng%is_array(2),ng%ie_array(2)
+  do ix=ng%is_array(1),ng%ie_array(1)
+    pk(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+  
+!$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    totbox=totbox+(zk(ix,iy,iz)*rlap_wk(ix,iy,iz))
+    zk(ix,iy,iz)=zk(ix,iy,iz)-rlap_wk(ix,iy,iz)
+    pk(ix,iy,iz)=zk(ix,iy,iz)
   end do
   end do
   end do
-
+  
+  sum1=0.d0
+!$omp parallel do reduction(+ : sum1) private(iz,iy,ix) collapse(2)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    sum1=sum1+zk(ix,iy,iz)**2*Hvol
+  end do
+  end do
+  end do
+  
   if(nproc_size_global==1)then
-    tottmp=totbox
   else
     call timer_begin(LOG_ALLREDUCE_HARTREE)
-    call comm_summation(totbox,tottmp,nproc_group_h)
+    call comm_summation(sum1,sum2,nproc_group_h)
     call timer_end(LOG_ALLREDUCE_HARTREE)
+    sum1=sum2
   end if
-
-  ak=sum1/tottmp/Hvol
-
-!$OMP parallel do private(iz,iy,ix) firstprivate(ak) collapse(2)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-     tVh(ix,iy,iz)=tVh(ix,iy,iz)+ak*pk(ix,iy,iz)
-     zk(ix,iy,iz)=zk(ix,iy,iz)-ak*rlap_wk(ix,iy,iz)
-  end do
-  end do
-  end do
-
-  totbox=0d0
-!$OMP parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    totbox=totbox+zk(ix,iy,iz)**2
-  end do
-  end do
-  end do
-
-  if(nproc_size_global==1)then
-    tottmp=totbox
-  else
-    call timer_begin(LOG_ALLREDUCE_HARTREE)
-    call comm_summation(totbox,tottmp,nproc_group_h)
-    call timer_end(LOG_ALLREDUCE_HARTREE)
+  
+  iteration : do iter=1,maxiter
+  
+    call update_overlap_real8(srg_ng, ng, pk)
+    call laplacian_poisson(ng,pk,rlap_wk,stencil%lap0,stencil%lapt)
+  
+    totbox=0d0
+!$omp parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      totbox=totbox+(zk(ix,iy,iz)*rlap_wk(ix,iy,iz))
+    end do
+    end do
+    end do
+  
+    if(nproc_size_global==1)then
+      tottmp=totbox
+    else
+      call timer_begin(LOG_ALLREDUCE_HARTREE)
+      call comm_summation(totbox,tottmp,nproc_group_h)
+      call timer_end(LOG_ALLREDUCE_HARTREE)
+    end if
+  
+    ak=sum1/tottmp/Hvol
+  
+!$omp parallel do private(iz,iy,ix) firstprivate(ak) collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+       tVh(ix,iy,iz)=tVh(ix,iy,iz)+ak*pk(ix,iy,iz)
+       zk(ix,iy,iz)=zk(ix,iy,iz)-ak*rlap_wk(ix,iy,iz)
+    end do
+    end do
+    end do
+  
+    totbox=0d0
+!$omp parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      totbox=totbox+zk(ix,iy,iz)**2
+    end do
+    end do
+    end do
+  
+    if(nproc_size_global==1)then
+      tottmp=totbox
+    else
+      call timer_begin(LOG_ALLREDUCE_HARTREE)
+      call comm_summation(totbox,tottmp,nproc_group_h)
+      call timer_end(LOG_ALLREDUCE_HARTREE)
+    end if
+  
+    sum2=tottmp*Hvol
+  
+    if ( abs(sum2) < hconv*dble(lg%num(1)*lg%num(2)*lg%num(3)) ) exit
+  
+    ck=sum2/sum1 ; sum1=sum2
+  
+!$omp parallel do private(iz,iy,ix) firstprivate(ck) collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      pk(ix,iy,iz)=zk(ix,iy,iz)+ck*pk(ix,iy,iz)
+    end do
+    end do
+    end do
+     
+  end do iteration
+  
+  iterVh=iter
+  if ( iterVh>maxiter .and. comm_is_root(nproc_id_global)) then
+     write(*,*) "Warning:Vh iteration is not converged"
+     write(*,'("||tVh(i)-tVh(i-1)||**2/(# of grids) = ",e15.8)') &
+                                sum2/dble(lg%num(1)*lg%num(2)*lg%num(3))
   end if
+  
+  return
 
-  sum2=tottmp*Hvol
-
-  if ( abs(sum2) < Hconv*dble(lg%num(1)*lg%num(2)*lg%num(3)) ) exit
-
-  ck=sum2/sum1 ; sum1=sum2
-
-!$OMP parallel do private(iz,iy,ix) firstprivate(ck) collapse(2)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    pk(ix,iy,iz)=zk(ix,iy,iz)+ck*pk(ix,iy,iz)
-  end do
-  end do
-  end do
-   
-end do Iteration
-
-iterVh=iter
-if ( iterVh>maxiter .and. comm_is_root(nproc_id_global)) then
-   write(*,*) "Warning:Vh iteration is not converged"
-   write(*,'("||tVh(i)-tVh(i-1)||**2/(# of grids) = ",e15.8)') &
-                              sum2/dble(lg%num(1)*lg%num(2)*lg%num(3))
-end if
-
-return
-
-END SUBROUTINE Hartree_cg
+end subroutine hartree_cg
 
 subroutine laplacian_poisson(ng,pk,rlap_wk,lap0,lapt)
   use structures, only: s_rgrid
@@ -236,7 +241,7 @@ subroutine laplacian_poisson(ng,pk,rlap_wk,lap0,lapt)
   real(8),intent(in)  :: lap0,lapt(4,3)
   integer :: ix,iy,iz
 
-!$OMP parallel do private(iz,iy,ix) collapse(2)
+!$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
@@ -260,3 +265,5 @@ subroutine laplacian_poisson(ng,pk,rlap_wk,lap0,lapt)
   return 
 
 end subroutine laplacian_poisson
+
+end module hartree_cg_sub
