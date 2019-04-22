@@ -288,7 +288,7 @@ contains
           ! Normalization:
           norm2_tmp = real(dot_wf(wf_jo1, wf_jo1))
           call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
-          call scal_wf_ovlp(dcmplx(1d0, 0d0) / sqrt(norm2), wf_jo1)
+          call scal_wf_ovlp(cmplx(1d0, 0d0) / sqrt(norm2), wf_jo1)
           ! Write back to "zwf":
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
