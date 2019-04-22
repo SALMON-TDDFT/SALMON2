@@ -124,7 +124,7 @@ contains
           ! Write back to "rwf":
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
-            & rwf1,
+            & rwf1, &
             & rwf(:, :, :, ispin, io1, ik, im)) 
         end if
       end do !jo1
