@@ -33,7 +33,7 @@ type(s_stencil),intent(in) :: stencil
 if(iSCFRT==1)then
   select case(iperiodic)
   case(0)
-    call Hartree_cg(lg,mg,ng,rho,Vh,srg_ng,stencil)
+    call Hartree_cg(lg,mg,ng,rho,Vh,srg_ng,stencil,wkbound_h,wk2bound_h)
   case(3)
     select case(iflag_hartree)
     case(2)
@@ -49,9 +49,9 @@ else if(iSCFRT==2)then
   select case(iperiodic)
   case(0)
     if(mod(itt,2)==1)then
-      call Hartree_cg(lg,mg,ng,rho,Vh_stock2,srg_ng,stencil)
+      call Hartree_cg(lg,mg,ng,rho,Vh_stock2,srg_ng,stencil,wkbound_h,wk2bound_h)
     else
-      call Hartree_cg(lg,mg,ng,rho,Vh_stock1,srg_ng,stencil)
+      call Hartree_cg(lg,mg,ng,rho,Vh_stock1,srg_ng,stencil,wkbound_h,wk2bound_h)
     end if
   case(3)
     if(mod(itt,2)==1)then
