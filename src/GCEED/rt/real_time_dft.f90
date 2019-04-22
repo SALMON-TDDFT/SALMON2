@@ -658,7 +658,8 @@ END subroutine Real_Time_DFT
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
-                           nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho
+                           nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho, &
+                           nproc_group_kgrid, nproc_group_k
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -667,6 +668,7 @@ use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
 use sendrecv_grid, only: init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
+use calc_iroot_sub
 implicit none
 
 type(s_rgrid) :: lg,mg,ng
@@ -744,15 +746,24 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%irank_r(5) = kup_array(1)
   info%irank_r(6) = kdw_array(1)
   info%icomm_r = nproc_group_korbital
+  info%icomm_o = nproc_group_kgrid
   info%icomm_ko = nproc_group_rho
+  info%icomm_ro = nproc_group_k
   info%icomm_rko = nproc_group_global
 
   allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
-          ,info%io_tbl(info%io_s:info%io_e))
+          ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
+          ,info%irank_jo(1:system%no))
+  info%jo_tbl(:) = 0 ! info%io_s-1 (initial value)
   do iob=info%io_s,info%io_e
     call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
     info%io_tbl(iob) = jj
+    info%jo_tbl(jj) = iob
   end do
+  do jj=1, system%no
+    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+  end do
+
 
   do ik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
