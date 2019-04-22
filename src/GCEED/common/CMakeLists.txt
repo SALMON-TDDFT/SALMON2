@@ -17,7 +17,6 @@ set(SOURCES
     conv_p0.f90
     conv_p.f90
     exc_cor_ns.f90
-    hartree_cg.f90
     hartree.f90
     hpsi2_buf.f90
     init_wf.f90
