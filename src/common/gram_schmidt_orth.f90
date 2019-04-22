@@ -33,7 +33,7 @@ contains
 
     !if (if_divide_rspace) then:
     if (allocated(wf%rwf)) then
-      call gram_schmidt_col_real8(sys, rg, wfi, wf)
+      call gram_schmidt_col_real8(sys, rg, wfi, wf%rwf)
     elseif (allocated(wf%zwf)) then
       !call gram_schmidt_col_complex8()
     else
@@ -58,9 +58,11 @@ contains
       & rg%is_array(3):rg%ie_array(3), &
       & 1:sys%nspin, &
       & wfi%io_s:wfi%io_e, &
-      & sys%ik_s:sys%ik_e, &
-      & sys%im_s:sys%im_e)
+      & wfi%ik_s:wfi%ik_e, &
+      & wfi%im_s:wfi%im_e)
 
+    integer :: nsize_rg
+    integer :: ik, im, ispin
     integer :: jo1, jo2, io1, io2
     real(8) :: coeff(1:sys%no), coeff_tmp(1:sys%no)
     real(8), dimension( &
@@ -68,14 +70,14 @@ contains
       & rg%is_array(2):rg%ie_array(2), &
       & rg%is_array(3):rg%ie_array(3)) &
       & :: rwf1, s_exc, s_exc_tmp
-    integer :: nsize_rg
+
 
     nsize_rg =  (rg%ie_array(1) - rg%is_array(1)) &
       & * (rg%ie_array(2) - rg%is_array(2)) &
       & * (rg%ie_array(3) - rg%is_array(3))
       
-    do im = sys%im_s, sys%im_e
-    do ik = sys%ik_s, sys%ik_e
+    do im = wfi%im_s, wfi%im_e
+    do ik = wfi%ik_s, wfi%ik_e
     do ispin = 1, sys%nspin
 
       ! Loop for all orbit #jo1:
