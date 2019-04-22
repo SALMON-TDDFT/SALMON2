@@ -284,7 +284,7 @@ contains
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
-          call axpy_wf_ovlp(-cmplx(1d0, 0d0), wf_exc, wf_jo1)
+          call axpy_wf_ovlp(-1, wf_exc, wf_jo1)
           ! Normalization:
           norm2_tmp = real(dot_wf(wf_jo1, wf_jo1))
           call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
