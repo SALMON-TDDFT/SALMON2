@@ -184,24 +184,7 @@ configure_file(
 
 include_directories(${CMAKE_BINARY_DIR})
 
-
-### Build target
-set(ARTED_LIB            "arted_rtl")
-set(GCEED_LIB            "gceed_rtl")
-
-set(SALMON_PARALLEL_LIB  "parallel_rtl")
-set(SALMON_IO_LIB        "io_rtl")
-set(SALMON_MATH_LIB      "math_rtl")
-set(SALMON_GS_LIB        "gs_rtl")
-set(SALMON_RT_LIB        "rt_rtl")
-set(SALMON_ATOM_LIB      "atom_rtl")
-set(SALMON_XC_LIB        "xc_rtl")
-set(SALMON_POISSON_LIB   "poisson_rtl")
-set(SALMON_MAXWELL_LIB   "maxwell_rtl")
-set(SALMON_COMMON_LIB    "common_rtl")
-set(SALMON_EXT_LIB       "ext_rtl")
-set(SALMON_MISC_LIB      "misc_rtl")
-
+# source directory
 set(SALMON_SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 add_subdirectory(${SALMON_SRC_DIR})
 
