@@ -91,8 +91,8 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             coeff_tmp(jo2) = dot_wf( &
-              & wf_jo1, &
-              & wf%rwf(:, :, :, ispin, io2, ik, im))
+              & wf%rwf(:, :, :, ispin, io2, ik, im), &
+              & wf_jo1)
           end if
         end do 
         call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
@@ -264,8 +264,8 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             coeff_tmp(jo2) = dot_wf( &
-              & wf_jo1, &
-              & wf%zwf(:, :, :, ispin, io2, ik, im))
+              & wf%zwf(:, :, :, ispin, io2, ik, im), &
+              & wf_jo1)
           end if
         end do 
         call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
