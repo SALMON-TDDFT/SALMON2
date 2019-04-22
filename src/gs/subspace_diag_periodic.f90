@@ -18,7 +18,7 @@ module subspace_diag_periodic_sub
 
 contains
 
-subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
                                   iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                   info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
@@ -26,7 +26,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_korbital, nproc_group_k, nproc_group_kgrid
   use salmon_communication, only: comm_bcast, comm_summation
-  use misc_routines, only: get_wtime
+  use timer
   use hpsi_sub
   use eigen_subdiag_periodic_sub
   use calc_allob_sub
@@ -42,7 +42,6 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
-  real(8),intent(out) :: elp3(3000)
   integer,intent(in)  :: ilsda
   integer,intent(in)  :: nproc_ob
   integer,intent(in)  :: iparaway_ob
@@ -85,8 +84,9 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
   integer :: a,iatom,ilma
   complex(8),parameter :: zi=(0.d0,1.d0)
   
-  elp3(301)=get_wtime()
+  call timer_begin(LOG_DIAG_TOTAL)
   
+  call timer_begin(LOG_DIAG_INIT)
   allocate(stpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
@@ -129,17 +129,14 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
   end do
   end do
   
-  elp3(302)=get_wtime()
-  elp3(352)=elp3(352)+elp3(302)-elp3(301)
-  
-  elp3(303)=get_wtime()
-  elp3(353)=elp3(353)+elp3(303)-elp3(302)
-  
   call set_isstaend(is_sta,is_end,ilsda)
+  call timer_end(LOG_DIAG_INIT)
+
   
   do ik=k_sta,k_end
   do is=is_sta,is_end
 
+    call timer_begin(LOG_DIAG_VLOCAL)
     do j=1,3
       stencil%kAc(1,j) = k_rd(j,ik)
     end do
@@ -164,7 +161,10 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
       end do
       end do
     end if
+    call timer_end(LOG_DIAG_VLOCAL)
 
+
+    call timer_begin(LOG_DIAG_AMAT)
     if(ifmst(is)>=1.and.mst(is)>=1)then
   
       iter=iobend(is)-iobsta(is)+1
@@ -236,11 +236,20 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
           end if
         end do
       end do
+      call timer_end(LOG_DIAG_AMAT)
     
+
+      call timer_begin(LOG_DIAG_ALLREDUCE)
       call comm_summation(amat,amat2,iter*iter,nproc_group_k)
+      call timer_end(LOG_DIAG_ALLREDUCE)
     
+
+      call timer_begin(LOG_DIAG_EIGEN)
       call eigen_subdiag_periodic(amat2,evec,iter,ier2)
+      call timer_end(LOG_DIAG_EIGEN)
     
+
+      call timer_begin(LOG_DIAG_SET_ORBITAL)
       do jj=1,iobnum
         call calc_allob(jj,j_allob,iparaway_ob,itotmst,mst,iobnum)
         if(j_allob>=iobsta(is).and.j_allob<=iobend(is))then
@@ -255,7 +264,10 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
           end do
         end if
       end do
-      
+      call timer_end(LOG_DIAG_SET_ORBITAL)
+
+
+      call timer_begin(LOG_DIAG_UPDATE)
       do jj=iobsta(is),iobend(is)
         call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
         call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
@@ -311,6 +323,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
           end do
         end if
       end do
+      call timer_end(LOG_DIAG_UPDATE)
     
       deallocate(amat,amat2,smat)
       deallocate(evec)
@@ -328,6 +341,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc
   deallocate(v)
   if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
 
+  call timer_end(LOG_DIAG_TOTAL)
 
 end subroutine subspace_diag_periodic
 

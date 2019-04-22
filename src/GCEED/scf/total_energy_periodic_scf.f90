@@ -82,7 +82,7 @@ f0=(1.d0/Hgs(1)**2   &
    +1.d0/Hgs(2)**2   &
    +1.d0/Hgs(3)**2)
 
-elp3(1401)=get_wtime()
+
 
 tpsi_tmp2=0.d0
 do iik=k_sta,k_end
@@ -107,8 +107,8 @@ do iob=1,iobnum
 end do
 end do
 
-elp3(1402)=get_wtime()
-elp3(1451)=elp3(1451)+elp3(1402)-elp3(1401)
+
+
 
 Ebox1(1:9)=0.d0
 
@@ -160,8 +160,8 @@ sum_temp1=Ebox1(1)
 call comm_summation(sum_temp1,sum_temp2,nproc_group_global)
 Ebox2(1)=sum_temp2
 
-elp3(1403)=get_wtime()
-elp3(1452)=elp3(1452)+elp3(1403)-elp3(1402)
+
+
 
 totnum_aewald=MI*(NEwald*2+1)**3
 
@@ -208,8 +208,8 @@ Ebox2(2)=Ebox2(2)-Pi*rbox3**2/(2*aEwald*Hvol*lg_num(1)*lg_num(2)*lg_num(3))  &
                  - sqrt(aEwald/Pi)*rbox4
 
 
-elp3(1404)=get_wtime()
-elp3(1453)=elp3(1453)+elp3(1404)-elp3(1403)
+
+
 
 !calculate reciprocal lattice vector
 bLx=2.d0*Pi/(Hgs(1)*dble(lg_num(1)))
@@ -278,8 +278,8 @@ call comm_summation(sum_temp3,sum_temp4,4,nproc_group_global)
 Ebox2(3:6)=sum_temp4(1:4)
 
 
-elp3(1405)=get_wtime()
-elp3(1454)=elp3(1454)+elp3(1405)-elp3(1404)
+
+
 
 do iik=k_sta,k_end
 do iob=1,iobnum
@@ -327,8 +327,8 @@ end do
 
 call comm_summation(uVpsibox3,uVpsibox4,maxlm*MI*iobnum*k_num,nproc_group_korbital)
 
-elp3(1406)=get_wtime()
-elp3(1455)=elp3(1455)+elp3(1406)-elp3(1405)
+
+
 
 do iik=k_sta,k_end
 do iob=1,iobnum
@@ -347,8 +347,8 @@ sum_temp1=Ebox1(7)
 call comm_summation(sum_temp1,sum_temp2,nproc_group_rho)
 Ebox2(7)=sum_temp2
 
-elp3(1407)=get_wtime()
-elp3(1456)=elp3(1456)+elp3(1407)-elp3(1406)
+
+
 
 Etot=sum(Ebox2(1:7))+Exc
 

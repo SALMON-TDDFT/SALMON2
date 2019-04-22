@@ -25,7 +25,7 @@ use scf_data
 use new_world_sub
 use allocate_mat_sub
 use deallocate_mat_sub
-use misc_routines, only: get_wtime
+use timer
 
 implicit none
 type(s_rgrid),intent(in) :: lg
@@ -58,7 +58,7 @@ iwk_size=12
 call make_iwksta_iwkend
 
 call hartree_boundary(lg,mg,ng,trho,pk,wkbound_h,wk2bound_h,   &
-                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,elp3,inum_mxin_s,   &
+                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                       iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                       ibox_icoobox_bound,icoobox_bound)
 
@@ -116,10 +116,9 @@ end do
 
 if(nproc_size_global==1)then
 else
-  elp3(201)=get_wtime()
+  call timer_begin(LOG_ALLREDUCE_HARTREE)
   call comm_summation(sum1,sum2,nproc_group_h)
-  elp3(202)=get_wtime()
-  elp3(254)=elp3(254)+elp3(202)-elp3(201)
+  call timer_end(LOG_ALLREDUCE_HARTREE)
   sum1=sum2
 end if
 
@@ -141,10 +140,9 @@ Iteration : do iter=1,maxiter
   if(nproc_size_global==1)then
     tottmp=totbox
   else
-    elp3(201)=get_wtime()
+    call timer_begin(LOG_ALLREDUCE_HARTREE)
     call comm_summation(totbox,tottmp,nproc_group_h)
-    elp3(202)=get_wtime()
-    elp3(255)=elp3(255)+elp3(202)-elp3(201)
+    call timer_end(LOG_ALLREDUCE_HARTREE)
   end if
 
   ak=sum1/tottmp/Hvol
@@ -172,10 +170,9 @@ Iteration : do iter=1,maxiter
   if(nproc_size_global==1)then
     tottmp=totbox
   else
-    elp3(201)=get_wtime()
+    call timer_begin(LOG_ALLREDUCE_HARTREE)
     call comm_summation(totbox,tottmp,nproc_group_h)
-    elp3(202)=get_wtime()
-    elp3(256)=elp3(256)+elp3(202)-elp3(201)
+    call timer_end(LOG_ALLREDUCE_HARTREE)
   end if
 
   sum2=tottmp*Hvol

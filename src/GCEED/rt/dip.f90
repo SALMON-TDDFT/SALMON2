@@ -16,10 +16,10 @@
 subroutine subdip(rNe,ifunc)
 use salmon_parallel, only: nproc_group_h, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
-use misc_routines, only: get_wtime
 use scf_data
 use new_world_sub
 use allocate_mat_sub
+use timer
 implicit none
 integer :: ifunc
 integer :: i1,ix,iy,iz,i2
@@ -29,8 +29,8 @@ real(8) :: rbox_array2(10), rbox_arrayq2(3, 3)
 real(8) :: rbox1, rbox1q, rbox1q12, rbox1q23, rbox1q31
 real(8) :: fact
 real(8) :: absr2
-   
-  elp3(526)=get_wtime()
+
+call timer_begin(LOG_CALC_DP)
 
 !$OMP parallel do
    do i1=1,4
@@ -111,11 +111,10 @@ end if
    
    !-----------QUADRUPOLE-end----------
 
-   elp3(761)=get_wtime()
+   call timer_begin(LOG_ALLREDUCE_DIPOLE)
    call comm_summation(rbox_array,rbox_array2,4,nproc_group_h)
    call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_h)
-   elp3(762)=get_wtime()
-   elp3(784)=elp3(784)+elp3(762)-elp3(761)
+   call timer_end(LOG_ALLREDUCE_DIPOLE)
 
    rNe=rbox_array2(4)*Hvol               ! Number of electrons
    if(ifunc==1)then
@@ -178,7 +177,6 @@ end if
     end if
   end if
 
-  elp3(527)=get_wtime()
-  elp3(539)=elp3(539)+elp3(527)-elp3(526)
+call timer_end(LOG_CALC_DP)
 
 end subroutine subdip

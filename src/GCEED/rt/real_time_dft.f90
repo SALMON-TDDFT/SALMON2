@@ -44,8 +44,10 @@ use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
-use misc_routines, only: get_wtime
+use timer
 use global_variables_rt
+use write_performance_results, only: write_rt_performance
+use iso_fortran_env, only: output_unit
 implicit none
 
 type(s_rgrid) :: lg
@@ -69,14 +71,13 @@ integer :: ia,ib
 real(8) :: rab
 real(8),allocatable :: tfourier_integrand(:,:)
 
+call timer_begin(LOG_TOTAL)
+
+call timer_begin(LOG_INIT_RT)
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 call check_cep
 call check_ae_shape
-
-elp3(:)=0.d0
-elp5(:)=0.d0
-elp3(401)=get_wtime()
 
 iSCFRT=2
 OC=0
@@ -194,9 +195,10 @@ end select
 if(iflag_fourier_omega==1)then
    fourier_omega(1:num_fourier_omega)=fourier_omega(1:num_fourier_omega) !/2.d0/Ry 
 end if
+call timer_end(LOG_INIT_RT)
 
-elp3(402)=get_wtime()
 
+call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
 call IN_data(lg,mg,ng,system,info,stencil)
 
@@ -234,9 +236,10 @@ end if
 
 if(MEO==2.or.MEO==3) call make_corr_pole
 call make_icoobox_bound
-elp3(403)=get_wtime()
+call timer_end(LOG_READ_LDA_DATA)
 
 
+call timer_begin(LOG_INIT_RT)
 if(iflag_dip2==1) then
   if(imesh_oddeven(1)==1)then
     dip2boundary(1:num_dip2-1)=dip2boundary(1:num_dip2-1) !/a_B
@@ -262,9 +265,10 @@ do ib=1,ia-1
   Eion=Eion+Zps(Kion(ia))*Zps(Kion(ib))/rab
 end do
 end do
+call timer_end(LOG_INIT_RT)
 
-elp3(404)=get_wtime()
 
+call timer_begin(LOG_READ_RT_DATA)
 allocate(Ex_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(Ec_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
@@ -309,9 +313,10 @@ if(IC_rt==0) then
 else if(IC_rt==1) then
   call IN_data_rt(Ntime)
 end if
+call timer_end(LOG_READ_RT_DATA)
 
-elp3(405)=get_wtime()
 
+call timer_begin(LOG_INIT_RT)
 allocate( alpha_R(3,0:Nenergy), & 
                     alpha_I(3,0:Nenergy), Sf(3) )
 allocate( alphaq_R(3,3,0:Nenergy), & 
@@ -343,17 +348,19 @@ if(comm_is_root(nproc_id_global))then
   write(*, *) "dip2center[A]", dip2center(1)*a_B, dip2center(2)*a_B
   write(*, *) 
 end if
+call timer_end(LOG_INIT_RT)
+
 
 call Time_Evolution(lg,mg,ng,system,info,stencil)
 
-elp3(409)=get_wtime()
 
+call timer_begin(LOG_WRITE_RT_DATA)
 if(OC_rt==1) call OUT_data_rt
-elp3(410)=get_wtime()
+call timer_end(LOG_WRITE_RT_DATA)
 
 
 ! Output
-
+call timer_begin(LOG_WRITE_RESULTS)
 if(iwrite_external==1)then
   if(comm_is_root(nproc_id_global))then
     open(1,file=file_external)
@@ -622,97 +629,13 @@ case(3)
   deallocate( tfourier_integrand )
 
 end select
+call timer_end(LOG_WRITE_RESULTS)
 
+call timer_end(LOG_TOTAL)
 
-elp3(411)=get_wtime()
 
 if(comm_is_root(nproc_id_global))then
-  write(*,'(a)') "==================== elapsed time ===================="
-  write(*,'(a,f16.8)') "elapsed time bef. reading lda data [s] = ", elp3(402)-elp3(401)
-  write(*,'(a,f16.8)') "elapsed time for reading lda data [s]  = ", elp3(403)-elp3(402)
-  write(*,'(a,f16.8)') "elapsed time for allocating zpsi [s]   = ", elp3(404)-elp3(403)
-  write(*,'(a,f16.8)') "elapsed time for reading rt data [s]   = ", elp3(405)-elp3(404)
-  write(*,'(a,f16.8)') "elapsed time for rt initialization [s] = ", elp3(406)-elp3(405)
-  write(*,'(a,f16.8)') "elapsed time for prep. time prop. [s]  = ", elp3(407)-elp3(406)
-  write(*,'(a,f16.8)') "elapsed time for prev iterations [s]   = ", elp3(413)-elp3(412)
-  write(*,'(a,f16.8)') "elapsed time for rt iterations [s]     = ", elp3(414)-elp3(413)
-  write(*,'(a,f16.8)') "elapsed time for aft iterations [s]    = ", elp3(415)-elp3(414)
-  write(*,'(a,f16.8)') "elapsed time aft. rt iterations [s]    = ", elp3(409)-elp3(408)
-  write(*,'(a,f16.8)') "elapsed time for writing rt data [s]   = ", elp3(410)-elp3(409)
-  write(*,'(a,f16.8)') "elapsed time aft. writing rt data [s]  = ", elp3(411)-elp3(410)
-  write(*,'(a,f16.8)') "total time [s]                         = ", elp3(411)-elp3(401)
-  write(*,'(a)') "======================================================"
-  write(*,'(a)') "=========== elapsed time for rt iterations ==========="
-  write(*,'(a,f16.8)') "elapsed time for Vbox [s]              = ", elp5(532)
-  write(*,'(a,f16.8)') "elapsed time for time propagation [s]  = ", elp5(533)
-  write(*,'(a,f16.8)') "elapsed time for calculating rho [s]   = ", elp5(534)
-  write(*,'(a,f16.8)') "elapsed time for Allreduce rho [s]     = ", elp5(535)
-  write(*,'(a,f16.8)') "elapsed time for Hartree routine [s]   = ", elp5(536)
-  write(*,'(a,f16.8)') "elapsed time for Exc_Cor routine [s]   = ", elp5(537)
-  write(*,'(a,f16.8)') "elapsed time for bcast Vhxc [s]        = ", elp5(538)
-  select case(iperiodic)
-  case(0)
-    write(*,'(a,f16.8)') "elapsed time for calculating Dp [s]    = ", elp5(539)
-  case(3)
-    write(*,'(a,f16.8)') "elapsed time for calculating curr [s]  = ", elp5(539)
-  end select
-  write(*,'(a,f16.8)') "elapsed time for calculating Dp [s]    = ", elp5(539)
-  write(*,'(a,f16.8)') "elapsed time for calculating Etot [s]  = ", elp5(540)
-  write(*,'(a,f16.8)') "elapsed time for writing info etc. [s] = ", elp5(541)
-  write(*,'(a,f16.8)') "total time for rt iterations [s]       = ", elp5(542)
-  write(*,'(a)') "======================================================"
-  write(*,'(a)') "======================================================"
-  write(*,'(a)') "=========== communication time ======================="
-  write(*,'(a,f16.8)') "copy (1) [s]                           = ", elp5(731)
-  write(*,'(a,f16.8)') "copy (2) [s]                           = ", elp5(732)
-  write(*,'(a,f16.8)') "copy (3) [s]                           = ", elp5(733)
-  write(*,'(a,f16.8)') "copy (4) [s]                           = ", elp5(734)
-  write(*,'(a,f16.8)') "copy (5) [s]                           = ", elp5(735)
-  write(*,'(a,f16.8)') "copy (6) [s]                           = ", elp5(736)
-  write(*,'(a,f16.8)') "copy (7) [s]                           = ", elp5(737)
-  write(*,'(a,f16.8)') "copy (8) [s]                           = ", elp5(738)
-  write(*,'(a,f16.8)') "copy (9) [s]                           = ", elp5(739)
-  write(*,'(a,f16.8)') "copy (10) [s]                          = ", elp5(740)
-  write(*,'(a,f16.8)') "copy (11) [s]                          = ", elp5(741)
-  write(*,'(a,f16.8)') "copy (12) [s]                          = ", elp5(742)
-  write(*,'(a,f16.8)') "time for sendrecv [s]                  = ", elp5(743)
-  write(*,'(a,f16.8)') "Allreduce for nonlocal [s]             = ", elp5(744)
-  write(*,'(a,f16.8)') "Allreduce for rhobox [s]               = ", elp5(760)
-  write(*,'(a,f16.8)') "Allreduce in Hartree (1) [s]           = ", elp5(251)
-  write(*,'(a,f16.8)') "Allreduce in Hartree (2) [s]           = ", elp5(252)
-  write(*,'(a,f16.8)') "Allreduce in Hartree (3) [s]           = ", elp5(253)
-  write(*,'(a,f16.8)') "Allreduce in Hartree (4) [s]           = ", elp5(254)
-  write(*,'(a,f16.8)') "Allreduce in Hartree (5) [s]           = ", elp5(255)
-  write(*,'(a,f16.8)') "Allreduce in Hartree (6) [s]           = ", elp5(256)
-  write(*,'(a,f16.8)') "Allgatherv [s]                         = ", elp5(781)
-  write(*,'(a,f16.8)') "Allreduce in total_energy_ex (1) [s]   = ", elp5(782)
-  write(*,'(a,f16.8)') "Allreduce in total_energy_ex (2) [s]   = ", elp5(783)
-  write(*,'(a,f16.8)') "Allreduce in dipole calc. [s]          = ", elp5(784)
-  write(*,'(a)') "=========== analysis ================================="
-  write(*,'(a,f16.8)') "isend, irecv, wait [s]                 = ", elp5(743)-sum(elp5(731:742))
-  write(*,'(a,f16.8)') "Allgatherv [s]                         = ", elp5(781)
-  write(*,'(a,f16.8)') "Allreduce [s]                          = ", & 
-    elp5(744)+elp5(760)+sum(elp5(251:256))+sum(elp5(782:783))+elp5(784)
-  write(*,'(a,f16.8)') "Allreduce (related to num of nodes )   = ", elp5(744)
-  write(*,'(a,f16.8)') "Allreduce (not related to num of nodes)= ", &
-    elp5(760)+sum(elp5(251:256))+sum(elp5(782:783))+elp5(784)
-  write(*,'(a)') "======================================================"
-  if(iperiodic==3)then
-    write(*,'(a)') "=========== total_energy_periodic ===================="
-    write(*,'(a,f16.8)') "sendrecv [s]                           = ", elp5(1451)
-    write(*,'(a,f16.8)') "orbital energy [s]                     = ", elp5(1452)
-    write(*,'(a,f16.8)') "ion-ion [s]                            = ", elp5(1453)
-    write(*,'(a,f16.8)') "ion-electron [s]                       = ", elp5(1454)
-    write(*,'(a,f16.8)') "nonlocal 1 [s]                         = ", elp5(1455)
-    write(*,'(a,f16.8)') "nonlocal 2 [s]                         = ", elp5(1456)
-    write(*,'(a)') "=========== current =================================="
-    write(*,'(a,f16.8)') "sendrecv [s]                           = ", elp5(1351)
-    write(*,'(a,f16.8)') "current (except nonlocal) [s]          = ", elp5(1352)
-    write(*,'(a,f16.8)') "current nonlocal (1) [s]               = ", elp5(1353)
-    write(*,'(a,f16.8)') "Allreduce nonlocal (1) [s]             = ", elp5(1354)
-    write(*,'(a,f16.8)') "current nonlocal (2) [s]               = ", elp5(1355)
-    write(*,'(a,f16.8)') "Allreduce nonlocal (2) [s]             = ", elp5(1356)
-  end if
+  call write_rt_performance(output_unit)
 end if
 
 if(timer_process=='y')then
@@ -721,93 +644,7 @@ if(timer_process=='y')then
   timeFile = "timer_proc"//adjustl(fileNumber)
   open(79,file=timeFile)
 
-! Just copied above timers. If above timers are modified, followings also must be modified.
-
-  write(79,'(a)') "==================== elapsed time ===================="
-  write(79,'(a,f16.8)') "elapsed time bef. reading lda data [s] = ", elp3(402)-elp3(401)
-  write(79,'(a,f16.8)') "elapsed time for reading lda data [s]  = ", elp3(403)-elp3(402)
-  write(79,'(a,f16.8)') "elapsed time for allocating zpsi [s]   = ", elp3(404)-elp3(403)
-  write(79,'(a,f16.8)') "elapsed time for reading rt data [s]   = ", elp3(405)-elp3(404)
-  write(79,'(a,f16.8)') "elapsed time for rt initialization [s] = ", elp3(406)-elp3(405)
-  write(79,'(a,f16.8)') "elapsed time for prep. time prop. [s]  = ", elp3(407)-elp3(406)
-  write(79,'(a,f16.8)') "elapsed time for prev iterations [s]   = ", elp3(413)-elp3(412)
-  write(79,'(a,f16.8)') "elapsed time for rt iterations [s]     = ", elp3(414)-elp3(413)
-  write(79,'(a,f16.8)') "elapsed time for aft iterations [s]    = ", elp3(415)-elp3(414)
-  write(79,'(a,f16.8)') "elapsed time aft. rt iterations [s]    = ", elp3(409)-elp3(408)
-  write(79,'(a,f16.8)') "elapsed time for writing rt data [s]   = ", elp3(410)-elp3(409)
-  write(79,'(a,f16.8)') "elapsed time aft. writing rt data [s]  = ", elp3(411)-elp3(410)
-  write(79,'(a,f16.8)') "total time [s]                         = ", elp3(411)-elp3(401)
-  write(79,'(a)') "======================================================"
-  write(79,'(a)') "=========== elapsed time for rt iterations ==========="
-  write(79,'(a,f16.8)') "elapsed time for Vbox [s]              = ", elp5(532)
-  write(79,'(a,f16.8)') "elapsed time for time propagation [s]  = ", elp5(533)
-  write(79,'(a,f16.8)') "elapsed time for calculating rho [s]   = ", elp5(534)
-  write(79,'(a,f16.8)') "elapsed time for Allreduce rho [s]     = ", elp5(535)
-  write(79,'(a,f16.8)') "elapsed time for Hartree routine [s]   = ", elp5(536)
-  write(79,'(a,f16.8)') "elapsed time for Exc_Cor routine [s]   = ", elp5(537)
-  write(79,'(a,f16.8)') "elapsed time for bcast Vhxc [s]        = ", elp5(538)
-  select case(iperiodic)
-  case(0)
-    write(79,'(a,f16.8)') "elapsed time for calculating Dp [s]    = ", elp5(539)
-  case(3)
-    write(79,'(a,f16.8)') "elapsed time for calculating curr [s]  = ", elp5(539)
-  end select
-  write(79,'(a,f16.8)') "elapsed time for calculating Etot [s]  = ", elp5(540)
-  write(79,'(a,f16.8)') "elapsed time for writing info etc. [s] = ", elp5(541)
-  write(79,'(a,f16.8)') "total time for rt iterations [s]       = ", elp5(542)
-  write(79,'(a)') "======================================================"
-  write(79,'(a)') "======================================================"
-  write(79,'(a)') "=========== communication time ======================="
-  write(79,'(a,f16.8)') "copy (1) [s]                           = ", elp5(731)
-  write(79,'(a,f16.8)') "copy (2) [s]                           = ", elp5(732)
-  write(79,'(a,f16.8)') "copy (3) [s]                           = ", elp5(733)
-  write(79,'(a,f16.8)') "copy (4) [s]                           = ", elp5(734)
-  write(79,'(a,f16.8)') "copy (5) [s]                           = ", elp5(735)
-  write(79,'(a,f16.8)') "copy (6) [s]                           = ", elp5(736)
-  write(79,'(a,f16.8)') "copy (7) [s]                           = ", elp5(737)
-  write(79,'(a,f16.8)') "copy (8) [s]                           = ", elp5(738)
-  write(79,'(a,f16.8)') "copy (9) [s]                           = ", elp5(739)
-  write(79,'(a,f16.8)') "copy (10) [s]                          = ", elp5(740)
-  write(79,'(a,f16.8)') "copy (11) [s]                          = ", elp5(741)
-  write(79,'(a,f16.8)') "copy (12) [s]                          = ", elp5(742)
-  write(79,'(a,f16.8)') "time for sendrecv [s]                  = ", elp5(743)
-  write(79,'(a,f16.8)') "Allreduce for nonlocal [s]             = ", elp5(744)
-  write(79,'(a,f16.8)') "Allreduce for rhobox [s]               = ", elp5(760)
-  write(79,'(a,f16.8)') "Allreduce in Hartree (1) [s]           = ", elp5(251)
-  write(79,'(a,f16.8)') "Allreduce in Hartree (2) [s]           = ", elp5(252)
-  write(79,'(a,f16.8)') "Allreduce in Hartree (3) [s]           = ", elp5(253)
-  write(79,'(a,f16.8)') "Allreduce in Hartree (4) [s]           = ", elp5(254)
-  write(79,'(a,f16.8)') "Allreduce in Hartree (5) [s]           = ", elp5(255)
-  write(79,'(a,f16.8)') "Allreduce in Hartree (6) [s]           = ", elp5(256)
-  write(79,'(a,f16.8)') "Allgatherv [s]                         = ", elp5(781)
-  write(79,'(a,f16.8)') "Allreduce in total_energy_ex (1) [s]   = ", elp5(782)
-  write(79,'(a,f16.8)') "Allreduce in total_energy_ex (2) [s]   = ", elp5(783)
-  write(79,'(a,f16.8)') "Allreduce in dipole calc. [s]          = ", elp5(784)
-  write(79,'(a)') "=========== analysis ================================="
-  write(79,'(a,f16.8)') "isend, irecv, wait [s]                 = ", elp5(743)-sum(elp5(731:742))
-  write(79,'(a,f16.8)') "Allgatherv [s]                         = ", elp5(781)
-  write(79,'(a,f16.8)') "Allreduce [s]                          = ", & 
-    elp5(744)+elp5(760)+sum(elp5(251:256))+sum(elp5(782:783))+elp5(784)
-  write(79,'(a,f16.8)') "Allreduce (related to num of nodes )   = ", elp5(744)
-  write(79,'(a,f16.8)') "Allreduce (not related to num of nodes)= ", &
-    elp5(760)+sum(elp5(251:256))+sum(elp5(782:783))+elp5(784)
-  write(79,'(a)') "======================================================"
-  if(iperiodic==3)then
-    write(79,'(a)') "=========== total_energy_periodic ===================="
-    write(79,'(a,f16.8)') "sendrecv [s]                           = ", elp5(1451)
-    write(79,'(a,f16.8)') "orbital energy [s]                     = ", elp5(1452)
-    write(79,'(a,f16.8)') "ion-ion [s]                            = ", elp5(1453)
-    write(79,'(a,f16.8)') "ion-electron [s]                       = ", elp5(1454)
-    write(79,'(a,f16.8)') "nonlocal 1 [s]                         = ", elp5(1455)
-    write(79,'(a,f16.8)') "nonlocal 2 [s]                         = ", elp5(1456)
-    write(79,'(a)') "=========== current =================================="
-    write(79,'(a,f16.8)') "sendrecv [s]                           = ", elp5(1351)
-    write(79,'(a,f16.8)') "current (except nonlocal) [s]          = ", elp5(1352)
-    write(79,'(a,f16.8)') "current nonlocal (1) [s]               = ", elp5(1353)
-    write(79,'(a,f16.8)') "Allreduce nonlocal (1) [s]             = ", elp5(1354)
-    write(79,'(a,f16.8)') "current nonlocal (2) [s]               = ", elp5(1355)
-    write(79,'(a,f16.8)') "Allreduce nonlocal (2) [s]             = ", elp5(1356)
-  end if
+  call write_rt_performance(79)
 end if
 
 call deallocate_mat
@@ -816,7 +653,7 @@ call finalize_xc(xc_func)
   
 END subroutine Real_Time_DFT
 
-!=======================================================================
+!=========%==============================================================
 
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil)
 use structures
@@ -825,7 +662,7 @@ use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
-use misc_routines, only: get_wtime
+use timer
 use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
 use sendrecv_grid, only: init_sendrecv_grid
@@ -864,6 +701,8 @@ complex(8), allocatable :: shtpsi(:,:,:,:,:)
 
 type(s_scalar),allocatable :: srho(:,:)
 type(s_scalar),allocatable :: srho_s(:,:)
+
+call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   if(ispin==0)then
     nspin=1
@@ -1572,20 +1411,18 @@ if(comm_is_root(nproc_id_global))then
     write(41,'("#",a)') "---------------------------------------------------------------------"
   end if
 end if
+call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
 
-elp3(406)=get_wtime()
-
+call timer_begin(LOG_INIT_RT)
 call taylor_coe
+call timer_end(LOG_INIT_RT)
 
-elp3(407)=get_wtime()
 
+call timer_begin(LOG_RT_ITERATION)
 if(itotNtime-Miter_rt<=10000)then
 
-  elp3(412)=get_wtime()
-  elp3(413)=get_wtime()
   TE : do itt=Miter_rt+1-1,itotNtime
-    
     if(iwrite_projection==1.and.itt==Miter_rt+1-1) then
       if(mod(itt,2)==1)then 
         call projection(zpsi_out)
@@ -1596,15 +1433,9 @@ if(itotNtime-Miter_rt<=10000)then
 
     if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE
-  elp3(414)=get_wtime()
-  elp3(415)=get_wtime()
-  elp5(1:400)=elp3(1:400)
-  elp5(431:3000)=elp3(431:3000)
-
 
 else
 
-  elp3(412)=get_wtime()
   TE1 : do itt=Miter_rt+1-1,Miter_rt+10
     if(iwrite_projection==1.and.itt==Miter_rt+1-1) then
       if(mod(itt,2)==1)then 
@@ -1614,32 +1445,22 @@ else
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) &
+      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE1
-  elp3(413)=get_wtime()
-
-  elp3(1:400)=0.d0
-  elp3(431:3000)=0.d0
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
     call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE2
 
-  elp5(1:400)=elp3(1:400)
-  elp5(431:3000)=elp3(431:3000)
-
-  elp3(414)=get_wtime()
-
   TE3 : do itt=itotNtime-4,itotNtime
     call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
   end do TE3
-  elp3(415)=get_wtime()
 
 end if
+call timer_end(LOG_RT_ITERATION)
 
   if(iperiodic==3) deallocate(stencil%kAc)
-
-elp3(408)=get_wtime()
 
 close(030) ! laser
 

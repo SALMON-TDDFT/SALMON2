@@ -48,7 +48,9 @@ use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_globa
                            nproc_group_korbital, nproc_id_korbital, nproc_group_rho
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
-use misc_routines, only: get_wtime
+use timer
+use write_performance_results, only: write_gs_performance
+use iso_fortran_env, only: output_unit
 use calc_iobnum_sub
 use check_mg_sub
 use check_ng_sub
@@ -102,9 +104,10 @@ iflag_comm_rho=1
 
 iblacsinit=0
 
-elp3(:)=0.d0
-elp3(101)=get_wtime()
+call timer_begin(LOG_TOTAL)
 
+
+call timer_begin(LOG_INIT_GS)
 inumcpu_check=0
 
 call setbN
@@ -146,11 +149,11 @@ if(iflag_stopt==1)then
   call structure_opt_ini(MI)
   istopt_tranc=0
 end if
+call timer_end(LOG_INIT_GS)
+
 
 Structure_Optimization_Iteration : do istopt=1,iter_stopt
 Multigrid_Iteration : do img=1,ntmg
-
-elp3(102)=get_wtime()
 
 if(istopt==1)then
   select case( IC )
@@ -158,6 +161,8 @@ if(istopt==1)then
 !------------------------------ New calculation
 
   case default
+
+    call timer_begin(LOG_INIT_GS)
 
     Hgs(1:3)=Harray(1:3,1)
     Hvol=Hgs(1)*Hgs(2)*Hgs(3)
@@ -334,10 +339,14 @@ if(istopt==1)then
       end do
       call Total_Energy_periodic_scf(zpsi_tmp)
     end select
+
+  call timer_end(LOG_INIT_GS)
       
 !------------------------------ Continue the previous calculation
 
   case(1,3)
+    call timer_begin(LOG_INIT_GS_RESTART)
+
     call IN_data(lg,mg,ng,system,info,stencil)
 
     call allocate_mat
@@ -378,14 +387,17 @@ if(istopt==1)then
     call make_icoobox_bound
   end select
 
+  call timer_end(LOG_INIT_GS_RESTART)
+
 else if(istopt>=2)then
+  call timer_begin(LOG_INIT_GS)
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     call init_ps(system%al,system%brl,stencil%matrix_A)
   end if
+  call timer_end(LOG_INIT_GS)
 end if
 
-elp3(103)=get_wtime()
 
 if(comm_is_root(nproc_id_global)) then
   write(*,*) '-----------------------------------------------'
@@ -407,8 +419,11 @@ if(comm_is_root(nproc_id_global)) then
     end if
   end do
 end if
+
+
 !---------------------------------------- Iteration
 
+call timer_begin(LOG_INIT_GS_ITERATION)
 iflag=1
 iterVh=1000
 sum1=1.0d9
@@ -637,11 +652,11 @@ case(3)
   end do
   end do
 end select
+call timer_end(LOG_INIT_GS_ITERATION)
 
+
+call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
-
-  elp3(111)=get_wtime()
-
   select case(convergence)
     case('rho_dne')
       if(sum1<threshold) cycle DFT_Iteration
@@ -651,8 +666,6 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(sum1<threshold_norm_pot) cycle DFT_Iteration
   end select 
 
-  elp3(112)=get_wtime()
-  elp3(122)=elp3(122)+elp3(112)-elp3(111)
 
   Miter=Miter+1
 
@@ -681,7 +694,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
   if(iscf_order==1)then
-   
+    call timer_begin(LOG_CALC_MINIMIZATION)
     select case(iperiodic)
     case(0)
       do ik=k_sta,k_end
@@ -717,13 +730,11 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     if( amin_routine == 'cg' .or.       &
    (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
-      elp3(181)=get_wtime()
-
       select case(iperiodic)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+          call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
@@ -733,7 +744,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,  &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
@@ -741,21 +752,14 @@ DFT_Iteration : do iter=1,iDiter(img)
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
-
-
-      elp3(182)=get_wtime()
-      elp3(183)=elp3(183)+elp3(182)-elp3(181)
     else if( amin_routine  == 'diis' .or. amin_routine == 'cg-diis' ) then
-      elp3(181)=get_wtime()
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,esp,norm_diff_psi_stock,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
-      elp3(182)=get_wtime()
-      elp3(184)=elp3(184)+elp3(182)-elp3(181)
     end if
   
     select case(iperiodic)
@@ -790,10 +794,10 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
     end select
+    call timer_end(LOG_CALC_MINIMIZATION)
 
-    elp3(113)=get_wtime()
-    elp3(123)=elp3(123)+elp3(113)-elp3(112)
 
+    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     select case(iperiodic)
     case(0)
       call Gram_Schmidt_ns
@@ -820,7 +824,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
           end do
 
-          call subspace_diag(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+          call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
           do ik=k_sta,k_end
@@ -854,7 +858,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
           end do
 
-          call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+          call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
                                       iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                       info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
@@ -875,11 +879,10 @@ DFT_Iteration : do iter=1,iDiter(img)
         end select
       end if
     end if
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
   
-    elp3(114)=get_wtime()
-    elp3(124)=elp3(124)+elp3(114)-elp3(113)
     
-
+    call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
     case(0)
       call calc_density(psi)
@@ -893,26 +896,29 @@ DFT_Iteration : do iter=1,iDiter(img)
       case ('broyden')
         call buffer_broyden_ns(iter)
     end select
+    call timer_end(LOG_CALC_RHO)
     
-    elp3(115)=get_wtime()
-    elp3(125)=elp3(125)+elp3(115)-elp3(114)
   
+    call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
       call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,stencil)
     end if
+    call timer_end(LOG_CALC_HARTREE)
   
-    elp3(116)=get_wtime()
-    elp3(126)=elp3(126)+elp3(116)-elp3(115)
   
+    call timer_begin(LOG_CALC_EXC_COR)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
       call exc_cor_ns(ppn)
     end if
+    call timer_end(LOG_CALC_EXC_COR)
    
+
+    call timer_begin(LOG_ALLGATHERV_TOTAL)
     call allgatherv_vlocal
+    call timer_end(LOG_ALLGATHERV_TOTAL)
     
-    elp3(117)=get_wtime()
-    elp3(127)=elp3(127)+elp3(117)-elp3(116)
   
+    call timer_begin(LOG_CALC_TOTAL_ENERGY)
     select case(iperiodic)
     case(0)
       call Total_Energy(psi)
@@ -932,29 +938,28 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       call Total_Energy_periodic_scf(zpsi_tmp)
     end select
+    call timer_end(LOG_CALC_TOTAL_ENERGY)
   
-    elp3(118)=get_wtime()
-    elp3(128)=elp3(128)+elp3(118)-elp3(117)
-    elp3(131)=get_wtime()
-  
-    elp3(132)=get_wtime()
-    elp3(142)=elp3(142)+elp3(132)-elp3(131)
-    
-    elp3(118)=get_wtime()
 
+    call timer_begin(LOG_CALC_CHANGE_ORDER)
     if(iperiodic==0)then  
       call change_order(psi)
     end if
+    call timer_end(LOG_CALC_CHANGE_ORDER)
   
   else if(iscf_order==2)then
 
+    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     select case(iperiodic)
     case(0)
       call Gram_Schmidt_ns
     case(3)
       call Gram_Schmidt_periodic
     end select
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
+
+    call timer_begin(LOG_CALC_SUBSPACE_DIAG)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
@@ -973,7 +978,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         end do
 
-        call subspace_diag(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+        call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
         do ik=k_sta,k_end
@@ -1006,7 +1011,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
         end do
 
-        call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,iparaway_ob,  &
+        call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
                                     iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
@@ -1026,14 +1031,20 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
       end select
     end if
+    call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
+
+    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     select case(iperiodic)
     case(0)
       call Gram_Schmidt_ns
     case(3)
       call Gram_Schmidt_periodic
     end select
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
+
+    call timer_begin(LOG_CALC_SUBSPACE_DIAG)
     select case(iperiodic)
     case(0)
       do ik=k_sta,k_end
@@ -1066,14 +1077,16 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
     end select
+    call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
+
+    call timer_begin(LOG_CALC_MINIMIZATION)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
-
       select case(iperiodic)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+          call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
@@ -1083,7 +1096,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3,   &
+          call gscg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
@@ -1091,17 +1104,17 @@ DFT_Iteration : do iter=1,iDiter(img)
                              info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
-
-
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,esp,norm_diff_psi_stock,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
     end if
+    call timer_end(LOG_CALC_MINIMIZATION)
+
 
     select case(iperiodic)
     case(0)
@@ -1136,19 +1149,26 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
     end select
 
+
+    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     select case(iperiodic)
     case(0)
       call Gram_Schmidt_ns
     case(3)
       call Gram_Schmidt_periodic
     end select
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
+
+    call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
     case(0)
       call calc_density(psi)
     case(3)
       call calc_density(zpsi)
     end select
+    call timer_end(LOG_CALC_RHO)
+
 
     select case(amixing)
       case ('simple')
@@ -1156,24 +1176,38 @@ DFT_Iteration : do iter=1,iDiter(img)
       case ('broyden')
         call buffer_broyden_ns(iter)
     end select
-    
+ 
+
+    call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
       call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
     end if
+    call timer_end(LOG_CALC_HARTREE)
+
   
+    call timer_begin(LOG_CALC_EXC_COR)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
       call exc_cor_ns(ppn)
     end if
+    call timer_end(LOG_CALC_EXC_COR)
    
+
+    call timer_begin(LOG_ALLGATHERV_TOTAL)
     call allgatherv_vlocal
+    call timer_end(LOG_ALLGATHERV_TOTAL)
+
     
+    call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
     case(0)
       call calc_density(psi)
     case(3)
       call calc_density(zpsi)
     end select
+    call timer_end(LOG_CALC_RHO)
 
+
+    call timer_begin(LOG_CALC_TOTAL_ENERGY)
     select case(iperiodic)
     case(0)
       call Total_Energy(psi)
@@ -1193,8 +1227,11 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       call Total_Energy_periodic_scf(zpsi_tmp)
     end select
+    call timer_end(LOG_CALC_TOTAL_ENERGY)
   end if
 
+
+  call timer_begin(LOG_WRITE_RESULTS)
 !+++++ test: total energy
   if(iperiodic==3) then
     allocate(stencil%kAc(k_sta:k_end,3))
@@ -1340,10 +1377,8 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(comm_is_root(nproc_id_global))then
     write(*,*) "Ne=",rNebox2*Hvol
   end if
+  call timer_end(LOG_WRITE_RESULTS)
 
-  elp3(119)=get_wtime()
-  elp3(129)=elp3(129)+elp3(119)-elp3(118)
-  elp3(130)=elp3(130)+elp3(119)-elp3(111)
 
 if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
@@ -1376,10 +1411,11 @@ case(3)
   deallocate(spsi%zwf)
 end select
 
-elp3(104)=get_wtime()
-
 deallocate(idiis_sd)
+call timer_end(LOG_GS_ITERATION)
 
+
+call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(icalcforce==1) then
   if(iperiodic==0) then
     call calc_force
@@ -1416,6 +1452,8 @@ if(iflag_stopt==1) then
     exit Multigrid_Iteration
   end if
 end if
+call timer_end(LOG_DEINIT_GS_ITERATION)
+
 
 end do Multigrid_Iteration
 if(istopt_tranc==1)then
@@ -1423,7 +1461,9 @@ if(istopt_tranc==1)then
 end if
 end do Structure_Optimization_Iteration
 
+
 !---------------------------------------- Output
+call timer_begin(LOG_WRITE_RESULTS)
 
 call band_information
 
@@ -1456,16 +1496,20 @@ if(out_elf=='y')then
   call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
   deallocate(elf)
 end if
+call timer_end(LOG_WRITE_RESULTS)
 
+
+call timer_begin(LOG_WRITE_LDA_DATA)
 ! LDA data
 ! subroutines in scf_data.f90
 if ( OC==1.or.OC==2.or.OC==3 ) then
   call OUT_data
 end if
-elp3(105)=get_wtime()
+call timer_end(LOG_WRITE_LDA_DATA)
+
 
 ! LDA information
-
+call timer_begin(LOG_WRITE_INFOS)
 if(comm_is_root(nproc_id_global)) then
   open(1,file=LDA_info)
 
@@ -1532,63 +1576,17 @@ if(comm_is_root(nproc_id_global)) then
   close(1)
 
 end if
-elp3(106)=get_wtime()
-
-if(comm_is_root(nproc_id_global))then
-   write(*,'(a)') "==================== elapsed time ===================="
-   if(IC==0)then
-     write(*,'(a,f16.8)') "elapsed time before initializing [s]  = ", elp3(102)-elp3(101)
-     write(*,'(a,f16.8)') "elapsed time for initializing [s]     = ", elp3(103)-elp3(102)
-   else if(IC==1)then
-     write(*,'(a,f16.8)') "elapsed time before reading data [s]  = ", elp3(102)-elp3(101)
-     write(*,'(a,f16.8)') "elapsed time for reading data [s]     = ", elp3(103)-elp3(102)
-   end if
-   write(*,'(a,f16.8)') "elapsed time for scf iterations [s]   = ", elp3(104)-elp3(103)
-   write(*,'(a,f16.8)') "elapsed time for writing data [s]     = ", elp3(105)-elp3(104)
-   write(*,'(a,f16.8)') "elapsed time after writing data [s]   = ", elp3(106)-elp3(105)
-   write(*,'(a,f16.8)') "total time [s]                        = ", elp3(106)-elp3(101)
-   write(*,'(a)') "======================================================"
-   write(*,'(a)') "================== in scf iterations ================="
-   write(*,'(a,f16.8)') "elapsed time for copying psi [s]      = ", elp3(122)
-   write(*,'(a,f16.8)') "elapsed time for optimizing psi [s]   = ", elp3(123)
-   write(*,'(a,f16.8)') "elapsed time for Gram Schmidt [s]     = ", elp3(124)
-   write(*,'(a,f16.8)') "elapsed time for calculating rho  [s] = ", elp3(125)
-   write(*,'(a,f16.8)') "elapsed time for Hartree routine  [s] = ", elp3(126)
-   write(*,'(a,f16.8)') "elapsed time for Exc_Cor routine  [s] = ", elp3(127)
-   write(*,'(a,f16.8)') "elapsed time for calculating Etot [s] = ", elp3(128)
-   write(*,'(a,f16.8)') "elapsed time for subspace-diag. [s]   = ", elp3(142)
-   write(*,'(a,f16.8)') "elapsed time for writing info. [s]    = ", elp3(129)
-   write(*,'(a,f16.8)') "total time for scf iterations [s]     = ", elp3(130)
-   write(*,'(a)') "======================================================"
-   write(*,'(a)') "================== in subspace-diag. ================="
-   write(*,'(a,f16.8)') "elapsed time for initialization [s]   = ", elp3(352)
-   write(*,'(a,f16.8)') "elapsed time for Vlocal [s]           = ", elp3(353)
-   write(*,'(a,f16.8)') "elapsed time for Amat [s]             = ", elp3(354)
-   write(*,'(a,f16.8)') "elapsed time for eigen [s]            = ", elp3(355)
-   write(*,'(a,f16.8)') "elapsed time for psi_mesh_box (1) [s] = ", elp3(356)
-   write(*,'(a,f16.8)') "elapsed time for psi_mesh_box (2) [s] = ", elp3(357)
-   write(*,'(a)') "======================================================"
-   write(*,'(a)') "================== in eigen. ========================="
-   write(*,'(a,f16.8)') "elapsed time for initialization [s]   = ", elp3(362)
-   write(*,'(a,f16.8)') "elapsed time for BLACS, DESCINIT [s]  = ", elp3(363)
-   write(*,'(a,f16.8)') "elapsed time for PDELSET (1) [s]      = ", elp3(364)
-   write(*,'(a,f16.8)') "elapsed time for PDSYEVX [s]          = ", elp3(365)
-   write(*,'(a,f16.8)') "elapsed time for PDELSET (2) [s]      = ", elp3(366)
-   write(*,'(a)') "======================================================"
-   write(*,'(a,f16.8)') "elapsed time for CG [s]               = ", elp3(183)
-   write(*,'(a,f16.8)') "elapsed time for DIIS [s]             = ", elp3(184)
-   write(*,'(a,f16.8)') "comm. for inner product in CG, DIIS[s]= ", elp3(190)
-   write(*,'(a,f16.8)') "elapsed time for Gram Schmidt [s]     = ", elp3(124)
-   write(*,'(a,f16.8)') "comm. for inner product in GS (1) [s] = ", elp3(188)
-   write(*,'(a,f16.8)') "comm. for inner product in GS (2) [s] = ", elp3(189)
-   write(*,'(a,f16.8)') "hpsi2 in CG [s]                       = ", elp3(193)
-   write(*,'(a,f16.8)') "gk in CG [s]                          = ", elp3(194)
-   write(*,'(a)') "======================================================"
-end if
+call timer_end(LOG_WRITE_INFOS)
 
 deallocate(Vlocal)
-
 call finalize_xc(xc_func)
+
+call timer_end(LOG_TOTAL)
+
+
+if(comm_is_root(nproc_id_global))then
+  call write_gs_performance(output_unit)
+end if
 
 contains
 

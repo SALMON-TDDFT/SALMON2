@@ -18,14 +18,13 @@ module subspace_diag_sub
 
 contains
 
-subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
   use inputoutput, only: ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
-  use misc_routines, only: get_wtime
   use hpsi_sub
   use calc_allob_sub
   use calc_iroot_sub
@@ -41,7 +40,6 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,ipara
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
-  real(8),intent(out) :: elp3(3000)
   integer,intent(in)  :: ilsda
   integer,intent(in)  :: nproc_ob
   integer,intent(in)  :: iparaway_ob
@@ -76,7 +74,6 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,elp3,ilsda,nproc_ob,ipara
   integer :: iter
   integer :: iobsta(2),iobend(2)
   
-  elp3(301)=get_wtime()
 
   allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &

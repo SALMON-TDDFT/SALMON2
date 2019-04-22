@@ -84,7 +84,7 @@ if(iperiodic==3)then
   end do
 end if
 
-elp3(701)=get_wtime()
+
 
 select case(iperiodic)
 case(0)
@@ -95,8 +95,8 @@ case(3)
   call sendrecv_groupob_tmp(tpsi)
 end select
 
-elp3(704)=get_wtime()
-elp3(743)=elp3(743)+elp3(704)-elp3(701)
+
+
 
 select case(iperiodic)
 case(0)
@@ -284,10 +284,10 @@ if(iflag_ps.eq.1)then
     end do
   end select
 
-  elp3(705)=get_wtime()
+
   call comm_summation(uVpsibox3,uVpsibox4,maxlm*MI*iobmax*k_num,nproc_group_korbital)
-  elp3(706)=get_wtime()
-  elp3(744)=elp3(744)+elp3(706)-elp3(705)
+
+
 
 end if
 

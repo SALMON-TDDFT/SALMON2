@@ -224,9 +224,6 @@ real(8),allocatable :: Vbox(:,:,:)
 
 real(8),allocatable :: Ex_fast(:,:,:),Ec_fast(:,:,:)
 
-real(8) :: elp3(3000)
-real(8) :: elp5(3000)
-
 integer, allocatable :: idiis_sd(:)
 
 integer :: iwksta(3),iwkend(3),iwknum(3)
