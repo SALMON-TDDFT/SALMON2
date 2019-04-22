@@ -92,8 +92,8 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             coeff_tmp(jo2) = dot_wf( &
-              & wf_jo1, &
-              & wf%rwf(:, :, :, ispin, io2, ik, im))
+              & wf%rwf(:, :, :, ispin, io2, ik, im), &
+              & wf_jo1)
           end if
         end do 
         call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
@@ -240,6 +240,8 @@ contains
       & rg%is_array(3):rg%ie_array(3)) &
       & :: wf_jo1, wf_exc, wf_exc_tmp
 
+    complex(8), parameter :: one = 1d0
+
     nsize_rg =  (rg%ie_array(1) - rg%is_array(1)) &
       & * (rg%ie_array(2) - rg%is_array(2)) &
       & * (rg%ie_array(3) - rg%is_array(3))
@@ -266,8 +268,8 @@ contains
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
             coeff_tmp(jo2) = dot_wf( &
-              & wf_jo1, &
-              & wf%zwf(:, :, :, ispin, io2, ik, im))
+              & wf%zwf(:, :, :, ispin, io2, ik, im), &
+              & wf_jo1)
           end if
         end do 
         call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
@@ -286,11 +288,11 @@ contains
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
-          call axpy_wf_ovlp(dcmplx(-1.0), wf_exc, wf_jo1)
+          call axpy_wf_ovlp(-one, wf_exc, wf_jo1)
           ! Normalization:
           norm2_tmp = real(dot_wf(wf_jo1, wf_jo1))
           call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
-          call scal_wf_ovlp(cmplx(1d0, 0d0) / sqrt(norm2), wf_jo1)
+          call scal_wf_ovlp(one / sqrt(norm2), wf_jo1)
           ! Write back to "zwf":
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
