@@ -68,6 +68,7 @@ use lattice
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
+use calc_iroot_sub
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa,ia
