@@ -69,7 +69,6 @@ subroutine dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda
   real(8) :: uk,alpha,ak,bk,ck
   real(8) , allocatable :: xk(:,:,:),hxk(:,:,:),gk(:,:,:),pk(:,:,:)
   real(8) , allocatable :: gk2(:,:,:)
-  real(8) :: elp2(2000)
   integer :: iob_myob,job_myob
   integer :: icorr,jcorr               
   integer :: iroot
@@ -107,8 +106,8 @@ subroutine dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda
   end do
   end do
   
-  elp2(:)=0d0
-  elp2(1)=get_wtime()
+
+
   
   if(ilsda == 0)then
     iobsta(1)=1
@@ -134,7 +133,7 @@ subroutine dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda
   orbital : do iob=iobsta(is),iobend(is)
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
     call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
-    elp2(2)=get_wtime()
+
   
     if(icorr==1)then
   

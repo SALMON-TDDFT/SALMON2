@@ -112,6 +112,7 @@ contains
     use salmon_communication, only: comm_summation
     use salmon_parallel, only: get_thread_id,get_nthreads
     use misc_routines, only: ceiling_pow2
+    use timer
     implicit none
     integer        ,intent(in) :: nspin
     type(s_wf_info),intent(in) :: info
@@ -161,7 +162,9 @@ contains
         end do
 
 !$omp end parallel
+        call timer_begin(LOG_ALLREDUCE_RHO)
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
+        call timer_end(LOG_ALLREDUCE_RHO)
       end do
       end do
 
@@ -199,7 +202,9 @@ contains
         end do
 
 !$omp end parallel
+        call timer_begin(LOG_ALLREDUCE_RHO)
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
+        call timer_end(LOG_ALLREDUCE_RHO)
       end do
       end do
 

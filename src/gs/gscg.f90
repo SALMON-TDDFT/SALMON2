@@ -21,14 +21,14 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,elp3, &
+subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
                  rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                  info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
-  use misc_routines, only: get_wtime
+  use timer
   use hpsi_sub
   use calc_allob_sub
   use calc_iroot_sub
@@ -53,7 +53,6 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
-  real(8),intent(out)    :: elp3(3000)
   real(8),intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
   real(8),intent(inout) :: rhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
   real(8),intent(inout) :: rgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
@@ -79,14 +78,16 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
   real(8) :: pkhxk_ob(itotmst),pkHpk_ob(itotmst)
   real(8) :: uk,alpha,ak,bk,ck
   real(8) , allocatable :: gk(:,:,:)
-  real(8) :: elp2(2000)
   real(8):: rmatbox_m(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer :: iob_myob,job_myob
   integer :: iob_allob
   integer :: icorr_iob,icorr_job
   integer :: iroot
   integer :: is_sta,is_end
-  
+
+  call timer_begin(LOG_GSCG_TOTAL)
+
+  call timer_begin(LOG_GSCG_INIT)
   allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),1,1,1,1))
@@ -111,9 +112,6 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
   end do
   end do
   
-  elp2(:)=0d0
-  elp2(1)=get_wtime()
-  
   if(ilsda == 0)then
     iobsta(1)=1
     iobend(1)=itotmst
@@ -123,7 +121,10 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
     iobsta(2)=mst(1)+1
     iobend(2)=itotmst
   end if
-  
+  call timer_end(LOG_GSCG_INIT)
+
+
+  call timer_begin(LOG_GSCG_INIT_ITERATION)
   do iob=1,nspin*info%numo
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     if(ilsda==0.or.ilsda==1.and.iob<=info%numo)then
@@ -174,13 +175,15 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
     end do
   end do
   
-  call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rhxk_ob,xkhxk_ob,elp3,hvol)
+  call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rhxk_ob,xkhxk_ob,hvol)
   
   xkxk_ob(:)=1.d0 
   rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
+  call timer_begin(LOG_GSCG_INIT_ITERATION)
+
   
+  call timer_begin(LOG_GSCG_ITERATION)
   Iteration : do iter=1,ncg
-  elp2(2)=get_wtime()
     do iob=1,nspin*info%numo
       call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -266,7 +269,7 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
       end do
       end do
     end if 
-    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rgk_ob,rgk_ob,sum_ob0,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rgk_ob,rgk_ob,sum_ob0,hvol)
     if ( iter==1 ) then
       do iob=1,nspin*info%numo
         call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
@@ -294,9 +297,9 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
       end do
     end if 
     gkgk_ob(:)=sum_ob0(:)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rpk_ob,xkpk_ob,elp3,hvol)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rpk_ob,rpk_ob,pkpk_ob,elp3,hvol)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rpk_ob,rhxk_ob,pkhxk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rpk_ob,xkpk_ob,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rpk_ob,rpk_ob,pkpk_ob,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rpk_ob,rhxk_ob,pkhxk_ob,hvol)
   
     do iob=1,nspin*info%numo
       call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
@@ -340,7 +343,7 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
       end do
       end do
     end do
-    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rpk_ob,rgk_ob,pkHpk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rpk_ob,rgk_ob,pkHpk_ob,hvol)
     do iob=1,nspin*info%numo
       call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
       ak=pkHpk_ob(iob_allob)*xkpk_ob(iob_allob)-pkhxk_ob(iob_allob)*pkpk_ob(iob_allob)
@@ -358,14 +361,15 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
       end do
       end do
     end do
-    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rhxk_ob,xkhxk_ob,elp3,hvol)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rxk_ob,xkxk_ob,elp3,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rhxk_ob,xkhxk_ob,hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rxk_ob,xkxk_ob,hvol)
     rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
-  
-  
   end do Iteration
-  
-  call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rxk_ob,sum_ob0,elp3,hvol)
+  call timer_end(LOG_GSCG_ITERATION)
+
+
+  call timer_begin(LOG_GSCG_DEINIT)
+  call inner_product7(mg,iparaway_ob,itotmst,mst,nspin*info%numo,rxk_ob,rxk_ob,sum_ob0,hvol)
   do iob=1,nspin*info%numo
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*info%numo)
     if(ilsda==0.or.ilsda==1.and.iob<=info%numo)then
@@ -392,6 +396,9 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
   deallocate(stpsi%rwf,shtpsi%rwf)
   deallocate(v(nspin_1)%f)
   deallocate(v)
+  call timer_end(LOG_GSCG_DEINIT)
+
+  call timer_end(LOG_GSCG_TOTAL)
 
   return
   

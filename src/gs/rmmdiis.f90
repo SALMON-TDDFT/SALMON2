@@ -23,7 +23,7 @@ contains
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,elp3,esp,norm_diff_psi_stock,   &
+subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,esp,norm_diff_psi_stock,   &
                    info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
@@ -47,7 +47,6 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_r
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: hvol
   integer,intent(out)   :: iflag_diisjump
-  real(8),intent(out)   :: elp3(3000)
   real(8),intent(in)    :: esp(itotmst,num_kpoints_rd)
   real(8),intent(out)   :: norm_diff_psi_stock(itotmst,1)
   type(s_wf_info)       :: info_ob
@@ -167,14 +166,14 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_r
       end do
       end do
 
-      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),0),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
+      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),0),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1)
   
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
         R1(:,:,iz,0)=htphi(:,:,iz)-rbox1*hvol*phi(:,:,iz,0)
       end do 
       epsdiis(iob,0)=rbox1*hvol
-      call inner_product3(mg,R1(mg%is(1),mg%is(2),mg%is(3),0),R1(mg%is(1),mg%is(2),mg%is(3),0),rbox1,elp3)
+      call inner_product3(mg,R1(mg%is(1),mg%is(2),mg%is(3),0),R1(mg%is(1),mg%is(2),mg%is(3),0),rbox1)
       Rnorm(iob,0)=rbox1*hvol
   
     else
@@ -200,7 +199,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_r
       end if
   
   ! normalization
-      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),phi(mg%is(1),mg%is(2),mg%is(3),iter),rbox1,elp3)
+      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),phi(mg%is(1),mg%is(2),mg%is(3),iter),rbox1)
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
         phi(:,:,iz,iter)=phi(:,:,iz,iter)/sqrt(rbox1*hvol)
@@ -226,16 +225,16 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_r
       end do
       end do
   
-      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
+      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1)
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
         R1(:,:,iz,iter)=htphi(:,:,iz)-rbox1*hvol*phi(:,:,iz,iter)
       end do
   
-      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
+      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1)
       epsdiis(iob,iter)=rbox1*hvol
   
-      call inner_product3(mg,R1(mg%is(1),mg%is(2),mg%is(3),iter),R1(mg%is(1),mg%is(2),mg%is(3),iter),rbox1,elp3)
+      call inner_product3(mg,R1(mg%is(1),mg%is(2),mg%is(3),iter),R1(mg%is(1),mg%is(2),mg%is(3),iter),rbox1)
       Rnorm(iob,iter)=rbox1*hvol
   
   ! judgement for closing loop.
@@ -294,7 +293,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_r
       end do
       end do
 
-      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
+      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),iter),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1)
       
       end if
   
@@ -382,7 +381,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_r
       end do
       end do
   
-      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),0),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1,elp3)
+      call inner_product3(mg,phi(mg%is(1),mg%is(2),mg%is(3),0),htphi(mg%is(1),mg%is(2),mg%is(3)),rbox1)
   
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)

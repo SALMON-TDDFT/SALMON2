@@ -22,7 +22,7 @@ contains
 !============================ Hartree potential (Solve Poisson equation)
 
 subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
-                            meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,elp3,inum_mxin_s,   &
+                            meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                             ibox_icoobox_bound,icoobox_bound)
   use inputoutput, only: natom,rion
@@ -30,7 +30,7 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h, &
                              nproc_id_bound, nproc_size_bound, nproc_group_bound
   use salmon_communication, only: comm_summation
-  use misc_routines, only: get_wtime
+  use timer
   
   use omp_lib, only: omp_get_num_threads, omp_get_thread_num, omp_get_max_threads
   use misc_routines, only: ceiling_pow2
@@ -56,7 +56,6 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
   real(8),intent(in) :: hvol
   integer,intent(in) :: iflag_ps
   integer,intent(in) :: num_pole
-  real(8),intent(out) :: elp3(3000)
   integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
   integer,intent(in) :: iamax
   integer,intent(in) :: maxval_pole
@@ -226,10 +225,9 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
     center_trho_nume_deno2(4,icorr_polenum(ii))=sum1
   end do
   
-  elp3(201)=get_wtime()
+  call timer_begin(LOG_ALLREDUCE_HARTREE)
   call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*num_pole,nproc_group_h)
-  elp3(202)=get_wtime()
-  elp3(251)=elp3(251)+elp3(202)-elp3(201)
+  call timer_end(LOG_ALLREDUCE_HARTREE)
   
   do ii=1,num_pole
     if(center_trho_nume_deno(4,ii)*Hvol>=1.d-12)then
@@ -335,10 +333,9 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
       rholm(:,icen)=rholm2(:,icen)
     end do
   else
-    elp3(201)=get_wtime()
+    call timer_begin(LOG_ALLREDUCE_HARTREE)
     call comm_summation(rholm2,rholm,(lmax_meo+1)**2*num_center,nproc_group_h)
-    elp3(202)=get_wtime()
-    elp3(252)=elp3(252)+elp3(202)-elp3(201)
+    call timer_end(LOG_ALLREDUCE_HARTREE)
   end if
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -445,13 +442,12 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
         wkbound_h(jj)=wk2bound_h(jj)
       end do
     else
-      elp3(201)=get_wtime()
+      call timer_begin(LOG_ALLREDUCE_HARTREE)
       call comm_summation( &
         wk2bound_h,              wkbound_h,              icount/2, nproc_group_bound(k), 0                    )
       call comm_summation( &
         wk2bound_h(icount/2+1:), wkbound_h(icount/2+1:), icount/2, nproc_group_bound(k), nproc_size_bound(k)-1)
-      elp3(202)=get_wtime()
-      elp3(253)=elp3(253)+elp3(202)-elp3(201)
+      call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
     if(nproc_id_bound(k)==0) then

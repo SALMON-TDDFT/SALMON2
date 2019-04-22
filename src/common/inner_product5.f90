@@ -2,7 +2,7 @@ subroutine inner_product5(mg,iparaway_ob,itotmst,mst,iobnum,zmatbox1,zmatbox2,zb
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_korbital
   use salmon_communication, only: comm_summation
-  use misc_routines, only: get_wtime
+  use timer
   use calc_allob_sub
   !$ use omp_lib
   implicit none
@@ -34,6 +34,9 @@ subroutine inner_product5(mg,iparaway_ob,itotmst,mst,iobnum,zmatbox1,zmatbox2,zb
     end do
     zbox2(iob_allob)=sum0*hvol
   end do
+
+  call timer_begin(LOG_ALLREDUCE_INNER_PRODUCT5)
   call comm_summation(zbox2,zbox,itotmst,nproc_group_korbital)
+  call timer_end(LOG_ALLREDUCE_INNER_PRODUCT5)
 
 end subroutine inner_product5
