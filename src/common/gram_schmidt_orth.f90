@@ -398,6 +398,7 @@ contains
 
   subroutine debug_var_dump(sys, rg, wfi, wf) 
     use salmon_parallel
+    use salmon_communication
     implicit none
     type(s_system),       intent(in) :: sys
     type(s_rgrid),        intent(in) :: rg
