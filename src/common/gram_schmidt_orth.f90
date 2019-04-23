@@ -477,7 +477,8 @@ contains
             end do
           end do
         end do
-        call comm_summation(p_tmp, p, 1, wfi%icomm_r)
+        call comm_summation(p_tmp, p, wfi%icomm_r)
+        
         write(777, *) 'io1, io2, p, p_tmp', io1, io2, p, p_tmp
       end do
       end do
