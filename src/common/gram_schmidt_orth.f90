@@ -464,8 +464,8 @@ contains
       do ik = wfi%ik_s, wfi%ik_e
       do ispin = 1, sys%nspin
         write(777, *) 'check im,ik,ispin', im, ik, ispin
-        do io1 = 1, wfi%numo
-          do io2 = 1, io1
+        do io1 = wfi%io_s, wfi%io_e
+          do io2 = wfi%io_s, io1
             p_tmp = 0d0
             do i3 = rg%is(3), rg%ie(3)
               do i2 = rg%is(2), rg%ie(2)
@@ -475,11 +475,10 @@ contains
                 end do
               end do
             end do
+            call comm_summation(p_tmp, p, wfi%icomm_r)
+            write(777, *) 'io1, io2, p, p_tmp', io1, io2, p, p_tmp    
           end do
         end do
-        call comm_summation(p_tmp, p, wfi%icomm_r)
-        
-        write(777, *) 'io1, io2, p, p_tmp', io1, io2, p, p_tmp
       end do
       end do
       end do
