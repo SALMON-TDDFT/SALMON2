@@ -319,23 +319,6 @@ if(istopt==1)then
     end do
     allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     
-    if(iperiodic==3)then
-      jj = system%ngrid/nproc_size_global
-      fg%ig_s = nproc_id_global*jj+1
-      fg%ig_e = (nproc_id_global+1)*jj
-      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-      fg%icomm_fourier = nproc_group_global
-      fg%ng = system%ngrid
-      fg%iGzero = nGzero
-      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      fg%Gx = Gx
-      fg%Gy = Gy
-      fg%Gz = Gz
-      fg%rhoG_ion = rhoion_G
-      fg%dVG_ion = dVloc_G
-    end if
-
     select case(iperiodic)
     case(0)
       allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
@@ -428,6 +411,22 @@ if(istopt==1)then
       call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
+    if(iperiodic==3)then
+      jj = system%ngrid/nproc_size_global
+      fg%ig_s = nproc_id_global*jj+1
+      fg%ig_e = (nproc_id_global+1)*jj
+      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+      fg%icomm_fourier = nproc_group_global
+      fg%ng = system%ngrid
+      fg%iGzero = nGzero
+      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+      fg%Gx = Gx
+      fg%Gy = Gy
+      fg%Gz = Gz
+      fg%rhoG_ion = rhoion_G
+      fg%dVG_ion = dVloc_G
+    end if
 
     if(iobnum >= 1)then
       select case(iperiodic)
@@ -739,23 +738,6 @@ if(istopt==1)then
     end do
     allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
-    if(iperiodic==3)then
-      jj = system%ngrid/nproc_size_global
-      fg%ig_s = nproc_id_global*jj+1
-      fg%ig_e = (nproc_id_global+1)*jj
-      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-      fg%icomm_fourier = nproc_group_global
-      fg%ng = system%ngrid
-      fg%iGzero = nGzero
-      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      fg%Gx = Gx
-      fg%Gy = Gy
-      fg%Gz = Gz
-      fg%rhoG_ion = rhoion_G
-      fg%dVG_ion = dVloc_G
-    end if
-
     select case(iperiodic)
     case(0)
       allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
@@ -839,6 +821,23 @@ if(istopt==1)then
       call read_pslfile
       call allocate_psl
       call init_ps(system%al,system%brl,stencil%matrix_A)
+    end if
+
+    if(iperiodic==3)then
+      jj = system%ngrid/nproc_size_global
+      fg%ig_s = nproc_id_global*jj+1
+      fg%ig_e = (nproc_id_global+1)*jj
+      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+      fg%icomm_fourier = nproc_group_global
+      fg%ng = system%ngrid
+      fg%iGzero = nGzero
+      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+      fg%Gx = Gx
+      fg%Gy = Gy
+      fg%Gz = Gz
+      fg%rhoG_ion = rhoion_G
+      fg%dVG_ion = dVloc_G
     end if
 
     call init_updown
