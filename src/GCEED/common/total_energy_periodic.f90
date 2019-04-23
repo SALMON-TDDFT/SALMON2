@@ -103,7 +103,10 @@ do iik=k_sta,k_end
   end do
   do iob=1,iobnum
     call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
-!$OMP parallel do private(ix,iy,iz)
+
+    Ekin_tmp=0.d0
+!$OMP parallel private(ix,iy,iz) reduction(+:Ekin_tmp)
+!$OMP do collapse(2)
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
     do ix=mg_sta(1),mg_end(1)
@@ -124,8 +127,9 @@ do iik=k_sta,k_end
     end do
     end do
     end do
-    Ekin_tmp=0.d0
-!$OMP parallel do reduction(+:Ekin_tmp) private(ix,iy,iz)
+!$OMP end do
+
+!$OMP do collapse(2)
     do iz=mg_sta(3),mg_end(3)
     do iy=mg_sta(2),mg_end(2)
     do ix=mg_sta(1),mg_end(1)
@@ -133,17 +137,13 @@ do iik=k_sta,k_end
     end do
     end do
     end do
+!$omp end do
+!$omp end parallel
     Ebox1(1)=Ebox1(1)+Ekin_tmp + rocc(p_allob,iik)*wtk(iik)*(ksquare(iik))/2.d0/dble(nproc_Mxin_mul)
   end do
 end do
 call timer_end(LOG_TEP_ORBITAL_ENERGY)
 
-
-call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
-sum_temp1=Ebox1(1)
-call comm_summation(sum_temp1,sum_temp2,nproc_group_global)
-Ebox2(1)=sum_temp2
-call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
 
 call timer_begin(LOG_TEP_ION_ION)
@@ -184,9 +184,7 @@ if(aewald_num>=1)then
   enddo
 !$omp end parallel do
 end if
-
-call comm_summation(sum_temp1,sum_temp2,nproc_group_global)
-Ebox2(2)=sum_temp2
+Ebox1(2)=sum_temp1
 
 ia_sta=nproc_id_global*MI/nproc_size_global+1
 ia_end=(nproc_id_global+1)*MI/nproc_size_global
@@ -197,15 +195,11 @@ do ia=ia_sta,ia_end
   rbox1=rbox1+Zps(ik)
   rbox2=rbox2+Zps(ik)**2
 end do
+
+Ebox1(7) = rbox1
+Ebox1(8) = rbox2
 call timer_end(LOG_TEP_ION_ION)
 
-
-call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
-call comm_summation(rbox1,rbox3,nproc_group_global)
-call comm_summation(rbox2,rbox4,nproc_group_global)
-Ebox2(2)=Ebox2(2)-Pi*rbox3**2/(2*aEwald*Hvol*lg_num(1)*lg_num(2)*lg_num(3))  &
-                 - sqrt(aEwald/Pi)*rbox4
-call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
 
 !calculate reciprocal lattice vector
@@ -279,12 +273,6 @@ end select
 call timer_end(LOG_TEP_ION_ELECTRON)
 
 
-call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
-sum_temp3(1:4)=Ebox1(3:6)
-call comm_summation(sum_temp3,sum_temp4,4,nproc_group_global)
-Ebox2(3:6)=sum_temp4(1:4)
-call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
-
 
 call timer_begin(LOG_TEP_NONLOCAL_1)
 !$omp parallel do private(iatom,jj) collapse(4)
@@ -342,6 +330,7 @@ call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
 
 call timer_begin(LOG_TEP_NONLOCAL_2)
+sum_temp1 = 0.d0
 do iik=k_sta,k_end
 do iob=1,iobnum
   call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
@@ -349,22 +338,25 @@ do iob=1,iobnum
   ik=Kion(iatom)
   loop_lm4 : do lm=1,(Mlps(ik)+1)**2
     if ( abs(uVu(lm,iatom))<1.d-5 ) cycle loop_lm4
-    Ebox1(7)=Ebox1(7)+rocc(p_allob,iik)*wtk(iik)*abs(uVpsibox4(lm,iatom,iob,iik))**2/uVu(lm,iatom)
+    sum_temp1=sum_temp1+rocc(p_allob,iik)*wtk(iik)*abs(uVpsibox4(lm,iatom,iob,iik))**2/uVu(lm,iatom)
   end do loop_lm4
   end do
 end do
 end do
+Ebox1(9) = sum_temp1
 call timer_end(LOG_TEP_NONLOCAL_2)
 
 
+
 call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
-sum_temp1=Ebox1(7)
-call comm_summation(sum_temp1,sum_temp2,nproc_group_rho)
-Ebox2(7)=sum_temp2
+call comm_summation(Ebox1(9),Ebox2(9),nproc_group_rho)
+call comm_summation(Ebox1,Ebox2,8,nproc_group_global)
+Ebox2(2)=Ebox2(2)-Pi*Ebox2(7)**2/(2*aEwald*Hvol*lg_num(1)*lg_num(2)*lg_num(3))  &
+                 - sqrt(aEwald/Pi)*Ebox2(8)
+Etot=sum(Ebox2(1:6))+Ebox2(9)+Exc
 call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
 
-Etot=sum(Ebox2(1:7))+Exc
 
 end if
 
