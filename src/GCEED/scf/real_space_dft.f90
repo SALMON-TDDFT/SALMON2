@@ -581,7 +581,7 @@ if(iperiodic==3) then
 !  end do
 end if
 
-call debug_var_dump(system, lg, info)  !uemoto!
+call debug_var_dump(system, mg, info)  !uemoto!
 
 if(iperiodic==3)then
   jj = system%ngrid/nproc_size_global
