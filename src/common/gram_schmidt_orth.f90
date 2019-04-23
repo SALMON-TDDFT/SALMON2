@@ -396,7 +396,7 @@ contains
 
 
 
-  subroutine debug_var_dump(sys, rg, wfi) 
+  subroutine debug_var_dump(sys, rg, wfi, wf) 
     use salmon_parallel
     implicit none
     type(s_system),       intent(in) :: sys
