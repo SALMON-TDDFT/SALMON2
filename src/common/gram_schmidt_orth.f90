@@ -396,13 +396,12 @@ contains
 
 
 
-  subroutine debug_var_dump(sys, rg, wfi, wf) 
+  subroutine debug_var_dump(sys, rg, wfi) 
     use salmon_parallel
     implicit none
     type(s_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
     type(s_wf_info),      intent(in)    :: wfi
-    type(s_wavefunction), intent(in)    :: wf
 
     character(100) :: logfile
     write(logfile,'(i3.3, ".log")') nproc_id_global
