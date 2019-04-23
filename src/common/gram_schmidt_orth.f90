@@ -426,6 +426,10 @@ contains
     write(777,*) 'Nd', rg%Nd
     write(777,*) 'is', rg%is
     write(777,*) 'ie', rg%ie
+    write(777,*) 'is_overlap', rg%is_overlap
+    write(777,*) 'ie_overlap', rg%ie_overlap
+    write(777,*) 'is_array', rg%is_array
+    write(777,*) 'ie_array', rg%ie_array
     write(777,*) 'num', rg%num
     write(777,*) 'wf-info----------'
     write(777,*) 'if_divide_rspace', wfi%if_divide_rspace
