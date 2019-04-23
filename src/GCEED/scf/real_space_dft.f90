@@ -772,72 +772,31 @@ DFT_Iteration : do iter=1,iDiter(img)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
     end if
-
-    call gram_schmidt(system, mg, info, spsi) !uemoto!
-    call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
-  
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    end select
     call timer_end(LOG_CALC_MINIMIZATION)
 
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
-    !select case(iperiodic)
-    !case(0)
-    !  call Gram_Schmidt_ns
-    !case(3)
-    !  call Gram_Schmidt_periodic
-    !end select
-  
+    call gram_schmidt(system, mg, info, spsi)
+    !call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
     if(iflag_subspace_diag==1)then
       if(Miter>iDiter_nosubspace_diag)then
         select case(iperiodic)
         case(0)
-          do ik=k_sta,k_end
+        do ik=k_sta,k_end
           do iob=1,info%numo
             do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
+              !$OMP parallel do private(iz,iy,ix)
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
               do ix=mg%is(1),mg%ie(1)
-                !spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+                psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
               end do
               end do
               end do
             end do
           end do
           end do
-
+      
           call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
@@ -857,14 +816,15 @@ DFT_Iteration : do iter=1,iDiter(img)
           end do
 
         case(3)
-          do ik=k_sta,k_end
+
+        do ik=k_sta,k_end
           do iob=1,info%numo
             do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
+              !$OMP parallel do private(iz,iy,ix)
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
               do ix=mg%is(1),mg%ie(1)
-                spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+                zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
               end do
               end do
               end do
