@@ -678,8 +678,6 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(sum1<threshold_norm_pot) cycle DFT_Iteration
   end select 
 
-  call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
-
   Miter=Miter+1
 
   if(temperature_k>=0.d0.and.Miter>iditer_notemperature) then
@@ -817,6 +815,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       call Gram_Schmidt_periodic
     end select
+    call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
   
     if(iflag_subspace_diag==1)then
       if(Miter>iDiter_nosubspace_diag)then
