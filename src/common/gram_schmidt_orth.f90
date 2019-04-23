@@ -404,7 +404,6 @@ contains
     type(s_wf_info),      intent(in)    :: wfi
     type(s_wavefunction), intent(in)    :: wf
 
-    implicit none
     character(100) :: logfile
     write(logfile,'(i3.3, ".log")') nproc_id_global
     open(unit=777, file=trim(logfile))
