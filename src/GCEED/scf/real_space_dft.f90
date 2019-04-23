@@ -667,8 +667,6 @@ case(3)
 end select
 call timer_end(LOG_INIT_GS_ITERATION)
 
-call debug_var_dump(system, mg, info, spsi)  !uemoto!
-
 call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
   select case(convergence)
@@ -680,6 +678,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(sum1<threshold_norm_pot) cycle DFT_Iteration
   end select 
 
+  if mitrer < 3 call debug_var_dump(system, mg, info, spsi)  !uemoto!
 
   Miter=Miter+1
 
