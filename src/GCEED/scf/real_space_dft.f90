@@ -69,6 +69,7 @@ use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
+use gram_schmidt_orth, only: debug_var_dump
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa,ia
@@ -579,6 +580,8 @@ if(iperiodic==3) then
 !    stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
 !  end do
 end if
+
+call debug_var_dump(system, lg, info)  !uemoto!
 
 if(iperiodic==3)then
   jj = system%ngrid/nproc_size_global

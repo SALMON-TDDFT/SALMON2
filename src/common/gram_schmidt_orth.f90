@@ -391,4 +391,68 @@ contains
   end subroutine gram_schmidt_col_complex8
 
 
+
+
+
+
+
+  subroutine debug_var_dump(sys, rg, wfi, wf) 
+    use salmon_parallel
+    implicit none
+    type(s_system),       intent(in)    :: sys
+    type(s_rgrid),        intent(in)    :: rg
+    type(s_wf_info),      intent(in)    :: wfi
+    type(s_wavefunction), intent(in)    :: wf
+
+    implicit none
+    character(100) :: logfile
+    write(logfile,'(i3.3, ".log")') nproc_id_global
+    open(unit=777, file=trim(logfile))
+    write(777,*) 'system----------'
+    write(777,*) 'iperiodic', sys%iperiodic
+    write(777,*) 'ngrid', sys%ngrid
+    write(777,*) 'nspin', sys%nspin
+    write(777,*) 'no', sys%no
+    write(777,*) 'nk', sys%nk
+    write(777,*) 'nion', sys%nion
+    write(777,*) 'Hvol', sys%Hvol
+    write(777,*) 'Hgs', sys%Hgs
+    write(777,*) 'al', sys%al
+    write(777,*) 'det_al', sys%det_al
+    write(777,*) 'brl', sys%brl
+    write(777,*) 'wtk', sys%wtk
+    write(777,*) 'Rion', sys%Rion
+    write(777,*) 'rocc', sys%rocc
+    write(777,*) 'rgrid----------'
+    write(777,*) 'ndir', rg%ndir
+    write(777,*) 'Nd', rg%Nd
+    write(777,*) 'is', rg%is
+    write(777,*) 'ie', rg%ie
+    write(777,*) 'num', rg%num
+    write(777,*) 'wf-info----------'
+    write(777,*) 'if_divide_rspace', wfi%if_divide_rspace
+    write(777,*) 'irank_r', wfi%irank_r
+    write(777,*) 'icomm_r', wfi%icomm_r
+    write(777,*) 'icomm_o', wfi%icomm_o
+    write(777,*) 'icomm_ro', wfi%icomm_ro
+    write(777,*) 'icomm_ko', wfi%icomm_ko
+    write(777,*) 'icomm_rko', wfi%icomm_rko
+    write(777,*) 'im_s', wfi%im_s
+    write(777,*) 'im_e', wfi%im_e
+    write(777,*) 'numm', wfi%numm
+    write(777,*) 'ik_s', wfi%ik_s
+    write(777,*) 'ik_e', wfi%ik_e
+    write(777,*) 'numk', wfi%numk
+    write(777,*) 'io_s', wfi%io_s
+    write(777,*) 'io_e', wfi%io_e
+    write(777,*) 'numo', wfi%numo
+    write(777,*) 'occ', wfi%occ
+    write(777,*) 'io_tbl', wfi%io_tbl
+    write(777,*) 'jo_tbl', wfi%jo_tbl
+    write(777,*) 'irank_jo', wfi%irank_jo
+
+    close(777)
+    return
+  end subroutine
+  
 end module gram_schmidt_orth
