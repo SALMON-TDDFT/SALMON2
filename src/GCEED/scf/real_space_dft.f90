@@ -809,6 +809,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
+    call gram_schmidt(system, mg, info, spsi) !uemoto!
     select case(iperiodic)
     case(0)
       call Gram_Schmidt_ns
