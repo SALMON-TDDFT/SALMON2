@@ -115,7 +115,7 @@ contains
           call axpy_wf_ovlp(-1d0, wf_exc, wf_jo1)
           ! Normalization:
           norm2_tmp = dot_wf(wf_jo1, wf_jo1)
-          call comm_summation(norm2_tmp, norm2, 1, wfi%icomm_r)
+          call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
           call scal_wf_ovlp(1d0 / sqrt(norm2), wf_jo1)
           ! Write back to "rwf":
           io1 = wfi%jo_tbl(jo1)
