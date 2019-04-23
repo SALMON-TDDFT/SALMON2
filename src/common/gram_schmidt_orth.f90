@@ -396,7 +396,7 @@ contains
 
 
 
-  subroutine debug_var_dump(sys, rg, wfi, wf) 
+  subroutine debug_var_dump(sys, rg, wfi, wf, itag) 
     use salmon_parallel
     use salmon_communication
     implicit none
@@ -404,13 +404,14 @@ contains
     type(s_rgrid),        intent(in) :: rg
     type(s_wf_info),      intent(in) :: wfi
     type(s_wavefunction), intent(in) :: wf
+    integer, intent(in) :: itag
 
     character(100) :: logfile
     integer :: im, ik, ispin, io1, io2, i1, i2, i3
     real(8) :: p, p_tmp
 
 
-    write(logfile,'(i3.3, ".log")') nproc_id_global
+    write(logfile,'(i3.3, "_" i3.3, ".log")') itag, nproc_id_global
     open(unit=777, file=trim(logfile))
     write(777,*) 'system----------'
     write(777,*) 'iperiodic', sys%iperiodic
