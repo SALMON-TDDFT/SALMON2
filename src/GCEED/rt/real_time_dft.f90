@@ -738,7 +738,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%io_e=iobnum/nspin
   info%numo=iobnum/nspin
 
-!  info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
+  info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
   info%irank_r(1) = iup_array(1)
   info%irank_r(2) = idw_array(1)
   info%irank_r(3) = jup_array(1)
@@ -764,6 +764,18 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
   end do
 
+  if(stencil%if_orthogonal) then
+    stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+  else
+    if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
+    stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+  end if
+  do jj=1,3
+    do ii=1,4
+      stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+      stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+    end do
+  end do
 
   do ik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
