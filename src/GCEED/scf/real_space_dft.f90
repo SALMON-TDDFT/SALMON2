@@ -581,8 +581,6 @@ if(iperiodic==3) then
 !  end do
 end if
 
-call debug_var_dump(system, mg, info)  !uemoto!
-
 if(iperiodic==3)then
   jj = system%ngrid/nproc_size_global
   fg%ig_s = nproc_id_global*jj+1
@@ -669,6 +667,7 @@ case(3)
 end select
 call timer_end(LOG_INIT_GS_ITERATION)
 
+call debug_var_dump(system, mg, info, spsi)  !uemoto!
 
 call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
