@@ -68,6 +68,7 @@ use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
+use gram_schmidt_orth, only: debug_var_dump
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa,ia
@@ -898,7 +899,6 @@ end if
 
 call timer_end(LOG_INIT_GS_ITERATION)
 
-
 call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
   select case(convergence)
@@ -909,7 +909,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     case('norm_pot','norm_pot_dng')
       if(sum1<threshold_norm_pot) cycle DFT_Iteration
   end select 
-
 
   Miter=Miter+1
 
@@ -1042,6 +1041,8 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
+    call gram_schmidt(system, mg, info, spsi) !uemoto!
+    call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
     select case(iperiodic)
     case(0)
       call Gram_Schmidt_ns
