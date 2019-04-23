@@ -405,7 +405,7 @@ contains
     type(s_wavefunction), intent(in) :: wf
 
     character(100) :: logfile
-    integer :: io1, io2
+    integer :: im, ik, ispin, io1, io2, i1, i2, i3
     real(8) :: p, p_tmp
 
 
