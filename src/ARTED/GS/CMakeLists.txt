@@ -9,5 +9,6 @@ set(SOURCES
     Fermi_Dirac_distribution.f90
     )
 
-add_library(${ARTED_GS_LIB} STATIC ${SOURCES})
-add_dependencies(${ARTED_GS_LIB} ${ARTED_MODULE_LIB} ${ARTED_COMMON_LIB})
+list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
+list(APPEND SALMON_SOURCES ${SOURCES})
+set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)

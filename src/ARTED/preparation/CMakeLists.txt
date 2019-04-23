@@ -6,5 +6,6 @@ set(SOURCES
     pp_postprocess.f90
     )
 
-add_library(${ARTED_PREP_LIB} STATIC ${SOURCES})
-add_dependencies(${ARTED_PREP_LIB} ${ARTED_MODULE_LIB})
+list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
+list(APPEND SALMON_SOURCES ${SOURCES})
+set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)

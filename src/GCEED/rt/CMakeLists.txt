@@ -1,6 +1,5 @@
 set(SOURCES
     add_polynomial.f90
-    aft_fourier.f90
     calc_current.f90
     calc_env_trigon.f90
     calcAext.f90
@@ -21,6 +20,8 @@ set(SOURCES
     total_energy_groupob.f90
     xc_fast.f90
     )
+  #    aft_fourier.f90 # Is this single program?
 
-add_library(${GCEED_RT_LIB} ${SOURCES})
-add_dependencies(${GCEED_RT_LIB} ${SALMON_RT_LIB} ${GCEED_MODULE_LIB} ${GCEED_SCF_LIB})
+list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
+list(APPEND SALMON_SOURCES ${SOURCES})
+set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)
