@@ -399,11 +399,16 @@ contains
   subroutine debug_var_dump(sys, rg, wfi) 
     use salmon_parallel
     implicit none
-    type(s_system),       intent(in)    :: sys
-    type(s_rgrid),        intent(in)    :: rg
-    type(s_wf_info),      intent(in)    :: wfi
+    type(s_system),       intent(in) :: sys
+    type(s_rgrid),        intent(in) :: rg
+    type(s_wf_info),      intent(in) :: wfi
+    type(s_wavefunction), intent(in) :: wf
 
     character(100) :: logfile
+    integer :: io1, io2
+    real(8) :: p, p_tmp
+
+
     write(logfile,'(i3.3, ".log")') nproc_id_global
     open(unit=777, file=trim(logfile))
     write(777,*) 'system----------'
@@ -453,8 +458,41 @@ contains
     write(777,*) 'jo_tbl', wfi%jo_tbl
     write(777,*) 'irank_jo', wfi%irank_jo
 
+    if (allocated(wf%rwf)) then
+      do im = wfi%im_s, wfi%im_e
+      do ik = wfi%ik_s, wfi%ik_e
+      do ispin = 1, sys%nspin
+        write(777, *) 'check im,ik,ispin', im, ik, ispin
+        do io1 = 1, wfi%numo
+          do io2 = 1, io1
+            p_tmp + 0d0
+            do i3 = rg%is(3), rg%ie(3)
+              do i2 = rg%is(2), rg%ie(2)
+                do i1 = rg%is(1), rg%ie(1)
+                  p_tmp = p_tmp + wf%rwf(i1,i2,i3,ispin,io1,ik,im) &
+                  & * wf%rwf(i1,i2,i3,ispin,io2,ik,im) * sys%hvol
+                end do
+              end do
+            end do
+          end do
+        end do
+        call comm_summation(p_tmp, p, 1, wfi%icomm_r)
+        write(777, *) 'io1, io2, p, p_tmp', io1, io2, p, p_tmp
+      end do
+      end do
+      end do
+    end if
+
+
     close(777)
     return
   end subroutine
+
+
+!=======================================================================
+
+
+
+  
   
 end module gram_schmidt_orth
