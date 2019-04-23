@@ -184,20 +184,6 @@ if(istopt==1)then
     call init_lattice(system,stencil,lg)
     Hvol = system%Hvol
     Hgs = system%Hgs
-    info%if_divide_rspace = nproc_mxin_mul.ne.1
-
-    if(stencil%if_orthogonal) then
-      stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-    else
-      if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-      stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
-    end if
-    do jj=1,3
-      do ii=1,4
-        stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-        stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
-      end do
-    end do
     
     call init_updown
     call init_itype
@@ -213,6 +199,20 @@ if(istopt==1)then
     call allocate_sendrecv
     call init_persistent_requests
 
+    ! Initialization of s_sendrecv_grid structure (experimental implementation)
+    neig(1, 1) = iup_array(1)
+    neig(1, 2) = idw_array(1)
+    neig(2, 1) = jup_array(1)
+    neig(2, 2) = jdw_array(1)
+    neig(3, 1) = kup_array(1)
+    neig(3, 2) = kdw_array(1)
+    call init_sendrecv_grid(srg, mg, iobnum * k_num, &
+      & nproc_group_korbital, nproc_id_korbital, neig)
+    call init_sendrecv_grid(srg_ob, mg, nspin, &
+      & nproc_group_korbital, nproc_id_korbital, neig)
+    call init_sendrecv_grid(srg_ob_1, mg, 1, &
+      & nproc_group_korbital, nproc_id_korbital, neig)
+
     neig_ng(1, 1) = iup_array(2)
     neig_ng(1, 2) = idw_array(2)
     neig_ng(2, 1) = jup_array(2)
@@ -221,7 +221,172 @@ if(istopt==1)then
     neig_ng(3, 2) = kdw_array(2)
     call init_sendrecv_grid(srg_ng, ng, 1, &
       & nproc_group_global, nproc_id_global, neig_ng)
+
+    if(ispin==0)then
+      nspin=1
+    else
+      nspin=2
+    end if
     
+    system%iperiodic = iperiodic
+    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+    system%nspin = nspin
+    system%no = itotMST
+    system%nk = num_kpoints_rd
+    system%nion = MI
+    
+    allocate(system%Rion(3,system%nion) &
+            ,system%wtk(system%nk) &
+            ,system%rocc(system%no,system%nk,system%nspin))
+    system%wtk = wtk
+    system%rion = rion
+    
+    allocate(energy%esp(system%no,system%nk,system%nspin))
+
+    info%im_s = 1
+    info%im_e = 1
+    info%numm = 1
+    info%ik_s=k_sta
+    info%ik_e=k_end
+    info%numk=k_num
+    info%io_s=1
+    info%io_e=iobnum/nspin
+    info%numo=iobnum/nspin
+    
+    info%if_divide_rspace = nproc_mxin_mul.ne.1
+    info%irank_r(1) = iup_array(1)
+    info%irank_r(2) = idw_array(1)
+    info%irank_r(3) = jup_array(1)
+    info%irank_r(4) = jdw_array(1)
+    info%irank_r(5) = kup_array(1)
+    info%irank_r(6) = kdw_array(1)
+    info%icomm_r = nproc_group_korbital
+    info%icomm_o = nproc_group_kgrid
+    info%icomm_ko = nproc_group_rho
+    info%icomm_ro = nproc_group_k
+    info%icomm_rko = nproc_group_global
+    allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+              ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
+              ,info%irank_jo(1:system%no))
+ 
+    info%jo_tbl(:) = 0 !(initial value)
+    do iob=info%io_s,info%io_e
+      call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+      info%io_tbl(iob) = jj
+      info%jo_tbl(jj) = iob
+    end do
+    
+    do jj=1, system%no
+      call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+    end do
+    
+    if(stencil%if_orthogonal) then
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+    else
+      if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+    end if
+    do jj=1,3
+      do ii=1,4
+        stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+        stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+      end do
+    end do
+    
+    info_ob%im_s = 1
+    info_ob%im_e = 1
+    info_ob%numm = 1
+    info_ob%ik_s = 1
+    info_ob%ik_e = 1
+    info_ob%numk = 1
+    info_ob%io_s = 1
+    info_ob%io_e = 1
+    info_ob%numo = 1
+    info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
+    info_ob%irank_r(1) = iup_array(1)
+    info_ob%irank_r(2) = idw_array(1)
+    info_ob%irank_r(3) = jup_array(1)
+    info_ob%irank_r(4) = jdw_array(1)
+    info_ob%irank_r(5) = kup_array(1)
+    info_ob%irank_r(6) = kdw_array(1)
+    info_ob%icomm_r = nproc_group_korbital
+    
+    allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
+    do jspin=1,system%nspin
+      allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      allocate(srho(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    end do
+    allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    
+    select case(iperiodic)
+    case(0)
+      allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+      allocate(shpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                         mg%is_array(2):mg%ie_array(2),  &
+                         mg%is_array(3):mg%ie_array(3),  &
+                         nspin,  &
+                         info%io_s:info%io_e,  &
+                         info%ik_s:info%ik_e,  &
+                         1))
+    !$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+      do ik=info%ik_s,info%ik_e
+      do iob=info%io_s,info%io_e
+        do is=1,nspin
+          do iz=mg%is_array(3),mg%ie_array(3)
+          do iy=mg%is_array(2),mg%ie_array(2)
+          do ix=mg%is_array(1),mg%ie_array(1)
+            spsi%rwf(ix,iy,iz,is,iob,ik,1)=0.d0
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+      allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+      allocate(shpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                         mg%is_array(2):mg%ie_array(2),  &
+                         mg%is_array(3):mg%ie_array(3),  &
+                         nspin,  &
+                         info%io_s:info%io_e,  &
+                         info%ik_s:info%ik_e,  &
+                         1))
+      allocate(sttpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                         mg%is_array(2):mg%ie_array(2),  &
+                         mg%is_array(3):mg%ie_array(3),  &
+                         nspin,  &
+                         info%io_s:info%io_e,  &
+                         info%ik_s:info%ik_e,  &
+                         1))
+    !$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+      do ik=info%ik_s,info%ik_e
+      do iob=info%io_s,info%io_e
+        do is=1,nspin
+          do iz=mg%is_array(3),mg%ie_array(3)
+          do iy=mg%is_array(2),mg%ie_array(2)
+          do ix=mg%is_array(1),mg%ie_array(1)
+            spsi%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    end select
+
     if(iperiodic==3)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
@@ -246,6 +411,22 @@ if(istopt==1)then
       call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
+    if(iperiodic==3)then
+      jj = system%ngrid/nproc_size_global
+      fg%ig_s = nproc_id_global*jj+1
+      fg%ig_e = (nproc_id_global+1)*jj
+      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+      fg%icomm_fourier = nproc_group_global
+      fg%ng = system%ngrid
+      fg%iGzero = nGzero
+      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+      fg%Gx = Gx
+      fg%Gy = Gy
+      fg%Gz = Gz
+      fg%rhoG_ion = rhoion_G
+      fg%dVG_ion = dVloc_G
+    end if
 
     if(iobnum >= 1)then
       select case(iperiodic)
@@ -342,8 +523,89 @@ if(istopt==1)then
       call Total_Energy_periodic_scf(zpsi_tmp)
     end select
 
-  call timer_end(LOG_INIT_GS)
-      
+    select case(iperiodic)
+    case(0)
+      do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+      do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+!$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    end select
+
+!+++++ test: total energy
+    if(iperiodic==3) then
+      allocate(stencil%kAc(k_sta:k_end,3))
+      do jj=1,3
+        stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+      end do
+      call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+    end if
+    do jspin=1,system%nspin
+      V_local(jspin)%f = Vlocal(:,:,:,jspin)
+    end do
+    if(ilsda == 1) then
+      do jspin=1,system%nspin
+        srho(jspin)%f = rho_s(:,:,:,jspin)
+        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+      end do
+    else
+      srho(1)%f = rho
+      sVxc(1)%f = Vxc
+    end if
+    sVh%f = Vh
+    energy%E_xc = Exc
+    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+    select case(iperiodic)
+    case(0)
+      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+    case(3)
+      fg%rhoG_elec = rhoe_G
+      call calc_Total_Energy_periodic(energy,system,pp,fg)
+    end select
+    call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+    if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
+    if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
+  
+    if(comm_is_root(nproc_id_global)) then
+      write(*,'(a,f10.5,a)') "total energy E_tot =",energy%E_tot," a.u."
+      write(*,'(a,f10.5,a,f10.5,a,f10.5)') "E_kin =",energy%E_kin, ",  E_h =",energy%E_h,",  E_xc =",energy%E_xc
+      write(*,'(a,f10.5,a,f10.5)') "E_{electron-ion}: local part =",energy%E_ion_loc, ",  nonlocal part =",energy%E_ion_nloc
+      write(*,'(a,f10.5)') "E_{ion-ion} =",energy%E_ion_ion
+  
+      write(*,*) '(forces on atoms)'
+      do ia=1,system%nion
+         write(*,'(1x,i7,3f15.6)') ia,force%f(1,ia),force%f(2,ia),force%f(3,ia)
+      end do
+    end if
+  
+    esp = energy%esp(:,:,1) !++++++++++
+  
+    call timer_end(LOG_INIT_GS)
+        
 !------------------------------ Continue the previous calculation
 
   case(1,3)
@@ -356,6 +618,20 @@ if(istopt==1)then
     call allocate_sendrecv
     call init_persistent_requests
 
+    ! Initialization of s_sendrecv_grid structure (experimental implementation)
+    neig(1, 1) = iup_array(1)
+    neig(1, 2) = idw_array(1)
+    neig(2, 1) = jup_array(1)
+    neig(2, 2) = jdw_array(1)
+    neig(3, 1) = kup_array(1)
+    neig(3, 2) = kdw_array(1)
+    call init_sendrecv_grid(srg, mg, iobnum * k_num, &
+      & nproc_group_korbital, nproc_id_korbital, neig)
+    call init_sendrecv_grid(srg_ob, mg, nspin, &
+      & nproc_group_korbital, nproc_id_korbital, neig)
+    call init_sendrecv_grid(srg_ob_1, mg, 1, &
+      & nproc_group_korbital, nproc_id_korbital, neig)
+
     neig_ng(1, 1) = iup_array(2)
     neig_ng(1, 2) = idw_array(2)
     neig_ng(2, 1) = jup_array(2)
@@ -364,7 +640,172 @@ if(istopt==1)then
     neig_ng(3, 2) = kdw_array(2)
     call init_sendrecv_grid(srg_ng, ng, 1, &
       & nproc_group_global, nproc_id_global, neig_ng)
+
+    if(ispin==0)then
+      nspin=1
+    else
+      nspin=2
+    end if
     
+    system%iperiodic = iperiodic
+    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+    system%nspin = nspin
+    system%no = itotMST
+    system%nk = num_kpoints_rd
+    system%nion = MI
+    
+    allocate(system%Rion(3,system%nion) &
+            ,system%wtk(system%nk) &
+            ,system%rocc(system%no,system%nk,system%nspin))
+    system%wtk = wtk
+    system%rion = rion
+    
+    allocate(energy%esp(system%no,system%nk,system%nspin))
+
+    info%im_s = 1
+    info%im_e = 1
+    info%numm = 1
+    info%ik_s=k_sta
+    info%ik_e=k_end
+    info%numk=k_num
+    info%io_s=1
+    info%io_e=iobnum/nspin
+    info%numo=iobnum/nspin
+    
+    info%if_divide_rspace = nproc_mxin_mul.ne.1
+    info%irank_r(1) = iup_array(1)
+    info%irank_r(2) = idw_array(1)
+    info%irank_r(3) = jup_array(1)
+    info%irank_r(4) = jdw_array(1)
+    info%irank_r(5) = kup_array(1)
+    info%irank_r(6) = kdw_array(1)
+    info%icomm_r = nproc_group_korbital
+    info%icomm_o = nproc_group_kgrid
+    info%icomm_ko = nproc_group_rho
+    info%icomm_ro = nproc_group_k
+    info%icomm_rko = nproc_group_global
+    allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+              ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
+              ,info%irank_jo(1:system%no))
+ 
+    info%jo_tbl(:) = 0 !(initial value)
+    do iob=info%io_s,info%io_e
+      call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+      info%io_tbl(iob) = jj
+      info%jo_tbl(jj) = iob
+    end do
+    
+    do jj=1, system%no
+      call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+    end do
+    
+    if(stencil%if_orthogonal) then
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+    else
+      if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
+      stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+    end if
+    do jj=1,3
+      do ii=1,4
+        stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+        stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+      end do
+    end do
+    
+    info_ob%im_s = 1
+    info_ob%im_e = 1
+    info_ob%numm = 1
+    info_ob%ik_s = 1
+    info_ob%ik_e = 1
+    info_ob%numk = 1
+    info_ob%io_s = 1
+    info_ob%io_e = 1
+    info_ob%numo = 1
+    info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
+    info_ob%irank_r(1) = iup_array(1)
+    info_ob%irank_r(2) = idw_array(1)
+    info_ob%irank_r(3) = jup_array(1)
+    info_ob%irank_r(4) = jdw_array(1)
+    info_ob%irank_r(5) = kup_array(1)
+    info_ob%irank_r(6) = kdw_array(1)
+    info_ob%icomm_r = nproc_group_korbital
+    
+    allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
+    do jspin=1,system%nspin
+      allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      allocate(srho(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    end do
+    allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+
+    select case(iperiodic)
+    case(0)
+      allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+      allocate(shpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                         mg%is_array(2):mg%ie_array(2),  &
+                         mg%is_array(3):mg%ie_array(3),  &
+                         nspin,  &
+                         info%io_s:info%io_e,  &
+                         info%ik_s:info%ik_e,  &
+                         1))
+    !$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+      do ik=info%ik_s,info%ik_e
+      do iob=info%io_s,info%io_e
+        do is=1,nspin
+          do iz=mg%is_array(3),mg%ie_array(3)
+          do iy=mg%is_array(2),mg%ie_array(2)
+          do ix=mg%is_array(1),mg%ie_array(1)
+            spsi%rwf(ix,iy,iz,is,iob,ik,1)=0.d0
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+      allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+      allocate(shpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                         mg%is_array(2):mg%ie_array(2),  &
+                         mg%is_array(3):mg%ie_array(3),  &
+                         nspin,  &
+                         info%io_s:info%io_e,  &
+                         info%ik_s:info%ik_e,  &
+                         1))
+      allocate(sttpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                         mg%is_array(2):mg%ie_array(2),  &
+                         mg%is_array(3):mg%ie_array(3),  &
+                         nspin,  &
+                         info%io_s:info%io_e,  &
+                         info%ik_s:info%ik_e,  &
+                         1))
+    !$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
+      do ik=info%ik_s,info%ik_e
+      do iob=info%io_s,info%io_e
+        do is=1,nspin
+          do iz=mg%is_array(3),mg%ie_array(3)
+          do iy=mg%is_array(2),mg%ie_array(2)
+          do ix=mg%is_array(1),mg%ie_array(1)
+            spsi%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    end select
+
     if(iperiodic==3)then
       allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
                  1:iobnum,k_sta:k_end))
@@ -380,6 +821,23 @@ if(istopt==1)then
       call read_pslfile
       call allocate_psl
       call init_ps(system%al,system%brl,stencil%matrix_A)
+    end if
+
+    if(iperiodic==3)then
+      jj = system%ngrid/nproc_size_global
+      fg%ig_s = nproc_id_global*jj+1
+      fg%ig_e = (nproc_id_global+1)*jj
+      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+      fg%icomm_fourier = nproc_group_global
+      fg%ng = system%ngrid
+      fg%iGzero = nGzero
+      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+      fg%Gx = Gx
+      fg%Gy = Gy
+      fg%Gz = Gz
+      fg%rhoG_ion = rhoion_G
+      fg%dVG_ion = dVloc_G
     end if
 
     call init_updown
@@ -467,90 +925,6 @@ else
   end do
 end if
 
-if(ispin==0)then
-  nspin=1
-else
-  nspin=2
-end if
-
-system%iperiodic = iperiodic
-system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-system%nspin = nspin
-system%no = itotMST
-system%nk = num_kpoints_rd
-system%nion = MI
-
-allocate(system%Rion(3,system%nion) &
-        ,system%wtk(system%nk) &
-        ,system%rocc(system%no,system%nk,system%nspin))
-system%wtk = wtk
-system%rion = rion
-
-allocate(energy%esp(system%no,system%nk,system%nspin))
-
-allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
-do jspin=1,system%nspin
-  allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  allocate(srho(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-end do
-allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-
-info%im_s = 1
-info%im_e = 1
-info%numm = 1
-info%ik_s=k_sta
-info%ik_e=k_end
-info%numk=k_num
-info%io_s=1
-info%io_e=iobnum/nspin
-info%numo=iobnum/nspin
-
-!info%if_divide_rspace = nproc_mxin_mul.ne.1 ! moved just after init_lattice
-info%irank_r(1) = iup_array(1)
-info%irank_r(2) = idw_array(1)
-info%irank_r(3) = jup_array(1)
-info%irank_r(4) = jdw_array(1)
-info%irank_r(5) = kup_array(1)
-info%irank_r(6) = kdw_array(1)
-info%icomm_r = nproc_group_korbital
-info%icomm_o = nproc_group_kgrid
-info%icomm_ko = nproc_group_rho
-info%icomm_ro = nproc_group_k
-info%icomm_rko = nproc_group_global
-allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
-          ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
-          ,info%irank_jo(1:system%no))
-
-info%jo_tbl(:) = 0 !(initial value)
-do iob=info%io_s,info%io_e
-  call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
-  info%io_tbl(iob) = jj
-  info%jo_tbl(jj) = iob
-end do
-
-do jj=1, system%no
-  call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
-end do
-
-info_ob%im_s = 1
-info_ob%im_e = 1
-info_ob%numm = 1
-info_ob%ik_s = 1
-info_ob%ik_e = 1
-info_ob%numk = 1
-info_ob%io_s = 1
-info_ob%io_e = 1
-info_ob%numo = 1
-info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
-info_ob%irank_r(1) = iup_array(1)
-info_ob%irank_r(2) = idw_array(1)
-info_ob%irank_r(3) = jup_array(1)
-info_ob%irank_r(4) = jdw_array(1)
-info_ob%irank_r(5) = kup_array(1)
-info_ob%irank_r(6) = kdw_array(1)
-info_ob%icomm_r = nproc_group_korbital
-
 ! Setup NLCC term from pseudopotential
 call calc_nlcc(pp, system, mg, ppn)
 if (comm_is_root(nproc_id_global)) then
@@ -559,111 +933,6 @@ if (comm_is_root(nproc_id_global)) then
 end if    
 
 
-! Initialization of s_sendrecv_grid structure (experimental implementation)
-neig(1, 1) = iup_array(1)
-neig(1, 2) = idw_array(1)
-neig(2, 1) = jup_array(1)
-neig(2, 2) = jdw_array(1)
-neig(3, 1) = kup_array(1)
-neig(3, 2) = kdw_array(1)
-call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-  & nproc_group_korbital, nproc_id_korbital, neig)
-call init_sendrecv_grid(srg_ob, mg, nspin, &
-  & nproc_group_korbital, nproc_id_korbital, neig)
-call init_sendrecv_grid(srg_ob_1, mg, 1, &
-  & nproc_group_korbital, nproc_id_korbital, neig)
-
-if(iperiodic==3) then
-!  allocate(stencil%kAc(k_sta:k_end,3))
-!  do jj=1,3
-!    stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
-!  end do
-end if
-
-if(iperiodic==3)then
-  jj = system%ngrid/nproc_size_global
-  fg%ig_s = nproc_id_global*jj+1
-  fg%ig_e = (nproc_id_global+1)*jj
-  if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-  fg%icomm_fourier = nproc_group_global
-  fg%ng = system%ngrid
-  fg%iGzero = nGzero
-  allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-  allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-  fg%Gx = Gx
-  fg%Gy = Gy
-  fg%Gz = Gz
-  fg%rhoG_ion = rhoion_G
-  fg%dVG_ion = dVloc_G
-end if
-
-select case(iperiodic)
-case(0)
-  allocate(spsi%rwf(mg%is_array(1):mg%ie_array(1),  &
-                    mg%is_array(2):mg%ie_array(2),  &
-                    mg%is_array(3):mg%ie_array(3),  &
-                    nspin,  &
-                    info%io_s:info%io_e,  &
-                    info%ik_s:info%ik_e,  &
-                    1))
-  allocate(shpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
-                     mg%is_array(2):mg%ie_array(2),  &
-                     mg%is_array(3):mg%ie_array(3),  &
-                     nspin,  &
-                     info%io_s:info%io_e,  &
-                     info%ik_s:info%ik_e,  &
-                     1))
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi%rwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-case(3)
-  allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1),  &
-                    mg%is_array(2):mg%ie_array(2),  &
-                    mg%is_array(3):mg%ie_array(3),  &
-                    nspin,  &
-                    info%io_s:info%io_e,  &
-                    info%ik_s:info%ik_e,  &
-                    1))
-  allocate(shpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
-                     mg%is_array(2):mg%ie_array(2),  &
-                     mg%is_array(3):mg%ie_array(3),  &
-                     nspin,  &
-                     info%io_s:info%io_e,  &
-                     info%ik_s:info%ik_e,  &
-                     1))
-  allocate(sttpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
-                     mg%is_array(2):mg%ie_array(2),  &
-                     mg%is_array(3):mg%ie_array(3),  &
-                     nspin,  &
-                     info%io_s:info%io_e,  &
-                     info%ik_s:info%ik_e,  &
-                     1))
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(4)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-end select
 call timer_end(LOG_INIT_GS_ITERATION)
 
 
