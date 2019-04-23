@@ -810,13 +810,13 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi) !uemoto!
+    call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
     select case(iperiodic)
     case(0)
       call Gram_Schmidt_ns
     case(3)
       call Gram_Schmidt_periodic
     end select
-    call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
   
     if(iflag_subspace_diag==1)then
       if(Miter>iDiter_nosubspace_diag)then
