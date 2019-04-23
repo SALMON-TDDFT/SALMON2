@@ -411,7 +411,7 @@ contains
     real(8) :: p, p_tmp
 
 
-    write(logfile,'(i3.3, "_proc" i3.3, ".log")') itag, nproc_id_global
+    write(logfile,'("dbg", i3.3, "_p", i3.3, ".log")') itag, nproc_id_global
     open(unit=777, file=trim(logfile))
     write(777,*) 'system----------'
     write(777,*) 'iperiodic', sys%iperiodic
