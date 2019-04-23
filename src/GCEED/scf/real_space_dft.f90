@@ -69,7 +69,7 @@ use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
-use gram_schmidt_orth, only: debug_var_dump
+use gram_schmidt_orth, only: debug_var_dump, gram_schmidt 
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa,ia
