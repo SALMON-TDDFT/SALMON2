@@ -678,7 +678,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(sum1<threshold_norm_pot) cycle DFT_Iteration
   end select 
 
-  if (Miter <= 3) call debug_var_dump(system, mg, info, spsi)  !uemoto!
+  call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
 
   Miter=Miter+1
 
