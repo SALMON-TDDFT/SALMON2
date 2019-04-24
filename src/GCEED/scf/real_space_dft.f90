@@ -1068,7 +1068,6 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
     case(3)
-
     do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
