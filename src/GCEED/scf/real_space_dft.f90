@@ -1222,44 +1222,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
-
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)    
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
-
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-           psi(ix,iy,iz,iob+(is-1)*info%numo,ik) =  spsi%rwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik) = spsi%zwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    end select
-
 
     call timer_begin(LOG_CALC_MINIMIZATION)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
