@@ -21,7 +21,6 @@ use allocate_mat_sub
 use deallocate_mat_sub
 use init_sendrecv_sub
 use new_world_sub
-use Total_Energy_sub
 use read_pslfile_sub
 use allocate_psl_sub
 use persistent_comm

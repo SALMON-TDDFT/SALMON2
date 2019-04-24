@@ -13,8 +13,6 @@ set(SOURCES
     real_space_dft.f90
     simple_mixing.f90
     subdgemm_lapack.f90
-    total_energy_periodic_scf.f90
-    total_energy_periodic_scf_esp.f90
     write_eigen.f90
     )
 

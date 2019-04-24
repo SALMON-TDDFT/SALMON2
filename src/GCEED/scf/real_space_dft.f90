@@ -25,7 +25,6 @@ use deallocate_mat_sub
 use new_world_sub
 use init_sendrecv_sub
 use copy_psi_mesh_sub
-use Total_Energy_sub
 use calc_density_sub
 use change_order_sub
 use read_pslfile_sub
@@ -505,26 +504,6 @@ if(istopt==1)then
 
     select case(iperiodic)
     case(0)
-      call Total_Energy(psi)
-    case(3)
-      call Total_Energy_periodic_scf_esp(zpsi)
-      do ik=k_sta,k_end
-      do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          zpsi_tmp(ix,iy,iz,iob,ik)=zpsi(ix,iy,iz,iob,ik)
-        end do
-        end do
-        end do
-      end do
-      end do
-      call Total_Energy_periodic_scf(zpsi_tmp)
-    end select
-
-    select case(iperiodic)
-    case(0)
       do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
@@ -556,7 +535,6 @@ if(istopt==1)then
       end do
     end select
 
-!+++++ test: total energy
     if(iperiodic==3) then
       allocate(stencil%kAc(k_sta:k_end,3))
       do jj=1,3
@@ -586,23 +564,8 @@ if(istopt==1)then
       fg%rhoG_elec = rhoe_G
       call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
-    call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
-    if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
+    esp = energy%esp(:,:,1) !++++++++
     if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
-  
-    if(comm_is_root(nproc_id_global)) then
-      write(*,'(a,f10.5,a)') "total energy E_tot =",energy%E_tot," a.u."
-      write(*,'(a,f10.5,a,f10.5,a,f10.5)') "E_kin =",energy%E_kin, ",  E_h =",energy%E_h,",  E_xc =",energy%E_xc
-      write(*,'(a,f10.5,a,f10.5)') "E_{electron-ion}: local part =",energy%E_ion_loc, ",  nonlocal part =",energy%E_ion_nloc
-      write(*,'(a,f10.5)') "E_{ion-ion} =",energy%E_ion_ion
-  
-      write(*,*) '(forces on atoms)'
-      do ia=1,system%nion
-         write(*,'(1x,i7,3f15.6)') ia,force%f(1,ia),force%f(2,ia),force%f(3,ia)
-      end do
-    end if
-  
-    esp = energy%esp(:,:,1) !++++++++++
   
     call timer_end(LOG_INIT_GS)
         
@@ -863,9 +826,9 @@ if(comm_is_root(nproc_id_global)) then
   write(*,*) '-----------------------------------------------'
   select case(iperiodic)
   case(0)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,Etot*2d0*Ry,iterVh
+    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,iterVh
   case(3)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,Etot*2d0*Ry
+    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
   end select
   do ik=1,num_kpoints_rd
     if(ik<=3)then
@@ -873,7 +836,7 @@ if(comm_is_root(nproc_id_global)) then
       do p5=1,(itotMST+3)/4
         p1=4*(p5-1)+1
         p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
-        write(*,'(1x,4(i5,f15.4,2x))') (iob,esp(iob,ik)*2d0*Ry,iob=p1,p2)
+        write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*2d0*Ry,iob=p1,p2)
       end do
       if(iperiodic==3) write(*,*)
     end if
@@ -1036,8 +999,8 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine  == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,esp,norm_diff_psi_stock,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
+        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,energy%esp, &
+                     norm_diff_psi_stock,info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -1200,25 +1163,37 @@ DFT_Iteration : do iter=1,iDiter(img)
     
   
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
+    if(iperiodic==3) then
+      allocate(stencil%kAc(k_sta:k_end,3))
+      do jj=1,3
+        stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+      end do
+      call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+    end if
+    do jspin=1,system%nspin
+      V_local(jspin)%f = Vlocal(:,:,:,jspin)
+    end do
+    if(ilsda == 1) then
+      do jspin=1,system%nspin
+        srho(jspin)%f = rho_s(:,:,:,jspin)
+        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+      end do
+    else
+      srho(1)%f = rho
+      sVxc(1)%f = Vxc
+    end if
+    sVh%f = Vh
+    energy%E_xc = Exc
+    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
-      call Total_Energy(psi)
+      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      call Total_Energy(zpsi)
-      do ik=k_sta,k_end
-      do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          zpsi_tmp(ix,iy,iz,iob,ik)=zpsi(ix,iy,iz,iob,ik)
-        end do
-        end do
-        end do
-      end do
-      end do
-      call Total_Energy_periodic_scf(zpsi_tmp)
+      fg%rhoG_elec = rhoe_G
+      call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
+    esp = energy%esp(:,:,1) !++++++++
+    if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
   
 
@@ -1388,8 +1363,8 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,esp,norm_diff_psi_stock,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
+        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,energy%esp, &
+                     norm_diff_psi_stock,info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
@@ -1489,77 +1464,41 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
+    if(iperiodic==3) then
+      allocate(stencil%kAc(k_sta:k_end,3))
+      do jj=1,3
+        stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+      end do
+      call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+    end if
+    do jspin=1,system%nspin
+      V_local(jspin)%f = Vlocal(:,:,:,jspin)
+    end do
+    if(ilsda == 1) then
+      do jspin=1,system%nspin
+        srho(jspin)%f = rho_s(:,:,:,jspin)
+        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+      end do
+    else
+      srho(1)%f = rho
+      sVxc(1)%f = Vxc
+    end if
+    sVh%f = Vh
+    energy%E_xc = Exc
+    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
-      call Total_Energy(psi)
+      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      call Total_Energy(zpsi)
-      do ik=k_sta,k_end
-      do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          zpsi_tmp(ix,iy,iz,iob,ik)=zpsi(ix,iy,iz,iob,ik)
-        end do
-        end do
-        end do
-      end do
-      end do
-      call Total_Energy_periodic_scf(zpsi_tmp)
+      fg%rhoG_elec = rhoe_G
+      call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
+    esp = energy%esp(:,:,1) !++++++++
+    if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
   end if
 
-
   call timer_begin(LOG_WRITE_RESULTS)
-!+++++ test: total energy
-  if(iperiodic==3) then
-    allocate(stencil%kAc(k_sta:k_end,3))
-    do jj=1,3
-      stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
-    end do
-    call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
-  end if
-  do jspin=1,system%nspin
-    V_local(jspin)%f = Vlocal(:,:,:,jspin)
-  end do
-  if(ilsda == 1) then
-    do jspin=1,system%nspin
-      srho(jspin)%f = rho_s(:,:,:,jspin)
-      sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-    end do
-  else
-    srho(1)%f = rho
-    sVxc(1)%f = Vxc
-  end if
-  sVh%f = Vh
-  energy%E_xc = Exc
-  call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
-  select case(iperiodic)
-  case(0)
-    call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
-  case(3)
-    fg%rhoG_elec = rhoe_G
-    call calc_Total_Energy_periodic(energy,system,pp,fg)
-  end select
-  call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
-  if(comm_is_root(nproc_id_global)) write(*,*) "(test: total energy)",energy%E_tot*2d0*Ry,Etot*2d0*Ry
-  if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
-
-  if(comm_is_root(nproc_id_global)) then
-    write(*,'(a,f10.5,a)') "total energy E_tot =",energy%E_tot," a.u."
-    write(*,'(a,f10.5,a,f10.5,a,f10.5)') "E_kin =",energy%E_kin, ",  E_h =",energy%E_h,",  E_xc =",energy%E_xc
-    write(*,'(a,f10.5,a,f10.5)') "E_{electron-ion}: local part =",energy%E_ion_loc, ",  nonlocal part =",energy%E_ion_nloc
-    write(*,'(a,f10.5)') "E_{ion-ion} =",energy%E_ion_ion
-
-    write(*,*) '(forces on atoms)'
-    do ia=1,system%nion
-       write(*,'(1x,i7,3f15.6)') ia,force%f(1,ia),force%f(2,ia),force%f(3,ia)
-    end do
-  end if
-
-  esp = energy%esp(:,:,1) !++++++++++
 
   select case(convergence)
     case('rho_dne')
@@ -1615,9 +1554,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(iflag_diisjump == 1) then
         write(*,'("Diisjump occured. Steepest descent was used.")')
       end if
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,Etot*2d0*Ry,iterVh
+      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,iterVh
     case(3)
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,Etot*2d0*Ry
+      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,energy%E_tot*2d0*Ry
     end select
     do ik=1,num_kpoints_rd
       if(ik<=3)then
@@ -1625,7 +1564,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         do p5=1,(itotMST+3)/4
           p1=4*(p5-1)+1
           p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
-          write(*,'(1x,4(i5,f15.4,2x))') (iob,esp(iob,ik)*2d0*Ry,iob=p1,p2)
+          write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*2d0*Ry,iob=p1,p2)
         end do
         if(iperiodic==3) write(*,*) 
       end if
@@ -1698,21 +1637,15 @@ call timer_end(LOG_GS_ITERATION)
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(icalcforce==1) then
-  if(iperiodic==0) then
-    call calc_force
-  elseif(iperiodic==3) then
-    if(comm_is_root(nproc_id_global)) write(*,*) &
-      "This version is not supporting force-calculation with spatial-grid parallelization."
-    stop
-  end if
+  call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
   if(comm_is_root(nproc_id_global))then
     write(*,*) "===== force ====="
     do iatom=1,MI
       select case(unit_system)
       case('au','a.u.')
-        write(*,'(i6,3e16.8)') iatom,(rforce(ix,iatom),ix=1,3)
+        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
       case('A_eV_fs')
-        write(*,'(i6,3e16.8)') iatom,(rforce(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
       end select
     end do
   end if
@@ -1805,14 +1738,14 @@ if(comm_is_root(nproc_id_global)) then
     write(1,*) "Number of electrons = ", (nelec_spin(is),is=1,2)
   end select
   write(1,*)
-  write(1,*) "Total energy (eV) = ", Etot*2d0*Ry
+  write(1,*) "Total energy (eV) = ", energy%E_tot*2d0*Ry
   write(1,*) "1-particle energies (eV)"
   select case (ilsda)
   case(0)
     do p5=1,(nstate+3)/4
       p1=4*(p5-1)+1
       p2=4*p5 ; if ( p2 > nstate ) p2=nstate
-      write(1,'(1x,4(i5,f15.4,2x))') (iob,esp(iob,1)*2d0*Ry,iob=p1,p2)
+      write(1,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
     end do
   case(1)
     do is=1,2
@@ -1822,14 +1755,14 @@ if(comm_is_root(nproc_id_global)) then
         do p5=1,(nstate_spin(is)+3)/4
           p1=4*(p5-1)+1
           p2=4*p5 ; if ( p2 > nstate_spin(1) ) p2=nstate_spin(1)
-          write(1,'(1x,4(i5,f15.4,2x))') (iob,esp(iob,1)*2d0*Ry,iob=p1,p2)
+          write(1,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
         end do
       case(2)
         write(1,*) "for down-spin"
         do p5=1,(nstate_spin(is)+3)/4
           p1=4*(p5-1)+1+nstate_spin(1)
           p2=4*p5+nstate_spin(1) ; if ( p2 > nstate_spin(1)+nstate_spin(2) ) p2=nstate_spin(1)+nstate_spin(2)
-          write(1,'(1x,4(i5,f15.4,2x))') (iob-nstate_spin(1),esp(iob,1)*2d0*Ry,iob=p1,p2)
+          write(1,'(1x,4(i5,f15.4,2x))') (iob-nstate_spin(1),energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
         end do
       end select
     end do
@@ -1877,10 +1810,10 @@ subroutine band_information
   real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
   if(comm_is_root(nproc_id_global)) then
     do ik=1,num_kpoints_rd
-      esp_vb_min(ik)=minval(esp(1:itotfMST,ik))
-      esp_vb_max(ik)=maxval(esp(1:itotfMST,ik))
-      esp_cb_min(ik)=minval(esp(itotfMST+1:itotMST,ik))
-      esp_cb_max(ik)=maxval(esp(itotfMST+1:itotMST,ik))
+      esp_vb_min(ik)=minval(energy%esp(1:itotfMST,ik,1))
+      esp_vb_max(ik)=maxval(energy%esp(1:itotfMST,ik,1))
+      esp_cb_min(ik)=minval(energy%esp(itotfMST+1:itotMST,ik,1))
+      esp_cb_max(ik)=maxval(energy%esp(itotfMST+1:itotMST,ik,1))
     end do
     write(*,*) 'band information-----------------------------------------'
     write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
