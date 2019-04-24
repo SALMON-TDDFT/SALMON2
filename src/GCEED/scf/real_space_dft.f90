@@ -1047,9 +1047,8 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
 
+    ! Store to psi/zpsi
     select case(iperiodic)
-
-
     case(0)
     do ik=k_sta,k_end
       do iob=1,info%numo
@@ -1065,8 +1064,6 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
       end do
       end do
-
-
     case(3)
     do ik=k_sta,k_end
       do iob=1,info%numo
@@ -1082,7 +1079,9 @@ DFT_Iteration : do iter=1,iDiter(img)
         end do
       end do
     end do
-    end select
+    end select 
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
+
 
 
 
@@ -1132,7 +1131,6 @@ DFT_Iteration : do iter=1,iDiter(img)
         end select
       end if
     end if
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
   
     
     call timer_begin(LOG_CALC_RHO)
@@ -1234,20 +1232,6 @@ DFT_Iteration : do iter=1,iDiter(img)
         call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
-        do ik=k_sta,k_end
-        do iob=1,info%numo
-          do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
       case(3)
         do ik=k_sta,k_end
         do iob=1,info%numo
@@ -1268,36 +1252,15 @@ DFT_Iteration : do iter=1,iDiter(img)
                                     iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
 
-        do ik=k_sta,k_end
-        do iob=1,info%numo
-          do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
       end select
     end if
     call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
-    select case(iperiodic)
-    case(0)
-      call Gram_Schmidt_ns
-    case(3)
-      call Gram_Schmidt_periodic
-    end select
+    call gram_schmidt(system, mg, info, spsi)    
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
-
-
-    call timer_begin(LOG_CALC_SUBSPACE_DIAG)
+    
     select case(iperiodic)
     case(0)
       do ik=k_sta,k_end
@@ -1307,7 +1270,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+           psi(ix,iy,iz,iob+(is-1)*info%numo,ik) =  spsi%rwf(ix,iy,iz,is,iob,ik,1)
           end do
           end do
           end do
@@ -1322,7 +1285,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+            zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik) = spsi%zwf(ix,iy,iz,is,iob,ik,1)
           end do
           end do
           end do
@@ -1330,7 +1293,6 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
     end select
-    call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
 
     call timer_begin(LOG_CALC_MINIMIZATION)
