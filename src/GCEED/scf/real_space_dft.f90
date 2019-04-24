@@ -1043,9 +1043,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_MINIMIZATION)
 
-
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
     ! Store to psi/zpsi
     select case(iperiodic)
@@ -1080,7 +1080,6 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
     end do
     end select 
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
 
@@ -1201,12 +1200,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   else if(iscf_order==2)then
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
-    select case(iperiodic)
-    case(0)
-      call Gram_Schmidt_ns
-    case(3)
-      call Gram_Schmidt_periodic
-    end select
+    call gram_schmidt(system, mg, info, spsi)
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
@@ -1214,39 +1208,11 @@ DFT_Iteration : do iter=1,iDiter(img)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
-        do ik=k_sta,k_end
-        do iob=1,info%numo
-          do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
 
         call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
       case(3)
-        do ik=k_sta,k_end
-        do iob=1,info%numo
-          do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-            end do
-            end do
-            end do
-          end do
-        end do
-        end do
 
         call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
                                     iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
