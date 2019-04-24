@@ -22,7 +22,6 @@ set(SOURCES
     sendrecv_groupob_ngp.f90
     sendrecv_groupob_tmp.f90
     sendrecvh.f90
-    total_energy.f90
     writebox_rt.f90
     persistent_comm.f90
     structure_opt.f90
