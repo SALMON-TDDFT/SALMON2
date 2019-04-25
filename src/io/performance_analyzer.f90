@@ -111,7 +111,6 @@ contains
     src( 7) = timer_get(LOG_ION_FORCE)
     src( 8) = timer_get(LOG_DT_EVOLVE_AC)
     src( 9) = timer_get(LOG_ANA_RT_USEGS)
-!    src( 9) = timer_get(LOG_K_SHIFT_WF) !older name
     src(10) = timer_get(LOG_OTHER)
     src(11) = timer_get(LOG_ALLREDUCE)
     src(12) = timer_get(LOG_DYNAMICS)
@@ -130,7 +129,6 @@ contains
     end do
 
     if (comm_is_root(nproc_id_global)) then
-      write (iounit,'(A)') 'Load balance check [sec]'
       write (iounit,'(A,4(A12))') 'Function    ','min','max','diff','rel'
       if (is_nonzero(rel( 1))) write (iounit,f) 'dt_evolve   ',rmin( 1),rmax( 1),diff( 1),rel( 1)
       if (is_nonzero(rel( 2))) write (iounit,f) 'hpsi        ',rmin( 2),rmax( 2),diff( 2),rel( 2)
@@ -141,7 +139,6 @@ contains
       if (is_nonzero(rel( 7))) write (iounit,f) 'ion_force   ',rmin( 7),rmax( 7),diff( 7),rel( 7)
       if (is_nonzero(rel( 8))) write (iounit,f) 'dt_evolve_ac',rmin( 8),rmax( 8),diff( 8),rel( 8)
       if (is_nonzero(rel( 9))) write (iounit,f) 'ana_RT_useGS',rmin( 9),rmax( 9),diff( 9),rel( 9)
-!      if (is_nonzero(rel( 9))) write (iounit,f) 'k_shift_wf  ',rmin( 9),rmax( 9),diff( 9),rel( 9)  !old name
       if (is_nonzero(rel(10))) write (iounit,f) 'other       ',rmin(10),rmax(10),diff(10),rel(10)
       if (is_nonzero(rel(11))) write (iounit,f) 'allreduce   ',rmin(11),rmax(11),diff(11),rel(11)
       if (is_nonzero(rel(12))) write (iounit,f) 'dynamics    ',rmin(12),rmax(12),diff(12),rel(12)

@@ -16,58 +16,123 @@
 module write_performance_results
   implicit none
 
+  private :: write_loadbalance
+  public  :: write_gs_performance
+  public  :: write_rt_performance
+
 contains
+  subroutine write_loadbalance(fd,nsize,tsrc,headers)
+    use salmon_parallel
+    use salmon_communication
+    use timer
+    use math_constants
+    implicit none
+    integer,intent(in)       :: fd,nsize
+    real(8),intent(in)       :: tsrc(nsize)
+    character(30),intent(in) :: headers(nsize)
+
+    character(*), parameter :: time_format = '(a30,3(f12.4),f12.2)'
+
+    real(8) :: tmin(nsize),tmax(nsize),tdif(nsize),trel(nsize)
+    integer :: i
+
+    call comm_get_min(tsrc,tmin,nsize,nproc_group_global)
+    call comm_get_max(tsrc,tmin,nsize,nproc_group_global)
+
+    do i=1,nsize
+      if (is_zero(tmin(i))) then
+        tdif(i) = 0.d0
+        trel(i) = 0.d0
+      else
+        tdif(i) = tmax(i) - tmin(i)
+        trel(i) = tmax(i) / tmin(i)
+      end if
+    end do
+
+    if (comm_is_root(nproc_id_global)) then
+      write (fd,'(a)') 'Load balance check [sec]'
+      write (fd,'(a30,4(a12))') 'Function','min','max','diff','rel'
+      do i=1,nsize
+        if (is_nonzero(trel(i))) then
+          write (fd,time_format) headers(i),tmin(i),tmax(i),tdif(i),trel(i)
+        end if
+      end do
+    end if
+  end subroutine
+
   subroutine write_gs_performance(fd)
     use timer
     implicit none
-    integer, intent(in)       :: fd
+    integer, intent(in) :: fd
 
-    write(*,'(a)') "==================== elapsed time ===================="
-    call timer_write(fd, 'elapsed time initializing [s]         = ', LOG_INIT_GS)
-    call timer_write(fd, 'elapsed time for reading data [s]     = ', LOG_INIT_GS_RESTART)
-    call timer_write(fd, 'elapsed time for init. scf iter. [s]  = ', LOG_INIT_GS_ITERATION)
-    call timer_write(fd, 'elapsed time for scf iterations [s]   = ', LOG_GS_ITERATION)
-    call timer_write(fd, 'elapsed time for deinit. scf iter. [s]= ', LOG_DEINIT_GS_ITERATION)
-    call timer_write(fd, 'elapsed time for writing data [s]     = ', LOG_WRITE_RESULTS)
-    call timer_write(fd, 'elapsed time for writing LDA data [s] = ', LOG_WRITE_LDA_DATA)
-    call timer_write(fd, 'elapsed time for writing infos [s]    = ', LOG_WRITE_INFOS)
-    call timer_write(fd, 'total time [s]                        = ', LOG_TOTAL)
-    write(*,'(a)') "======================================================"
-    write(*,'(a)') "================== in scf iterations ================="
-    call timer_write(fd, 'elapsed time for Gram Schmidt [s]     = ', LOG_CALC_GRAM_SCHMIDT)
-    call timer_write(fd, 'elapsed time for subspace-diag. [s]   = ', LOG_CALC_SUBSPACE_DIAG)
-    call timer_write(fd, 'elapsed time for calculating rho  [s] = ', LOG_CALC_RHO)
-    call timer_write(fd, 'elapsed time for Hartree routine  [s] = ', LOG_CALC_HARTREE)
-    call timer_write(fd, 'elapsed time for Exc_Cor routine  [s] = ', LOG_CALC_EXC_COR)
-    call timer_write(fd, 'elapsed time for calculating Etot [s] = ', LOG_CALC_TOTAL_ENERGY)
-    call timer_write(fd, 'elapsed time for writing info. [s]    = ', LOG_WRITE_RESULTS)
-    write(*,'(a)') "======================================================"
-    write(*,'(a)') "================== in subspace-diag. ================="
-    call timer_write(fd, 'elapsed time for initialization [s]   = ', LOG_DIAG_INIT)
-    call timer_write(fd, 'elapsed time for Vlocal [s]           = ', LOG_DIAG_VLOCAL)
-    call timer_write(fd, 'elapsed time for Amat [s]             = ', LOG_DIAG_AMAT)
-    call timer_write(fd, 'elapsed time for allreduce [s]        = ', LOG_DIAG_ALLREDUCE)
-    call timer_write(fd, 'elapsed time for eigen [s]            = ', LOG_DIAG_EIGEN)
-    call timer_write(fd, 'elapsed time for set orbital [s]      = ', LOG_DIAG_SET_ORBITAL)
-    call timer_write(fd, 'elapsed time for set orbital [s]      = ', LOG_DIAG_UPDATE)
-    write(*,'(a)') "======================================================"
-    write(*,'(a)') "================== in CG. ============================"
-    call timer_write(fd, 'total time for CG [s]                 = ', LOG_GSCG_TOTAL)
-    call timer_write(fd, 'elapsed time for init. CG [s]         = ', LOG_GSCG_INIT)
-    call timer_write(fd, 'elapsed time for init. iter. CG [s]   = ', LOG_GSCG_INIT_ITERATION)
-    call timer_write(fd, 'elapsed time for iterations CG [s]    = ', LOG_GSCG_ITERATION)
-    call timer_write(fd, 'elapsed time for deinit. CG [s]       = ', LOG_GSCG_DEINIT)
-    call timer_write(fd, 'comm. for inner product (5) in CG [s] = ', LOG_ALLREDUCE_INNER_PRODUCT5)
-    call timer_write(fd, 'comm. for inner product (7) in CG [s] = ', LOG_ALLREDUCE_INNER_PRODUCT7)
-    write(*,'(a)') "======================================================"
+    integer,parameter :: LOG_SIZE = 10
+    real(8)       :: tsrc(LOG_SIZE)
+    character(30) :: headers(LOG_SIZE)
+
+    write (fd,'(a)') "==================== elapsed time [s] ===================="
+    call timer_write(fd, 'elapsed time initializing          = ', LOG_INIT_GS)
+    call timer_write(fd, 'elapsed time for reading data      = ', LOG_INIT_GS_RESTART)
+    call timer_write(fd, 'elapsed time for init. scf iter.   = ', LOG_INIT_GS_ITERATION)
+    call timer_write(fd, 'elapsed time for scf iterations    = ', LOG_GS_ITERATION)
+    call timer_write(fd, 'elapsed time for deinit. scf iter. = ', LOG_DEINIT_GS_ITERATION)
+    call timer_write(fd, 'elapsed time for writing data      = ', LOG_WRITE_RESULTS)
+    call timer_write(fd, 'elapsed time for writing LDA data  = ', LOG_WRITE_LDA_DATA)
+    call timer_write(fd, 'elapsed time for writing infos     = ', LOG_WRITE_INFOS)
+    call timer_write(fd, 'total time                         = ', LOG_TOTAL)
+
+    write (fd,'(a)') "======================================================"
+    write (fd,*)
+
+    call set(1, LOG_CALC_GRAM_SCHMIDT , 'Gram Schmidt')
+    call set(2, LOG_CALC_SUBSPACE_DIAG, 'subspace-diag.')
+    call set(3, LOG_CALC_RHO          , 'calculating rho')
+    call set(4, LOG_CALC_HARTREE      , 'Hartree routine')
+    call set(5, LOG_CALC_EXC_COR      , 'Exc_Cor routine')
+    call set(6, LOG_CALC_TOTAL_ENERGY , 'calculating Etot')
+    call set(7, LOG_WRITE_RESULTS     , 'writing info.')
+    write (fd,'(a)') "================== in scf iterations [s] ================="
+    call write_loadbalance(fd, 7, tsrc, headers)
+
+    call set(1, LOG_DIAG_INIT       , 'initialization')
+    call set(2, LOG_DIAG_VLOCAL     , 'Vlocal')
+    call set(3, LOG_DIAG_AMAT       , 'Amat')
+    call set(4, LOG_DIAG_ALLREDUCE  , 'allreduce')
+    call set(5, LOG_DIAG_EIGEN      , 'eigen')
+    call set(6, LOG_DIAG_SET_ORBITAL, 'set orbital')
+    call set(7, LOG_DIAG_UPDATE     , 'set orbital')
+    write (fd,'(a)') "================== in subspace-diag. [s] ================="
+    call write_loadbalance(fd, 7, tsrc, headers)
+
+    call set(1, LOG_GSCG_TOTAL              , 'total')
+    call set(2, LOG_GSCG_INIT               , 'init.')
+    call set(3, LOG_GSCG_INIT_ITERATION     , 'init. iter.')
+    call set(4, LOG_GSCG_ITERATION          , 'iterations')
+    call set(5, LOG_GSCG_DEINIT             , 'deinit.')
+    call set(6, LOG_ALLREDUCE_INNER_PRODUCT5, 'comm. for inner product(5)')
+    call set(7, LOG_ALLREDUCE_INNER_PRODUCT7, 'comm. for inner product(7)')
+    write (fd,'(a)') "================== in CG. [s] ============================"
+    call write_loadbalance(fd, 7, tsrc, headers)
+
+  contains
+    subroutine set(nid, tid, header)
+      implicit none
+      integer, intent(in)      :: nid, tid
+      character(*), intent(in) :: header
+      tsrc(nid) = timer_get(tid)
+      write (headers(nid),*) header
+    end subroutine
   end subroutine
 
   subroutine write_rt_performance(fd)
     use timer
     implicit none
-    integer, intent(in)       :: fd
+    integer, intent(in) :: fd
 
-    write(fd,'(a)') "==================== elapsed time ===================="
+    integer,parameter :: LOG_SIZE = 20
+    real(8)       :: tsrc(LOG_SIZE)
+    character(30) :: headers(LOG_SIZE)
+
+    write(fd,'(a)') "==================== elapsed time [s] ===================="
     call timer_write(fd, 'elapsed time for rt initialization  = ', LOG_INIT_RT)
     call timer_write(fd, 'elapsed time for reading lda data   = ', LOG_READ_LDA_DATA)
     call timer_write(fd, 'elapsed time for reading rt data    = ', LOG_READ_RT_DATA)
@@ -78,41 +143,56 @@ contains
     call timer_write(fd, 'total time                          = ', LOG_TOTAL)
 
     write(fd,'(a)') "======================================================"
-    write(fd,'(a)') "=========== elapsed time for rt iterations ==========="
-    call timer_write(fd, 'elapsed time for Vbox               = ', LOG_CALC_VBOX)
-    call timer_write(fd, 'elapsed time for time propagation   = ', LOG_CALC_TIME_PROPAGATION)
-    call timer_write(fd, 'elapsed time for calculating rho    = ', LOG_CALC_RHO)
-    call timer_write(fd, 'elapsed time for Hartree routine    = ', LOG_CALC_HARTREE)
-    call timer_write(fd, 'elapsed time for Exc_Cor routine    = ', LOG_CALC_EXC_COR)
-    call timer_write(fd, 'elapsed time for Vhxc               = ', LOG_CALC_VLOCAL) ! FIXME: wrong name
-    call timer_write(fd, 'elapsed time for calculating Dp     = ', LOG_CALC_DP)
-    call timer_write(fd, 'elapsed time for calculating curr   = ', LOG_CALC_CURRENT)
-    call timer_write(fd, 'elapsed time for calculating Etot   = ', LOG_CALC_TOTAL_ENERGY)
-    call timer_write(fd, 'elapsed time for calc. projection   = ', LOG_CALC_PROJECTION)
-    call timer_write(fd, 'elapsed time for calc. quadrupole   = ', LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
-    call timer_write(fd, 'elapsed time for writing energies   = ', LOG_WRITE_ENERGIES)
-    call timer_write(fd, 'elapsed time for writing info etc.  = ', LOG_WRITE_INFOS)
-    write(*,'(a)') "======================================================"
-    write(*,'(a)') "======================================================"
+    write (fd,*)
+
+    call set( 1, LOG_CALC_VBOX            , 'Vbox')
+    call set( 2, LOG_CALC_TIME_PROPAGATION, 'time propagation')
+    call set( 3, LOG_CALC_RHO             , 'calculating rho')
+    call set( 4, LOG_CALC_HARTREE         , 'Hartree routine')
+    call set( 5, LOG_CALC_EXC_COR         , 'Exc_Cor routine')
+    call set( 6, LOG_CALC_VLOCAL          , 'Vhxc')              ! FIXME: wrong name    
+    call set( 7, LOG_CALC_DP              , 'calculating Dp')
+    call set( 8, LOG_CALC_CURRENT         , 'calculating curr')
+    call set( 9, LOG_CALC_TOTAL_ENERGY    , 'calculating Etot')
+    call set(10, LOG_CALC_PROJECTION      , 'calc. projection')
+    call set(11, LOG_CALC_QUADRUPOLE      , 'calc. quadrupole')  ! FIXME: wrong name
+    call set(12, LOG_WRITE_ENERGIES       , 'writing energies')
+    call set(13, LOG_WRITE_INFOS          , 'writing info etc.')
+    write(fd,'(a)') "=========== elapsed time for rt iterations [s] ==========="
+    call write_loadbalance(fd, 13, tsrc, headers)
+
+    call set(1, LOG_ALLREDUCE_RHO    , 'Allreduce in rho')
+    call set(2, LOG_ALLREDUCE_HARTREE, 'Allreduce in Hartree')
+    call set(3, LOG_ALLREDUCE_DIPOLE , 'Allreduce in dipole calc.')
+    call set(4, LOG_ALLGATHERV_TOTAL , 'Allgatherv')
     write(*,'(a)') "=========== communication time ======================="
-    call timer_write(fd, 'Allreduce in calculating rho        = ', LOG_ALLREDUCE_RHO)
-    call timer_write(fd, 'Allreduce in Hartree                = ', LOG_ALLREDUCE_HARTREE)
-    call timer_write(fd, 'Allreduce in dipole calc.           = ', LOG_ALLREDUCE_DIPOLE)
-    call timer_write(fd, 'Allgatherv                          = ', LOG_ALLGATHERV_TOTAL)
-    write(*,'(a)') "======================================================"
+    call write_loadbalance(fd, 4, tsrc, headers)
+
+    call set(1, LOG_TEP_SENDRECV      , 'sendrecv'
+    call set(2, LOG_TEP_ORBITAL_ENERGY, 'orbital energy'
+    call set(3, LOG_TEP_ION_ION       , 'ion-ion'
+    call set(4, LOG_TEP_ION_ELECTRON  , 'ion-electron'
+    call set(5, LOG_TEP_NONLOCAL_1    , 'nonlocal 1'
+    call set(6, LOG_TEP_NONLOCAL_2    , 'nonlocal 2'
     write(*,'(a)') "=========== total_energy_periodic ===================="
-    call timer_write(fd, 'sendrecv                            = ', LOG_TEP_SENDRECV)
-    call timer_write(fd, 'orbital energy                      = ', LOG_TEP_ORBITAL_ENERGY)
-    call timer_write(fd, 'ion-ion                             = ', LOG_TEP_ION_ION)
-    call timer_write(fd, 'ion-electron                        = ', LOG_TEP_ION_ELECTRON)
-    call timer_write(fd, 'nonlocal 1                          = ', LOG_TEP_NONLOCAL_1)
-    call timer_write(fd, 'nonlocal 2                          = ', LOG_TEP_NONLOCAL_2)
+    call write_loadbalance(fd, 6, tsrc, headers)
+
+    call set(1, LOG_CUR_SENDRECV           , 'sendrecv')
+    call set(2, LOG_CUR_LOCAL              , 'current (except nonlocal)')
+    call set(3, LOG_CUR_NONLOCAL1          , 'current nonlocal (1)')
+    call set(4, LOG_CUR_NONLOCAL1_ALLREDUCE, 'Allreduce nonlocal (1)')
+    call set(5, LOG_CUR_NONLOCAL2          , 'current nonlocal (2)')
+    call set(6, LOG_CUR_NONLOCAL2_ALLREDUCE, 'Allreduce nonlocal (2)')
     write(*,'(a)') "=========== current =================================="
-    call timer_write(fd, 'sendrecv                            = ', LOG_CUR_SENDRECV)
-    call timer_write(fd, 'current (except nonlocal)           = ', LOG_CUR_LOCAL)
-    call timer_write(fd, 'current nonlocal (1)                = ', LOG_CUR_NONLOCAL1)
-    call timer_write(fd, 'Allreduce nonlocal (1)              = ', LOG_CUR_NONLOCAL1_ALLREDUCE)
-    call timer_write(fd, 'current nonlocal (2)                = ', LOG_CUR_NONLOCAL2)
-    call timer_write(fd, 'Allreduce nonlocal (2)              = ', LOG_CUR_NONLOCAL2_ALLREDUCE)
+    call write_loadbalance(fd, 6, tsrc, headers)
+
+  contains
+    subroutine set(nid, tid, header)
+      implicit none
+      integer, intent(in)      :: nid, tid
+      character(*), intent(in) :: header
+      tsrc(nid) = timer_get(tid)
+      write (headers(nid),*) header
+    end subroutine
   end subroutine write_rt_performance
 end module write_performance_results
