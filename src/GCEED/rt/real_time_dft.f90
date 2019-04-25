@@ -633,18 +633,8 @@ call timer_end(LOG_WRITE_RESULTS)
 call timer_end(LOG_TOTAL)
 
 
-if(comm_is_root(nproc_id_global))then
-  call write_rt_performance(output_unit)
-end if
+call write_rt_performance(output_unit)
 
-if(timer_process=='y')then
-
-  write(fileNumber, '(i8)') nproc_id_global
-  timeFile = "timer_proc"//adjustl(fileNumber)
-  open(79,file=timeFile)
-
-  call write_rt_performance(79)
-end if
 
 call deallocate_mat
 

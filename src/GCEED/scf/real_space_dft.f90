@@ -1694,9 +1694,7 @@ call finalize_xc(xc_func)
 call timer_end(LOG_TOTAL)
 
 
-if(comm_is_root(nproc_id_global))then
-  call write_gs_performance(output_unit)
-end if
+call write_gs_performance(output_unit)
 
 contains
 

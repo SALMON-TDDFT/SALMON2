@@ -31,36 +31,63 @@ contains
     real(8),intent(in)       :: tsrc(nsize)
     character(30),intent(in) :: headers(nsize)
 
-    character(*), parameter :: time_format = '(a30,3(f12.4),f12.2)'
+    character(*), parameter :: time_format = '(a30,6(f12.2))'
 
     real(8) :: tmin(nsize),tmax(nsize),tdif(nsize),trel(nsize)
+    real(8) :: tavg(nsize),tnorm(nsize),tstdev(nsize)
     integer :: i
 
     call comm_get_min(tsrc,tmin,nsize,nproc_group_global)
-    call comm_get_max(tsrc,tmin,nsize,nproc_group_global)
+    call comm_get_max(tsrc,tmax,nsize,nproc_group_global)
+    call comm_summation(tsrc,tavg,nsize,nproc_group_global)
 
     do i=1,nsize
-      if (is_zero(tmin(i))) then
+      if (is_zero(tmax(i))) then
         tdif(i) = 0.d0
         trel(i) = 0.d0
+        tavg(i) = 0.d0
       else
         tdif(i) = tmax(i) - tmin(i)
         trel(i) = tmax(i) / tmin(i)
+        tavg(i) = tavg(i) / nproc_size_global
       end if
+    end do
+
+    do i=1,nsize
+      tnorm(i) = tsrc(i)**2 - tavg(i)**2
+    end do
+
+    call comm_summation(tnorm,tstdev,nsize,nproc_group_global)
+
+    do i=1,nsize
+      tstdev(i) = sqrt(tstdev(i) / nproc_size_global)
     end do
 
     if (comm_is_root(nproc_id_global)) then
       write (fd,'(a)') 'Load balance check [sec]'
-      write (fd,'(a30,4(a12))') 'Function','min','max','diff','rel'
+      write (fd,'(a8,22x,6(a12))') 'Function','min','max','average','std. dev.','difference','relative'
       do i=1,nsize
         if (is_nonzero(trel(i))) then
-          write (fd,time_format) headers(i),tmin(i),tmax(i),tdif(i),trel(i)
+          write (fd,time_format) headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
         end if
       end do
     end if
   end subroutine
 
+  subroutine write_root(fd, str)
+    use salmon_parallel
+    use salmon_communication
+    implicit none
+    integer, intent(in)      :: fd
+    character(*), intent(in) :: str
+    if (comm_is_root(nproc_id_global)) then
+      write (fd,'(a)') str
+    end if
+  end subroutine
+
   subroutine write_gs_performance(fd)
+    use salmon_parallel
+    use salmon_communication
     use timer
     implicit none
     integer, intent(in) :: fd
@@ -69,19 +96,20 @@ contains
     real(8)       :: tsrc(LOG_SIZE)
     character(30) :: headers(LOG_SIZE)
 
-    write (fd,'(a)') "==================== elapsed time [s] ===================="
-    call timer_write(fd, 'elapsed time initializing          = ', LOG_INIT_GS)
-    call timer_write(fd, 'elapsed time for reading data      = ', LOG_INIT_GS_RESTART)
-    call timer_write(fd, 'elapsed time for init. scf iter.   = ', LOG_INIT_GS_ITERATION)
-    call timer_write(fd, 'elapsed time for scf iterations    = ', LOG_GS_ITERATION)
-    call timer_write(fd, 'elapsed time for deinit. scf iter. = ', LOG_DEINIT_GS_ITERATION)
-    call timer_write(fd, 'elapsed time for writing data      = ', LOG_WRITE_RESULTS)
-    call timer_write(fd, 'elapsed time for writing LDA data  = ', LOG_WRITE_LDA_DATA)
-    call timer_write(fd, 'elapsed time for writing infos     = ', LOG_WRITE_INFOS)
-    call timer_write(fd, 'total time                         = ', LOG_TOTAL)
+    call write_root(fd, '==================== elapsed time [s] ====================')
+    if (comm_is_root(nproc_id_global)) then
+      call timer_write(fd, 'elapsed time initializing          = ', LOG_INIT_GS)
+      call timer_write(fd, 'elapsed time for reading data      = ', LOG_INIT_GS_RESTART)
+      call timer_write(fd, 'elapsed time for init. scf iter.   = ', LOG_INIT_GS_ITERATION)
+      call timer_write(fd, 'elapsed time for scf iterations    = ', LOG_GS_ITERATION)
+      call timer_write(fd, 'elapsed time for deinit. scf iter. = ', LOG_DEINIT_GS_ITERATION)
+      call timer_write(fd, 'elapsed time for writing data      = ', LOG_WRITE_RESULTS)
+      call timer_write(fd, 'elapsed time for writing LDA data  = ', LOG_WRITE_LDA_DATA)
+      call timer_write(fd, 'elapsed time for writing infos     = ', LOG_WRITE_INFOS)
+      call timer_write(fd, 'total time                         = ', LOG_TOTAL)
+    end if
 
-    write (fd,'(a)') "======================================================"
-    write (fd,*)
+    call write_root(fd, '==========================================================')
 
     call set(1, LOG_CALC_GRAM_SCHMIDT , 'Gram Schmidt')
     call set(2, LOG_CALC_SUBSPACE_DIAG, 'subspace-diag.')
@@ -90,7 +118,7 @@ contains
     call set(5, LOG_CALC_EXC_COR      , 'Exc_Cor routine')
     call set(6, LOG_CALC_TOTAL_ENERGY , 'calculating Etot')
     call set(7, LOG_WRITE_RESULTS     , 'writing info.')
-    write (fd,'(a)') "================== in scf iterations [s] ================="
+    call write_root(fd, '================== in scf iterations [s] =================')
     call write_loadbalance(fd, 7, tsrc, headers)
 
     call set(1, LOG_DIAG_INIT       , 'initialization')
@@ -100,7 +128,7 @@ contains
     call set(5, LOG_DIAG_EIGEN      , 'eigen')
     call set(6, LOG_DIAG_SET_ORBITAL, 'set orbital')
     call set(7, LOG_DIAG_UPDATE     , 'set orbital')
-    write (fd,'(a)') "================== in subspace-diag. [s] ================="
+    call write_root(fd, '================== in subspace-diag. [s] =================')
     call write_loadbalance(fd, 7, tsrc, headers)
 
     call set(1, LOG_GSCG_TOTAL              , 'total')
@@ -110,7 +138,7 @@ contains
     call set(5, LOG_GSCG_DEINIT             , 'deinit.')
     call set(6, LOG_ALLREDUCE_INNER_PRODUCT5, 'comm. for inner product(5)')
     call set(7, LOG_ALLREDUCE_INNER_PRODUCT7, 'comm. for inner product(7)')
-    write (fd,'(a)') "================== in CG. [s] ============================"
+    call write_root(fd, '================== in CG. [s] ============================')
     call write_loadbalance(fd, 7, tsrc, headers)
 
   contains
@@ -119,11 +147,13 @@ contains
       integer, intent(in)      :: nid, tid
       character(*), intent(in) :: header
       tsrc(nid) = timer_get(tid)
-      write (headers(nid),*) header
+      write (headers(nid),'(a)') header
     end subroutine
   end subroutine
 
   subroutine write_rt_performance(fd)
+    use salmon_parallel
+    use salmon_communication
     use timer
     implicit none
     integer, intent(in) :: fd
@@ -132,18 +162,20 @@ contains
     real(8)       :: tsrc(LOG_SIZE)
     character(30) :: headers(LOG_SIZE)
 
-    write(fd,'(a)') "==================== elapsed time [s] ===================="
-    call timer_write(fd, 'elapsed time for rt initialization  = ', LOG_INIT_RT)
-    call timer_write(fd, 'elapsed time for reading lda data   = ', LOG_READ_LDA_DATA)
-    call timer_write(fd, 'elapsed time for reading rt data    = ', LOG_READ_RT_DATA)
-    call timer_write(fd, 'elapsed time for prep. time prop.   = ', LOG_INIT_TIME_PROPAGATION)
-    call timer_write(fd, 'elapsed time for rt iterations      = ', LOG_RT_ITERATION)
-    call timer_write(fd, 'elapsed time for writing rt data    = ', LOG_WRITE_RT_DATA)
-    call timer_write(fd, 'elapsed time aft. writing rt data   = ', LOG_WRITE_RESULTS)
-    call timer_write(fd, 'total time                          = ', LOG_TOTAL)
+    call write_root(fd, '==================== elapsed time [s] ====================')
+    if (comm_is_root(nproc_id_global)) then
+      call timer_write(fd, 'elapsed time for rt initialization  = ', LOG_INIT_RT)
+      call timer_write(fd, 'elapsed time for reading lda data   = ', LOG_READ_LDA_DATA)
+      call timer_write(fd, 'elapsed time for reading rt data    = ', LOG_READ_RT_DATA)
+      call timer_write(fd, 'elapsed time for prep. time prop.   = ', LOG_INIT_TIME_PROPAGATION)
+      call timer_write(fd, 'elapsed time for rt iterations      = ', LOG_RT_ITERATION)
+      call timer_write(fd, 'elapsed time for writing rt data    = ', LOG_WRITE_RT_DATA)
+      call timer_write(fd, 'elapsed time aft. writing rt data   = ', LOG_WRITE_RESULTS)
+      call timer_write(fd, 'total time                          = ', LOG_TOTAL)
+    end if
 
-    write(fd,'(a)') "======================================================"
-    write (fd,*)
+    call write_root(fd, '======================================================')
+    call write_root(fd, '')
 
     call set( 1, LOG_CALC_VBOX            , 'Vbox')
     call set( 2, LOG_CALC_TIME_PROPAGATION, 'time propagation')
@@ -158,23 +190,23 @@ contains
     call set(11, LOG_CALC_QUADRUPOLE      , 'calc. quadrupole')  ! FIXME: wrong name
     call set(12, LOG_WRITE_ENERGIES       , 'writing energies')
     call set(13, LOG_WRITE_INFOS          , 'writing info etc.')
-    write(fd,'(a)') "=========== elapsed time for rt iterations [s] ==========="
+    call write_root(fd, '=========== elapsed time for rt iterations [s] ===========')
     call write_loadbalance(fd, 13, tsrc, headers)
 
     call set(1, LOG_ALLREDUCE_RHO    , 'Allreduce in rho')
     call set(2, LOG_ALLREDUCE_HARTREE, 'Allreduce in Hartree')
     call set(3, LOG_ALLREDUCE_DIPOLE , 'Allreduce in dipole calc.')
     call set(4, LOG_ALLGATHERV_TOTAL , 'Allgatherv')
-    write(*,'(a)') "=========== communication time ======================="
+    call write_root(fd, '=========== communication time =======================')
     call write_loadbalance(fd, 4, tsrc, headers)
 
-    call set(1, LOG_TEP_SENDRECV      , 'sendrecv'
-    call set(2, LOG_TEP_ORBITAL_ENERGY, 'orbital energy'
-    call set(3, LOG_TEP_ION_ION       , 'ion-ion'
-    call set(4, LOG_TEP_ION_ELECTRON  , 'ion-electron'
-    call set(5, LOG_TEP_NONLOCAL_1    , 'nonlocal 1'
-    call set(6, LOG_TEP_NONLOCAL_2    , 'nonlocal 2'
-    write(*,'(a)') "=========== total_energy_periodic ===================="
+    call set(1, LOG_TEP_SENDRECV      , 'sendrecv')
+    call set(2, LOG_TEP_ORBITAL_ENERGY, 'orbital energy')
+    call set(3, LOG_TEP_ION_ION       , 'ion-ion')
+    call set(4, LOG_TEP_ION_ELECTRON  , 'ion-electron')
+    call set(5, LOG_TEP_NONLOCAL_1    , 'nonlocal 1')
+    call set(6, LOG_TEP_NONLOCAL_2    , 'nonlocal 2')
+    call write_root(fd, '=========== total_energy_periodic ====================')
     call write_loadbalance(fd, 6, tsrc, headers)
 
     call set(1, LOG_CUR_SENDRECV           , 'sendrecv')
@@ -183,7 +215,7 @@ contains
     call set(4, LOG_CUR_NONLOCAL1_ALLREDUCE, 'Allreduce nonlocal (1)')
     call set(5, LOG_CUR_NONLOCAL2          , 'current nonlocal (2)')
     call set(6, LOG_CUR_NONLOCAL2_ALLREDUCE, 'Allreduce nonlocal (2)')
-    write(*,'(a)') "=========== current =================================="
+    call write_root(fd, '=========== current ==================================')
     call write_loadbalance(fd, 6, tsrc, headers)
 
   contains
@@ -192,7 +224,7 @@ contains
       integer, intent(in)      :: nid, tid
       character(*), intent(in) :: header
       tsrc(nid) = timer_get(tid)
-      write (headers(nid),*) header
+      write (headers(nid),'(a)') header
     end subroutine
   end subroutine write_rt_performance
 end module write_performance_results
