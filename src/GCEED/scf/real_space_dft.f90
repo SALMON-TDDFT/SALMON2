@@ -68,7 +68,7 @@ use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
-use gram_schmidt_orth, only: debug_var_dump, gram_schmidt 
+use gram_schmidt_orth, only: gram_schmidt 
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa,ia
@@ -447,13 +447,45 @@ if(istopt==1)then
     end if
 
     call init_wf_ns(1)
-
+    ! Store to psi/zpsi
     select case(iperiodic)
     case(0)
-      call Gram_Schmidt_ns
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
     case(3)
-      call Gram_Schmidt_periodic
-    end select
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+          end do
+          end do
+          end do
+        end do
+      end do
+    end do
+    end select 
+
+    
+    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
+    call gram_schmidt(system, mg, info, spsi)
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
+
 
     allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     allocate( rho_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) )  
@@ -469,6 +501,41 @@ if(istopt==1)then
       rho_s_out=0.d0
     end if
     rho=0.d0 
+
+
+        ! Store to psi/zpsi
+    select case(iperiodic)
+    case(0)
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+    end do
+    end select
 
     select case(iperiodic)
     case(0)
@@ -502,39 +569,6 @@ if(istopt==1)then
     call exc_cor_ns(ppn)
 
     call allgatherv_vlocal
-
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    end select
 
     if(iperiodic==3) then
       allocate(stencil%kAc(k_sta:k_end,3))
@@ -891,12 +925,11 @@ end if
 
 ! Setup NLCC term from pseudopotential
 call calc_nlcc(pp, system, mg, ppn)
+
 if (comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
   write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
 end if    
-
-
 call timer_end(LOG_INIT_GS_ITERATION)
 
 call timer_begin(LOG_GS_ITERATION)
@@ -936,41 +969,9 @@ DFT_Iteration : do iter=1,iDiter(img)
   call copy_density
 
 
+
   if(iscf_order==1)then
     call timer_begin(LOG_CALC_MINIMIZATION)
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    end select
-
     if( amin_routine == 'cg' .or.       &
    (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
@@ -1010,7 +1011,27 @@ DFT_Iteration : do iter=1,iDiter(img)
     call gram_schmidt(system, mg, info, spsi)
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
-    ! Store to psi/zpsi
+
+
+
+    !call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
+    if(iflag_subspace_diag==1)then
+      if(Miter>iDiter_nosubspace_diag)then
+        select case(iperiodic)
+        case(0)      
+          call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+
+        case(3)
+
+          call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+                                      iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
+                                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
+        end select
+      end if
+    end if
+  
+    ! Store to psi/zpsi for calc_density
     select case(iperiodic)
     case(0)
     do ik=k_sta,k_end
@@ -1044,57 +1065,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
     end select 
 
-
-
-
-    !call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
-    if(iflag_subspace_diag==1)then
-      if(Miter>iDiter_nosubspace_diag)then
-        select case(iperiodic)
-        case(0)      
-          call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
-                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-
-          do ik=k_sta,k_end
-          do iob=1,info%numo
-            do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-              do iz=mg%is(3),mg%ie(3)
-              do iy=mg%is(2),mg%ie(2)
-              do ix=mg%is(1),mg%ie(1)
-                psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
-              end do
-              end do
-              end do
-            end do
-          end do
-          end do
-
-        case(3)
-
-          call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                      iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
-                                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
-
-          do ik=k_sta,k_end
-          do iob=1,info%numo
-            do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-              do iz=mg%is(3),mg%ie(3)
-              do iy=mg%is(2),mg%ie(2)
-              do ix=mg%is(1),mg%ie(1)
-                zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
-              end do
-              end do
-              end do
-            end do
-          end do
-          end do
-        end select
-      end if
-    end if
-  
-    
     call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
     case(0)
@@ -1245,6 +1215,39 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
 
+    ! Store to psi/zpsi for calc_density
+  select case(iperiodic)
+  case(0)
+  do ik=k_sta,k_end
+    do iob=1,info%numo
+      do is=1,nspin
+        !$OMP parallel do private(iz,iy,ix)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
+        end do
+        end do
+        end do
+      end do
+    end do
+    end do
+  case(3)
+  do ik=k_sta,k_end
+    do iob=1,info%numo
+      do is=1,nspin
+        !$OMP parallel do private(iz,iy,ix)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
+        end do
+        end do
+        end do
+      end do
+    end do
+  end do
+  end select 
 
     call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
