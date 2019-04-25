@@ -4,7 +4,6 @@
 set(SOURCES
     global_variables.f90
     opt_variables.f90
-    performance_analyzer.f90
     nvtx.f90
     )
 #if (USE_NVTX)
