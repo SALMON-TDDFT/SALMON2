@@ -14,11 +14,12 @@
 !  limitations under the License.
 !
 !-----------------------------------------------------------------------------------------
-subroutine weyl_calc(grid,field,tmp)
-  use salmon_maxwell, only:fdtd_grid,fdtd_field,fdtd_tmp
+subroutine weyl_calc(fs,ff,fw)
+  use structures,     only: s_fdtd_system, s_fdtd_field
+  use salmon_maxwell, only: s_fdtd_work
   implicit none
-  type(fdtd_grid)  :: grid
-  type(fdtd_field) :: field
-  type(fdtd_tmp)   :: tmp
+  type(s_fdtd_system) :: fs
+  type(s_fdtd_field)  :: ff
+  type(s_fdtd_work)   :: fw
   
 end subroutine weyl_calc
