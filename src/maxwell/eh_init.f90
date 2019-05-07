@@ -27,10 +27,11 @@ subroutine eh_init(grid,tmp)
                                   phi_cep2,rlaser_int_wcm2_2,amplitude2
   use salmon_parallel,      only: nproc_id_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_bcast
-  use salmon_maxwell,       only:fdtd_grid,fdtd_tmp
+  use structures,           only: s_fdtd_system
+  use salmon_maxwell,       only: s_fdtd_work
   implicit none
-  type(fdtd_grid)     :: grid
-  type(fdtd_tmp)      :: tmp
+  type(s_fdtd_system) :: grid
+  type(s_fdtd_work)   :: tmp
   integer             :: ii,ij,ix,iy,iz,icount,icount_d,iflag
   real(8),parameter   :: pi=3.141592653589793d0
   real(8)             :: dt_cfl,diff_cep
@@ -1562,11 +1563,12 @@ subroutine eh_prep_GCEED(grid,tmp)
   use new_world_sub,     only: make_new_world
   use init_sendrecv_sub, only: init_updown,init_itype,init_sendrecv_matrix
   use persistent_comm,   only: init_persistent_requests
-  use salmon_maxwell,    only: fdtd_grid,fdtd_tmp
+  use structures,        only: s_fdtd_system
+  use salmon_maxwell,    only: s_fdtd_work
   implicit none
-  type(s_rgrid)    :: lg,mg,ng
-  type(fdtd_grid)  :: grid
-  type(fdtd_tmp)   :: tmp
+  type(s_rgrid)       :: lg,mg,ng
+  type(s_fdtd_system) :: grid
+  type(s_fdtd_work)   :: tmp
   
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
