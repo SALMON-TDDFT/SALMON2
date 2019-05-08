@@ -97,6 +97,7 @@ type(s_energy) :: energy
 type(s_force)  :: force
 integer :: neig(1:3, 1:2)
 integer :: neig_ng(1:3, 1:2)
+integer :: n,nn
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -418,14 +419,36 @@ if(istopt==1)then
       if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
       fg%icomm_fourier = nproc_group_global
       fg%ng = system%ngrid
-      fg%iGzero = nGzero
       allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
       allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      fg%Gx = Gx
-      fg%Gy = Gy
-      fg%Gz = Gz
-      fg%rhoG_ion = rhoion_G
-      fg%dVG_ion = dVloc_G
+      if(iflag_hartree==2)then
+        fg%iGzero = nGzero
+        fg%Gx = Gx
+        fg%Gy = Gy
+        fg%Gz = Gz
+        fg%rhoG_ion = rhoion_G
+        fg%dVG_ion = dVloc_G
+      else if(iflag_hartree==4)then
+        fg%iGzero = 1
+        fg%Gx = 0.d0
+        fg%Gy = 0.d0
+        fg%Gz = 0.d0
+        fg%rhoG_ion = 0.d0
+        fg%dVG_ion = 0.d0
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%Gx(nn) = Gx(n)
+          fg%Gy(nn) = Gy(n)
+          fg%Gz(nn) = Gz(n)
+          fg%rhoG_ion(nn) = rhoion_G(n)
+          fg%dVG_ion(nn,:) = dVloc_G(n,:)
+        enddo
+        enddo
+        enddo
+      end if
     end if
 
     if(iobnum >= 1)then
@@ -596,7 +619,19 @@ if(istopt==1)then
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      fg%rhoG_elec = rhoe_G
+      if(iflag_hartree==2)then
+        fg%rhoG_elec = rhoe_G
+      else if(iflag_hartree==4)then
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%rhoG_elec(nn) = rhoe_G(n)
+        enddo
+        enddo
+        enddo
+      end if
       call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
     esp = energy%esp(:,:,1) !++++++++
@@ -828,14 +863,36 @@ if(istopt==1)then
       if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
       fg%icomm_fourier = nproc_group_global
       fg%ng = system%ngrid
-      fg%iGzero = nGzero
       allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
       allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      fg%Gx = Gx
-      fg%Gy = Gy
-      fg%Gz = Gz
-      fg%rhoG_ion = rhoion_G
-      fg%dVG_ion = dVloc_G
+      if(iflag_hartree==2)then
+        fg%iGzero = nGzero
+        fg%Gx = Gx
+        fg%Gy = Gy
+        fg%Gz = Gz
+        fg%rhoG_ion = rhoion_G
+        fg%dVG_ion = dVloc_G
+      else if(iflag_hartree==4)then
+        fg%iGzero = 1
+        fg%Gx = 0.d0
+        fg%Gy = 0.d0
+        fg%Gz = 0.d0
+        fg%rhoG_ion = 0.d0
+        fg%dVG_ion = 0.d0
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%Gx(nn) = Gx(n)
+          fg%Gy(nn) = Gy(n)
+          fg%Gz(nn) = Gz(n)
+          fg%rhoG_ion(nn) = rhoion_G(n)
+          fg%dVG_ion(nn,:) = dVloc_G(n,:)
+        enddo
+        enddo
+        enddo
+      end if
     end if
 
     call init_updown
@@ -1128,7 +1185,19 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      fg%rhoG_elec = rhoe_G
+      if(iflag_hartree==2)then
+        fg%rhoG_elec = rhoe_G
+      else if(iflag_hartree==4)then
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%rhoG_elec(nn) = rhoe_G(n)
+        enddo
+        enddo
+        enddo
+      end if
       call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
     esp = energy%esp(:,:,1) !++++++++
@@ -1323,7 +1392,19 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      fg%rhoG_elec = rhoe_G
+      if(iflag_hartree==2)then
+        fg%rhoG_elec = rhoe_G
+      else if(iflag_hartree==4)then
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%rhoG_elec(nn) = rhoe_G(n)
+        enddo
+        enddo
+        enddo
+      end if
       call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
     esp = energy%esp(:,:,1) !++++++++
