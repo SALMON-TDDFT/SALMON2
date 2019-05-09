@@ -1722,7 +1722,7 @@ subroutine band_information
   implicit none
   integer :: ik
   real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
-  if(comm_is_root(nproc_id_global)) then
+  if(comm_is_root(nproc_id_global) .and. itotfMST<itotMST) then
     do ik=1,num_kpoints_rd
       esp_vb_min(ik)=minval(energy%esp(1:itotfMST,ik,1))
       esp_vb_max(ik)=maxval(energy%esp(1:itotfMST,ik,1))
