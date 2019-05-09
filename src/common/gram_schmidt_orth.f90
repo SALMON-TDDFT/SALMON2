@@ -103,7 +103,7 @@ contains
         do jo2 = 1, jo1 - 1
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
-            call axpy_wf_ovlp( &
+            call axpy_wf( &
               & coeff(jo2), wf%rwf(:, :, :, ispin, io2, ik, im), &
               & wf_exc_tmp)
           end if
@@ -112,11 +112,11 @@ contains
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
-          call axpy_wf_ovlp(-1d0, wf_exc, wf_jo1)
+          call axpy_wf(-1d0, wf_exc, wf_jo1)
           ! Normalization:
           norm2_tmp = dot_wf(wf_jo1, wf_jo1)
           call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
-          call scal_wf_ovlp(1d0 / sqrt(norm2), wf_jo1)
+          call scal_wf(1d0 / sqrt(norm2), wf_jo1)
           ! Write back to "rwf":
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
@@ -166,7 +166,7 @@ contains
   end function dot_wf
 
   ! Constant times a wavefunction plus a wavefunction:
-  subroutine axpy_wf_ovlp(a, x, y)
+  subroutine axpy_wf(a, x, y)
     implicit none
     real(8), intent(in) :: a
     real(8), intent(in) :: x( &
@@ -179,20 +179,20 @@ contains
       & rg%is_array(3):rg%ie_array(3))
     integer :: i1, i2, i3
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
-    do i3 = rg%is_overlap(3), rg%ie_overlap(3)
-      do i2 = rg%is_overlap(2), rg%ie_overlap(2)
-        do i1 = rg%is_overlap(1), rg%ie_overlap(1)
+    do i3 = rg%is(3), rg%ie(3)
+      do i2 = rg%is(2), rg%ie(2)
+        do i1 = rg%is(1), rg%ie(1)
           y(i1, i2, i3) = a * x(i1, i2, i3) + y(i1, i2, i3)
         end do
       end do
     end do
     !$omp end parallel do
     return
-  end subroutine axpy_wf_ovlp
+  end subroutine axpy_wf
 
 
   ! Scales a wavefunction by a constant 
-  subroutine scal_wf_ovlp(a, x)
+  subroutine scal_wf(a, x)
     implicit none
     real(8), intent(in) :: a
     real(8), intent(inout) :: x( &
@@ -201,16 +201,16 @@ contains
       & rg%is_array(3):rg%ie_array(3))
     integer :: i1, i2, i3
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
-    do i3 = rg%is_overlap(3), rg%ie_overlap(3)
-      do i2 = rg%is_overlap(2), rg%ie_overlap(2)
-        do i1 = rg%is_overlap(1), rg%ie_overlap(1)
+    do i3 = rg%is(3), rg%ie(3)
+      do i2 = rg%is(2), rg%ie(2)
+        do i1 = rg%is(1), rg%ie(1)
           x(i1, i2, i3) = a * x(i1, i2, i3)
         end do
       end do
     end do
     !$omp end parallel do
     return
-  end subroutine scal_wf_ovlp
+  end subroutine scal_wf
 
   end subroutine gram_schmidt_col_real8
 
@@ -279,7 +279,7 @@ contains
         do jo2 = 1, jo1 - 1
           if (has_orbit(jo2)) then
             io2 = wfi%jo_tbl(jo2)
-            call axpy_wf_ovlp( &
+            call axpy_wf( &
               & coeff(jo2), wf%zwf(:, :, :, ispin, io2, ik, im), &
               & wf_exc_tmp)
           end if
@@ -288,11 +288,11 @@ contains
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
-          call axpy_wf_ovlp(-one, wf_exc, wf_jo1)
+          call axpy_wf(-one, wf_exc, wf_jo1)
           ! Normalization:
           norm2_tmp = real(dot_wf(wf_jo1, wf_jo1))
           call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
-          call scal_wf_ovlp(one / sqrt(norm2), wf_jo1)
+          call scal_wf(one / sqrt(norm2), wf_jo1)
           ! Write back to "zwf":
           io1 = wfi%jo_tbl(jo1)
           call copy_data( &
@@ -342,7 +342,7 @@ contains
   end function dot_wf
 
   ! Constant times a wavefunction plus a wavefunction:
-  subroutine axpy_wf_ovlp(a, x, y)
+  subroutine axpy_wf(a, x, y)
     implicit none
     complex(8), intent(in) :: a
     complex(8), intent(in) :: x( &
@@ -355,20 +355,20 @@ contains
       & rg%is_array(3):rg%ie_array(3))
     integer :: i1, i2, i3
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
-    do i3 = rg%is_overlap(3), rg%ie_overlap(3)
-      do i2 = rg%is_overlap(2), rg%ie_overlap(2)
-        do i1 = rg%is_overlap(1), rg%ie_overlap(1)
+    do i3 = rg%is(3), rg%ie(3)
+      do i2 = rg%is(2), rg%ie(2)
+        do i1 = rg%is(1), rg%ie(1)
           y(i1, i2, i3) = a * x(i1, i2, i3) + y(i1, i2, i3)
         end do
       end do
     end do
     !$omp end parallel do
     return
-  end subroutine axpy_wf_ovlp
+  end subroutine axpy_wf
 
 
   ! Scales a wavefunction by a constant 
-  subroutine scal_wf_ovlp(a, x)
+  subroutine scal_wf(a, x)
     implicit none
     complex(8), intent(in) :: a
     complex(8), intent(inout) :: x( &
@@ -377,16 +377,16 @@ contains
       & rg%is_array(3):rg%ie_array(3))
     integer :: i1, i2, i3
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
-    do i3 = rg%is_overlap(3), rg%ie_overlap(3)
-      do i2 = rg%is_overlap(2), rg%ie_overlap(2)
-        do i1 = rg%is_overlap(1), rg%ie_overlap(1)
+    do i3 = rg%is(3), rg%ie(3)
+      do i2 = rg%is(2), rg%ie(2)
+        do i1 = rg%is(1), rg%ie(1)
           x(i1, i2, i3) = a * x(i1, i2, i3)
         end do
       end do
     end do
     !$omp end parallel do
     return
-  end subroutine scal_wf_ovlp
+  end subroutine scal_wf
 
   end subroutine gram_schmidt_col_complex8
 
