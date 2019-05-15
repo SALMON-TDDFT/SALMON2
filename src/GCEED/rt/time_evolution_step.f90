@@ -185,20 +185,20 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   end do
   end do
 
-if(iperiodic==0)then
-  if(ikind_eext==0.and.itt>=2)then
-    if(mod(itt,2)==0.or.propagator=='etrs')then
-      call Total_energy_groupob(zpsi_in,shtpsi,1)
-    else
-      call Total_energy_groupob(zpsi_out,shtpsi,1)
+  if(iperiodic==0)then
+    if(ikind_eext==0.and.itt>=2)then
+      if(mod(itt,2)==0.or.propagator=='etrs')then
+        call Total_energy_groupob(zpsi_in,shtpsi,1)
+      else
+        call Total_energy_groupob(zpsi_out,shtpsi,1)
+      end if
+      call subdip(rNe,2)
     end if
-    call subdip(rNe,2)
   end if
-end if
-call timer_end(LOG_CALC_TIME_PROPAGATION)
+  call timer_end(LOG_CALC_TIME_PROPAGATION)
 
 
-call timer_begin(LOG_CALC_RHO)
+  call timer_begin(LOG_CALC_RHO)
   if(ilsda==0)then  
     allocate(srho(1,1))
     allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
@@ -248,47 +248,47 @@ call timer_begin(LOG_CALC_RHO)
     deallocate(srho_s(2,1)%f)
     deallocate(srho_s)
   end if
-call timer_end(LOG_CALC_RHO)
+  call timer_end(LOG_CALC_RHO)
 
 
-call timer_begin(LOG_CALC_HARTREE)
-   if(itt/=1)then
-     if(mod(itt,2)==1)then
+  call timer_begin(LOG_CALC_HARTREE)
+  if(itt/=1)then
+    if(mod(itt,2)==1)then
 !$OMP parallel do private(iz,iy,ix)
-       do iz=ng_sta(3),ng_end(3)
-       do iy=ng_sta(2),ng_end(2)
-       do ix=ng_sta(1),ng_end(1)
-         Vh_stock2(ix,iy,iz)=2.d0*Vh_stock1(ix,iy,iz)-Vh_stock2(ix,iy,iz)
-       end do
-       end do
-       end do
-     else
+      do iz=ng_sta(3),ng_end(3)
+      do iy=ng_sta(2),ng_end(2)
+      do ix=ng_sta(1),ng_end(1)
+        Vh_stock2(ix,iy,iz)=2.d0*Vh_stock1(ix,iy,iz)-Vh_stock2(ix,iy,iz)
+      end do
+      end do
+      end do
+    else
 !$OMP parallel do private(iz,iy,ix)
-       do iz=ng_sta(3),ng_end(3)
-       do iy=ng_sta(2),ng_end(2)
-       do ix=ng_sta(1),ng_end(1)
-         Vh_stock1(ix,iy,iz)=2.d0*Vh_stock2(ix,iy,iz)-Vh_stock1(ix,iy,iz)
-       end do
-       end do
-       end do
-     end if
-   end if
+      do iz=ng_sta(3),ng_end(3)
+      do iy=ng_sta(2),ng_end(2)
+      do ix=ng_sta(1),ng_end(1)
+        Vh_stock1(ix,iy,iz)=2.d0*Vh_stock2(ix,iy,iz)-Vh_stock1(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
+  end if
 
   
   call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
-call timer_end(LOG_CALC_HARTREE)
+  call timer_end(LOG_CALC_HARTREE)
 
 
-call timer_begin(LOG_CALC_EXC_COR)
+  call timer_begin(LOG_CALC_EXC_COR)
   if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
     call exc_cor_ns(ppn)
   end if
-call timer_end(LOG_CALC_EXC_COR)
+  call timer_end(LOG_CALC_EXC_COR)
 
 
-call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
+  call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
   call allgatherv_vlocal
-call timer_end(LOG_CALC_VLOCAL)
+  call timer_end(LOG_CALC_VLOCAL)
 
 
 ! result
@@ -310,7 +310,7 @@ call timer_end(LOG_CALC_VLOCAL)
     end if
   end if
 
-call timer_begin(LOG_CALC_PROJECTION)
+  call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call projection(zpsi_in)
@@ -318,10 +318,10 @@ call timer_begin(LOG_CALC_PROJECTION)
       call projection(zpsi_out)
     end if
   end if
-call timer_end(LOG_CALC_PROJECTION)
+  call timer_end(LOG_CALC_PROJECTION)
 
 
-call timer_begin(LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
+  call timer_begin(LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
   if(iflag_dip2==1)then
     do jj=1,num_dip2
       do i1=1,3
@@ -417,10 +417,10 @@ call timer_begin(LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
       end do
     end if
   end if
-call timer_end(LOG_CALC_QUADRUPOLE)
+  call timer_end(LOG_CALC_QUADRUPOLE)
 
 
-call timer_begin(LOG_WRITE_ENERGIES)
+  call timer_begin(LOG_WRITE_ENERGIES)
   if(iperiodic==3)then
     call subdip(rNe,1)
     if(mod(itt,2)==0.or.propagator=='etrs')then
@@ -460,10 +460,10 @@ call timer_begin(LOG_WRITE_ENERGIES)
         dble(itt)*dt*2.41888d-2, (E_ind(i1,itt),i1=1,3)
     end if
   end if
-call timer_end(LOG_WRITE_ENERGIES)
+  call timer_end(LOG_WRITE_ENERGIES)
 
 
-call timer_begin(LOG_WRITE_INFOS)
+  call timer_begin(LOG_WRITE_INFOS)
   if(icalcforce==1)then
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_force_c(zpsi_in)
@@ -597,8 +597,8 @@ call timer_begin(LOG_WRITE_INFOS)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
-call timer_end(LOG_WRITE_INFOS)
+  call timer_end(LOG_WRITE_INFOS)
 
-return
+  return
 
 END SUBROUTINE time_evolution_step
