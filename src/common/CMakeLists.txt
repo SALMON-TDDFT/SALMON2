@@ -29,7 +29,6 @@ set(SOURCES
    writefile3d.f90
    lattice.f90
    force.f90
-   gram_schmidt_orth.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
