@@ -17,72 +17,73 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
-use structures
-use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
-use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-use density_matrix, only: calc_density
-use writefield
-use timer
-use inputoutput
-use taylor_sub
-use scf_data
-use new_world_sub
-use allocate_mat_sub
-use read_pslfile_sub
-use sendrecv_grid, only: s_sendrecv_grid
-
-implicit none
-type(s_rgrid),intent(in) :: lg
-type(s_rgrid),intent(in) :: mg
-type(s_rgrid),intent(in) :: ng
-type(s_system),intent(in) :: system
-integer,intent(in) :: nspin
-type(s_wf_info),intent(in) :: info
-type(s_stencil),intent(inout) :: stencil
-type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
-type(s_pp_nlcc), intent(in) :: ppn
-type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
-type(s_wavefunction),intent(inout) :: sshtpsi
-integer :: ix,iy,iz,i1,mm,jj
-integer :: ii,iob,iatom,iik,ik
-real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
-complex(8),allocatable :: cmatbox1(:,:,:),cmatbox2(:,:,:)
-real(8) :: absr2
-
-integer :: idensity, idiffDensity, ielf
-real(8) :: rNe
-
-complex(8),parameter :: zi=(0.d0,1.d0)
-
-complex(8) :: shtpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd,   &
-                     1:iobnum,k_sta:k_end)
-
-complex(8) :: cbox1,cbox2,cbox3
-integer :: is
-
-type(s_scalar),allocatable :: srho(:,:)
-type(s_scalar),allocatable :: srho_s(:,:)
-
-
-call timer_begin(LOG_CALC_VBOX)
-idensity=0
-idiffDensity=1
-ielf=2 
-
-if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%brl)
-
-select case(ikind_eext)
-  case(0,3,9:12)
-    ihpsieff=0
-  case(1,2,4,6:8,15)
-    ihpsieff=1
-end select
-
-if(ikind_eext==1) call calcVbox
-call timer_end(LOG_CALC_VBOX)
-
-
-call timer_begin(LOG_CALC_TIME_PROPAGATION)
+  use structures
+  use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
+  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use density_matrix, only: calc_density
+  use writefield
+  use timer
+  use inputoutput
+  use taylor_sub
+  use scf_data
+  use new_world_sub
+  use allocate_mat_sub
+  use read_pslfile_sub
+  use sendrecv_grid, only: s_sendrecv_grid
+  
+  implicit none
+  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid),intent(in) :: ng
+  type(s_system),intent(in) :: system
+  integer,intent(in) :: nspin
+  type(s_wf_info),intent(in) :: info
+  type(s_stencil),intent(inout) :: stencil
+  type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
+  type(s_pp_nlcc), intent(in) :: ppn
+  type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
+  type(s_wavefunction),intent(inout) :: sshtpsi
+  integer :: ix,iy,iz,i1,mm,jj
+  integer :: ii,iob,iatom,iik,ik
+  real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
+  complex(8),allocatable :: cmatbox1(:,:,:),cmatbox2(:,:,:)
+  real(8) :: absr2
+  
+  integer :: idensity, idiffDensity, ielf
+  real(8) :: rNe
+  
+  complex(8),parameter :: zi=(0.d0,1.d0)
+  
+  complex(8) :: shtpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd,   &
+                       1:iobnum,k_sta:k_end)
+  
+  complex(8) :: cbox1,cbox2,cbox3
+  integer :: is
+  
+  type(s_scalar),allocatable :: srho(:,:)
+  type(s_scalar),allocatable :: srho_s(:,:)
+  
+  
+  call timer_begin(LOG_CALC_VBOX)
+  
+  idensity=0
+  idiffDensity=1
+  ielf=2 
+  
+  if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%brl)
+  
+  select case(ikind_eext)
+    case(0,3,9:12)
+      ihpsieff=0
+    case(1,2,4,6:8,15)
+      ihpsieff=1
+  end select
+  
+  if(iperiodic==0.and.ikind_eext==1) call calcVbox(itt)
+  call timer_end(LOG_CALC_VBOX)
+  
+  
+  call timer_begin(LOG_CALC_TIME_PROPAGATION)
 !$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
@@ -112,15 +113,48 @@ call timer_begin(LOG_CALC_TIME_PROPAGATION)
   end do
   end do
 
-if(iobnum.ge.1)then
-  if(mod(itt,2)==1)then
-    call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,sshtpsi,   &
-                ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
-  else
-    call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,sshtpsi,   &
-                ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+  if(propagator=='etrs')then
+    if(iobnum.ge.1)then
+      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,sshtpsi,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+    end if
+
+!$OMP parallel do private(is,iz,iy,ix) collapse(3)
+    do is=1,nspin
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      vloc_t(ix,iy,iz,is)=vlocal(ix,iy,iz,is)
+      vloc_new(ix,iy,iz,is) = 3d0*vlocal(ix,iy,iz,is) - 3d0*vloc_old(ix,iy,iz,is,1) + vloc_old(ix,iy,iz,is,2)
+      vloc_old(ix,iy,iz,is,2) = vloc_old(ix,iy,iz,is,1)
+      vloc_old(ix,iy,iz,is,1) = vlocal(ix,iy,iz,is)
+      vlocal(ix,iy,iz,is) = vloc_new(ix,iy,iz,is)
+    end do
+    end do
+    end do
+    end do
+
+    if(iperiodic==0.and.ikind_eext==1) call calcVbox(itt+1)
+    if(iperiodic==3) call init_k_rd(k_rd,ksquare,4,system%brl)
+
+    if(iobnum.ge.1)then
+      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,sshtpsi,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+    end if
+
+  else 
+
+    if(iobnum.ge.1)then
+      if(mod(itt,2)==1)then
+        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,sshtpsi,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      else
+        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,sshtpsi,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      end if
+    end if
+    
   end if
-end if
 
 !$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
@@ -151,20 +185,20 @@ end if
   end do
   end do
 
-if(iperiodic==0)then
-  if(ikind_eext==0.and.itt>=2)then
-    if(mod(itt,2)==1)then
-      call Total_energy_groupob(zpsi_out,shtpsi,1)
-    else
-      call Total_energy_groupob(zpsi_in,shtpsi,1)
+  if(iperiodic==0)then
+    if(ikind_eext==0.and.itt>=2)then
+      if(mod(itt,2)==0.or.propagator=='etrs')then
+        call Total_energy_groupob(zpsi_in,shtpsi,1)
+      else
+        call Total_energy_groupob(zpsi_out,shtpsi,1)
+      end if
+      call subdip(rNe,2)
     end if
-    call subdip(rNe,2)
   end if
-end if
-call timer_end(LOG_CALC_TIME_PROPAGATION)
+  call timer_end(LOG_CALC_TIME_PROPAGATION)
 
 
-call timer_begin(LOG_CALC_RHO)
+  call timer_begin(LOG_CALC_RHO)
   if(ilsda==0)then  
     allocate(srho(1,1))
     allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
@@ -174,17 +208,17 @@ call timer_begin(LOG_CALC_RHO)
     allocate(srho_s(2,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   end if
 
-  if(mod(itt,2)==1)then
-    if(ilsda==0)then
-      call calc_density(srho,spsi_out,info,mg,nspin)
-    else
-      call calc_density(srho_s,spsi_out,info,mg,nspin)
-    end if
-  else
+  if(mod(itt,2)==0.or.propagator=='etrs')then
     if(ilsda==0)then
       call calc_density(srho,spsi_in,info,mg,nspin)
     else
       call calc_density(srho_s,spsi_in,info,mg,nspin)
+    end if
+  else
+    if(ilsda==0)then
+      call calc_density(srho,spsi_out,info,mg,nspin)
+    else
+      call calc_density(srho_s,spsi_out,info,mg,nspin)
     end if
   end if
   
@@ -214,47 +248,47 @@ call timer_begin(LOG_CALC_RHO)
     deallocate(srho_s(2,1)%f)
     deallocate(srho_s)
   end if
-call timer_end(LOG_CALC_RHO)
+  call timer_end(LOG_CALC_RHO)
 
 
-call timer_begin(LOG_CALC_HARTREE)
-   if(itt/=1)then
-     if(mod(itt,2)==1)then
+  call timer_begin(LOG_CALC_HARTREE)
+  if(itt/=1)then
+    if(mod(itt,2)==1)then
 !$OMP parallel do private(iz,iy,ix)
-       do iz=ng_sta(3),ng_end(3)
-       do iy=ng_sta(2),ng_end(2)
-       do ix=ng_sta(1),ng_end(1)
-         Vh_stock2(ix,iy,iz)=2.d0*Vh_stock1(ix,iy,iz)-Vh_stock2(ix,iy,iz)
-       end do
-       end do
-       end do
-     else
+      do iz=ng_sta(3),ng_end(3)
+      do iy=ng_sta(2),ng_end(2)
+      do ix=ng_sta(1),ng_end(1)
+        Vh_stock2(ix,iy,iz)=2.d0*Vh_stock1(ix,iy,iz)-Vh_stock2(ix,iy,iz)
+      end do
+      end do
+      end do
+    else
 !$OMP parallel do private(iz,iy,ix)
-       do iz=ng_sta(3),ng_end(3)
-       do iy=ng_sta(2),ng_end(2)
-       do ix=ng_sta(1),ng_end(1)
-         Vh_stock1(ix,iy,iz)=2.d0*Vh_stock2(ix,iy,iz)-Vh_stock1(ix,iy,iz)
-       end do
-       end do
-       end do
-     end if
-   end if
+      do iz=ng_sta(3),ng_end(3)
+      do iy=ng_sta(2),ng_end(2)
+      do ix=ng_sta(1),ng_end(1)
+        Vh_stock1(ix,iy,iz)=2.d0*Vh_stock2(ix,iy,iz)-Vh_stock1(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
+  end if
 
   
   call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
-call timer_end(LOG_CALC_HARTREE)
+  call timer_end(LOG_CALC_HARTREE)
 
 
-call timer_begin(LOG_CALC_EXC_COR)
+  call timer_begin(LOG_CALC_EXC_COR)
   if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
     call exc_cor_ns(ppn)
   end if
-call timer_end(LOG_CALC_EXC_COR)
+  call timer_end(LOG_CALC_EXC_COR)
 
 
-call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
+  call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
   call allgatherv_vlocal
-call timer_end(LOG_CALC_VLOCAL)
+  call timer_end(LOG_CALC_VLOCAL)
 
 
 ! result
@@ -263,10 +297,10 @@ call timer_end(LOG_CALC_VLOCAL)
     if(ikind_eext/=0.or.(ikind_eext==0.and.itt==itotNtime))then
   
       ihpsieff=0
-      if(mod(itt,2)==1)then
-        call Total_Energy_groupob(zpsi_out,shtpsi,1)              ! Total energy
-      else
+      if(mod(itt,2)==0.or.propagator=='etrs')then
         call Total_Energy_groupob(zpsi_in,shtpsi,1)              ! Total energy
+      else
+        call Total_Energy_groupob(zpsi_out,shtpsi,1)              ! Total energy
       end if
 
       call timer_begin(LOG_CALC_DP)
@@ -276,18 +310,18 @@ call timer_end(LOG_CALC_VLOCAL)
     end if
   end if
 
-call timer_begin(LOG_CALC_PROJECTION)
+  call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
-    if(mod(itt,2)==1)then
-      call projection(zpsi_out)
-    else
+    if(mod(itt,2)==0.or.propagator=='etrs')then
       call projection(zpsi_in)
+    else
+      call projection(zpsi_out)
     end if
   end if
-call timer_end(LOG_CALC_PROJECTION)
+  call timer_end(LOG_CALC_PROJECTION)
 
 
-call timer_begin(LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
+  call timer_begin(LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
   if(iflag_dip2==1)then
     do jj=1,num_dip2
       do i1=1,3
@@ -383,21 +417,21 @@ call timer_begin(LOG_CALC_QUADRUPOLE) ! FIXME: wrong name
       end do
     end if
   end if
-call timer_end(LOG_CALC_QUADRUPOLE)
+  call timer_end(LOG_CALC_QUADRUPOLE)
 
 
-call timer_begin(LOG_WRITE_ENERGIES)
+  call timer_begin(LOG_WRITE_ENERGIES)
   if(iperiodic==3)then
     call subdip(rNe,1)
-    if(mod(itt,2)==1)then
-      call calc_current(zpsi_out)
-      if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
-        call Total_Energy_periodic(zpsi_out,shtpsi)              ! Total energy
-      end if
-    else
+    if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_current(zpsi_in)
       if(itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
         call Total_Energy_periodic(zpsi_in,shtpsi)              ! Total energy
+      end if
+    else
+      call calc_current(zpsi_out)
+      if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
+        call Total_Energy_periodic(zpsi_out,shtpsi)              ! Total energy
       end if
     end if
     rbox1=0.d0
@@ -426,15 +460,15 @@ call timer_begin(LOG_WRITE_ENERGIES)
         dble(itt)*dt*2.41888d-2, (E_ind(i1,itt),i1=1,3)
     end if
   end if
-call timer_end(LOG_WRITE_ENERGIES)
+  call timer_end(LOG_WRITE_ENERGIES)
 
 
-call timer_begin(LOG_WRITE_INFOS)
+  call timer_begin(LOG_WRITE_INFOS)
   if(icalcforce==1)then
-    if(mod(itt,2)==1)then
-      call calc_force_c(zpsi_out)
-    else
+    if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_force_c(zpsi_in)
+    else
+      call calc_force_c(zpsi_out)
     end if
     if(comm_is_root(nproc_id_global))then
       do iatom=1,MI
@@ -469,12 +503,12 @@ call timer_begin(LOG_WRITE_INFOS)
 
     do iik=k_sta,k_end
     do iob=1,iobnum
-      if(mod(itt,2)==1)then
+      if(mod(itt,2)==0.or.propagator=='etrs')then
 !$OMP parallel do private(iz,iy,ix)
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
         do ix=mg_sta(1),mg_end(1)
-          cmatbox1(ix,iy,iz)=zpsi_out(ix,iy,iz,iob,iik)
+          cmatbox1(ix,iy,iz)=zpsi_in(ix,iy,iz,iob,iik)
         end do
         end do
         end do
@@ -483,7 +517,7 @@ call timer_begin(LOG_WRITE_INFOS)
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
         do ix=mg_sta(1),mg_end(1)
-          cmatbox1(ix,iy,iz)=zpsi_in(ix,iy,iz,iob,iik)
+          cmatbox1(ix,iy,iz)=zpsi_out(ix,iy,iz,iob,iik)
         end do
         end do
         end do
@@ -563,8 +597,8 @@ call timer_begin(LOG_WRITE_INFOS)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
-call timer_end(LOG_WRITE_INFOS)
+  call timer_end(LOG_WRITE_INFOS)
 
-return
+  return
 
 END SUBROUTINE time_evolution_step
