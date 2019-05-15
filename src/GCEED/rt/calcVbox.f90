@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE calcVbox
+SUBROUTINE calcVbox(itt_t)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use misc_routines, only: get_wtime
@@ -24,6 +24,7 @@ SUBROUTINE calcVbox
   use scf_data
   
   implicit none
+  integer :: itt_t
   integer :: ix,iy,iz,jj
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
@@ -83,7 +84,7 @@ SUBROUTINE calcVbox
         if(comm_is_root(nproc_id_global))then
           ipulse=1
           call calc_env_trigon(ipulse,env_trigon_1)
-          write(191,*) dt*itt*0.0241889d0, amplitude1*env_trigon_1
+          write(191,*) dt*itt_t*0.0241889d0, amplitude1*env_trigon_1
         end if
         if(quadrupole_pot=='sum')then
           ipulse=1
@@ -121,7 +122,7 @@ SUBROUTINE calcVbox
           end do
         end if
       else
-        if(dt*dble(itt) <= pulse_tw1)then
+        if(dt*dble(itt_t) <= pulse_tw1)then
           ipulse=1
           call calc_env_trigon(ipulse,env_trigon_1)
         !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -139,7 +140,7 @@ SUBROUTINE calcVbox
           end do
           end do
         end if
-        if(abs(dt*dble(itt)-0.5d0*pulse_tw1-t1_t2) < 0.5d0*pulse_tw2)then
+        if(abs(dt*dble(itt_t)-0.5d0*pulse_tw1-t1_t2) < 0.5d0*pulse_tw2)then
           ipulse=2
           call calc_env_trigon(ipulse,env_trigon_2)
           !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -162,7 +163,7 @@ SUBROUTINE calcVbox
   end if
    
   if(nump>=1)then
-    if(dt*dble(itt) <= pulse_tw1)then
+    if(dt*dble(itt_t) <= pulse_tw1)then
       ipulse=1
       call calc_env_trigon(ipulse,env_trigon_1)
 !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -174,7 +175,7 @@ SUBROUTINE calcVbox
       end do
       end do
     end if
-    if(abs(dt*dble(itt)-0.5d0*pulse_tw1-t1_t2) < 0.5d0*pulse_tw2)then
+    if(abs(dt*dble(itt_t)-0.5d0*pulse_tw1-t1_t2) < 0.5d0*pulse_tw2)then
       ipulse=2
       call calc_env_trigon(ipulse,env_trigon_2)
 !$OMP parallel do collapse(2) private(ix,iy,iz)

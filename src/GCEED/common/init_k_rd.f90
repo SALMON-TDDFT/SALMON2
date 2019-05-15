@@ -42,6 +42,15 @@ else if(iSCFRT==2)then
     end if
   else if(imode==2.or.imode==3)then
     vecA=0.d0
+  else if(imode==4)then
+    vecA(:)=A_ind(:,itt+1)
+    if(epdir_re1(1)==1.d0)then
+      vecA(1)=vecA(1)+A_ext(1,itt+1)
+    else if(epdir_re1(2)==1.d0)then
+      vecA(2)=vecA(2)+A_ext(2,itt+1)
+    else if(epdir_re1(3)==1.d0)then
+      vecA(3)=vecA(3)+A_ext(3,itt+1)
+    end if
   end if
 end if
 

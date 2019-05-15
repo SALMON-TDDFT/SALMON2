@@ -297,6 +297,10 @@ real(8),allocatable :: Vh_stock2(:,:,:)
 real(8),allocatable :: Vlocal(:,:,:,:)
 real(8),allocatable :: Vlocal2(:,:,:,:)
 
+real(8),allocatable :: vloc_t(:,:,:,:)
+real(8),allocatable :: vloc_new(:,:,:,:)
+real(8),allocatable :: vloc_old(:,:,:,:,:)
+
 ! use for hartree routine
 integer :: iterVh
 
