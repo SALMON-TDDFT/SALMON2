@@ -66,9 +66,9 @@ contains
       & rg%is_array(3):rg%ie_array(3)) &
       & :: wf_jo1, wf_exc, wf_exc_tmp
 
-    nsize_rg =  (rg%ie_array(1) - rg%is_array(1)) &
-      & * (rg%ie_array(2) - rg%is_array(2)) &
-      & * (rg%ie_array(3) - rg%is_array(3))
+    nsize_rg =  (rg%ie_array(1) - rg%is_array(1) + 1) &
+      & * (rg%ie_array(2) - rg%is_array(2) + 1) &
+      & * (rg%ie_array(3) - rg%is_array(3) + 1)
       
     do im = wfi%im_s, wfi%im_e
     do ik = wfi%ik_s, wfi%ik_e
@@ -242,9 +242,9 @@ contains
 
     complex(8), parameter :: one = 1d0
 
-    nsize_rg =  (rg%ie_array(1) - rg%is_array(1)) &
-      & * (rg%ie_array(2) - rg%is_array(2)) &
-      & * (rg%ie_array(3) - rg%is_array(3))
+    nsize_rg =  (rg%ie_array(1) - rg%is_array(1) + 1) &
+      & * (rg%ie_array(2) - rg%is_array(2) + 1) &
+      & * (rg%ie_array(3) - rg%is_array(3) + 1)
       
     do im = wfi%im_s, wfi%im_e
     do ik = wfi%ik_s, wfi%ik_e
