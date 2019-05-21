@@ -36,14 +36,16 @@ contains
   end subroutine structure_opt_ini
   !=======================================================================
   !======================================================convergence check
-  subroutine structure_opt_check(iMI_opt,iopt,itranc,rforce_opt)
+!  subroutine structure_opt_check(iMI_opt,iopt,itranc,rforce_opt)
+  subroutine structure_opt_check(iMI_opt,iopt,itranc,force)
+    use structures
     use salmon_global, only: convrg_opt_fmax,unit_system,flag_geo_opt_atom
     use salmon_parallel, only: nproc_id_global,nproc_group_global
     use salmon_communication, only: comm_is_root,comm_bcast
     implicit none
+    type(s_force),intent(in) :: force
     integer,intent(in) :: iMI_opt,iopt
     integer,intent(inout) :: itranc
-    real(8),intent(in) :: rforce_opt(3,iMI_opt)
     real(8),parameter :: a_B=0.529177d0,Ry=13.6058d0
     integer :: iatom,iatom_count
     real(8) :: fabs,fmax,fave
@@ -52,8 +54,10 @@ contains
     do iatom=1,iMI_opt
       if(flag_geo_opt_atom(iatom)=='y') then
         iatom_count=iatom_count+1
-        fabs=rforce_opt(1,iatom)**2.0d0+rforce_opt(2,iatom)**2.0d0+rforce_opt(3,iatom)**2.0d0
-        fave=fave+fabs
+!        fabs=rforce_opt(1,iatom)**2.0d0+rforce_opt(2,iatom)**2.0d0+rforce_opt(3,iatom)**2.0d0
+!        fabs=force%F(1,iatom)**2.0d0+force%F(2,iatom)**2.0d0+force%F(3,iatom)**2.0d0
+        fabs= sum(force%F(:,iatom)**2.0d0)
+        fave= fave + fabs
         if(fabs>=fmax) fmax=fabs
       end if
     enddo
@@ -75,25 +79,29 @@ contains
   end subroutine structure_opt_check
   !=======================================================================
   !===========================================================optimization
-  subroutine structure_opt(iMI_opt,iopt,rforce_opt,Rion_opt)
+!  subroutine structure_opt(iMI_opt,iopt,rforce_opt,Rion_opt)
+  subroutine structure_opt(iMI_opt,iopt,force,Rion_opt)
+    use structures
     use salmon_global, only: flag_geo_opt_atom
     use salmon_parallel, only: nproc_group_global
     use salmon_communication, only: comm_bcast
     implicit none
+    type(s_force),intent(in) :: force
     integer,intent(in) :: iMI_opt,iopt
-    real(8),intent(in) :: rforce_opt(3,iMI_opt)
+!    real(8),intent(in) :: rforce_opt(3,iMI_opt)
     real(8),intent(inout) :: Rion_opt(3,iMI_opt)
     real(8), parameter :: alpha=1.0d0,theta_opt=1.0d0  !theta_opt=0.0d0:DFP,theta_opt=1.0d0:BFGS in Quasi_Newton method
     integer :: ii,ij,icount_opt,iatom
     real(8) :: const1_opt,const2_opt
-    real(8) :: rforce_1d(3*iMI_opt),del_Rion_1d(3*iMI_opt),optmat_1d(3*iMI_opt)
+    real(8) :: force_1d(3*iMI_opt),del_Rion_1d(3*iMI_opt),optmat_1d(3*iMI_opt)
     real(8) :: del_Rion(3,iMI_opt)
     real(8) :: optmat1_2d((3*iMI_opt),(3*iMI_opt)),optmat2_2d((3*iMI_opt),(3*iMI_opt)),optmat3_2d((3*iMI_opt),(3*iMI_opt))
-    !transrate rforce to rforce_1d
+    !transrate rforce to force_1d
     icount_opt=1
     do iatom=1,iMI_opt
       do ii=1,3
-        rforce_1d(icount_opt)=rforce_opt(ii,iatom)
+!        rforce_1d(icount_opt)=rforce_opt(ii,iatom)
+        force_1d(icount_opt)=force%F(ii,iatom)
         icount_opt=icount_opt+1
       end do
     end do
@@ -111,7 +119,7 @@ contains
       end do
     else
       !update r2_opt
-      r2_opt=-(rforce_1d-r2_opt)
+      r2_opt=-(force_1d-r2_opt)
       !prepare const and matrix
       call dgemm('n','n',1,1,(3*iMI_opt),1.0d0,r1_opt,1,r2_opt,(3*iMI_opt),0.0d0,const1_opt,1)
       call dgemm('n','n',(3*iMI_opt),1,(3*iMI_opt),1.0d0,H_opt,(3*iMI_opt),r2_opt,(3*iMI_opt),0.0d0,optmat_1d,(3*iMI_opt))
@@ -134,13 +142,13 @@ contains
     end if
     !update del_Rion_1d and del_Rion
     del_Rion_1d(:)=0.0d0;
-    call dgemm('n','n',(3*iMI_opt),1,(3*iMI_opt),1.0d0,H_opt,(3*iMI_opt),rforce_1d,(3*iMI_opt),0.0d0,del_Rion_1d,(3*iMI_opt))
+    call dgemm('n','n',(3*iMI_opt),1,(3*iMI_opt),1.0d0,H_opt,(3*iMI_opt),force_1d,(3*iMI_opt),0.0d0,del_Rion_1d,(3*iMI_opt))
     do iatom=1,iMI_opt
       del_Rion(1:3,iatom)=del_Rion_1d((1+3*(iatom-1)):(3+3*(iatom-1)))
     end do
     !update r1_opt,r2_opt
     r1_opt=alpha*del_Rion_1d
-    r2_opt=rforce_1d
+    r2_opt=force_1d
     !update Rion
     do iatom=1,iMI_opt
       if(flag_geo_opt_atom(iatom)=='y') then

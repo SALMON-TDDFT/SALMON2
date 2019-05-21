@@ -71,7 +71,7 @@ use calc_iroot_sub
 use gram_schmidt_orth, only: debug_var_dump, gram_schmidt 
 implicit none
 
-integer :: ix,iy,iz,ik,ikoa,ia
+integer :: ix,iy,iz,ik,ikoa
 integer :: is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
 real(8) :: sum0,sum1
@@ -567,7 +567,7 @@ if(istopt==1)then
     end select
     esp = energy%esp(:,:,1) !++++++++
     if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
-  
+
     call timer_end(LOG_INIT_GS)
         
 !------------------------------ Continue the previous calculation
@@ -817,6 +817,15 @@ else if(istopt>=2)then
   call timer_begin(LOG_INIT_GS)
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
+    deallocate(ppg%jxyz,ppg%jxx,ppg%jyy,ppg%jzz,ppg%rxyz)
+    deallocate(ppg_all%jxyz,ppg_all%jxx,ppg_all%jyy,ppg_all%jzz,ppg_all%rxyz)
+    deallocate(ppg%lma_tbl)
+    deallocate(ppg_all%lma_tbl)
+    deallocate(ppg%ia_tbl,ppg%rinv_uvu,ppg%uv,ppg%duv)
+    deallocate(ppg_all%ia_tbl,ppg_all%rinv_uvu,ppg_all%uv,ppg_all%duv)
+    deallocate(ppg%Vpsl_atom)
+    deallocate(ppg%ekr_uV)
+    deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
     call init_ps(system%al,system%brl,stencil%matrix_A)
   end if
   call timer_end(LOG_INIT_GS)
@@ -972,7 +981,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
 
     if( amin_routine == 'cg' .or.       &
-   (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
+      ( amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
       case(0)
         select case(gscg)
@@ -1006,6 +1015,10 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_MINIMIZATION)
 
+ write(*,*) "aho2", real(spsi%rwf(-31,-31,34,1,1,1,1))
+ write(*,*) "aho2A", ubound(spsi%rwf,3), lbound(spsi%rwf,3)
+ write(*,*) "aho2B", mg%is_array, mg%ie_array
+ write(*,*) "aho2C", info%im_s, info%im_e
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
@@ -1013,6 +1026,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     ! Store to psi/zpsi
     select case(iperiodic)
     case(0)
+ write(*,*) "aho3", real(spsi%rwf(-31,-31,34,1,1,1,1))
     do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
@@ -1153,7 +1167,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     sVh%f = Vh
     energy%E_xc = Exc
+!hoge here NaN
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+    write(*,*) "aho10", energy%esp(:,:,1)
     select case(iperiodic)
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
@@ -1164,7 +1180,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     esp = energy%esp(:,:,1) !++++++++
     if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
-  
+
 
     call timer_begin(LOG_CALC_CHANGE_ORDER)
     if(iperiodic==0)then  
@@ -1454,12 +1470,6 @@ end if
 
 end do DFT_Iteration
 
-select case(iperiodic)
-case(0)
-  deallocate(spsi%rwf)
-case(3)
-  deallocate(spsi%zwf)
-end select
 
 deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
@@ -1482,8 +1492,8 @@ if(icalcforce==1) then
 end if
 
 if(iflag_stopt==1) then
-  call structure_opt_check(MI,istopt,istopt_tranc,rforce)
-  if(istopt_tranc/=1) call structure_opt(MI,istopt,rforce,Rion)
+  call structure_opt_check(MI,istopt,istopt_tranc,force)
+  if(istopt_tranc/=1) call structure_opt(MI,istopt,force,Rion)
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
     do iatom=1,MI
@@ -1495,6 +1505,14 @@ if(iflag_stopt==1) then
     call structure_opt_fin
     exit Multigrid_Iteration
   end if
+
+else
+   select case(iperiodic)
+   case(0)
+      deallocate(spsi%rwf)
+   case(3)
+      deallocate(spsi%zwf)
+   end select
 end if
 call timer_end(LOG_DEINIT_GS_ITERATION)
 
