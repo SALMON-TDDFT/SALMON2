@@ -1,5 +1,5 @@
 !
-!  Copyright 2018 SALMON developers
+!  Copyright 2019 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -14,11 +14,12 @@
 !  limitations under the License.
 !
 !-----------------------------------------------------------------------------------------
-subroutine weyl_calc(grid,field,tmp)
-  use salmon_maxwell, only:fdtd_grid,fdtd_field,fdtd_tmp
+subroutine weyl_calc(fs,ff,fw)
+  use structures,     only: s_fdtd_system, s_fdtd_field
+  use salmon_maxwell, only: s_fdtd_work
   implicit none
-  type(fdtd_grid)  :: grid
-  type(fdtd_field) :: field
-  type(fdtd_tmp)   :: tmp
+  type(s_fdtd_system) :: fs
+  type(s_fdtd_field)  :: ff
+  type(s_fdtd_work)   :: fw
   
 end subroutine weyl_calc

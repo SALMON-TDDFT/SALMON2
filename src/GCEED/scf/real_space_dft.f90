@@ -1,5 +1,5 @@
 !
-!  Copyright 2017 SALMON developers
+!  Copyright 2019 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ MODULE global_variables_scf
 
 use inputoutput
 use scf_data
-use hpsi2_sub
 use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
@@ -68,7 +67,7 @@ use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
-use gram_schmidt_orth, only: debug_var_dump, gram_schmidt 
+use gram_schmidt_orth, only: gram_schmidt 
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa
@@ -97,6 +96,7 @@ type(s_energy) :: energy
 type(s_force)  :: force
 integer :: neig(1:3, 1:2)
 integer :: neig_ng(1:3, 1:2)
+integer :: n,nn
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -418,14 +418,36 @@ if(istopt==1)then
       if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
       fg%icomm_fourier = nproc_group_global
       fg%ng = system%ngrid
-      fg%iGzero = nGzero
       allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
       allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      fg%Gx = Gx
-      fg%Gy = Gy
-      fg%Gz = Gz
-      fg%rhoG_ion = rhoion_G
-      fg%dVG_ion = dVloc_G
+      if(iflag_hartree==2)then
+        fg%iGzero = nGzero
+        fg%Gx = Gx
+        fg%Gy = Gy
+        fg%Gz = Gz
+        fg%rhoG_ion = rhoion_G
+        fg%dVG_ion = dVloc_G
+      else if(iflag_hartree==4)then
+        fg%iGzero = 1
+        fg%Gx = 0.d0
+        fg%Gy = 0.d0
+        fg%Gz = 0.d0
+        fg%rhoG_ion = 0.d0
+        fg%dVG_ion = 0.d0
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%Gx(nn) = Gx(n)
+          fg%Gy(nn) = Gy(n)
+          fg%Gz(nn) = Gz(n)
+          fg%rhoG_ion(nn) = rhoion_G(n)
+          fg%dVG_ion(nn,:) = dVloc_G(n,:)
+        enddo
+        enddo
+        enddo
+      end if
     end if
 
     if(iobnum >= 1)then
@@ -447,13 +469,45 @@ if(istopt==1)then
     end if
 
     call init_wf_ns(1)
-
+    ! Store to psi/zpsi
     select case(iperiodic)
     case(0)
-      call Gram_Schmidt_ns
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
     case(3)
-      call Gram_Schmidt_periodic
-    end select
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+          end do
+          end do
+          end do
+        end do
+      end do
+    end do
+    end select 
+
+    
+    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
+    call gram_schmidt(system, mg, info, spsi)
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
+
 
     allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     allocate( rho_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) )  
@@ -469,6 +523,41 @@ if(istopt==1)then
       rho_s_out=0.d0
     end if
     rho=0.d0 
+
+
+        ! Store to psi/zpsi
+    select case(iperiodic)
+    case(0)
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+      end do
+    case(3)
+    do ik=k_sta,k_end
+      do iob=1,info%numo
+        do is=1,nspin
+          !$OMP parallel do private(iz,iy,ix)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+    end do
+    end select
 
     select case(iperiodic)
     case(0)
@@ -503,39 +592,6 @@ if(istopt==1)then
 
     call allgatherv_vlocal
 
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    end select
-
     if(iperiodic==3) then
       allocate(stencil%kAc(k_sta:k_end,3))
       do jj=1,3
@@ -562,7 +618,19 @@ if(istopt==1)then
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      fg%rhoG_elec = rhoe_G
+      if(iflag_hartree==2)then
+        fg%rhoG_elec = rhoe_G
+      else if(iflag_hartree==4)then
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%rhoG_elec(nn) = rhoe_G(n)
+        enddo
+        enddo
+        enddo
+      end if
       call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
     esp = energy%esp(:,:,1) !++++++++
@@ -794,14 +862,36 @@ if(istopt==1)then
       if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
       fg%icomm_fourier = nproc_group_global
       fg%ng = system%ngrid
-      fg%iGzero = nGzero
       allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
       allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      fg%Gx = Gx
-      fg%Gy = Gy
-      fg%Gz = Gz
-      fg%rhoG_ion = rhoion_G
-      fg%dVG_ion = dVloc_G
+      if(iflag_hartree==2)then
+        fg%iGzero = nGzero
+        fg%Gx = Gx
+        fg%Gy = Gy
+        fg%Gz = Gz
+        fg%rhoG_ion = rhoion_G
+        fg%dVG_ion = dVloc_G
+      else if(iflag_hartree==4)then
+        fg%iGzero = 1
+        fg%Gx = 0.d0
+        fg%Gy = 0.d0
+        fg%Gz = 0.d0
+        fg%rhoG_ion = 0.d0
+        fg%dVG_ion = 0.d0
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%Gx(nn) = Gx(n)
+          fg%Gy(nn) = Gy(n)
+          fg%Gz(nn) = Gz(n)
+          fg%rhoG_ion(nn) = rhoion_G(n)
+          fg%dVG_ion(nn,:) = dVloc_G(n,:)
+        enddo
+        enddo
+        enddo
+      end if
     end if
 
     call init_updown
@@ -900,12 +990,11 @@ end if
 
 ! Setup NLCC term from pseudopotential
 call calc_nlcc(pp, system, mg, ppn)
+
 if (comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
   write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
 end if    
-
-
 call timer_end(LOG_INIT_GS_ITERATION)
 
 call timer_begin(LOG_GS_ITERATION)
@@ -945,41 +1034,9 @@ DFT_Iteration : do iter=1,iDiter(img)
   call copy_density
 
 
+
   if(iscf_order==1)then
     call timer_begin(LOG_CALC_MINIMIZATION)
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    end select
-
     if( amin_routine == 'cg' .or.       &
       ( amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
@@ -1023,7 +1080,27 @@ DFT_Iteration : do iter=1,iDiter(img)
     call gram_schmidt(system, mg, info, spsi)
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
-    ! Store to psi/zpsi
+
+
+
+    !call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
+    if(iflag_subspace_diag==1)then
+      if(Miter>iDiter_nosubspace_diag)then
+        select case(iperiodic)
+        case(0)      
+          call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
+                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+
+        case(3)
+
+          call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+                                      iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
+                                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
+        end select
+      end if
+    end if
+  
+    ! Store to psi/zpsi for calc_density
     select case(iperiodic)
     case(0)
  write(*,*) "aho3", real(spsi%rwf(-31,-31,34,1,1,1,1))
@@ -1058,57 +1135,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
     end select 
 
-
-
-
-    !call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
-    if(iflag_subspace_diag==1)then
-      if(Miter>iDiter_nosubspace_diag)then
-        select case(iperiodic)
-        case(0)      
-          call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
-                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-
-          do ik=k_sta,k_end
-          do iob=1,info%numo
-            do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-              do iz=mg%is(3),mg%ie(3)
-              do iy=mg%is(2),mg%ie(2)
-              do ix=mg%is(1),mg%ie(1)
-                psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
-              end do
-              end do
-              end do
-            end do
-          end do
-          end do
-
-        case(3)
-
-          call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                      iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
-                                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
-
-          do ik=k_sta,k_end
-          do iob=1,info%numo
-            do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-              do iz=mg%is(3),mg%ie(3)
-              do iy=mg%is(2),mg%ie(2)
-              do ix=mg%is(1),mg%ie(1)
-                zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
-              end do
-              end do
-              end do
-            end do
-          end do
-          end do
-        end select
-      end if
-    end if
-  
-    
     call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
     case(0)
@@ -1174,7 +1200,19 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      fg%rhoG_elec = rhoe_G
+      if(iflag_hartree==2)then
+        fg%rhoG_elec = rhoe_G
+      else if(iflag_hartree==4)then
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%rhoG_elec(nn) = rhoe_G(n)
+        enddo
+        enddo
+        enddo
+      end if
       call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
     esp = energy%esp(:,:,1) !++++++++
@@ -1261,6 +1299,39 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
 
+    ! Store to psi/zpsi for calc_density
+  select case(iperiodic)
+  case(0)
+  do ik=k_sta,k_end
+    do iob=1,info%numo
+      do is=1,nspin
+        !$OMP parallel do private(iz,iy,ix)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
+        end do
+        end do
+        end do
+      end do
+    end do
+    end do
+  case(3)
+  do ik=k_sta,k_end
+    do iob=1,info%numo
+      do is=1,nspin
+        !$OMP parallel do private(iz,iy,ix)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
+        end do
+        end do
+        end do
+      end do
+    end do
+  end do
+  end select 
 
     call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
@@ -1336,7 +1407,19 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
-      fg%rhoG_elec = rhoe_G
+      if(iflag_hartree==2)then
+        fg%rhoG_elec = rhoe_G
+      else if(iflag_hartree==4)then
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%rhoG_elec(nn) = rhoe_G(n)
+        enddo
+        enddo
+        enddo
+      end if
       call calc_Total_Energy_periodic(energy,system,pp,fg)
     end select
     esp = energy%esp(:,:,1) !++++++++
@@ -1656,7 +1739,7 @@ subroutine band_information
   implicit none
   integer :: ik
   real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
-  if(comm_is_root(nproc_id_global)) then
+  if(comm_is_root(nproc_id_global) .and. itotfMST<itotMST) then
     do ik=1,num_kpoints_rd
       esp_vb_min(ik)=minval(energy%esp(1:itotfMST,ik,1))
       esp_vb_max(ik)=maxval(energy%esp(1:itotfMST,ik,1))

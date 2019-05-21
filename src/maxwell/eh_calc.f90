@@ -1,5 +1,5 @@
 !
-!  Copyright 2018 SALMON developers
+!  Copyright 2019 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -20,13 +20,14 @@ subroutine eh_calc(grid,tmp)
                                   amplitude2,pulse_tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
   use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_summation
-  use salmon_maxwell,       only: fdtd_grid,fdtd_tmp
+  use structures,           only: s_fdtd_system
+  use salmon_maxwell,       only: s_fdtd_work
   implicit none
-  type(fdtd_grid)  :: grid
-  type(fdtd_tmp)   :: tmp
-  integer          :: iter,ii,ix,iy,iz
-  real(8),parameter :: pi=3.141592653589793d0
-  character(128)    :: save_name
+  type(s_fdtd_system) :: grid
+  type(s_fdtd_work)   :: tmp
+  integer             :: iter,ii,ix,iy,iz
+  real(8),parameter   :: pi=3.141592653589793d0
+  character(128)      :: save_name
   
   !time-iteration
   do iter=tmp%iter_sta,tmp%iter_end
@@ -781,10 +782,11 @@ end subroutine eh_save_plane
 subroutine eh_sendrecv(grid,tmp,var)
   use scf_data,       only: iwk_size
   use sendrecvh_sub,  only: sendrecvh
-  use salmon_maxwell, only: fdtd_grid,fdtd_tmp
+  use structures,     only: s_fdtd_system
+  use salmon_maxwell, only: s_fdtd_work
   implicit none
-  type(fdtd_grid)         :: grid
-  type(fdtd_tmp)          :: tmp
+  type(s_fdtd_system)     :: grid
+  type(s_fdtd_work)       :: tmp
   character(1),intent(in) :: var
   integer                 :: ix,iy,iz
   real(8),allocatable     :: f1(:,:,:),f2(:,:,:),f3(:,:,:)

@@ -1,5 +1,5 @@
 !
-!  Copyright 2018 SALMON developers
+!  Copyright 2019 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -17,29 +17,9 @@
 module salmon_maxwell
   implicit none
   
-  type fdtd_grid
-    integer :: ng_sta(3), ng_end(3)          ! Size of Local Grid System
-    integer :: lg_sta(3), lg_end(3)          ! Size of Global Grid System
-    integer :: no_sta(3), no_end(3)          ! Size of Entire (Allocated) Variables
-    real(8) :: dt                            ! Delta t
-    integer :: iter_now                      ! Present iteration Number
-    real(8) :: rlsize(3)                     ! Size of Cell
-    real(8) :: hgs(3)                        ! Grid Spacing
-    real(8) :: origin(3)                     ! Coordinate of Origin Point (TBA)
-    integer :: i_bc(3, 2)                    ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
-    character(16) :: gauge                   ! Gauge Condition (TBD)
-    integer, allocatable :: imedia(:,:,:)    ! Material information
-  end type fdtd_grid
-
-  type fdtd_field
-    real(8), allocatable :: vec_e(:,:,:,:)             ! E
-    real(8), allocatable :: vec_h(:,:,:,:)             ! H
-    real(8), allocatable :: vec_a(:,:,:,:), phi(:,:,:) ! Vector and Scalar Potential
-    real(8), allocatable :: vec_j_em(:,:,:,:)          ! Electromagnetic Current
-    real(8), allocatable :: rho_em(:,:,:,:)            ! Electromagnetic Charge
-  end type fdtd_field
-  
-  type fdtd_tmp
+  type s_fdtd_work
+    !share
+    
     !weyl
     
     !coulomb
@@ -106,16 +86,17 @@ module salmon_maxwell
     real(8),allocatable :: px_lr(:,:,:), py_lr(:,:,:), pz_lr(:,:,:)     !LR: poparization vector
     real(8),allocatable :: curr_lr(:,:)                                 !LR: current
     real(8),allocatable :: dip_lr(:,:)                                  !LR: dipolemoment
-  end type fdtd_tmp
+  end type s_fdtd_work
   
   contains
   
-  subroutine init_maxwell(grid,field,tmp)
+  subroutine init_maxwell(fs,ff,fw)
     use inputoutput, only: theory, use_ms_maxwell
+    use structures,  only: s_fdtd_system, s_fdtd_field
     implicit none
-    type(fdtd_grid)  :: grid
-    type(fdtd_field) :: field
-    type(fdtd_tmp)   :: tmp
+    type(s_fdtd_system) :: fs
+    type(s_fdtd_field)  :: ff
+    type(s_fdtd_work)   :: fw
     
     select case(theory)
     case('Maxwell+TDDFT')
@@ -123,55 +104,57 @@ module salmon_maxwell
       !After removing use_ms_maxwell, this selection is revised.
       select case(use_ms_maxwell) 
       case('y')
-        grid%gauge = 'weyl' 
+        fs%gauge = 'weyl' 
       case('s')
-        grid%gauge = 'coulomb' 
+        fs%gauge = 'coulomb' 
       end select
     case('Maxwell')
-      grid%gauge = 'eh' 
+      fs%gauge = 'eh' 
     case default
       stop 'invalid theory'
     end select
     
-    select case(grid%gauge)
+    select case(fs%gauge)
     case('weyl')
-      call weyl_init(grid,field,tmp)
+      call weyl_init(fs,ff,fw)
     case('coulomb')
-      call coulomb_init(grid,field,tmp)
+      call coulomb_init(fs,ff,fw)
     case('eh')
-      call eh_init(grid,tmp)
+      call eh_init(fs,fw)
     end select
   end subroutine init_maxwell
   
-  subroutine finalize_maxwell(grid,field,tmp)
+  subroutine finalize_maxwell(fs,ff,fw)
+    use structures,  only: s_fdtd_system, s_fdtd_field
     implicit none
-    type(fdtd_grid)  :: grid
-    type(fdtd_field) :: field
-    type(fdtd_tmp)   :: tmp
+    type(s_fdtd_system) :: fs
+    type(s_fdtd_field)  :: ff
+    type(s_fdtd_work)   :: fw
     
-    select case(grid%gauge)
+    select case(fs%gauge)
     case('weyl')
-      call weyl_finalize(grid,field,tmp)
+      call weyl_finalize(fs,ff,fw)
     case('coulomb')
-      call coulomb_finalize(grid,field,tmp)
+      call coulomb_finalize(fs,ff,fw)
     case('eh')
-      call eh_finalize(grid,tmp)
+      call eh_finalize(fs,fw)
     end select
   end subroutine finalize_maxwell
   
-  subroutine calc_maxwell(grid,field,tmp)
+  subroutine calc_maxwell(fs,ff,fw)
+    use structures,  only: s_fdtd_system, s_fdtd_field
     implicit none
-    type(fdtd_grid)  :: grid
-    type(fdtd_field) :: field
-    type(fdtd_tmp)   :: tmp
+    type(s_fdtd_system) :: fs
+    type(s_fdtd_field)  :: ff
+    type(s_fdtd_work)   :: fw
     
-    select case(grid%gauge)
+    select case(fs%gauge)
     case('weyl')
-      call weyl_calc(grid,field,tmp)
+      call weyl_calc(fs,ff,fw)
     case('coulomb')
-      call coulomb_calc(grid,field,tmp)
+      call coulomb_calc(fs,ff,fw)
     case('eh')
-      call eh_calc(grid,tmp)
+      call eh_calc(fs,fw)
     end select
   end subroutine calc_maxwell
   

@@ -1,5 +1,5 @@
 !
-!  Copyright 2018 SALMON developers
+!  Copyright 2019 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -20,10 +20,11 @@ subroutine eh_finalize(grid,tmp)
                                   directory,iobs_num_em,iobs_samp_em
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
-  use salmon_maxwell, only:fdtd_grid,fdtd_tmp
+  use structures,           only: s_fdtd_system
+  use salmon_maxwell,       only: s_fdtd_work
   implicit none
-  type(fdtd_grid)     :: grid
-  type(fdtd_tmp)      :: tmp
+  type(s_fdtd_system) :: grid
+  type(s_fdtd_work)   :: tmp
   integer             :: ii
   real(8),parameter   :: pi=3.141592653589793d0
   character(128)      :: save_name

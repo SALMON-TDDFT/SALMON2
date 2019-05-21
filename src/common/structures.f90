@@ -1,5 +1,5 @@
 !
-!  Copyright 2017 SALMON developers
+!  Copyright 2019 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -178,6 +178,25 @@ module structures
     real(8),allocatable :: Gx(:),Gy(:),Gz(:)
     complex(8),allocatable :: rhoG_ion(:),rhoG_elec(:),dVG_ion(:,:)
   end type s_fourier_grid
+
+  type s_fdtd_system
+    integer :: ng_sta(3), ng_end(3)       ! Size of Local Grid System
+    integer :: lg_sta(3), lg_end(3)       ! Size of Global Grid System
+    integer :: no_sta(3), no_end(3)       ! Size of Entire (Allocated) Variables
+    real(8) :: dt                         ! Delta t
+    integer :: iter_now                   ! Present iteration Number
+    real(8) :: rlsize(3)                  ! Size of Cell
+    real(8) :: hgs(3)                     ! Grid Spacing
+    real(8) :: origin(3)                  ! Coordinate of Origin Point (TBA)
+    integer :: i_bc(3, 2)                 ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
+    character(16) :: gauge                ! Gauge Condition (TBD)
+    integer, allocatable :: imedia(:,:,:) ! Material information
+  end type s_fdtd_system
+
+  type s_fdtd_field
+    type(s_scalar) :: phi, rho_em
+    type(s_vector) :: vec_e, vec_h, vec_a, vec_j_em
+  end type s_fdtd_field
 
 !===================================================================================================================================
 
