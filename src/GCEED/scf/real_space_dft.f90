@@ -68,7 +68,7 @@ use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
-use md_ground_state, only: write_xyz   !temporary
+use print_sub, only: write_xyz
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa, is
@@ -148,8 +148,11 @@ call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
 
 if(iflag_opt==1)then
-  call structure_opt_ini(MI)
-  iopt_tranc=0
+   call structure_opt_ini(MI)
+   iopt_tranc=0
+   write(comment_line,10) 0
+   call write_xyz(comment_line,"new","r  ",system,force)
+10 format("#opt iteration step=",i5)
 end if
 call timer_end(LOG_INIT_GS)
 
@@ -1565,14 +1568,18 @@ if(iflag_opt==1) then
   !! Rion is old variables to be removed 
   !! but currently it is used in many subroutines.
   Rion(:,:) = system%Rion(:,:) 
+
+  write(comment_line,10) iopt
+  call write_xyz(comment_line,"add","r  ",system,force)
+
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
     do iatom=1,MI
-       write(*,10) "'"//trim(AtomName(Kion(iatom)))//"'",  &
+       write(*,20) "'"//trim(AtomName(Kion(iatom)))//"'",  &
                    (system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
                    Kion(iatom), flag_geo_opt_atom(iatom)
     end do
-10  format(a5,3f16.8,i3,a3)
+20  format(a5,3f16.8,i3,a3)
   end if
   if(iopt_tranc==1) then
     call structure_opt_fin
