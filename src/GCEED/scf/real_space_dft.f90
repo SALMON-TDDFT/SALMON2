@@ -68,7 +68,8 @@ use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
-use gram_schmidt_orth, only: gram_schmidt 
+use gram_schmidt_orth, only: gram_schmidt
+use output_GS
 implicit none
 
 integer :: ix,iy,iz,ik,ikoa,ia
@@ -1537,6 +1538,22 @@ else if(ilsda==1)then
 end if
 
 end do DFT_Iteration
+
+! output for transition moment
+if(out_tm  == 'y') then
+  if(iperiodic==3) then
+    allocate(stencil%kAc(k_sta:k_end,3))
+    do jj=1,3
+      stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+    end do
+    call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+    call write_k_data(k_rd,system,stencil)
+    call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
+    deallocate(stencil%kAc,ppg%ekr_uV)
+  else
+    write(*,*) "error: out_tm='y' & iperiodic=0"
+  end if
+end if
 
 select case(iperiodic)
 case(0)

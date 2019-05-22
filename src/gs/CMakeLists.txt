@@ -10,6 +10,7 @@ set(SOURCES
     subspace_diag_periodic.f90
     ybcg.f90
     ybcg_periodic.f90
+    output_GS.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
