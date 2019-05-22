@@ -68,16 +68,16 @@ use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
+use output_GS
 use print_sub, only: write_xyz
 implicit none
-
 integer :: ix,iy,iz,ik,ikoa, is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
-integer :: nspin,n,nn,itmg
+integer :: itmg,nspin,n,nn
 integer :: neig(1:3, 1:2)
 integer :: neig_ng(1:3, 1:2)
 
@@ -1541,10 +1541,25 @@ end if
 
 end do DFT_Iteration
 
+! output for transition moment
+if(out_tm  == 'y') then
+  if(iperiodic==3) then
+    allocate(stencil%kAc(k_sta:k_end,3))
+    do jj=1,3
+      stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+    end do
+    call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+    call write_k_data(k_rd,system,stencil)
+    call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
+    deallocate(stencil%kAc,ppg%ekr_uV)
+  else
+    write(*,*) "error: out_tm='y' & iperiodic=0"
+  end if
+end if
+
 
 deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
-
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(icalcforce==1) then
