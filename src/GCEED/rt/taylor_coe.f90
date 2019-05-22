@@ -14,16 +14,26 @@
 !  limitations under the License.
 !
 subroutine taylor_coe
+use inputoutput, only : propagator
 use scf_data
 implicit none
 integer :: mm,nn
 complex(8),parameter :: zi=(0.d0,1.d0)
 
-do nn=1,N_hamil
-   zc(nn)=(-zi*dt)**nn
-   do mm=1,nn
+if(propagator=='etrs')then
+  do nn=1,N_hamil
+    zc(nn)=(-zi*dt/2.d0)**nn
+    do mm=1,nn
       zc(nn)=zc(nn)/mm
-   end do
-end do
+    end do
+  end do
+else
+  do nn=1,N_hamil
+    zc(nn)=(-zi*dt)**nn
+    do mm=1,nn
+      zc(nn)=zc(nn)/mm
+    end do
+  end do
+end if
 
 end subroutine taylor_coe

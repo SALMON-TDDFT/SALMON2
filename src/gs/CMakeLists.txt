@@ -11,6 +11,7 @@ set(SOURCES
     ybcg.f90
     ybcg_periodic.f90
     output_GS.f90
+    gram_schmidt_orth.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

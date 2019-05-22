@@ -480,6 +480,8 @@ integer :: imesh_oddeven0
 integer :: itmg
 integer :: j
 
+integer :: nspin
+
 if(comm_is_root(nproc_id_global))then
   write(*,*) file_IN
   open(96,file=file_IN,form='unformatted')
@@ -904,6 +906,16 @@ if(ilsda==0)then
 else
   allocate( Vlocal(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
   allocate( Vlocal2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
+end if
+if(iscfrt==2.and.propagator=='etrs')then
+  if(ilsda==0)then
+    nspin=1
+  else if(ilsda==1)then
+    nspin=2
+  end if
+  allocate( vloc_t(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),nspin) )
+  allocate( vloc_new(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),nspin) )
+  allocate( vloc_old(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),nspin,2) )
 end if
 allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
 if(icalcforce==1) allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
@@ -1408,6 +1420,28 @@ if(iSCFRT==2)then
 end if
 
 call allgatherv_vlocal
+
+if(iscfrt==2.and.propagator=='etrs')then
+  if(ilsda==0)then
+    nspin=1
+  else if(ilsda==1)then
+    nspin=2
+  end if
+!$OMP parallel do private(is,iz,iy,ix) collapse(3)
+  do is=1,nspin
+  do iz=mg_sta(3),mg_end(3)
+  do iy=mg_sta(2),mg_end(2)
+  do ix=mg_sta(1),mg_end(1)
+    vloc_t(ix,iy,iz,is)=vlocal(ix,iy,iz,is)
+    vloc_new(ix,iy,iz,is)=vlocal(ix,iy,iz,is)
+    vloc_old(ix,iy,iz,is,1)=vlocal(ix,iy,iz,is)
+    vloc_old(ix,iy,iz,is,2)=vlocal(ix,iy,iz,is)
+  end do
+  end do
+  end do
+  end do
+end if
+
 
 deallocate( esp0,rocc0 )
 

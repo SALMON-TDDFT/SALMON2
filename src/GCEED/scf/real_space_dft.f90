@@ -19,7 +19,6 @@ MODULE global_variables_scf
 
 use inputoutput
 use scf_data
-use hpsi2_sub
 use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
