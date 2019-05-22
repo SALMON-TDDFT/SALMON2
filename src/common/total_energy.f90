@@ -187,7 +187,6 @@ CONTAINS
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_eigen_energy"
     im = 1
 
- write(*,*) "gomi1", real(tpsi%rwf(-31,-31,34,1,1,1,1))
     Nspin = system%Nspin
     is = mg%is
     ie = mg%ie
@@ -197,7 +196,6 @@ CONTAINS
     wrk1 = 0d0
     call hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
 
- write(*,*) "gomi2", real(tpsi%rwf(-31,-31,34,1,1,1,1))
     if(allocated(tpsi%rwf)) then
 
       do ispin=1,Nspin

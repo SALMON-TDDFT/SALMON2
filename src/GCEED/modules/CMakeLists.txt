@@ -23,7 +23,6 @@ set(SOURCES
     sendrecvh.f90
     writebox_rt.f90
     persistent_comm.f90
-    structure_opt.f90
     )
   #  share_mesh_1d_old.f90
 

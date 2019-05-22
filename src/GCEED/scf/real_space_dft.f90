@@ -68,23 +68,25 @@ use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
+use md_ground_state, only: write_xyz   !temporary
 implicit none
 
-integer :: ix,iy,iz,ik,ikoa
-integer :: is
+integer :: ix,iy,iz,ik,ikoa, is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
 real(8) :: sum0,sum1
-character(100) :: file_atoms_coo
+character(100) :: file_atoms_coo, comment_line
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
-integer :: itmg
+integer :: nspin,n,nn,itmg
+integer :: neig(1:3, 1:2)
+integer :: neig_ng(1:3, 1:2)
+
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_wf_info) :: info_ob
 type(s_wf_info) :: info
 type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob, srg_ng
-integer :: nspin
 type(s_wavefunction) :: spsi,shpsi,sttpsi
 type(s_system) :: system
 type(s_stencil) :: stencil
@@ -94,9 +96,7 @@ type(s_fourier_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_energy) :: energy
 type(s_force)  :: force
-integer :: neig(1:3, 1:2)
-integer :: neig_ng(1:3, 1:2)
-integer :: n,nn
+
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -147,17 +147,17 @@ call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 
 call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
 
-if(iflag_stopt==1)then
+if(iflag_opt==1)then
   call structure_opt_ini(MI)
-  istopt_tranc=0
+  iopt_tranc=0
 end if
 call timer_end(LOG_INIT_GS)
 
 
-Structure_Optimization_Iteration : do istopt=1,iter_stopt
+Structure_Optimization_Iteration : do iopt=1,iter_opt
 Multigrid_Iteration : do img=1,ntmg
 
-if(istopt==1)then
+if(iopt==1)then
   select case( IC )
 
 !------------------------------ New calculation
@@ -903,19 +903,11 @@ if(istopt==1)then
 
   call timer_end(LOG_INIT_GS_RESTART)
 
-else if(istopt>=2)then
+else if(iopt>=2)then
   call timer_begin(LOG_INIT_GS)
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
-    deallocate(ppg%jxyz,ppg%jxx,ppg%jyy,ppg%jzz,ppg%rxyz)
-    deallocate(ppg_all%jxyz,ppg_all%jxx,ppg_all%jyy,ppg_all%jzz,ppg_all%rxyz)
-    deallocate(ppg%lma_tbl)
-    deallocate(ppg_all%lma_tbl)
-    deallocate(ppg%ia_tbl,ppg%rinv_uvu,ppg%uv,ppg%duv)
-    deallocate(ppg_all%ia_tbl,ppg_all%rinv_uvu,ppg_all%uv,ppg_all%duv)
-    deallocate(ppg%Vpsl_atom)
-    deallocate(ppg%ekr_uV)
-    deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
+    call dealloc_init_ps(ppg,ppg_all,ppn)
     call init_ps(system%al,system%brl,stencil%matrix_A)
   end if
   call timer_end(LOG_INIT_GS)
@@ -956,10 +948,10 @@ iflag_diisjump=0
 allocate(idiis_sd(itotMST))
 idiis_sd=0
 
-if(img==1.and.istopt==1) allocate(norm_diff_psi_stock(itotMST,1))
+if(img==1.and.iopt==1) allocate(norm_diff_psi_stock(itotMST,1))
 norm_diff_psi_stock=1.0d9
 
-if(img>=2.or.istopt>=2) deallocate(rho_stock,Vlocal_stock)
+if(img>=2.or.iopt>=2) deallocate(rho_stock,Vlocal_stock)
 allocate(rho_stock(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1))
 if(ilsda==0)then
   allocate(Vlocal_stock(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1))
@@ -1072,10 +1064,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_MINIMIZATION)
 
- write(*,*) "aho2", real(spsi%rwf(-31,-31,34,1,1,1,1))
- write(*,*) "aho2A", ubound(spsi%rwf,3), lbound(spsi%rwf,3)
- write(*,*) "aho2B", mg%is_array, mg%ie_array
- write(*,*) "aho2C", info%im_s, info%im_e
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
@@ -1103,7 +1091,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     ! Store to psi/zpsi for calc_density
     select case(iperiodic)
     case(0)
- write(*,*) "aho3", real(spsi%rwf(-31,-31,34,1,1,1,1))
     do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
@@ -1193,9 +1180,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     sVh%f = Vh
     energy%E_xc = Exc
-!hoge here NaN
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
-    write(*,*) "aho10", energy%esp(:,:,1)
     select case(iperiodic)
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
@@ -1574,17 +1559,22 @@ if(icalcforce==1) then
   end if
 end if
 
-if(iflag_stopt==1) then
-  call structure_opt_check(MI,istopt,istopt_tranc,force)
-  if(istopt_tranc/=1) call structure_opt(MI,istopt,force,Rion)
+if(iflag_opt==1) then
+  call structure_opt_check(MI,iopt,iopt_tranc,force)
+  if(iopt_tranc/=1) call structure_opt(MI,iopt,force,system%Rion)
+  !! Rion is old variables to be removed 
+  !! but currently it is used in many subroutines.
+  Rion(:,:) = system%Rion(:,:) 
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
     do iatom=1,MI
-      write(*,'(a3,3f16.8,i3,a3)') AtomName(Kion(iatom)), (Rion(jj,iatom)*ulength_from_au,jj=1,3), &
-                                   Kion(iatom),flag_geo_opt_atom(iatom)
+       write(*,10) "'"//trim(AtomName(Kion(iatom)))//"'",  &
+                   (system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
+                   Kion(iatom), flag_geo_opt_atom(iatom)
     end do
+10  format(a5,3f16.8,i3,a3)
   end if
-  if(istopt_tranc==1) then
+  if(iopt_tranc==1) then
     call structure_opt_fin
     exit Multigrid_Iteration
   end if
@@ -1601,7 +1591,7 @@ call timer_end(LOG_DEINIT_GS_ITERATION)
 
 
 end do Multigrid_Iteration
-if(istopt_tranc==1)then
+if(iopt_tranc==1)then
   exit Structure_Optimization_Iteration
 end if
 end do Structure_Optimization_Iteration

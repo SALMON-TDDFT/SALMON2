@@ -106,14 +106,14 @@ end if
 
 select case(use_geometry_opt)
 case('y')
-  iflag_stopt = 1
+  iflag_opt = 1
 case('n')
-  iflag_stopt = 0
+  iflag_opt = 0
 case default
-  stop 'invalid iflag_stopt'
+  stop 'invalid iflag_opt'
 end select
 
-iter_stopt = ngeometry_opt
+iter_opt = ngeometry_opt
 
 select case(subspace_diagonalization)
 case('y')
@@ -135,7 +135,7 @@ allocate(wtk(num_kpoints_rd))
 wtk(:)=1.d0/dble(num_kpoints_rd)
 
 if(comm_is_root(nproc_id_global))then
-  if(iflag_stopt==1.and.icalcforce==0)then
+  if(iflag_opt==1.and.icalcforce==0)then
     write(*,*) "use_force should be set to 'y' when use_geometry_opt is 'y'"
     stop
   end if
@@ -264,16 +264,7 @@ call comm_bcast(Lref,nproc_group_global)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "MI =",MI
 
-allocate(istopt_a(MI) ); istopt_a = 0
 allocate( AtomName(MI),iAtomicNumber(MI) )
-
-if(comm_is_root(nproc_id_global)) then
-  do iatom=1,MI
-    if(flag_geo_opt_atom(iatom) == 'y')istopt_a(iatom)=1
-  end do
-end if
-
-call comm_bcast(istopt_a,      nproc_group_global)
 
 Atomname(:)='dm' ! dummy
 iAtomicNumber(:)=0 ! dummy
