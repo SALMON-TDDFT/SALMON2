@@ -63,6 +63,7 @@ group.add_option('--disable-scalapack', action='store_false', dest='scalapack', 
 group.add_option('--enable-libxc',  action='store_true', default=False, dest='libxc', help='enable Libxc library.')
 #group.add_option('--disable-libxc', action='store_false', dest='libxc', help='enable/disable Libxc library.')
 group.add_option('--with-libxc', action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to LibXC package')
+group.add_option('--install-required-packages', action='store_true', default=False, dest='install_required_packages', help='request installation of required packages (We support the LAPACK and Libxc installation)')
 
 parser.add_option_group(group)
 
@@ -120,8 +121,10 @@ if options.simd is not None:
   dict['SIMD_SET'] = options.simd.upper()
 
 # Libxc library
-add_option(dict, 'USE_LIBXC', options.libxc or (options.libxc_installdir is not None))
-add_env(dict, 'LIBXC_INSTALLDIR', options.libxc_installdir)
+add_env   (dict, 'LIBXC_INSTALLDIR', options.libxc_installdir)
+add_option(dict, 'USE_LIBXC',        options.libxc or (options.libxc_installdir is not None))
+
+add_option(dict, 'INSTALL_REQUIRED_PACKAGES', options.install_required_packages)
 
 define = ''
 for k,v in dict.items():
