@@ -40,17 +40,16 @@ subroutine eh_init(grid,tmp)
   
   !set initial parameter and value
   tmp%c_0        = 1.370359991378353d2
-  tmp%Nd         = 4
+  tmp%Nd         = 1
   tmp%iter_sta   = 1
   tmp%iter_end   = nt_em
   grid%rlsize(:) = al_em(:)
   grid%hgs(:)    = dl_em(:)
-  tmp%ifn         = 600
+  tmp%ifn        = 600
   tmp%ipml_l     = 8
   tmp%pml_m      = 4.0d0
   tmp%pml_r      = 1.0d-7
   if(iperiodic==0) then
-    tmp%iwk_size_eh = 12
     grid%i_bc(:,:)=1 !PML
     do ix=1,3
     do iy=1,2
@@ -61,7 +60,6 @@ subroutine eh_init(grid,tmp)
     end do
   elseif(iperiodic==3) then
     grid%i_bc(:,:)  = iboundary(:,:) !Periodic or PML
-    tmp%iwk_size_eh = 2
   end if
   select case(unit_system)
   case('au','a.u.')
@@ -73,8 +71,12 @@ subroutine eh_init(grid,tmp)
     tmp%uAperm_from_au=tmp%uVperm_from_au
   end select
   
-  !prepare GCEED(set mpi condition, gird, coordinate, and sendrecv environment)
+  !prepare GCEED(set mpi condition, gird, and sendrecv environment)
   call eh_prep_GCEED(grid,tmp)
+  
+  !set coordinate
+  allocate(tmp%coo(minval(grid%lg_sta(:))-tmp%Nd:maxval(grid%lg_end(:))+tmp%Nd,3))
+  call eh_set_coo(iperiodic,tmp%Nd,tmp%ioddeven(:),grid%lg_sta(:),grid%lg_end(:),grid%hgs(:),tmp%coo)
   
   !set and check dt
   dt_cfl=1.0d0/( &
@@ -1542,13 +1544,44 @@ subroutine eh_find_point(rloc,id,ipo,ili,ipl,ista,iend,icoo_sta,icoo_end,coo)
 end subroutine eh_find_point
 
 !=========================================================================================
+!= set coordinate ========================================================================
+subroutine eh_set_coo(iperi,Nd,ioe,ista,iend,hgs,coo)
+  implicit none
+  integer,intent(in)  :: iperi,Nd
+  integer,intent(in)  :: ioe(3),ista(3),iend(3)
+  real(8),intent(in)  :: hgs(3)
+  real(8),intent(out) :: coo(minval(ista(:))-Nd:maxval(iend(:))+Nd,3)
+  integer :: ii,ij
+  
+  do ii=1,3
+    select case(iperi)
+    case(0)
+      select case(ioe(ii))
+      case(1)
+        do ij=ista(ii)-Nd,iend(ii)+Nd
+          coo(ij,ii)=dble(ij)*hgs(ii)
+        end do
+      case(2)
+        do ij=ista(ii)-Nd,iend(ii)+Nd
+          coo(ij,ii)=(dble(ij)-0.5d0)*hgs(ii)
+        end do
+      end select
+    case(3)
+      do ij=ista(ii)-Nd,iend(ii)+Nd
+        coo(ij,ii)=dble(ij-1)*hgs(ii)
+      end do
+    end select
+  end do
+  
+end subroutine eh_set_coo
+
+!=========================================================================================
 != prepare GCEED =========================================================================
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_prep_GCEED(grid,tmp)
   use inputoutput,       only: nproc_domain,nproc_domain_s,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
-  use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global
-  use structures,        only: s_rgrid
+  use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global,nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_Mxin,nproc_Mxin_s,nproc_Mxin_mul,nproc_Mxin_mul_s_dm,nproc_Mxin_s_dm,&
                                k_sta,k_end,k_num,num_kpoints_3d,num_kpoints_rd,&
@@ -1558,17 +1591,17 @@ subroutine eh_prep_GCEED(grid,tmp)
                                ng_sta,ng_end,ng_num,&
                                ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,Nd, &
                                ista_Mxin,iend_Mxin,inum_Mxin,&
-                               ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-                               gridcoo,iwk_size,make_iwksta_iwkend
+                               ista_Mxin_s,iend_Mxin_s,inum_Mxin_s
   use new_world_sub,     only: make_new_world
-  use init_sendrecv_sub, only: init_updown,init_itype,init_sendrecv_matrix
-  use persistent_comm,   only: init_persistent_requests
-  use structures,        only: s_fdtd_system
+  use init_sendrecv_sub, only: init_updown,iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
+  use sendrecv_grid,     only: init_sendrecv_grid
+  use structures,        only: s_fdtd_system,s_rgrid,s_sendrecv_grid
   use salmon_maxwell,    only: s_fdtd_work
   implicit none
-  type(s_rgrid)       :: lg,mg,ng
-  type(s_fdtd_system) :: grid
-  type(s_fdtd_work)   :: tmp
+  type(s_fdtd_system)   :: grid
+  type(s_fdtd_work)     :: tmp
+  integer               :: neig_ng_eh(1:3,1:2)
+  integer               :: id_tmp,ii
   
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
@@ -1581,35 +1614,58 @@ subroutine eh_prep_GCEED(grid,tmp)
   call make_new_world
   call setk(k_sta,k_end,k_num,num_kpoints_rd,nproc_k,nproc_id_orbitalgrid)
   
-  !set grid
+  !set grid and odd or even grid paterns
   rLsize(:,1)=grid%rlsize(:); Harray(:,1)=grid%hgs(:);
   Hgs(:)=Harray(:,1); Hvol=Hgs(1)*Hgs(2)*Hgs(3);
   call set_imesh_oddeven(1)
-  call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+  call setlg(grid%lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
              Hgs,Nd,rLsize(:,1),imesh_oddeven,iperiodic,1)
   allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1), &
            inum_Mxin(3,0:nproc_size_global-1))
-  call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
+  call setmg(grid%mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
              lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,1)
   allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
   allocate(inum_Mxin_s(3,0:nproc_size_global-1))
-  call setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
+  call setng(grid%ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
              nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,1)
-  grid%lg_sta(:)=lg_sta(:); grid%lg_end(:)=lg_end(:);
-  grid%ng_sta(:)=ng_sta(:); grid%ng_end(:)=ng_end(:);
-  
-  !set coordinate
-  allocate(tmp%coo(minval(grid%lg_sta(:))-tmp%Nd:maxval(grid%lg_end(:))+tmp%Nd,3))
-  call set_gridcoo
-  tmp%coo(:,:)=gridcoo(:,:)
+  grid%lg_sta(:)=grid%lg%is(:); grid%lg_end(:)=grid%lg%ie(:);
+  grid%ng_sta(:)=grid%ng%is(:); grid%ng_end(:)=grid%ng%ie(:);
+  tmp%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment
   call init_updown
-  call init_itype
-  call init_sendrecv_matrix
-  call init_persistent_requests
-  iwk_size=tmp%iwk_size_eh
-  call make_iwksta_iwkend
-  iwk_size=2
+  if (iperiodic==0) then
+    id_tmp=2;
+  elseif (iperiodic==3) then
+    !This process is temporal. 
+    !With bug-fixing init_updown for iperiodic=3 and ob=1, this process will be removed.
+    id_tmp=1;
+  end if
+  neig_ng_eh(1,1)=iup_array(id_tmp); neig_ng_eh(1,2)=idw_array(id_tmp);
+  neig_ng_eh(2,1)=jup_array(id_tmp); neig_ng_eh(2,2)=jdw_array(id_tmp);
+  neig_ng_eh(3,1)=kup_array(id_tmp); neig_ng_eh(3,2)=kdw_array(id_tmp);
+  !This process about ng is temporal. 
+  !With modifying set_ng to be applied to arbitrary Nd, this process will be removed.
+  grid%ng%is_overlap(1:3)=grid%ng_sta(1:3)-tmp%Nd
+  grid%ng%ie_overlap(1:3)=grid%ng_end(1:3)+tmp%Nd
+  grid%ng%is_array(1:3)  =grid%ng_sta(1:3)-tmp%Nd
+  grid%ng%ie_array(1:3)  =grid%ng_end(1:3)+tmp%Nd
+  if(allocated(grid%ng%idx)) deallocate(grid%ng%idx)
+  if(allocated(grid%ng%idy)) deallocate(grid%ng%idy)
+  if(allocated(grid%ng%idz)) deallocate(grid%ng%idz)
+  allocate(grid%ng%idx(grid%ng%is_overlap(1):grid%ng%ie_overlap(1)), &
+           grid%ng%idy(grid%ng%is_overlap(2):grid%ng%ie_overlap(2)), &
+           grid%ng%idz(grid%ng%is_overlap(3):grid%ng%ie_overlap(3)))
+  do ii=grid%ng%is_overlap(1),grid%ng%ie_overlap(1)
+    grid%ng%idx(ii)=ii
+  end do
+  do ii=grid%ng%is_overlap(2),grid%ng%ie_overlap(2)
+    grid%ng%idy(ii)=ii
+  end do
+  do ii=grid%ng%is_overlap(3),grid%ng%ie_overlap(3)
+    grid%ng%idz(ii)=ii
+  end do
+  grid%ng%nd=tmp%Nd
+  call init_sendrecv_grid(grid%srg_ng,grid%ng,1,nproc_group_global,nproc_id_global,neig_ng_eh)
   
 end subroutine eh_prep_GCEED

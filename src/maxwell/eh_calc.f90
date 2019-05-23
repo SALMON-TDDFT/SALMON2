@@ -780,8 +780,7 @@ end subroutine eh_save_plane
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_sendrecv(grid,tmp,var)
-  use scf_data,       only: iwk_size
-  use sendrecvh_sub,  only: sendrecvh
+  use sendrecv_grid,  only: update_overlap_real8
   use structures,     only: s_fdtd_system
   use salmon_maxwell, only: s_fdtd_work
   implicit none
@@ -791,23 +790,22 @@ subroutine eh_sendrecv(grid,tmp,var)
   integer                 :: ix,iy,iz
   real(8),allocatable     :: f1(:,:,:),f2(:,:,:),f3(:,:,:)
   
-  iwk_size=tmp%iwk_size_eh
   if(var=='e') then
-    call sendrecvh(tmp%ex_y)
-    call sendrecvh(tmp%ex_z)
-    call sendrecvh(tmp%ey_z)
-    call sendrecvh(tmp%ey_x)
-    call sendrecvh(tmp%ez_x)
-    call sendrecvh(tmp%ez_y)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%ex_y)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%ex_z)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%ey_z)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%ey_x)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%ez_x)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%ez_y)
   elseif(var=='h') then
-    call sendrecvh(tmp%hx_y)
-    call sendrecvh(tmp%hx_z)
-    call sendrecvh(tmp%hy_z)
-    call sendrecvh(tmp%hy_x)
-    call sendrecvh(tmp%hz_x)
-    call sendrecvh(tmp%hz_y)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hx_y)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hx_z)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hy_z)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hy_x)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hz_x)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hz_y)
   elseif(var=='r') then
-    call sendrecvh(tmp%rmedia)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%rmedia)
   elseif(var=='s') then
     !allocate temporary variable
     allocate(f1(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
@@ -854,9 +852,9 @@ subroutine eh_sendrecv(grid,tmp,var)
 !$omp end parallel
     tmp%hx_s(:,:,:)=f1(:,:,:); tmp%hy_s(:,:,:)=f2(:,:,:); tmp%hz_s(:,:,:)=f3(:,:,:);
     f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
-    call sendrecvh(tmp%hx_s)
-    call sendrecvh(tmp%hy_s)
-    call sendrecvh(tmp%hz_s)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hx_s)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hy_s)
+    call update_overlap_real8(grid%srg_ng,grid%ng,tmp%hz_s)
 !$omp parallel
 !$omp do private(ix,iy,iz)
     do iz=grid%ng_sta(3),grid%ng_end(3)
@@ -875,6 +873,5 @@ subroutine eh_sendrecv(grid,tmp,var)
     !deallocate temporary variable
     deallocate(f1,f2,f3)
   end if
-  iwk_size=2
   
 end subroutine eh_sendrecv
