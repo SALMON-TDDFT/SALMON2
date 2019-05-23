@@ -30,6 +30,7 @@ module salmon_maxwell
     integer             :: iter_sta        !start of time-iteration
     integer             :: iter_end        !end of time-iteration
     integer             :: ifn             !file number for inputing or saving data
+    integer             :: ioddeven(3)     !odd or even grid paterns
     integer             :: ipml_l          !pml parameter
     real(8)             :: pml_m           !pml parameter
     real(8)             :: pml_r           !pml parameter
@@ -76,7 +77,6 @@ module salmon_maxwell
                            rjz_sum_d(:,:,:)                             
     real(8),allocatable :: wex_d(:,:,:,:),wey_d(:,:,:,:),wez_d(:,:,:,:) !Drude: weight function for smoothing
     real(8),allocatable :: c1_j_d(:),c2_j_d(:)                          !Drude: coefficient for j
-    integer             :: iwk_size_eh                                  !tmporary variable for sendrecvh
     real(8),allocatable :: rmedia(:,:,:)                                !Material information for tmp.
     real(8),allocatable :: time_lr(:)                                   !LR: time
     integer             :: iter_lr                                      !LR: time iteration for save
