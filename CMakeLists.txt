@@ -29,9 +29,6 @@ option_set(EXPLICIT_VEC            "Enable explicit vectorization for the stenci
 option_set(LOOP_BLOCKING           "Enable loop blocking at the stencil"                                               OFF)
 option_set(SW_PREFETCH             "Enable software prefetch in the explicit vec of the stencil"                       OFF)
 
-## Debug
-option_set(USE_NVTX                "Use NVIDIA Tools Extension Library" OFF)
-
 ## test: joint hpsi subroutine
 option_set(HPSI_TEST               "Use joint hpsi subroutine (test)"   OFF)
 set(HPSI_TEST_SUFFIX "")
@@ -116,14 +113,6 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR})
 
 ### MPI Setting
 add_definitions_if(USE_MPI  -DSALMON_USE_MPI)
-
-### NVIDIA Tools Extension Library
-if (USE_NVTX)
-  find_package(CUDA REQUIRED)
-  add_definitions(-DARTED_USE_NVTX)
-  link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
-  set(EXTERNAL_LIBS ${EXTERNAL_LIBS} nvToolsExt)
-endif ()
 
 ### Numerical library
 if (USE_SCALAPACK)
