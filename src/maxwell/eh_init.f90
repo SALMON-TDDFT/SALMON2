@@ -1595,7 +1595,7 @@ subroutine eh_prep_GCEED(grid,tmp)
   use new_world_sub,     only: make_new_world
   use init_sendrecv_sub, only: init_updown,iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
   use sendrecv_grid,     only: init_sendrecv_grid
-  use structures,        only: s_fdtd_system,s_rgrid,s_sendrecv_grid
+  use structures,        only: s_fdtd_system
   use salmon_maxwell,    only: s_fdtd_work
   implicit none
   type(s_fdtd_system)   :: grid
