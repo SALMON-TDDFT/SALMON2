@@ -392,6 +392,7 @@ contains
       & iobs_num_em, &
       & iobs_samp_em, &
       & obs_loc_em, &
+      & obs_plane_em, &
       & shape_file, &
       & imedia_num, &
       & type_media, &
@@ -735,6 +736,7 @@ contains
     iobs_num_em     = 0
     iobs_samp_em    = 1
     obs_loc_em(:,:) = 0d0
+    obs_plane_em(:) = 'n'
     shape_file      = 'none'
     imedia_num      = 0
     type_media(:)   = 'vacuum'
@@ -1162,6 +1164,7 @@ contains
     call comm_bcast(iobs_samp_em ,nproc_group_global)
     call comm_bcast(obs_loc_em   ,nproc_group_global)
     obs_loc_em = obs_loc_em * ulength_to_au
+    call comm_bcast(obs_plane_em ,nproc_group_global)
     call comm_bcast(shape_file   ,nproc_group_global)
     call comm_bcast(imedia_num   ,nproc_group_global)
     call comm_bcast(type_media   ,nproc_group_global)
@@ -1800,9 +1803,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'iobs_samp_em', iobs_samp_em
       if(iobs_num_em==0) then
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,:)
+        write(fh_variables_log, '("#",4X,A,"=",A)')       'obs_plane_em', obs_plane_em(1)
       else
         do i = 1,iobs_num_em
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'obs_loc_em(',i,',:)', obs_loc_em(i,:)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'obs_plane_em(',i,')', obs_plane_em(i)
         end do
       end if
       write(fh_variables_log, '("#",4X,A,"=",A)')      'shape_file', trim(shape_file)

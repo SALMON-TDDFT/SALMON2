@@ -181,6 +181,8 @@ module structures
   end type s_fourier_grid
 
   type s_fdtd_system
+    type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
+    type(s_sendrecv_grid) :: srg_ng       ! Structure for send and receive in fdtd
     integer :: ng_sta(3), ng_end(3)       ! Size of Local Grid System
     integer :: lg_sta(3), lg_end(3)       ! Size of Global Grid System
     integer :: no_sta(3), no_end(3)       ! Size of Entire (Allocated) Variables

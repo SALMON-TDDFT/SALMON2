@@ -14,17 +14,17 @@
 !  limitations under the License.
 !
 !-----------------------------------------------------------------------------------------
-subroutine eh_finalize(grid,tmp)
+subroutine eh_finalize(fs,fw)
   use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,iperiodic,&
                                   ae_shape1,ae_shape2,e_impulse,sysname,nt_em,nenergy,de, &
-                                  directory,iobs_num_em,iobs_samp_em
+                                  directory,iobs_num_em,iobs_samp_em,obs_plane_em
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: s_fdtd_work
   implicit none
-  type(s_fdtd_system) :: grid
-  type(s_fdtd_work)   :: tmp
+  type(s_fdtd_system) :: fs
+  type(s_fdtd_work)   :: fw
   integer             :: ii
   real(8),parameter   :: pi=3.141592653589793d0
   character(128)      :: save_name
@@ -35,76 +35,76 @@ subroutine eh_finalize(grid,tmp)
       !output time-dependent dipole data
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_p.data'
-        open(tmp%ifn,file=save_name)
+        open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
-          write(tmp%ifn,'(A)') "# time[a.u.], dipoleMoment(x,y,z)[a.u.]" 
+          write(fw%ifn,'(A)') "# time[a.u.], dipoleMoment(x,y,z)[a.u.]" 
         case('A_eV_fs')
-          write(tmp%ifn,'(A)') "# time[fs], dipoleMoment(x,y,z)[Ang.]" 
+          write(fw%ifn,'(A)') "# time[fs], dipoleMoment(x,y,z)[Ang.]" 
         end select
         do ii=1,nt_em
-          write(tmp%ifn, '(E13.5)',advance="no")     tmp%time_lr(ii)*utime_from_au
-          write(tmp%ifn, '(3E16.6e3)',advance="yes") -tmp%dip_lr(ii,:)*ulength_from_au
+          write(fw%ifn, '(E13.5)',advance="no")     fw%time_lr(ii)*utime_from_au
+          write(fw%ifn, '(3E16.6e3)',advance="yes") -fw%dip_lr(ii,:)*ulength_from_au
         end do
-        close(tmp%ifn)
+        close(fw%ifn)
       end if
       
       !output lr data
-      call eh_fourier(nt_em,nenergy,grid%dt,de,tmp%time_lr,tmp%dip_lr(:,1),tmp%fr_lr(:,1),tmp%fi_lr(:,1))
-      call eh_fourier(nt_em,nenergy,grid%dt,de,tmp%time_lr,tmp%dip_lr(:,2),tmp%fr_lr(:,2),tmp%fi_lr(:,2))
-      call eh_fourier(nt_em,nenergy,grid%dt,de,tmp%time_lr,tmp%dip_lr(:,3),tmp%fr_lr(:,3),tmp%fi_lr(:,3))
+      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%dip_lr(:,1),fw%fr_lr(:,1),fw%fi_lr(:,1))
+      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%dip_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
+      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%dip_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_lr.data'
-        open(tmp%ifn,file=save_name)
+        open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
-          write(tmp%ifn,'(A)') "# energy[a.u.], Re[alpha](x,y,z)[a.u.], Im[alpha](x,y,z)[a.u.], df/dE(x,y,z)[a.u.]"
+          write(fw%ifn,'(A)') "# energy[a.u.], Re[alpha](x,y,z)[a.u.], Im[alpha](x,y,z)[a.u.], df/dE(x,y,z)[a.u.]"
         case('A_eV_fs')
-          write(tmp%ifn,'(A)') "# energy[eV], Re[alpha](x,y,z)[Ang.**3], Im[alpha](x,y,z)[Ang.**3], df/dE(x,y,z)[1/eV]"
+          write(fw%ifn,'(A)') "# energy[eV], Re[alpha](x,y,z)[Ang.**3], Im[alpha](x,y,z)[Ang.**3], df/dE(x,y,z)[1/eV]"
         end select
         do ii=0,nenergy
-          write(tmp%ifn, '(E13.5)',advance="no")     dble(ii)*de*uenergy_from_au
-          write(tmp%ifn, '(3E16.6e3)',advance="no")  tmp%fr_lr(ii,:)/(-e_impulse)*(ulength_from_au**3.0d0)
-          write(tmp%ifn, '(3E16.6e3)',advance="no")  tmp%fi_lr(ii,:)/(-e_impulse)*(ulength_from_au**3.0d0)
-          write(tmp%ifn, '(3E16.6e3)',advance="yes") 2.0d0*dble(ii)*de/pi*tmp%fi_lr(ii,:)/(-e_impulse)/uenergy_from_au
+          write(fw%ifn, '(E13.5)',advance="no")     dble(ii)*de*uenergy_from_au
+          write(fw%ifn, '(3E16.6e3)',advance="no")  fw%fr_lr(ii,:)/(-e_impulse)*(ulength_from_au**3.0d0)
+          write(fw%ifn, '(3E16.6e3)',advance="no")  fw%fi_lr(ii,:)/(-e_impulse)*(ulength_from_au**3.0d0)
+          write(fw%ifn, '(3E16.6e3)',advance="yes") 2.0d0*dble(ii)*de/pi*fw%fi_lr(ii,:)/(-e_impulse)/uenergy_from_au
         end do
-        close(tmp%ifn)
+        close(fw%ifn)
       end if
     elseif(iperiodic==3) then
       !output time-dependent dipole data
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_current.data'
-        open(tmp%ifn,file=save_name)
+        open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
-          write(tmp%ifn,'(A)') "# time[a.u.],  current(x,y,z)[a.u.]" 
+          write(fw%ifn,'(A)') "# time[a.u.],  current(x,y,z)[a.u.]" 
         case('A_eV_fs')
-          write(tmp%ifn,'(A)') "# time[fs],    current(x,y,z)[A/Ang.^2]" 
+          write(fw%ifn,'(A)') "# time[fs],    current(x,y,z)[A/Ang.^2]" 
         end select
         do ii=1,nt_em
-          write(tmp%ifn, '(E13.5)',advance="no")     tmp%time_lr(ii)*utime_from_au
-          write(tmp%ifn, '(3E16.6e3)',advance="yes") -tmp%curr_lr(ii,:)*tmp%uAperm_from_au/ulength_from_au
+          write(fw%ifn, '(E13.5)',advance="no")     fw%time_lr(ii)*utime_from_au
+          write(fw%ifn, '(3E16.6e3)',advance="yes") -fw%curr_lr(ii,:)*fw%uAperm_from_au/ulength_from_au
         end do
-        close(tmp%ifn)
+        close(fw%ifn)
       end if
       
       !output lr data
-      call eh_fourier(nt_em,nenergy,grid%dt,de,tmp%time_lr,tmp%curr_lr(:,1),tmp%fr_lr(:,1),tmp%fi_lr(:,1))
-      call eh_fourier(nt_em,nenergy,grid%dt,de,tmp%time_lr,tmp%curr_lr(:,2),tmp%fr_lr(:,2),tmp%fi_lr(:,2))
-      call eh_fourier(nt_em,nenergy,grid%dt,de,tmp%time_lr,tmp%curr_lr(:,3),tmp%fr_lr(:,3),tmp%fi_lr(:,3))
+      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%curr_lr(:,1),fw%fr_lr(:,1),fw%fi_lr(:,1))
+      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%curr_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
+      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%curr_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_lr.data'
-        open(tmp%ifn,file=save_name)
+        open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
-          write(tmp%ifn,'(A)') "# energy[a.u.], Re[epsilon](x,y,z), Im[epsilon](x,y,z)"
+          write(fw%ifn,'(A)') "# energy[a.u.], Re[epsilon](x,y,z), Im[epsilon](x,y,z)"
         case('A_eV_fs')
-          write(tmp%ifn,'(A)') "# energy[eV], Re[epsilon](x,y,z), Im[epsilon](x,y,z)"
+          write(fw%ifn,'(A)') "# energy[eV], Re[epsilon](x,y,z), Im[epsilon](x,y,z)"
         end select
         do ii=1,nenergy
-          write(tmp%ifn, '(E13.5)',advance="no")     dble(ii)*de*uenergy_from_au
-          write(tmp%ifn, '(3E16.6e3)',advance="no")  1.0d0-4.0d0*pi*tmp%fi_lr(ii,:)/(-e_impulse)/(dble(ii)*de)
-          write(tmp%ifn, '(3E16.6e3)',advance="yes") 4.0d0*pi*tmp%fr_lr(ii,:)/(-e_impulse)/(dble(ii)*de)
+          write(fw%ifn, '(E13.5)',advance="no")     dble(ii)*de*uenergy_from_au
+          write(fw%ifn, '(3E16.6e3)',advance="no")  1.0d0-4.0d0*pi*fw%fi_lr(ii,:)/(-e_impulse)/(dble(ii)*de)
+          write(fw%ifn, '(3E16.6e3)',advance="yes") 4.0d0*pi*fw%fr_lr(ii,:)/(-e_impulse)/(dble(ii)*de)
         end do
       end if
     end if
@@ -114,38 +114,42 @@ subroutine eh_finalize(grid,tmp)
   if(iobs_num_em>0) then
     if(comm_is_root(nproc_id_global)) then
       !make information file
-      open(tmp%ifn,file=trim(directory)//"/obs0_info.data")
-      write(tmp%ifn,'(A,A14)')                      'unit_system   =',trim(unit_system)
-      write(tmp%ifn,'(A,I14)')                      'iperiodic     =',iperiodic
-      write(tmp%ifn,'(A,ES14.5)')                   'dt_em         =',grid%dt*utime_from_au
-      write(tmp%ifn,'(A,I14)')                      'nt_em         =',(tmp%iter_end-tmp%iter_sta+1)
-      write(tmp%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'al_em         =',&
-            grid%rlsize(1)*ulength_from_au,', ',&
-            grid%rlsize(2)*ulength_from_au,', ',&
-            grid%rlsize(3)*ulength_from_au
-      write(tmp%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'dl_em         =',&
-            grid%hgs(1)*ulength_from_au,', ',&
-            grid%hgs(2)*ulength_from_au,', ',&
-            grid%hgs(3)*ulength_from_au
-      write(tmp%ifn,'(A,I14,A,I14,A,I14)')          'lg_sta        =',&
-            grid%lg_sta(1),', ',grid%lg_sta(2),', ',grid%lg_sta(3)
-      write(tmp%ifn,'(A,I14,A,I14,A,I14)')          'lg_end        =',&
-            grid%lg_end(1),', ',grid%lg_end(2),', ',grid%lg_end(3)
-      write(tmp%ifn,'(A,I14)')                      'iobs_num_em   =',iobs_num_em
-      write(tmp%ifn,'(A,I14)')                      'iobs_samp_em  =',iobs_samp_em
-      write(tmp%ifn,'(A,ES14.5)')                   'e_max         =',tmp%e_max
-      write(tmp%ifn,'(A,ES14.5)')                   'h_max         =',tmp%h_max
-      close(tmp%ifn)
+      open(fw%ifn,file=trim(directory)//"/obs0_info.data")
+      write(fw%ifn,'(A,A14)')                      'unit_system       =',trim(unit_system)
+      write(fw%ifn,'(A,I14)')                      'iperiodic         =',iperiodic
+      write(fw%ifn,'(A,ES14.5)')                   'dt_em             =',fs%dt*utime_from_au
+      write(fw%ifn,'(A,I14)')                      'nt_em             =',(fw%iter_end-fw%iter_sta+1)
+      write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'al_em             =',&
+            fs%rlsize(1)*ulength_from_au,', ',&
+            fs%rlsize(2)*ulength_from_au,', ',&
+            fs%rlsize(3)*ulength_from_au
+      write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'dl_em             =',&
+            fs%hgs(1)*ulength_from_au,', ',&
+            fs%hgs(2)*ulength_from_au,', ',&
+            fs%hgs(3)*ulength_from_au
+      write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_sta            =',&
+            fs%lg_sta(1),', ',fs%lg_sta(2),', ',fs%lg_sta(3)
+      write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_end            =',&
+            fs%lg_end(1),', ',fs%lg_end(2),', ',fs%lg_end(3)
+      write(fw%ifn,'(A,I14)')                      'iobs_num_em       =',iobs_num_em
+      write(fw%ifn,'(A,I14)')                      'iobs_samp_em      =',iobs_samp_em
+      do ii=1,iobs_num_em
+        write(fw%ifn,'(A,I3,A,A)')                 'obs_plane_em(',&
+                                                                ii,') =             ',obs_plane_em(ii)
+      end do
+      write(fw%ifn,'(A,ES14.5)')                   'e_max             =',fw%e_max
+      write(fw%ifn,'(A,ES14.5)')                   'h_max             =',fw%h_max
+      close(fw%ifn)
     end if
   end if
   
   !deallocate
-  deallocate(tmp%ex_y,tmp%c1_ex_y,tmp%c2_ex_y,tmp%ex_z,tmp%c1_ex_z,tmp%c2_ex_z,&
-             tmp%ey_z,tmp%c1_ey_z,tmp%c2_ey_z,tmp%ey_x,tmp%c1_ey_x,tmp%c2_ey_x,&
-             tmp%ez_x,tmp%c1_ez_x,tmp%c2_ez_x,tmp%ez_y,tmp%c1_ez_y,tmp%c2_ez_y,&
-             tmp%hx_y,tmp%c1_hx_y,tmp%c2_hx_y,tmp%hx_z,tmp%c1_hx_z,tmp%c2_hx_z,&
-             tmp%hy_z,tmp%c1_hy_z,tmp%c2_hy_z,tmp%hy_x,tmp%c1_hy_x,tmp%c2_hy_x,&
-             tmp%hz_x,tmp%c1_hz_x,tmp%c2_hz_x,tmp%hz_y,tmp%c1_hz_y,tmp%c2_hz_y)
+  deallocate(fw%ex_y,fw%c1_ex_y,fw%c2_ex_y,fw%ex_z,fw%c1_ex_z,fw%c2_ex_z,&
+             fw%ey_z,fw%c1_ey_z,fw%c2_ey_z,fw%ey_x,fw%c1_ey_x,fw%c2_ey_x,&
+             fw%ez_x,fw%c1_ez_x,fw%c2_ez_x,fw%ez_y,fw%c1_ez_y,fw%c2_ez_y,&
+             fw%hx_y,fw%c1_hx_y,fw%c2_hx_y,fw%hx_z,fw%c1_hx_z,fw%c2_hx_z,&
+             fw%hy_z,fw%c1_hy_z,fw%c2_hy_z,fw%hy_x,fw%c1_hy_x,fw%c2_hy_x,&
+             fw%hz_x,fw%c1_hz_x,fw%c2_hz_x,fw%hz_y,fw%c1_hz_y,fw%c2_hz_y)
   
   !write end
   if(comm_is_root(nproc_id_global)) then

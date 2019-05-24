@@ -223,6 +223,7 @@ module salmon_global
   integer        :: iobs_num_em
   integer        :: iobs_samp_em
   real(8)        :: obs_loc_em(200,3)
+  character(1)   :: obs_plane_em(200)
   character(256) :: shape_file
   integer        :: imedia_num
   character(16)  :: type_media(0:200)
