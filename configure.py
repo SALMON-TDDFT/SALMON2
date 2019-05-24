@@ -60,9 +60,9 @@ group.add_option('--enable-mpi',        action='store_true',  dest='mpi')
 group.add_option('--disable-mpi',       action='store_false', dest='mpi',       help='enable/disable MPI parallelization.')
 group.add_option('--enable-scalapack',  action='store_true',  dest='scalapack')
 group.add_option('--disable-scalapack', action='store_false', dest='scalapack', help='enable/disable computations with ScaLAPACK library.')
-group.add_option('--enable-libxc',  action='store_true', default=False, dest='libxc', help='enable Libxc library.')
-#group.add_option('--disable-libxc', action='store_false', dest='libxc', help='enable/disable Libxc library.')
-group.add_option('--with-libxc', action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to LibXC package')
+group.add_option('--enable-libxc',      action='store_true', default=False, dest='libxc', help='enable Libxc library.')
+group.add_option('--with-lapack',       action='store', type=str, default=None, dest='lapack_installdir', help='specify install path to LAPACK/ScaLAPACK')
+group.add_option('--with-libxc',        action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to Libxc package')
 group.add_option('--install-required-packages', action='store_true', default=False, dest='install_required_packages', help='request installation of required packages (We support the LAPACK and Libxc installation)')
 
 parser.add_option_group(group)
@@ -104,9 +104,12 @@ if options.prefix is not None:
 dict['CMAKE_BUILD_TYPE']           = debug_or_release(options.debug)
 dict['CMAKE_VERBOSE_MAKEFILE']     = on_or_off(options.verbose)
 
+add_env(dict, 'LAPACK_INSTALLDIR', options.lapack_installdir)
+add_env(dict, 'LIBXC_INSTALLDIR',  options.libxc_installdir)
 
 add_option(dict, 'USE_MPI',             options.mpi)
 add_option(dict, 'USE_SCALAPACK',       options.scalapack)
+add_option(dict, 'USE_LIBXC',           options.libxc or (options.libxc_installdir is not None))
 
 add_option(dict, 'OPT_STENCIL',         options.stencil_optimized)
 add_option(dict, 'DOMAIN_IS_POW2',      options.domain_two)
@@ -119,10 +122,6 @@ add_option(dict, 'REDUCE_FOR_MANYCORE', options.reduce_manycore)
 add_option(dict, 'HPSI_TEST',           options.hpsi_test)
 if options.simd is not None:
   dict['SIMD_SET'] = options.simd.upper()
-
-# Libxc library
-add_env   (dict, 'LIBXC_INSTALLDIR', options.libxc_installdir)
-add_option(dict, 'USE_LIBXC',        options.libxc or (options.libxc_installdir is not None))
 
 add_option(dict, 'INSTALL_REQUIRED_PACKAGES', options.install_required_packages)
 
