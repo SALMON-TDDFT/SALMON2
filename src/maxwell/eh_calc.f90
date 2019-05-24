@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_calc(fs,fw)
-  use inputoutput,          only: iobs_num_em,iobs_samp_em,directory,utime_from_au,t1_t2,t1_delay,&
+  use inputoutput,          only: iobs_num_em,iobs_samp_em,obs_plane_em,directory,utime_from_au,t1_t2,t1_delay,&
                                   amplitude1,pulse_tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                   amplitude2,pulse_tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
   use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
@@ -148,18 +148,20 @@ subroutine eh_calc(fs,fw)
         end if
         
         !plane
-        call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
-                           fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ex_s,'ex')
-        call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
-                           fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ey_s,'ey')
-        call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
-                           fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ez_s,'ez')
-        call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
-                           fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hx_s,'hx')
-        call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
-                           fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hy_s,'hy')
-        call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
-                           fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hz_s,'hz')
+        if(obs_plane_em(ii)=='y') then
+          call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
+                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ex_s,'ex')
+          call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
+                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ey_s,'ey')
+          call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
+                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ez_s,'ez')
+          call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
+                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hx_s,'hx')
+          call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
+                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hy_s,'hy')
+          call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
+                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hz_s,'hz')
+        end if
       end do
       
       !check maximum

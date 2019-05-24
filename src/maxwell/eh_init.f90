@@ -204,24 +204,24 @@ subroutine eh_init(fs,fw)
                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
     fw%rjx_d(:,:,:,:)=0.0d0; fw%rjy_d(:,:,:,:)=0.0d0; fw%rjz_d(:,:,:,:)=0.0d0;
     allocate( fw%rjx_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                            fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                            fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
               fw%rjy_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                            fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                            fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
               fw%rjz_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                            fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                            fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
     fw%rjx_sum_d(:,:,:)=0.0d0; fw%rjy_sum_d(:,:,:)=0.0d0; fw%rjz_sum_d(:,:,:)=0.0d0;
     allocate( fw%wex_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
               fw%wey_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
               fw%wez_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
     fw%wex_d(:,:,:,:)=0.0d0; fw%wey_d(:,:,:,:)=0.0d0; fw%wez_d(:,:,:,:)=0.0d0;
     allocate(fw%c1_j_d(fw%inum_d),fw%c2_j_d(fw%inum_d))
     fw%c1_j_d(:)=0.0d0; fw%c2_j_d(:)=0.0d0;
