@@ -63,6 +63,7 @@ module structures
 
   type s_wf_info
     logical :: if_divide_rspace
+    logical :: if_divide_orbit
     integer :: irank_r(6)
     integer :: icomm_r   ! communicator for r-space
     integer :: icomm_o   ! communicator for orbital
