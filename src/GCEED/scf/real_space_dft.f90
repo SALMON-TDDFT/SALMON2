@@ -233,14 +233,14 @@ if(iopt==1)then
     system%iperiodic = iperiodic
     system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
     system%nspin = nspin
-    system%no = itotMST
-    system%nk = num_kpoints_rd
-    system%nion = MI
+    system%no    = itotMST
+    system%nk    = num_kpoints_rd
+    system%nion  = MI
     
     allocate(system%Rion(3,system%nion) &
             ,system%wtk(system%nk) &
             ,system%rocc(system%no,system%nk,system%nspin))
-    system%wtk = wtk
+    system%wtk  = wtk
     system%rion = rion
     
     allocate(energy%esp(system%no,system%nk,system%nspin))
@@ -248,12 +248,12 @@ if(iopt==1)then
     info%im_s = 1
     info%im_e = 1
     info%numm = 1
-    info%ik_s=k_sta
-    info%ik_e=k_end
-    info%numk=k_num
-    info%io_s=1
-    info%io_e=iobnum/nspin
-    info%numo=iobnum/nspin
+    info%ik_s = k_sta
+    info%ik_e = k_end
+    info%numk = k_num
+    info%io_s = 1
+    info%io_e = iobnum/nspin
+    info%numo = iobnum/nspin
     
     info%if_divide_rspace = nproc_mxin_mul.ne.1
     info%irank_r(1) = iup_array(1)
@@ -262,11 +262,11 @@ if(iopt==1)then
     info%irank_r(4) = jdw_array(1)
     info%irank_r(5) = kup_array(1)
     info%irank_r(6) = kdw_array(1)
-    info%icomm_r = nproc_group_korbital
-    info%icomm_o = nproc_group_kgrid
-    info%icomm_ko = nproc_group_rho
-    info%icomm_ro = nproc_group_k
-    info%icomm_rko = nproc_group_global
+    info%icomm_r    = nproc_group_korbital
+    info%icomm_o    = nproc_group_kgrid
+    info%icomm_ko   = nproc_group_rho
+    info%icomm_ro   = nproc_group_k
+    info%icomm_rko  = nproc_group_global
     allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
               ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
               ,info%irank_jo(1:system%no))
@@ -275,7 +275,7 @@ if(iopt==1)then
     do iob=info%io_s,info%io_e
       call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
       info%io_tbl(iob) = jj
-      info%jo_tbl(jj) = iob
+      info%jo_tbl(jj)  = iob
     end do
     
     do jj=1, system%no
@@ -305,14 +305,14 @@ if(iopt==1)then
     info_ob%io_e = 1
     info_ob%numo = 1
     info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
-    info_ob%if_divide_orbit = nproc_ob.ne.1
+    info_ob%if_divide_orbit  = nproc_ob.ne.1
     info_ob%irank_r(1) = iup_array(1)
     info_ob%irank_r(2) = idw_array(1)
     info_ob%irank_r(3) = jup_array(1)
     info_ob%irank_r(4) = jdw_array(1)
     info_ob%irank_r(5) = kup_array(1)
     info_ob%irank_r(6) = kdw_array(1)
-    info_ob%icomm_r = nproc_group_korbital
+    info_ob%icomm_r    = nproc_group_korbital
     
     allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
     do jspin=1,system%nspin
@@ -412,44 +412,7 @@ if(iopt==1)then
       call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
-    if(iperiodic==3)then
-      jj = system%ngrid/nproc_size_global
-      fg%ig_s = nproc_id_global*jj+1
-      fg%ig_e = (nproc_id_global+1)*jj
-      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-      fg%icomm_fourier = nproc_group_global
-      fg%ng = system%ngrid
-      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      if(iflag_hartree==2)then
-        fg%iGzero = nGzero
-        fg%Gx = Gx
-        fg%Gy = Gy
-        fg%Gz = Gz
-        fg%rhoG_ion = rhoion_G
-        fg%dVG_ion = dVloc_G
-      else if(iflag_hartree==4)then
-        fg%iGzero = 1
-        fg%Gx = 0.d0
-        fg%Gy = 0.d0
-        fg%Gz = 0.d0
-        fg%rhoG_ion = 0.d0
-        fg%dVG_ion = 0.d0
-        do iz=1,lg_num(3)/NPUZ
-        do iy=1,lg_num(2)/NPUY
-        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%Gx(nn) = Gx(n)
-          fg%Gy(nn) = Gy(n)
-          fg%Gz(nn) = Gz(n)
-          fg%rhoG_ion(nn) = rhoion_G(n)
-          fg%dVG_ion(nn,:) = dVloc_G(n,:)
-        enddo
-        enddo
-        enddo
-      end if
-    end if
+    if(iperiodic==3) call get_fourier_grid_G(fg)
 
     if(iobnum >= 1)then
       select case(iperiodic)
@@ -473,7 +436,7 @@ if(iopt==1)then
     ! Store to psi/zpsi
     select case(iperiodic)
     case(0)
-    do ik=k_sta,k_end
+      do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
           !$OMP parallel do private(iz,iy,ix)
@@ -488,7 +451,7 @@ if(iopt==1)then
       end do
       end do
     case(3)
-    do ik=k_sta,k_end
+      do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
           !$OMP parallel do private(iz,iy,ix)
@@ -513,23 +476,23 @@ if(iopt==1)then
     allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     allocate( rho_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) )  
     allocate( rho_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) ) 
-    rho_in=0.d0
-    rho_out=0.d0
+    rho_in =0d0
+    rho_out=0d0
                                 
     if(ilsda == 1)then
       allocate( rho_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )  
       allocate( rho_s_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2) )  
       allocate( rho_s_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2) )  
-      rho_s_in=0.d0
-      rho_s_out=0.d0
+      rho_s_in =0d0
+      rho_s_out=0d0
     end if
-    rho=0.d0 
+    rho=0d0 
 
 
         ! Store to psi/zpsi
     select case(iperiodic)
     case(0)
-    do ik=k_sta,k_end
+      do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
           !$OMP parallel do private(iz,iy,ix)
@@ -544,7 +507,7 @@ if(iopt==1)then
       end do
       end do
     case(3)
-    do ik=k_sta,k_end
+      do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
           !$OMP parallel do private(iz,iy,ix)
@@ -561,20 +524,18 @@ if(iopt==1)then
     end select
 
     select case(iperiodic)
-    case(0)
-      call calc_density(psi)
-    case(3)
-      call calc_density(zpsi)
+    case(0) ; call calc_density(psi)
+    case(3) ; call calc_density(zpsi)
     end select
 
     if(ilsda==0)then
       allocate (Vlocal(mg_sta(1):mg_end(1),  &
-              mg_sta(2):mg_end(2),  &
-              mg_sta(3):mg_end(3),1))
+                mg_sta(2):mg_end(2),  &
+                mg_sta(3):mg_end(3),1))
     else if(ilsda==1)then
       allocate (Vlocal(mg_sta(1):mg_end(1),  &
-              mg_sta(2):mg_end(2),  &
-              mg_sta(3):mg_end(3),2))
+                mg_sta(2):mg_end(2),  &
+                mg_sta(3):mg_end(3),2))
     end if
 
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -683,14 +644,14 @@ if(iopt==1)then
     system%iperiodic = iperiodic
     system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
     system%nspin = nspin
-    system%no = itotMST
-    system%nk = num_kpoints_rd
-    system%nion = MI
+    system%no    = itotMST
+    system%nk    = num_kpoints_rd
+    system%nion  = MI
     
     allocate(system%Rion(3,system%nion) &
             ,system%wtk(system%nk) &
             ,system%rocc(system%no,system%nk,system%nspin))
-    system%wtk = wtk
+    system%wtk  = wtk
     system%rion = rion
     
     allocate(energy%esp(system%no,system%nk,system%nspin))
@@ -698,35 +659,35 @@ if(iopt==1)then
     info%im_s = 1
     info%im_e = 1
     info%numm = 1
-    info%ik_s=k_sta
-    info%ik_e=k_end
-    info%numk=k_num
-    info%io_s=1
-    info%io_e=iobnum/nspin
-    info%numo=iobnum/nspin
+    info%ik_s = k_sta
+    info%ik_e = k_end
+    info%numk = k_num
+    info%io_s = 1
+    info%io_e = iobnum/nspin
+    info%numo = iobnum/nspin
     
     info%if_divide_rspace = nproc_mxin_mul.ne.1
-    info%if_divide_orbit = nproc_ob.ne.1
+    info%if_divide_orbit  = nproc_ob.ne.1
     info%irank_r(1) = iup_array(1)
     info%irank_r(2) = idw_array(1)
     info%irank_r(3) = jup_array(1)
     info%irank_r(4) = jdw_array(1)
     info%irank_r(5) = kup_array(1)
     info%irank_r(6) = kdw_array(1)
-    info%icomm_r = nproc_group_korbital
-    info%icomm_o = nproc_group_kgrid
-    info%icomm_ko = nproc_group_rho
-    info%icomm_ro = nproc_group_k
+    info%icomm_r   = nproc_group_korbital
+    info%icomm_o   = nproc_group_kgrid
+    info%icomm_ko  = nproc_group_rho
+    info%icomm_ro  = nproc_group_k
     info%icomm_rko = nproc_group_global
     allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
-              ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
-              ,info%irank_jo(1:system%no))
+            ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
+            ,info%irank_jo(1:system%no))
  
     info%jo_tbl(:) = 0 !(initial value)
     do iob=info%io_s,info%io_e
       call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
       info%io_tbl(iob) = jj
-      info%jo_tbl(jj) = iob
+      info%jo_tbl(jj)  = iob
     end do
     
     do jj=1, system%no
@@ -762,7 +723,7 @@ if(iopt==1)then
     info_ob%irank_r(4) = jdw_array(1)
     info_ob%irank_r(5) = kup_array(1)
     info_ob%irank_r(6) = kdw_array(1)
-    info_ob%icomm_r = nproc_group_korbital
+    info_ob%icomm_r    = nproc_group_korbital
     
     allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
     do jspin=1,system%nspin
@@ -857,44 +818,7 @@ if(iopt==1)then
       call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
 
-    if(iperiodic==3)then
-      jj = system%ngrid/nproc_size_global
-      fg%ig_s = nproc_id_global*jj+1
-      fg%ig_e = (nproc_id_global+1)*jj
-      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-      fg%icomm_fourier = nproc_group_global
-      fg%ng = system%ngrid
-      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      if(iflag_hartree==2)then
-        fg%iGzero = nGzero
-        fg%Gx = Gx
-        fg%Gy = Gy
-        fg%Gz = Gz
-        fg%rhoG_ion = rhoion_G
-        fg%dVG_ion = dVloc_G
-      else if(iflag_hartree==4)then
-        fg%iGzero = 1
-        fg%Gx = 0.d0
-        fg%Gy = 0.d0
-        fg%Gz = 0.d0
-        fg%rhoG_ion = 0.d0
-        fg%dVG_ion = 0.d0
-        do iz=1,lg_num(3)/NPUZ
-        do iy=1,lg_num(2)/NPUY
-        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%Gx(nn) = Gx(n)
-          fg%Gy(nn) = Gy(n)
-          fg%Gz(nn) = Gz(n)
-          fg%rhoG_ion(nn) = rhoion_G(n)
-          fg%dVG_ion(nn,:) = dVloc_G(n,:)
-        enddo
-        enddo
-        enddo
-      end if
-    end if
+    if(iperiodic==3) call get_fourier_grid_G(fg)
 
     call init_updown
     call init_itype
@@ -911,48 +835,7 @@ else if(iopt>=2)then
   if(iflag_ps/=0) then
     call dealloc_init_ps(ppg,ppg_all,ppn)
     call init_ps(system%al,system%brl,stencil%matrix_A)
-
-    if(iperiodic==3)then
-      deallocate(fg%Gx,fg%Gy,fg%Gz)
-      deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
-
-      jj = system%ngrid/nproc_size_global
-      fg%ig_s = nproc_id_global*jj+1
-      fg%ig_e = (nproc_id_global+1)*jj
-      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-      fg%icomm_fourier = nproc_group_global
-      fg%ng = system%ngrid
-      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
-      if(iflag_hartree==2)then
-        fg%iGzero = nGzero
-        fg%Gx = Gx
-        fg%Gy = Gy
-        fg%Gz = Gz
-        fg%rhoG_ion = rhoion_G
-        fg%dVG_ion = dVloc_G
-      else if(iflag_hartree==4)then
-        fg%iGzero = 1
-        fg%Gx = 0.d0
-        fg%Gy = 0.d0
-        fg%Gz = 0.d0
-        fg%rhoG_ion = 0.d0
-        fg%dVG_ion = 0.d0
-        do iz=1,lg_num(3)/NPUZ
-        do iy=1,lg_num(2)/NPUY
-        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%Gx(nn) = Gx(n)
-          fg%Gy(nn) = Gy(n)
-          fg%Gz(nn) = Gz(n)
-          fg%rhoG_ion(nn) = rhoion_G(n)
-          fg%dVG_ion(nn,:) = dVloc_G(n,:)
-        enddo
-        enddo
-        enddo
-      end if
-    end if
+    if(iperiodic==3) call get_fourier_grid_G(fg)
 
   end if
   call timer_end(LOG_INIT_GS)
@@ -1125,7 +1008,6 @@ DFT_Iteration : do iter=1,iDiter(img)
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
         case(3)
-
           call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
                                       iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                       info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
@@ -1136,7 +1018,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     ! Store to psi/zpsi for calc_density
     select case(iperiodic)
     case(0)
-    do ik=k_sta,k_end
+      do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
           !$OMP parallel do private(iz,iy,ix)
@@ -1151,7 +1033,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
     case(3)
-    do ik=k_sta,k_end
+      do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
           !$OMP parallel do private(iz,iy,ix)
@@ -1169,17 +1051,13 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
-    case(0)
-      call calc_density(psi)
-    case(3)
-      call calc_density(zpsi)
+    case(0) ; call calc_density(psi)
+    case(3) ; call calc_density(zpsi)
     end select
 
     select case(amixing)
-      case ('simple')
-        call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden')
-        call buffer_broyden_ns(iter)
+      case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
+      case ('broyden'); call buffer_broyden_ns(iter)
     end select
     call timer_end(LOG_CALC_RHO)
     
@@ -1267,12 +1145,10 @@ DFT_Iteration : do iter=1,iDiter(img)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
-
         call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
 
       case(3)
-
         call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
                                     iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
                                     info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
@@ -1332,7 +1208,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     ! Store to psi/zpsi for calc_density
   select case(iperiodic)
   case(0)
-  do ik=k_sta,k_end
+    do ik=k_sta,k_end
     do iob=1,info%numo
       do is=1,nspin
         !$OMP parallel do private(iz,iy,ix)
@@ -1347,7 +1223,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
     end do
   case(3)
-  do ik=k_sta,k_end
+    do ik=k_sta,k_end
     do iob=1,info%numo
       do is=1,nspin
         !$OMP parallel do private(iz,iy,ix)
@@ -1365,19 +1241,15 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
-    case(0)
-      call calc_density(psi)
-    case(3)
-      call calc_density(zpsi)
+    case(0) ; call calc_density(psi)
+    case(3) ; call calc_density(zpsi)
     end select
     call timer_end(LOG_CALC_RHO)
 
 
     select case(amixing)
-      case ('simple')
-        call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden')
-        call buffer_broyden_ns(iter)
+      case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
+      case ('broyden'); call buffer_broyden_ns(iter)
     end select
  
 
@@ -1402,10 +1274,8 @@ DFT_Iteration : do iter=1,iDiter(img)
     
     call timer_begin(LOG_CALC_RHO)
     select case(iperiodic)
-    case(0)
-      call calc_density(psi)
-    case(3)
-      call calc_density(zpsi)
+    case(0) ; call calc_density(psi)
+    case(3) ; call calc_density(zpsi)
     end select
     call timer_end(LOG_CALC_RHO)
 
@@ -1770,7 +1640,7 @@ if(comm_is_root(nproc_id_global)) then
   end do
   write(1,*)
   write(1,*) "Ref. and max angular momentum",      &
-        " and pseudo-core radius of PP (A)"
+             " and pseudo-core radius of PP (A)"
   do ikoa=1,MKI
      write(1,'(1x,"(",i3,")  "," Ref, Max, Rps =",2i4,f8.3)')      &
                               ikoa,Lref(ikoa),Mlps(ikoa),Rps(ikoa)*a_B
@@ -1824,6 +1694,53 @@ subroutine band_information
   end if
   return
 end subroutine band_information
+
+subroutine get_fourier_grid_G(fg)
+  use structures, only: s_fourier_grid
+  implicit none
+  type(s_fourier_grid) :: fg
+
+  if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
+  if(allocated(fg%rhoG_ion)) deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
+
+  jj = system%ngrid/nproc_size_global
+  fg%ig_s = nproc_id_global*jj+1
+  fg%ig_e = (nproc_id_global+1)*jj
+  if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+  fg%icomm_fourier = nproc_group_global
+  fg%ng = system%ngrid
+  allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+  allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+  if(iflag_hartree==2)then
+     fg%iGzero = nGzero
+     fg%Gx = Gx
+     fg%Gy = Gy
+     fg%Gz = Gz
+     fg%rhoG_ion = rhoion_G
+     fg%dVG_ion = dVloc_G
+  else if(iflag_hartree==4)then
+     fg%iGzero = 1
+     fg%Gx = 0.d0
+     fg%Gy = 0.d0
+     fg%Gz = 0.d0
+     fg%rhoG_ion = 0.d0
+     fg%dVG_ion = 0.d0
+     do iz=1,lg_num(3)/NPUZ
+     do iy=1,lg_num(2)/NPUY
+     do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+        fg%Gx(nn) = Gx(n)
+        fg%Gy(nn) = Gy(n)
+        fg%Gz(nn) = Gz(n)
+        fg%rhoG_ion(nn) = rhoion_G(n)
+        fg%dVG_ion(nn,:) = dVloc_G(n,:)
+     enddo
+     enddo
+     enddo
+  end if
+
+end subroutine get_fourier_grid_G
 
 END subroutine Real_Space_DFT
 
