@@ -23,7 +23,7 @@ use inputoutput
 use scf_data
 use new_world_sub
 implicit none
-integer :: ii,iatom
+integer :: ii  !,iatom
 integer :: ibox2
 integer :: icheck1,icheck2
 character(100) :: file_atoms_coo
@@ -113,7 +113,11 @@ case default
   stop 'invalid iflag_opt'
 end select
 
-iter_opt = ngeometry_opt
+if(iflag_opt==1) then
+   iter_opt = nopt
+else
+   iter_opt = 1
+endif
 
 select case(subspace_diagonalization)
 case('y')
@@ -122,7 +126,7 @@ case('n')
   iflag_subspace_diag = 0
 end select
 
-select case(use_force)
+select case(use_force) !this keyword must be removed in near future
 case('y')
   icalcforce = 1
 case('n')
@@ -133,13 +137,6 @@ num_kpoints_3d(1:3)=num_kgrid(1:3)
 num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
 allocate(wtk(num_kpoints_rd))
 wtk(:)=1.d0/dble(num_kpoints_rd)
-
-if(comm_is_root(nproc_id_global))then
-  if(iflag_opt==1.and.icalcforce==0)then
-    write(*,*) "use_force should be set to 'y' when use_geometry_opt is 'y'"
-    stop
-  end if
-end if
 
 if(ilsda==1)then
   nproc_ob_spin(1)=(nproc_ob+1)/2

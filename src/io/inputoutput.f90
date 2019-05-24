@@ -316,7 +316,6 @@ contains
       & nfsset_start, &
       & nfsset_every, &
       & nscf, &
-      & ngeometry_opt, &
       & subspace_diagonalization, &
       & convergence, &
       & threshold, &
@@ -448,6 +447,7 @@ contains
       & aewald
 
     namelist/opt/ &
+      & nopt, &
       & cg_alpha_ini, &     !not use now if flag_use_grad_wf_on_force=.T.
       & cg_alpha_up, &
       & cg_alpha_down, &
@@ -656,7 +656,6 @@ contains
     nfsset_start  = 75
     nfsset_every  = 25
     nscf          = 0
-    ngeometry_opt = 1
     subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = 1d-17
@@ -790,6 +789,7 @@ contains
     newald = 4
     aewald = 0.5d0
 !! == default for &opt
+    nopt            = 100
     cg_alpha_ini    =  0.8d0 !not use now
     cg_alpha_up     =  1.3d0
     cg_alpha_down   =  0.5d0
@@ -1056,7 +1056,6 @@ contains
     call comm_bcast(nfsset_start            ,nproc_group_global)
     call comm_bcast(nfsset_every            ,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
-    call comm_bcast(ngeometry_opt           ,nproc_group_global)
     call comm_bcast(subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
     call comm_bcast(threshold               ,nproc_group_global)
@@ -1223,6 +1222,7 @@ contains
     call comm_bcast(newald,nproc_group_global)
     call comm_bcast(aewald,nproc_group_global)
 !! == bcast for &opt
+    call comm_bcast(nopt             ,nproc_group_global)
     call comm_bcast(cg_alpha_ini     ,nproc_group_global)
     call comm_bcast(cg_alpha_up      ,nproc_group_global)
     call comm_bcast(cg_alpha_down    ,nproc_group_global)
@@ -1369,11 +1369,11 @@ contains
     end if
 
     allocate(atom_name(natom))
-    allocate(rion(3,natom), rion_red(3,natom),kion(natom), flag_geo_opt_atom(natom))
+    allocate(rion(3,natom), rion_red(3,natom),kion(natom), flag_opt_atom(natom))
     rion = 0d0
     rion_red = 0d0
     kion = 0
-    flag_geo_opt_atom = 'n'
+    flag_opt_atom = 'n'
     
     if (0 < natom) then
       
@@ -1384,7 +1384,7 @@ contains
         case(ntype_atom_coor_cartesian)
            do i=1, natom
               if(use_geometry_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i), flag_geo_opt_atom(i)
+                 read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i), flag_opt_atom(i)
               else
                  read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i)
               end if
@@ -1394,7 +1394,7 @@ contains
         case(ntype_atom_coor_reduced)
            do i=1, natom
               if(use_geometry_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i), flag_geo_opt_atom(i)
+                 read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i), flag_opt_atom(i)
               else
                  read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i)
               end if
@@ -1408,7 +1408,7 @@ contains
       call comm_bcast(rion,nproc_group_global)
       call comm_bcast(rion_red,nproc_group_global)
       call comm_bcast(kion,nproc_group_global)
-      call comm_bcast(flag_geo_opt_atom,nproc_group_global)
+      call comm_bcast(flag_opt_atom,nproc_group_global)
       call comm_bcast(atom_name,nproc_group_global)
     end if ! if 0 < natom
 
@@ -1587,6 +1587,7 @@ contains
 
       if(inml_parallel >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'parallel', inml_parallel
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'domain_parallel', domain_parallel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain(1)', nproc_domain(1)
@@ -1681,7 +1682,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_start', nfsset_start
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_every', nfsset_every
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'ngeometry_opt', ngeometry_opt
       write(fh_variables_log, '("#",4X,A,"=",A)') 'subspace_diagonalization', subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
@@ -1868,6 +1868,7 @@ contains
 
       if(inml_opt >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'opt', inml_opt
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
      !write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_ini', cg_alpha_ini !not use now
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_up', cg_alpha_up
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_down', cg_alpha_down

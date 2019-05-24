@@ -68,8 +68,7 @@ use salmon_pp, only: calc_nlcc
 use force_sub
 use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
-use output_GS
-use print_sub, only: write_xyz
+use print_sub
 implicit none
 integer :: ix,iy,iz,ik,ikoa, is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -149,7 +148,7 @@ call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)
-   iopt_tranc=0
+   flag_opt_conv=.false.
    write(comment_line,10) 0
    call write_xyz(comment_line,"new","r  ",system,force)
 10 format("#opt iteration step=",i5)
@@ -398,9 +397,7 @@ if(iopt==1)then
     end if
 
     allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-    if(icalcforce==1)then
-      allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
-    end if
+    allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
     
     if(iperiodic==3 .and. iflag_hartree==4)then
       call prep_poisson_fft
@@ -912,6 +909,49 @@ else if(iopt>=2)then
   if(iflag_ps/=0) then
     call dealloc_init_ps(ppg,ppg_all,ppn)
     call init_ps(system%al,system%brl,stencil%matrix_A)
+
+    if(iperiodic==3)then
+      deallocate(fg%Gx,fg%Gy,fg%Gz)
+      deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
+
+      jj = system%ngrid/nproc_size_global
+      fg%ig_s = nproc_id_global*jj+1
+      fg%ig_e = (nproc_id_global+1)*jj
+      if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+      fg%icomm_fourier = nproc_group_global
+      fg%ng = system%ngrid
+      allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+      allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+      if(iflag_hartree==2)then
+        fg%iGzero = nGzero
+        fg%Gx = Gx
+        fg%Gy = Gy
+        fg%Gz = Gz
+        fg%rhoG_ion = rhoion_G
+        fg%dVG_ion = dVloc_G
+      else if(iflag_hartree==4)then
+        fg%iGzero = 1
+        fg%Gx = 0.d0
+        fg%Gy = 0.d0
+        fg%Gz = 0.d0
+        fg%rhoG_ion = 0.d0
+        fg%dVG_ion = 0.d0
+        do iz=1,lg_num(3)/NPUZ
+        do iy=1,lg_num(2)/NPUY
+        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%Gx(nn) = Gx(n)
+          fg%Gy(nn) = Gy(n)
+          fg%Gz(nn) = Gz(n)
+          fg%rhoG_ion(nn) = rhoion_G(n)
+          fg%dVG_ion(nn,:) = dVloc_G(n,:)
+        enddo
+        enddo
+        enddo
+      end if
+    end if
+
   end if
   call timer_end(LOG_INIT_GS)
 end if
@@ -1486,6 +1526,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         if(iperiodic==3) write(*,*) 
       end if
     end do
+
     select case(convergence)
       case('rho_dne')
         write(*,'("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec     = ",i6,e15.8)') Miter,sum1
@@ -1541,45 +1582,49 @@ end if
 
 end do DFT_Iteration
 
+!(prepare variables for the next analysis)
+if(iperiodic==3) then
+   allocate(stencil%kAc(k_sta:k_end,3))
+   do jj=1,3
+      stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+   end do
+   call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+endif
+
+
 ! output for transition moment
 if(out_tm  == 'y') then
   if(iperiodic==3) then
-    allocate(stencil%kAc(k_sta:k_end,3))
-    do jj=1,3
-      stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
-    end do
-    call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
     call write_k_data(k_rd,system,stencil)
     call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
-    deallocate(stencil%kAc,ppg%ekr_uV)
   else
     write(*,*) "error: out_tm='y' & iperiodic=0"
   end if
 end if
 
-
-deallocate(idiis_sd)
-call timer_end(LOG_GS_ITERATION)
-
-call timer_begin(LOG_DEINIT_GS_ITERATION)
-if(icalcforce==1) then
-  call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
-  if(comm_is_root(nproc_id_global))then
-    write(*,*) "===== force ====="
-    do iatom=1,MI
+! force
+call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+if(comm_is_root(nproc_id_global))then
+   write(*,*) "===== force ====="
+   do iatom=1,MI
       select case(unit_system)
       case('au','a.u.')
         write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
       case('A_eV_fs')
         write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
       end select
-    end do
-  end if
+   end do
 end if
 
+if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
+
+deallocate(idiis_sd)
+call timer_end(LOG_GS_ITERATION)
+
+call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(iflag_opt==1) then
-  call structure_opt_check(MI,iopt,iopt_tranc,force)
-  if(iopt_tranc/=1) call structure_opt(MI,iopt,force,system%Rion)
+  call structure_opt_check(MI,iopt,flag_opt_conv,force)
+  if(.not.flag_opt_conv) call structure_opt(MI,iopt,force,system%Rion)
   !! Rion is old variables to be removed 
   !! but currently it is used in many subroutines.
   Rion(:,:) = system%Rion(:,:) 
@@ -1592,28 +1637,27 @@ if(iflag_opt==1) then
     do iatom=1,MI
        write(*,20) "'"//trim(AtomName(Kion(iatom)))//"'",  &
                    (system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
-                   Kion(iatom), flag_geo_opt_atom(iatom)
+                   Kion(iatom), flag_opt_atom(iatom)
     end do
 20  format(a5,3f16.8,i3,a3)
   end if
-  if(iopt_tranc==1) then
+
+  if(flag_opt_conv) then
     call structure_opt_fin
     exit Multigrid_Iteration
   end if
 
 else
    select case(iperiodic)
-   case(0)
-      deallocate(spsi%rwf)
-   case(3)
-      deallocate(spsi%zwf)
+   case(0) ; deallocate(spsi%rwf)
+   case(3) ; deallocate(spsi%zwf)
    end select
 end if
 call timer_end(LOG_DEINIT_GS_ITERATION)
 
 
 end do Multigrid_Iteration
-if(iopt_tranc==1)then
+if(flag_opt_conv)then
   exit Structure_Optimization_Iteration
 end if
 end do Structure_Optimization_Iteration

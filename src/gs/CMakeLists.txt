@@ -10,7 +10,6 @@ set(SOURCES
     subspace_diag_periodic.f90
     ybcg.f90
     ybcg_periodic.f90
-    output_GS.f90
     gram_schmidt_orth.f90
     structure_opt.f90
    )

@@ -143,10 +143,10 @@ real(8),allocatable :: rbox_array2_dip2e(:)
 
 integer :: ilsda
 
+logical :: flag_opt_conv
 integer :: iflag_opt
 integer :: iter_opt
 integer :: iopt
-integer :: iopt_tranc
 
 integer :: MST(2),ifMST(2),itotMST
 integer :: itotfMST

@@ -39,15 +39,15 @@ contains
   end subroutine structure_opt_ini
 
   !======================================================convergence check
-  subroutine structure_opt_check(natom,iopt,itranc,force)
+  subroutine structure_opt_check(natom,iopt,flag_opt_conv,force)
     use structures
-    use salmon_global, only: convrg_opt_fmax,unit_system,flag_geo_opt_atom
+    use salmon_global, only: convrg_opt_fmax,unit_system,flag_opt_atom
     use salmon_parallel, only: nproc_id_global,nproc_group_global
     use salmon_communication, only: comm_is_root,comm_bcast
     implicit none
     type(s_force),intent(in) :: force
     integer,intent(in) :: natom,iopt
-    integer,intent(inout) :: itranc
+    logical,intent(inout) :: flag_opt_conv
     real(8),parameter :: a_B=0.529177d0,Ry=13.6058d0
     integer :: iatom,iatom_count
     real(8) :: fabs,fmax,fave
@@ -55,7 +55,7 @@ contains
     fmax=0.0d0; fave= 0d0;
     iatom_count=0
     do iatom=1,natom
-      if(flag_geo_opt_atom(iatom)=='y') then
+      if(flag_opt_atom(iatom)=='y') then
         iatom_count=iatom_count+1
         fabs= sum(force%F(:,iatom)**2.0d0)
         fave= fave + fabs
@@ -76,16 +76,16 @@ contains
       write(*,*) " Max-force=",fmax, "  Mean-force=",fave
       write(*,*) "==================================================="
       write(*,*) "Quasi-Newton Optimization Step = ", iopt
-      if(fmax<=convrg_opt_fmax) itranc=1;
+      if(fmax<=convrg_opt_fmax) flag_opt_conv=.true.;
     end if
-    call comm_bcast(itranc,nproc_group_global)
+    call comm_bcast(flag_opt_conv,nproc_group_global)
 
   end subroutine structure_opt_check
 
   !===========================================================optimization
   subroutine structure_opt(natom,iopt,force,Rion_opt)
     use structures
-    use salmon_global, only: flag_geo_opt_atom
+    use salmon_global, only: flag_opt_atom
     use salmon_parallel, only: nproc_group_global
     use salmon_communication, only: comm_bcast
     implicit none
@@ -152,16 +152,16 @@ contains
     end do
 
     !update r1_opt,r2_opt
-    r1_opt=alpha*del_Rion_1d
-    r2_opt=force_1d
+    r1_opt = alpha*del_Rion_1d
+    r2_opt = force_1d
 
     !update Rion
     do iatom=1,natom
-      if(flag_geo_opt_atom(iatom)=='y') then
+      if(flag_opt_atom(iatom)=='y') then
         Rion_opt(1:3,iatom)=Rion_opt(1:3,iatom)+alpha*del_Rion(1:3,iatom)
       end if
     end do
-    call comm_bcast(Rion_opt,nproc_group_global)
+    call comm_bcast(Rion_opt,nproc_group_global) !<-- need?
 
   end subroutine structure_opt
 
