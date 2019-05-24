@@ -84,7 +84,8 @@ contains
             & wf%rwf(:, :, :, ispin, io1, ik, im), &
             & wf_jo1)
         end if
-        call comm_bcast(wf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
+        if (wfi%if_divide_orbit) &
+          & call comm_bcast(wf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
         
         ! Calculate overlap coefficients: 
         coeff_tmp = 0d0
@@ -96,7 +97,11 @@ contains
               & wf_jo1)
           end if
         end do 
-        call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
+        if (wfi%if_divide_rspace .or. wfi%if_divide_orbit) then
+          call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
+        else
+          coeff = coeff_tmp
+        endif
 
         ! Calculate exclusion term "wf_exc":
         wf_exc_tmp = 0d0
@@ -108,14 +113,22 @@ contains
               & wf_exc_tmp)
           end if
         end do
-        call comm_summation(wf_exc_tmp, wf_exc, nsize_rg, wfi%icomm_o)
+        if (wfi%if_divide_orbit) then
+          call comm_summation(wf_exc_tmp, wf_exc, nsize_rg, wfi%icomm_o)
+        else
+          call copy_data(wf_exc_tmp, wf_exc)
+        end if
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
           call axpy_wf(-1d0, wf_exc, wf_jo1)
           ! Normalization:
           norm2_tmp = dot_wf(wf_jo1, wf_jo1)
-          call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
+          if (wfi%if_divide_rspace) then
+            call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
+          else
+            norm2 = norm2_tmp
+          endif
           call scal_wf(1d0 / sqrt(norm2), wf_jo1)
           ! Write back to "rwf":
           io1 = wfi%jo_tbl(jo1)
@@ -260,7 +273,8 @@ contains
             & wf%zwf(:, :, :, ispin, io1, ik, im), &
             & wf_jo1)
         end if
-        call comm_bcast(wf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
+        if (wfi%if_divide_orbit) &
+          & call comm_bcast(wf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
         
         ! Calculate overlap coefficients: 
         coeff_tmp = 0d0
@@ -272,7 +286,11 @@ contains
               & wf_jo1)
           end if
         end do 
-        call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
+        if (wfi%if_divide_rspace .or. wfi%if_divide_orbit) then
+          call comm_summation(coeff_tmp, coeff, sys%no, wfi%icomm_ro)
+        else
+          coeff = coeff_tmp
+        endif
 
         ! Calculate exclusion term "wf_exc":
         wf_exc_tmp = 0d0
@@ -284,14 +302,22 @@ contains
               & wf_exc_tmp)
           end if
         end do
-        call comm_summation(wf_exc_tmp, wf_exc, nsize_rg, wfi%icomm_o)
+        if (wfi%if_divide_orbit) then
+          call comm_summation(wf_exc_tmp, wf_exc, nsize_rg, wfi%icomm_o)
+        else
+          call copy_data(wf_exc_tmp, wf_exc)
+        endif
 
         if (has_orbit(jo1)) then
           ! Exclude non-orthonormal component:
           call axpy_wf(-one, wf_exc, wf_jo1)
           ! Normalization:
           norm2_tmp = real(dot_wf(wf_jo1, wf_jo1))
-          call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
+          if (wfi%if_divide_rspace) then
+            call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
+          else
+            norm2 = norm2_tmp
+          endif
           call scal_wf(one / sqrt(norm2), wf_jo1)
           ! Write back to "zwf":
           io1 = wfi%jo_tbl(jo1)

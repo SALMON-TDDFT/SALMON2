@@ -304,6 +304,7 @@ if(istopt==1)then
     info_ob%io_e = 1
     info_ob%numo = 1
     info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
+    info_ob%if_divide_orbit = nproc_ob.ne.1
     info_ob%irank_r(1) = iup_array(1)
     info_ob%irank_r(2) = idw_array(1)
     info_ob%irank_r(3) = jup_array(1)
@@ -706,6 +707,7 @@ if(istopt==1)then
     info%numo=iobnum/nspin
     
     info%if_divide_rspace = nproc_mxin_mul.ne.1
+    info%if_divide_orbit = nproc_ob.ne.1
     info%irank_r(1) = iup_array(1)
     info%irank_r(2) = idw_array(1)
     info%irank_r(3) = jup_array(1)
