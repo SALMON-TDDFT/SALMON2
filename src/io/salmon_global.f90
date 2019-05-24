@@ -143,7 +143,6 @@ module salmon_global
   integer        :: nfsset_start
   integer        :: nfsset_every
   integer        :: nscf
-  integer        :: ngeometry_opt
   character(1)   :: subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
@@ -280,6 +279,7 @@ module salmon_global
   real(8)        :: aewald
 
 !! &opt
+  integer        :: nopt
   real(8)        :: cg_alpha_ini
   real(8)        :: cg_alpha_up
   real(8)        :: cg_alpha_down
@@ -361,7 +361,7 @@ module salmon_global
 integer,allocatable :: kion(:)    
 real(8),allocatable :: rion(:,:)  
 real(8),allocatable :: rion_red(:,:)  
-character(1),allocatable :: flag_geo_opt_atom(:)
+character(1),allocatable :: flag_opt_atom(:)
 character(256),allocatable :: atom_name(:)
 
 

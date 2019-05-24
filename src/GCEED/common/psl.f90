@@ -51,3 +51,24 @@ end select
 return
 
 END SUBROUTINE init_ps
+
+SUBROUTINE dealloc_init_ps(ppg,ppg_all,ppn)
+  use structures, only: s_pp_grid, s_pp_nlcc
+  use salmon_global
+  implicit none
+  type(s_pp_grid) :: ppg,ppg_all
+  type(s_pp_nlcc) :: ppn
+
+  deallocate(ppg%jxyz, ppg%jxx, ppg%jyy, ppg%jzz, ppg%rxyz)
+  deallocate(ppg%lma_tbl, ppg%ia_tbl)
+  deallocate(ppg%rinv_uvu,ppg%uv,ppg%duv)
+
+  deallocate(ppg_all%jxyz,ppg_all%jxx,ppg_all%jyy,ppg_all%jzz,ppg_all%rxyz)
+  deallocate(ppg_all%lma_tbl, ppg_all%ia_tbl)
+  deallocate(ppg_all%rinv_uvu,ppg_all%uv,ppg_all%duv)
+
+  deallocate(ppg%Vpsl_atom)
+  if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
+
+  deallocate(ppn%rho_nlcc, ppn%tau_nlcc)
+END SUBROUTINE dealloc_init_ps
