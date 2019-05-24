@@ -10,20 +10,14 @@ set(ADDITIONAL_MACRO            "")
 set(ADDITIONAL_OPTIMIZE_FLAGS   "-qopt-ra-region-strategy=block -ansi-alias -fno-alias")
 
 set(Fortran_FLAGS_General       "-traceback -fpp -nogen-interface -std03 -warn all -diag-disable 6477,7025")
-#set(Fortran_FLAGS_General       "-fpe0 -CB -traceback -fpp -nogen-interface -std03 -warn all -diag-disable 6477,7025")
-#set(Fortran_FLAGS_General       "-CB -traceback -fpp -nogen-interface -std03 -warn all -diag-disable 6477,7025")
-#set(Fortran_FLAGS_General       "-check all -traceback -fpp -nogen-interface -std03 -warn all -diag-disable 6477,7025")
-
 set(C_FLAGS_General             "-Wall -diag-disable=10388 -restrict")
 
 set(CMAKE_Fortran_COMPILER      "mpiifort")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
-#set(CMAKE_Fortran_FLAGS_RELEASE "-O3")
-set(CMAKE_Fortran_FLAGS_RELEASE "-O0")
+set(CMAKE_Fortran_FLAGS_RELEASE "-O3")
 set(CMAKE_C_COMPILER            "mpiicc")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
-#set(CMAKE_C_FLAGS_RELEASE       "-O3")
-set(CMAKE_C_FLAGS_RELEASE       "-O0")
+set(CMAKE_C_FLAGS_RELEASE       "-O3")
 
 set(USE_MPI             ON)
 set(EXPLICIT_VEC        ON)
