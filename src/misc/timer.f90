@@ -62,10 +62,10 @@ module timer
   integer,public,parameter :: LOG_READ_LDA_DATA         = 110
   integer,public,parameter :: LOG_READ_RT_DATA          = 111
   integer,public,parameter :: LOG_WRITE_LDA_DATA        = 112
-  integer,public,parameter :: LOG_WRITE_RT_DATA         = 113
-  integer,public,parameter :: LOG_WRITE_ENERGIES        = 114
-  integer,public,parameter :: LOG_WRITE_INFOS           = 115
-  integer,public,parameter :: LOG_WRITE_RESULTS         = 116
+  integer,public,parameter :: LOG_WRITE_LDA_INFOS       = 113
+  integer,public,parameter :: LOG_WRITE_RT_DATA         = 114
+  integer,public,parameter :: LOG_WRITE_GS_RESULTS      = 115
+  integer,public,parameter :: LOG_WRITE_RT_RESULTS      = 116
 
   integer,public,parameter :: LOG_INIT_GS               = 120
   integer,public,parameter :: LOG_INIT_GS_RESTART       = 121
@@ -97,6 +97,8 @@ module timer
   integer,public,parameter :: LOG_CALC_VLOCAL           = 158 ! FIXME: wrong name
   integer,public,parameter :: LOG_CALC_PROJECTION       = 159
   integer,public,parameter :: LOG_CALC_QUADRUPOLE       = 160 ! FIXME: wrong name
+  integer,public,parameter :: LOG_WRITE_ENERGIES        = 161
+  integer,public,parameter :: LOG_WRITE_RT_INFOS        = 162
 
 !  integer,public,parameter :: LOG_SENDRECV_TOTAL            = 200
   integer,public,parameter :: LOG_SENDRECV_TIME_PROPAGATION = 201
@@ -307,7 +309,7 @@ contains
     integer,intent(in)      :: fd,id
     real(8) :: time
     time = log_time(id)
-    write(fd,'(a,f16.8,a)') str,time,'[s]'
+    write(fd,'(a,f16.8,a)') str,time,' [s]'
   end subroutine
 
   subroutine timer_thread_write(fd,str,id)
@@ -320,7 +322,7 @@ contains
     write(fd,*) str
     do i=0,omp_get_max_threads()-1
       time = log_time_t(id,i)
-      write(fd,'(a,i4,a,f16.8,a)') 'tid =',i,': ',time,'[s]'
+      write(fd,'(a,i4,a,f16.8,a)') 'tid =',i,': ',time,' [s]'
     end do
   end subroutine
 

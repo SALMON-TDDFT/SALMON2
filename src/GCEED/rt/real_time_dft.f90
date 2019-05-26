@@ -45,7 +45,7 @@ use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
-use write_performance_results, only: write_rt_performance
+use write_performance_results
 use iso_fortran_env, only: output_unit
 implicit none
 
@@ -359,7 +359,7 @@ call timer_end(LOG_WRITE_RT_DATA)
 
 
 ! Output
-call timer_begin(LOG_WRITE_RESULTS)
+call timer_begin(LOG_WRITE_RT_RESULTS)
 if(iwrite_external==1)then
   if(comm_is_root(nproc_id_global))then
     open(1,file=file_external)
@@ -628,12 +628,12 @@ case(3)
   deallocate( tfourier_integrand )
 
 end select
-call timer_end(LOG_WRITE_RESULTS)
+call timer_end(LOG_WRITE_RT_RESULTS)
 
 call timer_end(LOG_TOTAL)
 
 
-call write_rt_performance(output_unit)
+call write_performance(output_unit, write_mode_csv)
 
 
 call deallocate_mat
@@ -1424,7 +1424,7 @@ if(comm_is_root(nproc_id_global))then
     write(41,'("#",a)') "---------------------------------------------------------------------"
   end if
 end if
-call timer_begin(LOG_INIT_TIME_PROPAGATION)
+call timer_end(LOG_INIT_TIME_PROPAGATION)
 
 
 call timer_begin(LOG_INIT_RT)

@@ -47,7 +47,7 @@ use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
-use write_performance_results, only: write_gs_performance
+use write_performance_results
 use iso_fortran_env, only: output_unit
 use calc_iobnum_sub
 use check_mg_sub
@@ -1322,7 +1322,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
   end if
 
-  call timer_begin(LOG_WRITE_RESULTS)
+  call timer_begin(LOG_WRITE_GS_RESULTS)
 
   select case(convergence)
     case('rho_dne')
@@ -1422,7 +1422,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(comm_is_root(nproc_id_global))then
     write(*,*) "Ne=",rNebox2*Hvol
   end if
-  call timer_end(LOG_WRITE_RESULTS)
+  call timer_end(LOG_WRITE_GS_RESULTS)
 
 
 if(ilsda==0)then
@@ -1573,7 +1573,7 @@ end do Structure_Optimization_Iteration
 
 
 !---------------------------------------- Output
-call timer_begin(LOG_WRITE_RESULTS)
+call timer_begin(LOG_WRITE_GS_RESULTS)
 
 call band_information
 
@@ -1606,7 +1606,7 @@ if(out_elf=='y')then
   call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
   deallocate(elf)
 end if
-call timer_end(LOG_WRITE_RESULTS)
+call timer_end(LOG_WRITE_GS_RESULTS)
 
 
 call timer_begin(LOG_WRITE_LDA_DATA)
@@ -1619,7 +1619,7 @@ call timer_end(LOG_WRITE_LDA_DATA)
 
 
 ! LDA information
-call timer_begin(LOG_WRITE_INFOS)
+call timer_begin(LOG_WRITE_LDA_INFOS)
 if(comm_is_root(nproc_id_global)) then
   open(1,file=LDA_info)
 
@@ -1686,7 +1686,7 @@ if(comm_is_root(nproc_id_global)) then
   close(1)
 
 end if
-call timer_end(LOG_WRITE_INFOS)
+call timer_end(LOG_WRITE_LDA_INFOS)
 
 deallocate(Vlocal)
 call finalize_xc(xc_func)
@@ -1694,7 +1694,7 @@ call finalize_xc(xc_func)
 call timer_end(LOG_TOTAL)
 
 
-call write_gs_performance(output_unit)
+call write_performance(output_unit, write_mode_stdout)
 
 contains
 
