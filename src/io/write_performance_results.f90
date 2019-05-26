@@ -20,8 +20,11 @@ module write_performance_results
   public  :: write_gs_performance
   public  :: write_rt_performance
 
+  integer,parameter,private :: mode_stdout = 1
+  integer,parameter,private :: mode_csv    = 2
+
 contains
-  subroutine write_loadbalance(fd,nsize,tsrc,headers)
+  subroutine write_loadbalance(fd,nsize,tsrc,headers,write_mode)
     use salmon_parallel
     use salmon_communication
     use timer
@@ -30,8 +33,10 @@ contains
     integer,intent(in)       :: fd,nsize
     real(8),intent(in)       :: tsrc(nsize)
     character(30),intent(in) :: headers(nsize)
+    integer,intent(in)       :: write_mode
 
-    character(*), parameter :: time_format = '(a30,6(f12.2))'
+    character(*), parameter :: time_format     = '(a30,6(f12.2))'
+    character(*), parameter :: time_format_csv = '(a,",",5(f0.6,","),f0.6)'
 
     real(8) :: tmin(nsize),tmax(nsize),tdif(nsize),trel(nsize)
     real(8) :: tavg(nsize),tnorm(nsize),tstdev(nsize)
@@ -64,11 +69,18 @@ contains
     end do
 
     if (comm_is_root(nproc_id_global)) then
-      write (fd,'(a)') 'Load balance check [sec]'
-      write (fd,'(a8,22x,6(a12))') 'Function','min','max','average','std. dev.','difference','relative'
+      if (write_mode == mode_stdout) then
+        write (fd,'(a8,22x,6(a12))') 'Function','min','max','average','std. dev.','difference','relative'
+      else
+        write (fd,'(a,",",5(a,","),a)') 'Function','min','max','average','std. dev.','difference','relative'
+      end if
       do i=1,nsize
         if (is_nonzero(trel(i))) then
-          write (fd,time_format) headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+          if (write_mode == mode_stdout) then
+            write (fd,time_format) headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+          else
+            write (fd,time_format_csv) trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+          end if
         end if
       end do
     end if
@@ -95,6 +107,9 @@ contains
     integer,parameter :: LOG_SIZE = 10
     real(8)       :: tsrc(LOG_SIZE)
     character(30) :: headers(LOG_SIZE)
+    integer :: mode
+
+    mode = mode_csv
 
     call write_root(fd, '==================== elapsed time [s] ====================')
     if (comm_is_root(nproc_id_global)) then
@@ -109,7 +124,7 @@ contains
       call timer_write(fd, 'total time                         = ', LOG_TOTAL)
     end if
 
-    call write_root(fd, '==========================================================')
+    call write_root(fd, 'Load balance check [sec]')
 
     call set(1, LOG_CALC_GRAM_SCHMIDT , 'Gram Schmidt')
     call set(2, LOG_CALC_SUBSPACE_DIAG, 'subspace-diag.')
@@ -119,7 +134,7 @@ contains
     call set(6, LOG_CALC_TOTAL_ENERGY , 'calculating Etot')
     call set(7, LOG_WRITE_RESULTS     , 'writing info.')
     call write_root(fd, '================== in scf iterations [s] =================')
-    call write_loadbalance(fd, 7, tsrc, headers)
+    call write_loadbalance(fd, 7, tsrc, headers, mode)
 
     call set(1, LOG_DIAG_INIT       , 'initialization')
     call set(2, LOG_DIAG_VLOCAL     , 'Vlocal')
@@ -129,7 +144,7 @@ contains
     call set(6, LOG_DIAG_SET_ORBITAL, 'set orbital')
     call set(7, LOG_DIAG_UPDATE     , 'set orbital')
     call write_root(fd, '================== in subspace-diag. [s] =================')
-    call write_loadbalance(fd, 7, tsrc, headers)
+    call write_loadbalance(fd, 7, tsrc, headers, mode)
 
     call set(1, LOG_GSCG_TOTAL              , 'total')
     call set(2, LOG_GSCG_INIT               , 'init.')
@@ -139,7 +154,7 @@ contains
     call set(6, LOG_ALLREDUCE_INNER_PRODUCT5, 'comm. for inner product(5)')
     call set(7, LOG_ALLREDUCE_INNER_PRODUCT7, 'comm. for inner product(7)')
     call write_root(fd, '================== in CG. [s] ============================')
-    call write_loadbalance(fd, 7, tsrc, headers)
+    call write_loadbalance(fd, 7, tsrc, headers, mode)
 
   contains
     subroutine set(nid, tid, header)
@@ -161,6 +176,9 @@ contains
     integer,parameter :: LOG_SIZE = 20
     real(8)       :: tsrc(LOG_SIZE)
     character(30) :: headers(LOG_SIZE)
+    integer :: mode
+
+    mode = mode_csv
 
     call write_root(fd, '==================== elapsed time [s] ====================')
     if (comm_is_root(nproc_id_global)) then
@@ -191,14 +209,14 @@ contains
     call set(12, LOG_WRITE_ENERGIES       , 'writing energies')
     call set(13, LOG_WRITE_INFOS          , 'writing info etc.')
     call write_root(fd, '=========== elapsed time for rt iterations [s] ===========')
-    call write_loadbalance(fd, 13, tsrc, headers)
+    call write_loadbalance(fd, 13, tsrc, headers, mode)
 
     call set(1, LOG_ALLREDUCE_RHO    , 'Allreduce in rho')
     call set(2, LOG_ALLREDUCE_HARTREE, 'Allreduce in Hartree')
     call set(3, LOG_ALLREDUCE_DIPOLE , 'Allreduce in dipole calc.')
     call set(4, LOG_ALLGATHERV_TOTAL , 'Allgatherv')
     call write_root(fd, '=========== communication time =======================')
-    call write_loadbalance(fd, 4, tsrc, headers)
+    call write_loadbalance(fd, 4, tsrc, headers, mode)
 
     call set(1, LOG_TEP_SENDRECV      , 'sendrecv')
     call set(2, LOG_TEP_ORBITAL_ENERGY, 'orbital energy')
@@ -207,7 +225,7 @@ contains
     call set(5, LOG_TEP_NONLOCAL_1    , 'nonlocal 1')
     call set(6, LOG_TEP_NONLOCAL_2    , 'nonlocal 2')
     call write_root(fd, '=========== total_energy_periodic ====================')
-    call write_loadbalance(fd, 6, tsrc, headers)
+    call write_loadbalance(fd, 6, tsrc, headers, mode)
 
     call set(1, LOG_CUR_SENDRECV           , 'sendrecv')
     call set(2, LOG_CUR_LOCAL              , 'current (except nonlocal)')
@@ -216,7 +234,7 @@ contains
     call set(5, LOG_CUR_NONLOCAL2          , 'current nonlocal (2)')
     call set(6, LOG_CUR_NONLOCAL2_ALLREDUCE, 'Allreduce nonlocal (2)')
     call write_root(fd, '=========== current ==================================')
-    call write_loadbalance(fd, 6, tsrc, headers)
+    call write_loadbalance(fd, 6, tsrc, headers, mode)
 
   contains
     subroutine set(nid, tid, header)
