@@ -633,7 +633,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 
-call write_performance(output_unit, write_mode_csv)
+call write_performance(output_unit, write_mode_readable)
 
 
 call deallocate_mat

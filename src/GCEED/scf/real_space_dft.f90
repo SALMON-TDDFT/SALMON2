@@ -1694,7 +1694,7 @@ call finalize_xc(xc_func)
 call timer_end(LOG_TOTAL)
 
 
-call write_performance(output_unit, write_mode_stdout)
+call write_performance(output_unit, write_mode_readable)
 
 contains
 

@@ -18,8 +18,8 @@ module write_performance_results
 
   public  :: write_performance
 
-  integer,parameter,public :: write_mode_stdout = 1
-  integer,parameter,public :: write_mode_csv    = 2
+  integer,parameter,public :: write_mode_readable = 1
+  integer,parameter,public :: write_mode_csv      = 2
 
 private
 contains
@@ -33,9 +33,6 @@ contains
     real(8),intent(in)       :: tsrc(nsize)
     character(30),intent(in) :: headers(0:nsize)
     integer,intent(in)       :: write_mode
-
-    character(*), parameter :: time_format_stdout = '(a30,6(f12.2))'
-    character(*), parameter :: time_format_csv    = '(a,",",5(f0.6,","),f0.6)'
 
     real(8) :: tmin(nsize),tmax(nsize),tdif(nsize),trel(nsize)
     real(8) :: tavg(nsize),tnorm(nsize),tstdev(nsize)
@@ -68,16 +65,16 @@ contains
     end do
 
     if (comm_is_root(nproc_id_global)) then
-      if (write_mode == write_mode_stdout) then
+      if (write_mode == write_mode_readable) then
         write (fd,'(a30,6(a12))') headers(0),'min','max','average','std. dev.','difference','relative'
       else
         write (fd,'(a,",",5(a,","),a)') trim(headers(0)),'min','max','average','std. dev.','difference','relative'
       end if
       do i=1,nsize
-        if (write_mode == write_mode_stdout) then
-          write (fd,time_format_stdout) headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+        if (write_mode == write_mode_readable) then
+          write (fd,'(a30,6(f12.2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
         else
-          write (fd,time_format_csv) trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+          write (fd,'(a,",",5(f0.6,","),f0.6)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
         end if
       end do
     end if
@@ -107,11 +104,7 @@ contains
 
     call write_root(fd, '=== application breakdown [s] ===')
     if (comm_is_root(nproc_id_global)) then
-      if (mode == write_mode_stdout) then
-        write (fd,'(a,f16.8)') 'total calculation time = ',timer_get(LOG_TOTAL)
-      else
-        write (fd,'(a,f0.6)') 'total calculation time,',timer_get(LOG_TOTAL)
-      end if
+      write (fd,'(a,f0.8)') 'total calculation time,',timer_get(LOG_TOTAL)
     end if
 
     call set(0, 0, 'scf calculation')
