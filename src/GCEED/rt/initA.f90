@@ -36,13 +36,11 @@ allocate( E_tot(3,0:t_max) )
 allocate( rE_ind(3,0:t_max) )
 curr=0.d0
 sumcurr=0.d0
+A_ext=0.d0
 A_ind=0.d0
+A_tot=0.d0
 E_ind=0.d0
 rE_ind=0.d0
-A_ext(1:2,:)=0.d0
-A_ext(3,:)=Fst
-A_ind(:,0:1)=0.d0
-A_tot(:,0:1)=A_ext(:,0:1)+A_ind(:,0:1)
 
 E_ext=0.d0
 E_ind(:,0)=0.d0
