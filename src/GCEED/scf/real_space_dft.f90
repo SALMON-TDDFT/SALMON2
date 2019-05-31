@@ -560,12 +560,16 @@ if(istopt==1)then
     end do
     end select
 
-    select case(iperiodic)
-    case(0)
-      call calc_density(psi)
-    case(3)
-      call calc_density(zpsi)
-    end select
+    if(read_gs_dns_cube == 'n') then
+      select case(iperiodic)
+      case(0)
+        call calc_density(psi)
+      case(3)
+        call calc_density(zpsi)
+      end select
+    else
+      call read_dns ! cube file only
+    end if
 
     if(ilsda==0)then
       allocate (Vlocal(mg_sta(1):mg_end(1),  &
@@ -1765,6 +1769,47 @@ subroutine band_information
   end if
   return
 end subroutine band_information
+
+subroutine read_dns
+  implicit none
+  character(8),parameter :: filename="dns.cube"
+  integer,parameter :: fp=103
+  integer :: num(3),iatom,ix,iy,iz
+  real(8),allocatable :: tmp(:,:,:)
+  allocate(tmp(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+
+  if(comm_is_root(nproc_id_global))then
+    write(*,*) "read GS density dns.cube"
+    open(fp,file=filename)
+    read(fp,*)
+    read(fp,*)
+    read(fp,*) iatom
+    if(iatom/=natom) stop "error @ read_rho: natom"
+    read(fp,*) num(1)
+    read(fp,*) num(2)
+    read(fp,*) num(3)
+    if(num(1)/=lg%num(1) .or. num(2)/=lg%num(2) .or. num(3)/=lg%num(3)) stop "error @ read_rho: lg"
+    do iatom=1,natom
+      read(fp,'(i5,4f12.6)')
+    end do
+    do ix=lg%is(1),lg%ie(1)
+    do iy=lg%is(2),lg%ie(2)
+      read(fp,*) (tmp(ix,iy,iz),iz=lg%is(3),lg%ie(3))
+    end do
+    end do
+    close(fp)
+  end if
+  call comm_bcast(tmp,nproc_group_global)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    rho(ix,iy,iz) = tmp(ix,iy,iz)
+  enddo
+  enddo
+  enddo
+  deallocate(tmp)
+  return
+end subroutine read_dns
 
 END subroutine Real_Space_DFT
 

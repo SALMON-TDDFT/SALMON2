@@ -132,7 +132,7 @@ subroutine writecube(lg,fp,suffix,phys_quantity,rmat,hgs,igc_is,igc_ie,gridcoo)
 
     do ix=lg%is(1),lg%ie(1)
     do iy=lg%is(2),lg%ie(2)
-      write(fp,'(6e13.5)', advance="yes") (rmat(ix,iy,iz),iz=lg%is(3),lg%ie(3))
+      write(fp,'(6(1X,E23.15E3))', advance="yes") (rmat(ix,iy,iz),iz=lg%is(3),lg%ie(3))
 !    do iz=lg%is(3),lg%ie(3)
 !      if(mod(iz+1-lg%is(3),6)==0)then
 !        write(fp,'(e13.5)', advance="yes") abs(rmat(ix,iy,iz))

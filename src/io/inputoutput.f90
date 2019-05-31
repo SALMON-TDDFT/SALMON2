@@ -227,6 +227,7 @@ contains
       & dump_filename, &
       & modify_gs_wfn_k, &  !changed from modify_initial_guess
       & read_gs_wfn_k,   &  !changed from read_initial_guess
+      & read_gs_dns_cube,&
       & read_rt_wfn_k,   &
       & write_gs_wfn_k,  &
       & write_rt_wfn_k,  &
@@ -579,6 +580,7 @@ contains
     dump_filename    = 'default'
     modify_gs_wfn_k  = 'n'
     read_gs_wfn_k    = 'n'
+    read_gs_dns_cube = 'n'
     read_rt_wfn_k    = 'n'
     write_gs_wfn_k   = 'n'
     write_rt_wfn_k   = 'n'
@@ -965,6 +967,7 @@ contains
     call comm_bcast(dump_filename   ,nproc_group_global)
     call comm_bcast(modify_gs_wfn_k ,nproc_group_global)
     call comm_bcast(read_gs_wfn_k   ,nproc_group_global)
+    call comm_bcast(read_gs_dns_cube,nproc_group_global)
     call comm_bcast(read_rt_wfn_k   ,nproc_group_global)
     call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
     call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
@@ -1572,6 +1575,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'modify_gs_wfn_k', trim(modify_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_wfn_k', trim(read_gs_wfn_k)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_rt_wfn_k', trim(read_rt_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
