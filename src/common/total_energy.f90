@@ -194,10 +194,10 @@ CONTAINS
     nk = system%nk
     allocate(wrk1(no,nk),wrk2(no,nk))
     wrk1 = 0d0
-
     call hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
 
     if(allocated(tpsi%rwf)) then
+
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e

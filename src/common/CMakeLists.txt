@@ -29,6 +29,7 @@ set(SOURCES
    writefile3d.f90
    lattice.f90
    force.f90
+   print.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

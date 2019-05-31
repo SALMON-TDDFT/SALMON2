@@ -41,7 +41,7 @@ subroutine calc_opt_ground_state
   !check
   nfree=0
   do ia=1,NI
-     if(flag_geo_opt_atom(ia)=='y') nfree=nfree+1
+     if(flag_opt_atom(ia)=='y') nfree=nfree+1
   enddo
   if(nfree==0)then
      if(comm_is_root(nproc_id_global)) &
@@ -118,7 +118,7 @@ subroutine calc_opt_ground_state_useF
   call Ion_Force_omp(rion_update_on,calc_mode_gs)
   SearchDirection(:,:) = force(:,:)
   do ia=1,NI
-     if(flag_geo_opt_atom(ia)=='n') SearchDirection(:,ia)=0d0  !fix atom
+     if(flag_opt_atom(ia)=='n') SearchDirection(:,ia)=0d0  !fix atom
   enddo
   call variable_3xNto3N(NI,force,force_1d)
   call variable_3xNto3N(NI,SearchDirection,SearchDirection_1d)
@@ -373,7 +373,7 @@ subroutine calc_opt_ground_state_useF
     gm = (tmp1-tmp3)/tmp2   !(by Polak-Ribiere)--usually best, but sometimes direction is not downward.
     SearchDirection(:,:) = force(:,:) + gm * SearchDirection(:,:)
     do ia=1,NI
-       if(flag_geo_opt_atom(ia)=='n') SearchDirection(:,ia)=0d0  !fix atom
+       if(flag_opt_atom(ia)=='n') SearchDirection(:,ia)=0d0  !fix atom
     enddo
     call variable_3xNto3N(NI,SearchDirection,SearchDirection_1d)
 
@@ -415,7 +415,7 @@ subroutine calc_opt_ground_state_useE
 
   !(check)
   do i=1,NI
-     if(flag_geo_opt_atom(i)/='y')then
+     if(flag_opt_atom(i)/='y')then
         if(comm_is_root(nproc_id_global)) &
         &  write(*,*)'ERROR: flag of geometry opt of all atoms must be y'
         call end_parallel
@@ -907,7 +907,7 @@ end subroutine calc_opt_ground_state_useE
     fave   = 0d0
     NIfree = 0
     do ia=1,NI
-       if(flag_geo_opt_atom(ia)=='n') cycle  !fix atom
+       if(flag_opt_atom(ia)=='n') cycle  !fix atom
        NIfree = NIfree + 1
        fabs = f(1,ia)**2 + f(2,ia)**2 + f(3,ia)**2
        fave = fave + fabs

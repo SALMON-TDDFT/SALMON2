@@ -21,9 +21,10 @@ module structures
     integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
     real(8) :: Hvol,Hgs(3),al(3,3),det_al,brl(3,3)
-    real(8),allocatable :: wtk(:) ! (1:nk), weight of k points
-    real(8),allocatable :: Rion(:,:) ! (1:3,1:nion), atom position
-    real(8),allocatable :: rocc(:,:,:) ! (1:no,1:nk,1:nspin), occupation rate
+    real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
+    real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
+    real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
+    real(8),allocatable :: rocc(:,:,:)   ! (1:no,1:nk,1:nspin), occupation rate
   end type s_system
 
   type s_energy
@@ -63,6 +64,7 @@ module structures
 
   type s_wf_info
     logical :: if_divide_rspace
+    logical :: if_divide_orbit
     integer :: irank_r(6)
     integer :: icomm_r   ! communicator for r-space
     integer :: icomm_o   ! communicator for orbital
@@ -180,6 +182,8 @@ module structures
   end type s_fourier_grid
 
   type s_fdtd_system
+    type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
+    type(s_sendrecv_grid) :: srg_ng       ! Structure for send and receive in fdtd
     integer :: ng_sta(3), ng_end(3)       ! Size of Local Grid System
     integer :: lg_sta(3), lg_end(3)       ! Size of Global Grid System
     integer :: no_sta(3), no_end(3)       ! Size of Entire (Allocated) Variables
@@ -209,6 +213,7 @@ contains
     DEAL(system%rocc)
     DEAL(system%wtk)
     DEAL(system%Rion)
+    DEAL(system%Velocity)
   end subroutine deallocate_system
 
   subroutine deallocate_energy(energy)

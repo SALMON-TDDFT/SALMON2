@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 !-----------------------------------------------------------------------------------------
-subroutine eh_init(grid,tmp)
+subroutine eh_init(fs,fw)
   use inputoutput,          only: nt_em,al_em,dl_em,dt_em,iboundary,&
                                   utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                   uenergy_to_au,ulength_to_au,ucharge_to_au,iperiodic,directory,&
@@ -30,8 +30,8 @@ subroutine eh_init(grid,tmp)
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: s_fdtd_work
   implicit none
-  type(s_fdtd_system) :: grid
-  type(s_fdtd_work)   :: tmp
+  type(s_fdtd_system) :: fs
+  type(s_fdtd_work)   :: fw
   integer             :: ii,ij,ix,iy,iz,icount,icount_d,iflag
   real(8),parameter   :: pi=3.141592653589793d0
   real(8)             :: dt_cfl,diff_cep
@@ -39,52 +39,54 @@ subroutine eh_init(grid,tmp)
   character(128)      :: save_name
   
   !set initial parameter and value
-  tmp%c_0        = 1.370359991378353d2
-  tmp%Nd         = 4
-  tmp%iter_sta   = 1
-  tmp%iter_end   = nt_em
-  grid%rlsize(:) = al_em(:)
-  grid%hgs(:)    = dl_em(:)
-  tmp%ifn         = 600
-  tmp%ipml_l     = 8
-  tmp%pml_m      = 4.0d0
-  tmp%pml_r      = 1.0d-7
+  fw%c_0        = 1.370359991378353d2
+  fw%Nd         = 1
+  fw%iter_sta   = 1
+  fw%iter_end   = nt_em
+  fs%rlsize(:) = al_em(:)
+  fs%hgs(:)    = dl_em(:)
+  fw%ifn        = 600
+  fw%ipml_l     = 8
+  fw%pml_m      = 4.0d0
+  fw%pml_r      = 1.0d-7
   if(iperiodic==0) then
-    tmp%iwk_size_eh = 12
-    grid%i_bc(:,:)=1 !PML
+    fs%i_bc(:,:)=1 !PML
     do ix=1,3
     do iy=1,2
       if(iboundary(ix,iy)==1) then
-        grid%i_bc(ix,iy)=0 !PEC
+        fs%i_bc(ix,iy)=0 !PEC
       end if
     end do
     end do
   elseif(iperiodic==3) then
-    grid%i_bc(:,:)  = iboundary(:,:) !Periodic or PML
-    tmp%iwk_size_eh = 2
+    fs%i_bc(:,:)  = iboundary(:,:) !Periodic or PML
   end if
   select case(unit_system)
   case('au','a.u.')
-    tmp%uVperm_from_au=1.0d0
-    tmp%uAperm_from_au=1.0d0
+    fw%uVperm_from_au=1.0d0
+    fw%uAperm_from_au=1.0d0
   case('A_eV_fs')
     !see amplitude1 or amplitude2 in src/io/iunputoutput.f90
-    tmp%uVperm_from_au=1/(uenergy_to_au/ulength_to_au/ucharge_to_au)
-    tmp%uAperm_from_au=tmp%uVperm_from_au
+    fw%uVperm_from_au=1/(uenergy_to_au/ulength_to_au/ucharge_to_au)
+    fw%uAperm_from_au=fw%uVperm_from_au
   end select
   
-  !prepare GCEED(set mpi condition, gird, coordinate, and sendrecv environment)
-  call eh_prep_GCEED(grid,tmp)
+  !prepare GCEED(set mpi condition, gird, and sendrecv environment)
+  call eh_prep_GCEED(fs,fw)
+  
+  !set coordinate
+  allocate(fw%coo(minval(fs%lg_sta(:))-fw%Nd:maxval(fs%lg_end(:))+fw%Nd,3))
+  call eh_set_coo(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg_sta(:),fs%lg_end(:),fs%hgs(:),fw%coo)
   
   !set and check dt
   dt_cfl=1.0d0/( &
-         tmp%c_0*sqrt( (1.0d0/grid%hgs(1))**2.0d0+(1.0d0/grid%hgs(2))**2.0d0+(1.0d0/grid%hgs(3))**2.0d0 ) &
+         fw%c_0*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
          )
   if(dt_em==0.0d0) then
-    grid%dt=dt_cfl*0.99d0
+    fs%dt=dt_cfl*0.99d0
     if(comm_is_root(nproc_id_global)) then
       write(*,*) "**************************"
-      write(*,*) "From CFL condition, dt_em is determined by", grid%dt*utime_from_au
+      write(*,*) "From CFL condition, dt_em is determined by", fs%dt*utime_from_au
       write(*,*) "in the unit system, ",trim(unit_system),"."
       write(*,*) "**************************"
     end if
@@ -97,38 +99,38 @@ subroutine eh_init(grid,tmp)
     end if
     stop
   else
-    grid%dt=dt_em
+    fs%dt=dt_em
     if(comm_is_root(nproc_id_global)) then
       write(*,*) "**************************"
-      write(*,*) "dt_em =", grid%dt*utime_from_au
+      write(*,*) "dt_em =", fs%dt*utime_from_au
       write(*,*) "in the unit system, ",trim(unit_system),"."
       write(*,*) "**************************"
     end if
   end if
-  call comm_bcast(grid%dt,nproc_group_global)
+  call comm_bcast(fs%dt,nproc_group_global)
   
   !allocate
   call eh_allocate
-  allocate(tmp%c2_jx(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                     grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                     grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-           tmp%c2_jy(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                     grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                     grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-           tmp%c2_jz(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                     grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                     grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd) )
-  tmp%c2_jx(:,:,:)=0.0d0; tmp%c2_jy(:,:,:)=0.0d0; tmp%c2_jz(:,:,:)=0.0d0;
+  allocate(fw%c2_jx(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                    fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                    fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+           fw%c2_jy(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                    fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                    fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+           fw%c2_jz(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                    fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                    fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+  fw%c2_jx(:,:,:)=0.0d0; fw%c2_jy(:,:,:)=0.0d0; fw%c2_jz(:,:,:)=0.0d0;
   
   !input fdtd shape
-  allocate(grid%imedia(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                       grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                       grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-  grid%imedia(:,:,:)=0
-  allocate(tmp%rmedia(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-  tmp%rmedia(:,:,:)=0.0d0
+  allocate(fs%imedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+  fs%imedia(:,:,:)=0
+  allocate(fw%rmedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+  fw%rmedia(:,:,:)=0.0d0
   if(imedia_num>0) then
     !check file format and input shape file
     if(comm_is_root(nproc_id_global)) write(*,*)
@@ -137,10 +139,10 @@ subroutine eh_init(grid,tmp)
       if(comm_is_root(nproc_id_global)) then
         write(*,*) "shape file is inputed by .cube format."
       end if
-      call eh_input_shape(tmp%ifn,grid%ng_sta,grid%ng_end,grid%lg_sta,grid%lg_end,tmp%Nd,grid%imedia,'cu')
-      tmp%rmedia(:,:,:)=dble(grid%imedia(:,:,:))
-      call eh_sendrecv(grid,tmp,'r')
-      grid%imedia(:,:,:)=int(tmp%rmedia(:,:,:)+1d-3)
+      call eh_input_shape(fw%ifn,fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fs%imedia,'cu')
+      fw%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
+      call eh_sendrecv(fs,fw,'r')
+      fs%imedia(:,:,:)=int(fw%rmedia(:,:,:)+1d-3)
     elseif(index(shape_file,".mp", back=.true.)/=0) then
       if(comm_is_root(nproc_id_global)) then
         write(*,*) "shape file is inputed by .mp format."
@@ -157,22 +159,22 @@ subroutine eh_init(grid,tmp)
   end if
   
   !prepare Drude
-  tmp%inum_d=0
+  fw%inum_d=0
   do ii=0,imedia_num
     select case(type_media(ii))
     case('DRUDE','Drude','drude','D','d')
-      tmp%inum_d=tmp%inum_d+1
+      fw%inum_d=fw%inum_d+1
     end select
   end do
-  if(tmp%inum_d>0) then
+  if(fw%inum_d>0) then
     !set counter and make imedia_d
     icount_d=1
-    allocate(tmp%imedia_d(tmp%inum_d))
-    tmp%imedia_d(:)=0;
+    allocate(fw%imedia_d(fw%inum_d))
+    fw%imedia_d(:)=0;
     do ii=0,imedia_num
       select case(type_media(ii))
       case('DRUDE','Drude','drude','D','d')
-        tmp%imedia_d(icount_d)=ii
+        fw%imedia_d(icount_d)=ii
         icount_d=icount_d+1;
       end select
     end do
@@ -181,57 +183,57 @@ subroutine eh_init(grid,tmp)
     icount_d=1
     
     !allocate drude variable
-    allocate(tmp%idx_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                       grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                       grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d),&
-             tmp%idy_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                       grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                       grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d),&
-             tmp%idz_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                       grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                       grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d) )
-    tmp%idx_d(:,:,:,:)=0; tmp%idy_d(:,:,:,:)=0; tmp%idz_d(:,:,:,:)=0;
-    allocate( tmp%rjx_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d),&
-              tmp%rjy_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d),&
-              tmp%rjz_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d) )
-    tmp%rjx_d(:,:,:,:)=0.0d0; tmp%rjy_d(:,:,:,:)=0.0d0; tmp%rjz_d(:,:,:,:)=0.0d0;
-    allocate( tmp%rjx_sum_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                            grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                            grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-              tmp%rjy_sum_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                            grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                            grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-              tmp%rjz_sum_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                            grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                            grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd) )
-    tmp%rjx_sum_d(:,:,:)=0.0d0; tmp%rjy_sum_d(:,:,:)=0.0d0; tmp%rjz_sum_d(:,:,:)=0.0d0;
-    allocate( tmp%wex_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d),&
-              tmp%wey_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d),&
-              tmp%wez_d(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd,tmp%inum_d) )
-    tmp%wex_d(:,:,:,:)=0.0d0; tmp%wey_d(:,:,:,:)=0.0d0; tmp%wez_d(:,:,:,:)=0.0d0;
-    allocate(tmp%c1_j_d(tmp%inum_d),tmp%c2_j_d(tmp%inum_d))
-    tmp%c1_j_d(:)=0.0d0; tmp%c2_j_d(:)=0.0d0;
+    allocate(fw%idx_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                      fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                      fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+             fw%idy_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                      fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                      fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+             fw%idz_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                      fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                      fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
+    fw%idx_d(:,:,:,:)=0; fw%idy_d(:,:,:,:)=0; fw%idz_d(:,:,:,:)=0;
+    allocate( fw%rjx_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+              fw%rjy_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+              fw%rjz_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
+    fw%rjx_d(:,:,:,:)=0.0d0; fw%rjy_d(:,:,:,:)=0.0d0; fw%rjz_d(:,:,:,:)=0.0d0;
+    allocate( fw%rjx_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+              fw%rjy_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+              fw%rjz_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+    fw%rjx_sum_d(:,:,:)=0.0d0; fw%rjy_sum_d(:,:,:)=0.0d0; fw%rjz_sum_d(:,:,:)=0.0d0;
+    allocate( fw%wex_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+              fw%wey_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
+              fw%wez_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
+    fw%wex_d(:,:,:,:)=0.0d0; fw%wey_d(:,:,:,:)=0.0d0; fw%wez_d(:,:,:,:)=0.0d0;
+    allocate(fw%c1_j_d(fw%inum_d),fw%c2_j_d(fw%inum_d))
+    fw%c1_j_d(:)=0.0d0; fw%c2_j_d(:)=0.0d0;
   end if
   
   !set fdtd coeffient and write media information
-  allocate(tmp%rep(0:imedia_num),tmp%rmu(0:imedia_num),tmp%sig(0:imedia_num))
-  tmp%rep(:)=1.0d0; tmp%rmu(:)=1.0d0; tmp%sig(:)=0.0d0;
+  allocate(fw%rep(0:imedia_num),fw%rmu(0:imedia_num),fw%sig(0:imedia_num))
+  fw%rep(:)=1.0d0; fw%rmu(:)=1.0d0; fw%sig(:)=0.0d0;
   do ii=0,imedia_num
     call eh_coeff
   end do
-  deallocate(grid%imedia); deallocate(tmp%rmedia);
+  deallocate(fs%imedia); deallocate(fw%rmedia);
   if(comm_is_root(nproc_id_global)) then
     write(*,*)
     write(*,*) "**************************"
@@ -264,54 +266,54 @@ subroutine eh_init(grid,tmp)
   call eh_smoothing
   
   !set calculation area
-  tmp%iex_y_sta(:)=grid%ng_sta(:); tmp%iex_y_end(:)=grid%ng_end(:);
-  tmp%iex_z_sta(:)=grid%ng_sta(:); tmp%iex_z_end(:)=grid%ng_end(:);
-  tmp%iey_z_sta(:)=grid%ng_sta(:); tmp%iey_z_end(:)=grid%ng_end(:);
-  tmp%iey_x_sta(:)=grid%ng_sta(:); tmp%iey_x_end(:)=grid%ng_end(:);
-  tmp%iez_x_sta(:)=grid%ng_sta(:); tmp%iez_x_end(:)=grid%ng_end(:);
-  tmp%iez_y_sta(:)=grid%ng_sta(:); tmp%iez_y_end(:)=grid%ng_end(:);
-  tmp%ihx_y_sta(:)=grid%ng_sta(:); tmp%ihx_y_end(:)=grid%ng_end(:);
-  tmp%ihx_z_sta(:)=grid%ng_sta(:); tmp%ihx_z_end(:)=grid%ng_end(:);
-  tmp%ihy_z_sta(:)=grid%ng_sta(:); tmp%ihy_z_end(:)=grid%ng_end(:);
-  tmp%ihy_x_sta(:)=grid%ng_sta(:); tmp%ihy_x_end(:)=grid%ng_end(:);
-  tmp%ihz_x_sta(:)=grid%ng_sta(:); tmp%ihz_x_end(:)=grid%ng_end(:);
-  tmp%ihz_y_sta(:)=grid%ng_sta(:); tmp%ihz_y_end(:)=grid%ng_end(:);
-  if((grid%i_bc(1,1)==1).and.(grid%ng_sta(1)==grid%lg_sta(1))) then !x, bottom
-    tmp%iey_x_sta(1)=grid%ng_sta(1)+1; tmp%iez_x_sta(1)=grid%ng_sta(1)+1;
+  fw%iex_y_sta(:)=fs%ng_sta(:); fw%iex_y_end(:)=fs%ng_end(:);
+  fw%iex_z_sta(:)=fs%ng_sta(:); fw%iex_z_end(:)=fs%ng_end(:);
+  fw%iey_z_sta(:)=fs%ng_sta(:); fw%iey_z_end(:)=fs%ng_end(:);
+  fw%iey_x_sta(:)=fs%ng_sta(:); fw%iey_x_end(:)=fs%ng_end(:);
+  fw%iez_x_sta(:)=fs%ng_sta(:); fw%iez_x_end(:)=fs%ng_end(:);
+  fw%iez_y_sta(:)=fs%ng_sta(:); fw%iez_y_end(:)=fs%ng_end(:);
+  fw%ihx_y_sta(:)=fs%ng_sta(:); fw%ihx_y_end(:)=fs%ng_end(:);
+  fw%ihx_z_sta(:)=fs%ng_sta(:); fw%ihx_z_end(:)=fs%ng_end(:);
+  fw%ihy_z_sta(:)=fs%ng_sta(:); fw%ihy_z_end(:)=fs%ng_end(:);
+  fw%ihy_x_sta(:)=fs%ng_sta(:); fw%ihy_x_end(:)=fs%ng_end(:);
+  fw%ihz_x_sta(:)=fs%ng_sta(:); fw%ihz_x_end(:)=fs%ng_end(:);
+  fw%ihz_y_sta(:)=fs%ng_sta(:); fw%ihz_y_end(:)=fs%ng_end(:);
+  if((fs%i_bc(1,1)==1).and.(fs%ng_sta(1)==fs%lg_sta(1))) then !x, bottom
+    fw%iey_x_sta(1)=fs%ng_sta(1)+1; fw%iez_x_sta(1)=fs%ng_sta(1)+1;
   end if
-  if((grid%i_bc(1,2)==1).and.(grid%ng_end(1)==grid%lg_end(1))) then !x, top
-    tmp%iex_y_end(1)=grid%ng_end(1)-1; tmp%iex_z_end(1)=grid%ng_end(1)-1;
-    tmp%iey_x_end(1)=grid%ng_end(1)-1; tmp%iez_x_end(1)=grid%ng_end(1)-1;
-    tmp%ihy_z_end(1)=grid%ng_end(1)-1; tmp%ihy_x_end(1)=grid%ng_end(1)-1;
-    tmp%ihz_x_end(1)=grid%ng_end(1)-1; tmp%ihz_y_end(1)=grid%ng_end(1)-1;
+  if((fs%i_bc(1,2)==1).and.(fs%ng_end(1)==fs%lg_end(1))) then !x, top
+    fw%iex_y_end(1)=fs%ng_end(1)-1; fw%iex_z_end(1)=fs%ng_end(1)-1;
+    fw%iey_x_end(1)=fs%ng_end(1)-1; fw%iez_x_end(1)=fs%ng_end(1)-1;
+    fw%ihy_z_end(1)=fs%ng_end(1)-1; fw%ihy_x_end(1)=fs%ng_end(1)-1;
+    fw%ihz_x_end(1)=fs%ng_end(1)-1; fw%ihz_y_end(1)=fs%ng_end(1)-1;
   end if
-  if((grid%i_bc(2,1)==1).and.(grid%ng_sta(2)==grid%lg_sta(2))) then !y, bottom
-    tmp%iex_y_sta(2)=grid%ng_sta(2)+1; tmp%iez_y_sta(2)=grid%ng_sta(2)+1;
+  if((fs%i_bc(2,1)==1).and.(fs%ng_sta(2)==fs%lg_sta(2))) then !y, bottom
+    fw%iex_y_sta(2)=fs%ng_sta(2)+1; fw%iez_y_sta(2)=fs%ng_sta(2)+1;
   end if
-  if((grid%i_bc(2,2)==1).and.(grid%ng_end(2)==grid%lg_end(2))) then !y, top
-    tmp%iex_y_end(2)=grid%ng_end(2)-1; tmp%iey_z_end(2)=grid%ng_end(2)-1;
-    tmp%iey_x_end(2)=grid%ng_end(2)-1; tmp%iez_y_end(2)=grid%ng_end(2)-1;
-    tmp%ihx_y_end(2)=grid%ng_end(2)-1; tmp%ihx_z_end(2)=grid%ng_end(2)-1;
-    tmp%ihz_x_end(2)=grid%ng_end(2)-1; tmp%ihz_y_end(2)=grid%ng_end(2)-1;
+  if((fs%i_bc(2,2)==1).and.(fs%ng_end(2)==fs%lg_end(2))) then !y, top
+    fw%iex_y_end(2)=fs%ng_end(2)-1; fw%iey_z_end(2)=fs%ng_end(2)-1;
+    fw%iey_x_end(2)=fs%ng_end(2)-1; fw%iez_y_end(2)=fs%ng_end(2)-1;
+    fw%ihx_y_end(2)=fs%ng_end(2)-1; fw%ihx_z_end(2)=fs%ng_end(2)-1;
+    fw%ihz_x_end(2)=fs%ng_end(2)-1; fw%ihz_y_end(2)=fs%ng_end(2)-1;
   end if
-  if((grid%i_bc(3,1)==1).and.(grid%ng_sta(3)==grid%lg_sta(3))) then !z, bottom
-    tmp%iex_z_sta(3)=grid%ng_sta(3)+1; tmp%iey_z_sta(3)=grid%ng_sta(3)+1;
+  if((fs%i_bc(3,1)==1).and.(fs%ng_sta(3)==fs%lg_sta(3))) then !z, bottom
+    fw%iex_z_sta(3)=fs%ng_sta(3)+1; fw%iey_z_sta(3)=fs%ng_sta(3)+1;
   end if
-  if((grid%i_bc(3,2)==1).and.(grid%ng_end(3)==grid%lg_end(3))) then !z, top
-    tmp%iex_z_end(3)=grid%ng_end(3)-1; tmp%iey_z_end(3)=grid%ng_end(3)-1;
-    tmp%iez_x_end(3)=grid%ng_end(3)-1; tmp%iez_y_end(3)=grid%ng_end(3)-1;
-    tmp%ihx_y_end(3)=grid%ng_end(3)-1; tmp%ihx_z_end(3)=grid%ng_end(3)-1;
-    tmp%ihy_z_end(3)=grid%ng_end(3)-1; tmp%ihy_x_end(3)=grid%ng_end(3)-1;
+  if((fs%i_bc(3,2)==1).and.(fs%ng_end(3)==fs%lg_end(3))) then !z, top
+    fw%iex_z_end(3)=fs%ng_end(3)-1; fw%iey_z_end(3)=fs%ng_end(3)-1;
+    fw%iez_x_end(3)=fs%ng_end(3)-1; fw%iez_y_end(3)=fs%ng_end(3)-1;
+    fw%ihx_y_end(3)=fs%ng_end(3)-1; fw%ihx_z_end(3)=fs%ng_end(3)-1;
+    fw%ihy_z_end(3)=fs%ng_end(3)-1; fw%ihy_x_end(3)=fs%ng_end(3)-1;
   end if
   
   !set pml
-  call eh_set_pml(1,tmp%c1_ey_x,tmp%c2_ey_x,tmp%c1_ez_x,tmp%c2_ez_x,&
-                    tmp%c1_hy_x,tmp%c2_hy_x,tmp%c1_hz_x,tmp%c2_hz_x) !x direction
-  call eh_set_pml(2,tmp%c1_ez_y,tmp%c2_ez_y,tmp%c1_ex_y,tmp%c2_ex_y,&
-                    tmp%c1_hz_y,tmp%c2_hz_y,tmp%c1_hx_y,tmp%c2_hx_y) !y direction
-  call eh_set_pml(3,tmp%c1_ex_z,tmp%c2_ex_z,tmp%c1_ey_z,tmp%c2_ey_z,&
-                    tmp%c1_hx_z,tmp%c2_hx_z,tmp%c1_hy_z,tmp%c2_hy_z) !z direction
-  if(maxval(grid%i_bc(:,:))>0) then
+  call eh_set_pml(1,fw%c1_ey_x,fw%c2_ey_x,fw%c1_ez_x,fw%c2_ez_x,&
+                    fw%c1_hy_x,fw%c2_hy_x,fw%c1_hz_x,fw%c2_hz_x) !x direction
+  call eh_set_pml(2,fw%c1_ez_y,fw%c2_ez_y,fw%c1_ex_y,fw%c2_ex_y,&
+                    fw%c1_hz_y,fw%c2_hz_y,fw%c1_hx_y,fw%c2_hx_y) !y direction
+  call eh_set_pml(3,fw%c1_ex_z,fw%c2_ex_z,fw%c1_ey_z,fw%c2_ey_z,&
+                    fw%c1_hx_z,fw%c2_hx_z,fw%c1_hy_z,fw%c2_hy_z) !z direction
+  if(maxval(fs%i_bc(:,:))>0) then
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"
@@ -323,14 +325,14 @@ subroutine eh_init(grid,tmp)
         elseif(ii==3) then
           dir='z'
         end if
-        if(grid%i_bc(ii,1)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+        if(fs%i_bc(ii,1)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
                                ' PML has been set for ',dir,'-direction: ',&
-                               tmp%coo(grid%lg_sta(ii),ii)*ulength_from_au,' to ',&
-                               tmp%coo(grid%lg_sta(ii)+tmp%ipml_l,ii)*ulength_from_au,'.'
-        if(grid%i_bc(ii,2)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+                               fw%coo(fs%lg_sta(ii),ii)*ulength_from_au,' to ',&
+                               fw%coo(fs%lg_sta(ii)+fw%ipml_l,ii)*ulength_from_au,'.'
+        if(fs%i_bc(ii,2)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
                                ' PML has been set for ',dir,'-direction: ',&
-                               tmp%coo(grid%lg_end(ii)-tmp%ipml_l,ii)*ulength_from_au,' to ',&
-                               tmp%coo(grid%lg_end(ii),ii)*ulength_from_au,'.'
+                               fw%coo(fs%lg_end(ii)-fw%ipml_l,ii)*ulength_from_au,' to ',&
+                               fw%coo(fs%lg_end(ii),ii)*ulength_from_au,'.'
       end do
       write(*,*) "**************************"
     end if
@@ -339,38 +341,38 @@ subroutine eh_init(grid,tmp)
   !prepare observation
   if(iobs_num_em>0) then
     !set initial
-    allocate(tmp%ex_s(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-             tmp%ey_s(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-             tmp%ez_s(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-             tmp%hx_s(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-             tmp%hy_s(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-             tmp%hz_s(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%ex_s(:,:,:)=0; tmp%ey_s(:,:,:)=0; tmp%ez_s(:,:,:)=0; 
-    tmp%hx_s(:,:,:)=0; tmp%hy_s(:,:,:)=0; tmp%hz_s(:,:,:)=0; 
-    allocate(tmp%iobs_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
-    allocate(tmp%iobs_po_pe(iobs_num_em))
-    allocate(tmp%iobs_li_pe(iobs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
-    allocate(tmp%iobs_pl_pe(iobs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
-    tmp%iobs_po_id(:,:)=0; tmp%iobs_po_pe(:)=0; tmp%iobs_li_pe(:,:)=0; tmp%iobs_pl_pe(:,:)=0; 
-    tmp%e_max=0.0d0; tmp%h_max=0.0d0;
+    allocate(fw%ex_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+             fw%ey_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+             fw%ez_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+             fw%hx_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+             fw%hy_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+             fw%hz_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%ex_s(:,:,:)=0; fw%ey_s(:,:,:)=0; fw%ez_s(:,:,:)=0; 
+    fw%hx_s(:,:,:)=0; fw%hy_s(:,:,:)=0; fw%hz_s(:,:,:)=0; 
+    allocate(fw%iobs_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
+    allocate(fw%iobs_po_pe(iobs_num_em))
+    allocate(fw%iobs_li_pe(iobs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
+    allocate(fw%iobs_pl_pe(iobs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
+    fw%iobs_po_id(:,:)=0; fw%iobs_po_pe(:)=0; fw%iobs_li_pe(:,:)=0; fw%iobs_pl_pe(:,:)=0; 
+    fw%e_max=0.0d0; fw%h_max=0.0d0;
     
     !search observation point
     do ii=1,iobs_num_em
-      call eh_find_point(obs_loc_em(ii,:),tmp%iobs_po_id(ii,:),&
-                         tmp%iobs_po_pe(ii),tmp%iobs_li_pe(ii,:),tmp%iobs_pl_pe(ii,:),grid%ng_sta,grid%ng_end,&
-                         minval(grid%lg_sta)-tmp%Nd,maxval(grid%lg_end)+tmp%Nd,tmp%coo)
+      call eh_find_point(obs_loc_em(ii,:),fw%iobs_po_id(ii,:),&
+                         fw%iobs_po_pe(ii),fw%iobs_li_pe(ii,:),fw%iobs_pl_pe(ii,:),fs%ng_sta,fs%ng_end,&
+                         minval(fs%lg_sta)-fw%Nd,maxval(fs%lg_end)+fw%Nd,fw%coo)
     end do
     
     !write information
@@ -383,20 +385,20 @@ subroutine eh_init(grid,tmp)
         write(*,*) "Observation points are placed at"
       end if
       do ii=1,iobs_num_em
-        write(*,'(I3,A,3ES14.5)') ii,":",(tmp%coo(tmp%iobs_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
+        write(*,'(I3,A,3ES14.5)') ii,":",(fw%coo(fw%iobs_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
       end do
       write(*,*) "**************************"
       do ii=1,iobs_num_em
         write(save_name,*) ii
         save_name=trim(adjustl(directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
-        open(tmp%ifn,file=save_name)
+        open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
-          write(tmp%ifn,'(A)') "# time[a.u.], Ex[a.u.], Ey[a.u.], Ez[a.u.], Hx[a.u.], Hy[a.u.], Hz[a.u.]" 
+          write(fw%ifn,'(A)') "# time[a.u.], Ex[a.u.], Ey[a.u.], Ez[a.u.], Hx[a.u.], Hy[a.u.], Hz[a.u.]" 
         case('A_eV_fs')
-          write(tmp%ifn,'(A)') "# time[fs], Ex[V/Ang.], Ey[V/Ang.], Ez[V/Ang.], Hx[A/Ang.], Hy[A/Ang.], Hz[A/Ang.]" 
+          write(fw%ifn,'(A)') "# time[fs], Ex[V/Ang.], Ey[V/Ang.], Ez[V/Ang.], Hx[A/Ang.], Hy[A/Ang.], Hz[A/Ang.]" 
         end select
-        close(tmp%ifn)
+        close(fw%ifn)
       end do
     end if
   end if
@@ -415,7 +417,7 @@ subroutine eh_init(grid,tmp)
     
     !source1
     if    (ek_dir1(1)==0.0d0.and.ek_dir1(2)==0.0d0.and.ek_dir1(3)==0.0d0) then 
-      tmp%inc_dist1='none'
+      fw%inc_dist1='none'
     elseif(ek_dir1(1)==1.0d0.and.ek_dir1(2)==0.0d0.and.ek_dir1(3)==0.0d0) then
       if(epdir_re1(1)/=0.0d0.or.epdir_im1(1)/=0.0d0) then
         if(comm_is_root(nproc_id_global)) then
@@ -424,7 +426,7 @@ subroutine eh_init(grid,tmp)
         end if
         stop
       else
-        tmp%inc_dist1='yz-plane'
+        fw%inc_dist1='yz-plane'
       end if
     elseif(ek_dir1(1)==0.0d0.and.ek_dir1(2)==1.0d0.and.ek_dir1(3)==0.0d0) then
       if(epdir_re1(2)/=0.0d0.or.epdir_im1(2)/=0.0d0) then
@@ -434,7 +436,7 @@ subroutine eh_init(grid,tmp)
         end if
         stop
       else
-        tmp%inc_dist1='xz-plane'
+        fw%inc_dist1='xz-plane'
       end if
     elseif(ek_dir1(1)==0.0d0.and.ek_dir1(2)==0.0d0.and.ek_dir1(3)==1.0d0) then
       if(epdir_re1(3)/=0.0d0.or.epdir_im1(3)/=0.0d0) then
@@ -444,7 +446,7 @@ subroutine eh_init(grid,tmp)
         end if
         stop
       else
-        tmp%inc_dist1='xy-plane'
+        fw%inc_dist1='xy-plane'
       end if
     else
       if(comm_is_root(nproc_id_global)) then
@@ -457,7 +459,7 @@ subroutine eh_init(grid,tmp)
     
     !source2
     if    (ek_dir2(1)==0.0d0.and.ek_dir2(2)==0.0d0.and.ek_dir2(3)==0.0d0) then 
-      tmp%inc_dist2='none'
+      fw%inc_dist2='none'
     elseif(ek_dir2(1)==1.0d0.and.ek_dir2(2)==0.0d0.and.ek_dir2(3)==0.0d0) then
       if(epdir_re2(1)/=0.0d0.or.epdir_im2(1)/=0.0d0) then
         if(comm_is_root(nproc_id_global)) then
@@ -466,7 +468,7 @@ subroutine eh_init(grid,tmp)
         end if
         stop
       else
-        tmp%inc_dist2='yz-plane'
+        fw%inc_dist2='yz-plane'
       end if
     elseif(ek_dir2(1)==0.0d0.and.ek_dir2(2)==1.0d0.and.ek_dir2(3)==0.0d0) then
       if(epdir_re2(2)/=0.0d0.or.epdir_im2(2)/=0.0d0) then
@@ -476,7 +478,7 @@ subroutine eh_init(grid,tmp)
         end if
         stop
       else
-        tmp%inc_dist2='xz-plane'
+        fw%inc_dist2='xz-plane'
       end if
     elseif(ek_dir2(1)==0.0d0.and.ek_dir2(2)==0.0d0.and.ek_dir2(3)==1.0d0) then
       if(epdir_re2(3)/=0.0d0.or.epdir_im2(3)/=0.0d0) then
@@ -486,7 +488,7 @@ subroutine eh_init(grid,tmp)
         end if
         stop
       else
-        tmp%inc_dist2='xy-plane'
+        fw%inc_dist2='xy-plane'
       end if
     else
       if(comm_is_root(nproc_id_global)) then
@@ -498,10 +500,10 @@ subroutine eh_init(grid,tmp)
     end if
   case('point','x-line','y-line','z-line')
     !these selection are for debug
-    tmp%inc_dist1=wave_input; tmp%inc_dist2='none';
+    fw%inc_dist1=wave_input; fw%inc_dist2='none';
     if(comm_is_root(nproc_id_global)) write(*,*) trim(wave_input), " source is used."
   case default
-    tmp%inc_dist1='none'; tmp%inc_dist2='none';
+    fw%inc_dist1='none'; fw%inc_dist2='none';
     if(ae_shape1/='impulse'.and.ae_shape2/='impulse') then
       if(comm_is_root(nproc_id_global)) then
         write(*,*) "invalid wave_input:"
@@ -513,30 +515,30 @@ subroutine eh_init(grid,tmp)
   end select
   
   !prepare incident current source
-  if((tmp%inc_dist1=='none').and.(tmp%inc_dist2=='none')) then
-    tmp%inc_num=0
+  if((fw%inc_dist1=='none').and.(fw%inc_dist2=='none')) then
+    fw%inc_num=0
   else
-    tmp%inc_num=2
+    fw%inc_num=2
   end if
-  if(tmp%inc_num>0) then
+  if(fw%inc_num>0) then
     !set initial
-    allocate(tmp%inc_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
-    allocate(tmp%inc_po_pe(iobs_num_em))
-    allocate(tmp%inc_li_pe(iobs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
-    allocate(tmp%inc_pl_pe(iobs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
-    tmp%inc_po_id(:,:)=0; tmp%inc_po_pe(:)=0; tmp%inc_li_pe(:,:)=0; tmp%inc_pl_pe(:,:)=0; 
+    allocate(fw%inc_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
+    allocate(fw%inc_po_pe(iobs_num_em))
+    allocate(fw%inc_li_pe(iobs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
+    allocate(fw%inc_pl_pe(iobs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
+    fw%inc_po_id(:,:)=0; fw%inc_po_pe(:)=0; fw%inc_li_pe(:,:)=0; fw%inc_pl_pe(:,:)=0; 
     do ii=1,3
-      tmp%c2_inc_xyz(ii)=(tmp%c_0/tmp%rep(0)*grid%dt) &
-                         /(1.0d0+2.0d0*pi*tmp%sig(0)/tmp%rep(0)*grid%dt) &
-                         *2.0d0/( grid%hgs(ii)*sqrt(tmp%rmu(0)/tmp%rep(0)) )
+      fw%c2_inc_xyz(ii)=(fw%c_0/fw%rep(0)*fs%dt) &
+                         /(1.0d0+2.0d0*pi*fw%sig(0)/fw%rep(0)*fs%dt) &
+                         *2.0d0/( fs%hgs(ii)*sqrt(fw%rmu(0)/fw%rep(0)) )
     end do
     
     !search incident current source point and check others
-    if(tmp%inc_dist1/='none') then
+    if(fw%inc_dist1/='none') then
       ii=1
-      call eh_find_point(source_loc1(:),tmp%inc_po_id(ii,:),&
-                         tmp%inc_po_pe(ii),tmp%inc_li_pe(ii,:),tmp%inc_pl_pe(ii,:),grid%ng_sta,grid%ng_end,&
-                         minval(grid%lg_sta(:))-tmp%Nd,maxval(grid%lg_end(:))+tmp%Nd,tmp%coo(:,:))
+      call eh_find_point(source_loc1(:),fw%inc_po_id(ii,:),&
+                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng_sta,fs%ng_end,&
+                         minval(fs%lg_sta(:))-fw%Nd,maxval(fs%lg_end(:))+fw%Nd,fw%coo(:,:))
       select case(ae_shape1)
       case("Ecos2","Acos2")
         continue
@@ -550,11 +552,11 @@ subroutine eh_init(grid,tmp)
       if(rlaser_int_wcm2_1/=-1d0) &
         amplitude1=sqrt(rlaser_int_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
-    if(tmp%inc_dist2/='none') then
+    if(fw%inc_dist2/='none') then
       ii=2
-      call eh_find_point(source_loc2(:),tmp%inc_po_id(ii,:),&
-                         tmp%inc_po_pe(ii),tmp%inc_li_pe(ii,:),tmp%inc_pl_pe(ii,:),grid%ng_sta,grid%ng_end,&
-                         minval(grid%lg_sta(:))-tmp%Nd,maxval(grid%lg_end(:))+tmp%Nd,tmp%coo(:,:))
+      call eh_find_point(source_loc2(:),fw%inc_po_id(ii,:),&
+                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng_sta,fs%ng_end,&
+                         minval(fs%lg_sta(:))-fw%Nd,maxval(fs%lg_end(:))+fw%Nd,fw%coo(:,:))
       select case(ae_shape2)
       case("Ecos2","Acos2")
         continue
@@ -573,19 +575,19 @@ subroutine eh_init(grid,tmp)
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"
-      if((tmp%inc_dist1=='none').or.(tmp%inc_dist2=='none')) then
+      if((fw%inc_dist1=='none').or.(fw%inc_dist2=='none')) then
         write(*,*) "Incident current source is placed at"
       else
         write(*,*) "Incident current sources are placed at"
       end if
-      if(tmp%inc_dist1/='none') then
+      if(fw%inc_dist1/='none') then
         ii=1
-        write(*,'(I8,A,3ES14.5,A)') ii,":",(tmp%coo(tmp%inc_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
+        write(*,'(I8,A,3ES14.5,A)') ii,":",(fw%coo(fw%inc_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
         write(*,'(A,3ES14.5)') " ek_dir1:",ek_dir1
       end if
-      if(tmp%inc_dist2/='none') then
+      if(fw%inc_dist2/='none') then
         ii=2
-        write(*,'(I8,A,3ES14.5,A)') ii,":",(tmp%coo(tmp%inc_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
+        write(*,'(I8,A,3ES14.5,A)') ii,":",(fw%coo(fw%inc_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
         write(*,'(A,3ES14.5)') " ek_dir2:",ek_dir2
       end if
       write(*,*) "**************************"
@@ -598,7 +600,7 @@ subroutine eh_init(grid,tmp)
     iflag=0
     if(iperiodic==3.and.trans_longi/='tr') iflag=1
     do ii=0,imedia_num
-      if(tmp%rep(ii)/=1.0d0.or.tmp%rmu(ii)/=1.0d0.or.tmp%sig(ii)/=0.0d0) iflag=1
+      if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag=1
       if(ii==0) then
         select case(type_media(ii))
         case('VACUUM','Vacuum','vacuum')
@@ -627,39 +629,39 @@ subroutine eh_init(grid,tmp)
     end if
     
     !set initial current density
-    if(tmp%inum_d>0) then
-      do ii=1,tmp%inum_d
-        do iz=grid%ng_sta(3),grid%ng_end(3)
-        do iy=grid%ng_sta(2),grid%ng_end(2)
-        do ix=grid%ng_sta(1),grid%ng_end(1)
-          if(tmp%idx_d(ix,iy,iz,ii)==1) then
+    if(fw%inum_d>0) then
+      do ii=1,fw%inum_d
+        do iz=fs%ng_sta(3),fs%ng_end(3)
+        do iy=fs%ng_sta(2),fs%ng_end(2)
+        do ix=fs%ng_sta(1),fs%ng_end(1)
+          if(fw%idx_d(ix,iy,iz,ii)==1) then
             if(ae_shape1=='impulse') then
-              tmp%rjx_d(ix,iy,iz,ii)=tmp%rjx_d(ix,iy,iz,ii) &
-                                     -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(1)+epdir_im1(1))
+              fw%rjx_d(ix,iy,iz,ii)=fw%rjx_d(ix,iy,iz,ii) &
+                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(1)+epdir_im1(1))
             end if
             if(ae_shape2=='impulse') then
-              tmp%rjx_d(ix,iy,iz,ii)=tmp%rjx_d(ix,iy,iz,ii) &
-                                     -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(1)+epdir_im2(1))
+              fw%rjx_d(ix,iy,iz,ii)=fw%rjx_d(ix,iy,iz,ii) &
+                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(1)+epdir_im2(1))
             end if
           end if
-          if(tmp%idy_d(ix,iy,iz,ii)==1) then
+          if(fw%idy_d(ix,iy,iz,ii)==1) then
             if(ae_shape1=='impulse') then
-              tmp%rjy_d(ix,iy,iz,ii)=tmp%rjy_d(ix,iy,iz,ii) &
-                                     -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(2)+epdir_im1(2))
+              fw%rjy_d(ix,iy,iz,ii)=fw%rjy_d(ix,iy,iz,ii) &
+                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(2)+epdir_im1(2))
             end if
             if(ae_shape2=='impulse') then
-              tmp%rjy_d(ix,iy,iz,ii)=tmp%rjy_d(ix,iy,iz,ii) &
-                                     -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(2)+epdir_im2(2))
+              fw%rjy_d(ix,iy,iz,ii)=fw%rjy_d(ix,iy,iz,ii) &
+                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(2)+epdir_im2(2))
             end if
           end if
-          if(tmp%idz_d(ix,iy,iz,ii)==1) then
+          if(fw%idz_d(ix,iy,iz,ii)==1) then
             if(ae_shape1=='impulse') then
-              tmp%rjz_d(ix,iy,iz,ii)=tmp%rjz_d(ix,iy,iz,ii) &
-                                     -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(3)+epdir_im1(3))
+              fw%rjz_d(ix,iy,iz,ii)=fw%rjz_d(ix,iy,iz,ii) &
+                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(3)+epdir_im1(3))
             end if
             if(ae_shape2=='impulse') then
-              tmp%rjz_d(ix,iy,iz,ii)=tmp%rjz_d(ix,iy,iz,ii) &
-                                     -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(3)+epdir_im2(3))
+              fw%rjz_d(ix,iy,iz,ii)=fw%rjz_d(ix,iy,iz,ii) &
+                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(3)+epdir_im2(3))
             end if
           end if
         end do
@@ -669,37 +671,37 @@ subroutine eh_init(grid,tmp)
     end if
     
     !initialize and allocate
-    allocate(tmp%time_lr(nt_em))
-    tmp%time_lr(:)=0.0d0
-    tmp%iter_lr=1
-    allocate(tmp%fr_lr(0:nenergy,3),tmp%fi_lr(0:nenergy,3))
-    tmp%fr_lr(:,:)=0.0d0; tmp%fi_lr(:,:)=0.0d0;
-    allocate(tmp%rjx_lr(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-             tmp%rjy_lr(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-             tmp%rjz_lr(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                        grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                        grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd) )
-    tmp%rjx_lr(:,:,:)=0.0d0; tmp%rjy_lr(:,:,:)=0.0d0; tmp%rjz_lr(:,:,:)=0.0d0;
+    allocate(fw%time_lr(nt_em))
+    fw%time_lr(:)=0.0d0
+    fw%iter_lr=1
+    allocate(fw%fr_lr(0:nenergy,3),fw%fi_lr(0:nenergy,3))
+    fw%fr_lr(:,:)=0.0d0; fw%fi_lr(:,:)=0.0d0;
+    allocate(fw%rjx_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+             fw%rjy_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+             fw%rjz_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+    fw%rjx_lr(:,:,:)=0.0d0; fw%rjy_lr(:,:,:)=0.0d0; fw%rjz_lr(:,:,:)=0.0d0;
     if(iperiodic==0) then
-      allocate(tmp%px_lr(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-               tmp%py_lr(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-               tmp%pz_lr(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd) )
-      tmp%px_lr(:,:,:)=0.0d0; tmp%py_lr(:,:,:)=0.0d0; tmp%pz_lr(:,:,:)=0.0d0;
-      allocate(tmp%dip_lr(nt_em,3))
-      tmp%dip_lr(:,:)=0.0d0
+      allocate(fw%px_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                         fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                         fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+               fw%py_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                         fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                         fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+               fw%pz_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                         fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                         fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+      fw%px_lr(:,:,:)=0.0d0; fw%py_lr(:,:,:)=0.0d0; fw%pz_lr(:,:,:)=0.0d0;
+      allocate(fw%dip_lr(nt_em,3))
+      fw%dip_lr(:,:)=0.0d0
     elseif(iperiodic==3) then
-      allocate(tmp%curr_lr(nt_em,3))
-      tmp%curr_lr(:,:)=0.0d0
+      allocate(fw%curr_lr(nt_em,3))
+      fw%curr_lr(:,:)=0.0d0
     end if
   end if
   
@@ -721,128 +723,128 @@ contains
     implicit none
     
     !e
-    allocate(tmp%ex_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_ex_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_ex_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%ex_y(:,:,:)=0.0d0; tmp%c1_ex_y(:,:,:)=0.0d0; tmp%c2_ex_y(:,:,:)=0.0d0;
-    allocate(tmp%ex_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_ex_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_ex_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%ex_z(:,:,:)=0.0d0; tmp%c1_ex_z(:,:,:)=0.0d0; tmp%c2_ex_z(:,:,:)=0.0d0;
-    allocate(tmp%ey_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_ey_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_ey_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%ey_z(:,:,:)=0.0d0; tmp%c1_ey_z(:,:,:)=0.0d0; tmp%c2_ey_z(:,:,:)=0.0d0;
-    allocate(tmp%ey_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_ey_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_ey_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%ey_x(:,:,:)=0.0d0; tmp%c1_ey_x(:,:,:)=0.0d0; tmp%c2_ey_x(:,:,:)=0.0d0;
-    allocate(tmp%ez_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_ez_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_ez_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%ez_x(:,:,:)=0.0d0; tmp%c1_ez_x(:,:,:)=0.0d0; tmp%c2_ez_x(:,:,:)=0.0d0;
-    allocate(tmp%ez_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_ez_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_ez_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%ez_y(:,:,:)=0.0d0; tmp%c1_ez_y(:,:,:)=0.0d0; tmp%c2_ez_y(:,:,:)=0.0d0;
+    allocate(fw%ex_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_ex_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_ex_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%ex_y(:,:,:)=0.0d0; fw%c1_ex_y(:,:,:)=0.0d0; fw%c2_ex_y(:,:,:)=0.0d0;
+    allocate(fw%ex_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_ex_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_ex_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%ex_z(:,:,:)=0.0d0; fw%c1_ex_z(:,:,:)=0.0d0; fw%c2_ex_z(:,:,:)=0.0d0;
+    allocate(fw%ey_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_ey_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_ey_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%ey_z(:,:,:)=0.0d0; fw%c1_ey_z(:,:,:)=0.0d0; fw%c2_ey_z(:,:,:)=0.0d0;
+    allocate(fw%ey_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_ey_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_ey_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%ey_x(:,:,:)=0.0d0; fw%c1_ey_x(:,:,:)=0.0d0; fw%c2_ey_x(:,:,:)=0.0d0;
+    allocate(fw%ez_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_ez_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_ez_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%ez_x(:,:,:)=0.0d0; fw%c1_ez_x(:,:,:)=0.0d0; fw%c2_ez_x(:,:,:)=0.0d0;
+    allocate(fw%ez_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_ez_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_ez_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%ez_y(:,:,:)=0.0d0; fw%c1_ez_y(:,:,:)=0.0d0; fw%c2_ez_y(:,:,:)=0.0d0;
     
     !h
-    allocate(tmp%hx_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_hx_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_hx_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%hx_y(:,:,:)=0.0d0; tmp%c1_hx_y(:,:,:)=0.0d0; tmp%c2_hx_y(:,:,:)=0.0d0;
-    allocate(tmp%hx_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_hx_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_hx_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%hx_z(:,:,:)=0.0d0; tmp%c1_hx_z(:,:,:)=0.0d0; tmp%c2_hx_z(:,:,:)=0.0d0;
-    allocate(tmp%hy_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_hy_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_hy_z(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%hy_z(:,:,:)=0.0d0; tmp%c1_hy_z(:,:,:)=0.0d0; tmp%c2_hy_z(:,:,:)=0.0d0;
-    allocate(tmp%hy_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_hy_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_hy_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%hy_x(:,:,:)=0.0d0; tmp%c1_hy_x(:,:,:)=0.0d0; tmp%c2_hy_x(:,:,:)=0.0d0;
-    allocate(tmp%hz_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_hz_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_hz_x(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%hz_x(:,:,:)=0.0d0; tmp%c1_hz_x(:,:,:)=0.0d0; tmp%c2_hz_x(:,:,:)=0.0d0;
-    allocate(tmp%hz_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                      grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                      grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c1_hz_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    allocate(tmp%c2_hz_y(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                         grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                         grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-    tmp%hz_y(:,:,:)=0.0d0; tmp%c1_hz_y(:,:,:)=0.0d0; tmp%c2_hz_y(:,:,:)=0.0d0;
+    allocate(fw%hx_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_hx_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_hx_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%hx_y(:,:,:)=0.0d0; fw%c1_hx_y(:,:,:)=0.0d0; fw%c2_hx_y(:,:,:)=0.0d0;
+    allocate(fw%hx_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_hx_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_hx_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%hx_z(:,:,:)=0.0d0; fw%c1_hx_z(:,:,:)=0.0d0; fw%c2_hx_z(:,:,:)=0.0d0;
+    allocate(fw%hy_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_hy_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_hy_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%hy_z(:,:,:)=0.0d0; fw%c1_hy_z(:,:,:)=0.0d0; fw%c2_hy_z(:,:,:)=0.0d0;
+    allocate(fw%hy_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_hy_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_hy_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%hy_x(:,:,:)=0.0d0; fw%c1_hy_x(:,:,:)=0.0d0; fw%c2_hy_x(:,:,:)=0.0d0;
+    allocate(fw%hz_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_hz_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_hz_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%hz_x(:,:,:)=0.0d0; fw%c1_hz_x(:,:,:)=0.0d0; fw%c2_hz_x(:,:,:)=0.0d0;
+    allocate(fw%hz_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c1_hz_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%c2_hz_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    fw%hz_y(:,:,:)=0.0d0; fw%c1_hz_y(:,:,:)=0.0d0; fw%c2_hz_y(:,:,:)=0.0d0;
     
   end subroutine eh_allocate
   
@@ -854,31 +856,31 @@ contains
                 c1_e_mid,c2_e_x_mid,c2_e_y_mid,c2_e_z_mid,c2_j_mid
     
     !set constant parameter
-    tmp%rep(ii)=epsilon(ii); tmp%rmu(ii)=rmu(ii); tmp%sig(ii)=sigma(ii);
+    fw%rep(ii)=epsilon(ii); fw%rmu(ii)=rmu(ii); fw%sig(ii)=sigma(ii);
     
     !prepare coefficient
-    c1_e  =(1.0d0-2.0d0*pi*tmp%sig(ii)/tmp%rep(ii)*grid%dt) &
-           /(1.0d0+2.0d0*pi*tmp%sig(ii)/tmp%rep(ii)*grid%dt)
-    c2_e_x=(tmp%c_0/tmp%rep(ii)*grid%dt) &
-           /(1.0d0+2.0d0*pi*tmp%sig(ii)/tmp%rep(ii)*grid%dt)/grid%hgs(1)
-    c2_e_y=(tmp%c_0/tmp%rep(ii)*grid%dt) &
-           /(1.0d0+2.0d0*pi*tmp%sig(ii)/tmp%rep(ii)*grid%dt)/grid%hgs(2)
-    c2_e_z=(tmp%c_0/tmp%rep(ii)*grid%dt) &
-           /(1.0d0+2.0d0*pi*tmp%sig(ii)/tmp%rep(ii)*grid%dt)/grid%hgs(3)
+    c1_e  =(1.0d0-2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)
+    c2_e_x=(fw%c_0/fw%rep(ii)*fs%dt) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)/fs%hgs(1)
+    c2_e_y=(fw%c_0/fw%rep(ii)*fs%dt) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)/fs%hgs(2)
+    c2_e_z=(fw%c_0/fw%rep(ii)*fs%dt) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)/fs%hgs(3)
     call comm_bcast(c1_e,  nproc_group_global)
     call comm_bcast(c2_e_x,nproc_group_global)
     call comm_bcast(c2_e_y,nproc_group_global)
     call comm_bcast(c2_e_z,nproc_group_global)
     c1_h=1.0d0
-    c2_h_x=tmp%c_0/tmp%rmu(ii)*grid%dt/grid%hgs(1)
-    c2_h_y=tmp%c_0/tmp%rmu(ii)*grid%dt/grid%hgs(2)
-    c2_h_z=tmp%c_0/tmp%rmu(ii)*grid%dt/grid%hgs(3)
+    c2_h_x=fw%c_0/fw%rmu(ii)*fs%dt/fs%hgs(1)
+    c2_h_y=fw%c_0/fw%rmu(ii)*fs%dt/fs%hgs(2)
+    c2_h_z=fw%c_0/fw%rmu(ii)*fs%dt/fs%hgs(3)
     call comm_bcast(c1_h,  nproc_group_global)
     call comm_bcast(c2_h_x,nproc_group_global)
     call comm_bcast(c2_h_y,nproc_group_global)
     call comm_bcast(c2_h_z,nproc_group_global)
-    c2_j=(4.0d0*pi/tmp%rep(ii)*grid%dt) &
-         /(1.0d0+2.0d0*pi*tmp%sig(ii)/tmp%rep(ii)*grid%dt)
+    c2_j=(4.0d0*pi/fw%rep(ii)*fs%dt) &
+         /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)
     call comm_bcast(c2_j,nproc_group_global)
     
     !check type_media
@@ -886,40 +888,40 @@ contains
     case('PEC','Pec','pec')
       c1_e=0.0d0; c2_e_x=0.0d0; c2_e_y=0.0d0; c2_e_z=0.0d0;
     case('DRUDE','Drude','drude','D','d')
-      do iz=grid%ng_sta(3),grid%ng_end(3)
-      do iy=grid%ng_sta(2),grid%ng_end(2)
-      do ix=grid%ng_sta(1),grid%ng_end(1)
-        if(grid%imedia(ix,iy,iz)==ii) then
-          if(grid%imedia(ix+1,iy,iz)==ii) then !x
-            tmp%idx_d(ix,iy,iz,icount_d)=1;
-          elseif(grid%imedia(ix+1,iy,iz)/=0.and.grid%imedia(ix+1,iy,iz)<ii) then
-            tmp%idx_d(ix,iy,iz,icount_d)=1;
-          elseif(grid%imedia(ix+1,iy,iz)/=0.and.grid%imedia(ix+1,iy,iz)>ii) then
-            do ij=1,tmp%inum_d
-              if(tmp%imedia_d(ij)==grid%imedia(ix+1,iy,iz)) then
-                tmp%idx_d(ix,iy,iz,ij)=1;
+      do iz=fs%ng_sta(3),fs%ng_end(3)
+      do iy=fs%ng_sta(2),fs%ng_end(2)
+      do ix=fs%ng_sta(1),fs%ng_end(1)
+        if(fs%imedia(ix,iy,iz)==ii) then
+          if(fs%imedia(ix+1,iy,iz)==ii) then !x
+            fw%idx_d(ix,iy,iz,icount_d)=1;
+          elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)<ii) then
+            fw%idx_d(ix,iy,iz,icount_d)=1;
+          elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
+            do ij=1,fw%inum_d
+              if(fw%imedia_d(ij)==fs%imedia(ix+1,iy,iz)) then
+                fw%idx_d(ix,iy,iz,ij)=1;
               end if
             end do
           end if
-          if(grid%imedia(ix,iy+1,iz)==ii) then !y
-            tmp%idy_d(ix,iy,iz,icount_d)=1;
-          elseif(grid%imedia(ix,iy+1,iz)/=0.and.grid%imedia(ix,iy+1,iz)<ii) then
-            tmp%idy_d(ix,iy,iz,icount_d)=1;
-          elseif(grid%imedia(ix,iy+1,iz)/=0.and.grid%imedia(ix,iy+1,iz)>ii) then
-            do ij=1,tmp%inum_d
-              if(tmp%imedia_d(ij)==grid%imedia(ix,iy+1,iz)) then
-                tmp%idy_d(ix,iy,iz,ij)=1;
+          if(fs%imedia(ix,iy+1,iz)==ii) then !y
+            fw%idy_d(ix,iy,iz,icount_d)=1;
+          elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)<ii) then
+            fw%idy_d(ix,iy,iz,icount_d)=1;
+          elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
+            do ij=1,fw%inum_d
+              if(fw%imedia_d(ij)==fs%imedia(ix,iy+1,iz)) then
+                fw%idy_d(ix,iy,iz,ij)=1;
               end if
             end do
           end if
-          if(grid%imedia(ix,iy,iz+1)==ii) then !z
-            tmp%idz_d(ix,iy,iz,icount_d)=1;
-          elseif(grid%imedia(ix,iy,iz+1)/=0.and.grid%imedia(ix,iy,iz+1)<ii) then
-            tmp%idz_d(ix,iy,iz,icount_d)=1;
-          elseif(grid%imedia(ix,iy,iz+1)/=0.and.grid%imedia(ix,iy,iz+1)>ii) then
-            do ij=1,tmp%inum_d
-              if(tmp%imedia_d(ij)==grid%imedia(ix,iy,iz+1)) then
-                tmp%idz_d(ix,iy,iz,ij)=1;
+          if(fs%imedia(ix,iy,iz+1)==ii) then !z
+            fw%idz_d(ix,iy,iz,icount_d)=1;
+          elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)<ii) then
+            fw%idz_d(ix,iy,iz,icount_d)=1;
+          elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
+            do ij=1,fw%inum_d
+              if(fw%imedia_d(ij)==fs%imedia(ix,iy,iz+1)) then
+                fw%idz_d(ix,iy,iz,ij)=1;
               end if
             end do
           end if
@@ -927,191 +929,191 @@ contains
       end do
       end do
       end do
-      tmp%c1_j_d(icount_d)=(1.0d0-gamma_d(ii)*grid%dt/2.0d0)           / (1.0d0+gamma_d(ii)*grid%dt/2.0d0);
-      tmp%c2_j_d(icount_d)=((omega_p_d(ii)**2.0d0)*grid%dt/(4.0d0*pi)) / (1.0d0+gamma_d(ii)*grid%dt/2.0d0);
+      fw%c1_j_d(icount_d)=(1.0d0-gamma_d(ii)*fs%dt/2.0d0)           / (1.0d0+gamma_d(ii)*fs%dt/2.0d0);
+      fw%c2_j_d(icount_d)=((omega_p_d(ii)**2.0d0)*fs%dt/(4.0d0*pi)) / (1.0d0+gamma_d(ii)*fs%dt/2.0d0);
       icount_d=icount_d+1
     end select
     
     !set coefficient
     if(ii==0) then
-      tmp%c1_ex_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_e
-      tmp%c2_ex_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c2_e_y
-      tmp%c1_ex_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_e
-      tmp%c2_ex_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=-c2_e_z
+      fw%c1_ex_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_e
+      fw%c2_ex_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c2_e_y
+      fw%c1_ex_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_e
+      fw%c2_ex_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=-c2_e_z
           
-      tmp%c1_ey_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_e
-      tmp%c2_ey_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c2_e_z
-      tmp%c1_ey_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_e
-      tmp%c2_ey_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=-c2_e_x
+      fw%c1_ey_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_e
+      fw%c2_ey_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c2_e_z
+      fw%c1_ey_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_e
+      fw%c2_ey_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=-c2_e_x
         
-      tmp%c1_ez_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_e
-      tmp%c2_ez_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c2_e_x
-      tmp%c1_ez_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_e
-      tmp%c2_ez_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=-c2_e_y
+      fw%c1_ez_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_e
+      fw%c2_ez_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c2_e_x
+      fw%c1_ez_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_e
+      fw%c2_ez_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=-c2_e_y
         
-      tmp%c1_hx_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_h
-      tmp%c2_hx_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=-c2_h_y
-      tmp%c1_hx_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_h
-      tmp%c2_hx_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c2_h_z
+      fw%c1_hx_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_h
+      fw%c2_hx_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=-c2_h_y
+      fw%c1_hx_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_h
+      fw%c2_hx_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c2_h_z
         
-      tmp%c1_hy_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_h
-      tmp%c2_hy_z(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=-c2_h_z
-      tmp%c1_hy_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_h
-      tmp%c2_hy_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c2_h_x
+      fw%c1_hy_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_h
+      fw%c2_hy_z(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=-c2_h_z
+      fw%c1_hy_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_h
+      fw%c2_hy_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c2_h_x
       
-      tmp%c1_hz_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_h
-      tmp%c2_hz_x(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=-c2_h_x
-      tmp%c1_hz_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c1_h
-      tmp%c2_hz_y(grid%ng_sta(1):grid%ng_end(1),&
-                  grid%ng_sta(2):grid%ng_end(2),&
-                  grid%ng_sta(3):grid%ng_end(3))=c2_h_y
+      fw%c1_hz_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_h
+      fw%c2_hz_x(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=-c2_h_x
+      fw%c1_hz_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c1_h
+      fw%c2_hz_y(fs%ng_sta(1):fs%ng_end(1),&
+                 fs%ng_sta(2):fs%ng_end(2),&
+                 fs%ng_sta(3):fs%ng_end(3))=c2_h_y
                   
-      tmp%c2_jx(grid%ng_sta(1):grid%ng_end(1),&
-                grid%ng_sta(2):grid%ng_end(2),&
-                grid%ng_sta(3):grid%ng_end(3))=-c2_j
-      tmp%c2_jy(grid%ng_sta(1):grid%ng_end(1),&
-                grid%ng_sta(2):grid%ng_end(2),&
-                grid%ng_sta(3):grid%ng_end(3))=-c2_j
-      tmp%c2_jz(grid%ng_sta(1):grid%ng_end(1),&
-                grid%ng_sta(2):grid%ng_end(2),&
-                grid%ng_sta(3):grid%ng_end(3))=-c2_j
+      fw%c2_jx(fs%ng_sta(1):fs%ng_end(1),&
+               fs%ng_sta(2):fs%ng_end(2),&
+               fs%ng_sta(3):fs%ng_end(3))=-c2_j
+      fw%c2_jy(fs%ng_sta(1):fs%ng_end(1),&
+               fs%ng_sta(2):fs%ng_end(2),&
+               fs%ng_sta(3):fs%ng_end(3))=-c2_j
+      fw%c2_jz(fs%ng_sta(1):fs%ng_end(1),&
+               fs%ng_sta(2):fs%ng_end(2),&
+               fs%ng_sta(3):fs%ng_end(3))=-c2_j
     else
-      do iz=grid%ng_sta(3),grid%ng_end(3)
-      do iy=grid%ng_sta(2),grid%ng_end(2)
-      do ix=grid%ng_sta(1),grid%ng_end(1)
-        if(grid%imedia(ix,iy,iz)==ii) then
+      do iz=fs%ng_sta(3),fs%ng_end(3)
+      do iy=fs%ng_sta(2),fs%ng_end(2)
+      do ix=fs%ng_sta(1),fs%ng_end(1)
+        if(fs%imedia(ix,iy,iz)==ii) then
           !ex and jx
-          if(grid%imedia(ix+1,iy,iz)==ii) then
-            tmp%c1_ex_y(ix,iy,iz)=c1_e; tmp%c2_ex_y(ix,iy,iz)= c2_e_y;
-            tmp%c1_ex_z(ix,iy,iz)=c1_e; tmp%c2_ex_z(ix,iy,iz)=-c2_e_z;
-            tmp%c2_jx(ix,iy,iz)=-c2_j;
-          elseif(grid%imedia(ix+1,iy,iz)/=0.and.grid%imedia(ix+1,iy,iz)<ii) then
-            tmp%c1_ex_y(ix,iy,iz)=c1_e; tmp%c2_ex_y(ix,iy,iz)= c2_e_y;
-            tmp%c1_ex_z(ix,iy,iz)=c1_e; tmp%c2_ex_z(ix,iy,iz)=-c2_e_z;
-            tmp%c2_jx(ix,iy,iz)=-c2_j;
-          elseif(grid%imedia(ix+1,iy,iz)/=0.and.grid%imedia(ix+1,iy,iz)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(grid%imedia(ix+1,iy,iz))/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix+1,iy,iz))/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt)
-            c2_e_y_mid=(tmp%c_0/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix+1,iy,iz))/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /grid%hgs(2)
-            c2_e_z_mid=(tmp%c_0/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix+1,iy,iz))/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /grid%hgs(3)
-            c2_j_mid  =(4.0d0*pi/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix+1,iy,iz))/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt)
-            tmp%c1_ex_y(ix,iy,iz)=c1_e_mid; tmp%c2_ex_y(ix,iy,iz)= c2_e_y_mid;
-            tmp%c1_ex_z(ix,iy,iz)=c1_e_mid; tmp%c2_ex_z(ix,iy,iz)=-c2_e_z_mid;
-            tmp%c2_jx(ix,iy,iz)=-c2_j_mid;
+          if(fs%imedia(ix+1,iy,iz)==ii) then
+            fw%c1_ex_y(ix,iy,iz)=c1_e; fw%c2_ex_y(ix,iy,iz)= c2_e_y;
+            fw%c1_ex_z(ix,iy,iz)=c1_e; fw%c2_ex_z(ix,iy,iz)=-c2_e_z;
+            fw%c2_jx(ix,iy,iz)=-c2_j;
+          elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)<ii) then
+            fw%c1_ex_y(ix,iy,iz)=c1_e; fw%c2_ex_y(ix,iy,iz)= c2_e_y;
+            fw%c1_ex_z(ix,iy,iz)=c1_e; fw%c2_ex_z(ix,iy,iz)=-c2_e_z;
+            fw%c2_jx(ix,iy,iz)=-c2_j;
+          elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
+            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt)
+            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /fs%hgs(2)
+            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /fs%hgs(3)
+            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt)
+            fw%c1_ex_y(ix,iy,iz)=c1_e_mid; fw%c2_ex_y(ix,iy,iz)= c2_e_y_mid;
+            fw%c1_ex_z(ix,iy,iz)=c1_e_mid; fw%c2_ex_z(ix,iy,iz)=-c2_e_z_mid;
+            fw%c2_jx(ix,iy,iz)=-c2_j_mid;
           end if
           
           !ey and jy
-          if(grid%imedia(ix,iy+1,iz)==ii) then
-            tmp%c1_ey_z(ix,iy,iz)=c1_e; tmp%c2_ey_z(ix,iy,iz)= c2_e_z;
-            tmp%c1_ey_x(ix,iy,iz)=c1_e; tmp%c2_ey_x(ix,iy,iz)=-c2_e_x;
-            tmp%c2_jy(ix,iy,iz)=-c2_j;
-          elseif(grid%imedia(ix,iy+1,iz)/=0.and.grid%imedia(ix,iy+1,iz)<ii) then
-            tmp%c1_ey_z(ix,iy,iz)=c1_e; tmp%c2_ey_z(ix,iy,iz)= c2_e_z;
-            tmp%c1_ey_x(ix,iy,iz)=c1_e; tmp%c2_ey_x(ix,iy,iz)=-c2_e_x;
-            tmp%c2_jy(ix,iy,iz)=-c2_j;
-          elseif(grid%imedia(ix,iy+1,iz)/=0.and.grid%imedia(ix,iy+1,iz)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(grid%imedia(ix,iy+1,iz))/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix,iy+1,iz))/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt)
-            c2_e_z_mid=(tmp%c_0/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix,iy+1,iz))/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt) &
-                       /grid%hgs(3)
-            c2_e_x_mid=(tmp%c_0/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix,iy+1,iz))/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt) &
-                       /grid%hgs(1)
-            c2_j_mid  =(4.0d0*pi/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix,iy+1,iz))/epsilon(grid%imedia(ix,iy+1,iz))*grid%dt)
-            tmp%c1_ey_z(ix,iy,iz)=c1_e_mid; tmp%c2_ey_z(ix,iy,iz)= c2_e_z_mid;
-            tmp%c1_ey_x(ix,iy,iz)=c1_e_mid; tmp%c2_ey_x(ix,iy,iz)=-c2_e_x_mid;
-            tmp%c2_jy(ix,iy,iz)=-c2_j_mid;
+          if(fs%imedia(ix,iy+1,iz)==ii) then
+            fw%c1_ey_z(ix,iy,iz)=c1_e; fw%c2_ey_z(ix,iy,iz)= c2_e_z;
+            fw%c1_ey_x(ix,iy,iz)=c1_e; fw%c2_ey_x(ix,iy,iz)=-c2_e_x;
+            fw%c2_jy(ix,iy,iz)=-c2_j;
+          elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)<ii) then
+            fw%c1_ey_z(ix,iy,iz)=c1_e; fw%c2_ey_z(ix,iy,iz)= c2_e_z;
+            fw%c1_ey_x(ix,iy,iz)=c1_e; fw%c2_ey_x(ix,iy,iz)=-c2_e_x;
+            fw%c2_jy(ix,iy,iz)=-c2_j;
+          elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
+            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt)
+            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+                       /fs%hgs(3)
+            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+                       /fs%hgs(1)
+            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt)
+            fw%c1_ey_z(ix,iy,iz)=c1_e_mid; fw%c2_ey_z(ix,iy,iz)= c2_e_z_mid;
+            fw%c1_ey_x(ix,iy,iz)=c1_e_mid; fw%c2_ey_x(ix,iy,iz)=-c2_e_x_mid;
+            fw%c2_jy(ix,iy,iz)=-c2_j_mid;
           end if
           
           !ez and jz
-          if(grid%imedia(ix,iy,iz+1)==ii) then
-            tmp%c1_ez_x(ix,iy,iz)=c1_e; tmp%c2_ez_x(ix,iy,iz)= c2_e_x;
-            tmp%c1_ez_y(ix,iy,iz)=c1_e; tmp%c2_ez_y(ix,iy,iz)=-c2_e_y;
-            tmp%c2_jz(ix,iy,iz)=-c2_j;
-          elseif(grid%imedia(ix,iy,iz+1)/=0.and.grid%imedia(ix,iy,iz+1)<ii) then
-            tmp%c1_ez_x(ix,iy,iz)=c1_e; tmp%c2_ez_x(ix,iy,iz)= c2_e_x;
-            tmp%c1_ez_y(ix,iy,iz)=c1_e; tmp%c2_ez_y(ix,iy,iz)=-c2_e_y;
-            tmp%c2_jz(ix,iy,iz)=-c2_j;
-          elseif(grid%imedia(ix,iy,iz+1)/=0.and.grid%imedia(ix,iy,iz+1)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(grid%imedia(ix,iy,iz+1))/epsilon(grid%imedia(ix,iy,iz+1))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix,iy,iz+1))/epsilon(grid%imedia(ix,iy,iz+1))*grid%dt)
-            c2_e_x_mid=(tmp%c_0/epsilon(grid%imedia(ix,iy,iz+1))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix,iy,iz+1))/epsilon(grid%imedia(ix,iy,iz+1))*grid%dt) &
-                       /grid%hgs(1)
-            c2_e_y_mid=(tmp%c_0/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix+1,iy,iz))/epsilon(grid%imedia(ix+1,iy,iz))*grid%dt) &
-                       /grid%hgs(2)
-            c2_j_mid  =(4.0d0*pi/epsilon(grid%imedia(ix,iy,iz+1))*grid%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(grid%imedia(ix,iy,iz+1))/epsilon(grid%imedia(ix,iy,iz+1))*grid%dt)
-            tmp%c1_ez_x(ix,iy,iz)=c1_e_mid; tmp%c2_ez_x(ix,iy,iz)= c2_e_x_mid;
-            tmp%c1_ez_y(ix,iy,iz)=c1_e_mid; tmp%c2_ez_y(ix,iy,iz)=-c2_e_y_mid;
-            tmp%c2_jz(ix,iy,iz)=-c2_j_mid;
+          if(fs%imedia(ix,iy,iz+1)==ii) then
+            fw%c1_ez_x(ix,iy,iz)=c1_e; fw%c2_ez_x(ix,iy,iz)= c2_e_x;
+            fw%c1_ez_y(ix,iy,iz)=c1_e; fw%c2_ez_y(ix,iy,iz)=-c2_e_y;
+            fw%c2_jz(ix,iy,iz)=-c2_j;
+          elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)<ii) then
+            fw%c1_ez_x(ix,iy,iz)=c1_e; fw%c2_ez_x(ix,iy,iz)= c2_e_x;
+            fw%c1_ez_y(ix,iy,iz)=c1_e; fw%c2_ez_y(ix,iy,iz)=-c2_e_y;
+            fw%c2_jz(ix,iy,iz)=-c2_j;
+          elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
+            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt)
+            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
+                       /fs%hgs(1)
+            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+                       /fs%hgs(2)
+            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt)
+            fw%c1_ez_x(ix,iy,iz)=c1_e_mid; fw%c2_ez_x(ix,iy,iz)= c2_e_x_mid;
+            fw%c1_ez_y(ix,iy,iz)=c1_e_mid; fw%c2_ez_y(ix,iy,iz)=-c2_e_y_mid;
+            fw%c2_jz(ix,iy,iz)=-c2_j_mid;
           end if
           
           !hx
-          tmp%c1_hx_y(ix,iy-1:iy,iz-1:iz)=c1_h; tmp%c2_hx_y(ix,iy-1:iy,iz-1:iz)=-c2_h_y;
-          tmp%c1_hx_z(ix,iy-1:iy,iz-1:iz)=c1_h; tmp%c2_hx_z(ix,iy-1:iy,iz-1:iz)= c2_h_z;
+          fw%c1_hx_y(ix,iy-1:iy,iz-1:iz)=c1_h; fw%c2_hx_y(ix,iy-1:iy,iz-1:iz)=-c2_h_y;
+          fw%c1_hx_z(ix,iy-1:iy,iz-1:iz)=c1_h; fw%c2_hx_z(ix,iy-1:iy,iz-1:iz)= c2_h_z;
           
           !hy
-          tmp%c1_hy_z(ix-1:ix,iy,iz-1:iz)=c1_h; tmp%c2_hy_z(ix-1:ix,iy,iz-1:iz)=-c2_h_z;
-          tmp%c1_hy_x(ix-1:ix,iy,iz-1:iz)=c1_h; tmp%c2_hy_x(ix-1:ix,iy,iz-1:iz)= c2_h_x;
+          fw%c1_hy_z(ix-1:ix,iy,iz-1:iz)=c1_h; fw%c2_hy_z(ix-1:ix,iy,iz-1:iz)=-c2_h_z;
+          fw%c1_hy_x(ix-1:ix,iy,iz-1:iz)=c1_h; fw%c2_hy_x(ix-1:ix,iy,iz-1:iz)= c2_h_x;
           
           !hz
-          tmp%c1_hz_x(ix-1:ix,iy-1:iy,iz)=c1_h; tmp%c2_hz_x(ix-1:ix,iy-1:iy,iz)=-c2_h_x;
-          tmp%c1_hz_y(ix-1:ix,iy-1:iy,iz)=c1_h; tmp%c2_hz_y(ix-1:ix,iy-1:iy,iz)= c2_h_y;
+          fw%c1_hz_x(ix-1:ix,iy-1:iy,iz)=c1_h; fw%c2_hz_x(ix-1:ix,iy-1:iy,iz)=-c2_h_x;
+          fw%c1_hz_y(ix-1:ix,iy-1:iy,iz)=c1_h; fw%c2_hz_y(ix-1:ix,iy-1:iy,iz)= c2_h_y;
         end if
       end do
       end do
@@ -1126,43 +1128,43 @@ contains
     implicit none
     integer :: icomp
     
-    if(tmp%inum_d>0) then
-      tmp%wex_d(:,:,:,:)=dble(tmp%idx_d(:,:,:,:))
-      tmp%wey_d(:,:,:,:)=dble(tmp%idy_d(:,:,:,:))
-      tmp%wez_d(:,:,:,:)=dble(tmp%idz_d(:,:,:,:))
+    if(fw%inum_d>0) then
+      fw%wex_d(:,:,:,:)=dble(fw%idx_d(:,:,:,:))
+      fw%wey_d(:,:,:,:)=dble(fw%idy_d(:,:,:,:))
+      fw%wez_d(:,:,:,:)=dble(fw%idz_d(:,:,:,:))
       if(smooth_d=='y') then
-        allocate(grid%imedia(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                             grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                             grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-        grid%imedia(:,:,:)=0
-        allocate(tmp%rmedia(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                            grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                            grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd))
-        tmp%rmedia(:,:,:)=0.0d0
-        do ii=1,tmp%inum_d
+        allocate(fs%imedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+        fs%imedia(:,:,:)=0
+        allocate(fw%rmedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+        fw%rmedia(:,:,:)=0.0d0
+        do ii=1,fw%inum_d
           do icomp=1,3
             if(icomp==1)     then
-              tmp%rmedia(:,:,:)=dble(tmp%idx_d(:,:,:,ii))
+              fw%rmedia(:,:,:)=dble(fw%idx_d(:,:,:,ii))
             elseif(icomp==2) then
-              tmp%rmedia(:,:,:)=dble(tmp%idy_d(:,:,:,ii))
+              fw%rmedia(:,:,:)=dble(fw%idy_d(:,:,:,ii))
             elseif(icomp==3) then
-              tmp%rmedia(:,:,:)=dble(tmp%idz_d(:,:,:,ii))
+              fw%rmedia(:,:,:)=dble(fw%idz_d(:,:,:,ii))
             end if
-            call eh_sendrecv(grid,tmp,'r')
-            grid%imedia(:,:,:)=int(tmp%rmedia(:,:,:)+1d-3)
-            do iz=grid%ng_sta(3),grid%ng_end(3)
-            do iy=grid%ng_sta(2),grid%ng_end(2)
-            do ix=grid%ng_sta(1),grid%ng_end(1)
-              if(grid%imedia(ix,iy,iz)==1) then
-                if(grid%imedia(ix+1,iy,iz)==0 .or. grid%imedia(ix-1,iy,iz)==0 .or. &
-                   grid%imedia(ix,iy+1,iz)==0 .or. grid%imedia(ix,iy-1,iz)==0 .or. &
-                   grid%imedia(ix,iy,iz+1)==0 .or. grid%imedia(ix,iy,iz-1)==0)then
+            call eh_sendrecv(fs,fw,'r')
+            fs%imedia(:,:,:)=int(fw%rmedia(:,:,:)+1d-3)
+            do iz=fs%ng_sta(3),fs%ng_end(3)
+            do iy=fs%ng_sta(2),fs%ng_end(2)
+            do ix=fs%ng_sta(1),fs%ng_end(1)
+              if(fs%imedia(ix,iy,iz)==1) then
+                if(fs%imedia(ix+1,iy,iz)==0 .or. fs%imedia(ix-1,iy,iz)==0 .or. &
+                   fs%imedia(ix,iy+1,iz)==0 .or. fs%imedia(ix,iy-1,iz)==0 .or. &
+                   fs%imedia(ix,iy,iz+1)==0 .or. fs%imedia(ix,iy,iz-1)==0)then
                   if(icomp==1)     then
-                    tmp%wex_d(ix,iy,iz,ii)=weight_d
+                    fw%wex_d(ix,iy,iz,ii)=weight_d
                   elseif(icomp==2) then
-                    tmp%wey_d(ix,iy,iz,ii)=weight_d
+                    fw%wey_d(ix,iy,iz,ii)=weight_d
                   elseif(icomp==3) then
-                    tmp%wez_d(ix,iy,iz,ii)=weight_d
+                    fw%wez_d(ix,iy,iz,ii)=weight_d
                   end if
                 end if
               end if
@@ -1171,7 +1173,7 @@ contains
             end do
           end do
         end do
-        deallocate(grid%imedia); deallocate(tmp%rmedia);
+        deallocate(fs%imedia); deallocate(fw%rmedia);
       end if
     end if
     
@@ -1182,174 +1184,174 @@ contains
   subroutine eh_set_pml(idir,c1_e1,c2_e1,c1_e2,c2_e2,c1_h1,c2_h1,c1_h2,c2_h2)
     implicit none
     integer,intent(in)  :: idir
-    real(8),intent(out) :: c1_e1(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-                           c2_e1(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-                           c1_e2(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-                           c2_e2(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-                           c1_h1(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-                           c2_h1(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-                           c1_h2(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd),&
-                           c2_h2(grid%ng_sta(1)-tmp%Nd:grid%ng_end(1)+tmp%Nd,&
-                                 grid%ng_sta(2)-tmp%Nd:grid%ng_end(2)+tmp%Nd,&
-                                 grid%ng_sta(3)-tmp%Nd:grid%ng_end(3)+tmp%Nd)
+    real(8),intent(out) :: c1_e1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           c2_e1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           c1_e2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           c2_e2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           c1_h1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           c2_h1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           c1_h2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
+                           c2_h2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
+                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
+                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd)
     integer :: ista,iend
     real(8) :: pml_del,s_max
-    real(8) :: s_l(tmp%ipml_l+1),sh_l(tmp%ipml_l), &
-               c1_pml(tmp%ipml_l+1),c2_pml(tmp%ipml_l+1),c1_pml_h(tmp%ipml_l),c2_pml_h(tmp%ipml_l)
+    real(8) :: s_l(fw%ipml_l+1),sh_l(fw%ipml_l), &
+               c1_pml(fw%ipml_l+1),c2_pml(fw%ipml_l+1),c1_pml_h(fw%ipml_l),c2_pml_h(fw%ipml_l)
 
     !set pml conductivity
-    pml_del=grid%hgs(idir)
-    s_max=-(tmp%pml_m+1.0d0)*log(tmp%pml_r)/(2.0d0*dble(tmp%ipml_l)*pml_del) &
-          *tmp%c_0/(4.0d0*pi)*sqrt(tmp%rep(0)/tmp%rmu(0));
-    do ii=1,(tmp%ipml_l+1)
+    pml_del=fs%hgs(idir)
+    s_max=-(fw%pml_m+1.0d0)*log(fw%pml_r)/(2.0d0*dble(fw%ipml_l)*pml_del) &
+          *fw%c_0/(4.0d0*pi)*sqrt(fw%rep(0)/fw%rmu(0));
+    do ii=1,(fw%ipml_l+1)
       s_l(ii)=s_max*(&
-                    (dble(tmp%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(tmp%ipml_l)*pml_del)&
-                    )**tmp%pml_m;
+                    (dble(fw%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fw%ipml_l)*pml_del)&
+                    )**fw%pml_m;
     end do
-    do ii=1,tmp%ipml_l
-      sh_l(ii)=(tmp%rmu(0)/tmp%rep(0)) &
+    do ii=1,fw%ipml_l
+      sh_l(ii)=(fw%rmu(0)/fw%rep(0)) &
                *s_max*(&
-                      (dble(tmp%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(tmp%ipml_l)*pml_del)&
-                      )**tmp%pml_m;
+                      (dble(fw%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(fw%ipml_l)*pml_del)&
+                      )**fw%pml_m;
     end do
     
     !set pml coefficient
-    do ii=1,(tmp%ipml_l+1)
-      c1_pml(ii)=(1.0d0-2.0d0*pi*s_l(ii)/tmp%rep(0)*grid%dt) &
-                 /(1.0d0+2.0d0*pi*s_l(ii)/tmp%rep(0)*grid%dt);
-      c2_pml(ii)=(tmp%c_0/tmp%rep(0)*grid%dt) &
-                 /(1.0d0+2.0d0*pi*s_l(ii)/tmp%rep(0)*grid%dt)/pml_del
+    do ii=1,(fw%ipml_l+1)
+      c1_pml(ii)=(1.0d0-2.0d0*pi*s_l(ii)/fw%rep(0)*fs%dt) &
+                 /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*fs%dt);
+      c2_pml(ii)=(fw%c_0/fw%rep(0)*fs%dt) &
+                 /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*fs%dt)/pml_del
     end do
     call comm_bcast(c1_pml,nproc_group_global)
     call comm_bcast(c2_pml,nproc_group_global)
-    do ii=1,tmp%ipml_l
-      c1_pml_h(ii)=(1.0d0-2.0d0*pi*sh_l(ii)/tmp%rmu(0)*grid%dt) &
-                   /(1.0d0+2.0d0*pi*sh_l(ii)/tmp%rmu(0)*grid%dt);
-      c2_pml_h(ii)=(tmp%c_0/tmp%rmu(0)*grid%dt) &
-                   /(1.0d0+2.0d0*pi*sh_l(ii)/tmp%rmu(0)*grid%dt)/pml_del
+    do ii=1,fw%ipml_l
+      c1_pml_h(ii)=(1.0d0-2.0d0*pi*sh_l(ii)/fw%rmu(0)*fs%dt) &
+                   /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*fs%dt);
+      c2_pml_h(ii)=(fw%c_0/fw%rmu(0)*fs%dt) &
+                   /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*fs%dt)/pml_del
     end do
     call comm_bcast(c1_pml_h,nproc_group_global)
     call comm_bcast(c2_pml_h,nproc_group_global)
     
     !set pml(bottom)
-    if((grid%i_bc(idir,1)==1).and.(grid%ng_sta(idir)<=(grid%lg_sta(idir)+tmp%ipml_l))) then
+    if((fs%i_bc(idir,1)==1).and.(fs%ng_sta(idir)<=(fs%lg_sta(idir)+fw%ipml_l))) then
       !e
-      iend=grid%lg_sta(idir)+tmp%ipml_l
-      if(grid%ng_end(idir)<iend) then
-        iend=grid%ng_end(idir)
+      iend=fs%lg_sta(idir)+fw%ipml_l
+      if(fs%ng_end(idir)<iend) then
+        iend=fs%ng_end(idir)
       end if
       icount=1
-      do ii=grid%ng_sta(idir),iend
+      do ii=fs%ng_sta(idir),iend
         if(idir==1) then
-          c1_e1(ii,:,:)= c1_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_e1(ii,:,:)=-c2_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c1_e2(ii,:,:)= c1_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_e2(ii,:,:)= c2_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
+          c1_e1(ii,:,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_e1(ii,:,:)=-c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_e2(ii,:,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_e2(ii,:,:)= c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
         elseif(idir==2) then
-          c1_e1(:,ii,:)= c1_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_e1(:,ii,:)=-c2_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c1_e2(:,ii,:)= c1_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_e2(:,ii,:)= c2_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
+          c1_e1(:,ii,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_e1(:,ii,:)=-c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_e2(:,ii,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_e2(:,ii,:)= c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
         elseif(idir==3) then
-          c1_e1(:,:,ii)= c1_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_e1(:,:,ii)=-c2_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c1_e2(:,:,ii)= c1_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_e2(:,:,ii)= c2_pml(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
+          c1_e1(:,:,ii)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_e1(:,:,ii)=-c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_e2(:,:,ii)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_e2(:,:,ii)= c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
         end if
         icount=icount+1
       end do
       
       !h
-      if(iend==(grid%lg_sta(idir)+tmp%ipml_l)) then
+      if(iend==(fs%lg_sta(idir)+fw%ipml_l)) then
         iend=iend-1
       end if
       icount=1
-      do ii=grid%ng_sta(idir),iend
+      do ii=fs%ng_sta(idir),iend
         if(idir==1) then
-          c1_h1(ii,:,:)= c1_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_h1(ii,:,:)= c2_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c1_h2(ii,:,:)= c1_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_h2(ii,:,:)=-c2_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
+          c1_h1(ii,:,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_h1(ii,:,:)= c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_h2(ii,:,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_h2(ii,:,:)=-c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
         elseif(idir==2) then
-          c1_h1(:,ii,:)= c1_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_h1(:,ii,:)= c2_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c1_h2(:,ii,:)= c1_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_h2(:,ii,:)=-c2_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
+          c1_h1(:,ii,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_h1(:,ii,:)= c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_h2(:,ii,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_h2(:,ii,:)=-c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
         elseif(idir==3) then
-          c1_h1(:,:,ii)= c1_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_h1(:,:,ii)= c2_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c1_h2(:,:,ii)= c1_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
-          c2_h2(:,:,ii)=-c2_pml_h(grid%ng_sta(idir)-grid%lg_sta(idir)+icount)
+          c1_h1(:,:,ii)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_h1(:,:,ii)= c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_h2(:,:,ii)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c2_h2(:,:,ii)=-c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
         end if
         icount=icount+1
       end do
     end if
     
     !set pml(top)
-    if((grid%i_bc(idir,2)==1).and.(grid%ng_end(idir)>=(grid%lg_end(idir)-tmp%ipml_l))) then
+    if((fs%i_bc(idir,2)==1).and.(fs%ng_end(idir)>=(fs%lg_end(idir)-fw%ipml_l))) then
       !e
-      ista=grid%lg_end(idir)-tmp%ipml_l
-      if(grid%ng_sta(idir)>ista) then
-        ista=grid%ng_sta(idir)
+      ista=fs%lg_end(idir)-fw%ipml_l
+      if(fs%ng_sta(idir)>ista) then
+        ista=fs%ng_sta(idir)
       end if
       icount=1
-      do ii=ista,grid%ng_end(idir)
+      do ii=ista,fs%ng_end(idir)
         if(idir==1) then
-          c1_e1(ii,:,:)= c1_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_e1(ii,:,:)=-c2_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c1_e2(ii,:,:)= c1_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_e2(ii,:,:)= c2_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
+          c1_e1(ii,:,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_e1(ii,:,:)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_e2(ii,:,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_e2(ii,:,:)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==2) then
-          c1_e1(:,ii,:)= c1_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_e1(:,ii,:)=-c2_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c1_e2(:,ii,:)= c1_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_e2(:,ii,:)= c2_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
+          c1_e1(:,ii,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_e1(:,ii,:)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_e2(:,ii,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_e2(:,ii,:)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==3) then
-          c1_e1(:,:,ii)= c1_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_e1(:,:,ii)=-c2_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c1_e2(:,:,ii)= c1_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_e2(:,:,ii)= c2_pml((tmp%ipml_l+1)-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
+          c1_e1(:,:,ii)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_e1(:,:,ii)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_e2(:,:,ii)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_e2(:,:,ii)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
         end if
         icount=icount+1
       end do
       
       !h
-      if(grid%ng_end(idir)==grid%lg_end(idir)) then
-        iend=grid%ng_end(idir)-1
+      if(fs%ng_end(idir)==fs%lg_end(idir)) then
+        iend=fs%ng_end(idir)-1
       else
-        iend=grid%ng_end(idir)
+        iend=fs%ng_end(idir)
       end if
       icount=1
       do ii=ista,iend
         if(idir==1) then
-          c1_h1(ii,:,:)= c1_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_h1(ii,:,:)= c2_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c1_h2(ii,:,:)= c1_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_h2(ii,:,:)=-c2_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
+          c1_h1(ii,:,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_h1(ii,:,:)= c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_h2(ii,:,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_h2(ii,:,:)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==2) then
-          c1_h1(:,ii,:)= c1_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_h1(:,ii,:)= c2_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c1_h2(:,ii,:)= c1_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_h2(:,ii,:)=-c2_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
+          c1_h1(:,ii,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_h1(:,ii,:)= c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_h2(:,ii,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_h2(:,ii,:)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==3) then
-          c1_h1(:,:,ii)= c1_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_h1(:,:,ii)= c2_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c1_h2(:,:,ii)= c1_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
-          c2_h2(:,:,ii)=-c2_pml_h(tmp%ipml_l-(ista-(grid%lg_end(idir)-tmp%ipml_l)+(icount-1)))
+          c1_h1(:,:,ii)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_h1(:,:,ii)= c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_h2(:,:,ii)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c2_h2(:,:,ii)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
         end if
         icount=icount+1
       end do
@@ -1542,13 +1544,44 @@ subroutine eh_find_point(rloc,id,ipo,ili,ipl,ista,iend,icoo_sta,icoo_end,coo)
 end subroutine eh_find_point
 
 !=========================================================================================
+!= set coordinate ========================================================================
+subroutine eh_set_coo(iperi,Nd,ioe,ista,iend,hgs,coo)
+  implicit none
+  integer,intent(in)  :: iperi,Nd
+  integer,intent(in)  :: ioe(3),ista(3),iend(3)
+  real(8),intent(in)  :: hgs(3)
+  real(8),intent(out) :: coo(minval(ista(:))-Nd:maxval(iend(:))+Nd,3)
+  integer :: ii,ij
+  
+  do ii=1,3
+    select case(iperi)
+    case(0)
+      select case(ioe(ii))
+      case(1)
+        do ij=ista(ii)-Nd,iend(ii)+Nd
+          coo(ij,ii)=dble(ij)*hgs(ii)
+        end do
+      case(2)
+        do ij=ista(ii)-Nd,iend(ii)+Nd
+          coo(ij,ii)=(dble(ij)-0.5d0)*hgs(ii)
+        end do
+      end select
+    case(3)
+      do ij=ista(ii)-Nd,iend(ii)+Nd
+        coo(ij,ii)=dble(ij-1)*hgs(ii)
+      end do
+    end select
+  end do
+  
+end subroutine eh_set_coo
+
+!=========================================================================================
 != prepare GCEED =========================================================================
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
-subroutine eh_prep_GCEED(grid,tmp)
+subroutine eh_prep_GCEED(fs,fw)
   use inputoutput,       only: nproc_domain,nproc_domain_s,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
-  use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global
-  use structures,        only: s_rgrid
+  use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global,nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_Mxin,nproc_Mxin_s,nproc_Mxin_mul,nproc_Mxin_mul_s_dm,nproc_Mxin_s_dm,&
                                k_sta,k_end,k_num,num_kpoints_3d,num_kpoints_rd,&
@@ -1558,17 +1591,17 @@ subroutine eh_prep_GCEED(grid,tmp)
                                ng_sta,ng_end,ng_num,&
                                ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,Nd, &
                                ista_Mxin,iend_Mxin,inum_Mxin,&
-                               ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-                               gridcoo,iwk_size,make_iwksta_iwkend
+                               ista_Mxin_s,iend_Mxin_s,inum_Mxin_s
   use new_world_sub,     only: make_new_world
-  use init_sendrecv_sub, only: init_updown,init_itype,init_sendrecv_matrix
-  use persistent_comm,   only: init_persistent_requests
+  use init_sendrecv_sub, only: init_updown,iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
+  use sendrecv_grid,     only: init_sendrecv_grid
   use structures,        only: s_fdtd_system
   use salmon_maxwell,    only: s_fdtd_work
   implicit none
-  type(s_rgrid)       :: lg,mg,ng
-  type(s_fdtd_system) :: grid
-  type(s_fdtd_work)   :: tmp
+  type(s_fdtd_system)   :: fs
+  type(s_fdtd_work)     :: fw
+  integer               :: neig_ng_eh(1:3,1:2)
+  integer               :: id_tmp,ii
   
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
@@ -1581,35 +1614,58 @@ subroutine eh_prep_GCEED(grid,tmp)
   call make_new_world
   call setk(k_sta,k_end,k_num,num_kpoints_rd,nproc_k,nproc_id_orbitalgrid)
   
-  !set grid
-  rLsize(:,1)=grid%rlsize(:); Harray(:,1)=grid%hgs(:);
+  !set grid and odd or even grid paterns
+  rLsize(:,1)=fs%rlsize(:); Harray(:,1)=fs%hgs(:);
   Hgs(:)=Harray(:,1); Hvol=Hgs(1)*Hgs(2)*Hgs(3);
   call set_imesh_oddeven(1)
-  call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+  call setlg(fs%lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
              Hgs,Nd,rLsize(:,1),imesh_oddeven,iperiodic,1)
   allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1), &
            inum_Mxin(3,0:nproc_size_global-1))
-  call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
+  call setmg(fs%mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
              lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,1)
   allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
   allocate(inum_Mxin_s(3,0:nproc_size_global-1))
-  call setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
+  call setng(fs%ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
              nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,1)
-  grid%lg_sta(:)=lg_sta(:); grid%lg_end(:)=lg_end(:);
-  grid%ng_sta(:)=ng_sta(:); grid%ng_end(:)=ng_end(:);
-  
-  !set coordinate
-  allocate(tmp%coo(minval(grid%lg_sta(:))-tmp%Nd:maxval(grid%lg_end(:))+tmp%Nd,3))
-  call set_gridcoo
-  tmp%coo(:,:)=gridcoo(:,:)
+  fs%lg_sta(:)=fs%lg%is(:); fs%lg_end(:)=fs%lg%ie(:);
+  fs%ng_sta(:)=fs%ng%is(:); fs%ng_end(:)=fs%ng%ie(:);
+  fw%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment
   call init_updown
-  call init_itype
-  call init_sendrecv_matrix
-  call init_persistent_requests
-  iwk_size=tmp%iwk_size_eh
-  call make_iwksta_iwkend
-  iwk_size=2
+  if (iperiodic==0) then
+    id_tmp=2;
+  elseif (iperiodic==3) then
+    !This process is temporal. 
+    !With bug-fixing init_updown for iperiodic=3 and ob=1, this process will be removed.
+    id_tmp=1;
+  end if
+  neig_ng_eh(1,1)=iup_array(id_tmp); neig_ng_eh(1,2)=idw_array(id_tmp);
+  neig_ng_eh(2,1)=jup_array(id_tmp); neig_ng_eh(2,2)=jdw_array(id_tmp);
+  neig_ng_eh(3,1)=kup_array(id_tmp); neig_ng_eh(3,2)=kdw_array(id_tmp);
+  !This process about ng is temporal. 
+  !With modifying set_ng to be applied to arbitrary Nd, this process will be removed.
+  fs%ng%is_overlap(1:3)=fs%ng_sta(1:3)-fw%Nd
+  fs%ng%ie_overlap(1:3)=fs%ng_end(1:3)+fw%Nd
+  fs%ng%is_array(1:3)  =fs%ng_sta(1:3)-fw%Nd
+  fs%ng%ie_array(1:3)  =fs%ng_end(1:3)+fw%Nd
+  if(allocated(fs%ng%idx)) deallocate(fs%ng%idx)
+  if(allocated(fs%ng%idy)) deallocate(fs%ng%idy)
+  if(allocated(fs%ng%idz)) deallocate(fs%ng%idz)
+  allocate(fs%ng%idx(fs%ng%is_overlap(1):fs%ng%ie_overlap(1)), &
+           fs%ng%idy(fs%ng%is_overlap(2):fs%ng%ie_overlap(2)), &
+           fs%ng%idz(fs%ng%is_overlap(3):fs%ng%ie_overlap(3)))
+  do ii=fs%ng%is_overlap(1),fs%ng%ie_overlap(1)
+    fs%ng%idx(ii)=ii
+  end do
+  do ii=fs%ng%is_overlap(2),fs%ng%ie_overlap(2)
+    fs%ng%idy(ii)=ii
+  end do
+  do ii=fs%ng%is_overlap(3),fs%ng%ie_overlap(3)
+    fs%ng%idz(ii)=ii
+  end do
+  fs%ng%nd=fw%Nd
+  call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,nproc_id_global,neig_ng_eh)
   
 end subroutine eh_prep_GCEED

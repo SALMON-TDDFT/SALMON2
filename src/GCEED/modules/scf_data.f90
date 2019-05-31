@@ -143,10 +143,10 @@ real(8),allocatable :: rbox_array2_dip2e(:)
 
 integer :: ilsda
 
-integer :: iflag_stopt
-integer :: iter_stopt
-integer :: istopt
-integer :: istopt_tranc
+logical :: flag_opt_conv
+integer :: iflag_opt
+integer :: iter_opt
+integer :: iopt
 
 integer :: MST(2),ifMST(2),itotMST
 integer :: itotfMST
@@ -157,7 +157,6 @@ real(8) :: rnetot
 
 character(8),allocatable :: AtomName(:)   
 integer,allocatable :: iAtomicNumber(:)   
-integer,allocatable :: istopt_a(:)    
 
 real(8) :: Hgs(3)        ! Grid spacing
 real(8) :: Hold(3)     ! Grid spacing
