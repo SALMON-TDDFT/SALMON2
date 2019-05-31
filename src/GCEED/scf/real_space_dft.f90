@@ -497,42 +497,6 @@ if(iopt==1)then
       rho_s_in =0d0
       rho_s_out=0d0
     end if
-    rho=0d0 
-
-
-        ! Store to psi/zpsi
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    end select
 
     call calc_density(srho,spsi,info,mg,nspin)
     if(ilsda==0)then
@@ -1054,40 +1018,6 @@ DFT_Iteration : do iter=1,iDiter(img)
       end if
     end if
   
-    ! Store to psi/zpsi for calc_density
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end do
-      end do
-    end do
-    end select 
-
     call timer_begin(LOG_CALC_RHO)
     call calc_density(srho,spsi,info,mg,nspin)
     if(ilsda==0)then
@@ -1257,44 +1187,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)    
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
-
-
-
-
-
-    ! Store to psi/zpsi for calc_density
-  select case(iperiodic)
-  case(0)
-    do ik=k_sta,k_end
-    do iob=1,info%numo
-      do is=1,nspin
-        !$OMP parallel do private(iz,iy,ix)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
-        end do
-        end do
-        end do
-      end do
-    end do
-    end do
-  case(3)
-    do ik=k_sta,k_end
-    do iob=1,info%numo
-      do is=1,nspin
-        !$OMP parallel do private(iz,iy,ix)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
-        end do
-        end do
-        end do
-      end do
-    end do
-  end do
-  end select 
 
     call timer_begin(LOG_CALC_RHO)
     call calc_density(srho,spsi,info,mg,nspin)
