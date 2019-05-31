@@ -24,7 +24,6 @@ use deallocate_mat_sub
 use new_world_sub
 use init_sendrecv_sub
 use copy_psi_mesh_sub
-use calc_density_sub
 use change_order_sub
 use read_pslfile_sub
 use allocate_psl_sub
@@ -60,6 +59,7 @@ use gscg_periodic_sub
 use rmmdiis_sub
 use subspace_diag_sub
 use subspace_diag_periodic_sub
+use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
 use lattice
@@ -95,6 +95,7 @@ type(s_fourier_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_energy) :: energy
 type(s_force)  :: force
+ 
 
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -242,6 +243,7 @@ if(iopt==1)then
             ,system%rocc(system%no,system%nk,system%nspin))
     system%wtk  = wtk
     system%rion = rion
+    system%rocc(:,:,1) = rocc
     
     allocate(energy%esp(system%no,system%nk,system%nspin))
 
@@ -276,6 +278,15 @@ if(iopt==1)then
       call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
       info%io_tbl(iob) = jj
       info%jo_tbl(jj)  = iob
+    end do
+
+    do jspin=1,system%nspin
+      do ik=info%ik_s,info%ik_e
+        do iob=info%io_s,info%io_e
+          jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+          info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+        end do
+      end do
     end do
     
     do jj=1, system%no
@@ -520,13 +531,31 @@ if(iopt==1)then
           end do
         end do
       end do
-    end do
+      end do
     end select
 
-    select case(iperiodic)
-    case(0) ; call calc_density(psi)
-    case(3) ; call calc_density(zpsi)
-    end select
+    call calc_density(srho,spsi,info,mg,nspin)
+    if(ilsda==0)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    else if(ilsda==1)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
 
     if(ilsda==0)then
       allocate (Vlocal(mg_sta(1):mg_end(1),  &
@@ -653,7 +682,8 @@ if(iopt==1)then
             ,system%rocc(system%no,system%nk,system%nspin))
     system%wtk  = wtk
     system%rion = rion
-    
+    system%rocc(:,:,1) = rocc
+
     allocate(energy%esp(system%no,system%nk,system%nspin))
 
     info%im_s = 1
@@ -688,6 +718,15 @@ if(iopt==1)then
       call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
       info%io_tbl(iob) = jj
       info%jo_tbl(jj)  = iob
+    end do
+    
+    do jspin=1,system%nspin
+      do ik=info%ik_s,info%ik_e
+        do iob=info%io_s,info%io_e
+          jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+          info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+        end do
+      end do
     end do
     
     do jj=1, system%no
@@ -1050,10 +1089,28 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select 
 
     call timer_begin(LOG_CALC_RHO)
-    select case(iperiodic)
-    case(0) ; call calc_density(psi)
-    case(3) ; call calc_density(zpsi)
-    end select
+    call calc_density(srho,spsi,info,mg,nspin)
+    if(ilsda==0)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    else if(ilsda==1)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
 
     select case(amixing)
       case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
@@ -1240,10 +1297,28 @@ DFT_Iteration : do iter=1,iDiter(img)
   end select 
 
     call timer_begin(LOG_CALC_RHO)
-    select case(iperiodic)
-    case(0) ; call calc_density(psi)
-    case(3) ; call calc_density(zpsi)
-    end select
+    call calc_density(srho,spsi,info,mg,nspin)
+    if(ilsda==0)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    else if(ilsda==1)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
     call timer_end(LOG_CALC_RHO)
 
 
@@ -1273,10 +1348,28 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     
     call timer_begin(LOG_CALC_RHO)
-    select case(iperiodic)
-    case(0) ; call calc_density(psi)
-    case(3) ; call calc_density(zpsi)
-    end select
+    call calc_density(srho,spsi,info,mg,nspin)
+    if(ilsda==0)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    else if(ilsda==1)then
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
     call timer_end(LOG_CALC_RHO)
 
 
