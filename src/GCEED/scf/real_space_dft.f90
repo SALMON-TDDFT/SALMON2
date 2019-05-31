@@ -69,6 +69,7 @@ use force_sub
 use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
 use print_sub
+use read_gs
 implicit none
 integer :: ix,iy,iz,ik,ikoa, is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -432,41 +433,45 @@ if(iopt==1)then
       end select
     end if
 
-    call init_wf_ns(1)
-    ! Store to psi/zpsi
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+    if(read_gs_wfn_k=='n') then
+      call init_wf_ns(1)
+      ! Store to psi/zpsi
+      select case(iperiodic)
+      case(0)
+        do ik=k_sta,k_end
+        do iob=1,info%numo
+          do is=1,nspin
+            !$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%rwf(ix,iy,iz,is,iob,ik,1)=psi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+            end do
+            end do
+            end do
           end do
-          end do
+        end do
+        end do
+      case(3)
+        do ik=k_sta,k_end
+        do iob=1,info%numo
+          do is=1,nspin
+            !$OMP parallel do private(iz,iy,ix)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
+              spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
+            end do
+            end do
+            end do
           end do
         end do
       end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          !$OMP parallel do private(iz,iy,ix)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)
-          end do
-          end do
-          end do
-        end do
-      end do
-    end do
-    end select 
-
+      end select
+    else
+      if(iperiodic==0) stop "error: read_gs_wfn_k='y' & iperiodic=0"
+      call read_wfn(lg,mg,spsi,info,system,k_rd)
+    end if
     
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
@@ -523,7 +528,6 @@ if(iopt==1)then
     end do
     end select
 
-<<<<<<< HEAD
     if(read_gs_dns_cube == 'n') then
       select case(iperiodic)
       case(0)
@@ -532,14 +536,8 @@ if(iopt==1)then
         call calc_density(zpsi)
       end select
     else
-      call read_dns ! cube file only
+      call read_dns(lg,mg,rho) ! cube file only
     end if
-=======
-    select case(iperiodic)
-    case(0) ; call calc_density(psi)
-    case(3) ; call calc_density(zpsi)
-    end select
->>>>>>> 9648c4560f94ac5d6f4d9db7e1706c15ce5742d6
 
     if(ilsda==0)then
       allocate (Vlocal(mg_sta(1):mg_end(1),  &
@@ -1476,8 +1474,16 @@ if(iperiodic==3) then
    call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
 endif
 
+! output the wavefunctions for next GS calculations
+if(write_gs_wfn_k == 'y') then
+  if(iperiodic==3) then
+    call write_wfn(lg,mg,spsi,info,system,k_rd)
+  else
+    write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
+  end if
+end if
 
-! output for transition moment
+! output transition moment
 if(out_tm  == 'y') then
   if(iperiodic==3) then
     call write_k_data(k_rd,system,stencil)
@@ -1707,47 +1713,6 @@ subroutine band_information
   end if
   return
 end subroutine band_information
-
-subroutine read_dns
-  implicit none
-  character(8),parameter :: filename="dns.cube"
-  integer,parameter :: fp=103
-  integer :: num(3),iatom,ix,iy,iz
-  real(8),allocatable :: tmp(:,:,:)
-  allocate(tmp(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-
-  if(comm_is_root(nproc_id_global))then
-    write(*,*) "read GS density dns.cube"
-    open(fp,file=filename)
-    read(fp,*)
-    read(fp,*)
-    read(fp,*) iatom
-    if(iatom/=natom) stop "error @ read_rho: natom"
-    read(fp,*) num(1)
-    read(fp,*) num(2)
-    read(fp,*) num(3)
-    if(num(1)/=lg%num(1) .or. num(2)/=lg%num(2) .or. num(3)/=lg%num(3)) stop "error @ read_rho: lg"
-    do iatom=1,natom
-      read(fp,'(i5,4f12.6)')
-    end do
-    do ix=lg%is(1),lg%ie(1)
-    do iy=lg%is(2),lg%ie(2)
-      read(fp,*) (tmp(ix,iy,iz),iz=lg%is(3),lg%ie(3))
-    end do
-    end do
-    close(fp)
-  end if
-  call comm_bcast(tmp,nproc_group_global)
-  do iz=mg%is(3),mg%ie(3)
-  do iy=mg%is(2),mg%ie(2)
-  do ix=mg%is(1),mg%ie(1)
-    rho(ix,iy,iz) = tmp(ix,iy,iz)
-  enddo
-  enddo
-  enddo
-  deallocate(tmp)
-  return
-end subroutine read_dns
 
 subroutine get_fourier_grid_G(fg)
   use structures, only: s_fourier_grid
