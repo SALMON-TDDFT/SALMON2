@@ -1449,6 +1449,40 @@ end if
 
 end do DFT_Iteration
 
+! Store to psi/zpsi
+select case(iperiodic)
+case(0)
+  do ik=k_sta,k_end
+  do iob=1,info%numo
+    do is=1,nspin
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+case(3)
+  do ik=k_sta,k_end
+  do iob=1,info%numo
+    do is=1,nspin
+      !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
+      end do
+      end do
+      end do
+    end do
+  end do
+end do
+end select
+
 !(prepare variables for the next analysis)
 if(iperiodic==3) then
    allocate(stencil%kAc(k_sta:k_end,3))
