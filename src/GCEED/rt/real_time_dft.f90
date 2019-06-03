@@ -52,9 +52,10 @@ implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
-type(s_system) :: system
+type(s_system)  :: system
 type(s_wf_info) :: info
 type(s_stencil) :: stencil
+type(s_force)   :: force
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -202,7 +203,7 @@ call timer_begin(LOG_READ_LDA_DATA)
 call IN_data(lg,mg,ng,system,info,stencil)
 
 if(comm_is_root(nproc_id_global))then
-  if(icalcforce==1.and.iflag_md==1)then
+  if(iflag_md==1)then
     do jj=1,2
       if(idisnum(jj)>MI) then
         write(*,*) "idisnum is larger than MI"
@@ -350,7 +351,7 @@ end if
 call timer_end(LOG_INIT_RT)
 
 
-call Time_Evolution(lg,mg,ng,system,info,stencil)
+call Time_Evolution(lg,mg,ng,system,info,stencil,force)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -654,10 +655,10 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,force)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
-                           nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho, &
+use salmon_parallel, only: nproc_group_global, nproc_id_global, & !nproc_group_grid,   &
+                           nproc_group_h, nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
@@ -678,6 +679,7 @@ type(s_wavefunction) :: spsi_in,spsi_out
 type(s_wavefunction) :: sshtpsi
 type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_nlcc) :: ppn
+type(s_force)   :: force
 
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
@@ -685,9 +687,9 @@ integer :: nspin
 real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
-integer :: iob_allob
+!integer :: iob_allob
 real(8) :: absr2
-integer :: j,ind
+!integer :: j,ind
 integer :: is,jspin
 integer :: neig(1:3, 1:2)
 integer :: neig_ng(1:3, 1:2)
@@ -1378,9 +1380,10 @@ if(iperiodic==3)then
 end if
 
 !-------------------------------------------------- Time evolution
-if(iflag_md==1)then
-  call calc_force_c(zpsi_in)
-end if
+!hoge: this does not work now
+!if(iflag_md==1)then
+!  call calc_force_c(zpsi_in)
+!end if
 
 if(comm_is_root(nproc_id_global))then
   select case(iperiodic)
@@ -1393,33 +1396,34 @@ if(comm_is_root(nproc_id_global))then
                              " Current(xyz)[a.u.]   "      &
           ,"      electrons","      Total energy[eV]"
   end select
-  write(*,*) "-------------------------------------"      &
-     ,"------------------"
-  if(iflag_md==1)then
-    write(15,'(2a16,a24)') "        Time[fs]",      &
-                   "    Distance [A]",     &
-                   " Total energy [eV]   "  
-    write(15,*) "-------------------------------------"      &
-     ,"------------------"
-    do ii=1,wmaxMI
-      write(20+ii,'(a16,a28)') "        Time[fs]",      &
-                   "    Cooordinate (xyz) [A]   "
-      write(20+ii,*) "-------------------------------------"      &
-       ,"------------------"
-      write(30+ii,'(a16,a28)') "        Time[fs]",      &
-                   "       Force (xyz) [eV/A]   "
-      write(30+ii,*) "-------------------------------------"      &
-       ,"------------------"
-    end do
-    write(15,'(3f16.8)') dble(0)*dt*0.0241889d0,  &
-                sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
-                    +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
-                    +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, Etot*2.d0*Ry
-    do ii=1,wmaxMI
-      write(20+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (Rion(jj,ii)*a_B,jj=1,3)
-      write(30+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
-    end do
-  end if
+  write(*,*) "-------------------------------------",  &
+             "------------------"
+!out put for MD: replace later
+!  if(iflag_md==1)then
+!    write(15,'(2a16,a24)') "        Time[fs]",      &
+!                   "    Distance [A]",     &
+!                   " Total energy [eV]   "  
+!    write(15,*) "-------------------------------------"      &
+!     ,"------------------"
+!    do ii=1,wmaxMI
+!      write(20+ii,'(a16,a28)') "        Time[fs]",      &
+!                   "    Cooordinate (xyz) [A]   "
+!      write(20+ii,*) "-------------------------------------"      &
+!       ,"------------------"
+!      write(30+ii,'(a16,a28)') "        Time[fs]",      &
+!                   "       Force (xyz) [eV/A]   "
+!      write(30+ii,*) "-------------------------------------"      &
+!       ,"------------------"
+!    end do
+!    write(15,'(3f16.8)') dble(0)*dt*0.0241889d0,  &
+!                sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
+!                    +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
+!                    +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, Etot*2.d0*Ry
+!    do ii=1,wmaxMI
+!      write(20+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (Rion(jj,ii)*a_B,jj=1,3)
+!      write(30+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
+!    end do
+!  end if
   if(iwrite_projection==1)then
     open(41,file=file_Projection)
     write(41,'("#",a13,a56)') "time[fs]", "    projection    projection    projection    projection" 
@@ -1454,7 +1458,8 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) &
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
   end do TE
 
 else
@@ -1469,15 +1474,15 @@ else
     end if
 
     if(itt>=Miter_rt+1) &
-      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
   end do TE1
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
   end do TE2
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
   end do TE3
 
 end if

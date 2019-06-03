@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -43,6 +43,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   type(s_pp_nlcc), intent(in) :: ppn
   type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
   type(s_wavefunction),intent(inout) :: sshtpsi
+  type(s_force),intent(inout)  :: force
   integer :: ix,iy,iz,i1,mm,jj
   integer :: ii,iob,iatom,iik,ik
   real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
@@ -464,12 +465,16 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
 
 
   call timer_begin(LOG_WRITE_INFOS)
-  if(icalcforce==1)then
+  if(iflag_md==1)then  ! and or rvf flag in future
+    !currently, old subroutin calc_force_c for isolated system is used
+    !calc_force_salmon should be used, but now, 
+    !it does not support interaction with field for isolated system
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_force_c(zpsi_in)
     else
       call calc_force_c(zpsi_out)
     end if
+    force%F(:,:) = rforce(:,:)  !rforce must be removed in future
     if(comm_is_root(nproc_id_global))then
       do iatom=1,MI
         dRion(:,iatom,1)=2*dRion(:,iatom,0)-dRion(:,iatom,-1)+    &
@@ -481,7 +486,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     call init_ps(system%al,system%brl,stencil%matrix_A)
     if(comm_is_root(nproc_id_global))then
       dRion(:,:,-1)=dRion(:,:,0)
-      dRion(:,:,0)=dRion(:,:,1)
+      dRion(:,:, 0)=dRion(:,:,1)
     end if
     call comm_bcast(dRion,nproc_group_global)
   end if

@@ -45,6 +45,7 @@ end select
 select case(use_ehrenfest_md)
 case('y')
   iflag_md = 1
+  icalcforce = 1
 case('n')
   iflag_md = 0
 case default
