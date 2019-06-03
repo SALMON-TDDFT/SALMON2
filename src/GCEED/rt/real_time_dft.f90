@@ -1379,7 +1379,7 @@ end if
 
 !-------------------------------------------------- Time evolution
 if(iflag_md==1)then
-  call calc_force_c(zpsi_in)
+  call calc_force_c(mg,srg,zpsi_in)
 end if
 
 if(comm_is_root(nproc_id_global))then

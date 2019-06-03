@@ -13,14 +13,17 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_force_c(tzpsi)
+subroutine calc_force_c(mg,srg,tzpsi)
 use salmon_parallel, only: nproc_group_korbital, nproc_group_global
 use salmon_communication, only: comm_summation
+use structures
 use scf_data
 use allocate_mat_sub
 use read_pslfile_sub
 use new_world_sub
 implicit none
+type(s_rgrid),intent(in) :: mg
+type(s_sendrecv_grid),intent(inout) :: srg
 complex(8) :: tzpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
                     mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
 integer :: ix,iy,iz,iob,ikoa,jj,j2,iatom,ia,ib,lm,ikoa2,iik
@@ -58,7 +61,7 @@ do ia=1,MI
   end do
 end do
 
-call calc_gradient_fast_c(tzpsi,cgrad_wk)
+call calc_gradient_fast_c(mg,srg,tzpsi,cgrad_wk)
 
 ! local part of force
 do iatom=1,MI

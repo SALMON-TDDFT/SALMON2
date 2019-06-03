@@ -466,9 +466,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   call timer_begin(LOG_WRITE_INFOS)
   if(icalcforce==1)then
     if(mod(itt,2)==0.or.propagator=='etrs')then
-      call calc_force_c(zpsi_in)
+      call calc_force_c(mg,srg,zpsi_in)
     else
-      call calc_force_c(zpsi_out)
+      call calc_force_c(mg,srg,zpsi_out)
     end if
     if(comm_is_root(nproc_id_global))then
       do iatom=1,MI

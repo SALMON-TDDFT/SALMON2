@@ -13,17 +13,20 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_gradient_fast_c(tzpsi,cgrad_wk)
+subroutine calc_gradient_fast_c(mg,srg,tzpsi,cgrad_wk)
+use structures
 use scf_data
-use sendrecv_groupob_sub
+use sendrecv_grid, only: update_overlap_complex8
 implicit none
+type(s_rgrid),intent(in) :: mg
+type(s_sendrecv_grid),intent(inout) :: srg
 complex(8) :: tzpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
                     mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
 complex(8) :: cgrad_wk(mg_sta(1):mg_end(1)+1,mg_sta(2):mg_end(2),mg_sta(3):mg_end(3), &
                        1:iobnum,k_sta:k_end,3)
 integer :: ix,iy,iz,iob,iik
 
-call sendrecv_groupob(tzpsi)
+call update_overlap_complex8(srg, mg, tzpsi)
 
 if(Nd==4)then
   do iik=k_sta,k_end
