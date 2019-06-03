@@ -264,7 +264,7 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 
 
 !$omp parallel
-!$omp do private(a,ik,j,i,ix,iy,iz,x,y,z,r,tmpx,tmpy,tmpz)
+!$omp do private(a,ik,j,i,ix,iy,iz,x,y,z,r,rr,tmpx,tmpy,tmpz)
   do a=1,natom
     ik=kion(a)
     j=0
@@ -373,7 +373,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   end if
 
 !$omp parallel
-!$omp do private(a,ik,j,ix,iy,iz,tmpx,tmpy,tmpz,i,x,y,z,r)
+!$omp do private(a,ik,j,ix,iy,iz,tmpx,tmpy,tmpz,i,x,y,z,r,rr)
   do a=1,natom
     ik=kion(a)
     j=0
