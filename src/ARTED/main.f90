@@ -46,8 +46,13 @@ subroutine arted
   use ground_state
   use io_gs_wfn_k
   use io_rt_wfn_k
+  use timer
+  use write_performance_results
+  use iso_fortran_env, only: output_unit
   
   implicit none
+
+  call timer_begin(LOG_TOTAL)
 
   nproc_group_tdks = nproc_group_global
   nproc_id_tdks    = nproc_id_global
@@ -92,6 +97,10 @@ subroutine arted
   case default
     call Err_finalize("Invalid use_ms_maxwell parameter!")
   end select
+
+  call timer_end(LOG_TOTAL)
+
+  call write_performance(output_unit, write_mode_readable)
   
   return
 end subroutine arted

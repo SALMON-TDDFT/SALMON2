@@ -17,47 +17,14 @@ module timer
   use misc_routines, only: get_wtime
   implicit none
 
-  ! Calculation
-  integer,public,parameter :: LOG_ALL          = 0
-  integer,public,parameter :: LOG_STATIC       = 1
-  integer,public,parameter :: LOG_GROUND_STATE = 2
-  integer,public,parameter :: LOG_DYNAMICS     = 3
-  integer,public,parameter :: LOG_IO           = 7
-
-  ! GS routines
-  integer,public,parameter :: LOG_CG           = 10
-  integer,public,parameter :: LOG_DIAG         = 11
-  integer,public,parameter :: LOG_SP_ENERGY    = 12
-  integer,public,parameter :: LOG_GRAM_SCHMIDT = 13
-
-  ! GS and RT routines
-  integer,public,parameter :: LOG_DT_EVOLVE    = 20
-  integer,public,parameter :: LOG_HPSI         = 21
-  integer,public,parameter :: LOG_PSI_RHO      = 22
-  integer,public,parameter :: LOG_HARTREE      = 23
-  integer,public,parameter :: LOG_EXC_COR      = 24
-  integer,public,parameter :: LOG_CURRENT      = 25
-  integer,public,parameter :: LOG_TOTAL_ENERGY = 26
-  integer,public,parameter :: LOG_ION_FORCE    = 27
-  integer,public,parameter :: LOG_DT_EVOLVE_AC = 28
-  integer,public,parameter :: LOG_ANA_RT_USEGS = 29
-!  integer,public,parameter :: LOG_K_SHIFT_WF   = 29  !old name
-  integer,public,parameter :: LOG_OTHER        = 30
-
-  ! Hamiltonian
-  integer,public,parameter :: LOG_HPSI_INIT    = 35
-  integer,public,parameter :: LOG_HPSI_STENCIL = 36
-  integer,public,parameter :: LOG_HPSI_PSEUDO  = 37
-  integer,public,parameter :: LOG_HPSI_UPDATE  = 38
-
-  ! Communication
-  integer,public,parameter :: LOG_ALLREDUCE    = 40
-  integer,public,parameter :: LOG_SENDRECV_GRID= 41
+!  ! Communication
+!  integer,public,parameter :: LOG_ALLREDUCE    = 40
 
 
   ! for unified version
   ! ===============================================================
   integer,public,parameter :: LOG_TOTAL                 = 100
+  integer,public,parameter :: LOG_INIT                  = 101 ! general init.
 
   integer,public,parameter :: LOG_READ_LDA_DATA         = 110
   integer,public,parameter :: LOG_READ_RT_DATA          = 111
@@ -82,16 +49,20 @@ module timer
   integer,public,parameter :: LOG_CALC_HARTREE          = 133
   integer,public,parameter :: LOG_CALC_EXC_COR          = 134
   integer,public,parameter :: LOG_CALC_TOTAL_ENERGY     = 135
+  integer,public,parameter :: LOG_CALC_ION_FORCE        = 136
 
   ! for GS
   integer,public,parameter :: LOG_CALC_GRAM_SCHMIDT     = 140
   integer,public,parameter :: LOG_CALC_SUBSPACE_DIAG    = 141
   integer,public,parameter :: LOG_CALC_MINIMIZATION     = 142
   integer,public,parameter :: LOG_CALC_CHANGE_ORDER     = 143
+  integer,public,parameter :: LOG_CALC_ESP              = 144
 
   ! for RT
+  integer,public,parameter :: LOG_CALC_EMFIELD          = 149
   integer,public,parameter :: LOG_CALC_VBOX             = 150
   integer,public,parameter :: LOG_CALC_TIME_PROPAGATION = 151
+  integer,public,parameter :: LOG_HPSI                  = LOG_CALC_TIME_PROPAGATION
   integer,public,parameter :: LOG_CALC_DP               = 155
   integer,public,parameter :: LOG_CALC_CURRENT          = 156
   integer,public,parameter :: LOG_CALC_VLOCAL           = 158 ! FIXME: wrong name
@@ -99,6 +70,8 @@ module timer
   integer,public,parameter :: LOG_CALC_QUADRUPOLE       = 160 ! FIXME: wrong name
   integer,public,parameter :: LOG_WRITE_ENERGIES        = 161
   integer,public,parameter :: LOG_WRITE_RT_INFOS        = 162
+  integer,public,parameter :: LOG_RT_MISC               = 163
+  integer,public,parameter :: LOG_RT_ANALYSIS           = 164
 
 !  integer,public,parameter :: LOG_SENDRECV_TOTAL            = 200
   integer,public,parameter :: LOG_SENDRECV_TIME_PROPAGATION = 201
@@ -112,8 +85,12 @@ module timer
   integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT3 = 306
   integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT5 = 307
   integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT7 = 308
+  integer,public,parameter :: LOG_ALLREDUCE_ESP         = 309
+  integer,public,parameter :: LOG_ALLREDUCE_ION_FORCE   = 310
 
   integer,public,parameter :: LOG_ALLGATHERV_TOTAL      = 400
+
+  integer,public,parameter :: LOG_SENDRECV_GRID         = 401
 
   ! for specific routines
   ! total_energy_periodic (GCEED part)
@@ -151,6 +128,12 @@ module timer
   integer,public,parameter :: LOG_GSCG_ITERATION        = 1023
   integer,public,parameter :: LOG_GSCG_DEINIT           = 1024
   integer,public,parameter :: LOG_GSCG_ALLREDUCE        = 1025
+
+  ! hpsi (ARTED part)
+  integer,public,parameter :: LOG_HPSI_INIT    = 35
+  integer,public,parameter :: LOG_HPSI_STENCIL = 36
+  integer,public,parameter :: LOG_HPSI_PSEUDO  = 37
+  integer,public,parameter :: LOG_HPSI_UPDATE  = 38
   ! ===============================================================
 
 

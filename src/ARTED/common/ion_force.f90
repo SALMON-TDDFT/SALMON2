@@ -72,7 +72,7 @@ contains
     !if .true.   use gradient of wave-function (better accuracy)
     !if .false., old way which use gradient of potential is used (less accurate)
 
-    call timer_begin(LOG_ION_FORCE)
+    call timer_begin(LOG_CALC_ION_FORCE)
 
     !ion-ion interaction (point charge Ewald)
     if (Rion_update) then
@@ -199,9 +199,9 @@ contains
     call mreduce_omp(ftmp_l,ftmp_t,3*NI,tid)
 !$omp end parallel
 
-    call timer_begin(LOG_ALLREDUCE)
+    call timer_begin(LOG_ALLREDUCE_ION_FORCE)
     call comm_summation(ftmp_l,Floc,3*NI,nproc_group_tdks)
-    call timer_end(LOG_ALLREDUCE)
+    call timer_end(LOG_ALLREDUCE_ION_FORCE)
 
 
     !Non-Local pseudopotential term using gradient of w.f.
@@ -232,9 +232,9 @@ contains
     call mreduce_omp(ftmp_l,ftmp_t,3*NI,tid)
 !$omp end parallel
 
-    call timer_begin(LOG_ALLREDUCE)
+    call timer_begin(LOG_ALLREDUCE_ION_FORCE)
     call comm_summation(ftmp_l,Fnl,3*NI,nproc_group_tdks)
-    call timer_end(LOG_ALLREDUCE)
+    call timer_end(LOG_ALLREDUCE_ION_FORCE)
 
 
     else
@@ -289,18 +289,18 @@ contains
     call mreduce_omp(ftmp_l,ftmp_t,3*NI,tid)
 !$omp end parallel
 
-    call timer_begin(LOG_ALLREDUCE)
+    call timer_begin(LOG_ALLREDUCE_ION_FORCE)
     call comm_summation(ftmp_l,fnl,3*NI,nproc_group_tdks)
-    call timer_end(LOG_ALLREDUCE)
+    call timer_end(LOG_ALLREDUCE_ION_FORCE)
 
     endif ! flag_use_grad_wf_on_force
 
 
-    call timer_begin(LOG_ALLREDUCE)
+    call timer_begin(LOG_ALLREDUCE_ION_FORCE)
     force = Fion + Floc + Fnl
-    call timer_end(LOG_ALLREDUCE)
+    call timer_end(LOG_ALLREDUCE_ION_FORCE)
 
-    call timer_end(LOG_ION_FORCE)
+    call timer_end(LOG_CALC_ION_FORCE)
   end subroutine
 
 !OpenMP manual reduction routine

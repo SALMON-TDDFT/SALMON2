@@ -135,23 +135,27 @@ contains
     call set(4, LOG_CALC_HARTREE      , 'Hartree routine')
     call set(5, LOG_CALC_EXC_COR      , 'Exc_Cor routine')
     call set(6, LOG_CALC_TOTAL_ENERGY , 'calculating Etot')
+    call set(7, LOG_CALC_ESP          , 'calculating esp')
     call write_loadbalance(fd, 7, tsrc, headers, mode)
 
     call set(0, 0, 'in rt iterations')
-    call set( 1, LOG_CALC_VBOX            , 'Vbox')
-    call set( 2, LOG_CALC_TIME_PROPAGATION, 'time propagation')
-    call set( 3, LOG_CALC_RHO             , 'calculating rho')
-    call set( 4, LOG_CALC_HARTREE         , 'Hartree routine')
-    call set( 5, LOG_CALC_EXC_COR         , 'Exc_Cor routine')
-    call set( 6, LOG_CALC_VLOCAL          , 'Vhxc')              ! FIXME: wrong name
-    call set( 7, LOG_CALC_DP              , 'calculating Dp')
-    call set( 8, LOG_CALC_CURRENT         , 'calculating curr')
-    call set( 9, LOG_CALC_TOTAL_ENERGY    , 'calculating Etot')
-    call set(10, LOG_CALC_PROJECTION      , 'calc. projection')
-    call set(11, LOG_CALC_QUADRUPOLE      , 'calc. quadrupole')  ! FIXME: wrong name
-    call set(12, LOG_WRITE_ENERGIES       , 'writing energies')
-    call set(13, LOG_WRITE_RT_INFOS       , 'writing info etc.')
-    call write_loadbalance(fd, 13, tsrc, headers, mode)
+    call set( 1, LOG_CALC_EMFIELD         , 'Emfield')
+    call set( 2, LOG_CALC_VBOX            , 'Vbox')
+    call set( 3, LOG_CALC_TIME_PROPAGATION, 'time propagation')
+    call set( 4, LOG_CALC_RHO             , 'calculating rho')
+    call set( 5, LOG_CALC_HARTREE         , 'Hartree routine')
+    call set( 6, LOG_CALC_EXC_COR         , 'Exc_Cor routine')
+    call set( 7, LOG_CALC_VLOCAL          , 'Vhxc')              ! FIXME: wrong name
+    call set( 8, LOG_CALC_DP              , 'calculating Dp')
+    call set( 9, LOG_CALC_CURRENT         , 'calculating curr')
+    call set(10, LOG_CALC_TOTAL_ENERGY    , 'calculating Etot')
+    call set(11, LOG_CALC_PROJECTION      , 'calc. projection')
+    call set(12, LOG_CALC_QUADRUPOLE      , 'calc. quadrupole')  ! FIXME: wrong name
+    call set(13, LOG_WRITE_ENERGIES       , 'writing energies')
+    call set(14, LOG_WRITE_RT_INFOS       , 'writing info etc.')
+    call set(15, LOG_RT_ANALYSIS          , 'analysis calc.')
+    call set(16, LOG_RT_MISC              , 'misc.')
+    call write_loadbalance(fd, 16, tsrc, headers, mode)
 
     call set(0, 0, 'in subspace-diag')
     call set(1, LOG_DIAG_INIT       , 'initialization')
@@ -171,7 +175,8 @@ contains
     call set(5, LOG_GSCG_DEINIT             , 'deinit.')
     call set(6, LOG_ALLREDUCE_INNER_PRODUCT5, 'comm. for inner product(5)')
     call set(7, LOG_ALLREDUCE_INNER_PRODUCT7, 'comm. for inner product(7)')
-    call write_loadbalance(fd, 7, tsrc, headers, mode)
+    call set(8, LOG_GSCG_ALLREDUCE          , 'comm. for GSCG')
+    call write_loadbalance(fd, 8, tsrc, headers, mode)
 
     call set(0, 0, 'in total_energy_periodic')
     call set(1, LOG_TEP_SENDRECV      , 'sendrecv')
@@ -195,8 +200,9 @@ contains
     call set(1, LOG_ALLREDUCE_RHO    , 'Allreduce in rho')
     call set(2, LOG_ALLREDUCE_HARTREE, 'Allreduce in Hartree')
     call set(3, LOG_ALLREDUCE_DIPOLE , 'Allreduce in dipole calc.')
-    call set(4, LOG_ALLGATHERV_TOTAL , 'Allgatherv')
-    call write_loadbalance(fd, 4, tsrc, headers, mode)
+    call set(4, LOG_ALLREDUCE_ESP    , 'Allreduce in esp')
+    call set(5, LOG_ALLGATHERV_TOTAL , 'Allgatherv')
+    call write_loadbalance(fd, 5, tsrc, headers, mode)
 
   contains
     subroutine set(nid, tid, header)

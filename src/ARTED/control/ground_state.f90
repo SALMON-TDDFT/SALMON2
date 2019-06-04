@@ -33,6 +33,8 @@ contains
     real(8) :: fave,fave_prev
     logical :: flag_functional_override
 
+    call timer_begin(LOG_INIT_GS)
+
     allocate(rho_in(1:NL,1:Nscf+1),rho_out(1:NL,1:Nscf+1))
     rho_in(1:NL,1:Nscf+1)=0.d0; rho_out(1:NL,1:Nscf+1)=0.d0
     allocate(Eall_GS(0:Nscf),esp_var_ave(1:Nscf),esp_var_max(1:Nscf), &
@@ -88,12 +90,13 @@ contains
 
     if(PrLv_scf==3 .and. comm_is_root(nproc_id_global)) then
        write(*,*) 'This is the end of preparation for ground state calculation'
-       call timer_show_current_hour('elapse time=',LOG_ALL)
+       call timer_show_current_hour('elapse time=',LOG_TOTAL)
        write(*,*) '-----------------------------------------------------------'
     end if
 
-    call reset_gs_timer
-    call timer_begin(LOG_GROUND_STATE)
+    call timer_end(LOG_INIT_GS)
+
+    call timer_begin(LOG_GS_ITERATION)
 
     !(Main GS itaration loop)
     Nscf_conv=0
@@ -186,7 +189,7 @@ contains
           write(*,*) 'diff-dns,ddns/nelec=',ddns(iter),ddns_abs_1e(iter)
           if (iter/20*20 == iter) then
              write(*,*) '====='
-             call timer_show_current_min('elapse time=',LOG_ALL)
+             call timer_show_current_min('elapse time=',LOG_TOTAL)
           end if
           write(*,*) '-----------------------------------------------'
        end if
@@ -256,32 +259,17 @@ contains
 
     end do
     if(Nscf_conv==0) Nscf_conv=Nscf
-    call timer_end(LOG_GROUND_STATE)
+    call timer_end(LOG_GS_ITERATION)
 
     if(flag_update_only_zu_GS) goto 10
 
     if(PrLv_scf==3 .and. comm_is_root(nproc_id_global)) then
-       call timer_show_hour('Ground State time  :', LOG_GROUND_STATE)
-       call timer_show_min ('CG time            :', LOG_CG)
-       call timer_show_min ('Gram Schmidt time  :', LOG_GRAM_SCHMIDT)
-       call timer_show_min ('diag time          :', LOG_DIAG)
-       call timer_show_min ('sp_energy time     :', LOG_SP_ENERGY)
-       call timer_show_min ('hpsi time          :', LOG_HPSI)
-       call timer_show_min (' - stencil time    :', LOG_HPSI_STENCIL)
-       call timer_show_min (' - pseudo pt. time :', LOG_HPSI_PSEUDO)
-       call timer_show_min ('psi_rho time       :', LOG_PSI_RHO)
-       call timer_show_min ('Hartree time       :', LOG_HARTREE)
-       call timer_show_min ('Exc_Cor time       :', LOG_EXC_COR)
-       call timer_show_min ('current time       :', LOG_CURRENT)
-       call timer_show_min ('Total_Energy time  :', LOG_TOTAL_ENERGY)
-       call timer_show_min ('Ion_Force time     :', LOG_ION_FORCE)
-    end if
-    if(PrLv_scf==3 .and. comm_is_root(nproc_id_global)) then
        write(*,*) 'This is the end of GS calculation'
-       call timer_show_current_hour('elapse time=',LOG_ALL)
+       call timer_show_current_hour('elapse time=',LOG_TOTAL)
        write(*,*) '-----------------------------------------------------------'
     end if
-    
+
+    call timer_end(LOG_DEINIT_GS_ITERATION)
     zu_GS0(:,:,:)=zu_GS(:,:,:)
     
     zu_t(:,:,:)=zu_GS(:,1:NBoccmax,:)
@@ -301,14 +289,10 @@ contains
     call Total_Energy_omp(rion_update_off,calc_mode_gs)
     Eall0=Eall
     if(PrLv_scf==3 .and. comm_is_root(nproc_id_global)) write(*,*) 'Eall =',Eall
+    call timer_end(LOG_DEINIT_GS_ITERATION)
 
-    call timer_end(LOG_STATIC)
-    if (PrLv_scf==3 .and. comm_is_root(nproc_id_global)) then
-       write(*,*) '-----------------------------------------------'
-       call timer_show_min('static time=',LOG_STATIC)
-       write(*,*) '-----------------------------------------------'
-    end if
 
+    call timer_begin(LOG_WRITE_GS_RESULTS)
     if(PrLv_scf==3) then
     if (comm_is_root(nproc_id_global)) then
        write(*,*) '-----------------------------------------------'
@@ -332,30 +316,11 @@ contains
     end if
     call write_GS_data
     endif
+    call timer_end(LOG_WRITE_GS_RESULTS)
     
 10  deallocate(rho_in,rho_out)
     deallocate(Eall_GS,esp_var_ave,esp_var_max,ddns,ddns_abs_1e)
 
-  contains
-    subroutine reset_gs_timer
-      use timer
-      implicit none
-      integer :: i
-      do i = LOG_CG,LOG_GRAM_SCHMIDT
-         call timer_reset(i)
-      end do
-      call reset_rt_timer
-    end subroutine reset_gs_timer
-
-    subroutine reset_rt_timer
-      implicit none
-      integer :: i
-      do i = LOG_DT_EVOLVE,LOG_ALLREDUCE
-         call timer_reset(i)
-      end do
-    end subroutine reset_rt_timer
   end subroutine calc_ground_state
 
-
-  
 end module ground_state

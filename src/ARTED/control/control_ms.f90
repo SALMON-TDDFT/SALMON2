@@ -61,7 +61,7 @@ subroutine tddft_maxwell_ms
 
     if(comm_is_root(nproc_id_global)) then
       write(*,*) 'This is the end of preparation for Real time calculation'
-      call timer_show_current_hour('elapse time=',LOG_ALL)
+      call timer_show_current_hour('elapse time=',LOG_TOTAL)
       write(*,*) '-----------------------------------------------------------'
     end if
 
@@ -118,7 +118,6 @@ subroutine tddft_maxwell_ms
 
     position_option='rewind'
     entrance_iter=-1
-    call reset_rt_timer
   end if
 
   ! create directory for exporting
@@ -181,7 +180,7 @@ subroutine tddft_maxwell_ms
 !$acc enter data create(kAc_new)
 !$acc enter data create(ghtpsi)
 
-  call timer_begin(LOG_DYNAMICS)
+  call timer_begin(LOG_RT_ITERATION)
 !$acc enter data copyin(zu_m)
   RTiteratopm : do iter=entrance_iter+1, Nt ! sato
 
@@ -202,24 +201,24 @@ subroutine tddft_maxwell_ms
     !! Update of the Macroscopic System
     
     !===========================================================================
-    call timer_begin(LOG_OTHER)
+    call timer_begin(LOG_RT_MISC)
     !! NOTE: Update the macroscopic variables:
     !!       Ac_old_ms = Ac_ms; Ac_ms = Ac_new_ms; Ac_new_ms = 0
     !!       Jm_old_ms = Jm_ms; Jm_ms = Jm_new_ms; Jm_new_ms = 0
     !!       Energy_Elec_ms = map(Energy_Elec_Matter_new_m); Jm_m = Jm_new_m;
     call proceed_ms_variables_omp()
-    call timer_end(LOG_OTHER)
+    call timer_end(LOG_RT_MISC)
     !===========================================================================
 
     !===========================================================================
     !! Calculate "iter+1" macroscopic field (Ac_new_ms, Jm_new_ms)
-    call timer_begin(LOG_DT_EVOLVE_AC)
-    call dt_evolve_Ac() ! Timer: LOG_DT_EVOLVE_AC
-    call timer_end(LOG_DT_EVOLVE_AC)
+    call timer_begin(LOG_CALC_TIME_PROPAGATION)
+    call dt_evolve_Ac()
+    call timer_end(LOG_CALC_TIME_PROPAGATION)
     !===========================================================================
     !===========================================================================    
     !! Compute EM field, energy and other important quantities...
-    call timer_begin(LOG_OTHER) ! TODO: Create new timer "LOG_EMFIELD" later
+    call timer_begin(LOG_CALC_EMFIELD)
     call calc_energy_joule()
     if (flg_out_ms_step) then !! mod(iter, out_ms_step) == 0
       call calc_elec_field()
@@ -227,12 +226,12 @@ subroutine tddft_maxwell_ms
       call calc_energy_elemag()
       call calc_total_energy
     end if
-    call timer_end(LOG_OTHER)
+    call timer_end(LOG_CALC_EMFIELD)
     !===========================================================================    
 
 
     !=========================================================================== 
-    call timer_begin(LOG_OTHER)
+    call timer_begin(LOG_RT_MISC)
     !! NOTE: Mapping between the macropoint and the gridsystem
     !!       Ac_m <- Ac_ms; Ac_new_m <- Ac_new_ms
     !!       data_local_Ac_m = Ac_m; data_local_Jm_m = Jm_m
@@ -245,15 +244,15 @@ subroutine tddft_maxwell_ms
       index = iter / out_ms_step
       call store_data_out_omp(index)
     end if
-    call timer_end(LOG_OTHER)
+    call timer_end(LOG_RT_MISC)
     !===========================================================================
 
     !===========================================================================
-    call timer_begin(LOG_OTHER)
+    call timer_begin(LOG_RT_MISC)
     if (flg_out_ms_step .and. comm_is_root(nproc_id_global)) then
       call trace_ms_calculation()
     end if
-    call timer_end(LOG_OTHER)
+    call timer_end(LOG_RT_MISC)
     !===========================================================================
 
     !! Update of the Microscopic System
@@ -287,9 +286,9 @@ subroutine tddft_maxwell_ms
       
       !===========================================================================
       !! Extract microscopic state of "imacro"-th macropoint
-      call timer_begin(LOG_OTHER)
+      call timer_begin(LOG_RT_MISC)
       if (NXYsplit /= 1) call get_macro_data(imacro)
-      call timer_end(LOG_OTHER)
+      call timer_end(LOG_RT_MISC)
       !===========================================================================
 
       !===========================================================================
@@ -305,11 +304,11 @@ subroutine tddft_maxwell_ms
 
       !===========================================================================
       !! Store microscopic state of "imacro"-th macropoint
-      call timer_begin(LOG_OTHER)
+      call timer_begin(LOG_RT_MISC)
       if(NXYsplit /= 1)then
         call put_macro_data(imacro)
       end if
-      call timer_end(LOG_OTHER)
+      call timer_end(LOG_RT_MISC)
       !===========================================================================
 
       kAc(:,1) = kAc0(:,1) + Ac_new_m(1,imacro)
@@ -325,7 +324,7 @@ subroutine tddft_maxwell_ms
       !===========================================================================
 
       !===========================================================================
-      call timer_begin(LOG_OTHER)
+      call timer_begin(LOG_RT_MISC)
       if(Sym /= 1)then
         jav(1:2) = 0d0
       end if
@@ -348,7 +347,7 @@ subroutine tddft_maxwell_ms
             jm_ion_new_m_tmp(1:3, imacro) = jav_ion(1:3)
          end if
       end if
-      call timer_end(LOG_OTHER)
+      call timer_end(LOG_RT_MISC)
       !===========================================================================
 
       if (use_ehrenfest_md == 'y') then
@@ -369,13 +368,13 @@ subroutine tddft_maxwell_ms
     
       !===========================================================================
       ! Calculate + store electron energy (if required in the next iteration..)
-      call timer_begin(LOG_OTHER)
+      call timer_begin(LOG_RT_MISC)
       if (flg_out_ms_next_step) then !! mod(iter+1, out_ms_step) == 0
         if(comm_is_root(nproc_id_tdks)) then ! sato
           energy_elec_Matter_new_m_tmp(imacro) = Eall - Eall0_m(imacro)
         end if
       end if ! sato
-      call timer_end(LOG_OTHER)
+      call timer_end(LOG_RT_MISC)
       !===========================================================================
 
       !===========================================================================
@@ -392,7 +391,7 @@ subroutine tddft_maxwell_ms
 
       !===========================================================================
       ! Calculate + store excitation number (if required in the next iteration..)
-      call timer_begin(LOG_ANA_RT_USEGS)
+      call timer_begin(LOG_RT_ANALYSIS)
       if (flg_out_projection_next_step) then
 !$acc update self(zu_m(:,:,:,imacro))
         call analysis_RT_using_GS(Rion_update_rt,Nscf,zu_m(:,:,:,imacro),iter,"projection")
@@ -400,12 +399,12 @@ subroutine tddft_maxwell_ms
           excited_electron_new_m_tmp(imacro) = sum(occ) - sum(ovlp_occ(1:NBoccmax,:))
         end if ! sato
       end if
-      call timer_end(LOG_ANA_RT_USEGS)
+      call timer_end(LOG_RT_ANALYSIS)
     
     end do Macro_loop !end of Macro_loop iteraction========================
 
     !===========================================================================
-    call timer_begin(LOG_ALLREDUCE)
+    call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
     call comm_summation(jm_new_m_tmp, Jm_new_m, 3 * nmacro, nproc_group_global)
     if(use_ehrenfest_md=='y') &
     & call comm_summation(jm_ion_new_m_tmp, Jm_ion_new_m, 3*nmacro,nproc_group_global)
@@ -416,12 +415,12 @@ subroutine tddft_maxwell_ms
       call comm_summation(excited_electron_new_m_tmp, excited_electron_new_m, nmacro, nproc_group_global)
       if(comm_is_root(nproc_id_global)) call write_excited_electron(iter+1)
     end if
-    call timer_end(LOG_ALLREDUCE)
+    call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
     !===========================================================================
 
     
     !===========================================================================
-    call timer_begin(LOG_OTHER)
+    call timer_begin(LOG_RT_MISC)
 !$omp parallel do default(shared) private(imacro, ix_m, iy_m, iz_m)
     do imacro = 1, nmacro
       !! NOTE: If the array "macropoint" is appropriately setted,
@@ -438,7 +437,7 @@ subroutine tddft_maxwell_ms
       Jm_ion_new_ms(1:3,ix_m,iy_m,iz_m) = matmul(trans_inv(1:3,1:3), Jm_ion_new_m(1:3,imacro))
     end do
 !$omp end parallel do
-    call timer_end(LOG_OTHER)
+    call timer_end(LOG_RT_MISC)
     !===========================================================================
 
     ! Export to file_trj
@@ -460,7 +459,7 @@ subroutine tddft_maxwell_ms
     !===========================================================================
     
     ! Shutdown sequence
-    call timer_begin(LOG_OTHER)
+    call timer_begin(LOG_RT_MISC)
     if(mod(iter,10) == 1) then
       call comm_bcast(flag_shutdown,nproc_group_global)
     end if
@@ -469,11 +468,11 @@ subroutine tddft_maxwell_ms
       write(*,*) nproc_id_global,'iter =',iter
       iter_now=iter
 !$acc update self(zu_m)
-      call timer_end(LOG_DYNAMICS)
+      call timer_end(LOG_RT_ITERATION)
       call prep_restart_write
       go to 1
     end if
-    call timer_end(LOG_OTHER)
+    call timer_end(LOG_RT_MISC)
     
     ! Timer for shutdown
     if (mod(iter,10) == 0) then
@@ -488,44 +487,23 @@ subroutine tddft_maxwell_ms
 
     ! backup for system failure
     if (need_backup .and. iter > 0 .and. mod(iter, backup_frequency) == 0) then
-      if (comm_is_root(nproc_id_global)) call timer_show_current_hour('Backup...', LOG_ALL)
-      call timer_end(LOG_DYNAMICS)
-      call timer_end(LOG_ALL)
+      if (comm_is_root(nproc_id_global)) call timer_show_current_hour('Backup...', LOG_TOTAL)
+      call timer_end(LOG_RT_ITERATION)
+      call timer_end(LOG_TOTAL)
       iter_now=iter
       call prep_restart_write
-      call timer_begin(LOG_ALL)
-      call timer_begin(LOG_DYNAMICS)
+      call timer_begin(LOG_TOTAL)
+      call timer_begin(LOG_RT_ITERATION)
     end if
     
   enddo RTiteratopm !end of RT iteraction========================
 !$acc exit data copyout(zu_m)
-  call timer_end(LOG_DYNAMICS)
+  call timer_end(LOG_RT_ITERATION)
 
-  if(comm_is_root(nproc_id_global)) then
-    write(*,'(1X,A)') '-----------------------------------------------'
-
-    call timer_show_hour('dynamics time      :', LOG_DYNAMICS)
-    call timer_show_min ('dt_evolve_Ac time  :', LOG_DT_EVOLVE_AC)
-    call timer_show_min ('dt_evolve time     :', LOG_DT_EVOLVE)
-    call timer_show_min ('hpsi time          :', LOG_HPSI)
-    call timer_show_min (' - init time       :', LOG_HPSI_INIT)
-    call timer_show_min (' - stencil time    :', LOG_HPSI_STENCIL)
-    call timer_show_min (' - pseudo pt. time :', LOG_HPSI_PSEUDO)
-    call timer_show_min (' - update time     :', LOG_HPSI_UPDATE)
-    call timer_show_min ('psi_rho time       :', LOG_PSI_RHO)
-    call timer_show_min ('Hartree time       :', LOG_HARTREE)
-    call timer_show_min ('Exc_Cor time       :', LOG_EXC_COR)
-    call timer_show_min ('current time       :', LOG_CURRENT)
-    call timer_show_min ('Total_Energy time  :', LOG_TOTAL_ENERGY)
-    call timer_show_min ('Ion_Force time     :', LOG_ION_FORCE)
-    call timer_show_min ('ana_RT_useGS time  :', LOG_ANA_RT_USEGS)
-    call timer_show_min ('Other time         :', LOG_OTHER)
-    call timer_show_min ('Allreduce time     :', LOG_ALLREDUCE)
-  end if
   call write_performance(trim(directory)//'ms_performance')
 
   if(comm_is_root(nproc_id_global)) write(*,*) 'This is the start of write section'
-  call timer_begin(LOG_IO)
+  call timer_begin(LOG_WRITE_RT_RESULTS)
 
   ! Write data out by using MPI
   do index = 0, Ndata_out-1
@@ -554,15 +532,15 @@ subroutine tddft_maxwell_ms
   endif
 
 
-  call timer_end(LOG_IO)
+  call timer_end(LOG_WRITE_RT_RESULTS)
   if(comm_is_root(nproc_id_global)) then
     write(*,*) 'This is the end of write section'
-    call timer_show_min('write time =',LOG_IO)
+    call timer_show_min('write time =',LOG_WRITE_RT_RESULTS)
   end if
 
   if(comm_is_root(nproc_id_global)) then
     write(*,*) 'This is the end of RT calculation'
-    call timer_show_current_hour('elapse time=',LOG_ALL)
+    call timer_show_current_hour('elapse time=',LOG_TOTAL)
     write(*,*) '-----------------------------------------------------------'
   end if
 
@@ -571,8 +549,8 @@ subroutine tddft_maxwell_ms
 
   if (comm_is_root(nproc_id_global)) write(*,*) 'This is the end of all calculation'
   Time_now=get_wtime()
-  call timer_end(LOG_ALL)
-  if (comm_is_root(nproc_id_global)) call timer_show_hour('Total time =',LOG_ALL)
+  call timer_end(LOG_TOTAL)
+  if (comm_is_root(nproc_id_global)) call timer_show_hour('Total time =',LOG_TOTAL)
 
 1 if(comm_is_root(nproc_id_global)) write(*,*)  'This calculation is shutdown successfully!'
 !  if(comm_is_root(nproc_id_global)) then
@@ -615,15 +593,6 @@ contains
   end subroutine
 
 
-  subroutine reset_rt_timer
-    implicit none
-    integer :: i
-    do i = LOG_DT_EVOLVE,LOG_ALLREDUCE
-      call timer_reset(i)
-    end do
-  end subroutine
-  
-  
   subroutine proceed_ms_variables_omp()
     implicit none
     integer :: iimacro, iix_m, iiy_m, iiz_m

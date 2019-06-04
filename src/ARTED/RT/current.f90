@@ -88,7 +88,7 @@ subroutine current(mode,NBtmp,zutmp)
   real(8) :: jx,jy,jz
 
   NVTX_BEG('current_RT()',2)
-  call timer_begin(LOG_CURRENT)
+  call timer_begin(LOG_CALC_CURRENT)
 #ifdef _OPENACC
   if (mode == 'RT') then
     call current_acc_impl(zutmp,jx,jy,jz)
@@ -99,7 +99,7 @@ subroutine current(mode,NBtmp,zutmp)
   call impl(mode,NBtmp,zutmp,jx,jy,jz)
 #endif
   call summation(jx,jy,jz)
-  call timer_end(LOG_CURRENT)
+  call timer_end(LOG_CALC_CURRENT)
   NVTX_END()
 
 contains
@@ -282,12 +282,12 @@ contains
     real(8),intent(in) :: jx,jy,jz
     real(8) :: jav_l(3)
 
-    call timer_begin(LOG_ALLREDUCE)
+    call timer_begin(LOG_ALLREDUCE_CURRENT)
     jav_l(1)=jx
     jav_l(2)=jy
     jav_l(3)=jz
     call comm_summation(jav_l,jav,3,nproc_group_tdks)
-    call timer_end(LOG_ALLREDUCE)
+    call timer_end(LOG_ALLREDUCE_CURRENT)
   end subroutine
 end subroutine
 
