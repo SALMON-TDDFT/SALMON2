@@ -87,7 +87,7 @@ contains
     use salmon_communication
     use flops
     use math_constants
-    use salmon_global, only: theory, iperiodic
+    use salmon_global, only: theory, iperiodic, domain_parallel
     implicit none
     integer, intent(in) :: fd, write_mode
 
@@ -100,20 +100,22 @@ contains
           ! 0: GCEED
           ! 3: ARTED
           case(3)
-            call get_hamiltonian_flops(lg,pg,mg,sg)
-            if (comm_is_root(nproc_id_global)) then
-              if (write_mode == write_mode_readable) then
-                write (fd,'(a30,4(a12))') 'hamiltonian','all','stencil','pseudo-pt','update'
-                write (fd,'(a30,4(f12.2))') 'processor'       ,lg(4),lg(1),lg(2),lg(3)
-                write (fd,'(a30,4(f12.2))') 'processor (best)',pg(4),pg(1),pg(2),pg(3)
-                if (.not. is_zero(mg(4))) write (fd,'(a30,4(f12.2))') 'macro-grid',mg(4),mg(1),mg(2),mg(3)
-                write (fd,'(a30,4(f12.2))') 'system'          ,sg(4),sg(1),sg(2),sg(3)
-              else
-                write (fd,'(a,",",3(a,","),a)') 'hamiltonian','all','stencil','pseudo-pt','update'
-                write (fd,'(a,",",3(f0.6,","),f0.6)') 'processor'       ,lg(4),lg(1),lg(2),lg(3)
-                write (fd,'(a,",",3(f0.6,","),f0.6)') 'processor (best)',pg(4),pg(1),pg(2),pg(3)
-                if (.not. is_zero(mg(4))) write (fd,'(a,",",3(f0.6,","),f0.6)') 'macro-grid'      ,mg(4),mg(1),mg(2),mg(3)
-                write (fd,'(a,",",3(f0.6,","),f0.6)') 'system'          ,sg(4),sg(1),sg(2),sg(3)
+            if (domain_parallel == 'y') then
+              call get_hamiltonian_flops(lg,pg,mg,sg)
+              if (comm_is_root(nproc_id_global)) then
+                if (write_mode == write_mode_readable) then
+                  write (fd,'(a30,4(a12))') 'hamiltonian','all','stencil','pseudo-pt','update'
+                  write (fd,'(a30,4(f12.2))') 'processor'       ,lg(4),lg(1),lg(2),lg(3)
+                  write (fd,'(a30,4(f12.2))') 'processor (best)',pg(4),pg(1),pg(2),pg(3)
+                  if (.not. is_zero(mg(4))) write (fd,'(a30,4(f12.2))') 'macro-grid',mg(4),mg(1),mg(2),mg(3)
+                  write (fd,'(a30,4(f12.2))') 'system'          ,sg(4),sg(1),sg(2),sg(3)
+                else
+                  write (fd,'(a,",",3(a,","),a)') 'hamiltonian','all','stencil','pseudo-pt','update'
+                  write (fd,'(a,",",3(f0.6,","),f0.6)') 'processor'       ,lg(4),lg(1),lg(2),lg(3)
+                  write (fd,'(a,",",3(f0.6,","),f0.6)') 'processor (best)',pg(4),pg(1),pg(2),pg(3)
+                  if (.not. is_zero(mg(4))) write (fd,'(a,",",3(f0.6,","),f0.6)') 'macro-grid'      ,mg(4),mg(1),mg(2),mg(3)
+                  write (fd,'(a,",",3(f0.6,","),f0.6)') 'system'          ,sg(4),sg(1),sg(2),sg(3)
+                end if
               end if
             end if
         end select
