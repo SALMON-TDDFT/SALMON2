@@ -500,8 +500,6 @@ subroutine tddft_maxwell_ms
 !$acc exit data copyout(zu_m)
   call timer_end(LOG_RT_ITERATION)
 
-  call write_performance(trim(directory)//'ms_performance')
-
   if(comm_is_root(nproc_id_global)) write(*,*) 'This is the start of write section'
   call timer_begin(LOG_WRITE_RT_RESULTS)
 

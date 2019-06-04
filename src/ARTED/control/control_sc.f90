@@ -23,7 +23,6 @@ subroutine tddft_sc
   use Global_Variables
   use timer
   use opt_variables
-  use performance_analyzer
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
   use misc_routines, only: get_wtime
@@ -408,8 +407,6 @@ subroutine tddft_sc
   enddo !end of RT iteraction========================
 !$acc exit data copyout(zu_t)
   call timer_end(LOG_RT_ITERATION)
-
-  call write_performance(trim(directory)//'sc_performance')
 
   if(comm_is_root(nproc_id_global)) then
     ! close(7) !! TODO: Remove output of "_t.out" file future
