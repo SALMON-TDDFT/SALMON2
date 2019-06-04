@@ -71,10 +71,12 @@ contains
         write (fd,'(a,",",5(a,","),a)') trim(headers(0)),'min','max','average','std. dev.','difference','relative'
       end if
       do i=1,nsize
-        if (write_mode == write_mode_readable) then
-          write (fd,'(a30,6(f12.2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
-        else
-          write (fd,'(a,",",5(f0.6,","),f0.6)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+        if (.not. is_zero(trel(i))) then
+          if (write_mode == write_mode_readable) then
+            write (fd,'(a30,6(f12.2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+          else
+            write (fd,'(a,",",5(f0.6,","),f0.6)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+          end if
         end if
       end do
     end if
@@ -84,6 +86,7 @@ contains
     use salmon_parallel
     use salmon_communication
     use flops
+    use math_constants
     use salmon_global, only: theory, iperiodic
     implicit none
     integer, intent(in) :: fd, write_mode
@@ -103,13 +106,13 @@ contains
                 write (fd,'(a30,4(a12))') 'hamiltonian','all','stencil','pseudo-pt','update'
                 write (fd,'(a30,4(f12.2))') 'processor'       ,lg(4),lg(1),lg(2),lg(3)
                 write (fd,'(a30,4(f12.2))') 'processor (best)',pg(4),pg(1),pg(2),pg(3)
-                write (fd,'(a30,4(f12.2))') 'macro-grid'      ,mg(4),mg(1),mg(2),mg(3)
+                if (.not. is_zero(mg(4))) write (fd,'(a30,4(f12.2))') 'macro-grid',mg(4),mg(1),mg(2),mg(3)
                 write (fd,'(a30,4(f12.2))') 'system'          ,sg(4),sg(1),sg(2),sg(3)
               else
                 write (fd,'(a,",",3(a,","),a)') 'hamiltonian','all','stencil','pseudo-pt','update'
                 write (fd,'(a,",",3(f0.6,","),f0.6)') 'processor'       ,lg(4),lg(1),lg(2),lg(3)
                 write (fd,'(a,",",3(f0.6,","),f0.6)') 'processor (best)',pg(4),pg(1),pg(2),pg(3)
-                write (fd,'(a,",",3(f0.6,","),f0.6)') 'macro-grid'      ,mg(4),mg(1),mg(2),mg(3)
+                if (.not. is_zero(mg(4))) write (fd,'(a,",",3(f0.6,","),f0.6)') 'macro-grid'      ,mg(4),mg(1),mg(2),mg(3)
                 write (fd,'(a,",",3(f0.6,","),f0.6)') 'system'          ,sg(4),sg(1),sg(2),sg(3)
               end if
             end if
