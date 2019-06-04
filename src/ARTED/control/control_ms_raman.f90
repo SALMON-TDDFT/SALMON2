@@ -167,7 +167,6 @@ subroutine raman_maxwell_ms
   use Global_Variables
   use timer
   use opt_variables
-  use performance_analyzer
   use salmon_parallel
   use salmon_communication
   use salmon_file
