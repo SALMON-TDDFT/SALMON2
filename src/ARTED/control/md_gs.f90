@@ -30,7 +30,6 @@ contains
 subroutine calc_md_ground_state
   use timer
   use opt_variables
-  use performance_analyzer
   use misc_routines, only: get_wtime
   use salmon_global, only: format3d, out_dns, out_dns_rt, out_dns_rt_step
   use ground_state

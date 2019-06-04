@@ -50,17 +50,22 @@ contains
     ceiling_pow2 = k
   end function ceiling_pow2
 
-  ! input  : base filename
-  ! output : <base filename>_YYYYMMDD_hhmmss.log
-  function gen_logfilename(filename)
+  ! input  : filename, extension
+  ! output : <filename>_YYYYMMDD_hhmmss.<extension>
+  function gen_logfilename(filename,extension)
     implicit none
     character(100)          :: gen_logfilename
     character(*),intent(in) :: filename
+    character(*),intent(in),optional :: extension
     character(8)  :: d
     character(10) :: t
     call date_and_time(date=d,time=t)
 
-    write (gen_logfilename,'(A)') filename//'_'//d//'_'//t(1:6)//'.log'
+    if (present(extension)) then
+      write (gen_logfilename,'(A)') trim(filename)//'_'//d//'_'//t(1:6)//'.'//trim(extension)
+    else
+      write (gen_logfilename,'(A)') trim(filename)//'_'//d//'_'//t(1:6)//'.log'
+    end if
   end function
 
   function get_wtime()

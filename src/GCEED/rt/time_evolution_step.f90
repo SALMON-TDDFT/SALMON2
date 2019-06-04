@@ -463,7 +463,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   call timer_end(LOG_WRITE_ENERGIES)
 
 
-  call timer_begin(LOG_WRITE_INFOS)
+  call timer_begin(LOG_WRITE_RT_INFOS)
   if(icalcforce==1)then
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_force_c(zpsi_in)
@@ -597,7 +597,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
-  call timer_end(LOG_WRITE_INFOS)
+  call timer_end(LOG_WRITE_RT_INFOS)
 
   return
 

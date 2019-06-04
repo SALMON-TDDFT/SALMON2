@@ -23,7 +23,6 @@ subroutine tddft_sc
   use Global_Variables
   use timer
   use opt_variables
-  use performance_analyzer
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
   use misc_routines, only: get_wtime
@@ -61,7 +60,7 @@ subroutine tddft_sc
 
   if(comm_is_root(nproc_id_global)) then
     write(*,*) 'This is the end of preparation for Real time calculation'
-    call timer_show_current_hour('elapse time=',LOG_ALL)
+    call timer_show_current_hour('elapse time=',LOG_TOTAL)
     write(*,*) '-----------------------------------------------------------'
   end if
 
@@ -82,9 +81,6 @@ subroutine tddft_sc
   Vloc_old(:,1) = Vloc(:); Vloc_old(:,2) = Vloc(:)
 
   rho_gs(:)=rho(:)
-
-  call reset_rt_timer
-
 
   ! Export electronic density
   if (out_dns == 'y') call write_density(iter,'gs')
@@ -145,7 +141,7 @@ subroutine tddft_sc
 !$acc enter data create(kAc_new)
 !$acc enter data create(ghtpsi)
 
-  call timer_begin(LOG_DYNAMICS)
+  call timer_begin(LOG_RT_ITERATION)
 !$acc enter data copyin(zu_t)
   do iter=entrance_iter+1,Nt
 
@@ -222,7 +218,7 @@ subroutine tddft_sc
       end if
     end if
 
-    call timer_begin(LOG_OTHER)
+    call timer_begin(LOG_RT_MISC)
 
 
     E_ext(iter,:)=-(Ac_ext(iter+1,:)-Ac_ext(iter-1,:))/(2*dt)
@@ -374,10 +370,10 @@ subroutine tddft_sc
     
 !Timer
     if (iter/1000*1000 == iter.and.comm_is_root(nproc_id_global)) then
-      call timer_show_current_hour('dynamics time      :', LOG_DYNAMICS)
-      call timer_show_min         ('dt_evolve time     :', LOG_DT_EVOLVE)
-      call timer_show_min         ('Hartree time       :', LOG_HARTREE)
-      call timer_show_min         ('current time       :', LOG_CURRENT)
+      call timer_show_current_hour('dynamics iter.  :', LOG_RT_ITERATION)
+      call timer_show_min         ('time propgation :', LOG_CALC_TIME_PROPAGATION)
+      call timer_show_min         ('Hartree         :', LOG_CALC_HARTREE)
+      call timer_show_min         ('current         :', LOG_CALC_CURRENT)
     end if
 !Timer for shutdown
     if (iter/10*10 == iter) then
@@ -391,45 +387,26 @@ subroutine tddft_sc
         write(*,*) nproc_id_global,'iter =',iter
         iter_now=iter
 !$acc update self(zu_t)
-        call timer_end(LOG_DYNAMICS)
+        call timer_end(LOG_RT_ITERATION)
         call prep_restart_write
         go to 1
       end if
     end if
 
-    call timer_end(LOG_OTHER)
+    call timer_end(LOG_RT_MISC)
 
     ! backup for system failure
     if (need_backup .and. iter > 0 .and. mod(iter, backup_frequency) == 0) then
-      call timer_end(LOG_DYNAMICS)
-      call timer_end(LOG_ALL)
+      call timer_end(LOG_RT_ITERATION)
+      call timer_end(LOG_TOTAL)
       iter_now=iter
       call prep_restart_write
-      call timer_begin(LOG_ALL)
-      call timer_begin(LOG_DYNAMICS)
+      call timer_begin(LOG_TOTAL)
+      call timer_begin(LOG_RT_ITERATION)
     end if
   enddo !end of RT iteraction========================
 !$acc exit data copyout(zu_t)
-  call timer_end(LOG_DYNAMICS)
-
-  if(comm_is_root(nproc_id_global)) then
-    call timer_show_hour('dynamics time      :', LOG_DYNAMICS)
-    call timer_show_min ('dt_evolve time     :', LOG_DT_EVOLVE)
-    call timer_show_min ('hpsi time          :', LOG_HPSI)
-    call timer_show_min (' - init time       :', LOG_HPSI_INIT)
-    call timer_show_min (' - stencil time    :', LOG_HPSI_STENCIL)
-    call timer_show_min (' - pseudo pt. time :', LOG_HPSI_PSEUDO)
-    call timer_show_min (' - update time     :', LOG_HPSI_UPDATE)
-    call timer_show_min ('psi_rho time       :', LOG_PSI_RHO)
-    call timer_show_min ('Hartree time       :', LOG_HARTREE)
-    call timer_show_min ('Exc_Cor time       :', LOG_EXC_COR)
-    call timer_show_min ('current time       :', LOG_CURRENT)
-    call timer_show_min ('Total_Energy time  :', LOG_TOTAL_ENERGY)
-    call timer_show_min ('Ion_Force time     :', LOG_ION_FORCE)
-    call timer_show_min ('Other time         :', LOG_OTHER)
-    call timer_show_min ('Allreduce time     :', LOG_ALLREDUCE)
-  end if
-  call write_performance(trim(directory)//'sc_performance')
+  call timer_end(LOG_RT_ITERATION)
 
   if(comm_is_root(nproc_id_global)) then
     ! close(7) !! TODO: Remove output of "_t.out" file future
@@ -448,7 +425,7 @@ subroutine tddft_sc
 
   if(comm_is_root(nproc_id_global)) then
     write(*,*) 'This is the end of RT calculation'
-    call timer_show_current_hour('elapse time=',LOG_ALL)
+    call timer_show_current_hour('elapse time=',LOG_TOTAL)
     write(*,*) '-----------------------------------------------------------'
   end if
 
@@ -466,21 +443,13 @@ subroutine tddft_sc
 
   if (comm_is_root(nproc_id_global)) write(*,*) 'This is the end of all calculation'
   Time_now=get_wtime()
-  call timer_end(LOG_ALL)
-  if (comm_is_root(nproc_id_global)) call timer_show_hour('Total time =',LOG_ALL)
+  call timer_end(LOG_TOTAL)
+  if (comm_is_root(nproc_id_global)) call timer_show_hour('Total time =',LOG_TOTAL)
 
 1 if(comm_is_root(nproc_id_global)) write(*,*)  'This calculation is shutdown successfully!'
 
 contains
 
-  subroutine reset_rt_timer
-    implicit none
-    integer :: i
-    do i = LOG_DT_EVOLVE,LOG_ALLREDUCE
-      call timer_reset(i)
-    end do
-  end subroutine
-  
   
   subroutine write_rt_data(niter)
     implicit none

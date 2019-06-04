@@ -57,7 +57,7 @@ subroutine psi_rho_impl(zutmp,zu_NB)
   integer,intent(in)    :: zu_NB
   complex(8),intent(in) :: zutmp(0:NL-1,zu_NB,NK_s:NK_e)
 
-  call timer_begin(LOG_PSI_RHO)
+  call timer_begin(LOG_CALC_RHO)
   ! write(*,*) "Sym:", Sym
   ! stop
   select case(Sym)
@@ -82,11 +82,11 @@ subroutine psi_rho_impl(zutmp,zu_NB)
   case default
     call err_finalize('Bad Symmetry')
   end select
-  call timer_end(LOG_PSI_RHO)
+  call timer_end(LOG_CALC_RHO)
 
-  call timer_begin(LOG_ALLREDUCE)
+  call timer_begin(LOG_ALLREDUCE_RHO)
   call comm_summation(rho_l,rho,NL,nproc_group_tdks)
-  call timer_end(LOG_ALLREDUCE)
+  call timer_end(LOG_ALLREDUCE_RHO)
 
 
 contains

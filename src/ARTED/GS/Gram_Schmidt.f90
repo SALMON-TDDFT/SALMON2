@@ -37,7 +37,7 @@ Subroutine Gram_Schmidt_ompk
   real(8) :: s
   complex(8) :: zov
 
-  call timer_begin(LOG_GRAM_SCHMIDT)
+  call timer_begin(LOG_CALC_GRAM_SCHMIDT)
 !$omp parallel do private(ib,ibt,zov,s)
   do ik=NK_s,NK_e
   do ib=1,NB
@@ -49,7 +49,7 @@ Subroutine Gram_Schmidt_ompk
     zu_GS(:,ib,ik)=zu_GS(:,ib,ik)/sqrt(s)
   enddo
   enddo
-  call timer_end(LOG_GRAM_SCHMIDT)
+  call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
   return
 End Subroutine Gram_Schmidt_ompk
@@ -69,7 +69,7 @@ Subroutine Gram_Schmidt_ompb
   integer :: thr_id,omp_get_thread_num
   thr_id=0
 
-  call timer_begin(LOG_GRAM_SCHMIDT)
+  call timer_begin(LOG_CALC_GRAM_SCHMIDT)
   allocate(zu_GSold(NL,NB,NK_s:NK_e))
   allocate(zov_omp(2,NB,0:NUMBER_THREADS-1))
 
@@ -133,7 +133,7 @@ Subroutine Gram_Schmidt_ompb
 
   deallocate(zov_omp)
   deallocate(zu_GSold)
-  call timer_end(LOG_GRAM_SCHMIDT)
+  call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
   return
 End Subroutine Gram_Schmidt_ompb

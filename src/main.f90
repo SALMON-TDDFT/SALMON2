@@ -40,6 +40,8 @@ program main
     stop 'invalid theory'
   end select
 
+  call write_perflog_csv
+
   call end_parallel
 contains
   subroutine print_software_version
@@ -58,5 +60,18 @@ contains
     print '(A)',         '##############################################################################'
     
     call print_xc_info()    
+  end subroutine
+
+  subroutine write_perflog_csv
+    use perflog
+    use misc_routines, only: gen_logfilename
+    use salmon_file, only: get_filehandle
+    use iso_fortran_env, only: output_unit
+    implicit none
+    integer :: fh
+
+    fh = get_filehandle()
+    open(fh, file=gen_logfilename('perflog','csv'))
+    call write_performance(fh,write_mode_csv)
   end subroutine
 end program main

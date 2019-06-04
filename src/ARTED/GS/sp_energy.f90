@@ -33,7 +33,7 @@ Subroutine sp_energy_omp
 ! omp
   integer :: thr_id,omp_get_thread_num
 
-  call timer_begin(LOG_SP_ENERGY)
+  call timer_begin(LOG_CALC_ESP)
   esp_l=0.d0
   thr_id=0
   call update_projector(kac)
@@ -50,11 +50,11 @@ Subroutine sp_energy_omp
 
 !$omp end parallel
 
-  call timer_begin(LOG_ALLREDUCE)
-  call comm_summation(esp_l,esp,NB*NK,nproc_group_tdks)
-  call timer_end(LOG_ALLREDUCE)
+  call timer_end(LOG_CALC_ESP)
 
-  call timer_end(LOG_SP_ENERGY)
+  call timer_begin(LOG_ALLREDUCE_ESP)
+  call comm_summation(esp_l,esp,NB*NK,nproc_group_tdks)
+  call timer_end(LOG_ALLREDUCE_ESP)
 
   return
 End Subroutine sp_energy_omp

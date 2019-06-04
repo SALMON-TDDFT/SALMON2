@@ -23,7 +23,7 @@ subroutine Exc_Cor(GS_RT,NBtmp,zu)
   integer,intent(in)       :: GS_RT
   integer,intent(in)       :: NBtmp
   complex(8),intent(inout) :: zu(NL,NBtmp,NK_s:NK_e)
-  call timer_begin(LOG_EXC_COR)
+  call timer_begin(LOG_CALC_EXC_COR)
   
   select case(functional)
   case('TPSS')
@@ -42,7 +42,7 @@ subroutine Exc_Cor(GS_RT,NBtmp,zu)
       
   end select
 
-  call timer_end(LOG_EXC_COR)
+  call timer_end(LOG_CALC_EXC_COR)
 
 contains
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130

@@ -117,7 +117,7 @@ Subroutine dt_evolve_omp_KB(zu)
   integer    :: i
 
   NVTX_BEG('dt_evolve_omp_KB()',1)
-  call timer_begin(LOG_DT_EVOLVE)
+  call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
 !$acc data pcopy(zu, vloc) pcreate(zproj)
 
@@ -209,7 +209,7 @@ Subroutine dt_evolve_omp_KB(zu)
 
 !$acc end data
 
-  call timer_end(LOG_DT_EVOLVE)
+  call timer_end(LOG_CALC_TIME_PROPAGATION)
   NVTX_END()
 
   return
@@ -230,7 +230,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
   real(8)    :: dt_t
 
   NVTX_BEG('dt_evolve_omp_KB()',1)
-  call timer_begin(LOG_DT_EVOLVE)
+  call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
   dt_t = dt; dt = 0.5d0*dt
 
@@ -341,7 +341,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
 !$acc end data
 
   dt = dt_t
-  call timer_end(LOG_DT_EVOLVE)
+  call timer_end(LOG_CALC_TIME_PROPAGATION)
   NVTX_END()
 
   return
@@ -359,7 +359,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
   integer    :: i
 
   NVTX_BEG('dt_evolve_omp_KB_MS()',1)
-  call timer_begin(LOG_DT_EVOLVE)
+  call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
 !$acc data pcopy(zu, vloc) pcreate(zproj)
 
@@ -451,7 +451,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
 
 !$acc end data
 
-  call timer_end(LOG_DT_EVOLVE)
+  call timer_end(LOG_CALC_TIME_PROPAGATION)
   NVTX_END()
 
   return

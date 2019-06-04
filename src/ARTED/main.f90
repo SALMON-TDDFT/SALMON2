@@ -46,8 +46,11 @@ subroutine arted
   use ground_state
   use io_gs_wfn_k
   use io_rt_wfn_k
+  use timer
   
   implicit none
+
+  call timer_begin(LOG_TOTAL)
 
   nproc_group_tdks = nproc_group_global
   nproc_id_tdks    = nproc_id_global
@@ -92,6 +95,8 @@ subroutine arted
   case default
     call Err_finalize("Invalid use_ms_maxwell parameter!")
   end select
+
+  call timer_end(LOG_TOTAL)
   
   return
 end subroutine arted
