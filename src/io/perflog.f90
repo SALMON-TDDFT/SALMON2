@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-module write_performance_results
+module perflog
   implicit none
 
   public  :: write_performance
@@ -244,4 +244,4 @@ contains
       write (headers(nid),'(a)') header
     end subroutine
   end subroutine write_performance
-end module write_performance_results
+end module perflog

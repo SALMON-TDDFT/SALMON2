@@ -63,7 +63,7 @@ contains
   end subroutine
 
   subroutine write_perflog_csv
-    use write_performance_results
+    use perflog
     use misc_routines, only: gen_logfilename
     use salmon_file, only: get_filehandle
     use iso_fortran_env, only: output_unit

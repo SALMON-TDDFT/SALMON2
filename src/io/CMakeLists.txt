@@ -3,7 +3,7 @@ set(SOURCES
     salmon_file.f90
     salmon_global.f90
     flops.f90
-    write_performance_results.f90
+    perflog.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
