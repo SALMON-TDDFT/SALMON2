@@ -269,7 +269,7 @@ contains
        write(*,*) '-----------------------------------------------------------'
     end if
 
-    call timer_end(LOG_DEINIT_GS_ITERATION)
+    call timer_begin(LOG_DEINIT_GS_ITERATION)
     zu_GS0(:,:,:)=zu_GS(:,:,:)
     
     zu_t(:,:,:)=zu_GS(:,1:NBoccmax,:)

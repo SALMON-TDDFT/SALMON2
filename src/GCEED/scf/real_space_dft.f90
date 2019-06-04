@@ -47,8 +47,6 @@ use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
-use write_performance_results
-use iso_fortran_env, only: output_unit
 use calc_iobnum_sub
 use check_mg_sub
 use check_ng_sub
@@ -1692,9 +1690,6 @@ deallocate(Vlocal)
 call finalize_xc(xc_func)
 
 call timer_end(LOG_TOTAL)
-
-
-call write_performance(output_unit, write_mode_readable)
 
 contains
 

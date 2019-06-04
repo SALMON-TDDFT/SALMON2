@@ -17,12 +17,6 @@ module timer
   use misc_routines, only: get_wtime
   implicit none
 
-!  ! Communication
-!  integer,public,parameter :: LOG_ALLREDUCE    = 40
-
-
-  ! for unified version
-  ! ===============================================================
   integer,public,parameter :: LOG_TOTAL                 = 100
   integer,public,parameter :: LOG_INIT                  = 101 ! general init.
 
@@ -62,7 +56,7 @@ module timer
   integer,public,parameter :: LOG_CALC_EMFIELD          = 149
   integer,public,parameter :: LOG_CALC_VBOX             = 150
   integer,public,parameter :: LOG_CALC_TIME_PROPAGATION = 151
-  integer,public,parameter :: LOG_HPSI                  = LOG_CALC_TIME_PROPAGATION
+  integer,public,parameter :: LOG_HPSI                  = 152
   integer,public,parameter :: LOG_CALC_DP               = 155
   integer,public,parameter :: LOG_CALC_CURRENT          = 156
   integer,public,parameter :: LOG_CALC_VLOCAL           = 158 ! FIXME: wrong name
@@ -134,6 +128,7 @@ module timer
   integer,public,parameter :: LOG_HPSI_STENCIL = 36
   integer,public,parameter :: LOG_HPSI_PSEUDO  = 37
   integer,public,parameter :: LOG_HPSI_UPDATE  = 38
+
   ! ===============================================================
 
 

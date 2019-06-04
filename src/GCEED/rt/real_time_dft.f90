@@ -45,8 +45,6 @@ use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
-use write_performance_results
-use iso_fortran_env, only: output_unit
 implicit none
 
 type(s_rgrid) :: lg
@@ -631,10 +629,6 @@ end select
 call timer_end(LOG_WRITE_RT_RESULTS)
 
 call timer_end(LOG_TOTAL)
-
-
-call write_performance(output_unit, write_mode_readable)
-
 
 call deallocate_mat
 

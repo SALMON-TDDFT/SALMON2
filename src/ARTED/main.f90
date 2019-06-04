@@ -47,8 +47,6 @@ subroutine arted
   use io_gs_wfn_k
   use io_rt_wfn_k
   use timer
-  use write_performance_results
-  use iso_fortran_env, only: output_unit
   
   implicit none
 
@@ -99,8 +97,6 @@ subroutine arted
   end select
 
   call timer_end(LOG_TOTAL)
-
-  call write_performance(output_unit, write_mode_readable)
   
   return
 end subroutine arted

@@ -4,6 +4,8 @@ program main
   use inputoutput
   use math_constants
   use timer
+  use write_performance_results
+  use iso_fortran_env, only: output_unit
   implicit none
 
   call set_math_constants
@@ -39,6 +41,8 @@ program main
   case default
     stop 'invalid theory'
   end select
+
+  call write_performance(output_unit, write_mode_csv)
 
   call end_parallel
 contains
