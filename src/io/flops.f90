@@ -13,94 +13,41 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-module performance_analyzer
+module flops
   implicit none
 
-  public  write_performance
-  public  print_stencil_size
-  public  get_hamiltonian_performance
-
-  private write_hamiltonian
+  public get_hamiltonian_flops
 
   private summation_threads, get_gflops, get_hamiltonian_chunk_size
   private get_stencil_FLOP, get_pseudo_pt_FLOP, get_update_FLOP
 
 contains
-  subroutine print_stencil_size
-    use global_variables, only: NK_s,NK_e,NBoccmax,NL,Nt,NUMBER_THREADS
-    implicit none
-    integer :: NK, NB
-
-    NK = NK_e - NK_s + 1
-    NB = NBoccmax
-    print *, 'NK =', NK
-    print *, 'NB =', NB
-    print *, 'NL =', NL
-    print *, 'Nt =', (Nt + 1)
-    print *, 'Number of Domain/Thread =', real(NK * NB) / NUMBER_THREADS
-  end subroutine
-
-  subroutine get_hamiltonian_performance(lgflops)
-    implicit none
-    real(8) :: lgflops(4)
-    call summation_threads(lgflops)
-  end subroutine
-
-  subroutine write_hamiltonian(iounit)
+  subroutine get_hamiltonian_flops(lgflops,pgflops,mgflops,sgflops)
     use global_variables
     use salmon_parallel
     use salmon_communication
     use timer
     implicit none
-    integer,intent(in) :: iounit
-
-    character(*),parameter :: f = '(A,4(f15.6))'
+    real(8),intent(out) :: lgflops(4) ! processor
+    real(8),intent(out) :: pgflops(4) ! processor max
+    real(8),intent(out) :: mgflops(4) ! macro grid
+    real(8),intent(out) :: sgflops(4) ! system total
 
     type(comm_maxloc_type) :: tin,tout
-    real(8)                :: lgflops(4), pgflops(4), tgflops(4)
-    real(8)                :: sgflops(4)
 
     call summation_threads(lgflops)
-    pgflops = lgflops
 
+    pgflops  = lgflops
     tin%rank = nproc_id_global
     tin%val  = lgflops(4)
     call comm_get_max(tin, tout, nproc_group_global)
     call comm_bcast(pgflops, nproc_group_global, tout%rank)
 
     if (calc_mode == calc_mode_ms) then
-       call comm_summation(lgflops, sgflops, 4, nproc_group_tdks)
+       call comm_summation(lgflops, mgflops, 4, nproc_group_tdks)
     end if
 
-    call comm_summation(lgflops, tgflops, 4, nproc_group_global)
-
-    if(comm_is_root(nproc_id_global)) then
-      write (iounit,'(A)') 'Performance [GFLOPS]'
-      write (iounit,'(A,4(A15))') 'Type           ', 'Hamiltonian', 'Stencil', 'Pseudo-Pt', 'Update'
-      write (iounit,f)            'Processor      ', lgflops(4), lgflops(1), lgflops(2), lgflops(3)
-      write (iounit,f)            'Processor(max) ', pgflops(4), pgflops(1), pgflops(2), pgflops(3)
-      if (calc_mode == calc_mode_ms) then
-        write (iounit,f)            'Macro-grid(sum)', sgflops(4), sgflops(1), sgflops(2), sgflops(3)
-      endif
-      write (iounit,f)            'System(sum)    ', tgflops(4), tgflops(1), tgflops(2), tgflops(3)
-    end if
-  end subroutine
-
-  subroutine write_performance(filename)
-    use global_variables
-    use salmon_parallel
-    use salmon_communication
-    use misc_routines, only: gen_logfilename
-    implicit none
-    character(*),intent(in) :: filename
-
-    integer,parameter :: iounit = 999
-
-    if(comm_is_root(nproc_id_global)) open(iounit, file=gen_logfilename(filename))
-    call write_hamiltonian(iounit)
-    if(comm_is_root(nproc_id_global)) close(iounit)
-
-    call comm_sync_all
+    call comm_summation(lgflops, sgflops, 4, nproc_group_global)
   end subroutine
 
   subroutine summation_threads(lgflops)
