@@ -73,9 +73,9 @@ contains
       do i=1,nsize
         if (.not. is_zero(trel(i))) then
           if (write_mode == write_mode_readable) then
-            write (fd,'(a30,6(f12.2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+            write (fd,'(a30,6(e12.5e2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
           else
-            write (fd,'(a,",",5(f0.6,","),f0.6)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+            write (fd,'(a,",",5(e12.5e2,","),e12.5e2)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
           end if
         end if
       end do
