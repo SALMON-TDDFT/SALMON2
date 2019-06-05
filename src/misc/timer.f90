@@ -362,7 +362,10 @@ contains
     integer, intent(in)      :: id,ln
     character(*), intent(in) :: sn
     if (ticked(id)) then
-      print '(A,I3,A,"(",A,"line.",I4)', 'timer ',id,' now ticked... please check it.',sn,ln
+      print '(A,I3,A,"(",A,"line.",I4,")")', 'timer ',id,' now ticked... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+      call tracebackqq
+#endif
       stop 'error'
     end if
   end subroutine
@@ -372,7 +375,12 @@ contains
     integer, intent(in)      :: id,tid,ln
     character(*), intent(in) :: sn
     if (ticked_t(id,tid)) then
-      print '(A,I3,A,I3,A,"(",A,"line.",I4)', 'thread ',tid,': timer ',id,' now ticked... please check it.',sn,ln
+      print '(A,I3,A,I3,A,"(",A,"line.",I4,")")', 'thread ',tid,': timer ',id,' now ticked... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+!$omp critical
+      call tracebackqq
+!$omp end critical
+#endif
       stop 'error'
     end if
   end subroutine
@@ -382,17 +390,26 @@ contains
     integer, intent(in)      :: id,ln
     character(*), intent(in) :: sn
     if (.not.ticked(id)) then
-      print '(A,I3,A,"(",A,"line.",I4)', 'timer ',id,' now stopped... please check it.',sn,ln
+      print '(A,I3,A,"(",A,"line.",I4,")")', 'timer ',id,' now stopped... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+      call tracebackqq
+#endif
       stop 'error'
     end if
   end subroutine
 
   subroutine now_stopped_t(id,tid,ln,sn)
+    use ifcore
     implicit none
     integer, intent(in)      :: id,tid,ln
     character(*), intent(in) :: sn
     if (.not.ticked_t(id,tid)) then
-      print '(A,I3,A,I3,A,"(",A,"line.",I4)', 'thread ',tid,': timer ',id,' now stopped... please check it.',sn,ln
+      print '(A,I3,A,I3,A,"(",A,"line.",I4,")")', 'thread ',tid,': timer ',id,' now stopped... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+!$omp critical
+      call tracebackqq
+!$omp end critical
+#endif
       stop 'error'
     end if
   end subroutine
