@@ -178,6 +178,8 @@ contains
     allocate(log_temp_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
     allocate(ticked(0:LOG_SIZE - 1))
     allocate(ticked_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
+    ticked(:)     = .false.
+    ticked_t(:,:) = .false.
     call timer_reset
   end subroutine
 
