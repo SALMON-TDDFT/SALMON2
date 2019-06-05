@@ -263,7 +263,7 @@ contains
       call timer_begin(id)
     end if
     log_temp_t(id,tid) = get_wtime()
-    ticked_t(id,tid)   = .false.
+    ticked_t(id,tid)   = .true.
   end subroutine
 
   subroutine timer_thread_end(id)
