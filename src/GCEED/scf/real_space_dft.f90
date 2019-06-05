@@ -52,6 +52,7 @@ use iso_fortran_env, only: output_unit
 use calc_iobnum_sub
 use check_mg_sub
 use check_ng_sub
+use scf_iteration_sub
 use dtcg_sub
 use gscg_sub
 use dtcg_periodic_sub
@@ -976,7 +977,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
+          call scf_iteration(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         case('n')
