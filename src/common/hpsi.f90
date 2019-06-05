@@ -27,6 +27,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   use stencil_sub
   use pseudo_pt_sub
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
+  use timer
   implicit none
   integer        ,intent(in) :: Nspin
   type(s_wf_info),intent(in) :: info
@@ -42,6 +43,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3) !?????
   logical :: if_kAc
 
+  call timer_begin(LOG_UHPSI_ALL)
+
   im_s = info%im_s
   im_e = info%im_e
   ik_s = info%ik_s
@@ -55,12 +58,16 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   if(allocated(tpsi%rwf)) then
 
   ! overlap region communication
+    call timer_begin(LOG_UHPSI_UPDATE_OVERLAP)
     if(info%if_divide_rspace) then
       call update_overlap_real8(srg, mg, tpsi%rwf)
 !      call update_overlap_R(tpsi%rwf,mg%is_array,mg%ie_array,norb,Nd & !?????????
 !                           ,mg%is,mg%ie,info%irank_r,info%icomm_r)
     end if
+    call timer_end(LOG_UHPSI_UPDATE_OVERLAP)
+
   ! stencil
+    call timer_begin(LOG_UHPSI_STENCIL)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -72,18 +79,24 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     end do
     end do
     end do
+    call timer_end(LOG_UHPSI_STENCIL)
+
   ! pseudopotential
     call pseudo_R(tpsi,htpsi,info,Nspin,ppg)
 
   else
 
   ! overlap region communication
+    call timer_begin(LOG_UHPSI_UPDATE_OVERLAP)
     if(info%if_divide_rspace) then
       !call update_overlap_C(tpsi%zwf,mg%is_array,mg%ie_array,norb,Nd & !????????
       !                     ,mg%is,mg%ie,info%irank_r,info%icomm_r)
       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
+    call timer_end(LOG_UHPSI_UPDATE_OVERLAP)
+
   ! stencil
+    call timer_begin(LOG_UHPSI_STENCIL)
     if(stencil%if_orthogonal) then
     ! orthogonal lattice
       do im=im_s,im_e
@@ -176,10 +189,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
       end do
       end do
     end if
+    call timer_end(LOG_UHPSI_STENCIL)
+
   ! pseudopotential
     call pseudo_C(tpsi,htpsi,info,nspin,ppg)
 
   end if
+
+  call timer_end(LOG_UHPSI_ALL)
 
   return
 end subroutine hpsi

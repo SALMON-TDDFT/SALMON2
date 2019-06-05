@@ -126,6 +126,13 @@ module timer
   integer,public,parameter :: LOG_HPSI_PSEUDO  = 247
   integer,public,parameter :: LOG_HPSI_UPDATE  = 248
 
+  ! hpsi (unified)
+  integer,public,parameter :: LOG_UHPSI_ALL            = 250
+  integer,public,parameter :: LOG_UHPSI_UPDATE_OVERLAP = 251
+  integer,public,parameter :: LOG_UHPSI_STENCIL        = 252
+  integer,public,parameter :: LOG_UHPSI_PSEUDO         = 253
+  integer,public,parameter :: LOG_UHPSI_PSEUDO_COMM    = 254
+
   ! ===============================================================
 
 

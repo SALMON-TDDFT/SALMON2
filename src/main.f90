@@ -66,12 +66,21 @@ contains
     use perflog
     use misc_routines, only: gen_logfilename
     use salmon_file, only: get_filehandle
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
     use iso_fortran_env, only: output_unit
     implicit none
     integer :: fh
 
-    fh = get_filehandle()
-    open(fh, file=gen_logfilename('perflog','csv'))
+    if (comm_is_root(nproc_id_global)) then
+      fh = get_filehandle()
+      open(fh, file=gen_logfilename('perflog','csv'))
+    end if
+
     call write_performance(fh,write_mode_csv)
+
+    if (comm_is_root(nproc_id_global)) then
+      close(fh)
+    end if
   end subroutine
 end program main
