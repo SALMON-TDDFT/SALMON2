@@ -401,7 +401,6 @@ contains
   end subroutine
 
   subroutine now_stopped_t(id,tid,ln,sn)
-    use ifcore
     implicit none
     integer, intent(in)      :: id,tid,ln
     character(*), intent(in) :: sn
