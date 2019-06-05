@@ -21,6 +21,7 @@ contains
 subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
   use structures
   use salmon_communication, only: comm_summation
+  use timer
   implicit none
   integer,intent(in) :: nspin
   type(s_wf_info),intent(in) :: info
@@ -34,6 +35,8 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
   real(8),allocatable :: uVpsibox (:,:,:,:,:)
   real(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
+  call timer_begin(LOG_UHPSI_PSEUDO)
+
   im_s = info%im_s
   im_e = info%im_e
   ik_s = info%ik_s
@@ -75,7 +78,13 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
     end do
 !$omp end parallel do
 
+    call timer_end(LOG_UHPSI_PSEUDO)
+
+    call timer_begin(LOG_UHPSI_PSEUDO_COMM)
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
+    call timer_end(LOG_UHPSI_PSEUDO_COMM)
+
+    call timer_begin(LOG_UHPSI_PSEUDO)
 
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
@@ -140,6 +149,8 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
 
   end if
 
+  call timer_end(LOG_UHPSI_PSEUDO)
+
   return
 end subroutine pseudo_R
 
@@ -148,6 +159,7 @@ end subroutine pseudo_R
 subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   use structures
   use salmon_communication, only: comm_summation
+  use timer
   implicit none
   integer,intent(in) :: nspin
   type(s_wf_info),intent(in) :: info
@@ -161,6 +173,8 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
+  call timer_begin(LOG_UHPSI_PSEUDO)
+
   im_s = info%im_s
   im_e = info%im_e
   ik_s = info%ik_s
@@ -202,7 +216,13 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
     end do
 !$omp end parallel do
 
+    call timer_end(LOG_UHPSI_PSEUDO)
+
+    call timer_begin(LOG_UHPSI_PSEUDO_COMM)
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
+    call timer_end(LOG_UHPSI_PSEUDO_COMM)
+
+    call timer_begin(LOG_UHPSI_PSEUDO)
 
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
@@ -266,6 +286,8 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
 !$omp end parallel do
 
   end if
+
+  call timer_end(LOG_UHPSI_PSEUDO)
 
   return
 end subroutine pseudo_C
