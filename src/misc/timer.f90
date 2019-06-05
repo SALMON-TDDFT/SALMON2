@@ -198,7 +198,7 @@ contains
     integer :: i,j
     if(present(e)) then
       CHECK_TICKED(e)
-      do j=0,size(ticked_t,2)
+      do j=0,size(ticked_t,2)-1
         CHECK_TICKED_T(e,j)
       end do
       log_time  (e)   = 0.d0
@@ -209,7 +209,7 @@ contains
     else
       do i=0,LOG_SIZE-1
         CHECK_TICKED(i)
-        do j=0,size(ticked_t,2)
+        do j=0,size(ticked_t,2)-1
           CHECK_TICKED_T(i,j)
         end do
       end do
