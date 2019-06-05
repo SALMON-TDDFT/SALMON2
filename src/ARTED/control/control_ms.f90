@@ -546,8 +546,7 @@ subroutine tddft_maxwell_ms
 
   if (comm_is_root(nproc_id_global)) write(*,*) 'This is the end of all calculation'
   Time_now=get_wtime()
-  call timer_end(LOG_TOTAL)
-  if (comm_is_root(nproc_id_global)) call timer_show_hour('Total time =',LOG_TOTAL)
+  if (comm_is_root(nproc_id_global)) call timer_show_current_hour('Total time =',LOG_TOTAL)
 
 1 if(comm_is_root(nproc_id_global)) write(*,*)  'This calculation is shutdown successfully!'
 !  if(comm_is_root(nproc_id_global)) then
