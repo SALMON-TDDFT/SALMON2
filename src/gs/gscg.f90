@@ -179,7 +179,7 @@ subroutine sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsd
   
   xkxk_ob(:)=1.d0 
   rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
-  call timer_begin(LOG_GSCG_INIT_ITERATION)
+  call timer_end(LOG_GSCG_INIT_ITERATION)
 
   
   call timer_begin(LOG_GSCG_ITERATION)

@@ -303,11 +303,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       else
         call Total_Energy_groupob(zpsi_out,shtpsi,1)              ! Total energy
       end if
-
-      call timer_begin(LOG_CALC_DP)
       call subdip(rNe,1)
-      call timer_end(LOG_CALC_DP)
-  
     end if
   end if
 
