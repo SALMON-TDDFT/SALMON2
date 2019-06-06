@@ -71,7 +71,6 @@ subroutine read_wfn(lg,mg,psi,info,system,k_rd)
   use structures
   use salmon_parallel
   use salmon_communication
-  use mpi
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   type(s_system) ,intent(in) :: system
@@ -114,8 +113,7 @@ subroutine read_wfn(lg,mg,psi,info,system,k_rd)
   call comm_bcast(nk0,info%icomm_rko)
   if(.not. comm_is_root(nproc_id_global)) allocate(tmp1(lg%num(1),lg%num(2),lg%num(3),no0,nk0),k_tmp(3,nk0))
   call comm_bcast(k_tmp,info%icomm_rko)
- ! call comm_bcast(tmp1,info%icomm_rko)
-  call MPI_Bcast(tmp1,system%ngrid*no0*nk0, MPI_DOUBLE_COMPLEX, 0, info%icomm_rko, i)
+  call comm_bcast(tmp1,info%icomm_rko)
 
   do ik=ik_s,ik_e
     ik0 = 1
