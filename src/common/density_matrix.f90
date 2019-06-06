@@ -126,7 +126,7 @@ contains
     is = rg%is
     ie = rg%ie
     nsize = rg%num(1) * rg%num(2) * rg%num(3)
-    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:get_nthreads()-1))
+    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(get_nthreads()-1)))
 
     if(allocated(psi%rwf)) then
 
@@ -152,7 +152,7 @@ contains
         end do
 !$omp end do
 
-        ix = ceiling_pow2(size(wrk,4))/2
+        ix = size(wrk,4)/2
         do while(ix > 0)
           if(tid < ix) then
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
@@ -192,7 +192,7 @@ contains
         end do
 !$omp end do
 
-        ix = ceiling_pow2(size(wrk,4))/2
+        ix = size(wrk,4)/2
         do while(ix > 0)
           if(tid < ix) then
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
