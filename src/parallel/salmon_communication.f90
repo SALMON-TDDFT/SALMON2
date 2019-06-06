@@ -202,6 +202,9 @@ module salmon_communication
     module procedure comm_bcast_array4d_double
     ! module procedure comm_bcast_array3d_dcomplex
     !! TODO: create broadcast routine for rank-4 tensor later ...
+
+    ! 5-D array
+    module procedure comm_bcast_array5d_dcomplex
   end interface
 
   interface comm_allgatherv
@@ -1714,6 +1717,31 @@ contains
 #else
     implicit none
     complex(8), intent(inout)     :: val(:,:,:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
+#endif
+  end subroutine
+
+  subroutine comm_bcast_array5d_dcomplex(val, ngroup, root)
+#ifdef SALMON_USE_MPI
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(inout)     :: val(:,:,:,:,:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    integer :: rank, ierr
+    if (present(root)) then
+      rank = root
+    else
+      rank = 0
+    end if
+    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_COMPLEX, rank, ngroup, ierr))
+#else
+    implicit none
+    complex(8), intent(inout)     :: val(:,:,:,:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
