@@ -38,8 +38,8 @@ if (HPSI_TEST)
 endif()
 
 ## Additional library options
-option_set(USE_LIBXC                 "Use LibXC library"                      OFF)
-option_set(INSTALL_REQUIRED_PACKAGES "Request required packages installation" OFF)
+option_set(USE_LIBXC               "Use LibXC library"                               OFF)
+option_set(BUILD_REQUIRED_PACKAGES "Request build and static link required packages" OFF)
 
 
 # cross-compile or native-compile
@@ -91,8 +91,8 @@ if (LIBXC_INSTALLDIR)
   set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${LIBXC_INSTALLDIR})
 endif ()
 
-if (INSTALL_REQUIRED_PACKAGES)
-  include(${CMAKE_SOURCE_DIR}/cmakefiles/install_required_packages.cmake)
+if (BUILD_REQUIRED_PACKAGES)
+  include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)
 else ()
   include(${CMAKE_SOURCE_DIR}/cmakefiles/find_required_packages.cmake)
 endif ()
