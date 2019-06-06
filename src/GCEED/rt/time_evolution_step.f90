@@ -155,6 +155,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     end if
     
   end if
+  call timer_end(LOG_CALC_TIME_PROPAGATION)
+
 
 !$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
@@ -195,7 +197,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       call subdip(rNe,2)
     end if
   end if
-  call timer_end(LOG_CALC_TIME_PROPAGATION)
 
 
   call timer_begin(LOG_CALC_RHO)
@@ -302,11 +303,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       else
         call Total_Energy_groupob(zpsi_out,shtpsi,1)              ! Total energy
       end if
-
-      call timer_begin(LOG_CALC_DP)
       call subdip(rNe,1)
-      call timer_end(LOG_CALC_DP)
-  
     end if
   end if
 

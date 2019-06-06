@@ -151,11 +151,21 @@ module timer
   integer,private,parameter   :: LOG_SIZE = 300
   real(8),private,allocatable :: log_time(:)
   real(8),private,allocatable :: log_temp(:)
+  logical,private,allocatable :: ticked(:)
 
   real(8),private,allocatable :: log_time_t(:,:)
   real(8),private,allocatable :: log_temp_t(:,:)
+  logical,private,allocatable :: ticked_t(:,:)
 
   character(*),private,parameter :: SHOW_FORMAT = '(a,f10.2,a,f10.2,a)'
+
+#define CHECK_TICKED(ID)        call now_ticked((ID),__LINE__,__FILE__)
+#define CHECK_TICKED_T(ID,TID)  call now_ticked_t((ID),(TID),__LINE__,__FILE__)
+#define CHECK_STOPPED(ID)       call now_stopped((ID),__LINE__,__FILE__)
+#define CHECK_STOPPED_T(ID,TID) call now_stopped_t((ID),(TID),__LINE__,__FILE__)
+
+  private :: now_ticked, now_ticked_t
+  private :: now_stopped, now_stopped_t
 
 private
 contains
@@ -166,6 +176,10 @@ contains
     allocate(log_temp(0:LOG_SIZE - 1))
     allocate(log_time_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
     allocate(log_temp_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
+    allocate(ticked(0:LOG_SIZE - 1))
+    allocate(ticked_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
+    ticked(:)     = .false.
+    ticked_t(:,:) = .false.
     call timer_reset
   end subroutine
 
@@ -175,21 +189,36 @@ contains
     real(8),intent(in) :: t
     log_time(e) = t
     log_temp(e) = 0.d0
+    ticked(e)   = .false.
   end subroutine
 
   subroutine timer_reset(e)
     implicit none
     integer,intent(in),optional :: e
+    integer :: i,j
     if(present(e)) then
+      CHECK_TICKED(e)
+      do j=0,size(ticked_t,2)-1
+        CHECK_TICKED_T(e,j)
+      end do
       log_time  (e)   = 0.d0
       log_temp  (e)   = 0.d0
       log_time_t(e,:) = 0.d0
       log_temp_t(e,:) = 0.d0
+      ticked(e)       = .false.
     else
+      do i=0,LOG_SIZE-1
+        CHECK_TICKED(i)
+        do j=0,size(ticked_t,2)-1
+          CHECK_TICKED_T(i,j)
+        end do
+      end do
       log_time  (:)   = 0.d0
       log_temp  (:)   = 0.d0
       log_time_t(:,:) = 0.d0
       log_time_t(:,:) = 0.d0
+      ticked(:)       = .false.
+      ticked_t(:,:)   = .false.
     end if
   end subroutine
 
@@ -212,13 +241,17 @@ contains
   subroutine timer_begin(id)
     implicit none
     integer,intent(in) :: id
+    CHECK_TICKED(id)
     log_temp(id) = get_wtime()
+    ticked(id)   = .true.
   end subroutine
 
   subroutine timer_end(id)
     implicit none
     integer,intent(in) :: id
+    CHECK_STOPPED(id)
     log_time(id) = log_time(id) + get_wtime() - log_temp(id)
+    ticked(id)   = .false.
   end subroutine
 
   subroutine timer_thread_begin(id)
@@ -227,10 +260,12 @@ contains
     integer,intent(in) :: id
     integer :: tid
     tid = omp_get_thread_num()
+    CHECK_TICKED_T(id,tid)
     if (tid == 0) then
       call timer_begin(id)
     end if
     log_temp_t(id,tid) = get_wtime()
+    ticked_t(id,tid)   = .true.
   end subroutine
 
   subroutine timer_thread_end(id)
@@ -239,10 +274,12 @@ contains
     integer,intent(in) :: id
     integer :: tid
     tid = omp_get_thread_num()
+    CHECK_STOPPED_T(id,tid)
     if (tid == 0) then
       call timer_end(id)
     end if
     log_time_t(id,tid) = log_time_t(id,tid) + get_wtime() - log_temp_t(id,tid)
+    ticked_t(id,tid)   = .false.
   end subroutine
 
   subroutine timer_show_hour(str, id)
@@ -321,4 +358,60 @@ contains
     real(8)            :: timer_thread_get
     timer_thread_get = log_time_t(id,tid)
   end function
+
+  subroutine now_ticked(id,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,ln
+    character(*), intent(in) :: sn
+    if (ticked(id)) then
+      print '(A,I3,A,"(",A," line.",I4,")")', 'timer ',id,' now ticked... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+      call tracebackqq
+#endif
+      stop 'error'
+    end if
+  end subroutine
+
+  subroutine now_ticked_t(id,tid,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,tid,ln
+    character(*), intent(in) :: sn
+    if (ticked_t(id,tid)) then
+      print '(A,I3,A,I3,A,"(",A," line.",I4,")")', 'thread ',tid,': timer ',id,' now ticked... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+!$omp critical
+      call tracebackqq
+!$omp end critical
+#endif
+      stop 'error'
+    end if
+  end subroutine
+
+  subroutine now_stopped(id,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,ln
+    character(*), intent(in) :: sn
+    if (.not.ticked(id)) then
+      print '(A,I3,A,"(",A," line.",I4,")")', 'timer ',id,' now stopped... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+      call tracebackqq
+#endif
+      stop 'error'
+    end if
+  end subroutine
+
+  subroutine now_stopped_t(id,tid,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,tid,ln
+    character(*), intent(in) :: sn
+    if (.not.ticked_t(id,tid)) then
+      print '(A,I3,A,I3,A,"(",A," line.",I4,")")', 'thread ',tid,': timer ',id,' now stopped... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+!$omp critical
+      call tracebackqq
+!$omp end critical
+#endif
+      stop 'error'
+    end if
+  end subroutine
 end module

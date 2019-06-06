@@ -482,9 +482,7 @@ if(iopt==1)then
       call read_wfn(lg,mg,spsi,info,system,k_rd)
     end if
     
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
     allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -603,8 +601,8 @@ if(iopt==1)then
         
 !------------------------------ Continue the previous calculation
 
+  call timer_begin(LOG_INIT_GS_RESTART)
   case(1,3)
-    call timer_begin(LOG_INIT_GS_RESTART)
 
     call IN_data(lg,mg,ng,system,info,stencil)
 
@@ -837,7 +835,6 @@ if(iopt==1)then
     if(MEO==2.or.MEO==3) call make_corr_pole
     call make_icoobox_bound
   end select
-
   call timer_end(LOG_INIT_GS_RESTART)
 
 else if(iopt>=2)then
@@ -1003,9 +1000,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_MINIMIZATION)
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
 
@@ -1071,9 +1066,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_EXC_COR)
    
 
-    call timer_begin(LOG_ALLGATHERV_TOTAL)
     call allgatherv_vlocal
-    call timer_end(LOG_ALLGATHERV_TOTAL)
     
   
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
@@ -1131,9 +1124,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   
   else if(iscf_order==2)then
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
     call timer_begin(LOG_CALC_SUBSPACE_DIAG)
@@ -1152,9 +1143,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)    
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
     call timer_begin(LOG_CALC_MINIMIZATION)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
@@ -1192,9 +1181,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_MINIMIZATION)
 
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)    
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
     call timer_begin(LOG_CALC_RHO)
     call calc_density(srho,spsi,info,mg,nspin)
@@ -1242,9 +1229,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_EXC_COR)
    
 
-    call timer_begin(LOG_ALLGATHERV_TOTAL)
     call allgatherv_vlocal
-    call timer_end(LOG_ALLGATHERV_TOTAL)
 
     
     call timer_begin(LOG_CALC_RHO)
