@@ -19,16 +19,16 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
+subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
                rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-               info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+               info_ob,bnmat,cnmat,ppg,vlocal)
   use inputoutput, only: ispin
   use structures
   use gscg_sub
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
-  integer,               intent(in)    :: nspin
+  type(s_system),        intent(in)    :: system
   type(s_wf_info),       intent(in)    :: info
   type(s_wavefunction),  intent(inout) :: spsi
   type(s_stencil),       intent(in)    :: stencil
@@ -37,22 +37,20 @@ subroutine scf_iteration(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   integer,               intent(inout) :: iflag
   integer,               intent(in)    :: itotmst
   integer,               intent(in)    :: mst(2)
-  real(8),               intent(in)    :: hvol
   integer,               intent(in)    :: ilsda
   integer,               intent(in)    :: nproc_ob
   integer,               intent(in)    :: iparaway_ob
-  real(8),               intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
-  real(8),               intent(inout) :: rhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
-  real(8),               intent(inout) :: rgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
-  real(8),               intent(inout) :: rpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:nspin*info%numo)
+  real(8),               intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
+  real(8),               intent(inout) :: rhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
+  real(8),               intent(inout) :: rgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
+  real(8),               intent(inout) :: rpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
   type(s_wf_info),       intent(in)    :: info_ob
   real(8),               intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
-  real(8),               intent(in)    :: hgs(3)
   real(8),               intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
 
-  call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
+  call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
              rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-             info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+             info_ob,bnmat,cnmat,ppg,vlocal)
 
 end subroutine scf_iteration
 
