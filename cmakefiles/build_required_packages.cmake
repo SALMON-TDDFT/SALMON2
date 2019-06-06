@@ -3,7 +3,7 @@ include(ExternalProject)
 
 ### Numerical library
 if (USE_SLACAPACK)
-  message(FATAL_ERROR "We don't support an automatic installation of ScaLAPACK. Please contact your system administrator.")
+  message(FATAL_ERROR "We don't support builiding ScaLAPACK. Please contact your system administrator.")
 else ()
   set(FILE_MATHLIB lapack)
   find_package(LAPACK QUIET)
@@ -14,7 +14,7 @@ else ()
     set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${LAPACK_FLAGS})
   else ()
     set(LAPACK_VERSION "3.8.0")
-    message(STATUS "Install Netlib LAPACK library version ${LAPACK_VERSION}")
+    message(STATUS "Build Netlib LAPACK library version ${LAPACK_VERSION}")
 
     ExternalProject_Add(lapack-project
       URL              "http://www.netlib.org/lapack/lapack-${LAPACK_VERSION}.tar.gz"
@@ -50,7 +50,7 @@ if (USE_LIBXC)
     set(EXTERNAL_LIBS ${EXTERNAL_LIBS} Libxc::xc)
   else ()
     set(LIBXC_VERSION "4.3.4")
-    message(STATUS "Enable installation Libxc version ${LIBXC_VERSION}")
+    message(STATUS "Build Libxc version ${LIBXC_VERSION}")
 
     ExternalProject_Add(libxc-project
       URL              "http://www.tddft.org/programs/octopus/down.php?file=libxc/${LIBXC_VERSION}/libxc-${LIBXC_VERSION}.tar.gz"
