@@ -970,15 +970,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       ( amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
       case(0)
-        select case(gscg)
-        case('y')
-          call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                     info_ob,ppg,vlocal)
-        case('n')
-          call dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
-                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-        end select
+        call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
+                   rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                   info_ob,ppg,vlocal)
       case(3)
         select case(gscg)
         case('y')
@@ -1156,8 +1150,8 @@ DFT_Iteration : do iter=1,iDiter(img)
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,ppg,vlocal)
         case('n')
-          call dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
-                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+          call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
+                    info_ob,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
