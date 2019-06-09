@@ -21,8 +21,8 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
-                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
+                info_ob,bnmat,cnmat,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
@@ -40,7 +40,6 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
   
   type(s_rgrid),intent(in) :: mg
   type(s_system),intent(in)    :: system
-  integer,intent(in)    :: nspin
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
@@ -49,13 +48,11 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
-  real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
-  real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
   integer :: j,ind
@@ -132,7 +129,7 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
     end do
 
   orbital : do iob=iobsta(is),iobend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
     call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
 
   
@@ -169,7 +166,7 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
   
       call inner_product(mg,xk,hxk,xkhxk,commname)
   
-      xkhxk=xkhxk*hvol ; xkxk=1.d0 ; Rk=xkhxk/xkxk
+      xkhxk=xkhxk*system%hvol ; xkxk=1.d0 ; Rk=xkhxk/xkxk
   
     end if
   
@@ -190,7 +187,7 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
   
       do job=iobsta(is),iob-1
         sum0=0.d0
-        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
         call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(jcorr==1)then
   !$OMP parallel do reduction(+ : sum0) private(iz,iy,ix) 
@@ -202,7 +199,7 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
           end do
           end do
           call comm_summation(sum0,sum1,nproc_group_korbital)
-          sum0=sum1*hvol
+          sum0=sum1*system%hvol
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -220,7 +217,7 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
       if(icorr==1)then
   
         call inner_product(mg,gk,gk,sum0,commname)
-        sum0=sum0*hvol
+        sum0=sum0*system%hvol
   
         if ( iter==1 ) then
   !$OMP parallel do private(iz,iy,ix)
@@ -247,13 +244,13 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
         xkpk=0.d0 ; pkpk=0.d0 ; pkhxk=0.d0
   
         call inner_product(mg,xk,pk,xkpk,commname)
-        xkpk = xkpk*hvol
+        xkpk = xkpk*system%hvol
   
         call inner_product(mg,pk,pk,pkpk,commname)
-        pkpk = pkpk*hvol
+        pkpk = pkpk*system%hvol
   
         call inner_product(mg,pk,hxk,pkhxk,commname)
-        pkhxk = pkhxk*hvol
+        pkhxk = pkhxk*system%hvol
   
   !$OMP parallel do private(iz,iy,ix) 
         do iz=mg%is(3),mg%ie(3)
@@ -276,7 +273,7 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
         end do
 
         call inner_product(mg,pk,gk,pkhpk,commname)
-        pkhpk = pkhpk*hvol
+        pkhpk = pkhpk*system%hvol
   
         ak=pkhpk*xkpk-pkhxk*pkpk
         bk=pkhpk*xkxk-xkhxk*pkpk
@@ -287,10 +284,10 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
         hxk=hxk + alpha*gk
   
         call inner_product(mg,xk,hxk,xkhxk,commname)
-        xkhxk = xkhxk*hvol
+        xkhxk = xkhxk*system%hvol
   
         call inner_product(mg,xk,xk,xkxk,commname)
-        xkxk = xkxk*hvol
+        xkxk = xkxk*system%hvol
       
         Rk=xkhxk/xkxk
   
@@ -304,7 +301,7 @@ subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvo
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)=xk(ix,iy,iz)/sqrt(sum0*hvol)
+        spsi%rwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,1,1)=xk(ix,iy,iz)/sqrt(sum0*system%hvol)
       end do
       end do
       end do
