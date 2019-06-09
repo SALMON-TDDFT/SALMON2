@@ -1151,7 +1151,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                      info_ob,ppg,vlocal)
         case('n')
-          call dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+          call dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
         end select
       case(3)

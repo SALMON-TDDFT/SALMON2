@@ -21,10 +21,10 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
+subroutine dtcg(mg,system,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
                 info_ob,bnmat,cnmat,hgs,ppg,vlocal)
   use inputoutput, only: ncg,ispin
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
   use salmon_communication, only: comm_bcast,comm_summation
   use misc_routines, only: get_wtime
@@ -39,6 +39,7 @@ subroutine dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda
   implicit none
   
   type(s_rgrid),intent(in) :: mg
+  type(s_system),intent(in)    :: system
   integer,intent(in)    :: nspin
   type(s_wf_info) :: info
   type(s_wavefunction),intent(inout) :: spsi
