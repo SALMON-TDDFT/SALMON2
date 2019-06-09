@@ -21,8 +21,7 @@ contains
 
 subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
                rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-               info_ob,ppg,vlocal,  &
-               bnmat,cnmat)
+               info_ob,ppg,vlocal)
   use inputoutput, only: ispin,gscg
   use structures
   use gscg_sub
@@ -48,7 +47,6 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   real(8),               intent(inout) :: rpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
   type(s_wf_info),       intent(in)    :: info_ob
   real(8),               intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
-  real(8),               intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
 
   select case(gscg)
   case('y')
@@ -57,7 +55,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                info_ob,ppg,vlocal)
   case('n')
     call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
-              info_ob,bnmat,cnmat,ppg,vlocal)
+              info_ob,ppg,vlocal)
   end select
 
 end subroutine scf_iteration

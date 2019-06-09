@@ -972,8 +972,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
                    rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                   info_ob,ppg,vlocal,   &
-                   bnmat,cnmat)
+                   info_ob,ppg,vlocal)
       case(3)
         select case(gscg)
         case('y')
@@ -1152,7 +1151,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                      info_ob,ppg,vlocal)
         case('n')
           call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
-                    info_ob,bnmat,cnmat,ppg,vlocal)
+                    info_ob,ppg,vlocal)
         end select
       case(3)
         select case(gscg)

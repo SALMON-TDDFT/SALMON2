@@ -22,7 +22,7 @@ contains
 !======================================= Conjugate-Gradient minimization
 
 subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
-                info_ob,bnmat,cnmat,ppg,vlocal)
+                info_ob,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
@@ -52,10 +52,8 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
   type(s_wf_info)       :: info_ob
-  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
-  integer :: j,ind
   integer :: iter,iob,job
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
