@@ -22,8 +22,8 @@ contains
 !======================================= Conjugate-Gradient minimization
 
 subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
-                         info_ob,bnmat,cnmat,ppg,vlocal,num_kpoints_rd,k_rd)
-  use inputoutput, only: ncg,ispin,natom
+                         info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
+  use inputoutput, only: ncg
   use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
   use salmon_communication, only: comm_bcast, comm_summation
@@ -50,12 +50,11 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
   type(s_wf_info)       :: info_ob
-  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   integer,parameter :: nd=4
-  integer :: j,ind
+  integer :: j
   integer :: iter,p,q
   integer :: ik
   integer :: ix,iy,iz
@@ -79,10 +78,6 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer :: icorr_p,icorr_q
   integer :: iroot
   integer :: is_sta,is_end
-  integer :: ilma
-  complex(8) :: ekr(ppg%nps,natom)
-  real(8) :: x,y,z
-  integer :: a,iatom
   complex(8),parameter :: zi=(0.d0,1.d0)
   
   allocate(stpsi%zwf(mg%is_array(1):mg%ie_array(1),  &

@@ -972,8 +972,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                          num_kpoints_rd,k_rd,   &
                          rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
-                         info_ob,ppg,vlocal,   &
-                         bnmat,cnmat)
+                         info_ob,ppg,vlocal)
     else if( amin_routine  == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
@@ -1148,10 +1147,10 @@ DFT_Iteration : do iter=1,iDiter(img)
         case('y')
           call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
                              zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
-                             info_ob,bnmat,cnmat,ppg,vlocal,num_kpoints_rd,k_rd)
+                             info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
           call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
-                             info_ob,bnmat,cnmat,ppg,vlocal,num_kpoints_rd,k_rd)
+                             info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
