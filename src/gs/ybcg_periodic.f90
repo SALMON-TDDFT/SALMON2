@@ -21,10 +21,10 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
-                         info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
+subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
+                         info_ob,bnmat,cnmat,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
@@ -37,7 +37,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in)           :: mg
-  integer,intent(in)    :: nspin
+  type(s_system),intent(in) :: system
   type(s_wf_info),intent(in)         :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
@@ -46,14 +46,12 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
   integer,intent(inout) :: iflag
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
-  real(8),intent(in)    :: hvol
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
   type(s_wf_info)       :: info_ob
   real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
-  real(8),intent(in)    :: hgs(3)
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   integer,parameter :: nd=4
@@ -159,7 +157,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
     end do
     call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
 
-    call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
+    call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
     call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
   
 
@@ -176,7 +174,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
         end do
         end do
         end do
-        sum0=sum0*hvol
+        sum0=sum0*system%hvol
         call comm_summation(sum0,sum1,nproc_group_korbital)
   !$omp parallel do
         do iz=mg%is(3),mg%ie(3)
@@ -190,7 +188,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
       end do
     else
       do q=pstart(is),p-1
-        call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
+        call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
         call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(icorr_q==1)then
   !$omp parallel do
@@ -215,7 +213,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
           end do
           end do
         end if
-        sum0=sum0*hvol
+        sum0=sum0*system%hvol
         call comm_summation(sum0,sum1,nproc_group_korbital)
         if(icorr_p==1)then
   !$omp parallel do
@@ -241,7 +239,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
       end do
       end do
     end if
-    sum0=sum0*hvol
+    sum0=sum0*system%hvol
     call comm_summation(sum0,sum1,nproc_group_korbital)
     if(icorr_p==1)then
   !$omp parallel do 
@@ -280,8 +278,8 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
     call comm_bcast(hxk,nproc_group_kgrid,iroot)
     call comm_bcast(txk,nproc_group_kgrid,iroot)
   
-    call inner_product4(mg,xk,hxk,xkhxk,hvol)
-    call inner_product4(mg,xk,txk,xktxk,hvol)
+    call inner_product4(mg,xk,hxk,xkhxk,system%hvol)
+    call inner_product4(mg,xk,txk,xktxk,system%hvol)
     
     iteration : do iter=1,ncg
   
@@ -305,7 +303,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
           end do
           end do
           end do
-          sum0=sum0*hvol
+          sum0=sum0*system%hvol
           call comm_summation(sum0,sum1,nproc_group_korbital)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -317,7 +315,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
         end do
       else
         do q=pstart(is),p-1
-          call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,nspin*info%numo)
+          call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
           call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
           if(icorr_q==1)then
   !$omp parallel do
@@ -340,7 +338,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
           end do
           end do
           end do
-          sum0=sum0*hvol
+          sum0=sum0*system%hvol
           call comm_summation(sum0,sum1,nproc_group_korbital)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
@@ -351,7 +349,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
           end do
         end do
       end if
-      call inner_product4(mg,gk,gk,sum1,hvol)
+      call inner_product4(mg,gk,gk,sum1,system%hvol)
       
       if(iter==1)then
   !$OMP parallel do
@@ -374,7 +372,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
         end do
       end if
       gkgk=sum1
-      call inner_product4(mg,xk,pk,zs,hvol)
+      call inner_product4(mg,xk,pk,zs,system%hvol)
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -383,7 +381,7 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
       end do
       end do
       end do
-      call inner_product4(mg,pko,pko,sum1,hvol)
+      call inner_product4(mg,pko,pko,sum1,system%hvol)
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -406,8 +404,8 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
       end do
       end do
 
-      call inner_product4(mg,xk,htpsi,xkhpk,hvol)
-      call inner_product4(mg,pko,htpsi,pkhpk,hvol)
+      call inner_product4(mg,xk,htpsi,xkhpk,system%hvol)
+      call inner_product4(mg,pko,htpsi,pkhpk,system%hvol)
       
   
       ev=0.5d0*((xkhxk+pkhpk)-sqrt((xkhxk-pkhpk)**2+4.d0*abs(xkhpk)**2))
@@ -427,14 +425,14 @@ subroutine dtcg_periodic(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,h
       end do
       end do
   
-      call inner_product4(mg,xk,hxk,xkhxk,hvol)
-      call inner_product4(mg,xk,txk,xktxk,hvol)
-      call inner_product4(mg,xk,xk,xkxk,hvol)
+      call inner_product4(mg,xk,hxk,xkhxk,system%hvol)
+      call inner_product4(mg,xk,txk,xktxk,system%hvol)
+      call inner_product4(mg,xk,xk,xkxk,system%hvol)
       rk=xkhxk/xkxk
   
     end do iteration
   
-    call inner_product4(mg,xk(mg%is(1),mg%is(2),mg%is(3)),xk(mg%is(1),mg%is(2),mg%is(3)),sum0,hvol)
+    call inner_product4(mg,xk(mg%is(1),mg%is(2),mg%is(3)),xk(mg%is(1),mg%is(2),mg%is(3)),sum0,system%hvol)
     if(icorr_p==1)then
   !$OMP parallel do
       do iz=mg%is(3),mg%ie(3)
