@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,fg,force)
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -31,8 +31,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   use allocate_mat_sub
   use read_pslfile_sub
   use sendrecv_grid, only: s_sendrecv_grid
+  use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy
   use force_sub, only: calc_force_salmon
-  
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -44,10 +44,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
   type(s_pp_nlcc), intent(in) :: ppn
   type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
-  type(s_wavefunction),intent(inout) :: sshtpsi
-  type(s_fourier_grid),intent(in) :: fg
-  type(s_force),intent(inout)  :: force
-  integer :: ix,iy,iz,i1,mm,jj
+  type(s_wavefunction),intent(inout) :: tpsi1,tpsi2 ! temporary wavefunctions
+  type(s_fourier_grid) :: fg
+  type(s_force),intent(inout) :: force
+  type(s_energy) :: energy
+  type(s_scalar) :: sVh
+  type(s_scalar),allocatable :: srho(:),V_local(:),sVxc(:)
+
+  integer :: ix,iy,iz,i1,mm,jj,jspin,n,nn
   integer :: ii,iob,iatom,iik,ik
   real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
   complex(8),allocatable :: cmatbox1(:,:,:),cmatbox2(:,:,:)
@@ -58,17 +62,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   
   complex(8),parameter :: zi=(0.d0,1.d0)
   
-  complex(8) :: shtpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd,   &
-                       1:iobnum,k_sta:k_end)
-  
   complex(8) :: cbox1,cbox2,cbox3
   integer :: is
 
   real(8) :: mass_au, dt_h, aforce(3,MI)
-  
-  type(s_scalar),allocatable :: srho(:,:)
-  type(s_scalar),allocatable :: srho_s(:,:)
-  
   
   call timer_begin(LOG_CALC_VBOX)
   
@@ -152,7 +149,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
 
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,sshtpsi,   &
+      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
     end if
 
@@ -175,7 +172,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     if(iperiodic==3) call init_k_rd(k_rd,ksquare,4,system%brl)
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,sshtpsi,   &
+      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
     end if
 
@@ -183,10 +180,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
 
     if(iobnum.ge.1)then
       if(mod(itt,2)==1)then
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,sshtpsi,   &
+        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
                     ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
       else
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,sshtpsi,   &
+        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
                     ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
       end if
     end if
@@ -224,40 +221,47 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   end do
   end do
 
+  allocate(srho(nspin),V_local(nspin),sVxc(nspin))
+  do jspin=1,system%nspin
+    allocate(srho(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  end do
+  allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+
   if(iperiodic==0)then
     if(ikind_eext==0.and.itt>=2)then
-      if(mod(itt,2)==0.or.propagator=='etrs')then
-        call Total_energy_groupob(zpsi_in,shtpsi,1)
+      do jspin=1,system%nspin
+        V_local(jspin)%f = Vlocal(:,:,:,jspin)
+      end do
+      if(ilsda == 1) then
+        do jspin=1,system%nspin
+          srho(jspin)%f = rho_s(:,:,:,jspin)
+          sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+        end do
       else
-        call Total_energy_groupob(zpsi_out,shtpsi,1)
+        srho(1)%f = rho
+        sVxc(1)%f = Vxc
       end if
+      sVh%f = Vh
+      energy%E_xc = Exc
+      if(mod(itt,2)==0.or.propagator=='etrs')then
+        call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
+      else
+        call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
+      end if
+      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      Etot = energy%E_tot
       call subdip(rNe,2)
     end if
   end if
 
 
   call timer_begin(LOG_CALC_RHO)
-  if(ilsda==0)then  
-    allocate(srho(1,1))
-    allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  else
-    allocate(srho_s(nspin,1))
-    allocate(srho_s(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(srho_s(2,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  end if
-
   if(mod(itt,2)==0.or.propagator=='etrs')then
-    if(ilsda==0)then
-      call calc_density(srho,spsi_in,info,mg,nspin)
-    else
-      call calc_density(srho_s,spsi_in,info,mg,nspin)
-    end if
+    call calc_density(srho,spsi_in,info,mg,nspin)
   else
-    if(ilsda==0)then
-      call calc_density(srho,spsi_out,info,mg,nspin)
-    else
-      call calc_density(srho_s,spsi_out,info,mg,nspin)
-    end if
+    call calc_density(srho,spsi_out,info,mg,nspin)
   end if
   
   if(ilsda==0)then  
@@ -265,26 +269,21 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
+      rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
     end do
     end do
     end do
-    deallocate(srho(1,1)%f)
-    deallocate(srho)
   else if(ilsda==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
-      rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
-      rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+      rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
+      rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+      rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
     end do
     end do
     end do
-    deallocate(srho_s(1,1)%f)
-    deallocate(srho_s(2,1)%f)
-    deallocate(srho_s)
   end if
   call timer_end(LOG_CALC_RHO)
 
@@ -328,6 +327,18 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   call allgatherv_vlocal
   call timer_end(LOG_CALC_VLOCAL)
 
+  do jspin=1,system%nspin
+    V_local(jspin)%f = Vlocal(:,:,:,jspin)
+  end do
+  if(ilsda == 1) then
+    do jspin=1,system%nspin
+      sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+    end do
+  else
+    sVxc(1)%f = Vxc
+  end if
+  sVh%f = Vh
+  energy%E_xc = Exc
 
 ! result
 
@@ -336,10 +347,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   
       ihpsieff=0
       if(mod(itt,2)==0.or.propagator=='etrs')then
-        call Total_Energy_groupob(zpsi_in,shtpsi,1)              ! Total energy
+        call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       else
-        call Total_Energy_groupob(zpsi_out,shtpsi,1)              ! Total energy
+        call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       end if
+      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      Etot = energy%E_tot
       call subdip(rNe,1)
     end if
   end if
@@ -457,17 +470,31 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   call timer_begin(LOG_WRITE_ENERGIES)
   if(iperiodic==3)then
     call subdip(rNe,1)
+    if(iflag_hartree==2)then
+      fg%rhoG_elec = rhoe_G
+    else if(iflag_hartree==4)then
+      do iz=1,lg_num(3)/NPUZ
+      do iy=1,lg_num(2)/NPUY
+      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+        fg%rhoG_elec(nn) = rhoe_G(n)
+      enddo
+      enddo
+      enddo
+    end if
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_current(zpsi_in)
       if(itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
-        call Total_Energy_periodic(zpsi_in,shtpsi)              ! Total energy
+        call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       end if
     else
       call calc_current(zpsi_out)
       if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
-        call Total_Energy_periodic(zpsi_out,shtpsi)              ! Total energy
+        call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       end if
     end if
+    call calc_Total_Energy_periodic(energy,system,pp,fg)
     rbox1=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction( + : rbox1 )
     do iz=ng_sta(3),ng_end(3)
@@ -483,9 +510,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   !      itt, (curr(i1,itt),i1=1,3), Ne, Etot*2d0*Ry,iterVh,dble(cumnum)
     if(comm_is_root(nproc_id_global))then
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
-        itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
+        itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, energy%E_tot*2d0*Ry
       write(16,'(f14.8, 3e16.8, f15.8,f18.8)')       &
-        dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
+        dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, energy%E_tot*2d0*Ry
       write(17,'(f14.8, 3e16.8)')       &
         dble(itt)*dt*2.41888d-2, (E_tot(i1,itt),i1=1,3)
       write(18,'(f14.8, 3e16.8)')       &
@@ -611,7 +638,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       write(15,'(3f16.8)') dble(itt)*dt*0.0241889d0,  &
                   sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
                       +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
-                      +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, Etot*2.d0*Ry
+                      +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, energy%E_tot*2.d0*Ry
       do ii=1,wmaxMI
         write(20+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (system%Rion(jj,ii)*a_B,jj=1,3)
 !xxx        write(30+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
@@ -653,6 +680,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)
+
+  call deallocate_scalar(sVh)
+  do jspin=1,nspin
+    call deallocate_scalar(srho(jspin))
+    call deallocate_scalar(V_local(jspin))
+    call deallocate_scalar(sVxc(jspin))
+  end do
+  deallocate(srho,V_local,sVxc)
 
   return
 
