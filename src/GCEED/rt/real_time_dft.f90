@@ -642,7 +642,7 @@ SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_grid,   &
                            nproc_group_h, nproc_group_korbital,  nproc_id_korbital, nproc_group_rho, &
-                           nproc_group_kgrid, nproc_group_k
+                           nproc_group_kgrid, nproc_group_k, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -659,19 +659,19 @@ type(s_system) :: system
 type(s_wf_info) :: info
 type(s_stencil) :: stencil
 type(s_wavefunction) :: spsi_in,spsi_out
-type(s_wavefunction) :: sshtpsi
+type(s_wavefunction) :: tpsi1,tpsi2 ! temporary wavefunctions
 type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_nlcc) :: ppn
+type(s_fourier_grid) :: fg
+type(s_energy)  :: energy
 
 complex(8),parameter :: zi=(0.d0,1.d0)
-integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
+integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik,n,nn
 integer :: nspin
 real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
-integer :: iob_allob
 real(8) :: absr2
-integer :: j,ind
 integer :: is,jspin
 integer :: neig(1:3, 1:2)
 integer :: neig_ng(1:3, 1:2)
@@ -681,8 +681,6 @@ real(8)    :: rbox_array2(10)
 real(8)    :: rbox_arrayq(3,3)
 real(8)    :: rbox_arrayq2(3,3)
 real(8)    :: rbox1q,rbox1q12,rbox1q23,rbox1q31
-
-complex(8), allocatable :: shtpsi(:,:,:,:,:)
 
 type(s_scalar),allocatable :: srho(:,:)
 type(s_scalar),allocatable :: srho_s(:,:)
@@ -710,6 +708,8 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   system%rion = rion
 
   system%rocc(:,:,1) = rocc(:,:)
+
+  allocate(energy%esp(system%no,system%nk,system%nspin))
 
   info%im_s=1
   info%im_e=1
@@ -803,7 +803,14 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
                         info%io_s:info%io_e,  &
                         info%ik_s:info%ik_e,  &
                         1))
-  allocate(sshtpsi%zwf(mg%is_array(1):mg%ie_array(1),  &
+  allocate(tpsi1%zwf(mg%is_array(1):mg%ie_array(1),  &
+                        mg%is_array(2):mg%ie_array(2),  &
+                        mg%is_array(3):mg%ie_array(3),  &
+                        1:nspin,  &
+                        info%io_s:info%io_e,  &
+                        info%ik_s:info%ik_e,  &
+                        1))
+  allocate(tpsi2%zwf(mg%is_array(1):mg%ie_array(1),  &
                         mg%is_array(2):mg%ie_array(2),  &
                         mg%is_array(3):mg%ie_array(3),  &
                         1:nspin,  &
@@ -819,34 +826,9 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
       do iy=mg%is_array(2),mg%ie_array(2)
       do ix=mg%is_array(1),mg%ie_array(1)
         spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
         spsi_out%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        sshtpsi%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+        tpsi1%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
+        tpsi2%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
       end do
       end do
       end do
@@ -854,7 +836,49 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   end do
   end do
 
-  if(iperiodic==3) allocate(stencil%kAc(info%ik_s:info%ik_e,3))
+  if(iperiodic==3) then
+    allocate(stencil%kAc(info%ik_s:info%ik_e,3))
+
+!????????? get_fourier_grid_G @ real_space_dft.f90
+    if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
+    if(allocated(fg%rhoG_ion)) deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
+    jj = system%ngrid/nproc_size_global
+    fg%ig_s = nproc_id_global*jj+1
+    fg%ig_e = (nproc_id_global+1)*jj
+    if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+    fg%icomm_fourier = nproc_group_global
+    fg%ng = system%ngrid
+    allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+    allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+    if(iflag_hartree==2)then
+       fg%iGzero = nGzero
+       fg%Gx = Gx
+       fg%Gy = Gy
+       fg%Gz = Gz
+       fg%rhoG_ion = rhoion_G
+       fg%dVG_ion = dVloc_G
+    else if(iflag_hartree==4)then
+       fg%iGzero = 1
+       fg%Gx = 0.d0
+       fg%Gy = 0.d0
+       fg%Gz = 0.d0
+       fg%rhoG_ion = 0.d0
+       fg%dVG_ion = 0.d0
+       do iz=1,lg_num(3)/NPUZ
+       do iy=1,lg_num(2)/NPUY
+       do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          fg%Gx(nn) = Gx(n)
+          fg%Gy(nn) = Gy(n)
+          fg%Gz(nn) = Gz(n)
+          fg%rhoG_ion(nn) = rhoion_G(n)
+          fg%dVG_ion(nn,:) = dVloc_G(n,:)
+       enddo
+       enddo
+       enddo
+    end if
+  end if
 
 if(comm_is_root(nproc_id_global).and.iflag_md==1)then
   open(15,file="distance.data")
@@ -1313,22 +1337,6 @@ end do
     end if
   end do
 
-allocate (shtpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd,   &
-                 1:iobnum,k_sta:k_end))
-
-do ik=k_sta,k_end
-do iob=1,iobnum
-!$OMP parallel do private(iz,iy,ix)
-  do iz=mg_sta(3)-Nd,mg_end(3)+Nd
-  do iy=mg_sta(2)-Nd,mg_end(2)+Nd
-  do ix=mg_sta(1)-Nd,mg_end(1)+Nd+1
-    shtpsi(ix,iy,iz,iob,ik)=0.d0
-  end do
-  end do
-  end do
-end do
-end do
-
 if(iflag_comm_rho==2)then
   allocate(rhobox1_all(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3))) 
   allocate(rhobox2_all(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3))) 
@@ -1398,7 +1406,7 @@ if(comm_is_root(nproc_id_global))then
     write(15,'(3f16.8)') dble(0)*dt*0.0241889d0,  &
                 sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
                     +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
-                    +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, Etot*2.d0*Ry
+                    +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, energy%E_tot*2.d0*Ry
     do ii=1,wmaxMI
       write(20+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (Rion(jj,ii)*a_B,jj=1,3)
       write(30+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
@@ -1438,7 +1446,8 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    if(itt>=Miter_rt+1) call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+                        ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy)
   end do TE
 
 else
@@ -1453,15 +1462,18 @@ else
     end if
 
     if(itt>=Miter_rt+1) &
-      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+      ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy)
   end do TE1
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy)
   end do TE2
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy)
   end do TE3
 
 end if
