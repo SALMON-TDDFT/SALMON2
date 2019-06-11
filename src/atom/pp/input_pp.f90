@@ -27,8 +27,8 @@ subroutine input_pp(pp,hx,hy,hz)
     & psmask_option
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_is_root
+  use math_constants, only : pi
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
   real(8),intent(in) :: hx,hy,hz
@@ -269,8 +269,8 @@ subroutine read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 !See http://www.abinit.org/downloads/psp-links/lda_fhi
   use structures,only : s_pp_info
   use salmon_global,only : nelem, Lmax_ps
+  use math_constants,only : pi
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info),intent(inout) :: pp
 !argument
   integer,intent(in) :: ik
@@ -439,8 +439,8 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
                           rhor_nlcc,flag_nlcc_element)
   use structures,only : s_pp_info
   use salmon_global, only: ps_format, nelem, alpha_mask, eta_mask
+  use math_constants, only : pi
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info),intent(inout) :: pp
   integer,intent(in) :: ik
   real(8),intent(in) :: hx,hy,hz
@@ -549,8 +549,8 @@ end subroutine making_ps_with_masking
 subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   use structures,only : s_pp_info
   use salmon_global, only: nelem
+  use math_constants, only : pi
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info),intent(inout) :: pp
   integer,intent(in) :: ik
   logical,intent(in) :: flag_nlcc_element(nelem)
@@ -615,9 +615,9 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   use structures,only : s_pp_info
   use salmon_global,only :ps_format,alpha_mask,gamma_mask
   use salmon_math, only: xjl, dxjl
+  use math_constants, only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
 !argument
   integer,intent(in) :: ik
   real(8),intent(inout) :: uvpp(0:pp%nrmax0,0:pp%lmax0)
@@ -729,8 +729,8 @@ subroutine make_mask_function(pp,rmask,dmask,ik)
 !Name of variables are taken from ***
   use structures,only : s_pp_info
   use salmon_global, only : eta_mask
+  use math_constants, only : pi
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info),intent(inout) :: pp
 !Arguments
   integer,intent(in) :: ik

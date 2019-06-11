@@ -29,9 +29,9 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,icheck_ascorder,hgs,npuw,npuy,npuz,  &
   use salmon_communication, only: comm_summation
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
+  use math_constants, only : pi
 !$  use omp_lib
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
