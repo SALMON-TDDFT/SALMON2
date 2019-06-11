@@ -11,6 +11,7 @@ set(SOURCES
     ybcg.f90
     ybcg_periodic.f90
     gram_schmidt_orth.f90
+    scf_iteration.f90
     structure_opt.f90
     read_gs.f90
    )

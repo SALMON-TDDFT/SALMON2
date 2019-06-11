@@ -47,11 +47,10 @@ use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
-use write_performance_results, only: write_gs_performance
-use iso_fortran_env, only: output_unit
 use calc_iobnum_sub
 use check_mg_sub
 use check_ng_sub
+use scf_iteration_sub
 use dtcg_sub
 use gscg_sub
 use dtcg_periodic_sub
@@ -484,9 +483,7 @@ if(iopt==1)then
       call read_wfn(lg,mg,spsi,info,system,k_rd)
     end if
     
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
     allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -605,8 +602,8 @@ if(iopt==1)then
         
 !------------------------------ Continue the previous calculation
 
+  call timer_begin(LOG_INIT_GS_RESTART)
   case(1,3)
-    call timer_begin(LOG_INIT_GS_RESTART)
 
     call IN_data(lg,mg,ng,system,info,stencil)
 
@@ -839,7 +836,6 @@ if(iopt==1)then
     if(MEO==2.or.MEO==3) call make_corr_pole
     call make_icoobox_bound
   end select
-
   call timer_end(LOG_INIT_GS_RESTART)
 
 else if(iopt>=2)then
@@ -974,15 +970,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       ( amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
       case(0)
-        select case(gscg)
-        case('y')
-          call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-        case('n')
-          call dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,   &
-                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-        end select
+        call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
+                   rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                   info_ob,ppg,vlocal)
       case(3)
         select case(gscg)
         case('y')
@@ -1005,9 +995,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_MINIMIZATION)
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
 
@@ -1073,9 +1061,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_EXC_COR)
    
 
-    call timer_begin(LOG_ALLGATHERV_TOTAL)
     call allgatherv_vlocal
-    call timer_end(LOG_ALLGATHERV_TOTAL)
     
   
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
@@ -1133,9 +1119,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   
   else if(iscf_order==2)then
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
 
     call timer_begin(LOG_CALC_SUBSPACE_DIAG)
@@ -1154,9 +1138,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)    
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
     call timer_begin(LOG_CALC_MINIMIZATION)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
@@ -1164,12 +1146,12 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob, &
+          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
                      rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                     info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+                     info_ob,ppg,vlocal)
         case('n')
-          call dtcg(mg,nspin,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,hvol,ilsda,nproc_ob,iparaway_ob,  &
-                    info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+          call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
+                    info_ob,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
@@ -1194,9 +1176,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_MINIMIZATION)
 
 
-    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
     call gram_schmidt(system, mg, info, spsi)    
-    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
     call timer_begin(LOG_CALC_RHO)
     call calc_density(srho,spsi,info,mg,nspin)
@@ -1244,9 +1224,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_EXC_COR)
    
 
-    call timer_begin(LOG_ALLGATHERV_TOTAL)
     call allgatherv_vlocal
-    call timer_end(LOG_ALLGATHERV_TOTAL)
 
     
     call timer_begin(LOG_CALC_RHO)
@@ -1322,7 +1300,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
   end if
 
-  call timer_begin(LOG_WRITE_RESULTS)
+  call timer_begin(LOG_WRITE_GS_RESULTS)
 
   select case(convergence)
     case('rho_dne')
@@ -1422,7 +1400,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(comm_is_root(nproc_id_global))then
     write(*,*) "Ne=",rNebox2*Hvol
   end if
-  call timer_end(LOG_WRITE_RESULTS)
+  call timer_end(LOG_WRITE_GS_RESULTS)
 
 
 if(ilsda==0)then
@@ -1573,7 +1551,7 @@ end do Structure_Optimization_Iteration
 
 
 !---------------------------------------- Output
-call timer_begin(LOG_WRITE_RESULTS)
+call timer_begin(LOG_WRITE_GS_RESULTS)
 
 call band_information
 
@@ -1606,7 +1584,7 @@ if(out_elf=='y')then
   call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
   deallocate(elf)
 end if
-call timer_end(LOG_WRITE_RESULTS)
+call timer_end(LOG_WRITE_GS_RESULTS)
 
 
 call timer_begin(LOG_WRITE_LDA_DATA)
@@ -1619,7 +1597,7 @@ call timer_end(LOG_WRITE_LDA_DATA)
 
 
 ! LDA information
-call timer_begin(LOG_WRITE_INFOS)
+call timer_begin(LOG_WRITE_LDA_INFOS)
 if(comm_is_root(nproc_id_global)) then
   open(1,file=LDA_info)
 
@@ -1686,17 +1664,12 @@ if(comm_is_root(nproc_id_global)) then
   close(1)
 
 end if
-call timer_end(LOG_WRITE_INFOS)
+call timer_end(LOG_WRITE_LDA_INFOS)
 
 deallocate(Vlocal)
 call finalize_xc(xc_func)
 
 call timer_end(LOG_TOTAL)
-
-
-if(comm_is_root(nproc_id_global))then
-  call write_gs_performance(output_unit)
-end if
 
 contains
 

@@ -45,8 +45,6 @@ use salmon_communication, only: comm_is_root, comm_summation
 use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
-use write_performance_results, only: write_rt_performance
-use iso_fortran_env, only: output_unit
 implicit none
 
 type(s_rgrid) :: lg
@@ -55,7 +53,9 @@ type(s_rgrid) :: ng
 type(s_system)  :: system
 type(s_wf_info) :: info
 type(s_stencil) :: stencil
+type(s_fourier_grid) :: fg
 type(s_force)   :: force
+type(s_md) :: md
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -65,7 +65,6 @@ real(8),allocatable :: Qp_box(:,:,:),alpha_Rq_box(:,:,:),alpha_Iq_box(:,:,:)
 real(8),allocatable :: Sf(:),Sf2(:,:),Sq2(:,:,:)
 integer :: jj,nn
 integer :: iene,nntime,ix,iy,iz
-character(100):: timeFile
 character(100):: alpha2OutFile
 integer :: ia,ib
 real(8) :: rab
@@ -351,7 +350,7 @@ end if
 call timer_end(LOG_INIT_RT)
 
 
-call Time_Evolution(lg,mg,ng,system,info,stencil,force)
+call Time_Evolution(lg,mg,ng,system,info,stencil,fg,force,md)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -360,7 +359,7 @@ call timer_end(LOG_WRITE_RT_DATA)
 
 
 ! Output
-call timer_begin(LOG_WRITE_RESULTS)
+call timer_begin(LOG_WRITE_RT_RESULTS)
 if(iwrite_external==1)then
   if(comm_is_root(nproc_id_global))then
     open(1,file=file_external)
@@ -629,23 +628,9 @@ case(3)
   deallocate( tfourier_integrand )
 
 end select
-call timer_end(LOG_WRITE_RESULTS)
+call timer_end(LOG_WRITE_RT_RESULTS)
 
 call timer_end(LOG_TOTAL)
-
-
-if(comm_is_root(nproc_id_global))then
-  call write_rt_performance(output_unit)
-end if
-
-if(timer_process=='y')then
-
-  write(fileNumber, '(i8)') nproc_id_global
-  timeFile = "timer_proc"//adjustl(fileNumber)
-  open(79,file=timeFile)
-
-  call write_rt_performance(79)
-end if
 
 call deallocate_mat
 
@@ -655,7 +640,7 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,force)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,force,md)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & !nproc_group_grid,   &
                            nproc_group_h, nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
@@ -669,6 +654,9 @@ use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,k
 use sendrecv_grid, only: init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use calc_iroot_sub
+use force_sub, only: calc_force_salmon
+use hpsi_sub, only: update_kvector_nonlocalpt
+use md_sub, only: init_md
 implicit none
 
 type(s_rgrid) :: lg,mg,ng
@@ -679,7 +667,9 @@ type(s_wavefunction) :: spsi_in,spsi_out
 type(s_wavefunction) :: sshtpsi
 type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_nlcc) :: ppn
-type(s_force)   :: force
+type(s_fourier_grid) :: fg
+type(s_force) :: force
+type(s_md) :: md
 
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik
@@ -721,7 +711,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   system%nion = MI
   system%Hvol = Hvol
   system%Hgs = Hgs
-  allocate(system%Rion(3,system%nion) &
+  allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) &
           ,system%wtk(system%nk) &
           ,system%rocc(system%no,system%nk,system%nspin))
   system%wtk = wtk
@@ -1375,24 +1365,36 @@ if(iflag_fourier_omega==1)then
 end if
 
 allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-if(iperiodic==3)then
-  call calcAext
-end if
+
+if(iperiodic==3) call calcAext
+
+if(iflag_md==1) call init_md(system,md)
 
 !-------------------------------------------------- Time evolution
-!hoge: this does not work now
-!if(iflag_md==1)then
-!  call calc_force_c(zpsi_in)
-!end if
+
+!(force at initial step)
+if(iflag_md==1)then
+   if(iperiodic==0)then
+      call calc_force_c(zpsi_in)  !this does not work now
+      force%F(:,:) = rforce(:,:)  !rforce must be removed in future
+   else if(iperiodic==3)then
+      do ik=info%ik_s,info%ik_e
+        stencil%kAc(ik,:) = k_rd(:,ik)
+      end do
+      call update_kvector_nonlocalpt(ppg,stencil%kAc,info%ik_s,info%ik_e)
+      call get_fourier_grid_G_rt(system,lg,ng,fg)
+      call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
+   end if
+end if
 
 if(comm_is_root(nproc_id_global))then
   select case(iperiodic)
   case(0)
-    write(*,'(1x,a10,a10,a25,a15,a25,a10)') " timestep ","time[fs]",      &
+    write(*,'(1x,a10,a10,a25,a15,a25,a10)') "time-step ","time[fs]",      &
                              " Dipole moment(xyz)[A]"      &
           ,"      electrons","      Total energy[eV]","   iterVh"
   case(3)
-    write(*,'(1x,a10,a10,a25,a15,a25)') " timestep ","time[fs]",      &
+    write(*,'(1x,a10,a10,a25,a15,a25)') "time-step ","time[fs]",      &
                              " Current(xyz)[a.u.]   "      &
           ,"      electrons","      Total energy[eV]"
   end select
@@ -1403,22 +1405,16 @@ if(comm_is_root(nproc_id_global))then
 !    write(15,'(2a16,a24)') "        Time[fs]",      &
 !                   "    Distance [A]",     &
 !                   " Total energy [eV]   "  
-!    write(15,*) "-------------------------------------"      &
-!     ,"------------------"
 !    do ii=1,wmaxMI
 !      write(20+ii,'(a16,a28)') "        Time[fs]",      &
 !                   "    Cooordinate (xyz) [A]   "
-!      write(20+ii,*) "-------------------------------------"      &
-!       ,"------------------"
 !      write(30+ii,'(a16,a28)') "        Time[fs]",      &
 !                   "       Force (xyz) [eV/A]   "
-!      write(30+ii,*) "-------------------------------------"      &
-!       ,"------------------"
 !    end do
 !    write(15,'(3f16.8)') dble(0)*dt*0.0241889d0,  &
-!                sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
-!                    +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
-!                    +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, Etot*2.d0*Ry
+!             sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
+!                 +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
+!                 +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, Etot*2.d0*Ry
 !    do ii=1,wmaxMI
 !      write(20+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (Rion(jj,ii)*a_B,jj=1,3)
 !      write(30+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
@@ -1438,7 +1434,7 @@ if(comm_is_root(nproc_id_global))then
     write(41,'("#",a)') "---------------------------------------------------------------------"
   end if
 end if
-call timer_begin(LOG_INIT_TIME_PROPAGATION)
+call timer_end(LOG_INIT_TIME_PROPAGATION)
 
 
 call timer_begin(LOG_INIT_RT)
@@ -1459,7 +1455,7 @@ if(itotNtime-Miter_rt<=10000)then
     end if
 
     if(itt>=Miter_rt+1) &
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,fg,force)
   end do TE
 
 else
@@ -1474,15 +1470,15 @@ else
     end if
 
     if(itt>=Miter_rt+1) &
-      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
+      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,fg,force)
   end do TE1
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,fg,force)
   end do TE2
 
   TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
+    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,fg,force)
   end do TE3
 
 end if

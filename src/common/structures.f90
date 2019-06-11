@@ -202,6 +202,10 @@ module structures
     type(s_vector) :: vec_e, vec_h, vec_a, vec_j_em
   end type s_fdtd_field
 
+  type s_md
+     real(8) :: xi_nh
+  end type s_md
+
 !===================================================================================================================================
 
 contains

@@ -45,7 +45,7 @@ Subroutine diag_omp
   lwork=6*NB
   thr_id=0
 
-  call timer_begin(LOG_DIAG)
+  call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   call update_projector(kac)
 
 ! FIXME: For Fujitsu's parallelized BLAS routines, the application crashes when
@@ -167,7 +167,7 @@ Subroutine diag_omp
   end select
 
 #endif
-  call timer_end(LOG_DIAG)
+  call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
   return
 End Subroutine diag_omp

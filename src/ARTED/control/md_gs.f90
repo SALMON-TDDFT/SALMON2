@@ -24,13 +24,13 @@ module md_ground_state
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
   use salmon_parallel, only: nproc_id_global
+  use const, only: umass, hartree2J, kB
   implicit none
 contains
 
 subroutine calc_md_ground_state
   use timer
   use opt_variables
-  use performance_analyzer
   use misc_routines, only: get_wtime
   use salmon_global, only: format3d, out_dns, out_dns_rt, out_dns_rt_step
   use ground_state

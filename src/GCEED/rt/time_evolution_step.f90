@@ -16,26 +16,28 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,force)
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,shtpsi,sshtpsi,fg,force)
   use structures
-  use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_grid, nproc_group_h, nproc_group_korbital
+  use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density
   use writefield
   use timer
   use inputoutput
   use taylor_sub
+  use const, only: umass
   use scf_data
   use new_world_sub
   use allocate_mat_sub
   use read_pslfile_sub
   use sendrecv_grid, only: s_sendrecv_grid
+  use force_sub, only: calc_force_salmon
   
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  type(s_system),intent(in) :: system
+  type(s_system),intent(inout) :: system
   integer,intent(in) :: nspin
   type(s_wf_info),intent(in) :: info
   type(s_stencil),intent(inout) :: stencil
@@ -43,6 +45,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   type(s_pp_nlcc), intent(in) :: ppn
   type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
   type(s_wavefunction),intent(inout) :: sshtpsi
+  type(s_fourier_grid),intent(in) :: fg
   type(s_force),intent(inout)  :: force
   integer :: ix,iy,iz,i1,mm,jj
   integer :: ii,iob,iatom,iik,ik
@@ -60,6 +63,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   
   complex(8) :: cbox1,cbox2,cbox3
   integer :: is
+
+  real(8) :: mass_au, dt_h, aforce(3,MI)
   
   type(s_scalar),allocatable :: srho(:,:)
   type(s_scalar),allocatable :: srho_s(:,:)
@@ -114,6 +119,37 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   end do
   end do
 
+  !(MD: part1)
+  if(iflag_md==1)then
+     dt_h = dt*0.5d0
+
+     !update ion velocity with dt/2
+     do iatom=1,MI
+        mass_au = umass*Mass(Kion(iatom))
+        system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
+     enddo
+
+     !update ion coordinate with dt
+     do iatom=1,MI
+        system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
+     enddo
+
+     !update pseudopotential
+     if (mod(itt,step_update_ps)==0 ) then
+        !xxxx call prep_ps_periodic('update_all       ')
+        call dealloc_init_ps(ppg,ppg_all,ppn)
+        call init_ps(system%al,system%brl,stencil%matrix_A)
+        if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
+     else if (mod(itt,step_update_ps2)==0 ) then
+        !xxxx call prep_ps_periodic('update_wo_realloc')
+        !xxxxxxx this option is not yet made xxxxxx
+        call dealloc_init_ps(ppg,ppg_all,ppn)
+        call init_ps(system%al,system%brl,stencil%matrix_A)
+        if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
+     endif
+
+  endif
+
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
       call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,sshtpsi,   &
@@ -156,6 +192,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     end if
     
   end if
+  call timer_end(LOG_CALC_TIME_PROPAGATION)
+
 
 !$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
@@ -196,7 +234,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       call subdip(rNe,2)
     end if
   end if
-  call timer_end(LOG_CALC_TIME_PROPAGATION)
 
 
   call timer_begin(LOG_CALC_RHO)
@@ -303,11 +340,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       else
         call Total_Energy_groupob(zpsi_out,shtpsi,1)              ! Total energy
       end if
-
-      call timer_begin(LOG_CALC_DP)
       call subdip(rNe,1)
-      call timer_end(LOG_CALC_DP)
-  
     end if
   end if
 
@@ -464,32 +497,47 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   call timer_end(LOG_WRITE_ENERGIES)
 
 
-  call timer_begin(LOG_WRITE_INFOS)
-  if(iflag_md==1)then  ! and or rvf flag in future
+  call timer_begin(LOG_WRITE_RT_INFOS)
+
+  !(force)
+  if(icalcforce==1)then  ! and or rvf flag in future
+    aforce(:,:) = force%F(:,:)
+
+    if(iperiodic==0)then !<--currently does not work
     !currently, old subroutin calc_force_c for isolated system is used
     !calc_force_salmon should be used, but now, 
     !it does not support interaction with field for isolated system
-    if(mod(itt,2)==0.or.propagator=='etrs')then
-      call calc_force_c(zpsi_in)
-    else
-      call calc_force_c(zpsi_out)
-    end if
-    force%F(:,:) = rforce(:,:)  !rforce must be removed in future
-    if(comm_is_root(nproc_id_global))then
-      do iatom=1,MI
-        dRion(:,iatom,1)=2*dRion(:,iatom,0)-dRion(:,iatom,-1)+    &
-                             rforce(:,iatom)*dt**2/(umass*Mass(Kion(iatom)))
-        Rion(:,iatom)=Rion_eq(:,iatom)+dRion(:,iatom,1)
-      enddo
-    end if
-    call comm_bcast(Rion,nproc_group_global)
-    call init_ps(system%al,system%brl,stencil%matrix_A)
-    if(comm_is_root(nproc_id_global))then
-      dRion(:,:,-1)=dRion(:,:,0)
-      dRion(:,:, 0)=dRion(:,:,1)
-    end if
-    call comm_bcast(dRion,nproc_group_global)
-  end if
+       !(currently does not work)
+       if(mod(itt,2)==0.or.propagator=='etrs')then
+          call calc_force_c(zpsi_in)
+       else
+          call calc_force_c(zpsi_out)
+       end if
+       force%F(:,:) = rforce(:,:)  !rforce must be removed in future
+    else if(iperiodic==3)then
+       call get_fourier_grid_G_rt(system,lg,ng,fg)
+       !now, interaction between ion and field is not included yet
+       if(mod(itt,2)==0.or.propagator=='etrs')then
+          call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
+       else
+          call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
+       end if
+    end if  !ipediodic
+  endif
+
+  !(MD: part2) or/and force
+  if(iflag_md==1)then  ! and or rvf flag in future
+     dt_h = dt*0.5d0
+
+     !update ion velocity with dt/2
+!     Ework = 0d0
+     do iatom=1,MI
+        mass_au = umass*Mass(Kion(iatom))
+        system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
+!        Ework = Ework - sum(aforce(:,ia)*(dRion(:,ia,iter+1)-dRion(:,ia,iter)))
+     enddo
+
+  end if  !iflag_md
 
 
   if(circular=='y')then
@@ -557,6 +605,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     deallocate(cmatbox1,cmatbox2) 
   end if
 
+!hoge
   if(comm_is_root(nproc_id_global))then
     if(iflag_md==1)then
       write(15,'(3f16.8)') dble(itt)*dt*0.0241889d0,  &
@@ -564,8 +613,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
                       +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
                       +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, Etot*2.d0*Ry
       do ii=1,wmaxMI
-        write(20+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (Rion(jj,ii)*a_B,jj=1,3)
-        write(30+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
+        write(20+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (system%Rion(jj,ii)*a_B,jj=1,3)
+!xxx        write(30+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
+        write(30+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (force%F(jj,ii)*2.d0*Ry/a_B,jj=1,3)
       end do
     end if
   end if
@@ -602,8 +652,64 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
-  call timer_end(LOG_WRITE_INFOS)
+  call timer_end(LOG_WRITE_RT_INFOS)
 
   return
 
 END SUBROUTINE time_evolution_step
+
+subroutine get_fourier_grid_G_rt(system,lg,ng,fg)
+  use salmon_global, only: nelem
+  use structures, only: s_system, s_fourier_grid, s_rgrid
+  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
+  use scf_data
+  use allocate_psl_sub
+  implicit none
+  type(s_system),intent(in) :: system
+  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: ng
+  type(s_fourier_grid) :: fg
+
+  integer :: jj,ix,iy,iz,n,nn
+
+  if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
+  if(allocated(fg%rhoG_ion)) deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
+
+  jj = system%ngrid/nproc_size_global
+  fg%ig_s = nproc_id_global*jj+1
+  fg%ig_e = (nproc_id_global+1)*jj
+  if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
+  fg%icomm_fourier = nproc_group_global
+  fg%ng = system%ngrid
+  allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
+  allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+  if(iflag_hartree==2)then
+     fg%iGzero = nGzero
+     fg%Gx = Gx
+     fg%Gy = Gy
+     fg%Gz = Gz
+     fg%rhoG_ion = rhoion_G
+     fg%dVG_ion = dVloc_G
+  else if(iflag_hartree==4)then
+     fg%iGzero = 1
+     fg%Gx = 0.d0
+     fg%Gy = 0.d0
+     fg%Gz = 0.d0
+     fg%rhoG_ion = 0.d0
+     fg%dVG_ion = 0.d0
+     do iz=1,lg_num(3)/NPUZ
+     do iy=1,lg_num(2)/NPUY
+     do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+        fg%Gx(nn) = Gx(n)
+        fg%Gy(nn) = Gy(n)
+        fg%Gz(nn) = Gz(n)
+        fg%rhoG_ion(nn) = rhoion_G(n)
+        fg%dVG_ion(nn,:) = dVloc_G(n,:)
+     enddo
+     enddo
+     enddo
+  end if
+
+end subroutine get_fourier_grid_G_rt

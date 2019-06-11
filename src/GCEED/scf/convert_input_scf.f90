@@ -32,6 +32,7 @@ real(8) :: dip_spacing
 ik_oddeven=2
 iterVh = 0         ! Iteration counter
 ilsda = ispin
+icalcforce=0
 
 if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
@@ -115,6 +116,7 @@ end select
 
 if(iflag_opt==1) then
    iter_opt = nopt
+   icalcforce = 1
 else
    iter_opt = 1
 endif
@@ -124,13 +126,6 @@ case('y')
   iflag_subspace_diag = 1
 case('n')
   iflag_subspace_diag = 0
-end select
-
-select case(use_force) !this keyword must be removed in near future
-case('y')
-  icalcforce = 1
-case('n')
-  icalcforce = 0
 end select
 
 num_kpoints_3d(1:3)=num_kgrid(1:3)

@@ -394,7 +394,6 @@ real(8),allocatable :: rforce(:,:)
 integer :: iflag_md
 real(8),allocatable :: dRion(:,:,:)
 real(8),allocatable :: Rion_eq(:,:)
-real(8),parameter :: umass=1822.9d0
 
 integer :: wmaxMI
 
