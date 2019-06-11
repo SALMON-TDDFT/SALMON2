@@ -25,8 +25,8 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global, nproc_group_bound
   use salmon_communication, only: comm_summation
+  use math_constants, only : pi
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
