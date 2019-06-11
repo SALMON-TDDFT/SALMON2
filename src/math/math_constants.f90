@@ -20,6 +20,11 @@ module math_constants
   public :: set_math_constants
   public :: is_zero
   public :: is_nonzero
+  public :: Pi
+  public :: zi
+
+  real(8),parameter :: Pi=3.141592653589793d0
+  complex(8),parameter :: zi=(0.d0,1.d0)
 
 private
   real    :: eps_sp

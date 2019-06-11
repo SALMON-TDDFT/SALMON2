@@ -27,12 +27,12 @@ subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk
   use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_is_root, comm_summation
+  use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
   use hartree_boundary_sub
   use timer
   
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   integer,parameter :: ndh=4
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
