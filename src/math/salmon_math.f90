@@ -16,9 +16,6 @@
 !-----------------------------------------------------------------------------------------
 module salmon_math
   implicit none
-  private
-
-  real(8),parameter :: Pi=3.141592653589793d0
 
   public :: erf_salmon, &
             erfc_salmon, &
@@ -139,6 +136,7 @@ contains
   end function erfc_salmon_mid
 !--------------------------------------------------------------------------------
   function erfc_salmon_long(x) result(y) ! 4d0 <x
+    use math_constants, only : pi
     implicit none
     real(8),intent(in) :: x
     real(8) :: y

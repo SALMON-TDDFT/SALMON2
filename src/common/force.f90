@@ -15,8 +15,8 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module force_sub
+  use math_constants,only : pi
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math !?????????
   complex(8),parameter :: zI=(0d0,1d0)
 
 contains
