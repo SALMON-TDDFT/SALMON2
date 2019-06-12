@@ -21,9 +21,10 @@ module structures
     integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
     real(8) :: Hvol,Hgs(3),al(3,3),det_al,brl(3,3)
-    real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
+    real(8),allocatable :: Mass(:)       ! Atomic weight
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
+    real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
     real(8),allocatable :: rocc(:,:,:)   ! (1:no,1:nk,1:nspin), occupation rate
   end type s_system
 

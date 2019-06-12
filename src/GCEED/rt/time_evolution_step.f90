@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force)
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -33,6 +33,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   use sendrecv_grid, only: s_sendrecv_grid
   use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy
   use force_sub, only: calc_force_salmon
+  use md_sub, only: remove_system_momentum, cal_Tion_Temperature_ion
+  use print_sub, only: write_xyz
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -50,9 +52,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   type(s_energy) :: energy
   type(s_scalar) :: sVh
   type(s_scalar),allocatable :: srho(:),V_local(:),sVxc(:)
+  type(s_md) :: md
 
   integer :: ix,iy,iz,i1,mm,jj,jspin,n,nn
-  integer :: ii,iob,iatom,iik,ik
+  integer :: iob,iatom,iik,ik
   real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
   complex(8),allocatable :: cmatbox1(:,:,:),cmatbox2(:,:,:)
   real(8) :: absr2
@@ -65,8 +68,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   complex(8) :: cbox1,cbox2,cbox3
   integer :: is
 
-  real(8) :: mass_au, dt_h, aforce(3,MI)
-  
+  real(8) :: mass_au, dt_h, aforce(3,MI), Tion, Temperature_ion
+  character(100) :: comment_line
+
   call timer_begin(LOG_CALC_VBOX)
   
   idensity=0
@@ -116,13 +120,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   end do
   end do
 
-  !(MD: part1)
+  !(MD: part1) : I'm going to move this part1 into md.f90, soon
   if(iflag_md==1)then
      dt_h = dt*0.5d0
 
      !update ion velocity with dt/2
      do iatom=1,MI
-        mass_au = umass*Mass(Kion(iatom))
+        mass_au = umass * system%Mass(Kion(iatom))
         system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
      enddo
 
@@ -552,17 +556,20 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     end if  !ipediodic
   endif
 
-  !(MD: part2) or/and force
+  !(MD: part2) or/and force  : I'm going to move this part2 into md.f90, soon
   if(iflag_md==1)then  ! and or rvf flag in future
      dt_h = dt*0.5d0
 
      !update ion velocity with dt/2
 !     Ework = 0d0
      do iatom=1,MI
-        mass_au = umass*Mass(Kion(iatom))
+        mass_au = umass * system%Mass(Kion(iatom))
         system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
 !        Ework = Ework - sum(aforce(:,ia)*(dRion(:,ia,iter+1)-dRion(:,ia,iter)))
      enddo
+
+     if (stop_system_momt=='y') call remove_system_momentum(0,system)
+     call cal_Tion_Temperature_ion(Tion,Temperature_ion,system)
 
   end if  !iflag_md
 
@@ -632,20 +639,18 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     deallocate(cmatbox1,cmatbox2) 
   end if
 
-!hoge
-  if(comm_is_root(nproc_id_global))then
-    if(iflag_md==1)then
-      write(15,'(3f16.8)') dble(itt)*dt*0.0241889d0,  &
-                  sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
-                      +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
-                      +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, energy%E_tot*2.d0*Ry
-      do ii=1,wmaxMI
-        write(20+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (system%Rion(jj,ii)*a_B,jj=1,3)
-!xxx        write(30+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
-        write(30+ii,'(4f16.8)') dble(itt)*dt*0.0241889d0, (force%F(jj,ii)*2.d0*Ry/a_B,jj=1,3)
-      end do
-    end if
-  end if
+  ! Export to file_trj
+  if( icalcforce==1 .and. mod(itt,out_rvf_rt_step)==0 )then
+     write(comment_line,10) itt, itt*dt
+10   format("#rt   step=",i8,"   time=",e16.6)
+     if(iflag_md==1) write(comment_line,11) trim(comment_line),Temperature_ion
+11   format(a,"   T=",f12.4)
+     if(iflag_md==1 .and. ensemble=="NVT" .and. thermostat=="nose-hoover") &
+          &  write(comment_line,12) trim(comment_line), md%xi_nh
+12   format(a,"  xi_nh=",e18.10)
+     call write_xyz(comment_line,"add","rvf",system,force)
+  endif
+
 
   if(iflag_fourier_omega==1)then
     do mm=1,num_fourier_omega

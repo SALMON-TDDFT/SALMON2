@@ -70,5 +70,6 @@ SUBROUTINE dealloc_init_ps(ppg,ppg_all,ppn)
   deallocate(ppg%Vpsl_atom)
   if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
 
-  deallocate(ppn%rho_nlcc, ppn%tau_nlcc)
+  if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc)
+  if(allocated(ppn%tau_nlcc)) deallocate(ppn%tau_nlcc)
 END SUBROUTINE dealloc_init_ps

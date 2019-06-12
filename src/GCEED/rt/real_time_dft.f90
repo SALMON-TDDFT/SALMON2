@@ -657,6 +657,7 @@ use calc_iroot_sub
 use force_sub, only: calc_force_salmon
 use hpsi_sub, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
+use print_sub, only: write_xyz
 implicit none
 
 type(s_rgrid) :: lg,mg,ng
@@ -689,6 +690,8 @@ real(8)    :: rbox_arrayq(3,3)
 real(8)    :: rbox_arrayq2(3,3)
 real(8)    :: rbox1q,rbox1q12,rbox1q23,rbox1q31
 
+character(100) :: comment_line
+
 type(s_scalar),allocatable :: srho(:,:)
 type(s_scalar),allocatable :: srho_s(:,:)
 
@@ -709,10 +712,12 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   system%Hvol = Hvol
   system%Hgs = Hgs
   allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) &
+          ,system%Mass(MKI)      &
           ,system%wtk(system%nk) &
           ,system%rocc(system%no,system%nk,system%nspin))
   system%wtk = wtk
   system%rion = rion
+  system%Mass(:) = Mass(:)
 
   system%rocc(:,:,1) = rocc(:,:)
 
@@ -886,22 +891,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
        enddo
     end if
   end if
-
-if(comm_is_root(nproc_id_global).and.iflag_md==1)then
-  open(15,file="distance.data")
-  if(MI<=9)then
-    wmaxMI=MI
-  else
-    wmaxMI=9
-  end if
-  do ii=1,wmaxMI
-    write(fileNumber, '(i8)') ii
-    rtOutFile = "coo"//trim(adjustl(fileNumber))//".data"
-    open(20+ii,file=rtOutFile)
-    rtOutFile = "force"//trim(adjustl(fileNumber))//".data"
-    open(30+ii,file=rtOutFile)
-  end do
-end if
 
 if(comm_is_root(nproc_id_global).and.iperiodic==3) then
   open(16,file="current.data")
@@ -1380,7 +1369,7 @@ if(iflag_md==1) call init_md(system,md)
 !-------------------------------------------------- Time evolution
 
 !(force at initial step)
-if(iflag_md==1)then
+if(iflag_md==1 .or. icalcforce==1)then
    if(iperiodic==0)then
       call calc_force_c(zpsi_in)  !this does not work now
       force%F(:,:) = rforce(:,:)  !rforce must be removed in future
@@ -1392,6 +1381,15 @@ if(iflag_md==1)then
       call get_fourier_grid_G_rt(system,lg,ng,fg)
       call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
    end if
+
+   !open trj file for coordinate, velocity, and force (rvf) in xyz format
+   write(comment_line,10) -1, 0.0d0
+   if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
+        &  write(comment_line,12) trim(comment_line), md%xi_nh
+   call write_xyz(comment_line,"new","rvf",system,force)
+   call write_xyz(comment_line,"add","rvf",system,force)
+10 format("#rt   step=",i8,"   time",e16.6)
+12 format(a,"  xi_nh=",e18.10)
 end if
 
 if(comm_is_root(nproc_id_global))then
@@ -1401,39 +1399,12 @@ if(comm_is_root(nproc_id_global))then
                              " Dipole moment(xyz)[A]"      &
           ,"      electrons","      Total energy[eV]","   iterVh"
   case(3)
-    write(*,'(1x,a10,a10,a25,a15,a25)') "time-step ","time[fs]",      &
-                             " Current(xyz)[a.u.]   "      &
-          ,"      electrons","      Total energy[eV]"
+    write(*,'(1x,a10,a11,a48,a15,a18)') "time-step ","  time[fs] ",      &
+                "                 Current(xyz)[a.u.]             ",      &
+                "   electrons   "," Total energy[eV] "
   end select
 
-  write(*,*) "-------------------------------------"      &
-     ,"------------------"
-!output for MD: replace later
-!  if(iflag_md==1)then
-!    write(15,'(2a16,a24)') "        Time[fs]",      &
-!                   "    Distance [A]",     &
-!                   " Total energy [eV]   "  
-!    write(15,*) "-------------------------------------"      &
-!     ,"------------------"
-!    do ii=1,wmaxMI
-!      write(20+ii,'(a16,a28)') "        Time[fs]",      &
-!                   "    Cooordinate (xyz) [A]   "
-!      write(20+ii,*) "-------------------------------------"      &
-!       ,"------------------"
-!      write(30+ii,'(a16,a28)') "        Time[fs]",      &
-!                   "       Force (xyz) [eV/A]   "
-!      write(30+ii,*) "-------------------------------------"      &
-!       ,"------------------"
-!    end do
-!    write(15,'(3f16.8)') dble(0)*dt*0.0241889d0,  &
-!                sqrt((Rion(1,idisnum(1))-Rion(1,idisnum(2)))**2   &
-!                    +(Rion(2,idisnum(1))-Rion(2,idisnum(2)))**2   &
-!                    +(Rion(3,idisnum(1))-Rion(3,idisnum(2)))**2)*a_B, energy%E_tot*2.d0*Ry
-!    do ii=1,wmaxMI
-!      write(20+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (Rion(jj,ii)*a_B,jj=1,3)
-!      write(30+ii,'(4f16.8)') dble(0)*dt*0.0241889d0, (rforce(jj,ii)*2.d0*Ry/a_B,jj=1,3)
-!    end do
-!  end if
+  write(*,*) "-------------------------------------------------------"
 
   if(iwrite_projection==1)then
     open(41,file=file_Projection)
@@ -1471,7 +1442,7 @@ if(itotNtime-Miter_rt<=10000)then
 
     if(itt>=Miter_rt+1) &
          call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force)
+         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
   end do TE
 
 else
@@ -1487,17 +1458,17 @@ else
 
     if(itt>=Miter_rt+1) &
       call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-      ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force)
+      ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
   end do TE1
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
     call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force)
+    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
   end do TE2
 
   TE3 : do itt=itotNtime-4,itotNtime
     call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force)
+    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
   end do TE3
 
 end if

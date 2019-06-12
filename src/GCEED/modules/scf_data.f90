@@ -174,7 +174,7 @@ integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)
 real(8),allocatable :: Zps(:)              ! Pseudo charge
 real(8),allocatable :: Rps(:)              ! Core radius
-real(8),allocatable :: Mass(:)             ! Atomic weight
+real(8),allocatable :: Mass(:)             ! Atomic weight ( --> system%Mass )
 integer,allocatable :: Jxyz_all(:,:,:),Mps_all(:),Jxxyyzz_all(:,:,:)
 integer,allocatable :: Mps(:)
 integer,allocatable :: Jxyz_tmp1(:,:,:)
@@ -394,8 +394,6 @@ real(8),allocatable :: rforce(:,:)
 integer :: iflag_md
 real(8),allocatable :: dRion(:,:,:)
 real(8),allocatable :: Rion_eq(:,:)
-
-integer :: wmaxMI
 
 real(8) :: fcN(0:12)
 real(8) :: fbN(0:12)

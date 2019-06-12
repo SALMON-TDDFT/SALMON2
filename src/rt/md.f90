@@ -55,14 +55,13 @@ subroutine set_initial_velocity(system)
   use salmon_global, only: MI,Kion,temperature0_ion
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_bcast
+  use math_constants, only: Pi
   use const, only: umass,hartree2J,kB
-  use scf_data, only: Mass
   implicit none
   type(s_system) :: system
   integer :: ia,ixyz,iseed
   real(8) :: rnd1,rnd2,rnd, sqrt_kT_im, kB_au, mass_au
   real(8) :: Temperature_ion, scale_v, Tion
-  real(8),parameter :: Pi=3.141592653589793d0   !use from const.f90, later
   
   if (comm_is_root(nproc_id_global)) then
      write(*,*) "  Initial velocities with maxwell-boltzmann distribution was set"
@@ -73,7 +72,7 @@ subroutine set_initial_velocity(system)
 
   iseed= 123
   do ia=1,MI
-     mass_au = umass*Mass(Kion(ia))
+     mass_au = umass * system%Mass(Kion(ia))
      sqrt_kT_im = sqrt( kB_au * temperature0_ion / mass_au )
 
      do ixyz=1,3
@@ -87,7 +86,7 @@ subroutine set_initial_velocity(system)
   !!(check temperature)
   !Tion=0d0
   !do ia=1,MI
-  !   Tion = Tion + 0.5d0*umass*Mass(Kion(ia))*sum(system%Velocity(:,ia)**2d0)
+  !   Tion = Tion + 0.5d0*umass*system%Mass(Kion(ia))*sum(system%Velocity(:,ia)**2d0)
   !enddo
   !Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
   !write(*,*)"  Temperature: random-vel",real(Temperature_ion)
@@ -99,7 +98,7 @@ subroutine set_initial_velocity(system)
   !scaling: set temperature exactly to input value
   Tion=0d0
   do ia=1,MI
-     Tion = Tion + 0.5d0 * umass*Mass(Kion(ia)) * sum(system%Velocity(:,ia)**2d0)
+     Tion = Tion + 0.5d0 * umass*system%Mass(Kion(ia)) * sum(system%Velocity(:,ia)**2d0)
   enddo
   Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
   !write(*,*)"    Temperature: befor-scaling",real(Temperature_ion)
@@ -111,7 +110,7 @@ subroutine set_initial_velocity(system)
   !(check)
   Tion=0d0
   do ia=1,MI
-     Tion = Tion + 0.5d0 * umass*Mass(Kion(ia)) * sum(system%Velocity(:,ia)**2d0)
+     Tion = Tion + 0.5d0 * umass*system%Mass(Kion(ia)) * sum(system%Velocity(:,ia)**2d0)
   enddo
   Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
   if (comm_is_root(nproc_id_global)) &
@@ -167,7 +166,6 @@ subroutine remove_system_momentum(flag_print_check,system)
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   use const, only: umass
-  use scf_data, only: Mass
   implicit none
   type(s_system) :: system
   integer :: ia, flag_print_check
@@ -177,7 +175,7 @@ subroutine remove_system_momentum(flag_print_check,system)
   v_com(:)=0d0
   sum_mass=0d0
   do ia=1,MI
-     mass_au = umass*Mass(Kion(ia))
+     mass_au = umass * system%Mass(Kion(ia))
      v_com(:) = v_com(:) + mass_au * system%Velocity(:,ia)
      sum_mass = sum_mass + mass_au
   enddo
@@ -193,12 +191,32 @@ subroutine remove_system_momentum(flag_print_check,system)
   if(flag_print_check==1) then
      v_com(:)=0d0
      do ia=1,MI
-        v_com(:) = v_com(:) + umass*Mass(Kion(ia)) * system%Velocity(:,ia)
+        v_com(:) = v_com(:) + umass*system%Mass(Kion(ia)) * system%Velocity(:,ia)
      enddo
      v_com(:) = v_com(:) / sum_mass
      if(comm_is_root(nproc_id_global)) write(*,*)"    v_com =",real(v_com(:))
   endif
 
 end subroutine remove_system_momentum
+
+subroutine cal_Tion_Temperature_ion(Ene_ion,Temp_ion,system)
+  use structures, only: s_system
+  use salmon_global, only: MI,Kion
+  use const, only: umass,hartree2J,kB
+  implicit none
+  type(s_system) :: system
+  integer :: ia
+  real(8) :: mass_au, Ene_ion,Temp_ion
+
+  Ene_ion = 0.d0
+  do ia=1,MI
+     mass_au = umass * system%Mass(Kion(ia))
+     Ene_ion = Ene_ion + 0.5d0 * mass_au * sum(system%Velocity(:,ia)**2d0)
+  enddo
+  Temp_ion = Ene_ion * 2d0 / (3d0*MI) / (kB/hartree2J)
+
+  return
+end subroutine cal_Tion_Temperature_ion
+
 
 end module md_sub
