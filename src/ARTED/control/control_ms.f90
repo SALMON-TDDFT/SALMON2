@@ -26,6 +26,7 @@ subroutine tddft_maxwell_ms
   use salmon_parallel
   use salmon_communication
   use salmon_file
+  use const, only: umass
   use misc_routines
   use inputoutput, only: t_unit_time, t_unit_current, t_unit_ac
   use restart, only: prep_restart_write

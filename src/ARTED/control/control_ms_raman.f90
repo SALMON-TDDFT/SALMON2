@@ -17,6 +17,7 @@
 !This file contains ms-mode program
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module control_ms_raman
+  use const, only: umass
   implicit none
   !AY trial for Raman: Maxwell + Force-Field type MD (theory=Raman)
   logical :: flag_ms_ff_LessPrint

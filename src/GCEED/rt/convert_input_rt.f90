@@ -27,24 +27,22 @@ real(8) :: dip_spacing
 
 ik_oddeven=2
 ilsda=ispin
+icalcforce=0
 
 if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
 end if
 
 !===== namelist for group_fundamental =====
-select case(use_force)
+select case(out_rvf_rt)
 case('y')
   icalcforce = 1
-case('n')
-  icalcforce = 0
-case default
-  stop 'invald icalcforce'
 end select
 
 select case(use_ehrenfest_md)
 case('y')
   iflag_md = 1
+  icalcforce = 1
 case('n')
   iflag_md = 0
 case default

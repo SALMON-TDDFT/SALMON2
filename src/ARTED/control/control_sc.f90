@@ -31,6 +31,7 @@ subroutine tddft_sc
   use inputoutput, only: t_unit_time, t_unit_current, t_unit_ac,  t_unit_energy, t_unit_elec
   use restart, only: prep_restart_write
   use Ac_alocal_laser
+  use const, only: umass, hartree2J, kB
   use md_ground_state
   implicit none
   integer :: iter,ia,i,ixyz  !,ib,ik

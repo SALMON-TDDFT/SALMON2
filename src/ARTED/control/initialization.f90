@@ -589,6 +589,7 @@ contains
     use salmon_communication
     !use misc_routines
     use salmon_math
+    use const, only: umass, hartree2J, kB
     use md_ground_state, only: remove_system_momentum
     implicit none
     integer :: ia,ixyz,iseed

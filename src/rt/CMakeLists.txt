@@ -1,5 +1,6 @@
 set(SOURCES
     taylor.f90
+    md.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
