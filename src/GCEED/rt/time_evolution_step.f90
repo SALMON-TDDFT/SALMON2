@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -34,7 +34,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy
   use force_sub, only: calc_force_salmon
   use md_sub, only: remove_system_momentum, cal_Tion_Temperature_ion
-  use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data_3d
+  use print_sub, only: write_xyz
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -53,7 +53,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   type(s_scalar) :: sVh
   type(s_scalar),allocatable :: srho(:),V_local(:),sVxc(:)
   type(s_md) :: md
-  type(s_ofile) :: ofl
 
   integer :: ix,iy,iz,i1,mm,jj,jspin,n,nn
   integer :: iob,iatom,iik,ik
@@ -69,7 +68,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   complex(8) :: cbox1,cbox2,cbox3
   integer :: is
 
-  real(8) :: mass_au, dt_h, aforce(3,MI), dR(3,MI)
+  real(8) :: mass_au, dt_h, aforce(3,MI), Tion, Temperature_ion
   character(100) :: comment_line
 
   call timer_begin(LOG_CALC_VBOX)
@@ -131,15 +130,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
         system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
      enddo
 
-     dR(:,:) = system%Rion(:,:)
-
      !update ion coordinate with dt
      do iatom=1,MI
         system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
      enddo
-     Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
-
-     if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)  !test
 
      !update pseudopotential
      if (mod(itt,step_update_ps)==0 ) then
@@ -565,18 +559,17 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   !(MD: part2) or/and force  : I'm going to move this part2 into md.f90, soon
   if(iflag_md==1)then  ! and or rvf flag in future
      dt_h = dt*0.5d0
-     aforce(:,:) = 0.5d0*( aforce(:,:) + force%F(:,:) )
 
      !update ion velocity with dt/2
-     dR(:,:) = system%Rion(:,:) - dR(:,:)
+!     Ework = 0d0
      do iatom=1,MI
         mass_au = umass * system%Mass(Kion(iatom))
         system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
-        md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
+!        Ework = Ework - sum(aforce(:,ia)*(dRion(:,ia,iter+1)-dRion(:,ia,iter)))
      enddo
 
      if (stop_system_momt=='y') call remove_system_momentum(0,system)
-     call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
+     call cal_Tion_Temperature_ion(Tion,Temperature_ion,system)
 
   end if  !iflag_md
 
@@ -646,12 +639,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     deallocate(cmatbox1,cmatbox2) 
   end if
 
-  ! Output 
-  !(Export to SYSname_trj.xyz)
+  ! Export to file_trj
   if( icalcforce==1 .and. mod(itt,out_rvf_rt_step)==0 )then
      write(comment_line,10) itt, itt*dt
 10   format("#rt   step=",i8,"   time=",e16.6)
-     if(iflag_md==1) write(comment_line,11) trim(comment_line),md%Temperature
+     if(iflag_md==1) write(comment_line,11) trim(comment_line),Temperature_ion
 11   format(a,"   T=",f12.4)
      if(iflag_md==1 .and. ensemble=="NVT" .and. thermostat=="nose-hoover") &
           &  write(comment_line,12) trim(comment_line), md%xi_nh
@@ -659,23 +651,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
      call write_xyz(comment_line,"add","rvf",system,force)
   endif
 
-
-!  if( mod(itt,100) == 0 ) then
-  if( mod(itt,1) == 0 ) then  !for debug
-     !(Export to SYSname_rt.data)
-     select case(iperiodic)
-     case(0)
-     case(3)
-        call write_rt_data_3d(itt,ofl,iflag_md,dt)
-     end select
-
-     !(Export to SYSname_rt_energy.data)
-     select case(iperiodic)
-     case(0)
-     case(3)
-        call write_rt_energy_data_3d(itt,ofl,iflag_md,dt,energy,md)
-     end select
-  endif
 
   if(iflag_fourier_omega==1)then
     do mm=1,num_fourier_omega
