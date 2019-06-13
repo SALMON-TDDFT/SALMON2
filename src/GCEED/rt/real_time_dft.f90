@@ -40,11 +40,12 @@ END MODULE global_variables_rt
 
 subroutine Real_Time_DFT
 use structures
-use salmon_parallel, only: nproc_id_global, nproc_group_h
-use salmon_communication, only: comm_is_root, comm_summation
+use salmon_parallel, only: nproc_id_global, nproc_group_h, nproc_group_global
+use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
+use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data_3d
 implicit none
 
 type(s_rgrid) :: lg
@@ -54,8 +55,10 @@ type(s_system)  :: system
 type(s_wf_info) :: info
 type(s_stencil) :: stencil
 type(s_fourier_grid) :: fg
+type(s_energy) :: energy
 type(s_force)   :: force
 type(s_md) :: md
+type(s_ofile) :: ofl
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -65,7 +68,7 @@ real(8),allocatable :: Qp_box(:,:,:),alpha_Rq_box(:,:,:),alpha_Iq_box(:,:,:)
 real(8),allocatable :: Sf(:),Sf2(:,:),Sq2(:,:,:)
 integer :: jj,nn
 integer :: iene,nntime,ix,iy,iz
-character(100):: alpha2OutFile
+character(100):: alpha2OutFile, comment_line
 integer :: ia,ib
 real(8) :: rab
 real(8),allocatable :: tfourier_integrand(:,:)
@@ -349,8 +352,63 @@ if(comm_is_root(nproc_id_global))then
 end if
 call timer_end(LOG_INIT_RT)
 
+!Open output files and print header parts (Please move and put this kinds here!)
+!(output file names)
+if(comm_is_root(nproc_id_global))then
+   write(ofl%file_rt_data,"(2A,'_rt.data')") trim(directory),trim(SYSname)
+   write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(directory),trim(SYSname)
+endif
+call comm_bcast(ofl%file_rt_data,       nproc_group_global)
+call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)
 
-call Time_Evolution(lg,mg,ng,system,info,stencil,fg,force,md)
+!(write header)
+if(comm_is_root(nproc_id_global))then
+  !(header of standard output)
+  select case(iperiodic)
+  case(0)
+    write(*,'(1x,a10,a11,a48,a15,a18,a10)') &
+                "time-step ", "time[fs]",   &
+                "Dipole moment(xyz)[A]"     &
+               ,"electrons", "Total energy[eV]", "iterVh"
+  case(3)
+    write(*,'(1x,a10,a11,a48,a15,a18)')   &
+                "time-step", "time[fs] ", &
+                "Current(xyz)[a.u.]",     &
+                "electrons", "Total energy[eV] "
+  end select
+  write(*,'("#",7("----------"))')
+
+  !(header of SYSname_rt.data)
+  select case(iperiodic)
+  case(0)
+  case(3)
+     call write_rt_data_3d(-1,ofl,iflag_md,dt)
+  end select
+
+  !(header of SYSname_rt_energy.data)
+  select case(iperiodic)
+  case(0)
+  case(3)
+     call write_rt_energy_data_3d(-1,ofl,iflag_md,dt,energy,md)
+  end select
+
+  !(header in SYSname_proj.data)
+  if(iwrite_projection==1)then
+    open(41,file=file_Projection)
+    write(41,'("#",5X,"time[fs]",4("    projection"))')
+    write(41,'("#",13x,4("  orbital",i5))') (iwrite_projection_ob(jj),jj=1,4)
+    write(41,'("#",13x,4("        k",i5))') (iwrite_projection_k(jj), jj=1,4)
+    write(41,'("#",7("----------"))')
+  end if
+end if
+
+if(iflag_md==1 .or. icalcforce==1)then
+   call write_xyz(comment_line,"new","rvf",system,force)
+endif
+
+
+! Go into Time-Evolution
+call Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -358,7 +416,7 @@ if(OC_rt==1) call OUT_data_rt
 call timer_end(LOG_WRITE_RT_DATA)
 
 
-! Output
+! Output after time-evolution
 call timer_begin(LOG_WRITE_RT_RESULTS)
 if(iwrite_external==1)then
   if(comm_is_root(nproc_id_global))then
@@ -640,7 +698,7 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,force,md)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & !nproc_group_grid,   &
                            nproc_group_h, nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
@@ -671,7 +729,8 @@ type(s_pp_nlcc) :: ppn
 type(s_fourier_grid) :: fg
 type(s_force) :: force
 type(s_md) :: md
-type(s_energy)  :: energy
+type(s_energy) :: energy
+type(s_ofile) :: ofl
 
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik,n,nn
@@ -1386,40 +1445,11 @@ if(iflag_md==1 .or. icalcforce==1)then
    write(comment_line,10) -1, 0.0d0
    if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
         &  write(comment_line,12) trim(comment_line), md%xi_nh
-   call write_xyz(comment_line,"new","rvf",system,force)
    call write_xyz(comment_line,"add","rvf",system,force)
 10 format("#rt   step=",i8,"   time",e16.6)
 12 format(a,"  xi_nh=",e18.10)
 end if
 
-if(comm_is_root(nproc_id_global))then
-  select case(iperiodic)
-  case(0)
-    write(*,'(1x,a10,a10,a25,a15,a25,a10)') "time-step ","time[fs]",      &
-                             " Dipole moment(xyz)[A]"      &
-          ,"      electrons","      Total energy[eV]","   iterVh"
-  case(3)
-    write(*,'(1x,a10,a11,a48,a15,a18)') "time-step ","  time[fs] ",      &
-                "                 Current(xyz)[a.u.]             ",      &
-                "   electrons   "," Total energy[eV] "
-  end select
-
-  write(*,*) "-------------------------------------------------------"
-
-  if(iwrite_projection==1)then
-    open(41,file=file_Projection)
-    write(41,'("#",a13,a56)') "time[fs]", "    projection    projection    projection    projection" 
-    write(41,'("#",13x,a9,i5,a9,i5,a9,i5,a9,i5)') " orbital",iwrite_projection_ob(1),&
-                                              " orbital",iwrite_projection_ob(2),&
-                                              " orbital",iwrite_projection_ob(3),&
-                                              " orbital",iwrite_projection_ob(4)
-    write(41,'("#",13x,a9,i5,a9,i5,a9,i5,a9,i5)') "k",iwrite_projection_k(1),&
-                                              "k",iwrite_projection_k(2),&
-                                              "k",iwrite_projection_k(3),&
-                                              "k",iwrite_projection_k(4)
-    write(41,'("#",a)') "---------------------------------------------------------------------"
-  end if
-end if
 call timer_end(LOG_INIT_TIME_PROPAGATION)
 
 
@@ -1442,7 +1472,7 @@ if(itotNtime-Miter_rt<=10000)then
 
     if(itt>=Miter_rt+1) &
          call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
+         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
   end do TE
 
 else
@@ -1458,17 +1488,17 @@ else
 
     if(itt>=Miter_rt+1) &
       call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-      ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
+      ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
   end do TE1
 
   TE2 : do itt=Miter_rt+11,itotNtime-5
     call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
+    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
   end do TE2
 
   TE3 : do itt=itotNtime-4,itotNtime
     call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md)
+    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
   end do TE3
 
 end if

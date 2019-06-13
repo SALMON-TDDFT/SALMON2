@@ -204,8 +204,13 @@ module structures
   end type s_fdtd_field
 
   type s_md
-     real(8) :: xi_nh
+     real(8) :: Tene, Temperature, E_work, xi_nh
   end type s_md
+
+  type s_ofile
+     integer :: fh_rt, fh_rt_energy
+     character(256) :: file_rt_data, file_rt_energy_data
+  end type s_ofile
 
 !===================================================================================================================================
 
