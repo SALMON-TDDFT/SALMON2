@@ -140,6 +140,7 @@ else
     Harray(1:3,1) = rLsize(1:3,1) / dble(num_rgrid(1:3))
   end if
 end if
+allocate(system%mass(1:nelem))
 
 call set_filename
 
@@ -418,7 +419,7 @@ if(iopt==1)then
     if(iflag_ps.eq.0)then
       Vpsl=0d0
     else
-      call read_pslfile
+      call read_pslfile(system)
       call allocate_psl
       call init_ps(system%al,system%brl,stencil%matrix_A)
     end if
@@ -823,7 +824,7 @@ if(iopt==1)then
     end if
 
     if(iflag_ps/=0) then
-      call read_pslfile
+      call read_pslfile(system)
       call allocate_psl
       call init_ps(system%al,system%brl,stencil%matrix_A)
     end if

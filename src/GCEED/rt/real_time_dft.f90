@@ -109,6 +109,7 @@ call setbN
 call setcN
 
 call convert_input_rt(Ntime)
+allocate(system%mass(1:nelem))
 
 call set_filename
 
@@ -216,7 +217,7 @@ if(iperiodic==3 .and. iflag_hartree==4)then
   call prep_poisson_fft
 end if
 
-call read_pslfile
+call read_pslfile(system)
 call allocate_psl
 call init_ps(system%al,system%brl,stencil%matrix_A)
 
@@ -712,12 +713,10 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   system%Hvol = Hvol
   system%Hgs = Hgs
   allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) &
-          ,system%Mass(MKI)      &
           ,system%wtk(system%nk) &
           ,system%rocc(system%no,system%nk,system%nspin))
   system%wtk = wtk
   system%rion = rion
-  system%Mass(:) = Mass(:)
 
   system%rocc(:,:,1) = rocc(:,:)
 
