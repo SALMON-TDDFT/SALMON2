@@ -21,6 +21,7 @@ contains
 !===================================================================================================================================
 
 SUBROUTINE init_lattice(system,stencil,lg)
+  use math_constants,only : pi
   use structures
   implicit none
   type(s_system) :: system
@@ -29,7 +30,6 @@ SUBROUTINE init_lattice(system,stencil,lg)
   !
   real(8),dimension(3,3) :: A,B,F,wrk
   real(8) :: a1(3),a2(3),a3(3),detA,normA(3),f_uu,f_vv,f_ww,f_uv,f_uw,f_vw
-  real(8),parameter :: Pi=3.141592653589793d0 !??????????? salmon_math ? global parameter ?
 
 ! al = [ a1, a2, a3 ]
   A = system%al ! a (primitive lattice vectors)
