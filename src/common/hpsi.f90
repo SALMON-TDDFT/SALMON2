@@ -204,6 +204,7 @@ end subroutine hpsi
 !===================================================================================================================================
 
 subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
+  use math_constants,only : zi
   use structures
   implicit none
   type(s_pp_grid)    :: ppg
@@ -213,7 +214,6 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   integer :: ilma,iatom,j,ik
   real(8) :: x,y,z,k(3)
   complex(8) :: ekr
-  complex(8),parameter :: zi = (0d0,1d0)
   if(.not.allocated(ppg%ekr_uV)) allocate(ppg%ekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ik=ik_s,ik_e
     k = kAc(ik,:)
