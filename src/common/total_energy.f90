@@ -42,9 +42,10 @@ CONTAINS
 
 !    if (Rion_update) then
       Eion = 0d0
-!$omp parallel do &
+!$omp parallel do default(none) &
 !$omp          reduction(+:Eion) &
-!$omp          private(ia,ib,r)
+!$omp          private(ia,ib,r) &
+!$omp          shared(system,pp,Kion)
       do ia=1,system%nion
         do ib=1,ia-1
           r = sqrt((system%Rion(1,ia)-system%Rion(1,ib))**2      &
@@ -57,9 +58,10 @@ CONTAINS
 !    end if
 
     Etot = 0d0
-!$omp parallel do collapse(3) &
+!$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:Etot) &
-!$omp          private(ispin,ik,io)
+!$omp          private(ispin,ik,io) &
+!$omp          shared(Nspin,system,energy)
     do ispin=1,Nspin
     do ik=1,system%nk
     do io=1,system%no
@@ -70,9 +72,10 @@ CONTAINS
 !$omp end parallel do
 
     sum1 = 0d0
-!$omp parallel do collapse(4) &
+!$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:sum1) &
-!$omp          private(ispin,ix,iy,iz)
+!$omp          private(ispin,ix,iy,iz) &
+!$omp          shared(Nspin,ng,Vh,rho,Vxc)
     do ispin=1,Nspin
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
@@ -116,9 +119,10 @@ CONTAINS
 
 !    if (Rion_update) then ! Ewald sum
     E_tmp = 0d0
-!$omp parallel do collapse(4) &
+!$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:E_tmp) &
-!$omp          private(ia,ib,ix,iy,iz,r,rab,rr)
+!$omp          private(ia,ib,ix,iy,iz,r,rab,rr) &
+!$omp          shared(NEwald,system,pp,Kion,aEwald)
     do ia=1,system%nion
       do ix=-NEwald,NEwald
       do iy=-NEwald,NEwald
@@ -143,9 +147,10 @@ CONTAINS
 !    end if
 
     E_wrk = 0d0
-!$omp parallel do &
+!$omp parallel do default(none) &
 !$omp          reduction(+:E_wrk) &
-!$omp          private(ig,g,G2,rho_i,rho_e,ia,r,Gd)
+!$omp          private(ig,g,G2,rho_i,rho_e,ia,r,Gd) &
+!$omp          shared(fg,aEwald,system,sysvol,kion)
     do ig=fg%ig_s,fg%ig_e
       if(ig == fg%iGzero ) cycle
       g(1) = fg%Gx(ig)
@@ -232,8 +237,9 @@ CONTAINS
     else
     ! eigen energies (esp)
       do ispin=1,Nspin
-!$omp parallel do collapse(2) &
-!$omp          private(ik,io,jo)
+!$omp parallel do collapse(2) default(none) &
+!$omp          private(ik,io,jo) &
+!$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           jo = info%io_tbl(io)
@@ -248,9 +254,10 @@ CONTAINS
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0
-!$omp parallel do collapse(3) &
+!$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
-!$omp          private(ispin,ik,io)
+!$omp          private(ispin,ik,io) &
+!$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
@@ -267,9 +274,10 @@ CONTAINS
       ttpsi%zwf = 0d0
       call pseudo_C(tpsi,ttpsi,info,nspin,ppg)
       E_tmp = 0d0
-!$omp parallel do collapse(3) &
+!$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
-!$omp          private(ispin,ik,io)
+!$omp          private(ispin,ik,io) &
+!$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
