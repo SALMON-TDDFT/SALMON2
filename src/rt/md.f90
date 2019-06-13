@@ -33,11 +33,9 @@ subroutine init_md(system,md)
      out_rvf_rt='y'
   endif
 
-  md%E_work = 0d0
-
   if(ensemble=="NVT" .and. thermostat=="nose-hoover") md%xi_nh=0d0
   if(set_ini_velocity=='y' .or. step_velocity_scaling>=1) &
-       call set_initial_velocity(system,md)
+       call set_initial_velocity(system)
   if(set_ini_velocity=='r') call read_initial_velocity(system,md)
 
   !if(use_ms_maxwell == 'y' .and. use_potential_model=='n') then
@@ -52,7 +50,7 @@ subroutine init_md(system,md)
 
 end subroutine init_md
 
-subroutine set_initial_velocity(system,md)
+subroutine set_initial_velocity(system)
   use structures, only: s_system,s_md
   use salmon_global, only: MI,Kion,temperature0_ion
   use salmon_parallel, only: nproc_id_global,nproc_group_global
@@ -61,7 +59,6 @@ subroutine set_initial_velocity(system,md)
   use const, only: umass,hartree2J,kB
   implicit none
   type(s_system) :: system
-  type(s_md) :: md
   integer :: ia,ixyz,iseed
   real(8) :: rnd1,rnd2,rnd, sqrt_kT_im, kB_au, mass_au
   real(8) :: Temperature_ion, scale_v, Tion
@@ -118,9 +115,6 @@ subroutine set_initial_velocity(system,md)
   Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
   if (comm_is_root(nproc_id_global)) &
        write(*,*)"    Initial Temperature: after-scaling",real(Temperature_ion)
-
-  md%Tene = Tion
-  md%Temperature = Temperature_ion
   
   call comm_bcast(system%Velocity ,nproc_group_global)
  
