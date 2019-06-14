@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine calcVpsl_periodic_FFTE
-  use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global, nproc_group_grid
+  use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_parallel, only: nproc_id_icommy, nproc_id_icommz
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data

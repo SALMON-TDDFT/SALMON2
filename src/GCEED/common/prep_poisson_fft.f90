@@ -14,13 +14,12 @@
 !  limitations under the License.
 !
 subroutine prep_poisson_fft
-  use salmon_parallel, only: nproc_id_icommy, nproc_group_icommy
-  use salmon_parallel, only: nproc_id_icommz, nproc_group_icommz
+  use salmon_parallel, only: nproc_id_icommy
+  use salmon_parallel, only: nproc_id_icommz
   use scf_data
   use new_world_sub
   use allocate_mat_sub
   implicit none
-  integer :: i
   integer :: ng_sta_2(3),ng_end_2(3),ng_num_2(3)
   integer :: lg_sta_2(3),lg_end_2(3),lg_num_2(3)
   real(8) :: Gx,Gy,Gz

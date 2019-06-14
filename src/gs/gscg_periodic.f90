@@ -62,7 +62,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   integer,parameter :: nd=4
-  integer :: j,ind
+  integer :: j
   integer :: iter,iob,job
   integer :: ik
   integer :: ix,iy,iz
@@ -86,10 +86,6 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer :: iroot
   integer :: is_sta,is_end
   integer :: iter_bak_ob(itotmst)
-  integer :: ilma
-  complex(8) :: ekr(ppg%nps,natom)
-  real(8) :: x,y,z
-  integer :: a,iatom
   complex(8),parameter :: zi=(0.d0,1.d0)
 
   call timer_begin(LOG_GSCG_TOTAL)

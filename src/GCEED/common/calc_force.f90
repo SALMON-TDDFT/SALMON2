@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine calc_force
-use salmon_parallel, only: nproc_group_korbital, nproc_group_global, nproc_id_global
+use salmon_parallel, only: nproc_group_korbital, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
 use allocate_mat_sub

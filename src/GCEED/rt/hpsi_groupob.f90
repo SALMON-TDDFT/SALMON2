@@ -17,7 +17,7 @@
 !========================= Hamiltonian Operation (for complex funcitons)
 
 SUBROUTINE hpsi_groupob(tpsi,htpsi,tpsi_out,tVlocal,nn,isub)
-use salmon_parallel, only: nproc_group_korbital, nproc_group_h
+use salmon_parallel, only: nproc_group_korbital
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
 use calc_allob_sub

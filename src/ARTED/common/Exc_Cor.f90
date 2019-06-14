@@ -18,7 +18,6 @@ subroutine Exc_Cor(GS_RT,NBtmp,zu)
   use Global_Variables
   use timer
   use salmon_math
-  use salmon_parallel, only : nproc_id_global
   implicit none
   integer,intent(in)       :: GS_RT
   integer,intent(in)       :: NBtmp

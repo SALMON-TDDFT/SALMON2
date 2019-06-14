@@ -53,7 +53,6 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_o
   real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
-  integer :: j,ind
   integer :: iob,job,ii,jj
   integer :: ix,iy,iz,is
   integer :: nspin_1
