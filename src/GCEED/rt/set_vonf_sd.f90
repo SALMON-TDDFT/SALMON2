@@ -18,7 +18,6 @@
 
 subroutine set_vonf_sd
 !$ use omp_lib
-  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation
   use scf_data
   implicit none

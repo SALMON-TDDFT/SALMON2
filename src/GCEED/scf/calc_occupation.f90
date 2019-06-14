@@ -14,17 +14,12 @@
 !  limitations under the License.
 !
 subroutine calc_occupation
-  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use scf_data
   implicit none
   real(8),parameter :: bltz=8.6173214d-5
-  real(8) :: factor
-  integer :: ii,iob,p1,p2,p5,ik
-  integer :: is
   integer :: is_sta,is_end
   integer :: iobsta(2),iobend(2)
-  real(8) :: temperature_au
 
   if(ilsda==0)then
     is_sta=1

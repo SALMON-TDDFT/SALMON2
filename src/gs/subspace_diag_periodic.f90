@@ -57,7 +57,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,i
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   integer,parameter :: nd=4
-  integer :: j,ind
+  integer :: j
   integer :: ii,jj,ik
   integer :: ix,iy,iz
   complex(8),allocatable :: amat(:,:)
@@ -79,9 +79,6 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,i
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
-  complex(8) :: ekr(ppg%nps,natom)
-  real(8) :: x,y,z
-  integer :: a,iatom,ilma
   complex(8),parameter :: zi=(0.d0,1.d0)
   
   call timer_begin(LOG_DIAG_TOTAL)

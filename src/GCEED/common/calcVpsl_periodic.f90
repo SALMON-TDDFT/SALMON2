@@ -27,7 +27,6 @@ subroutine calcVpsl_periodic(matrix_A,brl)
   integer :: ii,ix,iy,iz,ak
   integer :: iix,iiy,iiz
   integer :: n
-  real(8) :: bLx,bLy,bLz
   real(8) :: aLxyz
   integer :: NG_s,NG_e
   integer :: NG_l_s_para,NG_l_e_para
