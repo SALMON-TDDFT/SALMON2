@@ -20,7 +20,7 @@ contains
 
 subroutine init_md(system,md)
   use structures, only: s_system,s_md
-  use salmon_global, only: out_rvf_rt, ensemble, thermostat,set_ini_velocity,step_velocity_scaling
+  use salmon_global, only: MI,out_rvf_rt, ensemble, thermostat,set_ini_velocity,step_velocity_scaling
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   implicit none    
@@ -32,6 +32,9 @@ subroutine init_md(system,md)
           write(*,*)" out_rvf_rt --> y : changed for md option"
      out_rvf_rt='y'
   endif
+
+  allocate(md%Rion_last(3,MI))
+  allocate(md%force_last(3,MI))
 
   md%E_work = 0d0
 
@@ -172,6 +175,7 @@ subroutine remove_system_momentum(flag_print_check,system)
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   use const, only: umass
+!  use scf_data, only: ppg,ppg_all
   implicit none
   type(s_system) :: system
   integer :: ia, flag_print_check
@@ -224,5 +228,95 @@ subroutine cal_Tion_Temperature_ion(Ene_ion,Temp_ion,system)
   return
 end subroutine cal_Tion_Temperature_ion
 
+
+subroutine time_evolution_step_md_part1(system,force,md)
+  use structures, only: s_system, s_force, s_md
+  use salmon_global, only: MI,Kion,dt, Rion
+  use const, only: umass,hartree2J,kB
+  implicit none
+  type(s_system) :: system
+  type(s_force),intent(in) :: force
+  type(s_md) :: md
+  integer :: iatom
+  real(8) :: mass_au, dt_h
+
+     dt_h = dt*0.5d0
+
+     !update ion velocity with dt/2
+     do iatom=1,MI
+        mass_au = umass * system%Mass(Kion(iatom))
+        system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
+     enddo
+
+     md%Rion_last(:,:) = system%Rion(:,:)
+     md%force_last(:,:)= force%F(:,:)
+
+     !update ion coordinate with dt
+     do iatom=1,MI
+        system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
+     enddo
+     Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
+
+end subroutine 
+
+subroutine update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
+  use structures, only: s_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_fourier_grid
+  use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
+  use const, only: umass,hartree2J,kB
+  implicit none
+  type(s_system) :: system
+  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: ng
+  type(s_fourier_grid) :: fg
+  type(s_stencil),intent(inout) :: stencil
+  type(s_pp_nlcc), intent(in) :: ppn
+  type(s_pp_grid) :: ppg,ppg_all
+  integer :: itt
+
+  if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
+
+  !update pseudopotential
+  if (mod(itt,step_update_ps)==0 ) then
+     !xxxx call prep_ps_periodic('update_all       ')
+     call dealloc_init_ps(ppg,ppg_all,ppn)
+     call init_ps(system%al,system%brl,stencil%matrix_A)
+     !if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
+  else if (mod(itt,step_update_ps2)==0 ) then
+     !xxxx call prep_ps_periodic('update_wo_realloc')
+     !xxxxxxx this option is not yet made xxxxxx
+     call dealloc_init_ps(ppg,ppg_all,ppn)
+     call init_ps(system%al,system%brl,stencil%matrix_A)
+     !if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
+  endif
+
+end subroutine 
+
+subroutine time_evolution_step_md_part2(system,force,md)
+  use structures, only: s_system, s_force, s_md
+  use salmon_global, only: MI,Kion,dt,stop_system_momt
+  use const, only: umass,hartree2J,kB
+  implicit none
+  type(s_system) :: system
+  type(s_force),intent(in) :: force
+  type(s_md) :: md
+  integer :: iatom
+  real(8) :: mass_au,dt_h, aforce(3,MI), dR(3,MI)
+
+  dt_h = dt*0.5d0
+  aforce(:,:) = 0.5d0*( md%force_last(:,:) + force%F(:,:) )
+
+  !update ion velocity with dt/2
+  dR(:,:) = system%Rion(:,:) - md%Rion_last(:,:)
+  do iatom=1,MI
+     mass_au = umass * system%Mass(Kion(iatom))
+     system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
+     md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
+  enddo
+
+
+  if (stop_system_momt=='y') call remove_system_momentum(0,system)
+  call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
+
+end subroutine 
 
 end module md_sub

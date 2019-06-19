@@ -33,7 +33,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   use sendrecv_grid, only: s_sendrecv_grid
   use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy
   use force_sub, only: calc_force_salmon
-  use md_sub, only: remove_system_momentum, cal_Tion_Temperature_ion
+  use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
+                    update_pseudo_rt
   use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data_3d
   implicit none
   type(s_rgrid),intent(in) :: lg
@@ -69,7 +70,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   complex(8) :: cbox1,cbox2,cbox3
   integer :: is
 
-  real(8) :: mass_au, dt_h, aforce(3,MI), dR(3,MI)
   character(100) :: comment_line
 
   call timer_begin(LOG_CALC_VBOX)
@@ -121,40 +121,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   end do
   end do
 
-  !(MD: part1) : I'm going to move this part1 into md.f90, soon
-  if(iflag_md==1)then
-     dt_h = dt*0.5d0
-
-     !update ion velocity with dt/2
-     do iatom=1,MI
-        mass_au = umass * system%Mass(Kion(iatom))
-        system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
-     enddo
-
-     dR(:,:) = system%Rion(:,:)
-
-     !update ion coordinate with dt
-     do iatom=1,MI
-        system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
-     enddo
-     Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
-
-     if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)  !test
-
-     !update pseudopotential
-     if (mod(itt,step_update_ps)==0 ) then
-        !xxxx call prep_ps_periodic('update_all       ')
-        call dealloc_init_ps(ppg,ppg_all,ppn)
-        call init_ps(system%al,system%brl,stencil%matrix_A)
-        if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
-     else if (mod(itt,step_update_ps2)==0 ) then
-        !xxxx call prep_ps_periodic('update_wo_realloc')
-        !xxxxxxx this option is not yet made xxxxxx
-        call dealloc_init_ps(ppg,ppg_all,ppn)
-        call init_ps(system%al,system%brl,stencil%matrix_A)
-        if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
-     endif
-
+  !(MD:part1 & update of pseudopotential)
+  if(iflag_md==1) then
+     call time_evolution_step_md_part1(system,force,md)
+     call update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
   endif
 
   if(propagator=='etrs')then
@@ -538,7 +508,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
 
   !(force)
   if(icalcforce==1)then  ! and or rvf flag in future
-    aforce(:,:) = force%F(:,:)
 
     if(iperiodic==0)then !<--currently does not work
     !currently, old subroutin calc_force_c for isolated system is used
@@ -562,23 +531,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     end if  !ipediodic
   endif
 
-  !(MD: part2) or/and force  : I'm going to move this part2 into md.f90, soon
-  if(iflag_md==1)then  ! and or rvf flag in future
-     dt_h = dt*0.5d0
-     aforce(:,:) = 0.5d0*( aforce(:,:) + force%F(:,:) )
-
-     !update ion velocity with dt/2
-     dR(:,:) = system%Rion(:,:) - dR(:,:)
-     do iatom=1,MI
-        mass_au = umass * system%Mass(Kion(iatom))
-        system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
-        md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
-     enddo
-
-     if (stop_system_momt=='y') call remove_system_momentum(0,system)
-     call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
-
-  end if  !iflag_md
+  !(MD: part2)
+  if(iflag_md==1) call time_evolution_step_md_part2(system,force,md)
 
 
   if(circular=='y')then

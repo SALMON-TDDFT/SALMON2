@@ -205,6 +205,7 @@ module structures
 
   type s_md
      real(8) :: Tene, Temperature, E_work, xi_nh
+     real(8),allocatable :: Rion_last(:,:), force_last(:,:)
   end type s_md
 
   type s_ofile
