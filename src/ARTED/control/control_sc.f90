@@ -490,9 +490,9 @@ contains
         & 16, "Jm_z", trim(t_unit_current%name)
       if(use_ehrenfest_md=='y') then
       write(fh_rt, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-        & 17, "Jmi_x", trim(t_unit_current%name), &
-        & 18, "Jmi_y", trim(t_unit_current%name), &
-        & 19, "Jmi_z", trim(t_unit_current%name)
+        & 17, "-Jmi_x", trim(t_unit_current%name), &
+        & 18, "-Jmi_y", trim(t_unit_current%name), &
+        & 19, "-Jmi_z", trim(t_unit_current%name)
       endif
 
       write(fh_rt,*)

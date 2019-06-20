@@ -203,3 +203,26 @@ E_tot(:,itt)=-(A_tot(:,itt+1)-A_tot(:,itt-1))/(2.d0*dt)
 call timer_end(LOG_CALC_CURRENT)
 
 end subroutine calc_current
+
+subroutine calc_current_ion(system,j_ion)
+  use structures, only: s_system
+  use salmon_global, only: MI,Kion
+  use scf_data, only: pp,lg_num,Hvol
+  implicit none
+  type(s_system) :: system
+  integer :: ia
+  real(8) :: j_ion(3)
+
+  !AY memo
+  !current of ion: defined by positive charge-->minus sign
+  !This is NOT matter current NOR electric current.... strange definition....
+  !This is defined so as to the total electric current = -(curr + curr_ion)
+  !Should change this ion current but if you change, 
+  !please change all part in ARTED, multiscale ..... 
+  j_ion(:)=0d0
+  do ia=1,MI
+     j_ion(:) = j_ion(:) - pp%Zps(Kion(ia)) * system%Velocity(:,ia)
+  enddo
+  j_ion(:) = j_ion(:)/(dble(lg_num(1)*lg_num(2)*lg_num(3))*Hvol)
+
+end subroutine calc_current_ion

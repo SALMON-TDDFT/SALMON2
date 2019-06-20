@@ -938,9 +938,9 @@ contains
           & 7, "Jm_z", trim(t_unit_current%name)
           if(use_ehrenfest_md=='y') then
             write(fh_ac_m, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-            & 8, "Jmi_x", trim(t_unit_current%name), &
-            & 9, "Jmi_y", trim(t_unit_current%name), &
-            &10, "Jmi_z", trim(t_unit_current%name), &
+            & 8, "-Jmi_x", trim(t_unit_current%name), &
+            & 9, "-Jmi_y", trim(t_unit_current%name), &
+            &10, "-Jmi_z", trim(t_unit_current%name), &
             &11, "Tmp_ion", "K"
           endif
           write(fh_ac_m,*)

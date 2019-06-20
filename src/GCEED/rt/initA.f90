@@ -26,6 +26,7 @@ else
 end if
 
 allocate( curr(3,0:t_max) )
+allocate( curr_ion(3,0:t_max) )
 allocate( sumcurr(3,0:t_max) )
 allocate( A_ext(3,0:t_max+1) )
 allocate( A_ind(3,0:t_max+1) )
@@ -35,6 +36,7 @@ allocate( E_ind(3,0:t_max) )
 allocate( E_tot(3,0:t_max) )
 allocate( rE_ind(3,0:t_max) )
 curr=0.d0
+curr_ion=0.d0
 sumcurr=0.d0
 A_ext=0.d0
 A_ind=0.d0
