@@ -966,23 +966,18 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
   if(iscf_order==1)then
+! solve Kohn-Sham equation by minimization techniques
     call timer_begin(LOG_CALC_MINIMIZATION)
-    if( amin_routine == 'cg' .or.       &
-      ( amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
-      call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                         num_kpoints_rd,k_rd,   &
-                         rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                         zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
-                         info_ob,ppg,vlocal)
-    else if( amin_routine  == 'diis' .or. amin_routine == 'cg-diis' ) then
-      select case(iperiodic)
-      case(0)
-        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,energy%esp, &
-                     norm_diff_psi_stock,info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
-      case(3)
-        stop "rmmdiis method is not implemented for periodic systems."
-      end select
-    end if
+
+    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
+                       num_kpoints_rd,k_rd,   &
+                       rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+                       zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+                       info_ob,ppg,vlocal,  &
+                       iflag_diisjump,energy, &
+                       norm_diff_psi_stock, &
+                       Miter,iDiterYBCG)
+
     call timer_end(LOG_CALC_MINIMIZATION)
 
     call gram_schmidt(system, mg, info, spsi)
@@ -1130,6 +1125,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call gram_schmidt(system, mg, info, spsi)    
 
+! solve Kohn-Sham equation by minimization techniques
     call timer_begin(LOG_CALC_MINIMIZATION)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
@@ -1157,8 +1153,8 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,energy%esp, &
-                     norm_diff_psi_stock,info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
+        call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,iflag_diisjump, &
+                     norm_diff_psi_stock,info_ob,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
