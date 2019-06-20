@@ -63,7 +63,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   real(8) :: absr2
   
   integer :: idensity, idiffDensity, ielf
-  real(8) :: rNe
+  real(8) :: rNe, FionE(3,MI)
   
   complex(8),parameter :: zi=(0.d0,1.d0)
   
@@ -474,6 +474,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
         call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       end if
     end if
+    if(iflag_md==1) call calc_current_ion(system,curr_ion(:,itt))
+
     call calc_Total_Energy_periodic(energy,system,pp,fg)
     rbox1=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction( + : rbox1 )
@@ -491,8 +493,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     if(comm_is_root(nproc_id_global))then
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
         itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, energy%E_tot*2d0*Ry
-      write(16,'(f14.8, 3e16.8, f15.8,f18.8)')       &
+      if(iflag_md==1) then
+        write(16,'(f14.8, 6e16.8, f15.8,f18.8)')       &
+        dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3),(curr_ion(i1,itt),i1=1,3),rNe, energy%E_tot*2d0*Ry
+      else
+        write(16,'(f14.8, 3e16.8, f15.8,f18.8)')       &
         dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, energy%E_tot*2d0*Ry
+      endif
       write(17,'(f14.8, 3e16.8)')       &
         dble(itt)*dt*2.41888d-2, (E_tot(i1,itt),i1=1,3)
       write(18,'(f14.8, 3e16.8)')       &
@@ -528,6 +535,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
        else
           call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
        end if
+
+       !force on ion directly from field --- should put in calc_force_salmon?
+       do iatom=1,MI
+          FionE(:,iatom) = pp%Zps(Kion(iatom)) * E_tot(:,itt)
+       enddo
+       force%F(:,:) = force%F(:,:) + FionE(:,:)
+
     end if  !ipediodic
   endif
 

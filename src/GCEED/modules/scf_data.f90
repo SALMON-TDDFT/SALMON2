@@ -364,7 +364,7 @@ complex(8), allocatable :: zpsi_n(:,:,:,:,:)
 
 real(8),allocatable :: Ex_static(:,:,:),Ey_static(:,:,:),Ez_static(:,:,:)
 
-real(8),allocatable :: curr(:,:) 
+real(8),allocatable :: curr(:,:), curr_ion(:,:)
 real(8),allocatable :: sumcurr(:,:)
 real(8),allocatable :: rE_ind(:,:)
 
