@@ -63,7 +63,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   real(8) :: absr2
   
   integer :: idensity, idiffDensity, ielf
-  real(8) :: rNe
+  real(8) :: rNe, FionE(3,MI)
   
   complex(8),parameter :: zi=(0.d0,1.d0)
   
@@ -528,6 +528,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
        else
           call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
        end if
+
+       !force on ion directly from field --- should put in calc_force_salmon?
+       do iatom=1,MI
+          FionE(:,iatom) = pp%Zps(Kion(iatom)) * E_tot(:,itt)
+       enddo
+       force%F(:,:) = force%F(:,:) + FionE(:,:)
+
     end if  !ipediodic
   endif
 
