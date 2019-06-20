@@ -966,6 +966,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
   if(iscf_order==1)then
+! solve Kohn-Sham equation by minimization techniques
     call timer_begin(LOG_CALC_MINIMIZATION)
 
     call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
@@ -1124,6 +1125,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call gram_schmidt(system, mg, info, spsi)    
 
+! solve Kohn-Sham equation by minimization techniques
     call timer_begin(LOG_CALC_MINIMIZATION)
     if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
       select case(iperiodic)
