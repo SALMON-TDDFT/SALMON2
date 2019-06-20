@@ -974,7 +974,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                        zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                        info_ob,ppg,vlocal,  &
                        iflag_diisjump,energy, &
-                       norm_diff_psi_stock,bnmat,cnmat, &
+                       norm_diff_psi_stock, &
                        Miter,iDiterYBCG)
 
     call timer_end(LOG_CALC_MINIMIZATION)
@@ -1151,8 +1151,8 @@ DFT_Iteration : do iter=1,iDiter(img)
     else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
       select case(iperiodic)
       case(0)
-        call rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,hvol,iflag_diisjump,energy%esp, &
-                     norm_diff_psi_stock,info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
+        call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,iflag_diisjump, &
+                     norm_diff_psi_stock,info_ob,ppg,vlocal,iparaway_ob)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select

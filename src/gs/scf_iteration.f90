@@ -25,7 +25,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
-               norm_diff_psi_stock,bnmat,cnmat,  &
+               norm_diff_psi_stock,  &
                miter,iditerybcg)
   use inputoutput, only: iperiodic,ispin,amin_routine,gscg
   use structures
@@ -66,7 +66,6 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,               intent(inout) :: iflag_diisjump
   type(s_energy),        intent(inout) :: energy
   real(8),               intent(out)   :: norm_diff_psi_stock(itotmst,1)
-  real(8),               intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditerybcg
 
@@ -97,9 +96,9 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   else if( amin_routine  == 'diis' .or. amin_routine == 'cg-diis' ) then
     select case(iperiodic)
     case(0)
-      call rmmdiis(mg,system%nspin,info,stencil,srg_ob_1,spsi,itotmst,mst,num_kpoints_rd,   &
-                   system%hvol,iflag_diisjump,energy%esp, &
-                   norm_diff_psi_stock,info_ob,bnmat,cnmat,system%hgs,ppg,vlocal,iparaway_ob)
+      call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,   &
+                   iflag_diisjump, &
+                   norm_diff_psi_stock,info_ob,ppg,vlocal,iparaway_ob)
     case(3)
       stop "rmmdiis method is not implemented for periodic systems."
     end select
