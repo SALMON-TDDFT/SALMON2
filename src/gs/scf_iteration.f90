@@ -29,6 +29,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                miter,iditerybcg)
   use inputoutput, only: iperiodic,ispin,amin_routine,gscg
   use structures
+  use timer
   use dtcg_sub
   use gscg_sub
   use dtcg_periodic_sub
@@ -69,6 +70,9 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditerybcg
 
+! solve Kohn-Sham equation by minimization techniques
+  call timer_begin(LOG_CALC_MINIMIZATION)
+
   if( amin_routine == 'cg' .or.       &
     ( amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
     select case(iperiodic)
@@ -103,6 +107,8 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       stop "rmmdiis method is not implemented for periodic systems."
     end select
   end if
+
+  call timer_end(LOG_CALC_MINIMIZATION)
 
 end subroutine scf_iteration
 
