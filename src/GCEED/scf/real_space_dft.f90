@@ -976,12 +976,6 @@ DFT_Iteration : do iter=1,iDiter(img)
                        norm_diff_psi_stock, &
                        Miter,iDiterYBCG)
 
-    call gram_schmidt(system, mg, info, spsi)
-
-
-
-
-    !call debug_var_dump(system, mg, info, spsi, iter)  !uemoto!
     if(iflag_subspace_diag==1)then
       if(Miter>iDiter_nosubspace_diag)then
         select case(iperiodic)

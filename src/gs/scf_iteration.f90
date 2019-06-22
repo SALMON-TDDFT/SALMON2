@@ -35,6 +35,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   use dtcg_periodic_sub
   use gscg_periodic_sub
   use rmmdiis_sub
+  use gram_schmidt_orth, only: gram_schmidt 
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
@@ -109,6 +110,9 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   end if
 
   call timer_end(LOG_CALC_MINIMIZATION)
+
+! Gram Schmidt orghonormalization
+  call gram_schmidt(system, mg, info, spsi)
 
 end subroutine scf_iteration
 
