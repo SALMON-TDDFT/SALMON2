@@ -27,7 +27,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
-               iflag_subspace_diag,iditer_nosubspace_diag,cnmat,bnmat,iobnum,ifmst,k_sta,k_end)
+               iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,k_sta,k_end)
   use inputoutput, only: iperiodic,ispin,amin_routine,gscg
   use structures
   use timer
@@ -75,7 +75,6 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,               intent(in)    :: iditerybcg
   integer,               intent(in)    :: iflag_subspace_diag
   integer,               intent(in)    :: iditer_nosubspace_diag
-  real(8),               intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
   integer,               intent(in)    :: iobnum
   integer,               intent(in)    :: ifmst(2)
   integer,               intent(in)    :: k_sta,k_end
@@ -128,13 +127,13 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      
-        call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,   &
-                           mst,ifmst,system%hvol,info_ob,bnmat,cnmat,system%hgs,ppg,vlocal)
+        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,   &
+                           mst,ifmst,info_ob,ppg,vlocal)
 
       case(3)
-        call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                    iobnum,itotmst,k_sta,k_end,mst,ifmst,system%hvol,   &
-                                    info_ob,bnmat,cnmat,system%hgs,ppg,vlocal,num_kpoints_rd,k_rd)
+        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+                                    iobnum,itotmst,k_sta,k_end,mst,ifmst,   &
+                                    info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
       end select
     end if
   end if
