@@ -974,23 +974,9 @@ DFT_Iteration : do iter=1,iDiter(img)
                        info_ob,ppg,vlocal,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
-                       Miter,iDiterYBCG)
+                       Miter,iDiterYBCG,   &
+                       iflag_subspace_diag,iditer_nosubspace_diag,cnmat,bnmat,iobnum,ifmst,k_sta,k_end)
 
-    if(iflag_subspace_diag==1)then
-      if(Miter>iDiter_nosubspace_diag)then
-        select case(iperiodic)
-        case(0)      
-          call subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
-                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
-
-        case(3)
-          call subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                      iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
-                                      info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
-        end select
-      end if
-    end if
-  
     call timer_begin(LOG_CALC_RHO)
     call calc_density(srho,spsi,info,mg,nspin)
     if(ilsda==0)then
