@@ -26,7 +26,8 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
-               miter,iditerybcg)
+               miter,iditerybcg,   &
+               iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,k_sta,k_end)
   use inputoutput, only: iperiodic,ispin,amin_routine,gscg
   use structures
   use timer
@@ -36,6 +37,8 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   use gscg_periodic_sub
   use rmmdiis_sub
   use gram_schmidt_orth, only: gram_schmidt 
+  use subspace_diag_sub
+  use subspace_diag_periodic_sub
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
@@ -70,6 +73,11 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   real(8),               intent(out)   :: norm_diff_psi_stock(itotmst,1)
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditerybcg
+  integer,               intent(in)    :: iflag_subspace_diag
+  integer,               intent(in)    :: iditer_nosubspace_diag
+  integer,               intent(in)    :: iobnum
+  integer,               intent(in)    :: ifmst(2)
+  integer,               intent(in)    :: k_sta,k_end
 
 ! solve Kohn-Sham equation by minimization techniques
   call timer_begin(LOG_CALC_MINIMIZATION)
@@ -114,6 +122,22 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
 ! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)
 
+! subspace diagonalization
+  if(iflag_subspace_diag==1)then
+    if(miter>iditer_nosubspace_diag)then
+      select case(iperiodic)
+      case(0)      
+        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,   &
+                           mst,ifmst,info_ob,ppg,vlocal)
+
+      case(3)
+        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+                                    iobnum,itotmst,k_sta,k_end,mst,ifmst,   &
+                                    info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
+      end select
+    end if
+  end if
+  
 end subroutine scf_iteration
 
 end module scf_iteration_sub
