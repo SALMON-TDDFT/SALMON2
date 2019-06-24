@@ -17,7 +17,6 @@ set(SOURCES
     set_vonf_sd.f90
     taylor_coe.f90
     time_evolution_step.f90
-    total_energy_groupob.f90
     xc_fast.f90
     )
   #    aft_fourier.f90 # Is this single program?

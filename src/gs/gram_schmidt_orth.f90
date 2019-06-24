@@ -29,7 +29,7 @@ contains
     type(s_wf_info),      intent(in)    :: wfi
     type(s_wavefunction), intent(inout) :: wf
 
-    call timer_begin(LOG_GRAM_SCHMIDT)
+    call timer_begin(LOG_CALC_GRAM_SCHMIDT)
 
     !if (if_divide_rspace) then:
     if (allocated(wf%rwf)) then
@@ -40,7 +40,7 @@ contains
       stop "Wavefunctions are not allocated!"
     end if
 
-    call timer_end(LOG_GRAM_SCHMIDT)
+    call timer_end(LOG_CALC_GRAM_SCHMIDT)
 
     return
   end subroutine

@@ -24,7 +24,7 @@ Subroutine Hartree
   integer :: i,ix,iy,iz,n,nx,ny,nz
   real(8) :: G2
 
-  call timer_begin(LOG_HARTREE)
+  call timer_begin(LOG_CALC_HARTREE)
 
 !$omp parallel 
 
@@ -122,7 +122,7 @@ Subroutine Hartree
 
 !$omp end parallel
 
-  call timer_end(LOG_HARTREE)
+  call timer_end(LOG_CALC_HARTREE)
 
   return
 End Subroutine Hartree

@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 module stencil_sub
-complex(8), parameter :: zI=(0.d0,1.d0)
+use math_constants,only : zi
 
 contains
 

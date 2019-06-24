@@ -54,11 +54,8 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tsps
   integer,intent(in)    :: iparaway_ob
   type(s_scalar),allocatable :: v(:)
   integer :: nn,ix,iy,iz
-  integer :: ik,io,io_allob
-  complex(8) :: ekr(ppg%nps,natom)
-  integer :: a,iatom
-  integer :: ilma,j
-  real(8) :: x,y,z
+  integer :: ik,io
+  integer :: j
   complex(8),parameter :: zi=(0.d0,1.d0)
   integer :: is
   

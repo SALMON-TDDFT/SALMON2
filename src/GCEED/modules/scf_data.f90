@@ -174,7 +174,6 @@ integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)
 real(8),allocatable :: Zps(:)              ! Pseudo charge
 real(8),allocatable :: Rps(:)              ! Core radius
-real(8),allocatable :: Mass(:)             ! Atomic weight
 integer,allocatable :: Jxyz_all(:,:,:),Mps_all(:),Jxxyyzz_all(:,:,:)
 integer,allocatable :: Mps(:)
 integer,allocatable :: Jxyz_tmp1(:,:,:)
@@ -365,7 +364,7 @@ complex(8), allocatable :: zpsi_n(:,:,:,:,:)
 
 real(8),allocatable :: Ex_static(:,:,:),Ey_static(:,:,:),Ez_static(:,:,:)
 
-real(8),allocatable :: curr(:,:) 
+real(8),allocatable :: curr(:,:), curr_ion(:,:)
 real(8),allocatable :: sumcurr(:,:)
 real(8),allocatable :: rE_ind(:,:)
 
@@ -394,9 +393,6 @@ real(8),allocatable :: rforce(:,:)
 integer :: iflag_md
 real(8),allocatable :: dRion(:,:,:)
 real(8),allocatable :: Rion_eq(:,:)
-real(8),parameter :: umass=1822.9d0
-
-integer :: wmaxMI
 
 real(8) :: fcN(0:12)
 real(8) :: fbN(0:12)

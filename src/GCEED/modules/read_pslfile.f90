@@ -38,12 +38,14 @@ module read_pslfile_sub
   
   contains
   !==================================================================================================
-  subroutine read_pslfile
+  subroutine read_pslfile(system)
     use salmon_communication, only: comm_is_root
     use salmon_pp, only: init_pp
+    use structures, only: s_system
     use input_pp_sub, only: input_pp
     use prep_pp_sub, only: init_mps
     implicit none
+    type(s_system), intent(inout)  :: system
     integer :: ak,i,ll
     
     allocate( Mlps0(MKI) )
@@ -52,7 +54,6 @@ module read_pslfile_sub
     
     allocate( Zps(MKI) )
     allocate( Rps(MKI) )
-    allocate( Mass(MKI) )
     
     call init_pp(pp,Nrmax,Lmax,flag_nlcc)
     call init_mps(ppg)
@@ -65,7 +66,7 @@ module read_pslfile_sub
     
     call input_pp(pp,harray(1,1),harray(2,1),harray(3,1))
  
-    Mass(1:MKI)=pp%rmass(1:MKI)
+    system%mass(1:MKI)=pp%rmass(1:MKI)
   
     do ak=1,MKI
       Mr(ak)=pp%mr(ak)

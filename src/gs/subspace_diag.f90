@@ -18,11 +18,11 @@ module subspace_diag_sub
 
 contains
 
-subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,  &
-                info_ob,bnmat,cnmat,hgs,ppg,vlocal)
+subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,  &
+                info_ob,ppg,vlocal)
 
   use inputoutput, only: ispin
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
   use hpsi_sub
@@ -35,6 +35,7 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_o
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   type(s_rgrid),intent(in) :: mg
+  type(s_system),intent(in) :: system
   type(s_wf_info)       :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
@@ -47,13 +48,9 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_o
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
   integer,intent(in)  :: k_sta,k_end
-  real(8),intent(in)  :: hvol
   type(s_wf_info)       :: info_ob
-  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
-  real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
-  integer :: j,ind
   integer :: iob,job,ii,jj
   integer :: ix,iy,iz,is
   integer :: nspin_1
@@ -191,7 +188,7 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_o
             end do
             end do
             end do
-            amat2(iob_allob-iobsta(is)+1,job-iobsta(is)+1)=rbox*Hvol
+            amat2(iob_allob-iobsta(is)+1,job-iobsta(is)+1)=rbox*system%hvol
           end if
         end do
       end do
@@ -265,7 +262,7 @@ subroutine subspace_diag(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_o
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
             spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)=   &
-              spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)/sqrt(rbox1*Hvol)
+              spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)/sqrt(rbox1*system%hvol)
           end do
           end do
           end do

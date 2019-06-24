@@ -47,7 +47,7 @@ contains
     call hpsi_omp_KB_base(ik,zhtpsi(:,1,tid),zhtpsi(:,2,tid),zttpsi(:,tid))
     call copyout(zhtpsi(:,2,tid),zttpsi(:,tid),htpsi,ttpsi)
 
-   LOG_END(LOG_HPSI)
+    LOG_END(LOG_HPSI)
 
   contains
       subroutine init(zu,tpsi)

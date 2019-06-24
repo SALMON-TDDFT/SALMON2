@@ -54,14 +54,13 @@ contains
 
     if(comm_is_root(nproc_id_global))write(*,*)'NUMBER_THREADS = ',NUMBER_THREADS
 
-    call timer_begin(LOG_ALL)
+    call timer_begin(LOG_INIT)
 
-    call timer_begin(LOG_STATIC)
     Time_start=get_wtime() !reentrance
     call comm_bcast(Time_start,nproc_group_global)
 
     if(restart_option == 'restart') then
-      if (comm_is_root(nproc_id_global)) call timer_show_current_hour('Restore...', LOG_ALL)
+      if (comm_is_root(nproc_id_global)) call timer_show_current_hour('Restore...', LOG_TOTAL)
       call prep_restart_read
       return
     end if
@@ -111,6 +110,7 @@ contains
        endif
     endif
 
+    call timer_end(LOG_INIT)
 
   end subroutine initialize
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -589,6 +589,7 @@ contains
     use salmon_communication
     !use misc_routines
     use salmon_math
+    use const, only: umass, hartree2J, kB
     use md_ground_state, only: remove_system_momentum
     implicit none
     integer :: ia,ixyz,iseed

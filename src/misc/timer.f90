@@ -17,138 +17,122 @@ module timer
   use misc_routines, only: get_wtime
   implicit none
 
-  ! Calculation
-  integer,public,parameter :: LOG_ALL          = 0
-  integer,public,parameter :: LOG_STATIC       = 1
-  integer,public,parameter :: LOG_GROUND_STATE = 2
-  integer,public,parameter :: LOG_DYNAMICS     = 3
-  integer,public,parameter :: LOG_IO           = 7
+  integer,public,parameter :: LOG_TOTAL                 = 0
+  integer,public,parameter :: LOG_INIT                  = 1 ! general init.
 
-  ! GS routines
-  integer,public,parameter :: LOG_CG           = 10
-  integer,public,parameter :: LOG_DIAG         = 11
-  integer,public,parameter :: LOG_SP_ENERGY    = 12
-  integer,public,parameter :: LOG_GRAM_SCHMIDT = 13
+  integer,public,parameter :: LOG_READ_LDA_DATA         = 10
+  integer,public,parameter :: LOG_READ_RT_DATA          = 11
+  integer,public,parameter :: LOG_WRITE_LDA_DATA        = 12
+  integer,public,parameter :: LOG_WRITE_LDA_INFOS       = 13
+  integer,public,parameter :: LOG_WRITE_RT_DATA         = 14
+  integer,public,parameter :: LOG_WRITE_GS_RESULTS      = 15
+  integer,public,parameter :: LOG_WRITE_RT_RESULTS      = 16
 
-  ! GS and RT routines
-  integer,public,parameter :: LOG_DT_EVOLVE    = 20
-  integer,public,parameter :: LOG_HPSI         = 21
-  integer,public,parameter :: LOG_PSI_RHO      = 22
-  integer,public,parameter :: LOG_HARTREE      = 23
-  integer,public,parameter :: LOG_EXC_COR      = 24
-  integer,public,parameter :: LOG_CURRENT      = 25
-  integer,public,parameter :: LOG_TOTAL_ENERGY = 26
-  integer,public,parameter :: LOG_ION_FORCE    = 27
-  integer,public,parameter :: LOG_DT_EVOLVE_AC = 28
-  integer,public,parameter :: LOG_ANA_RT_USEGS = 29
-!  integer,public,parameter :: LOG_K_SHIFT_WF   = 29  !old name
-  integer,public,parameter :: LOG_OTHER        = 30
+  integer,public,parameter :: LOG_INIT_GS               = 20
+  integer,public,parameter :: LOG_INIT_GS_RESTART       = 21
+  integer,public,parameter :: LOG_INIT_GS_ITERATION     = 22
+  integer,public,parameter :: LOG_DEINIT_GS_ITERATION   = 23
 
-  ! Hamiltonian
-  integer,public,parameter :: LOG_HPSI_INIT    = 35
-  integer,public,parameter :: LOG_HPSI_STENCIL = 36
-  integer,public,parameter :: LOG_HPSI_PSEUDO  = 37
-  integer,public,parameter :: LOG_HPSI_UPDATE  = 38
+  integer,public,parameter :: LOG_INIT_RT               = 25
+  integer,public,parameter :: LOG_INIT_TIME_PROPAGATION = 26
 
-  ! Communication
-  integer,public,parameter :: LOG_ALLREDUCE    = 40
-  integer,public,parameter :: LOG_SENDRECV_GRID= 41
+  integer,public,parameter :: LOG_GS_ITERATION          = 30
+  integer,public,parameter :: LOG_RT_ITERATION          = 31
 
-
-  ! for unified version
-  ! ===============================================================
-  integer,public,parameter :: LOG_TOTAL                 = 100
-
-  integer,public,parameter :: LOG_READ_LDA_DATA         = 110
-  integer,public,parameter :: LOG_READ_RT_DATA          = 111
-  integer,public,parameter :: LOG_WRITE_LDA_DATA        = 112
-  integer,public,parameter :: LOG_WRITE_RT_DATA         = 113
-  integer,public,parameter :: LOG_WRITE_ENERGIES        = 114
-  integer,public,parameter :: LOG_WRITE_INFOS           = 115
-  integer,public,parameter :: LOG_WRITE_RESULTS         = 116
-
-  integer,public,parameter :: LOG_INIT_GS               = 120
-  integer,public,parameter :: LOG_INIT_GS_RESTART       = 121
-  integer,public,parameter :: LOG_INIT_GS_ITERATION     = 122
-  integer,public,parameter :: LOG_DEINIT_GS_ITERATION   = 123
-
-  integer,public,parameter :: LOG_INIT_RT               = 125
-  integer,public,parameter :: LOG_INIT_TIME_PROPAGATION = 126
-
-  integer,public,parameter :: LOG_GS_ITERATION          = 130
-  integer,public,parameter :: LOG_RT_ITERATION          = 131
-
-  integer,public,parameter :: LOG_CALC_RHO              = 132
-  integer,public,parameter :: LOG_CALC_HARTREE          = 133
-  integer,public,parameter :: LOG_CALC_EXC_COR          = 134
-  integer,public,parameter :: LOG_CALC_TOTAL_ENERGY     = 135
+  integer,public,parameter :: LOG_CALC_RHO              = 32
+  integer,public,parameter :: LOG_CALC_HARTREE          = 33
+  integer,public,parameter :: LOG_CALC_EXC_COR          = 34
+  integer,public,parameter :: LOG_CALC_TOTAL_ENERGY     = 35
+  integer,public,parameter :: LOG_CALC_ION_FORCE        = 36
 
   ! for GS
-  integer,public,parameter :: LOG_CALC_GRAM_SCHMIDT     = 140
-  integer,public,parameter :: LOG_CALC_SUBSPACE_DIAG    = 141
-  integer,public,parameter :: LOG_CALC_MINIMIZATION     = 142
-  integer,public,parameter :: LOG_CALC_CHANGE_ORDER     = 143
+  integer,public,parameter :: LOG_CALC_GRAM_SCHMIDT     = 40
+  integer,public,parameter :: LOG_CALC_SUBSPACE_DIAG    = 41
+  integer,public,parameter :: LOG_CALC_MINIMIZATION     = 42
+  integer,public,parameter :: LOG_CALC_CHANGE_ORDER     = 43
+  integer,public,parameter :: LOG_CALC_ESP              = 44
 
   ! for RT
-  integer,public,parameter :: LOG_CALC_VBOX             = 150
-  integer,public,parameter :: LOG_CALC_TIME_PROPAGATION = 151
-  integer,public,parameter :: LOG_CALC_DP               = 155
-  integer,public,parameter :: LOG_CALC_CURRENT          = 156
-  integer,public,parameter :: LOG_CALC_VLOCAL           = 158 ! FIXME: wrong name
-  integer,public,parameter :: LOG_CALC_PROJECTION       = 159
-  integer,public,parameter :: LOG_CALC_QUADRUPOLE       = 160 ! FIXME: wrong name
+  integer,public,parameter :: LOG_CALC_EMFIELD          = 49
+  integer,public,parameter :: LOG_CALC_VBOX             = 50
+  integer,public,parameter :: LOG_CALC_TIME_PROPAGATION = 51
+  integer,public,parameter :: LOG_HPSI                  = 52
+  integer,public,parameter :: LOG_CALC_DP               = 55
+  integer,public,parameter :: LOG_CALC_CURRENT          = 56
+  integer,public,parameter :: LOG_CALC_VLOCAL           = 58 ! FIXME: wrong name
+  integer,public,parameter :: LOG_CALC_PROJECTION       = 59
+  integer,public,parameter :: LOG_CALC_QUADRUPOLE       = 60 ! FIXME: wrong name
+  integer,public,parameter :: LOG_WRITE_ENERGIES        = 61
+  integer,public,parameter :: LOG_WRITE_RT_INFOS        = 62
+  integer,public,parameter :: LOG_RT_MISC               = 63
+  integer,public,parameter :: LOG_RT_ANALYSIS           = 64
 
-!  integer,public,parameter :: LOG_SENDRECV_TOTAL            = 200
-  integer,public,parameter :: LOG_SENDRECV_TIME_PROPAGATION = 201
+  integer,public,parameter :: LOG_ALLREDUCE_RHO             = 101
+  integer,public,parameter :: LOG_ALLREDUCE_HARTREE         = 102
+  integer,public,parameter :: LOG_ALLREDUCE_DIPOLE          = 103
+  integer,public,parameter :: LOG_ALLREDUCE_TOTAL_ENERGY    = 104
+  integer,public,parameter :: LOG_ALLREDUCE_CURRENT         = 105
+  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT3  = 106
+  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT5  = 107
+  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT7  = 108
+  integer,public,parameter :: LOG_ALLREDUCE_ESP             = 109
+  integer,public,parameter :: LOG_ALLREDUCE_ION_FORCE       = 110
 
-!  integer,public,parameter :: LOG_ALLREDUCE_TOTAL       = 300
-  integer,public,parameter :: LOG_ALLREDUCE_RHO         = 301
-  integer,public,parameter :: LOG_ALLREDUCE_HARTREE     = 302
-  integer,public,parameter :: LOG_ALLREDUCE_DIPOLE      = 303
-  integer,public,parameter :: LOG_ALLREDUCE_TOTAL_ENERGY= 304
-  integer,public,parameter :: LOG_ALLREDUCE_CURRENT     = 305
-  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT3 = 306
-  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT5 = 307
-  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT7 = 308
+  integer,public,parameter :: LOG_ALLGATHERV_TOTAL          = 120
 
-  integer,public,parameter :: LOG_ALLGATHERV_TOTAL      = 400
+  integer,public,parameter :: LOG_SENDRECV_TIME_PROPAGATION = 130
+  integer,public,parameter :: LOG_SENDRECV_GRID             = 131
 
   ! for specific routines
   ! total_energy_periodic (GCEED part)
-  integer,public,parameter :: LOG_TEP_TOTAL             = 1000
-  integer,public,parameter :: LOG_TEP_SENDRECV          = 1001
-  integer,public,parameter :: LOG_TEP_ORBITAL_ENERGY    = 1002
-  integer,public,parameter :: LOG_TEP_ION_ION           = 1003
-  integer,public,parameter :: LOG_TEP_ION_ELECTRON      = 1004
-  integer,public,parameter :: LOG_TEP_NONLOCAL_1        = 1005
-  integer,public,parameter :: LOG_TEP_NONLOCAL_2        = 1006
+  integer,public,parameter :: LOG_TEP_TOTAL          = 200
+  integer,public,parameter :: LOG_TEP_SENDRECV       = 201
+  integer,public,parameter :: LOG_TEP_ORBITAL_ENERGY = 202
+  integer,public,parameter :: LOG_TEP_ION_ION        = 203
+  integer,public,parameter :: LOG_TEP_ION_ELECTRON   = 204
+  integer,public,parameter :: LOG_TEP_NONLOCAL_1     = 205
+  integer,public,parameter :: LOG_TEP_NONLOCAL_2     = 206
 
   ! current (GCEED part)
-  integer,public,parameter :: LOG_CUR_TOTAL               = 1010
-  integer,public,parameter :: LOG_CUR_SENDRECV            = 1011
-  integer,public,parameter :: LOG_CUR_LOCAL               = 1012
-  integer,public,parameter :: LOG_CUR_NONLOCAL1           = 1013
-  integer,public,parameter :: LOG_CUR_NONLOCAL1_ALLREDUCE = 1014
-  integer,public,parameter :: LOG_CUR_NONLOCAL2           = 1015
-  integer,public,parameter :: LOG_CUR_NONLOCAL2_ALLREDUCE = 1016
-
-  ! subspace diag
-  integer,public,parameter :: LOG_DIAG_TOTAL            = 1030
-  integer,public,parameter :: LOG_DIAG_INIT             = 1031
-  integer,public,parameter :: LOG_DIAG_VLOCAL           = 1032
-  integer,public,parameter :: LOG_DIAG_AMAT             = 1033
-  integer,public,parameter :: LOG_DIAG_ALLREDUCE        = 1034
-  integer,public,parameter :: LOG_DIAG_EIGEN            = 1035
-  integer,public,parameter :: LOG_DIAG_SET_ORBITAL      = 1036
-  integer,public,parameter :: LOG_DIAG_UPDATE           = 1037
+  integer,public,parameter :: LOG_CUR_TOTAL               = 210
+  integer,public,parameter :: LOG_CUR_SENDRECV            = 211
+  integer,public,parameter :: LOG_CUR_LOCAL               = 212
+  integer,public,parameter :: LOG_CUR_NONLOCAL1           = 213
+  integer,public,parameter :: LOG_CUR_NONLOCAL1_ALLREDUCE = 214
+  integer,public,parameter :: LOG_CUR_NONLOCAL2           = 215
+  integer,public,parameter :: LOG_CUR_NONLOCAL2_ALLREDUCE = 216
 
   ! conjugate gradient (gscg)
-  integer,public,parameter :: LOG_GSCG_TOTAL            = 1020
-  integer,public,parameter :: LOG_GSCG_INIT             = 1021
-  integer,public,parameter :: LOG_GSCG_INIT_ITERATION   = 1022
-  integer,public,parameter :: LOG_GSCG_ITERATION        = 1023
-  integer,public,parameter :: LOG_GSCG_DEINIT           = 1024
-  integer,public,parameter :: LOG_GSCG_ALLREDUCE        = 1025
+  integer,public,parameter :: LOG_GSCG_TOTAL          = 220
+  integer,public,parameter :: LOG_GSCG_INIT           = 221
+  integer,public,parameter :: LOG_GSCG_INIT_ITERATION = 222
+  integer,public,parameter :: LOG_GSCG_ITERATION      = 223
+  integer,public,parameter :: LOG_GSCG_DEINIT         = 224
+  integer,public,parameter :: LOG_GSCG_ALLREDUCE      = 225
+
+  ! subspace diag
+  integer,public,parameter :: LOG_DIAG_TOTAL       = 230
+  integer,public,parameter :: LOG_DIAG_INIT        = 231
+  integer,public,parameter :: LOG_DIAG_VLOCAL      = 232
+  integer,public,parameter :: LOG_DIAG_AMAT        = 233
+  integer,public,parameter :: LOG_DIAG_ALLREDUCE   = 234
+  integer,public,parameter :: LOG_DIAG_EIGEN       = 235
+  integer,public,parameter :: LOG_DIAG_SET_ORBITAL = 236
+  integer,public,parameter :: LOG_DIAG_UPDATE      = 237
+
+  ! hpsi (ARTED part)
+  integer,public,parameter :: LOG_HPSI_INIT    = 245
+  integer,public,parameter :: LOG_HPSI_STENCIL = 246
+  integer,public,parameter :: LOG_HPSI_PSEUDO  = 247
+  integer,public,parameter :: LOG_HPSI_UPDATE  = 248
+
+  ! hpsi (unified)
+  integer,public,parameter :: LOG_UHPSI_ALL            = 250
+  integer,public,parameter :: LOG_UHPSI_UPDATE_OVERLAP = 251
+  integer,public,parameter :: LOG_UHPSI_STENCIL        = 252
+  integer,public,parameter :: LOG_UHPSI_PSEUDO         = 253
+  integer,public,parameter :: LOG_UHPSI_PSEUDO_COMM    = 254
+
   ! ===============================================================
 
 
@@ -164,14 +148,24 @@ module timer
   public :: timer_write, timer_thread_write
 
 
-  integer,private,parameter   :: LOG_SIZE = 2000
+  integer,private,parameter   :: LOG_SIZE = 300
   real(8),private,allocatable :: log_time(:)
   real(8),private,allocatable :: log_temp(:)
+  logical,private,allocatable :: ticked(:)
 
   real(8),private,allocatable :: log_time_t(:,:)
   real(8),private,allocatable :: log_temp_t(:,:)
+  logical,private,allocatable :: ticked_t(:,:)
 
   character(*),private,parameter :: SHOW_FORMAT = '(a,f10.2,a,f10.2,a)'
+
+#define CHECK_TICKED(ID)        call now_ticked((ID),__LINE__,__FILE__)
+#define CHECK_TICKED_T(ID,TID)  call now_ticked_t((ID),(TID),__LINE__,__FILE__)
+#define CHECK_STOPPED(ID)       call now_stopped((ID),__LINE__,__FILE__)
+#define CHECK_STOPPED_T(ID,TID) call now_stopped_t((ID),(TID),__LINE__,__FILE__)
+
+  private :: now_ticked, now_ticked_t
+  private :: now_stopped, now_stopped_t
 
 private
 contains
@@ -182,6 +176,10 @@ contains
     allocate(log_temp(0:LOG_SIZE - 1))
     allocate(log_time_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
     allocate(log_temp_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
+    allocate(ticked(0:LOG_SIZE - 1))
+    allocate(ticked_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
+    ticked(:)     = .false.
+    ticked_t(:,:) = .false.
     call timer_reset
   end subroutine
 
@@ -191,21 +189,36 @@ contains
     real(8),intent(in) :: t
     log_time(e) = t
     log_temp(e) = 0.d0
+    ticked(e)   = .false.
   end subroutine
 
   subroutine timer_reset(e)
     implicit none
     integer,intent(in),optional :: e
+    integer :: i,j
     if(present(e)) then
+      CHECK_TICKED(e)
+      do j=0,size(ticked_t,2)-1
+        CHECK_TICKED_T(e,j)
+      end do
       log_time  (e)   = 0.d0
       log_temp  (e)   = 0.d0
       log_time_t(e,:) = 0.d0
       log_temp_t(e,:) = 0.d0
+      ticked(e)       = .false.
     else
+      do i=0,LOG_SIZE-1
+        CHECK_TICKED(i)
+        do j=0,size(ticked_t,2)-1
+          CHECK_TICKED_T(i,j)
+        end do
+      end do
       log_time  (:)   = 0.d0
       log_temp  (:)   = 0.d0
       log_time_t(:,:) = 0.d0
       log_time_t(:,:) = 0.d0
+      ticked(:)       = .false.
+      ticked_t(:,:)   = .false.
     end if
   end subroutine
 
@@ -228,13 +241,17 @@ contains
   subroutine timer_begin(id)
     implicit none
     integer,intent(in) :: id
+    CHECK_TICKED(id)
     log_temp(id) = get_wtime()
+    ticked(id)   = .true.
   end subroutine
 
   subroutine timer_end(id)
     implicit none
     integer,intent(in) :: id
+    CHECK_STOPPED(id)
     log_time(id) = log_time(id) + get_wtime() - log_temp(id)
+    ticked(id)   = .false.
   end subroutine
 
   subroutine timer_thread_begin(id)
@@ -243,10 +260,12 @@ contains
     integer,intent(in) :: id
     integer :: tid
     tid = omp_get_thread_num()
+    CHECK_TICKED_T(id,tid)
     if (tid == 0) then
       call timer_begin(id)
     end if
     log_temp_t(id,tid) = get_wtime()
+    ticked_t(id,tid)   = .true.
   end subroutine
 
   subroutine timer_thread_end(id)
@@ -255,10 +274,12 @@ contains
     integer,intent(in) :: id
     integer :: tid
     tid = omp_get_thread_num()
+    CHECK_STOPPED_T(id,tid)
     if (tid == 0) then
       call timer_end(id)
     end if
     log_time_t(id,tid) = log_time_t(id,tid) + get_wtime() - log_temp_t(id,tid)
+    ticked_t(id,tid)   = .false.
   end subroutine
 
   subroutine timer_show_hour(str, id)
@@ -307,7 +328,7 @@ contains
     integer,intent(in)      :: fd,id
     real(8) :: time
     time = log_time(id)
-    write(fd,'(a,f16.8,a)') str,time,'[s]'
+    write(fd,'(a,f16.8,a)') str,time,' [s]'
   end subroutine
 
   subroutine timer_thread_write(fd,str,id)
@@ -320,7 +341,7 @@ contains
     write(fd,*) str
     do i=0,omp_get_max_threads()-1
       time = log_time_t(id,i)
-      write(fd,'(a,i4,a,f16.8,a)') 'tid =',i,': ',time,'[s]'
+      write(fd,'(a,i4,a,f16.8,a)') 'tid =',i,': ',time,' [s]'
     end do
   end subroutine
 
@@ -337,4 +358,60 @@ contains
     real(8)            :: timer_thread_get
     timer_thread_get = log_time_t(id,tid)
   end function
+
+  subroutine now_ticked(id,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,ln
+    character(*), intent(in) :: sn
+    if (ticked(id)) then
+      print '(A,I3,A,"(",A," line.",I4,")")', 'timer ',id,' now ticked... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+      call tracebackqq
+#endif
+      stop 'error'
+    end if
+  end subroutine
+
+  subroutine now_ticked_t(id,tid,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,tid,ln
+    character(*), intent(in) :: sn
+    if (ticked_t(id,tid)) then
+      print '(A,I3,A,I3,A,"(",A," line.",I4,")")', 'thread ',tid,': timer ',id,' now ticked... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+!$omp critical
+      call tracebackqq
+!$omp end critical
+#endif
+      stop 'error'
+    end if
+  end subroutine
+
+  subroutine now_stopped(id,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,ln
+    character(*), intent(in) :: sn
+    if (.not.ticked(id)) then
+      print '(A,I3,A,"(",A," line.",I4,")")', 'timer ',id,' now stopped... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+      call tracebackqq
+#endif
+      stop 'error'
+    end if
+  end subroutine
+
+  subroutine now_stopped_t(id,tid,ln,sn)
+    implicit none
+    integer, intent(in)      :: id,tid,ln
+    character(*), intent(in) :: sn
+    if (.not.ticked_t(id,tid)) then
+      print '(A,I3,A,I3,A,"(",A," line.",I4,")")', 'thread ',tid,': timer ',id,' now stopped... please check it.',sn,ln
+#ifdef __INTEL_COMPILER
+!$omp critical
+      call tracebackqq
+!$omp end critical
+#endif
+      stop 'error'
+    end if
+  end subroutine
 end module

@@ -24,7 +24,6 @@ Module Global_Variables
   real(8),parameter :: Pi=3.141592653589793d0
   complex(8),parameter :: zI=(0.d0,1.d0)
   real(8),parameter :: a_B=0.529177d0,Ry=13.6058d0
-  real(8),parameter :: umass=1822.9d0
   real(8),parameter :: c_light=137.03953250d0 ! sato
 
 !yabana
@@ -98,9 +97,7 @@ Module Global_Variables
   real(8),allocatable :: esp_vb_min(:),esp_vb_max(:) !FS set
   real(8),allocatable :: esp_cb_min(:),esp_cb_max(:) !FS set
   real(8),allocatable :: Eall_GS(:),esp_var_ave(:),esp_var_max(:),ddns(:),ddns_abs_1e(:)
-  real(8) :: xi_nh, kB, hartree2J
-  parameter( kB = 1.38064852d-23 ) ![J/K]
-  parameter( hartree2J = 4.359744650d-18 )
+  real(8) :: xi_nh
 
   logical :: flag_use_grad_wf_on_force
   parameter(flag_use_grad_wf_on_force=.true.)

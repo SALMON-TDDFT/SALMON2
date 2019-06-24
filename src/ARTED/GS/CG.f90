@@ -55,7 +55,7 @@ Subroutine CG_ompk(iter_cg_max)
   integer :: thr_id,omp_get_thread_num
   thr_id=0
 
-  call timer_begin(LOG_CG)
+  call timer_begin(LOG_GSCG_TOTAL)
   call update_projector(kac)
 
   esp_var_l(:,:)=0.d0
@@ -129,11 +129,11 @@ Subroutine CG_ompk(iter_cg_max)
 
 !$omp end parallel
 
-  call timer_begin(LOG_ALLREDUCE)
-  call comm_summation(esp_var_l,esp_var,NB*NK,nproc_group_tdks)
-  call timer_end(LOG_ALLREDUCE)
+  call timer_end(LOG_GSCG_TOTAL)
 
-  call timer_end(LOG_CG)
+  call timer_begin(LOG_GSCG_ALLREDUCE)
+  call comm_summation(esp_var_l,esp_var,NB*NK,nproc_group_tdks)
+  call timer_end(LOG_GSCG_ALLREDUCE)
 
   return
 End Subroutine CG_ompk
@@ -162,7 +162,7 @@ Subroutine CG_ompb(iter_cg_max)
   integer :: thr_id,omp_get_thread_num
   thr_id=0
 
-  call timer_begin(LOG_CG)
+  call timer_begin(LOG_GSCG_TOTAL)
   call update_projector(kac)
   esp_var_l(:,:)=0.d0
 
@@ -234,11 +234,11 @@ Subroutine CG_ompb(iter_cg_max)
   enddo
 !$omp end parallel
 
-  call timer_begin(LOG_ALLREDUCE)
-  call comm_summation(esp_var_l,esp_var,NB*NK,nproc_group_tdks)
-  call timer_end(LOG_ALLREDUCE)
+  call timer_end(LOG_GSCG_TOTAL)
 
-  call timer_end(LOG_CG)
+  call timer_begin(LOG_GSCG_ALLREDUCE)
+  call comm_summation(esp_var_l,esp_var,NB*NK,nproc_group_tdks)
+  call timer_end(LOG_GSCG_ALLREDUCE)
 
   return
 End Subroutine CG_ompb

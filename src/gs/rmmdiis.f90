@@ -27,11 +27,12 @@ contains
 ! This routine is RMM-DIIS
 ! J. Soc. Mat. Sci., Japan, vol.52 (3), p.260-265. (in Japanese)
 
-subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
-                  ,mst,num_kpoints_rd,hvol,iflag_diisjump,esp,norm_diff_psi_stock  &
-                  ,info_ob,bnmat,cnmat,hgs,ppg,vlocal,iparaway_ob)
-  use inputoutput, only: ncg,ispin,lambda1_diis,lambda2_diis
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
+                  ,mst,iflag_diisjump,norm_diff_psi_stock  &
+                  ,info_ob,ppg,vlocal,iparaway_ob)
+  use inputoutput, only: ncg,lambda1_diis,lambda2_diis
+  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,   &
+                        s_energy,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use calc_allob_sub
@@ -40,26 +41,21 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   implicit none
   
   type(s_rgrid),intent(in) :: mg
-  integer,intent(in)   :: nspin
+  type(s_system),intent(in) :: system
   type(s_wf_info) :: info
   type(s_wavefunction) :: spsi
+  type(s_energy) :: energy
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
   integer,intent(in)    :: itotmst
   integer,intent(in)    :: mst(2)
-  integer,intent(in)    :: num_kpoints_rd
-  real(8),intent(in)    :: hvol
   integer,intent(out)   :: iflag_diisjump
-  real(8),intent(in)    :: esp(itotmst,num_kpoints_rd)
   real(8),intent(out)   :: norm_diff_psi_stock(itotmst,1)
   type(s_wf_info)       :: info_ob
-  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
-  real(8),intent(in)    :: hgs(3)
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin)
+  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
   integer,intent(in)    :: iparaway_ob
   integer,parameter :: nd=4
-  integer :: j,ind
   integer :: iob,iob_allob,iter,ix,iy,iz
   integer :: nspin_1
   type(s_wavefunction)  :: stpsi
@@ -104,8 +100,8 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   allocate (R1(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0:ncg))
   allocate (phibar(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0:ncg))
   allocate (Rbar(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0:ncg))
-  allocate (psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:nspin,  &
-                      1:nspin*numo,info%ik_s:info%ik_e,1))
+  allocate (psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:system%nspin,  &
+                      1:system%nspin*numo,info%ik_s:info%ik_e,1))
   
   allocate (iobcheck(1:itotmst,0:ncg))
   iobcheck=0
@@ -119,27 +115,27 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   end do
   end do
   
-  if(nspin*numo>=1)then
-    allocate (iflagdiis(1:nspin*numo))
-    allocate (epsdiis(1:nspin*numo,0:ncg))
-    allocate (Rnorm(1:nspin*numo,0:ncg))
+  if(system%nspin*numo>=1)then
+    allocate (iflagdiis(1:system%nspin*numo))
+    allocate (epsdiis(1:system%nspin*numo,0:ncg))
+    allocate (Rnorm(1:system%nspin*numo,0:ncg))
   end if 
   
   ! Flag for convergence
-  if(nspin*numo >= 1) iflagdiis=1
+  if(system%nspin*numo >= 1) iflagdiis=1
   
-  if(nspin*numo >= 1) then
+  if(system%nspin*numo >= 1) then
     phi=0.d0
-    psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:nspin,  &
+    psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:system%nspin,  &
                       1:numo,info%ik_s:info%ik_e,1)=   &
-      spsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:nspin,  &
+      spsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:system%nspin,  &
                       1:numo,info%ik_s:info%ik_e,1)
   end if
   
   iflag_diisjump=0
   
-  do iob=1,nspin*numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*numo)
+  do iob=1,system%nspin*numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*numo)
     if(iob>numo)then
       is=2
     else
@@ -165,20 +161,20 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
 
       call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,0),htphi(mg_xs,mg_ys,mg_zs),rbox1)
   
-      call axpyzv(mg,-rbox1*hvol &
+      call axpyzv(mg,-rbox1*system%hvol &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0) &
                     ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze) &
                     ,R1(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0))
 
-      epsdiis(iob,0)=rbox1*hvol
+      epsdiis(iob,0)=rbox1*system%hvol
       call inner_product3(mg,R1(mg_xs,mg_ys,mg_zs,0),R1(mg_xs,mg_ys,mg_zs,0),rbox1)
-      Rnorm(iob,0)=rbox1*hvol
+      Rnorm(iob,0)=rbox1*system%hvol
   
     else
   ! Solve by Lagrange's method of undetermined multipliers, and obtain 
   ! Rbar from previous combinations of phi and R.
       if(iflagdiis(iob) == 1)then
-        call diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
+        call diis_core(mg,itotmst,system%hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
       end if
     end if
   
@@ -198,7 +194,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   ! normalization
       call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,iter),phi(mg_xs,mg_ys,mg_zs,iter),rbox1)
 
-      call scalev(mg,1.0d0/sqrt(rbox1*hvol) &
+      call scalev(mg,1.0d0/sqrt(rbox1*system%hvol) &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,iter))
   
       call copyv(mg,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,iter) &
@@ -211,16 +207,16 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   
       call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
 
-      call axpyzv(mg,-rbox1*hvol &
+      call axpyzv(mg,-rbox1*system%hvol &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,iter) &
                     ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze) &
                     ,R1(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,iter))
 
       call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
-      epsdiis(iob,iter)=rbox1*hvol
+      epsdiis(iob,iter)=rbox1*system%hvol
   
       call inner_product3(mg,R1(mg_xs,mg_ys,mg_zs,iter),R1(mg_xs,mg_ys,mg_zs,iter),rbox1)
-      Rnorm(iob,iter)=rbox1*hvol
+      Rnorm(iob,iter)=rbox1*system%hvol
   
   ! judgement for closing loop.
   ! The ratio of Rnorm is set to 0.3 as well as Kresse-Furthmuller.
@@ -264,8 +260,8 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   end do        ! loop for iob
   
   iflag_diisjump=0
-  do iob=1,nspin*numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*numo)
+  do iob=1,system%nspin*numo
+    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*numo)
     if(iob>numo)then
       is=2
     else
@@ -282,22 +278,22 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
     call copyv(mg,shtpsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1,1,1,1) &
                  ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze))
 
-    rbox1=hvol* &
+    rbox1=system%hvol* &
           dotv(mg,spsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,is,iob-(is-1)*numo,1,1) &
                  ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze))
 
-    if(rbox1-esp(iob,1)>5.d0) iflag_diisjump=1
+    if(rbox1-energy%esp(iob,1,1)>5.d0) iflag_diisjump=1
   end do
   
   if(iflag_diisjump==0)then
     continue
   else if(iflag_diisjump==1)then
-    spsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:nspin,  &
+    spsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:system%nspin,  &
                       1:numo,info%ik_s:info%ik_e,1)=   &
-      psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:nspin,  &
+      psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:system%nspin,  &
                       1:numo,info%ik_s:info%ik_e,1)
-    do iob=1,nspin*numo
-      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,nspin*numo)
+    do iob=1,system%nspin*numo
+      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*numo)
       if(iob>numo)then
         is=2
       else
@@ -319,7 +315,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   
       call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,0),htphi(mg_xs,mg_ys,mg_zs),rbox1)
 
-      call axpyzv(mg,-rbox1*hvol &
+      call axpyzv(mg,-rbox1*system%hvol &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0) &
                     ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze) &
                     ,R1(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0))
@@ -331,7 +327,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
     end do
   
     rnorm_diff_psi=0.d0
-    do iob=1,nspin*numo
+    do iob=1,system%nspin*numo
       if(iob>numo)then
         is=2
       else
@@ -340,7 +336,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
       call diffv(mg,spsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,is,iob-(is-1)*numo,1,1) &
                    ,psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,is,iob-(is-1)*numo,1,1) &
                    ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0))
-      rbox1=normv(mg,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0))*hvol
+      rbox1=normv(mg,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0))*system%hvol
       rnorm_diff_psi(iob,1)=rbox1
     end do
     call comm_summation(rnorm_diff_psi,norm_diff_psi_stock,itotmst,nproc_group_global)
@@ -350,7 +346,7 @@ subroutine rmmdiis(mg,nspin,info,stencil,srg_ob_1,spsi,itotmst  &
   deallocate(htphi)
   deallocate(phibox,Rbox,phi,R1,phibar,Rbar)
   
-  if(nspin*numo>=1)then
+  if(system%nspin*numo>=1)then
     deallocate (iflagdiis,epsdiis,Rnorm)
   end if 
   deallocate(iobcheck) 

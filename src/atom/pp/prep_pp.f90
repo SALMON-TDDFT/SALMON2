@@ -21,9 +21,9 @@ contains
 
 subroutine calc_vloc(pp,dvloc_g,gx,gy,gz,ng,ng_s,ng_e,ngzero)
   use salmon_global,only : nelem
+  use math_constants,only : pi
   use structures,only : s_pp_info
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info) :: pp
   integer,intent(in) :: ng,ng_s,ng_e
   integer,intent(in) :: ngzero
@@ -71,9 +71,9 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
   use salmon_global,only : natom, nelem, kion, rion
   use salmon_parallel,only : nproc_group_tdks
   use salmon_communication, only: comm_summation
+  use math_constants,only : pi
   use structures,only : s_pp_info
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info) :: pp
   integer,intent(in) :: ngzero
   integer,intent(in) :: ng,ng_s,ng_e
@@ -264,7 +264,7 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 
 
 !$omp parallel
-!$omp do private(a,ik,j,i,ix,iy,iz,x,y,z,r,rr,tmpx,tmpy,tmpz)
+!$omp do private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w)
   do a=1,natom
     ik=kion(a)
     j=0
@@ -373,7 +373,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   end if
 
 !$omp parallel
-!$omp do private(a,ik,j,ix,iy,iz,tmpx,tmpy,tmpz,i,x,y,z,r,rr)
+!$omp do private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w)
   do a=1,natom
     ik=kion(a)
     j=0
@@ -526,9 +526,9 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
                    lx,ly,lz,nl,hx,hy,hz,  &
                    flag_use_grad_wf_on_force,property,hvol0)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
+  use math_constants,only : pi
   use structures,only : s_pp_info,s_pp_grid
   implicit none
-  real(8),parameter :: pi=3.141592653589793d0 ! copied from salmon_math
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   integer,intent(in) :: nl

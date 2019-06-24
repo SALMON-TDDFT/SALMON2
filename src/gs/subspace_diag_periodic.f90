@@ -18,12 +18,12 @@ module subspace_diag_periodic_sub
 
 contains
 
-subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                  iobnum,itotmst,k_sta,k_end,mst,ifmst,hvol,   &
-                                  info_ob,bnmat,cnmat,hgs,ppg,vlocal,num_kpoints_rd,k_rd)
+subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+                                  iobnum,itotmst,k_sta,k_end,mst,ifmst,   &
+                                  info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
 
-  use inputoutput, only: ispin,natom
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use inputoutput, only: ispin
+  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_korbital, nproc_group_k, nproc_group_kgrid
   use salmon_communication, only: comm_bcast, comm_summation
   use timer
@@ -37,6 +37,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,i
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   type(s_rgrid),intent(in) :: mg
+  type(s_system),intent(in) :: system
   type(s_wf_info)     :: info
   type(s_wavefunction),intent(inout) :: spsi
   type(s_stencil) :: stencil
@@ -49,15 +50,12 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,i
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
   integer,intent(in)  :: k_sta,k_end
-  real(8),intent(in)  :: hvol
   type(s_wf_info)       :: info_ob
-  real(8),intent(in)    :: cnmat(0:12,0:12),bnmat(0:12,0:12)
-  real(8),intent(in)    :: hgs(3)
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   integer,parameter :: nd=4
-  integer :: j,ind
+  integer :: j
   integer :: ii,jj,ik
   integer :: ix,iy,iz
   complex(8),allocatable :: amat(:,:)
@@ -79,9 +77,6 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,i
   type(s_wavefunction)  :: stpsi
   type(s_wavefunction)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
-  complex(8) :: ekr(ppg%nps,natom)
-  real(8) :: x,y,z
-  integer :: a,iatom,ilma
   complex(8),parameter :: zi=(0.d0,1.d0)
   
   call timer_begin(LOG_DIAG_TOTAL)
@@ -232,7 +227,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,i
             end do
             end do
             end do
-            amat(i_allob-iobsta(is)+1,jj-iobsta(is)+1)=cbox*hvol
+            amat(i_allob-iobsta(is)+1,jj-iobsta(is)+1)=cbox*system%hvol
           end if
         end do
       end do
@@ -317,7 +312,7 @@ subroutine subspace_diag_periodic(mg,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,i
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
             spsi%zwf(ix,iy,iz,is,ii-(is-1)*info%numo,ik,1)=   &
-              spsi%zwf(ix,iy,iz,is,ii-(is-1)*info%numo,ik,1)/sqrt(rbox1*hvol)
+              spsi%zwf(ix,iy,iz,is,ii-(is-1)*info%numo,ik,1)/sqrt(rbox1*system%hvol)
           end do
           end do
           end do
