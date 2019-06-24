@@ -522,9 +522,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     !it does not support interaction with field for isolated system
        !(currently does not work)
        if(mod(itt,2)==0.or.propagator=='etrs')then
-          call calc_force_c(zpsi_in)
+          call calc_force_c(mg,srg,zpsi_in)
        else
-          call calc_force_c(zpsi_out)
+          call calc_force_c(mg,srg,zpsi_out)
        end if
        force%F(:,:) = rforce(:,:)  !rforce must be removed in future
     else if(iperiodic==3)then
