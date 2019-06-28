@@ -648,8 +648,8 @@ if(iscfrt==1)then
   lg%ie_array(1:3)=lg_end(1:3)+nd
 else if(iscfrt==2)then
   lg%is_array(1:3)=lg_sta(1:3)-nd
-  lg%ie_array(1)=lg_end(1)+nd+1
-  lg%ie_array(2:3)=lg_end(2:3)+nd
+  lg%ie_array(1:3)=lg_end(1:3)+nd
+  lg%ie_array(1)=lg%ie_array(1)+1 ! padding
 end if
 
 if(allocated(lg%idx)) deallocate(lg%idx)
@@ -747,7 +747,7 @@ end if
 lg%ndir = 3
 mg%ndir = 3
 ng%ndir = 3
-system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
+system%ngrid = lg%num(1)*lg%num(2)*lg%num(3)
 
 call init_lattice(system,stencil,lg)
 Hvol = system%Hvol
@@ -811,16 +811,16 @@ if(iperiodic==3)then
   call init_k_rd(k_rd0,ksquare0,3,system%brl)
 end if
 
-allocate( matbox(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )
-allocate( cmatbox(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )
-allocate( matbox3(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+allocate( matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
+allocate( cmatbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
+allocate( matbox3(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
 
 if(iSCFRT==1)then
   select case(iperiodic)
   case(0)
     if(iobnum.ge.1)then
-      allocate( psi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),   &
-                    mg_sta(3):mg_end(3), &
+      allocate( psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),   &
+                    mg%is(3):mg%ie(3), &
 &                   1:iobnum,k_sta:k_end) )
     end if
     if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
@@ -830,9 +830,9 @@ if(iSCFRT==1)then
                        1:itotMST,num_kpoints_rd) )
     end if
   case(3)
-    allocate( ttpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+    allocate( ttpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     if(iobnum.ge.1)then
-      allocate( zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3), &
+      allocate( zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
       &                    1:iobnum,k_sta:k_end) )
     end if
     if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
@@ -844,29 +844,29 @@ if(iSCFRT==1)then
   end select
 else if(iSCFRT==2)then
   if(iobnum.ge.1)then
-    allocate( zpsi_in(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-&                  1:iobnum,k_sta:k_end) )
-    allocate( zpsi_out(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-&                  1:iobnum,k_sta:k_end) )
-    zpsi_in(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-&                    1:iobnum,k_sta:k_end) = 0.d0
-    zpsi_out(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-&                    1:iobnum,k_sta:k_end) = 0.d0
+    allocate(zpsi_in(mg%is_overlap(1):mg%ie_overlap(1), &
+                   & mg%is_overlap(2):mg%ie_overlap(2), &
+                   & mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end))
+    allocate(zpsi_out(mg%is_overlap(1):mg%ie_overlap(1), &
+                    & mg%is_overlap(2):mg%ie_overlap(2), &
+                    & mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end))
+    zpsi_in(:,:,:,:,:)  = 0.d0
+    zpsi_out(:,:,:,:,:) = 0.d0
   end if
   if(iwrite_projection==1)then
     call calc_iobnum(itotMST0,nproc_ob,nproc_id_kgrid,iobnum0,nproc_ob,iparaway_ob)
     if(iobnum0.ge.1)then
-      allocate( zpsi_t0(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-&                  1:iobnum0,k_sta:k_end) )
-      zpsi_t0(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-&                  1:iobnum0,k_sta:k_end) = 0.d0
+      allocate(zpsi_t0(mg%is_overlap(1):mg%ie_overlap(1), &
+                     & mg%is_overlap(2):mg%ie_overlap(2), &
+                     & mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end))
+      zpsi_t0(:,:,:,:,:) = 0.d0
     end if
   end if
 end if
 
-allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-allocate( rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-allocate( rho_diff(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+allocate( rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+allocate( rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+allocate( rho_diff(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 if(iSCFRT==1)then
   allocate( rho_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1))
   allocate( rho_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1))
@@ -877,7 +877,7 @@ end if
 if(ilsda == 0) then
   continue
 else if(ilsda == 1) then
-  allocate( rho_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
+  allocate( rho_s(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2))
   allocate( rho_s_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2))
   allocate( rho_s_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2))
   rho_s_in=0.d0
@@ -894,18 +894,18 @@ else if(iSCFRT==2)then
   allocate( esp2(itotMST,num_kpoints_rd))
   esp2=0.d0
 end if
-allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+allocate( Vh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
 if(ilsda == 0) then
-  allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+  allocate( Vxc(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
 else if(ilsda == 1) then
-  allocate( Vxc_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
+  allocate( Vxc_s(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2) )
 end if
 if(ilsda==0)then
-  allocate( Vlocal(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1) )
-  allocate( Vlocal2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1) )
+  allocate( Vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1) )
+  allocate( Vlocal2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1) )
 else
-  allocate( Vlocal(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
-  allocate( Vlocal2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
+  allocate( Vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2) )
+  allocate( Vlocal2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2) )
 end if
 if(iscfrt==2.and.propagator=='etrs')then
   if(ilsda==0)then
@@ -913,12 +913,12 @@ if(iscfrt==2.and.propagator=='etrs')then
   else if(ilsda==1)then
     nspin=2
   end if
-  allocate( vloc_t(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),nspin) )
-  allocate( vloc_new(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),nspin) )
-  allocate( vloc_old(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),nspin,2) )
+  allocate( vloc_t(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin) )
+  allocate( vloc_new(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin) )
+  allocate( vloc_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin,2) )
 end if
-allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-if(icalcforce==1) allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
+allocate( Vpsl(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
+if(icalcforce==1) allocate( Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),MI) )
 
 if(comm_is_root(nproc_id_global))then
   if(version_num_box(1)>=32)then
@@ -935,7 +935,7 @@ if(version_num_box(1)>=32)then
   end if
 end if 
 
-allocate( cmatbox2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )
+allocate( cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
 
 if(num_datafiles_IN==1)then
   ifilenum_data=96
@@ -965,12 +965,12 @@ if(IC<=2)then
       do j1=0,nproc_xyz_datafile(1)-1
         ibox = j1 + nproc_xyz_datafile(1)*j2 + nproc_xyz_datafile(1)*nproc_xyz_datafile(2)*j3 
         if(ibox==myrank_datafiles)then
-          ista_Mxin_datafile(1)=j1*lg_num(1)/nproc_xyz_datafile(1)+lg_sta(1)
-          iend_Mxin_datafile(1)=(j1+1)*lg_num(1)/nproc_xyz_datafile(1)+lg_sta(1)-1
-          ista_Mxin_datafile(2)=j2*lg_num(2)/nproc_xyz_datafile(2)+lg_sta(2)
-          iend_Mxin_datafile(2)=(j2+1)*lg_num(2)/nproc_xyz_datafile(2)+lg_sta(2)-1
-          ista_Mxin_datafile(3)=j3*lg_num(3)/nproc_xyz_datafile(3)+lg_sta(3)
-          iend_Mxin_datafile(3)=(j3+1)*lg_num(3)/nproc_xyz_datafile(3)+lg_sta(3)-1
+          ista_Mxin_datafile(1)=j1*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)
+          iend_Mxin_datafile(1)=(j1+1)*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)-1
+          ista_Mxin_datafile(2)=j2*lg%num(2)/nproc_xyz_datafile(2)+lg%is(2)
+          iend_Mxin_datafile(2)=(j2+1)*lg%num(2)/nproc_xyz_datafile(2)+lg%is(2)-1
+          ista_Mxin_datafile(3)=j3*lg%num(3)/nproc_xyz_datafile(3)+lg%is(3)
+          iend_Mxin_datafile(3)=(j3+1)*lg%num(3)/nproc_xyz_datafile(3)+lg%is(3)-1
         end if
       end do
       end do
@@ -1001,19 +1001,19 @@ else if(ilsda == 1)then
   pend(2)=itotMST0
 end if
 
-allocate( matbox2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )
+allocate( matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
 
-ig_sta(:)=lg_sta(:)
-ig_end(:)=lg_end(:)
-ig_num(:)=lg_num(:)
+ig_sta(:)=lg%is(:)
+ig_end(:)=lg%ie(:)
+ig_num(:)=lg%num(:)
 
 allocate( matbox_read(ig_sta(1):ig_end(1),ig_sta(2):ig_end(2),ig_sta(3):ig_end(3)) )
 allocate( matbox_read2(ig_sta(1):ig_end(1),ig_sta(2):ig_end(2),ig_sta(3):ig_end(3)) )
 allocate( cmatbox_read(ig_sta(1):ig_end(1),ig_sta(2):ig_end(2),ig_sta(3):ig_end(3)) )
 allocate( cmatbox_read2(ig_sta(1):ig_end(1),ig_sta(2):ig_end(2),ig_sta(3):ig_end(3)) )
 
-allocate( matbox_read3(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-allocate( cmatbox_read3(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+allocate( matbox_read3(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
+allocate( cmatbox_read3(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
 
 !$OMP parallel do private(iz,iy,ix) 
 do iz=ig_sta(3),ig_end(3)
@@ -1090,56 +1090,56 @@ do p0=pstart(is),pend(is)
     if(iSCFRT==1)then
       select case(iperiodic)
       case(0)
-        psi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-            mg_sta(3):mg_end(3),iob_myob,ik)=  &
-        matbox_read(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),   &
-               mg_sta(3):mg_end(3))
+        psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+            mg%is(3):mg%ie(3),iob_myob,ik)=  &
+        matbox_read(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),   &
+               mg%is(3):mg%ie(3))
       case(3)
-        zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-             mg_sta(3):mg_end(3),iob_myob,ik)=  &
-        cmatbox_read(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),   &
-                mg_sta(3):mg_end(3))
+        zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+             mg%is(3):mg%ie(3),iob_myob,ik)=  &
+        cmatbox_read(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),   &
+                mg%is(3):mg%ie(3))
       end select
     else if(iSCFRT==2)then
       select case(iperiodic)
       case(0)
         if(iwrite_projection==1)then
-          zpsi_t0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                  mg_sta(3):mg_end(3),iob_myob,ik)=  &
-          matbox_read(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),   &
-                  mg_sta(3):mg_end(3))
+          zpsi_t0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+                  mg%is(3):mg%ie(3),iob_myob,ik)=  &
+          matbox_read(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),   &
+                  mg%is(3):mg%ie(3))
         else
           if((ilsda==0.and.p0<=MST(1)).or.  &
              (ilsda==1.and.(p0<=MST0(1).and.p0<=MST(1)).or.(p0>MST0(1).and.p0<=MST0(1)+MST(2))))then
-            zpsi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                    mg_sta(3):mg_end(3),iob_myob,ik)=  &
-            matbox_read(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),   &
-                        mg_sta(3):mg_end(3))
+            zpsi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+                    mg%is(3):mg%ie(3),iob_myob,ik)=  &
+            matbox_read(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),   &
+                        mg%is(3):mg%ie(3))
           end if
         end if
       case(3)
         if(iwrite_projection==1)then
-          zpsi_t0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                  mg_sta(3):mg_end(3),iob_myob,ik)=  &
-             cmatbox_read(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),   &
-                          mg_sta(3):mg_end(3))
+          zpsi_t0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+                  mg%is(3):mg%ie(3),iob_myob,ik)=  &
+             cmatbox_read(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),   &
+                          mg%is(3):mg%ie(3))
         else
           if((ilsda==0.and.p0<=MST(1)).or.  &
              (ilsda==1.and.(p0<=MST0(1).and.p0<=MST(1)).or.(p0>MST0(1).and.p0<=MST0(1)+MST(2))))then
-            zpsi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                    mg_sta(3):mg_end(3),iob_myob,ik)=  &
-              cmatbox_read(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),   &
-                           mg_sta(3):mg_end(3))
+            zpsi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+                    mg%is(3):mg%ie(3),iob_myob,ik)=  &
+              cmatbox_read(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),   &
+                           mg%is(3):mg%ie(3))
           end if
         end if
       end select
       if(iwrite_projection==1)then
         if((ilsda==0.and.p0<=MST(1)).or.  &
            (ilsda==1.and.(p0<=MST0(1).and.p0<=MST(1)).or.(p0>MST0(1).and.p0<=MST0(1)+MST(2))))then
-          zpsi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                  mg_sta(3):mg_end(3),iob_myob,ik)=  &
-          zpsi_t0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                  mg_sta(3):mg_end(3),iob_myob,ik)
+          zpsi_in(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+                  mg%is(3):mg%ie(3),iob_myob,ik)=  &
+          zpsi_t0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+                  mg%is(3):mg%ie(3),iob_myob,ik)
         end if
       end if
     end if
@@ -1189,9 +1189,9 @@ if(IC<=2)then
           read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
           rho_s(ix,iy,iz,is)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1262,9 +1262,9 @@ if(IC<=2)then
           read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
           rho_s(ix,iy,iz,is)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1370,9 +1370,9 @@ if(IC<=2)then
         read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
       end if
       call comm_bcast(matbox_read,nproc_group_global)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         Vxc_s(ix,iy,iz,is)=matbox_read(ix,iy,iz)
       end do
       end do
@@ -1406,12 +1406,12 @@ if(version_num_box(1)<=31)then
 end if
 
 if(iSCFRT==2)then
-  allocate(Vh_stock1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-  allocate(Vh_stock2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  allocate(Vh_stock1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(Vh_stock2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 !$OMP parallel do private(iz,iy,ix) 
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     Vh_stock1(ix,iy,iz) = Vh(ix,iy,iz)
     Vh_stock2(ix,iy,iz) = Vh(ix,iy,iz)
   end do
@@ -1429,9 +1429,9 @@ if(iscfrt==2.and.propagator=='etrs')then
   end if
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
   do is=1,nspin
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     vloc_t(ix,iy,iz,is)=vlocal(ix,iy,iz,is)
     vloc_new(ix,iy,iz,is)=vlocal(ix,iy,iz,is)
     vloc_old(ix,iy,iz,is,1)=vlocal(ix,iy,iz,is)
