@@ -24,8 +24,9 @@ use new_world_sub
 implicit none
 type(s_rgrid),intent(in) :: mg
 type(s_sendrecv_grid),intent(inout) :: srg
-complex(8) :: tzpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
-                    mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
+complex(8) :: tzpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&                  ,mg%is_overlap(2):mg%ie_overlap(2) &
+&                  ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
 integer :: ix,iy,iz,iob,ikoa,jj,j2,iatom,ia,ib,lm,ikoa2,iik
 real(8) :: rbox1,rbox2
 complex(8) :: cbox1
@@ -69,9 +70,9 @@ do j2=1,3
   rbox1=0.d0
   do iik=k_sta,k_end
   do iob=1,iobnum
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rbox1=rbox1-2.d0*rocc(iob,iik)*dble(conjg(cgrad_wk(ix,iy,iz,iob,iik,j2))*Vpsl_atom(ix,iy,iz,iatom)*tzpsi(ix,iy,iz,iob,iik))
     end do
     end do

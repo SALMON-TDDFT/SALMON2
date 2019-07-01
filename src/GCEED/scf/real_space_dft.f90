@@ -403,8 +403,10 @@ if(iopt==1)then
     end select
 
     if(iperiodic==3)then
-      allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-                 1:iobnum,k_sta:k_end))
+      allocate (zpsi_tmp(mg%is_overlap(1):mg%ie_overlap(1) &
+      &                 ,mg%is_overlap(2):mg%ie_overlap(2) &
+      &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
+      &                 ,1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
       call init_k_rd(k_rd,ksquare,1,system%brl)
     end if
@@ -813,8 +815,10 @@ if(iopt==1)then
     end select
 
     if(iperiodic==3)then
-      allocate (zpsi_tmp(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-                 1:iobnum,k_sta:k_end))
+      allocate (zpsi_tmp(mg%is_overlap(1):mg%ie_overlap(1) &
+      &                 ,mg%is_overlap(2):mg%ie_overlap(2) &
+      &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
+      &                 ,1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
       call init_k_rd(k_rd,ksquare,1)
     end if

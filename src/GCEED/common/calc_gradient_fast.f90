@@ -13,13 +13,16 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_gradient_fast(tpsi,grad_wk)
+subroutine calc_gradient_fast(mg,tpsi,grad_wk)
 use scf_data
 use sendrecv_groupob_sub
+use structures, only: s_rgrid
 implicit none
-real(8) :: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
-                mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
-real(8) :: grad_wk(mg_sta(1):mg_end(1)+1,mg_sta(2):mg_end(2),mg_sta(3):mg_end(3), &
+type(s_rgrid),intent(in) :: mg
+real(8) :: tpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&              ,mg%is_overlap(2):mg%ie_overlap(2) &
+&              ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
+real(8) :: grad_wk(mg%is(1):mg%ie(1)+1,mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
                    1:iobnum,k_sta:k_end,3)
 integer :: ix,iy,iz,iob,iik
 
@@ -30,10 +33,10 @@ if(Nd==4)then
   do iik=k_sta,k_end
   do iob=1,iobnum
 !$OMP parallel private(iz)
-    do iz=mg_sta(3),mg_end(3)
+    do iz=mg%is(3),mg%ie(3)
 !$OMP do private(iy, ix) 
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       grad_wk(ix,iy,iz,iob,iik,1) =  &
         +bN1/Hgs(1)*( tpsi(ix+1,iy,iz,iob,iik) - tpsi(ix-1,iy,iz,iob,iik) )    &
         +bN2/Hgs(1)*( tpsi(ix+2,iy,iz,iob,iik) - tpsi(ix-2,iy,iz,iob,iik) )    &
@@ -48,8 +51,8 @@ if(Nd==4)then
     end do
 !$OMP end do nowait
 !$OMP do private(iy, ix) 
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       grad_wk(ix,iy,iz,iob,iik,3) =  &
         +bN1/Hgs(3)*( tpsi(ix,iy,iz+1,iob,iik) - tpsi(ix,iy,iz-1,iob,iik) )    &
         +bN2/Hgs(3)*( tpsi(ix,iy,iz+2,iob,iik) - tpsi(ix,iy,iz-2,iob,iik) )    &

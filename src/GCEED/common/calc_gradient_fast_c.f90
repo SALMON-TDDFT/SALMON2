@@ -20,9 +20,10 @@ use sendrecv_grid, only: update_overlap_complex8
 implicit none
 type(s_rgrid),intent(in) :: mg
 type(s_sendrecv_grid),intent(inout) :: srg
-complex(8) :: tzpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
-                    mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
-complex(8) :: cgrad_wk(mg_sta(1):mg_end(1)+1,mg_sta(2):mg_end(2),mg_sta(3):mg_end(3), &
+complex(8) :: tzpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&                  ,mg%is_overlap(2):mg%ie_overlap(2) &
+&                  ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
+complex(8) :: cgrad_wk(mg%is(1):mg%ie(1)+1,mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
                        1:iobnum,k_sta:k_end,3)
 integer :: ix,iy,iz,iob,iik
 
@@ -32,10 +33,10 @@ if(Nd==4)then
   do iik=k_sta,k_end
   do iob=1,iobnum
 !$OMP parallel private(iz)
-    do iz=mg_sta(3),mg_end(3)
+    do iz=mg%is(3),mg%ie(3)
 !$OMP do private(iy,ix) 
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       cgrad_wk(ix,iy,iz,iob,iik,1) =  &
         +bN1/Hgs(1)*( tzpsi(ix+1,iy,iz,iob,iik) - tzpsi(ix-1,iy,iz,iob,iik) )    &
         +bN2/Hgs(1)*( tzpsi(ix+2,iy,iz,iob,iik) - tzpsi(ix-2,iy,iz,iob,iik) )    &
@@ -50,8 +51,8 @@ if(Nd==4)then
     end do
 !$OMP end do nowait
 !$OMP do private(iy,ix) 
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       cgrad_wk(ix,iy,iz,iob,iik,3) =  &
         +bN1/Hgs(3)*( tzpsi(ix,iy,iz+1,iob,iik) - tzpsi(ix,iy,iz-1,iob,iik) )    &
         +bN2/Hgs(3)*( tzpsi(ix,iy,iz+2,iob,iik) - tzpsi(ix,iy,iz-2,iob,iik) )    &

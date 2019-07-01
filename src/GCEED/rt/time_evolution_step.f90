@@ -340,9 +340,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
     if(mod(itt,2)==0.or.propagator=='etrs')then
-      call projection(zpsi_in)
+      call projection(mg,zpsi_in)
     else
-      call projection(zpsi_out)
+      call projection(mg,zpsi_out)
     end if
   end if
   call timer_end(LOG_CALC_PROJECTION)
