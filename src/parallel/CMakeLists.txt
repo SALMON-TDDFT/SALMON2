@@ -1,6 +1,7 @@
 set(SOURCES
     salmon_parallel.f90
     salmon_communication.f90
+    code_optimization.f90
 )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

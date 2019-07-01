@@ -71,6 +71,9 @@ end subroutine stencil_R
 
 subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
                     ,tpsi,htpsi,V_local,lap0,lapt,nabt)
+#ifdef SALMON_EXPLICIT_VECTORIZATION
+  use code_optimization, only: modx,mody,modz,stencil_is_parallelized_by_omp
+#endif
   implicit none
   integer,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                         ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -78,13 +81,23 @@ subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
   real(8)   ,intent(in)  :: V_local(is(1):ie(1),is(2):ie(2),is(3):ie(3)),lap0,lapt(4,3),nabt(4,3)
   complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
 
-  if (.true.) then ! (stencil_is_parallelized_by_omp)
-    call stencil_C_omp(is_array,ie_array,is,ie,idx,idy,idz &
-                      ,tpsi,htpsi,V_local,lap0,lapt,nabt)
+#ifdef SALMON_EXPLICIT_VECTORIZATION
+#define idx modx
+#define idy mody
+#define idz modz
+#endif
+
+  if (stencil_is_parallelized_by_omp) then
+    call stencil_C_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,lap0,lapt,nabt)
   else
-    call stencil_C_seq(is_array,ie_array,is,ie,idx,idy,idz &
-                      ,tpsi,htpsi,V_local,lap0,lapt,nabt)
+    call stencil_C_seq(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,lap0,lapt,nabt)
   end if
+
+#ifdef SALMON_EXPLICIT_VECTORIZATION
+#undef idx modx
+#undef idy mody
+#undef idz modz
+#endif
 
   return
 end subroutine stencil_C

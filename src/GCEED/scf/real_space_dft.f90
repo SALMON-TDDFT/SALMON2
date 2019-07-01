@@ -69,6 +69,7 @@ use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
 use print_sub
 use read_gs
+use code_optimization
 implicit none
 integer :: ix,iy,iz,ik,ikoa, is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -202,6 +203,7 @@ if(iopt==1)then
     call set_icoo1d
     call allocate_sendrecv
     call init_persistent_requests
+    call init_code_optimization
 
     ! Initialization of s_sendrecv_grid structure (experimental implementation)
     neig(1, 1) = iup_array(1)
@@ -615,6 +617,7 @@ if(iopt==1)then
     call set_icoo1d
     call allocate_sendrecv
     call init_persistent_requests
+    call init_code_optimization
 
     ! Initialization of s_sendrecv_grid structure (experimental implementation)
     neig(1, 1) = iup_array(1)
@@ -1724,6 +1727,16 @@ subroutine get_fourier_grid_G(fg)
   end if
 
 end subroutine get_fourier_grid_G
+
+subroutine init_code_optimization
+  implicit none
+  call switch_openmp_parallelization(mg%num)
+  call set_modulo_tables(mg%num + (nd*2))
+
+  if (comm_is_root(nproc_id_global)) then
+    print *, 'hpsi stencil enables openmp parallelization:', stencil_is_parallelized_by_omp
+  end if
+end subroutine
 
 END subroutine Real_Space_DFT
 

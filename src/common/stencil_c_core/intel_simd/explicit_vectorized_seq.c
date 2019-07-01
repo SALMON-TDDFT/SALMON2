@@ -20,8 +20,6 @@
 #include <assert.h>
 #include "./glue.h"
 
-#include <stdio.h>
-
 void stencil_c_seq_imp( const int PNLx
                       , const int PNLy
                       , const int PNLz
@@ -186,9 +184,9 @@ void stencil_c_seq_( int            const            is_array[restrict 3]
                    , int            const            ie_array[restrict 3]
                    , int            const            is[restrict 3]
                    , int            const            ie[restrict 3]
-                   , int            const * restrict idx
-                   , int            const * restrict idy
-                   , int            const * restrict idz
+                   , int            const * restrict modx
+                   , int            const * restrict mody
+                   , int            const * restrict modz
                    , double complex const * restrict E
                    , double complex       * restrict F
                    , double         const * restrict B
@@ -211,18 +209,7 @@ void stencil_c_seq_( int            const            is_array[restrict 3]
   const int NHz  = INT_ABS(is_array[2] - is[2]);
 #undef INT_ABS
 
-  int modx[(NLx+NHx*2)*4], mody[(NLy+NHy*2)*4], modz[(NLz+NHz*2)*4];
-
-  for (int ix = 0; ix < (NLx + NHx*2)*4; ++ix)
-    modx[ix] = ix % (NLx + NHx*2);
-  for (int iy = 0; iy < (NLy + NHy*2)*4; ++iy)
-    mody[iy] = iy % (NLy + NHy*2);
-  for (int iz = 0; iz < (NLz + NHz*2)*4; ++iz)
-    modz[iz] = iz % (NLz + NHz*2);
-
   assert(NLx % 4 == 0);
-  assert(NLy % 4 == 0);
-  assert(NLz % 4 == 0);
   assert(NHx == 4);
   assert(NHy == 4);
   assert(NHz == 4);

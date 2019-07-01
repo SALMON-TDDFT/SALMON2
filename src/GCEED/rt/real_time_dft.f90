@@ -46,6 +46,7 @@ use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
 use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
+use code_optimization
 implicit none
 
 type(s_rgrid) :: lg
@@ -230,6 +231,16 @@ call init_sendrecv_matrix
 
 call allocate_sendrecv
 call init_persistent_requests
+
+! for code optimization
+! ===
+call switch_openmp_parallelization(mg%num)
+call set_modulo_tables(mg%num + (nd*2))
+
+if (comm_is_root(nproc_id_global)) then
+  print *, 'hpsi stencil enables openmp parallelization:', stencil_is_parallelized_by_omp
+end if
+! ===
 
 if(ilsda==0)then
   numspin=1

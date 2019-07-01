@@ -77,6 +77,10 @@ if (OPT_STENCIL)
   add_definitions_if(SW_PREFETCH     -DARTED_ENABLE_SOFTWARE_PREFETCH)
   add_definitions_if(ARRAY_PADDING   -DARTED_STENCIL_PADDING)
   add_definitions_if(LOOP_BLOCKING   -DARTED_STENCIL_ENABLE_LOOP_BLOCKING)
+
+  if (EXPLICIT_VEC)
+    add_definitions(-DSALMON_EXPLICIT_VECTORIZATION) # TODO: replace ARTED_EXPLICIT_VECTORIZATION
+  endif ()
 else ()
   add_definitions(-DARTED_STENCIL_ORIGIN)
 endif ()
