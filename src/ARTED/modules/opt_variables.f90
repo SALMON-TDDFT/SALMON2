@@ -189,16 +189,6 @@ contains
     call set_modulo_tables(num)
   end subroutine
 
-  subroutine optimization_log
-    use code_optimization, only: optimized_stencil_is_callable, &
-    &                            stencil_is_parallelized_by_omp
-    implicit none
-    print *, 'code optimization log ============================'
-    print *, 'hpsi stencil:'
-    print *, '  enables hand-coding vectorization :', optimized_stencil_is_callable
-    print *, '  enables openmp parallelization    :', stencil_is_parallelized_by_omp
-  end subroutine
-
   subroutine init_for_padding
     use global_variables
     implicit none

@@ -1735,10 +1735,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    print *, 'code optimization log ============================'
-    print *, 'hpsi stencil:'
-    print *, '  enables hand-coding vectorization :', optimized_stencil_is_callable
-    print *, '  enables openmp parallelization    :', stencil_is_parallelized_by_omp
+    call optimization_log
   end if
 end subroutine
 

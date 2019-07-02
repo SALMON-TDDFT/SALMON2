@@ -37,6 +37,7 @@ contains
     use inputfile,only: transfer_input
     use restart,only: prep_restart_read
     use io_gs_wfn_k,only: modify_initial_guess_copy_1stk_to_all
+    use code_optimization, only: optimization_log
     implicit none
 !$ integer :: omp_get_max_threads  
 
