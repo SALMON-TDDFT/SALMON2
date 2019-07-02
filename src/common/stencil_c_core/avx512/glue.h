@@ -16,8 +16,6 @@
 #ifndef SALMON_STENCIL_GLUE
 #define SALMON_STENCIL_GLUE
 
-/* Stencil computation code with C supports Intel compiler only. */
-
 /* currently Xeon CPUs and Xeon Phi are 64B cacheline. */
 #ifndef CACHELINE_SIZE
 # define CACHELINE_SIZE 64

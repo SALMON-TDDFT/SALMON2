@@ -35,11 +35,13 @@ set(SOURCES
    stencil_c_core/typical/seq.f90
    )
 
-set(SOURCES
-    ${SOURCES}
-    stencil_c_core/intel_simd/explicit_vectorized_omp.c
-    stencil_c_core/intel_simd/explicit_vectorized_seq.c
-    )
+if (EXPLICIT_VEC)
+  set(SOURCES
+      ${SOURCES}
+      stencil_c_core/${SIMD_SET}/explicit_vectorized_omp.c
+      stencil_c_core/${SIMD_SET}/explicit_vectorized_seq.c
+      )
+endif ()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
 list(APPEND SALMON_SOURCES ${SOURCES})
