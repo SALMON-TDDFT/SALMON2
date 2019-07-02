@@ -210,9 +210,9 @@ void stencil_c_seq_( int            const            is_array[restrict 3]
 #undef INT_ABS
 
   assert(NLx % 4 == 0);
-  assert(NHx == 4);
-  assert(NHy == 4);
-  assert(NHz == 4);
+  assert(NHx == 4 || NHx == 0);
+  assert(NHy == 4 || NHy == 0);
+  assert(NHz == 4 || NHz == 0);
 
   stencil_c_seq_imp(PNLx, PNLy, PNLz, NLx, NLy, NLz, NHx, NHy, NHz, modx, mody, modz
                    , A_

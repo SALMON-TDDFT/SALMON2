@@ -104,9 +104,13 @@ contains
 
   subroutine opt_vars_initialize_p2
     use global_variables
+    use code_optimization, only: switch_stencil_optimization, &
+    &                            switch_openmp_parallelization, &
+    &                            set_modulo_tables
     implicit none
 
     integer :: ix,iy,iz
+    integer :: num(3)
 
     PNLx = NLx
 #ifdef ARTED_STENCIL_PADDING
@@ -176,6 +180,23 @@ contains
 #ifdef ARTED_STENCIL_ENABLE_LOOP_BLOCKING
     call auto_blocking
 #endif
+
+    num(1) = NLz
+    num(2) = NLy
+    num(3) = NLx
+    call switch_stencil_optimization(num)
+    call switch_openmp_parallelization(num)
+    call set_modulo_tables(num)
+  end subroutine
+
+  subroutine optimization_log
+    use code_optimization, only: optimized_stencil_is_callable, &
+    &                            stencil_is_parallelized_by_omp
+    implicit none
+    print *, 'code optimization log ============================'
+    print *, 'hpsi stencil:'
+    print *, '  enables hand-coding vectorization :', optimized_stencil_is_callable
+    print *, '  enables openmp parallelization    :', stencil_is_parallelized_by_omp
   end subroutine
 
   subroutine init_for_padding

@@ -105,6 +105,8 @@ contains
 #endif
     use salmon_parallel, only: get_thread_id
     use salmon_global, only: alocal_laser
+    use stencil_sub, only: stencil_C
+    use code_optimization, only: modx,mody,modz
     use Ac_alocal_laser
     implicit none
     integer,intent(in)              :: ik
@@ -112,8 +114,10 @@ contains
     complex(8),intent(out)          :: htpsi(0:PNLz-1,0:PNLy-1,0:PNLx-1)
     complex(8),intent(out),optional :: ttpsi(0:PNLz-1,0:PNLy-1,0:PNLx-1)
     real(8) :: k2,k2lap0_2
-    real(8) :: nabt(12)
+    real(8) :: nabt(12),lapt2(12),nabt2(12)
     integer :: tid
+    integer :: is_array(3),ie_array(3)
+    integer :: is(3),ie(3)
 
     NVTX_BEG('hpsi1()',3)
 
@@ -123,8 +127,30 @@ contains
     nabt( 5: 8)=kAc(ik,2)*naby(1:4)
     nabt( 9:12)=kAc(ik,3)*nabz(1:4)
 
+
     LOG_BEG(LOG_HPSI_STENCIL)
-      call hpsi1_RT_stencil(k2lap0_2,Vloc,lapt,nabt,tpsi,htpsi)
+      ! wrapped call unified stencil routine
+      ! ===
+      is_array(:) = 0
+      ie_array(1) = PNLz - 1 ! swap X and Z
+      ie_array(2) = PNLy - 1
+      ie_array(3) = PNLx - 1
+      is(:) = 0
+      ie(1) = NLz - 1 ! swap X and Z
+      ie(2) = NLy - 1
+      ie(3) = NLx - 1
+
+      lapt2( 1: 4)=lapt( 9:12) ! swap X and Z
+      lapt2( 5: 8)=lapt( 5: 8)
+      lapt2( 9:12)=lapt( 1: 4)
+      nabt2( 1: 4)=nabt( 9:12) ! swap X and Z
+      nabt2( 5: 8)=nabt( 5: 8)
+      nabt2( 9:12)=nabt( 1: 4)
+
+      call stencil_C(is_array,ie_array,is,ie &
+      &             ,modx(NLz-4:NLz*2+4),mody(NLy-4:NLy*2+4),modz(NLx-4:NLx*2+4) &
+      &             ,tpsi,htpsi,Vloc,k2lap0_2,lapt2,nabt2)
+      ! ===
       if(alocal_laser=='y' .and. flag_set_ini_Ac_alocal)then
          call hpsi1_RT_stencil_add_Ac_alocal(Ac2_al(:,ik),Ac1x_al,Ac1y_al,Ac1z_al,nabt_al,tpsi,htpsi)
       endif

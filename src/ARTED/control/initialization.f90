@@ -98,6 +98,9 @@ contains
 
 ! initialize for optimization.
     call opt_vars_initialize_p2
+    if (comm_is_root(nproc_id_global)) then
+      call optimization_log
+    end if
 
     if(use_ehrenfest_md=='y' .or. use_adiabatic_md=='y') then
        call init_md
