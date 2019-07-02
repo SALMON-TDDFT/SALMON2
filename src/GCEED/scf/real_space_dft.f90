@@ -967,6 +967,9 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
+    ! FIX: Attempt to fetch from allocatable variable K_RD when it is not allocated
+    if (.not. allocated(k_rd)) allocate(k_rd(3,num_kpoints_rd))
+
     call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
                        num_kpoints_rd,k_rd,   &
                        rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
