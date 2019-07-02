@@ -23,7 +23,7 @@
 # define CACHELINE_SIZE 64
 #endif
 
-#ifdef ARTED_ENABLE_SOFTWARE_PREFETCH
+#ifdef SALMON_ENABLE_SOFTWARE_PREFETCH
 # define PREFETCH_L1(p, distance)  _mm_prefetch(((char const*)p) + distance, _MM_HINT_T0)
 # define BUSY_PREFETCH_L1(p)       PREFETCH_L1(p, CACHELINE_SIZE)
 #else
@@ -39,7 +39,7 @@
 # define VECTOR_SIZE 2
 #endif
 
-#ifdef ARTED_DOMAIN_POWER_OF_TWO
+#ifdef SALMON_DOMAIN_POWER_OF_TWO
 # ifdef ENABLE_STENCIL_CODE_WITH_PADDING
 #   define IDX(npt) ((ix - ((ix + (npt) + NLx) & (NLx-1))) * PNLy * PNLz)
 #   define IDY(npt) ((iy - ((iy + (npt) + NLy) & (NLy-1))) * PNLz)
@@ -59,7 +59,7 @@
 #   define IDY(npt) ((iy - mody[iy + (npt) + NLy]) * NLz)
 #   define IDZ(npt) ((iz - modz[iz + (npt) + NLz]))
 # endif
-#endif /* ARTED_DOMAIN_POWER_OF_TWO */
+#endif /* SALMON_DOMAIN_POWER_OF_TWO */
 
 #define MIN(n,m) (n < m ? n : m)
 

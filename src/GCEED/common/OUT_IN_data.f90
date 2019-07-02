@@ -649,7 +649,9 @@ if(iscfrt==1)then
 else if(iscfrt==2)then
   lg%is_array(1:3)=lg_sta(1:3)-nd
   lg%ie_array(1:3)=lg_end(1:3)+nd
-  lg%ie_array(2)=lg%ie_array(2)+1 ! padding
+#ifdef SALMON_STENCIL_PADDING
+  lg%ie_array(2)=lg%ie_array(2)+1
+#endif
 end if
 
 if(allocated(lg%idx)) deallocate(lg%idx)

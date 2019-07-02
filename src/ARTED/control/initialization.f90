@@ -41,10 +41,6 @@ contains
     implicit none
 !$ integer :: omp_get_max_threads  
 
-    if(comm_is_root(nproc_id_global)) then
-       call print_optimize_message
-    end if
-
     NUMBER_THREADS=1
 !$  NUMBER_THREADS=omp_get_max_threads()
 !$  if(.true.) then

@@ -18,7 +18,7 @@ subroutine total_energy_stencil_acc(A,C,E,zu_NB,Ekin_l)
   use global_variables, only: NLx,NLy,NLz,zI,Nboccmax,NK_s,NK_e,nabx,naby,nabz, &
                            &  occ,Hxyz,kAc
   use opt_variables, only: zJxyz
-#ifndef ARTED_DOMAIN_POWER_OF_TWO
+#ifndef SALMON_DOMAIN_POWER_OF_TWO
   use opt_variables, only: modx, mody, modz
 #endif
   implicit none
@@ -33,7 +33,7 @@ subroutine total_energy_stencil_acc(A,C,E,zu_NB,Ekin_l)
   complex(8) :: F
   real(8)    :: D(12)
 
-#ifdef ARTED_DOMAIN_POWER_OF_TWO
+#ifdef SALMON_DOMAIN_POWER_OF_TWO
 # define IDX(dt) iz,iy,and(ix+(dt)+NLx,NLx-1),ib,ik
 # define IDY(dt) iz,and(iy+(dt)+NLy,NLy-1),ix,ib,ik
 # define IDZ(dt) and(iz+(dt)+NLz,NLz-1),iy,ix,ib,ik

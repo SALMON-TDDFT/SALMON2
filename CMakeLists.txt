@@ -23,11 +23,9 @@ option_set(CURRENT_PREPROCESSING   "Enable preprocessing of the current computat
 option_set(LARGE_BLOCKING          "Enable large blocking for accelerator"                    OFF)
 
 ## Optimization for stencil compitations
-option_set(OPT_STENCIL             "Enable optimization of the stencil"                                                ON)
 option_set(DOMAIN_IS_POW2          "Enable whether the opimization assumes that a stencil domain size is power of two" OFF)
 option_set(ARRAY_PADDING           "Enable array padding for the stencil"                                              ON)
 option_set(EXPLICIT_VEC            "Enable explicit vectorization for the stencil"                                     OFF)
-option_set(LOOP_BLOCKING           "Enable loop blocking at the stencil"                                               OFF)
 option_set(SW_PREFETCH             "Enable software prefetch in the explicit vec of the stencil"                       OFF)
 
 ## test: joint hpsi subroutine
@@ -65,25 +63,16 @@ include_directories(${CMAKE_BINARY_DIR})
 
 
 add_definitions_if(USE_MPI               -DSALMON_USE_MPI)
+
+add_definitions_if(EXPLICIT_VEC          -DSALMON_EXPLICIT_VECTORIZATION)
+add_definitions_if(SW_PREFETCH           -DSALMON_ENABLE_SOFTWARE_PREFETCH)
+add_definitions_if(DOMAIN_IS_POW2        -DSALMON_DOMAIN_POWER_OF_TWO)
+add_definitions_if(ARRAY_PADDING         -DSALMON_STENCIL_PADDING)
+
 add_definitions_if(CURRENT_PREPROCESSING -DARTED_CURRENT_PREPROCESSING)
 add_definitions_if(REDUCE_FOR_MANYCORE   -DARTED_REDUCE_FOR_MANYCORE)
 add_definitions_if(LARGE_BLOCKING        -DARTED_LBLK)
 
-if (OPT_STENCIL)
-  add_definitions(-DARTED_STENCIL_OPTIMIZED)
-
-  add_definitions_if(DOMAIN_IS_POW2  -DARTED_DOMAIN_POWER_OF_TWO)
-  add_definitions_if(EXPLICIT_VEC    -DARTED_EXPLICIT_VECTORIZATION)
-  add_definitions_if(SW_PREFETCH     -DARTED_ENABLE_SOFTWARE_PREFETCH)
-  add_definitions_if(ARRAY_PADDING   -DARTED_STENCIL_PADDING)
-  add_definitions_if(LOOP_BLOCKING   -DARTED_STENCIL_ENABLE_LOOP_BLOCKING)
-
-  if (EXPLICIT_VEC)
-    add_definitions(-DSALMON_EXPLICIT_VECTORIZATION) # TODO: replace ARTED_EXPLICIT_VECTORIZATION
-  endif ()
-else ()
-  add_definitions(-DARTED_STENCIL_ORIGIN)
-endif ()
 add_definitions("${ADDITIONAL_MACRO}")
 
 

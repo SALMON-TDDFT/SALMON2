@@ -29,7 +29,7 @@ subroutine current_stencil_LBLK(E, ikb_s,ikb_e)
 #undef IDX
 #undef IDY
 #undef IDZ
-#ifdef ARTED_DOMAIN_POWER_OF_TWO
+#ifdef SALMON_DOMAIN_POWER_OF_TWO
 # define IDX(dt) iz,iy,and(ix+(dt)+NLx,NLx-1),ib,ik
 # define IDY(dt) iz,and(iy+(dt)+NLy,NLy-1),ix,ib,ik
 # define IDZ(dt) and(iz+(dt)+NLz,NLz-1),iy,ix,ib,ik
@@ -40,7 +40,7 @@ subroutine current_stencil_LBLK(E, ikb_s,ikb_e)
 #endif
 
 !$acc kernels pcopy(zcx,zcy,zcz) &
-#ifndef ARTED_DOMAIN_POWER_OF_TWO
+#ifndef SALMON_DOMAIN_POWER_OF_TWO
 !$acc pcopyin(modx,mody,modz) &
 #endif
 !$acc pcopyin(E,ib_table,ik_table,nabx,naby,nabz)

@@ -73,7 +73,7 @@ contains
 
     ! wrap opt_variables
     PNLx = NLx
-#ifdef ARTED_STENCIL_PADDING
+#ifdef SALMON_STENCIL_PADDING
     PNLy = NLy + 1
 #else
     PNLy = NLy

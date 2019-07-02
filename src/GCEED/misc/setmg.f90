@@ -88,7 +88,9 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
   else if(iscfrt==2)then
     mg%is_array(1:3)=mg_sta(1:3)-nd
     mg%ie_array(1:3)=mg_end(1:3)+nd
+#ifdef SALMON_STENCIL_PADDING
     mg%ie_array(2)=mg_end(2)+nd+1
+#endif
   end if
 
   if(allocated(mg%idx)) deallocate(mg%idx)

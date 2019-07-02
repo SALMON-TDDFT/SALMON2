@@ -15,7 +15,7 @@
 !
 subroutine hpsi1_RT_stencil_LBLK(A,B,C,D,E,F, ikb_s,ikb_e)
   use global_variables, only: NLx,NLy,NLz,zI
-#ifndef ARTED_DOMAIN_POWER_OF_TWO
+#ifndef SALMON_DOMAIN_POWER_OF_TWO
   use opt_variables, only: modx, mody, modz
 #endif
   use opt_variables, only: PNLx,PNLy,PNLz
@@ -31,7 +31,7 @@ subroutine hpsi1_RT_stencil_LBLK(A,B,C,D,E,F, ikb_s,ikb_e)
   integer    :: ikb, ix,iy,iz
   complex(8) :: v, w
 
-#ifdef ARTED_DOMAIN_POWER_OF_TWO
+#ifdef SALMON_DOMAIN_POWER_OF_TWO
 # define IDX(dt) iz,iy,and(ix+(dt)+NLx,NLx-1),ikb
 # define IDY(dt) iz,and(iy+(dt)+NLy,NLy-1),ix,ikb
 # define IDZ(dt) and(iz+(dt)+NLz,NLz-1),iy,ix,ikb
@@ -42,7 +42,7 @@ subroutine hpsi1_RT_stencil_LBLK(A,B,C,D,E,F, ikb_s,ikb_e)
 #endif
 
 !$acc kernels pcopy(F) &
-#ifndef ARTED_DOMAIN_POWER_OF_TWO
+#ifndef SALMON_DOMAIN_POWER_OF_TWO
 !$acc& pcopyin(modx,mody,modz) &
 #endif
 !$acc& pcopyin(A,B,C,D,E)
