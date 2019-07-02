@@ -30,12 +30,15 @@ contains
 
 !==================================================================================================
 
-subroutine R_sendrecv_groupob_tmp(tpsi)
+subroutine R_sendrecv_groupob_tmp(mg,tpsi)
 use salmon_parallel, only: nproc_group_korbital, is_distributed_parallel
 use salmon_communication, only: comm_proc_null, comm_isend, comm_irecv, comm_wait_all
+use structures, only: s_rgrid
 implicit none
-real(8) :: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
-                mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
+type(s_rgrid),intent(in) :: mg
+real(8) :: tpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&              ,mg%is_overlap(2):mg%ie_overlap(2) &
+&              ,mg%is_overlap(3):mg%ie_overlap(3),1:iobnum,k_sta:k_end)
 integer :: ix,iy,iz,iob,iik
 integer :: iup,idw,jup,jdw,kup,kdw
 integer :: ireq(12)
@@ -274,12 +277,15 @@ end subroutine R_sendrecv_groupob_tmp
 
 !==================================================================================================
 
-subroutine C_sendrecv_groupob_tmp(tpsi)
+subroutine C_sendrecv_groupob_tmp(mg,tpsi)
 use salmon_parallel, only: nproc_group_korbital, is_distributed_parallel
 use salmon_communication, only: comm_proc_null, comm_isend, comm_irecv, comm_wait_all
+use structures, only: s_rgrid
 implicit none
-complex(8) :: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
-                   mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
+type(s_rgrid),intent(in) :: mg
+complex(8) :: tpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&                 ,mg%is_overlap(2):mg%ie_overlap(2) &
+&                 ,mg%is_overlap(3):mg%ie_overlap(3),1:iobnum,k_sta:k_end)
 integer :: ix,iy,iz,iob,iik
 integer :: iup,idw,jup,jdw,kup,kdw
 integer :: icomm

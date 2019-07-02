@@ -46,7 +46,7 @@ curr1(1:3)=0.d0
 
 
 call timer_begin(LOG_CUR_SENDRECV)
-call sendrecv_groupob_tmp(tpsi)
+call sendrecv_groupob_tmp(mg,tpsi)
 call timer_end(LOG_CUR_SENDRECV)
 
 
