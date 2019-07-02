@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine projection(tzpsi)
+subroutine projection(mg,tzpsi)
 use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_allob_sub
@@ -23,9 +23,12 @@ use check_corrkob_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
+use structures, only: s_rgrid
 implicit none
-complex(8) :: tzpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
-                    mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
+type(s_rgrid),intent(in) :: mg
+complex(8) :: tzpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&                  ,mg%is_overlap(2):mg%ie_overlap(2) &
+&                  ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
 integer :: ix,iy,iz,iob,iik
 integer :: iob_myob,icorr_p,job,job_allob
 complex(8) :: coef_mat(itotMST,itotMST0,num_kpoints_rd,1)
@@ -56,9 +59,9 @@ do iob=1,itotMST0
   call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
   if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       cmatbox_m(ix,iy,iz)=zpsi_t0(ix,iy,iz,iob_myob,iik)
     end do
     end do
@@ -69,9 +72,9 @@ do iob=1,itotMST0
   do job=1,iobmax
     cbox=0.d0
 !$OMP parallel do reduction(+:cbox) private(iz,iy,ix)
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       cbox=cbox+conjg(tzpsi(ix,iy,iz,job,iik))*cmatbox_m(ix,iy,iz)
     end do
     end do

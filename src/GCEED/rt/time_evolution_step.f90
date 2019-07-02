@@ -340,9 +340,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
     if(mod(itt,2)==0.or.propagator=='etrs')then
-      call projection(zpsi_in)
+      call projection(mg,zpsi_in)
     else
-      call projection(zpsi_out)
+      call projection(mg,zpsi_out)
     end if
   end if
   call timer_end(LOG_CALC_PROJECTION)
@@ -464,12 +464,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
       enddo
     end if
     if(mod(itt,2)==0.or.propagator=='etrs')then
-      call calc_current(zpsi_in)
+      call calc_current(mg,zpsi_in)
       if(itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
         call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       end if
     else
-      call calc_current(zpsi_out)
+      call calc_current(mg,zpsi_out)
       if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
         call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       end if

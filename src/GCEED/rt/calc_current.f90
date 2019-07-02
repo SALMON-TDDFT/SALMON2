@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_current(tpsi)
+subroutine calc_current(mg,tpsi)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation
 use timer
@@ -21,9 +21,12 @@ use calc_allob_sub
 use scf_data
 use sendrecv_groupob_tmp_sub
 use allocate_psl_sub
+use structures, only: s_rgrid
 implicit none
-complex(8) :: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd,mg_sta(3)-Nd:mg_end(3)+Nd, &
-                   1:iobnum,k_sta:k_end)
+type(s_rgrid),intent(in) :: mg
+complex(8) :: tpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&                 ,mg%is_overlap(2):mg%ie_overlap(2) &
+&                 ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
 integer :: ix,iy,iz,iob,iik
 complex(8),parameter :: zi=(0.d0,1.d0)
 complex(8) :: ekr(maxMps,MI,k_sta:k_end)
@@ -43,7 +46,7 @@ curr1(1:3)=0.d0
 
 
 call timer_begin(LOG_CUR_SENDRECV)
-call sendrecv_groupob_tmp(tpsi)
+call sendrecv_groupob_tmp(mg,tpsi)
 call timer_end(LOG_CUR_SENDRECV)
 
 
@@ -53,9 +56,9 @@ do iob=1,iobnum
   call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
   jxt=0.d0
 !$OMP parallel do private(iz,iy,ix) reduction(+ : jxt)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     jxt=jxt+real(tpsi(ix,iy,iz,iob,iik))**2+aimag(tpsi(ix,iy,iz,iob,iik))**2
   end do
   end do
@@ -67,9 +70,9 @@ do iob=1,iobnum
 
   jxt=0.d0; jyt=0.d0; jzt=0.d0
 !$OMP parallel do private(iz,iy,ix) reduction(+ : jxt,jyt,jzt)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     jxt=jxt+aimag(conjg(tpsi(ix,iy,iz,iob,iik))*   &
                             ( bN1*( tpsi(ix+1,iy,iz,iob,iik) - tpsi(ix-1,iy,iz,iob,iik) )    &
                              +bN2*( tpsi(ix+2,iy,iz,iob,iik) - tpsi(ix-2,iy,iz,iob,iik) )    &

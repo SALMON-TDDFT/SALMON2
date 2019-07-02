@@ -13,21 +13,24 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_force
+subroutine calc_force(mg)
 use salmon_parallel, only: nproc_group_korbital, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
 use allocate_mat_sub
 use read_pslfile_sub
 use new_world_sub
+use structures, only: s_rgrid
 implicit none
+type(s_rgrid),intent(in) :: mg
 integer :: ix,iy,iz,iob,ikoa,jj,j2,iatom,ia,ib,lm,ikoa2
 real(8) :: rbox1,rbox2
 real(8),allocatable :: uVpsibox(:,:,:,:),uVpsibox2(:,:,:,:)
 real(8) :: rforce1(3,MI),rforce2(3,MI),rforce3(3,MI)
 real(8) :: rab
-real(8) :: tpsi(mg_sta(1)-Nd:mg_end(1)+Nd+1,mg_sta(2)-Nd:mg_end(2)+Nd, &
-                mg_sta(3)-Nd:mg_end(3)+Nd,1:iobnum,k_sta:k_end)
+real(8) :: tpsi(mg%is_overlap(1):mg%ie_overlap(1) &
+&              ,mg%is_overlap(2):mg%ie_overlap(2) &
+&              ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
 
 do iatom=1,MI
 do j2=1,3
@@ -58,9 +61,9 @@ end do
 tpsi=0.d0
 do iob=1,iobnum
 !$OMP parallel do private(ix,iy,iz)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     tpsi(ix,iy,iz,iob,1)=psi(ix,iy,iz,iob,1)
   end do
   end do
@@ -75,9 +78,9 @@ do j2=1,3
   rbox1=0.d0
   do iob=1,iobnum
 !$OMP parallel do private(ix,iy,iz) reduction( + : rbox1 )
-    do iz=mg_sta(3),mg_end(3)
-    do iy=mg_sta(2),mg_end(2)
-    do ix=mg_sta(1),mg_end(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rbox1=rbox1-2.d0*rocc(iob,1)*rgrad_wk(ix,iy,iz,iob,1,j2)*Vpsl_atom(ix,iy,iz,iatom)*psi(ix,iy,iz,iob,1)
     end do
     end do

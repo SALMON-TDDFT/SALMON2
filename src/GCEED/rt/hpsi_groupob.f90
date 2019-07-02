@@ -16,7 +16,7 @@
 !=======================================================================
 !========================= Hamiltonian Operation (for complex funcitons)
 
-SUBROUTINE hpsi_groupob(tpsi,htpsi,tpsi_out,tVlocal,nn,isub)
+SUBROUTINE hpsi_groupob(mg,tpsi,htpsi,tpsi_out,tVlocal,nn,isub)
 use salmon_parallel, only: nproc_group_korbital
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
@@ -28,8 +28,10 @@ use allocate_mat_sub
 use sendrecv_groupob_sub
 use sendrecv_groupob_tmp_sub
 use init_sendrecv_sub
+use structures, only: s_rgrid
 !use sendrecv_groupob_ngp_sub
 implicit none
+type(s_rgrid),intent(in) :: mg
 complex(8) :: tpsi(iwk2sta(1):iwk2end(1)+1,iwk2sta(2):iwk2end(2),iwk2sta(3):iwk2end(3),   &
                    1:iobnum,k_sta:k_end)
 complex(8) :: htpsi(iwk2sta(1):iwk2end(1)+1,  &
@@ -92,7 +94,7 @@ case(0)
     call sendrecv_groupob(tpsi)
   end if
 case(3)
-  call sendrecv_groupob_tmp(tpsi)
+  call sendrecv_groupob_tmp(mg,tpsi)
 end select
 
 
