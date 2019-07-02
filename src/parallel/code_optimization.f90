@@ -17,6 +17,9 @@
 module code_optimization
   implicit none
 
+  ! can we call optimized stencil code in hamiltonian?
+  logical :: optimized_stencil_is_callable
+
   ! is a stencil computation in hamiltonian parallelized by OpenMP?
   logical :: stencil_is_parallelized_by_omp
 
@@ -24,6 +27,17 @@ module code_optimization
   integer,allocatable :: modx(:), mody(:), modz(:)
 
 contains
+  subroutine switch_stencil_optimization(nlens)
+    implicit none
+    integer,intent(in) :: nlens(3) ! a length of x,y,z directions
+#ifdef SALMON_EXPLICIT_VECTORIZATION
+    ! unit-stride direction is should multiple of 4
+    optimized_stencil_is_callable = (mod(nlens(1), 4) == 0)
+#else
+    optimized_stencil_is_callable = .false.
+#endif
+  end subroutine
+
   subroutine switch_openmp_parallelization(nlens)
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions

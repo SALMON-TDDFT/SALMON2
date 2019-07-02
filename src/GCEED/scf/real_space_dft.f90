@@ -1730,11 +1730,15 @@ end subroutine get_fourier_grid_G
 
 subroutine init_code_optimization
   implicit none
+  call switch_stencil_optimization(mg%num)
   call switch_openmp_parallelization(mg%num)
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    print *, 'hpsi stencil enables openmp parallelization:', stencil_is_parallelized_by_omp
+    print *, 'code optimization log ============================'
+    print *, 'hpsi stencil:'
+    print *, '  enables hand-coding vectorization :', optimized_stencil_is_callable
+    print *, '  enables openmp parallelization    :', stencil_is_parallelized_by_omp
   end if
 end subroutine
 

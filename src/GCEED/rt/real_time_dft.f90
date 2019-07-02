@@ -231,16 +231,7 @@ call init_sendrecv_matrix
 
 call allocate_sendrecv
 call init_persistent_requests
-
-! for code optimization
-! ===
-call switch_openmp_parallelization(mg%num)
-call set_modulo_tables(mg%num + (nd*2))
-
-if (comm_is_root(nproc_id_global)) then
-  print *, 'hpsi stencil enables openmp parallelization:', stencil_is_parallelized_by_omp
-end if
-! ===
+call init_code_optimization
 
 if(ilsda==0)then
   numspin=1
@@ -701,7 +692,23 @@ call timer_end(LOG_TOTAL)
 call deallocate_mat
 
 call finalize_xc(xc_func)
-  
+
+contains
+
+subroutine init_code_optimization
+  implicit none
+  call switch_stencil_optimization(mg%num)
+  call switch_openmp_parallelization(mg%num)
+  call set_modulo_tables(mg%num + (nd*2))
+
+  if (comm_is_root(nproc_id_global)) then
+    print *, 'code optimization log ============================'
+    print *, 'hpsi stencil:'
+    print *, '  enables hand-coding vectorization :', optimized_stencil_is_callable
+    print *, '  enables openmp parallelization    :', stencil_is_parallelized_by_omp
+  end if
+end subroutine
+
 END subroutine Real_Time_DFT
 
 !=========%==============================================================

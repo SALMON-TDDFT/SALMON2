@@ -31,6 +31,8 @@ set(SOURCES
    lattice.f90
    force.f90
    print.f90
+   stencil_c_core/typical/omp.f90
+   stencil_c_core/typical/seq.f90
    )
 
 set(SOURCES

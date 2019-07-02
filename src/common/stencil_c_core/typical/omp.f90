@@ -16,9 +16,9 @@
 
 #define LOOP_BLOCKING
 
-subroutine stencil_C_omp(is_array,ie_array,is,ie,idx,idy,idz &
-                        ,tpsi,htpsi,V_local,lap0,lapt,nabt &
-                        )
+subroutine stencil_C_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
+                                ,tpsi,htpsi,V_local,lap0,lapt,nabt &
+                                )
   implicit none
 
   integer,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
