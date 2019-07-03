@@ -194,10 +194,13 @@ contains
     call set(11, LOG_CALC_PROJECTION      , 'calc. projection')
     call set(12, LOG_CALC_QUADRUPOLE      , 'calc. quadrupole')  ! FIXME: wrong name
     call set(13, LOG_WRITE_ENERGIES       , 'writing energies')
-    call set(14, LOG_WRITE_RT_INFOS       , 'writing info etc.')
-    call set(15, LOG_RT_ANALYSIS          , 'analysis calc.')
-    call set(16, LOG_RT_MISC              , 'misc.')
-    call write_loadbalance(fd, 16, tsrc, headers, mode)
+    call set(14, LOG_CALC_EIGEN_ENERGY    , 'calc_eigen_energy')
+    call set(15, LOG_CALC_CURRENT_ION     , 'calc_current_ion')
+    call set(16, LOG_CALC_TOTAL_ENERGY_PERIODIC, 'calc_total_energy_periodic')
+    call set(17, LOG_WRITE_RT_INFOS       , 'writing info etc.')
+    call set(18, LOG_RT_ANALYSIS          , 'analysis calc.')
+    call set(19, LOG_RT_MISC              , 'misc.')
+    call write_loadbalance(fd, 19, tsrc, headers, mode)
 
     call set(0, 0, 'in subspace-diag')
     call set(1, LOG_DIAG_INIT       , 'initialization')
