@@ -1429,7 +1429,7 @@ if(iflag_md==1) call init_md(system,md)
 !(force at initial step)
 if(iflag_md==1 .or. icalcforce==1)then
    if(iperiodic==0)then
-      call calc_force_c(zpsi_in)  !this does not work now
+      call calc_force_c(mg,srg,zpsi_in)  !this does not work now
       force%F(:,:) = rforce(:,:)  !rforce must be removed in future
    else if(iperiodic==3)then
       do ik=info%ik_s,info%ik_e
