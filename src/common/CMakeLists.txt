@@ -38,8 +38,8 @@ set(SOURCES
 if (EXPLICIT_VEC)
   set(SOURCES
       ${SOURCES}
-      stencil_c_core/${SIMD_SET}/explicit_vectorized_omp.c
-      stencil_c_core/${SIMD_SET}/explicit_vectorized_seq.c
+      stencil_c_core/${SIMD_SET}/omp.c
+      stencil_c_core/${SIMD_SET}/seq.c
       )
 endif ()
 

@@ -84,9 +84,9 @@ subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
 #ifdef SALMON_EXPLICIT_VECTORIZATION
     ! optimized version with hand-coding vectorization (AVX-512, SVE...)
     if (stencil_is_parallelized_by_omp) then
-      call stencil_C_omp(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call stencil_C_tuned_omp(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
     else
-      call stencil_C_seq(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call stencil_C_tuned_seq(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
     end if
 #else
     stop 'error: explicit vectorization does not support'
