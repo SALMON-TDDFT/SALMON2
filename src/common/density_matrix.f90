@@ -127,6 +127,7 @@ contains
     ie = rg%ie
     nsize = rg%num(1) * rg%num(2) * rg%num(3)
     allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(get_nthreads()-1)))
+    wrk=0.d0
 
     if(allocated(psi%rwf)) then
 
@@ -135,7 +136,6 @@ contains
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
-        wrk(:,:,:,tid) = 0.d0
 
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
@@ -175,7 +175,6 @@ contains
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
-        wrk(:,:,:,tid) = 0.d0
 
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
