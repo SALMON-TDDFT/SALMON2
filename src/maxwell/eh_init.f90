@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_init(fs,fw)
-  use inputoutput,          only: nt_em,al_em,dl_em,dt_em,iboundary,&
+  use inputoutput,          only: nt_em,al_em,dl_em,dt_em,boundary_em,&
                                   utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                   uenergy_to_au,ulength_to_au,ucharge_to_au,iperiodic,directory,&
                                   imedia_num,shape_file,epsilon,rmu,sigma,type_media,&
@@ -28,12 +28,12 @@ subroutine eh_init(fs,fw)
   use salmon_parallel,      only: nproc_id_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_bcast
   use structures,           only: s_fdtd_system
-  use salmon_maxwell,       only: s_fdtd_work
+  use salmon_maxwell,       only: ls_fdtd_work
   use math_constants,       only: pi
   implicit none
   type(s_fdtd_system) :: fs
-  type(s_fdtd_work)   :: fw
-  integer             :: ii,ij,ix,iy,iz,icount,icount_d,iflag
+  type(ls_fdtd_work)  :: fw
+  integer             :: ii,ij,ix,iy,iz,icount,icount_d,iflag_lr,iflag_pml
   real(8)             :: dt_cfl,diff_cep
   character(1)        :: dir
   character(128)      :: save_name
@@ -49,18 +49,31 @@ subroutine eh_init(fs,fw)
   fw%ipml_l     = 8
   fw%pml_m      = 4.0d0
   fw%pml_r      = 1.0d-7
-  if(iperiodic==0) then
-    fs%i_bc(:,:)=1 !PML
-    do ix=1,3
-    do iy=1,2
-      if(iboundary(ix,iy)==1) then
-        fs%i_bc(ix,iy)=0 !PEC
+  do ii=1,3
+  do ij=1,2
+    select case(boundary_em(ii,ij))
+    case('default')
+      if(iperiodic==0) then
+        fs%bc(ii,ij)='pml'
+        iflag_pml   =1
+      elseif(iperiodic==3) then
+        fs%bc(ii,ij)='periodic'
       end if
-    end do
-    end do
-  elseif(iperiodic==3) then
-    fs%i_bc(:,:)  = iboundary(:,:) !Periodic or PML
-  end if
+    case('pml')
+      fs%bc(ii,ij)='pml'
+      iflag_pml   =1
+    case('pec')
+      if(comm_is_root(nproc_id_global).and.(iperiodic==3)) &
+      write(*,*) "For iperiodic = 3, boundary_em must be default or pml."
+      stop
+      fs%bc(ii,ij)='pec'
+    case('periodic')
+      if(comm_is_root(nproc_id_global).and.(iperiodic==0)) &
+      write(*,*) "For iperiodic = 0, boundary_em must be default, pml, or pec."
+      stop
+    end select
+  end do
+  end do
   select case(unit_system)
   case('au','a.u.')
     fw%uVperm_from_au=1.0d0
@@ -76,7 +89,7 @@ subroutine eh_init(fs,fw)
   
   !set coordinate
   allocate(fw%coo(minval(fs%lg%is(:))-fw%Nd:maxval(fs%lg%ie(:))+fw%Nd,3))
-  call eh_set_coo(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo)
+  call set_coo_em(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo(:,:))
   
   !set and check dt
   dt_cfl=1.0d0/( &
@@ -278,28 +291,28 @@ subroutine eh_init(fs,fw)
   fw%ihy_x_is(:)=fs%ng%is(:); fw%ihy_x_ie(:)=fs%ng%ie(:);
   fw%ihz_x_is(:)=fs%ng%is(:); fw%ihz_x_ie(:)=fs%ng%ie(:);
   fw%ihz_y_is(:)=fs%ng%is(:); fw%ihz_y_ie(:)=fs%ng%ie(:);
-  if((fs%i_bc(1,1)==1).and.(fs%ng%is(1)==fs%lg%is(1))) then !x, bottom
+  if((fs%bc(1,1)=='pml').and.(fs%ng%is(1)==fs%lg%is(1))) then !x, bottom
     fw%iey_x_is(1)=fs%ng%is(1)+1; fw%iez_x_is(1)=fs%ng%is(1)+1;
   end if
-  if((fs%i_bc(1,2)==1).and.(fs%ng%ie(1)==fs%lg%ie(1))) then !x, top
+  if((fs%bc(1,2)=='pml').and.(fs%ng%ie(1)==fs%lg%ie(1))) then !x, top
     fw%iex_y_ie(1)=fs%ng%ie(1)-1; fw%iex_z_ie(1)=fs%ng%ie(1)-1;
     fw%iey_x_ie(1)=fs%ng%ie(1)-1; fw%iez_x_ie(1)=fs%ng%ie(1)-1;
     fw%ihy_z_ie(1)=fs%ng%ie(1)-1; fw%ihy_x_ie(1)=fs%ng%ie(1)-1;
     fw%ihz_x_ie(1)=fs%ng%ie(1)-1; fw%ihz_y_ie(1)=fs%ng%ie(1)-1;
   end if
-  if((fs%i_bc(2,1)==1).and.(fs%ng%is(2)==fs%lg%is(2))) then !y, bottom
+  if((fs%bc(2,1)=='pml').and.(fs%ng%is(2)==fs%lg%is(2))) then !y, bottom
     fw%iex_y_is(2)=fs%ng%is(2)+1; fw%iez_y_is(2)=fs%ng%is(2)+1;
   end if
-  if((fs%i_bc(2,2)==1).and.(fs%ng%ie(2)==fs%lg%ie(2))) then !y, top
+  if((fs%bc(2,2)=='pml').and.(fs%ng%ie(2)==fs%lg%ie(2))) then !y, top
     fw%iex_y_ie(2)=fs%ng%ie(2)-1; fw%iey_z_ie(2)=fs%ng%ie(2)-1;
     fw%iey_x_ie(2)=fs%ng%ie(2)-1; fw%iez_y_ie(2)=fs%ng%ie(2)-1;
     fw%ihx_y_ie(2)=fs%ng%ie(2)-1; fw%ihx_z_ie(2)=fs%ng%ie(2)-1;
     fw%ihz_x_ie(2)=fs%ng%ie(2)-1; fw%ihz_y_ie(2)=fs%ng%ie(2)-1;
   end if
-  if((fs%i_bc(3,1)==1).and.(fs%ng%is(3)==fs%lg%is(3))) then !z, bottom
+  if((fs%bc(3,1)=='pml').and.(fs%ng%is(3)==fs%lg%is(3))) then !z, bottom
     fw%iex_z_is(3)=fs%ng%is(3)+1; fw%iey_z_is(3)=fs%ng%is(3)+1;
   end if
-  if((fs%i_bc(3,2)==1).and.(fs%ng%ie(3)==fs%lg%ie(3))) then !z, top
+  if((fs%bc(3,2)=='pml').and.(fs%ng%ie(3)==fs%lg%ie(3))) then !z, top
     fw%iex_z_ie(3)=fs%ng%ie(3)-1; fw%iey_z_ie(3)=fs%ng%ie(3)-1;
     fw%iez_x_ie(3)=fs%ng%ie(3)-1; fw%iez_y_ie(3)=fs%ng%ie(3)-1;
     fw%ihx_y_ie(3)=fs%ng%ie(3)-1; fw%ihx_z_ie(3)=fs%ng%ie(3)-1;
@@ -313,7 +326,7 @@ subroutine eh_init(fs,fw)
                     fw%c1_hz_y,fw%c2_hz_y,fw%c1_hx_y,fw%c2_hx_y) !y direction
   call eh_set_pml(3,fw%c1_ex_z,fw%c2_ex_z,fw%c1_ey_z,fw%c2_ey_z,&
                     fw%c1_hx_z,fw%c2_hx_z,fw%c1_hy_z,fw%c2_hy_z) !z direction
-  if(maxval(fs%i_bc(:,:))>0) then
+  if(iflag_pml==1) then
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"
@@ -325,14 +338,14 @@ subroutine eh_init(fs,fw)
         elseif(ii==3) then
           dir='z'
         end if
-        if(fs%i_bc(ii,1)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
-                               ' PML has been set for ',dir,'-direction: ',&
-                               fw%coo(fs%lg%is(ii),ii)*ulength_from_au,' to ',&
-                               fw%coo(fs%lg%is(ii)+fw%ipml_l,ii)*ulength_from_au,'.'
-        if(fs%i_bc(ii,2)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
-                               ' PML has been set for ',dir,'-direction: ',&
-                               fw%coo(fs%lg%ie(ii)-fw%ipml_l,ii)*ulength_from_au,' to ',&
-                               fw%coo(fs%lg%ie(ii),ii)*ulength_from_au,'.'
+        if(fs%bc(ii,1)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+                                 ' PML has been set for ',dir,'-direction: ',&
+                                 fw%coo(fs%lg%is(ii),ii)*ulength_from_au,' to ',&
+                                 fw%coo(fs%lg%is(ii)+fw%ipml_l,ii)*ulength_from_au,'.'
+        if(fs%bc(ii,2)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+                                 ' PML has been set for ',dir,'-direction: ',&
+                                 fw%coo(fs%lg%ie(ii)-fw%ipml_l,ii)*ulength_from_au,' to ',&
+                                 fw%coo(fs%lg%ie(ii),ii)*ulength_from_au,'.'
       end do
       write(*,*) "**************************"
     end if
@@ -370,9 +383,9 @@ subroutine eh_init(fs,fw)
     
     !search observation point
     do ii=1,iobs_num_em
-      call eh_find_point(obs_loc_em(ii,:),fw%iobs_po_id(ii,:),&
-                         fw%iobs_po_pe(ii),fw%iobs_li_pe(ii,:),fw%iobs_pl_pe(ii,:),fs%ng%is,fs%ng%ie,&
-                         minval(fs%lg%is)-fw%Nd,maxval(fs%lg%ie)+fw%Nd,fw%coo)
+      call find_point_em(obs_loc_em(ii,:),fw%iobs_po_id(ii,:),&
+                         fw%iobs_po_pe(ii),fw%iobs_li_pe(ii,:),fw%iobs_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
+                         minval(fs%lg%is)-fw%Nd,maxval(fs%lg%ie)+fw%Nd,fw%coo(:,:))
     end do
     
     !write information
@@ -522,10 +535,10 @@ subroutine eh_init(fs,fw)
   end if
   if(fw%inc_num>0) then
     !set initial
-    allocate(fw%inc_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
-    allocate(fw%inc_po_pe(iobs_num_em))
-    allocate(fw%inc_li_pe(iobs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
-    allocate(fw%inc_pl_pe(iobs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
+    allocate(fw%inc_po_id(fw%inc_num,3)) !1:x,        2:y,        3:z
+    allocate(fw%inc_po_pe(fw%inc_num))
+    allocate(fw%inc_li_pe(fw%inc_num,3)) !1:x-line,   2:y-line,   3:z-line
+    allocate(fw%inc_pl_pe(fw%inc_num,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
     fw%inc_po_id(:,:)=0; fw%inc_po_pe(:)=0; fw%inc_li_pe(:,:)=0; fw%inc_pl_pe(:,:)=0; 
     do ii=1,3
       fw%c2_inc_xyz(ii)=(fw%c_0/fw%rep(0)*fs%dt) &
@@ -536,36 +549,42 @@ subroutine eh_init(fs,fw)
     !search incident current source point and check others
     if(fw%inc_dist1/='none') then
       ii=1
-      call eh_find_point(source_loc1(:),fw%inc_po_id(ii,:),&
-                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng%is,fs%ng%ie,&
+      call find_point_em(source_loc1(:),fw%inc_po_id(ii,:),&
+                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
                          minval(fs%lg%is(:))-fw%Nd,maxval(fs%lg%ie(:))+fw%Nd,fw%coo(:,:))
       select case(ae_shape1)
       case("Ecos2","Acos2")
         continue
       case default
-        stop 'set ae_shape1 to "Ecos2" or "Acos2"'
+        if(comm_is_root(nproc_id_global)) write(*,*) 'set ae_shape1 to "Ecos2" or "Acos2".'
+        stop
       end select
       diff_cep=(phi_cep1-0.25d0)*2.d0-int((phi_cep1-0.25d0)*2.d0)
       if(ae_shape1=="Ecos2".and.abs(diff_cep)>=1.d-12)then
-        stop "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
+        if(comm_is_root(nproc_id_global)) write(*,*) &
+          "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
+        stop
       end if
       if(rlaser_int_wcm2_1/=-1d0) &
         amplitude1=sqrt(rlaser_int_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
     if(fw%inc_dist2/='none') then
       ii=2
-      call eh_find_point(source_loc2(:),fw%inc_po_id(ii,:),&
-                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng%is,fs%ng%ie,&
+      call find_point_em(source_loc2(:),fw%inc_po_id(ii,:),&
+                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
                          minval(fs%lg%is(:))-fw%Nd,maxval(fs%lg%ie(:))+fw%Nd,fw%coo(:,:))
       select case(ae_shape2)
       case("Ecos2","Acos2")
         continue
       case default
-        stop 'set ae_shape2 to "Ecos2" or "Acos2"'
+        if(comm_is_root(nproc_id_global)) write(*,*) 'set ae_shape2 to "Ecos2" or "Acos2".'
+        stop
       end select
       diff_cep=(phi_cep2-0.25d0)*2.d0-int((phi_cep2-0.25d0)*2.d0)
       if(ae_shape2=="Ecos2".and.abs(diff_cep)>=1.d-12)then
-        stop "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
+        if(comm_is_root(nproc_id_global)) write(*,*) &
+          "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
+        stop
       end if
       if(rlaser_int_wcm2_2/=-1d0) &
         amplitude2=sqrt(rlaser_int_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
@@ -597,27 +616,27 @@ subroutine eh_init(fs,fw)
   !prepare linear response
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
     !check condition
-    iflag=0
-    if(iperiodic==3.and.trans_longi/='tr') iflag=1
+    iflag_lr=0
+    if(iperiodic==3.and.trans_longi/='tr') iflag_lr=1
     do ii=0,imedia_num
-      if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag=1
+      if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag_lr=1
       if(ii==0) then
         select case(type_media(ii))
         case('VACUUM','Vacuum','vacuum')
           continue
         case default
-          iflag=1
+          iflag_lr=1
         end select
       else
         select case(type_media(ii))
         case('DRUDE','Drude','drude','D','d')
           continue
         case default
-          iflag=1
+          iflag_lr=1
         end select
       end if
     end do
-    if(iflag==1) then
+    if(iflag_lr==1) then
       if(comm_is_root(nproc_id_global)) then
         write(*,*) "invalid input keywords:"
         write(*,*) "epsilon and rmu must be 1.0d0."
@@ -1248,7 +1267,7 @@ contains
     call comm_bcast(c2_pml_h,nproc_group_global)
     
     !set pml(bottom)
-    if((fs%i_bc(idir,1)==1).and.(fs%ng%is(idir)<=(fs%lg%is(idir)+fw%ipml_l))) then
+    if((fs%bc(idir,1)=='pml').and.(fs%ng%is(idir)<=(fs%lg%is(idir)+fw%ipml_l))) then
       !e
       iend=fs%lg%is(idir)+fw%ipml_l
       if(fs%ng%ie(idir)<iend) then
@@ -1302,7 +1321,7 @@ contains
     end if
     
     !set pml(top)
-    if((fs%i_bc(idir,2)==1).and.(fs%ng%ie(idir)>=(fs%lg%ie(idir)-fw%ipml_l))) then
+    if((fs%bc(idir,2)=='pml').and.(fs%ng%ie(idir)>=(fs%lg%ie(idir)-fw%ipml_l))) then
       !e
       ista=fs%lg%ie(idir)-fw%ipml_l
       if(fs%ng%is(idir)>ista) then
@@ -1455,127 +1474,6 @@ subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
 end subroutine eh_input_shape
 
 !=========================================================================================
-!= find point and set corresponding processor element ====================================
-subroutine eh_find_point(rloc,id,ipo,ili,ipl,ista,iend,icoo_sta,icoo_end,coo)
-  use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
-  use salmon_communication, only: comm_summation
-  implicit none
-  real(8),intent(in)    :: rloc(3)
-  integer,intent(inout) :: id(3)
-  integer,intent(out)   :: ipo
-  integer,intent(out)   :: ili(3),ipl(3)
-  integer,intent(in)    :: ista(3),iend(3)
-  integer,intent(in)    :: icoo_sta,icoo_end
-  real(8),intent(in)    :: coo(icoo_sta:icoo_end,3)
-  integer               :: ii,ix,iy,iz,ipe_tmp,i1,i1s,i2,i2s
-  integer               :: id_tmp(3),id_tmp2(3)
-  real(8)               :: err(0:nproc_size_global-1),err2(0:nproc_size_global-1)
-  real(8)               :: err_tmp
-  
-  !set initial value
-  err(:)              =0.0d0
-  err(nproc_id_global)=1.0d9
-  err2(:)             =0.0d0
-  id_tmp(:)           =0
-  id_tmp2(:)          =0
-  
-  !find observation point in each PE
-  do iz=ista(3),iend(3)
-  do iy=ista(2),iend(2)
-  do ix=ista(1),iend(1)
-    err_tmp=sqrt( (coo(ix,1)-rloc(1))**2.0d0 &
-                 +(coo(iy,2)-rloc(2))**2.0d0 &
-                 +(coo(iz,3)-rloc(3))**2.0d0 )
-    if(err(nproc_id_global)>err_tmp) then
-      err(nproc_id_global)=err_tmp
-      id_tmp(1)=ix; id_tmp(2)=iy; id_tmp(3)=iz;
-    end if
-  end do
-  end do
-  end do
-  call comm_summation(err,err2,nproc_size_global,nproc_group_global)
-  
-  !determine and share id + determine pe including the point
-  ipe_tmp=-1; err_tmp=1.0d9;
-  do ii=0,nproc_size_global-1
-    if(err_tmp>err2(ii)) then
-      err_tmp=err2(ii)
-      ipe_tmp=ii
-    end if
-  end do
-  if(nproc_id_global==ipe_tmp) then
-    ipo=1;
-  else
-    ipo=0; id_tmp(:)=0;
-  end if
-  call comm_summation(id_tmp,id_tmp2,3,nproc_group_global)
-  id(:)=id_tmp2(:)
-  
-  !determine pe including the line
-  do ii=1,3
-    if(ii==1) then     !x-line(searching at yz-plane)
-      i1s=3; i2s=2;
-    elseif(ii==2) then !x-line(searching at xz-plane)
-      i1s=3; i2s=1;
-    elseif(ii==3) then !z-line(searching at xy-plane)
-      i1s=2; i2s=1;
-    end if
-    do i2=ista(i2s),iend(i2s)
-    do i1=ista(i1s),iend(i1s)
-      if( (i1==id(i1s)).and.(i2==id(i2s)) ) ili(ii)=1
-    end do
-    end do
-  end do
-  
-  !determine pe including the plane
-  do ii=1,3
-    if(ii==1) then     !xy-plane(searching at z-line)
-      i1s=3;
-    elseif(ii==2) then !yz-plane(searching at x-line)
-      i1s=1;
-    elseif(ii==3) then !xz-plane(searching at y-line)
-      i1s=2;
-    end if
-    do i1=ista(i1s),iend(i1s)
-      if(i1==id(i1s)) ipl(ii)=1
-    end do
-  end do
-  
-end subroutine eh_find_point
-
-!=========================================================================================
-!= set coordinate ========================================================================
-subroutine eh_set_coo(iperi,Nd,ioe,ista,iend,hgs,coo)
-  implicit none
-  integer,intent(in)  :: iperi,Nd
-  integer,intent(in)  :: ioe(3),ista(3),iend(3)
-  real(8),intent(in)  :: hgs(3)
-  real(8),intent(out) :: coo(minval(ista(:))-Nd:maxval(iend(:))+Nd,3)
-  integer :: ii,ij
-  
-  do ii=1,3
-    select case(iperi)
-    case(0)
-      select case(ioe(ii))
-      case(1)
-        do ij=ista(ii)-Nd,iend(ii)+Nd
-          coo(ij,ii)=dble(ij)*hgs(ii)
-        end do
-      case(2)
-        do ij=ista(ii)-Nd,iend(ii)+Nd
-          coo(ij,ii)=(dble(ij)-0.5d0)*hgs(ii)
-        end do
-      end select
-    case(3)
-      do ij=ista(ii)-Nd,iend(ii)+Nd
-        coo(ij,ii)=dble(ij-1)*hgs(ii)
-      end do
-    end select
-  end do
-  
-end subroutine eh_set_coo
-
-!=========================================================================================
 != prepare GCEED =========================================================================
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
@@ -1596,10 +1494,10 @@ subroutine eh_prep_GCEED(fs,fw)
   use init_sendrecv_sub, only: init_updown,iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
   use sendrecv_grid,     only: init_sendrecv_grid
   use structures,        only: s_fdtd_system
-  use salmon_maxwell,    only: s_fdtd_work
+  use salmon_maxwell,    only: ls_fdtd_work
   implicit none
   type(s_fdtd_system)   :: fs
-  type(s_fdtd_work)     :: fw
+  type(ls_fdtd_work)    :: fw
   integer               :: neig_ng_eh(1:3,1:2)
   integer               :: id_tmp,ii
   

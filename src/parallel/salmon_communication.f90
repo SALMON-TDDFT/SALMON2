@@ -193,6 +193,7 @@ module salmon_communication
     ! 2-D array
     module procedure comm_bcast_array2d_integer
     module procedure comm_bcast_array2d_double
+    module procedure comm_bcast_array2d_character
 
     ! 3-D array
     module procedure comm_bcast_array3d_double
@@ -1772,6 +1773,31 @@ contains
     UNUSED_VARIABLE(val)
     UNUSED_VARIABLE(root)
     ABORT_MESSAGE(ngroup,"comm_bcast_array1d_character")
+#endif
+  end subroutine
+
+  subroutine comm_bcast_array2d_character(val, ngroup, root)
+#ifdef SALMON_USE_MPI
+    use mpi, only: MPI_CHARACTER
+    implicit none
+    character(*), intent(inout)        :: val(:,:)
+    integer,      intent(in)           :: ngroup
+    integer,      intent(in), optional :: root
+    integer :: rank, ierr
+    if (present(root)) then
+      rank = root
+    else
+      rank = 0
+    end if
+    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val)*len(val), MPI_CHARACTER, rank, ngroup, ierr))
+#else
+    implicit none
+    character(*), intent(inout)        :: val(:,:)
+    integer,      intent(in)           :: ngroup
+    integer,      intent(in), optional :: root
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array2d_character")
 #endif
   end subroutine
 

@@ -16,10 +16,10 @@
 !-----------------------------------------------------------------------------------------
 subroutine coulomb_init(fs,ff,fw)
   use structures,     only: s_fdtd_system, s_fdtd_field
-  use salmon_maxwell, only: s_fdtd_work
+  use salmon_maxwell, only: ls_fdtd_work
   implicit none
   type(s_fdtd_system) :: fs
   type(s_fdtd_field)  :: ff
-  type(s_fdtd_work)   :: fw
+  type(ls_fdtd_work)  :: fw
   
 end subroutine coulomb_init

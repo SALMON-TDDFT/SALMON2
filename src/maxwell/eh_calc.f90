@@ -21,11 +21,11 @@ subroutine eh_calc(fs,fw)
   use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_summation
   use structures,           only: s_fdtd_system
-  use salmon_maxwell,       only: s_fdtd_work
+  use salmon_maxwell,       only: ls_fdtd_work
   use math_constants,       only: pi
   implicit none
   type(s_fdtd_system) :: fs
-  type(s_fdtd_work)   :: fw
+  type(ls_fdtd_work)  :: fw
   integer             :: iter,ii,ix,iy,iz
   character(128)      :: save_name
   
@@ -784,10 +784,10 @@ end subroutine eh_save_plane
 subroutine eh_sendrecv(fs,fw,var)
   use sendrecv_grid,  only: update_overlap_real8
   use structures,     only: s_fdtd_system
-  use salmon_maxwell, only: s_fdtd_work
+  use salmon_maxwell, only: ls_fdtd_work
   implicit none
   type(s_fdtd_system)     :: fs
-  type(s_fdtd_work)       :: fw
+  type(ls_fdtd_work)      :: fw
   character(1),intent(in) :: var
   integer                 :: ix,iy,iz
   real(8),allocatable     :: f1(:,:,:),f2(:,:,:),f3(:,:,:)
