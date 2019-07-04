@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_init(fs,fw)
-  use inputoutput,          only: nt_em,al_em,dl_em,dt_em,iboundary,&
+  use inputoutput,          only: nt_em,al_em,dl_em,dt_em,boundary_em,&
                                   utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                   uenergy_to_au,ulength_to_au,ucharge_to_au,iperiodic,directory,&
                                   imedia_num,shape_file,epsilon,rmu,sigma,type_media,&
@@ -28,12 +28,12 @@ subroutine eh_init(fs,fw)
   use salmon_parallel,      only: nproc_id_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_bcast
   use structures,           only: s_fdtd_system
-  use salmon_maxwell,       only: s_fdtd_work
+  use salmon_maxwell,       only: ls_fdtd_work
+  use math_constants,       only: pi
   implicit none
   type(s_fdtd_system) :: fs
-  type(s_fdtd_work)   :: fw
-  integer             :: ii,ij,ix,iy,iz,icount,icount_d,iflag
-  real(8),parameter   :: pi=3.141592653589793d0
+  type(ls_fdtd_work)  :: fw
+  integer             :: ii,ij,ix,iy,iz,icount,icount_d,iflag_lr,iflag_pml
   real(8)             :: dt_cfl,diff_cep
   character(1)        :: dir
   character(128)      :: save_name
@@ -49,18 +49,31 @@ subroutine eh_init(fs,fw)
   fw%ipml_l     = 8
   fw%pml_m      = 4.0d0
   fw%pml_r      = 1.0d-7
-  if(iperiodic==0) then
-    fs%i_bc(:,:)=1 !PML
-    do ix=1,3
-    do iy=1,2
-      if(iboundary(ix,iy)==1) then
-        fs%i_bc(ix,iy)=0 !PEC
+  do ii=1,3
+  do ij=1,2
+    select case(boundary_em(ii,ij))
+    case('default')
+      if(iperiodic==0) then
+        fs%bc(ii,ij)='pml'
+        iflag_pml   =1
+      elseif(iperiodic==3) then
+        fs%bc(ii,ij)='periodic'
       end if
-    end do
-    end do
-  elseif(iperiodic==3) then
-    fs%i_bc(:,:)  = iboundary(:,:) !Periodic or PML
-  end if
+    case('pml')
+      fs%bc(ii,ij)='pml'
+      iflag_pml   =1
+    case('pec')
+      if(comm_is_root(nproc_id_global).and.(iperiodic==3)) &
+      write(*,*) "For iperiodic = 3, boundary_em must be default or pml."
+      stop
+      fs%bc(ii,ij)='pec'
+    case('periodic')
+      if(comm_is_root(nproc_id_global).and.(iperiodic==0)) &
+      write(*,*) "For iperiodic = 0, boundary_em must be default, pml, or pec."
+      stop
+    end select
+  end do
+  end do
   select case(unit_system)
   case('au','a.u.')
     fw%uVperm_from_au=1.0d0
@@ -75,8 +88,8 @@ subroutine eh_init(fs,fw)
   call eh_prep_GCEED(fs,fw)
   
   !set coordinate
-  allocate(fw%coo(minval(fs%lg_sta(:))-fw%Nd:maxval(fs%lg_end(:))+fw%Nd,3))
-  call eh_set_coo(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg_sta(:),fs%lg_end(:),fs%hgs(:),fw%coo)
+  allocate(fw%coo(minval(fs%lg%is(:))-fw%Nd:maxval(fs%lg%ie(:))+fw%Nd,3))
+  call set_coo_em(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo(:,:))
   
   !set and check dt
   dt_cfl=1.0d0/( &
@@ -111,25 +124,25 @@ subroutine eh_init(fs,fw)
   
   !allocate
   call eh_allocate
-  allocate(fw%c2_jx(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                    fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                    fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-           fw%c2_jy(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                    fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                    fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-           fw%c2_jz(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                    fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                    fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+  allocate(fw%c2_jx(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                    fs%ng%is_array(2):fs%ng%ie_array(2),&
+                    fs%ng%is_array(3):fs%ng%ie_array(3)),&
+           fw%c2_jy(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                    fs%ng%is_array(2):fs%ng%ie_array(2),&
+                    fs%ng%is_array(3):fs%ng%ie_array(3)),&
+           fw%c2_jz(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                    fs%ng%is_array(2):fs%ng%ie_array(2),&
+                    fs%ng%is_array(3):fs%ng%ie_array(3)) )
   fw%c2_jx(:,:,:)=0.0d0; fw%c2_jy(:,:,:)=0.0d0; fw%c2_jz(:,:,:)=0.0d0;
   
   !input fdtd shape
-  allocate(fs%imedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+  allocate(fs%imedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
   fs%imedia(:,:,:)=0
-  allocate(fw%rmedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+  allocate(fw%rmedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
   fw%rmedia(:,:,:)=0.0d0
   if(imedia_num>0) then
     !check file format and input shape file
@@ -139,7 +152,7 @@ subroutine eh_init(fs,fw)
       if(comm_is_root(nproc_id_global)) then
         write(*,*) "shape file is inputed by .cube format."
       end if
-      call eh_input_shape(fw%ifn,fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fs%imedia,'cu')
+      call eh_input_shape(fw%ifn,fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fs%imedia,'cu')
       fw%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
       call eh_sendrecv(fs,fw,'r')
       fs%imedia(:,:,:)=int(fw%rmedia(:,:,:)+1d-3)
@@ -183,45 +196,45 @@ subroutine eh_init(fs,fw)
     icount_d=1
     
     !allocate drude variable
-    allocate(fw%idx_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                      fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                      fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
-             fw%idy_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                      fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                      fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
-             fw%idz_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                      fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                      fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
+    allocate(fw%idx_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                      fs%ng%is_array(2):fs%ng%ie_array(2),&
+                      fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
+             fw%idy_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                      fs%ng%is_array(2):fs%ng%ie_array(2),&
+                      fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
+             fw%idz_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                      fs%ng%is_array(2):fs%ng%ie_array(2),&
+                      fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d) )
     fw%idx_d(:,:,:,:)=0; fw%idy_d(:,:,:,:)=0; fw%idz_d(:,:,:,:)=0;
-    allocate( fw%rjx_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
-              fw%rjy_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
-              fw%rjz_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
+    allocate( fw%rjx_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
+              fw%rjy_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
+              fw%rjz_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d) )
     fw%rjx_d(:,:,:,:)=0.0d0; fw%rjy_d(:,:,:,:)=0.0d0; fw%rjz_d(:,:,:,:)=0.0d0;
-    allocate( fw%rjx_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-              fw%rjy_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-              fw%rjz_sum_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+    allocate( fw%rjx_sum_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                           fs%ng%is_array(2):fs%ng%ie_array(2),&
+                           fs%ng%is_array(3):fs%ng%ie_array(3)),&
+              fw%rjy_sum_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                           fs%ng%is_array(2):fs%ng%ie_array(2),&
+                           fs%ng%is_array(3):fs%ng%ie_array(3)),&
+              fw%rjz_sum_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                           fs%ng%is_array(2):fs%ng%ie_array(2),&
+                           fs%ng%is_array(3):fs%ng%ie_array(3)) )
     fw%rjx_sum_d(:,:,:)=0.0d0; fw%rjy_sum_d(:,:,:)=0.0d0; fw%rjz_sum_d(:,:,:)=0.0d0;
-    allocate( fw%wex_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
-              fw%wey_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d),&
-              fw%wez_d(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd,fw%inum_d) )
+    allocate( fw%wex_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
+              fw%wey_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
+              fw%wez_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d) )
     fw%wex_d(:,:,:,:)=0.0d0; fw%wey_d(:,:,:,:)=0.0d0; fw%wez_d(:,:,:,:)=0.0d0;
     allocate(fw%c1_j_d(fw%inum_d),fw%c2_j_d(fw%inum_d))
     fw%c1_j_d(:)=0.0d0; fw%c2_j_d(:)=0.0d0;
@@ -266,44 +279,44 @@ subroutine eh_init(fs,fw)
   call eh_smoothing
   
   !set calculation area
-  fw%iex_y_sta(:)=fs%ng_sta(:); fw%iex_y_end(:)=fs%ng_end(:);
-  fw%iex_z_sta(:)=fs%ng_sta(:); fw%iex_z_end(:)=fs%ng_end(:);
-  fw%iey_z_sta(:)=fs%ng_sta(:); fw%iey_z_end(:)=fs%ng_end(:);
-  fw%iey_x_sta(:)=fs%ng_sta(:); fw%iey_x_end(:)=fs%ng_end(:);
-  fw%iez_x_sta(:)=fs%ng_sta(:); fw%iez_x_end(:)=fs%ng_end(:);
-  fw%iez_y_sta(:)=fs%ng_sta(:); fw%iez_y_end(:)=fs%ng_end(:);
-  fw%ihx_y_sta(:)=fs%ng_sta(:); fw%ihx_y_end(:)=fs%ng_end(:);
-  fw%ihx_z_sta(:)=fs%ng_sta(:); fw%ihx_z_end(:)=fs%ng_end(:);
-  fw%ihy_z_sta(:)=fs%ng_sta(:); fw%ihy_z_end(:)=fs%ng_end(:);
-  fw%ihy_x_sta(:)=fs%ng_sta(:); fw%ihy_x_end(:)=fs%ng_end(:);
-  fw%ihz_x_sta(:)=fs%ng_sta(:); fw%ihz_x_end(:)=fs%ng_end(:);
-  fw%ihz_y_sta(:)=fs%ng_sta(:); fw%ihz_y_end(:)=fs%ng_end(:);
-  if((fs%i_bc(1,1)==1).and.(fs%ng_sta(1)==fs%lg_sta(1))) then !x, bottom
-    fw%iey_x_sta(1)=fs%ng_sta(1)+1; fw%iez_x_sta(1)=fs%ng_sta(1)+1;
+  fw%iex_y_is(:)=fs%ng%is(:); fw%iex_y_ie(:)=fs%ng%ie(:);
+  fw%iex_z_is(:)=fs%ng%is(:); fw%iex_z_ie(:)=fs%ng%ie(:);
+  fw%iey_z_is(:)=fs%ng%is(:); fw%iey_z_ie(:)=fs%ng%ie(:);
+  fw%iey_x_is(:)=fs%ng%is(:); fw%iey_x_ie(:)=fs%ng%ie(:);
+  fw%iez_x_is(:)=fs%ng%is(:); fw%iez_x_ie(:)=fs%ng%ie(:);
+  fw%iez_y_is(:)=fs%ng%is(:); fw%iez_y_ie(:)=fs%ng%ie(:);
+  fw%ihx_y_is(:)=fs%ng%is(:); fw%ihx_y_ie(:)=fs%ng%ie(:);
+  fw%ihx_z_is(:)=fs%ng%is(:); fw%ihx_z_ie(:)=fs%ng%ie(:);
+  fw%ihy_z_is(:)=fs%ng%is(:); fw%ihy_z_ie(:)=fs%ng%ie(:);
+  fw%ihy_x_is(:)=fs%ng%is(:); fw%ihy_x_ie(:)=fs%ng%ie(:);
+  fw%ihz_x_is(:)=fs%ng%is(:); fw%ihz_x_ie(:)=fs%ng%ie(:);
+  fw%ihz_y_is(:)=fs%ng%is(:); fw%ihz_y_ie(:)=fs%ng%ie(:);
+  if((fs%bc(1,1)=='pml').and.(fs%ng%is(1)==fs%lg%is(1))) then !x, bottom
+    fw%iey_x_is(1)=fs%ng%is(1)+1; fw%iez_x_is(1)=fs%ng%is(1)+1;
   end if
-  if((fs%i_bc(1,2)==1).and.(fs%ng_end(1)==fs%lg_end(1))) then !x, top
-    fw%iex_y_end(1)=fs%ng_end(1)-1; fw%iex_z_end(1)=fs%ng_end(1)-1;
-    fw%iey_x_end(1)=fs%ng_end(1)-1; fw%iez_x_end(1)=fs%ng_end(1)-1;
-    fw%ihy_z_end(1)=fs%ng_end(1)-1; fw%ihy_x_end(1)=fs%ng_end(1)-1;
-    fw%ihz_x_end(1)=fs%ng_end(1)-1; fw%ihz_y_end(1)=fs%ng_end(1)-1;
+  if((fs%bc(1,2)=='pml').and.(fs%ng%ie(1)==fs%lg%ie(1))) then !x, top
+    fw%iex_y_ie(1)=fs%ng%ie(1)-1; fw%iex_z_ie(1)=fs%ng%ie(1)-1;
+    fw%iey_x_ie(1)=fs%ng%ie(1)-1; fw%iez_x_ie(1)=fs%ng%ie(1)-1;
+    fw%ihy_z_ie(1)=fs%ng%ie(1)-1; fw%ihy_x_ie(1)=fs%ng%ie(1)-1;
+    fw%ihz_x_ie(1)=fs%ng%ie(1)-1; fw%ihz_y_ie(1)=fs%ng%ie(1)-1;
   end if
-  if((fs%i_bc(2,1)==1).and.(fs%ng_sta(2)==fs%lg_sta(2))) then !y, bottom
-    fw%iex_y_sta(2)=fs%ng_sta(2)+1; fw%iez_y_sta(2)=fs%ng_sta(2)+1;
+  if((fs%bc(2,1)=='pml').and.(fs%ng%is(2)==fs%lg%is(2))) then !y, bottom
+    fw%iex_y_is(2)=fs%ng%is(2)+1; fw%iez_y_is(2)=fs%ng%is(2)+1;
   end if
-  if((fs%i_bc(2,2)==1).and.(fs%ng_end(2)==fs%lg_end(2))) then !y, top
-    fw%iex_y_end(2)=fs%ng_end(2)-1; fw%iey_z_end(2)=fs%ng_end(2)-1;
-    fw%iey_x_end(2)=fs%ng_end(2)-1; fw%iez_y_end(2)=fs%ng_end(2)-1;
-    fw%ihx_y_end(2)=fs%ng_end(2)-1; fw%ihx_z_end(2)=fs%ng_end(2)-1;
-    fw%ihz_x_end(2)=fs%ng_end(2)-1; fw%ihz_y_end(2)=fs%ng_end(2)-1;
+  if((fs%bc(2,2)=='pml').and.(fs%ng%ie(2)==fs%lg%ie(2))) then !y, top
+    fw%iex_y_ie(2)=fs%ng%ie(2)-1; fw%iey_z_ie(2)=fs%ng%ie(2)-1;
+    fw%iey_x_ie(2)=fs%ng%ie(2)-1; fw%iez_y_ie(2)=fs%ng%ie(2)-1;
+    fw%ihx_y_ie(2)=fs%ng%ie(2)-1; fw%ihx_z_ie(2)=fs%ng%ie(2)-1;
+    fw%ihz_x_ie(2)=fs%ng%ie(2)-1; fw%ihz_y_ie(2)=fs%ng%ie(2)-1;
   end if
-  if((fs%i_bc(3,1)==1).and.(fs%ng_sta(3)==fs%lg_sta(3))) then !z, bottom
-    fw%iex_z_sta(3)=fs%ng_sta(3)+1; fw%iey_z_sta(3)=fs%ng_sta(3)+1;
+  if((fs%bc(3,1)=='pml').and.(fs%ng%is(3)==fs%lg%is(3))) then !z, bottom
+    fw%iex_z_is(3)=fs%ng%is(3)+1; fw%iey_z_is(3)=fs%ng%is(3)+1;
   end if
-  if((fs%i_bc(3,2)==1).and.(fs%ng_end(3)==fs%lg_end(3))) then !z, top
-    fw%iex_z_end(3)=fs%ng_end(3)-1; fw%iey_z_end(3)=fs%ng_end(3)-1;
-    fw%iez_x_end(3)=fs%ng_end(3)-1; fw%iez_y_end(3)=fs%ng_end(3)-1;
-    fw%ihx_y_end(3)=fs%ng_end(3)-1; fw%ihx_z_end(3)=fs%ng_end(3)-1;
-    fw%ihy_z_end(3)=fs%ng_end(3)-1; fw%ihy_x_end(3)=fs%ng_end(3)-1;
+  if((fs%bc(3,2)=='pml').and.(fs%ng%ie(3)==fs%lg%ie(3))) then !z, top
+    fw%iex_z_ie(3)=fs%ng%ie(3)-1; fw%iey_z_ie(3)=fs%ng%ie(3)-1;
+    fw%iez_x_ie(3)=fs%ng%ie(3)-1; fw%iez_y_ie(3)=fs%ng%ie(3)-1;
+    fw%ihx_y_ie(3)=fs%ng%ie(3)-1; fw%ihx_z_ie(3)=fs%ng%ie(3)-1;
+    fw%ihy_z_ie(3)=fs%ng%ie(3)-1; fw%ihy_x_ie(3)=fs%ng%ie(3)-1;
   end if
   
   !set pml
@@ -313,7 +326,7 @@ subroutine eh_init(fs,fw)
                     fw%c1_hz_y,fw%c2_hz_y,fw%c1_hx_y,fw%c2_hx_y) !y direction
   call eh_set_pml(3,fw%c1_ex_z,fw%c2_ex_z,fw%c1_ey_z,fw%c2_ey_z,&
                     fw%c1_hx_z,fw%c2_hx_z,fw%c1_hy_z,fw%c2_hy_z) !z direction
-  if(maxval(fs%i_bc(:,:))>0) then
+  if(iflag_pml==1) then
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"
@@ -325,14 +338,14 @@ subroutine eh_init(fs,fw)
         elseif(ii==3) then
           dir='z'
         end if
-        if(fs%i_bc(ii,1)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
-                               ' PML has been set for ',dir,'-direction: ',&
-                               fw%coo(fs%lg_sta(ii),ii)*ulength_from_au,' to ',&
-                               fw%coo(fs%lg_sta(ii)+fw%ipml_l,ii)*ulength_from_au,'.'
-        if(fs%i_bc(ii,2)==1) write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
-                               ' PML has been set for ',dir,'-direction: ',&
-                               fw%coo(fs%lg_end(ii)-fw%ipml_l,ii)*ulength_from_au,' to ',&
-                               fw%coo(fs%lg_end(ii),ii)*ulength_from_au,'.'
+        if(fs%bc(ii,1)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+                                 ' PML has been set for ',dir,'-direction: ',&
+                                 fw%coo(fs%lg%is(ii),ii)*ulength_from_au,' to ',&
+                                 fw%coo(fs%lg%is(ii)+fw%ipml_l,ii)*ulength_from_au,'.'
+        if(fs%bc(ii,2)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+                                 ' PML has been set for ',dir,'-direction: ',&
+                                 fw%coo(fs%lg%ie(ii)-fw%ipml_l,ii)*ulength_from_au,' to ',&
+                                 fw%coo(fs%lg%ie(ii),ii)*ulength_from_au,'.'
       end do
       write(*,*) "**************************"
     end if
@@ -341,24 +354,24 @@ subroutine eh_init(fs,fw)
   !prepare observation
   if(iobs_num_em>0) then
     !set initial
-    allocate(fw%ex_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             fw%ey_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             fw%ez_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             fw%hx_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             fw%hy_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             fw%hz_s(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%ex_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%ey_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%ez_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%hx_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%hy_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%hz_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ex_s(:,:,:)=0; fw%ey_s(:,:,:)=0; fw%ez_s(:,:,:)=0; 
     fw%hx_s(:,:,:)=0; fw%hy_s(:,:,:)=0; fw%hz_s(:,:,:)=0; 
     allocate(fw%iobs_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
@@ -370,9 +383,9 @@ subroutine eh_init(fs,fw)
     
     !search observation point
     do ii=1,iobs_num_em
-      call eh_find_point(obs_loc_em(ii,:),fw%iobs_po_id(ii,:),&
-                         fw%iobs_po_pe(ii),fw%iobs_li_pe(ii,:),fw%iobs_pl_pe(ii,:),fs%ng_sta,fs%ng_end,&
-                         minval(fs%lg_sta)-fw%Nd,maxval(fs%lg_end)+fw%Nd,fw%coo)
+      call find_point_em(obs_loc_em(ii,:),fw%iobs_po_id(ii,:),&
+                         fw%iobs_po_pe(ii),fw%iobs_li_pe(ii,:),fw%iobs_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
+                         minval(fs%lg%is)-fw%Nd,maxval(fs%lg%ie)+fw%Nd,fw%coo(:,:))
     end do
     
     !write information
@@ -522,10 +535,10 @@ subroutine eh_init(fs,fw)
   end if
   if(fw%inc_num>0) then
     !set initial
-    allocate(fw%inc_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
-    allocate(fw%inc_po_pe(iobs_num_em))
-    allocate(fw%inc_li_pe(iobs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
-    allocate(fw%inc_pl_pe(iobs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
+    allocate(fw%inc_po_id(fw%inc_num,3)) !1:x,        2:y,        3:z
+    allocate(fw%inc_po_pe(fw%inc_num))
+    allocate(fw%inc_li_pe(fw%inc_num,3)) !1:x-line,   2:y-line,   3:z-line
+    allocate(fw%inc_pl_pe(fw%inc_num,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
     fw%inc_po_id(:,:)=0; fw%inc_po_pe(:)=0; fw%inc_li_pe(:,:)=0; fw%inc_pl_pe(:,:)=0; 
     do ii=1,3
       fw%c2_inc_xyz(ii)=(fw%c_0/fw%rep(0)*fs%dt) &
@@ -536,36 +549,42 @@ subroutine eh_init(fs,fw)
     !search incident current source point and check others
     if(fw%inc_dist1/='none') then
       ii=1
-      call eh_find_point(source_loc1(:),fw%inc_po_id(ii,:),&
-                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng_sta,fs%ng_end,&
-                         minval(fs%lg_sta(:))-fw%Nd,maxval(fs%lg_end(:))+fw%Nd,fw%coo(:,:))
+      call find_point_em(source_loc1(:),fw%inc_po_id(ii,:),&
+                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
+                         minval(fs%lg%is(:))-fw%Nd,maxval(fs%lg%ie(:))+fw%Nd,fw%coo(:,:))
       select case(ae_shape1)
       case("Ecos2","Acos2")
         continue
       case default
-        stop 'set ae_shape1 to "Ecos2" or "Acos2"'
+        if(comm_is_root(nproc_id_global)) write(*,*) 'set ae_shape1 to "Ecos2" or "Acos2".'
+        stop
       end select
       diff_cep=(phi_cep1-0.25d0)*2.d0-int((phi_cep1-0.25d0)*2.d0)
       if(ae_shape1=="Ecos2".and.abs(diff_cep)>=1.d-12)then
-        stop "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
+        if(comm_is_root(nproc_id_global)) write(*,*) &
+          "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
+        stop
       end if
       if(rlaser_int_wcm2_1/=-1d0) &
         amplitude1=sqrt(rlaser_int_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
     if(fw%inc_dist2/='none') then
       ii=2
-      call eh_find_point(source_loc2(:),fw%inc_po_id(ii,:),&
-                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng_sta,fs%ng_end,&
-                         minval(fs%lg_sta(:))-fw%Nd,maxval(fs%lg_end(:))+fw%Nd,fw%coo(:,:))
+      call find_point_em(source_loc2(:),fw%inc_po_id(ii,:),&
+                         fw%inc_po_pe(ii),fw%inc_li_pe(ii,:),fw%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
+                         minval(fs%lg%is(:))-fw%Nd,maxval(fs%lg%ie(:))+fw%Nd,fw%coo(:,:))
       select case(ae_shape2)
       case("Ecos2","Acos2")
         continue
       case default
-        stop 'set ae_shape2 to "Ecos2" or "Acos2"'
+        if(comm_is_root(nproc_id_global)) write(*,*) 'set ae_shape2 to "Ecos2" or "Acos2".'
+        stop
       end select
       diff_cep=(phi_cep2-0.25d0)*2.d0-int((phi_cep2-0.25d0)*2.d0)
       if(ae_shape2=="Ecos2".and.abs(diff_cep)>=1.d-12)then
-        stop "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
+        if(comm_is_root(nproc_id_global)) write(*,*) &
+          "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
+        stop
       end if
       if(rlaser_int_wcm2_2/=-1d0) &
         amplitude2=sqrt(rlaser_int_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
@@ -597,27 +616,27 @@ subroutine eh_init(fs,fw)
   !prepare linear response
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
     !check condition
-    iflag=0
-    if(iperiodic==3.and.trans_longi/='tr') iflag=1
+    iflag_lr=0
+    if(iperiodic==3.and.trans_longi/='tr') iflag_lr=1
     do ii=0,imedia_num
-      if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag=1
+      if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag_lr=1
       if(ii==0) then
         select case(type_media(ii))
         case('VACUUM','Vacuum','vacuum')
           continue
         case default
-          iflag=1
+          iflag_lr=1
         end select
       else
         select case(type_media(ii))
         case('DRUDE','Drude','drude','D','d')
           continue
         case default
-          iflag=1
+          iflag_lr=1
         end select
       end if
     end do
-    if(iflag==1) then
+    if(iflag_lr==1) then
       if(comm_is_root(nproc_id_global)) then
         write(*,*) "invalid input keywords:"
         write(*,*) "epsilon and rmu must be 1.0d0."
@@ -631,9 +650,9 @@ subroutine eh_init(fs,fw)
     !set initial current density
     if(fw%inum_d>0) then
       do ii=1,fw%inum_d
-        do iz=fs%ng_sta(3),fs%ng_end(3)
-        do iy=fs%ng_sta(2),fs%ng_end(2)
-        do ix=fs%ng_sta(1),fs%ng_end(1)
+        do iz=fs%ng%is(3),fs%ng%ie(3)
+        do iy=fs%ng%is(2),fs%ng%ie(2)
+        do ix=fs%ng%is(1),fs%ng%ie(1)
           if(fw%idx_d(ix,iy,iz,ii)==1) then
             if(ae_shape1=='impulse') then
               fw%rjx_d(ix,iy,iz,ii)=fw%rjx_d(ix,iy,iz,ii) &
@@ -676,26 +695,26 @@ subroutine eh_init(fs,fw)
     fw%iter_lr=1
     allocate(fw%fr_lr(0:nenergy,3),fw%fi_lr(0:nenergy,3))
     fw%fr_lr(:,:)=0.0d0; fw%fi_lr(:,:)=0.0d0;
-    allocate(fw%rjx_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             fw%rjy_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             fw%rjz_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                       fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                       fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+    allocate(fw%rjx_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%rjy_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%rjz_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3)) )
     fw%rjx_lr(:,:,:)=0.0d0; fw%rjy_lr(:,:,:)=0.0d0; fw%rjz_lr(:,:,:)=0.0d0;
     if(iperiodic==0) then
-      allocate(fw%px_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                         fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                         fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-               fw%py_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                         fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                         fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-               fw%pz_lr(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                         fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                         fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd) )
+      allocate(fw%px_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)),&
+               fw%py_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)),&
+               fw%pz_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)) )
       fw%px_lr(:,:,:)=0.0d0; fw%py_lr(:,:,:)=0.0d0; fw%pz_lr(:,:,:)=0.0d0;
       allocate(fw%dip_lr(nt_em,3))
       fw%dip_lr(:,:)=0.0d0
@@ -723,127 +742,127 @@ contains
     implicit none
     
     !e
-    allocate(fw%ex_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_ex_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_ex_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%ex_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_ex_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_ex_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ex_y(:,:,:)=0.0d0; fw%c1_ex_y(:,:,:)=0.0d0; fw%c2_ex_y(:,:,:)=0.0d0;
-    allocate(fw%ex_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_ex_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_ex_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%ex_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_ex_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_ex_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ex_z(:,:,:)=0.0d0; fw%c1_ex_z(:,:,:)=0.0d0; fw%c2_ex_z(:,:,:)=0.0d0;
-    allocate(fw%ey_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_ey_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_ey_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%ey_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_ey_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_ey_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ey_z(:,:,:)=0.0d0; fw%c1_ey_z(:,:,:)=0.0d0; fw%c2_ey_z(:,:,:)=0.0d0;
-    allocate(fw%ey_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_ey_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_ey_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%ey_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_ey_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_ey_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ey_x(:,:,:)=0.0d0; fw%c1_ey_x(:,:,:)=0.0d0; fw%c2_ey_x(:,:,:)=0.0d0;
-    allocate(fw%ez_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_ez_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_ez_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%ez_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_ez_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_ez_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ez_x(:,:,:)=0.0d0; fw%c1_ez_x(:,:,:)=0.0d0; fw%c2_ez_x(:,:,:)=0.0d0;
-    allocate(fw%ez_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_ez_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_ez_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%ez_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_ez_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_ez_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ez_y(:,:,:)=0.0d0; fw%c1_ez_y(:,:,:)=0.0d0; fw%c2_ez_y(:,:,:)=0.0d0;
     
     !h
-    allocate(fw%hx_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_hx_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_hx_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%hx_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_hx_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_hx_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%hx_y(:,:,:)=0.0d0; fw%c1_hx_y(:,:,:)=0.0d0; fw%c2_hx_y(:,:,:)=0.0d0;
-    allocate(fw%hx_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_hx_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_hx_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%hx_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_hx_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_hx_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%hx_z(:,:,:)=0.0d0; fw%c1_hx_z(:,:,:)=0.0d0; fw%c2_hx_z(:,:,:)=0.0d0;
-    allocate(fw%hy_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_hy_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_hy_z(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%hy_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_hy_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_hy_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%hy_z(:,:,:)=0.0d0; fw%c1_hy_z(:,:,:)=0.0d0; fw%c2_hy_z(:,:,:)=0.0d0;
-    allocate(fw%hy_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_hy_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_hy_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%hy_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_hy_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_hy_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%hy_x(:,:,:)=0.0d0; fw%c1_hy_x(:,:,:)=0.0d0; fw%c2_hy_x(:,:,:)=0.0d0;
-    allocate(fw%hz_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_hz_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_hz_x(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%hz_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_hz_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_hz_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%hz_x(:,:,:)=0.0d0; fw%c1_hz_x(:,:,:)=0.0d0; fw%c2_hz_x(:,:,:)=0.0d0;
-    allocate(fw%hz_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                     fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                     fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c1_hz_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
-    allocate(fw%c2_hz_y(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                        fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                        fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(fw%hz_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                     fs%ng%is_array(2):fs%ng%ie_array(2),&
+                     fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c1_hz_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
+    allocate(fw%c2_hz_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%hz_y(:,:,:)=0.0d0; fw%c1_hz_y(:,:,:)=0.0d0; fw%c2_hz_y(:,:,:)=0.0d0;
     
   end subroutine eh_allocate
@@ -888,9 +907,9 @@ contains
     case('PEC','Pec','pec')
       c1_e=0.0d0; c2_e_x=0.0d0; c2_e_y=0.0d0; c2_e_z=0.0d0;
     case('DRUDE','Drude','drude','D','d')
-      do iz=fs%ng_sta(3),fs%ng_end(3)
-      do iy=fs%ng_sta(2),fs%ng_end(2)
-      do ix=fs%ng_sta(1),fs%ng_end(1)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
         if(fs%imedia(ix,iy,iz)==ii) then
           if(fs%imedia(ix+1,iy,iz)==ii) then !x
             fw%idx_d(ix,iy,iz,icount_d)=1;
@@ -936,97 +955,97 @@ contains
     
     !set coefficient
     if(ii==0) then
-      fw%c1_ex_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_e
-      fw%c2_ex_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c2_e_y
-      fw%c1_ex_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_e
-      fw%c2_ex_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=-c2_e_z
+      fw%c1_ex_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_e
+      fw%c2_ex_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c2_e_y
+      fw%c1_ex_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_e
+      fw%c2_ex_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=-c2_e_z
           
-      fw%c1_ey_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_e
-      fw%c2_ey_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c2_e_z
-      fw%c1_ey_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_e
-      fw%c2_ey_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=-c2_e_x
+      fw%c1_ey_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_e
+      fw%c2_ey_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c2_e_z
+      fw%c1_ey_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_e
+      fw%c2_ey_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=-c2_e_x
         
-      fw%c1_ez_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_e
-      fw%c2_ez_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c2_e_x
-      fw%c1_ez_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_e
-      fw%c2_ez_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=-c2_e_y
+      fw%c1_ez_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_e
+      fw%c2_ez_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c2_e_x
+      fw%c1_ez_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_e
+      fw%c2_ez_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=-c2_e_y
         
-      fw%c1_hx_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_h
-      fw%c2_hx_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=-c2_h_y
-      fw%c1_hx_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_h
-      fw%c2_hx_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c2_h_z
+      fw%c1_hx_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_h
+      fw%c2_hx_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=-c2_h_y
+      fw%c1_hx_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_h
+      fw%c2_hx_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c2_h_z
         
-      fw%c1_hy_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_h
-      fw%c2_hy_z(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=-c2_h_z
-      fw%c1_hy_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_h
-      fw%c2_hy_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c2_h_x
+      fw%c1_hy_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_h
+      fw%c2_hy_z(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=-c2_h_z
+      fw%c1_hy_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_h
+      fw%c2_hy_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c2_h_x
       
-      fw%c1_hz_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_h
-      fw%c2_hz_x(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=-c2_h_x
-      fw%c1_hz_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c1_h
-      fw%c2_hz_y(fs%ng_sta(1):fs%ng_end(1),&
-                 fs%ng_sta(2):fs%ng_end(2),&
-                 fs%ng_sta(3):fs%ng_end(3))=c2_h_y
+      fw%c1_hz_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_h
+      fw%c2_hz_x(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=-c2_h_x
+      fw%c1_hz_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c1_h
+      fw%c2_hz_y(fs%ng%is(1):fs%ng%ie(1),&
+                 fs%ng%is(2):fs%ng%ie(2),&
+                 fs%ng%is(3):fs%ng%ie(3))=c2_h_y
                   
-      fw%c2_jx(fs%ng_sta(1):fs%ng_end(1),&
-               fs%ng_sta(2):fs%ng_end(2),&
-               fs%ng_sta(3):fs%ng_end(3))=-c2_j
-      fw%c2_jy(fs%ng_sta(1):fs%ng_end(1),&
-               fs%ng_sta(2):fs%ng_end(2),&
-               fs%ng_sta(3):fs%ng_end(3))=-c2_j
-      fw%c2_jz(fs%ng_sta(1):fs%ng_end(1),&
-               fs%ng_sta(2):fs%ng_end(2),&
-               fs%ng_sta(3):fs%ng_end(3))=-c2_j
+      fw%c2_jx(fs%ng%is(1):fs%ng%ie(1),&
+               fs%ng%is(2):fs%ng%ie(2),&
+               fs%ng%is(3):fs%ng%ie(3))=-c2_j
+      fw%c2_jy(fs%ng%is(1):fs%ng%ie(1),&
+               fs%ng%is(2):fs%ng%ie(2),&
+               fs%ng%is(3):fs%ng%ie(3))=-c2_j
+      fw%c2_jz(fs%ng%is(1):fs%ng%ie(1),&
+               fs%ng%is(2):fs%ng%ie(2),&
+               fs%ng%is(3):fs%ng%ie(3))=-c2_j
     else
-      do iz=fs%ng_sta(3),fs%ng_end(3)
-      do iy=fs%ng_sta(2),fs%ng_end(2)
-      do ix=fs%ng_sta(1),fs%ng_end(1)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
         if(fs%imedia(ix,iy,iz)==ii) then
           !ex and jx
           if(fs%imedia(ix+1,iy,iz)==ii) then
@@ -1133,13 +1152,13 @@ contains
       fw%wey_d(:,:,:,:)=dble(fw%idy_d(:,:,:,:))
       fw%wez_d(:,:,:,:)=dble(fw%idz_d(:,:,:,:))
       if(smooth_d=='y') then
-        allocate(fs%imedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+        allocate(fs%imedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                           fs%ng%is_array(2):fs%ng%ie_array(2),&
+                           fs%ng%is_array(3):fs%ng%ie_array(3)))
         fs%imedia(:,:,:)=0
-        allocate(fw%rmedia(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                           fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                           fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+        allocate(fw%rmedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                           fs%ng%is_array(2):fs%ng%ie_array(2),&
+                           fs%ng%is_array(3):fs%ng%ie_array(3)))
         fw%rmedia(:,:,:)=0.0d0
         do ii=1,fw%inum_d
           do icomp=1,3
@@ -1152,9 +1171,9 @@ contains
             end if
             call eh_sendrecv(fs,fw,'r')
             fs%imedia(:,:,:)=int(fw%rmedia(:,:,:)+1d-3)
-            do iz=fs%ng_sta(3),fs%ng_end(3)
-            do iy=fs%ng_sta(2),fs%ng_end(2)
-            do ix=fs%ng_sta(1),fs%ng_end(1)
+            do iz=fs%ng%is(3),fs%ng%ie(3)
+            do iy=fs%ng%is(2),fs%ng%ie(2)
+            do ix=fs%ng%is(1),fs%ng%ie(1)
               if(fs%imedia(ix,iy,iz)==1) then
                 if(fs%imedia(ix+1,iy,iz)==0 .or. fs%imedia(ix-1,iy,iz)==0 .or. &
                    fs%imedia(ix,iy+1,iz)==0 .or. fs%imedia(ix,iy-1,iz)==0 .or. &
@@ -1184,30 +1203,30 @@ contains
   subroutine eh_set_pml(idir,c1_e1,c2_e1,c1_e2,c2_e2,c1_h1,c2_h1,c1_h2,c2_h2)
     implicit none
     integer,intent(in)  :: idir
-    real(8),intent(out) :: c1_e1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                           c2_e1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                           c1_e2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                           c2_e2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                           c1_h1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                           c2_h1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                           c1_h2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                           c2_h2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                                 fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                                 fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd)
+    real(8),intent(out) :: c1_e1(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                           c2_e1(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                           c1_e2(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                           c2_e2(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                           c1_h1(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                           c2_h1(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                           c1_h2(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                           c2_h2(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                                 fs%ng%is_array(2):fs%ng%ie_array(2),&
+                                 fs%ng%is_array(3):fs%ng%ie_array(3))
     integer :: ista,iend
     real(8) :: pml_del,s_max
     real(8) :: s_l(fw%ipml_l+1),sh_l(fw%ipml_l), &
@@ -1248,110 +1267,110 @@ contains
     call comm_bcast(c2_pml_h,nproc_group_global)
     
     !set pml(bottom)
-    if((fs%i_bc(idir,1)==1).and.(fs%ng_sta(idir)<=(fs%lg_sta(idir)+fw%ipml_l))) then
+    if((fs%bc(idir,1)=='pml').and.(fs%ng%is(idir)<=(fs%lg%is(idir)+fw%ipml_l))) then
       !e
-      iend=fs%lg_sta(idir)+fw%ipml_l
-      if(fs%ng_end(idir)<iend) then
-        iend=fs%ng_end(idir)
+      iend=fs%lg%is(idir)+fw%ipml_l
+      if(fs%ng%ie(idir)<iend) then
+        iend=fs%ng%ie(idir)
       end if
       icount=1
-      do ii=fs%ng_sta(idir),iend
+      do ii=fs%ng%is(idir),iend
         if(idir==1) then
-          c1_e1(ii,:,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_e1(ii,:,:)=-c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c1_e2(ii,:,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_e2(ii,:,:)= c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_e1(ii,:,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_e1(ii,:,:)=-c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c1_e2(ii,:,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_e2(ii,:,:)= c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
         elseif(idir==2) then
-          c1_e1(:,ii,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_e1(:,ii,:)=-c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c1_e2(:,ii,:)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_e2(:,ii,:)= c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_e1(:,ii,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_e1(:,ii,:)=-c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c1_e2(:,ii,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_e2(:,ii,:)= c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
         elseif(idir==3) then
-          c1_e1(:,:,ii)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_e1(:,:,ii)=-c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c1_e2(:,:,ii)= c1_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_e2(:,:,ii)= c2_pml(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_e1(:,:,ii)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_e1(:,:,ii)=-c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c1_e2(:,:,ii)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_e2(:,:,ii)= c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
         end if
         icount=icount+1
       end do
       
       !h
-      if(iend==(fs%lg_sta(idir)+fw%ipml_l)) then
+      if(iend==(fs%lg%is(idir)+fw%ipml_l)) then
         iend=iend-1
       end if
       icount=1
-      do ii=fs%ng_sta(idir),iend
+      do ii=fs%ng%is(idir),iend
         if(idir==1) then
-          c1_h1(ii,:,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_h1(ii,:,:)= c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c1_h2(ii,:,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_h2(ii,:,:)=-c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_h1(ii,:,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_h1(ii,:,:)= c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c1_h2(ii,:,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_h2(ii,:,:)=-c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
         elseif(idir==2) then
-          c1_h1(:,ii,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_h1(:,ii,:)= c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c1_h2(:,ii,:)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_h2(:,ii,:)=-c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_h1(:,ii,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_h1(:,ii,:)= c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c1_h2(:,ii,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_h2(:,ii,:)=-c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
         elseif(idir==3) then
-          c1_h1(:,:,ii)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_h1(:,:,ii)= c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c1_h2(:,:,ii)= c1_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
-          c2_h2(:,:,ii)=-c2_pml_h(fs%ng_sta(idir)-fs%lg_sta(idir)+icount)
+          c1_h1(:,:,ii)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_h1(:,:,ii)= c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c1_h2(:,:,ii)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+          c2_h2(:,:,ii)=-c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
         end if
         icount=icount+1
       end do
     end if
     
     !set pml(top)
-    if((fs%i_bc(idir,2)==1).and.(fs%ng_end(idir)>=(fs%lg_end(idir)-fw%ipml_l))) then
+    if((fs%bc(idir,2)=='pml').and.(fs%ng%ie(idir)>=(fs%lg%ie(idir)-fw%ipml_l))) then
       !e
-      ista=fs%lg_end(idir)-fw%ipml_l
-      if(fs%ng_sta(idir)>ista) then
-        ista=fs%ng_sta(idir)
+      ista=fs%lg%ie(idir)-fw%ipml_l
+      if(fs%ng%is(idir)>ista) then
+        ista=fs%ng%is(idir)
       end if
       icount=1
-      do ii=ista,fs%ng_end(idir)
+      do ii=ista,fs%ng%ie(idir)
         if(idir==1) then
-          c1_e1(ii,:,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_e1(ii,:,:)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c1_e2(ii,:,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_e2(ii,:,:)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_e1(ii,:,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_e1(ii,:,:)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c1_e2(ii,:,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_e2(ii,:,:)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==2) then
-          c1_e1(:,ii,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_e1(:,ii,:)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c1_e2(:,ii,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_e2(:,ii,:)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_e1(:,ii,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_e1(:,ii,:)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c1_e2(:,ii,:)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_e2(:,ii,:)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==3) then
-          c1_e1(:,:,ii)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_e1(:,:,ii)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c1_e2(:,:,ii)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_e2(:,:,ii)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_e1(:,:,ii)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_e1(:,:,ii)=-c2_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c1_e2(:,:,ii)= c1_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_e2(:,:,ii)= c2_pml((fw%ipml_l+1)-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
         end if
         icount=icount+1
       end do
       
       !h
-      if(fs%ng_end(idir)==fs%lg_end(idir)) then
-        iend=fs%ng_end(idir)-1
+      if(fs%ng%ie(idir)==fs%lg%ie(idir)) then
+        iend=fs%ng%ie(idir)-1
       else
-        iend=fs%ng_end(idir)
+        iend=fs%ng%ie(idir)
       end if
       icount=1
       do ii=ista,iend
         if(idir==1) then
-          c1_h1(ii,:,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_h1(ii,:,:)= c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c1_h2(ii,:,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_h2(ii,:,:)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_h1(ii,:,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_h1(ii,:,:)= c2_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c1_h2(ii,:,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_h2(ii,:,:)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==2) then
-          c1_h1(:,ii,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_h1(:,ii,:)= c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c1_h2(:,ii,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_h2(:,ii,:)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_h1(:,ii,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_h1(:,ii,:)= c2_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c1_h2(:,ii,:)= c1_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_h2(:,ii,:)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
         elseif(idir==3) then
-          c1_h1(:,:,ii)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_h1(:,:,ii)= c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c1_h2(:,:,ii)= c1_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
-          c2_h2(:,:,ii)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg_end(idir)-fw%ipml_l)+(icount-1)))
+          c1_h1(:,:,ii)= c1_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_h1(:,:,ii)= c2_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c1_h2(:,:,ii)= c1_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
+          c2_h2(:,:,ii)=-c2_pml_h(fw%ipml_l-(ista-(fs%lg%ie(idir)-fw%ipml_l)+(icount-1)))
         end if
         icount=icount+1
       end do
@@ -1363,16 +1382,16 @@ end subroutine eh_init
 
 !=========================================================================================
 != input fdtd shape data =================================================================
-subroutine eh_input_shape(ifn,ng_sta,ng_end,lg_sta,lg_end,Nd,imat,format)
+subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use inputoutput,          only: shape_file
   implicit none
   integer,intent(in)      :: ifn,Nd
-  integer,intent(in)      :: ng_sta(3),ng_end(3),lg_sta(3),lg_end(3)
-  integer,intent(out)     :: imat(ng_sta(1)-Nd:ng_end(1)+Nd,&
-                                  ng_sta(2)-Nd:ng_end(2)+Nd,&
-                                  ng_sta(3)-Nd:ng_end(3)+Nd)
+  integer,intent(in)      :: ng_is(3),ng_ie(3),lg_is(3),lg_ie(3)
+  integer,intent(out)     :: imat(ng_is(1)-Nd:ng_ie(1)+Nd,&
+                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+                                  ng_is(3)-Nd:ng_ie(3)+Nd)
   character(2),intent(in) :: format
   real(8),allocatable     :: rtmp1d(:)
   integer                 :: inum(3),inum_check(3)
@@ -1383,7 +1402,7 @@ subroutine eh_input_shape(ifn,ng_sta,ng_end,lg_sta,lg_end,Nd,imat,format)
   
   if(trim(format)=='cu') then
     !check grid information
-    inum(:)=lg_end(:)-lg_sta(:)+1
+    inum(:)=lg_ie(:)-lg_is(:)+1
     read(ifn,*); read (ifn,*); read (ifn,*); !skip
     allocate(rtmp1d(4))
     read (ifn,*) rtmp1d; inum_check(1)=int(rtmp1d(1)+1d-3);
@@ -1400,25 +1419,25 @@ subroutine eh_input_shape(ifn,ng_sta,ng_end,lg_sta,lg_end,Nd,imat,format)
     
     !input shape(general case)
     allocate(rtmp1d(6))
-    ix=lg_sta(1); iy=lg_sta(2); iz=lg_sta(3);
+    ix=lg_is(1); iy=lg_is(2); iz=lg_is(3);
     do ii=1,int(inum(1)*inum(2)*inum(3)/6)
       read (ifn,*) rtmp1d
       do ij=1,6
         !check flag and write imat
         iflag_x=0; iflag_y=0; iflag_z=0;
-        if(ix>=ng_sta(1) .and. ix<=ng_end(1)) iflag_x=1
-        if(iy>=ng_sta(2) .and. iy<=ng_end(2)) iflag_y=1
-        if(iz>=ng_sta(3) .and. iz<=ng_end(3)) iflag_z=1
+        if(ix>=ng_is(1) .and. ix<=ng_ie(1)) iflag_x=1
+        if(iy>=ng_is(2) .and. iy<=ng_ie(2)) iflag_y=1
+        if(iz>=ng_is(3) .and. iz<=ng_ie(3)) iflag_z=1
         if(iflag_x==1 .and. iflag_y==1 .and. iflag_z==1) then
           imat(ix,iy,iz)=int(rtmp1d(ij)+1d-3)
         end if        
         
         !update iz, iy, ix 
-        iz=iz+1                                            !iz
-        if(iz>lg_end(3))                      iz=lg_sta(3) !iz
-        if(iz==lg_sta(3))                     iy=iy+1      !iy
-        if(iy>lg_end(2))                      iy=lg_sta(2) !iy
-        if(iz==lg_sta(3) .and. iy==lg_sta(2)) ix=ix+1      !ix
+        iz=iz+1                                          !iz
+        if(iz>lg_ie(3))                      iz=lg_is(3) !iz
+        if(iz==lg_is(3))                     iy=iy+1     !iy
+        if(iy>lg_ie(2))                      iy=lg_is(2) !iy
+        if(iz==lg_is(3) .and. iy==lg_is(2)) ix=ix+1      !ix
       end do
     end do
     deallocate(rtmp1d)
@@ -1430,19 +1449,19 @@ subroutine eh_input_shape(ifn,ng_sta,ng_end,lg_sta,lg_end,Nd,imat,format)
       do ij=1,mod(inum(1)*inum(2)*inum(3),6)
         !check flag and write imat
         iflag_x=0; iflag_y=0; iflag_z=0;
-        if(ix>=ng_sta(1) .and. ix<=ng_end(1)) iflag_x=1
-        if(iy>=ng_sta(2) .and. iy<=ng_end(2)) iflag_y=1
-        if(iz>=ng_sta(3) .and. iz<=ng_end(3)) iflag_z=1
+        if(ix>=ng_is(1) .and. ix<=ng_ie(1)) iflag_x=1
+        if(iy>=ng_is(2) .and. iy<=ng_ie(2)) iflag_y=1
+        if(iz>=ng_is(3) .and. iz<=ng_ie(3)) iflag_z=1
         if(iflag_x==1 .and. iflag_y==1 .and. iflag_z==1) then
           imat(ix,iy,iz)=int(rtmp1d(ij)+1d-3)
         end if        
         
         !update iz, iy, ix 
-        iz=iz+1                                            !iz
-        if(iz>lg_end(3))                      iz=lg_sta(3) !iz
-        if(iz==lg_sta(3))                     iy=iy+1      !iy
-        if(iy>lg_end(2))                      iy=lg_sta(2) !iy
-        if(iz==lg_sta(3) .and. iy==lg_sta(2)) ix=ix+1      !ix
+        iz=iz+1                                          !iz
+        if(iz>lg_ie(3))                      iz=lg_is(3) !iz
+        if(iz==lg_is(3))                     iy=iy+1     !iy
+        if(iy>lg_ie(2))                      iy=lg_is(2) !iy
+        if(iz==lg_is(3) .and. iy==lg_is(2)) ix=ix+1      !ix
       end do      
       deallocate(rtmp1d)
     end if
@@ -1453,127 +1472,6 @@ subroutine eh_input_shape(ifn,ng_sta,ng_end,lg_sta,lg_end,Nd,imat,format)
   close(ifn)
 
 end subroutine eh_input_shape
-
-!=========================================================================================
-!= find point and set corresponding processor element ====================================
-subroutine eh_find_point(rloc,id,ipo,ili,ipl,ista,iend,icoo_sta,icoo_end,coo)
-  use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
-  use salmon_communication, only: comm_summation
-  implicit none
-  real(8),intent(in)    :: rloc(3)
-  integer,intent(inout) :: id(3)
-  integer,intent(out)   :: ipo
-  integer,intent(out)   :: ili(3),ipl(3)
-  integer,intent(in)    :: ista(3),iend(3)
-  integer,intent(in)    :: icoo_sta,icoo_end
-  real(8),intent(in)    :: coo(icoo_sta:icoo_end,3)
-  integer               :: ii,ix,iy,iz,ipe_tmp,i1,i1s,i2,i2s
-  integer               :: id_tmp(3),id_tmp2(3)
-  real(8)               :: err(0:nproc_size_global-1),err2(0:nproc_size_global-1)
-  real(8)               :: err_tmp
-  
-  !set initial value
-  err(:)              =0.0d0
-  err(nproc_id_global)=1.0d9
-  err2(:)             =0.0d0
-  id_tmp(:)           =0
-  id_tmp2(:)          =0
-  
-  !find observation point in each PE
-  do iz=ista(3),iend(3)
-  do iy=ista(2),iend(2)
-  do ix=ista(1),iend(1)
-    err_tmp=sqrt( (coo(ix,1)-rloc(1))**2.0d0 &
-                 +(coo(iy,2)-rloc(2))**2.0d0 &
-                 +(coo(iz,3)-rloc(3))**2.0d0 )
-    if(err(nproc_id_global)>err_tmp) then
-      err(nproc_id_global)=err_tmp
-      id_tmp(1)=ix; id_tmp(2)=iy; id_tmp(3)=iz;
-    end if
-  end do
-  end do
-  end do
-  call comm_summation(err,err2,nproc_size_global,nproc_group_global)
-  
-  !determine and share id + determine pe including the point
-  ipe_tmp=-1; err_tmp=1.0d9;
-  do ii=0,nproc_size_global-1
-    if(err_tmp>err2(ii)) then
-      err_tmp=err2(ii)
-      ipe_tmp=ii
-    end if
-  end do
-  if(nproc_id_global==ipe_tmp) then
-    ipo=1;
-  else
-    ipo=0; id_tmp(:)=0;
-  end if
-  call comm_summation(id_tmp,id_tmp2,3,nproc_group_global)
-  id(:)=id_tmp2(:)
-  
-  !determine pe including the line
-  do ii=1,3
-    if(ii==1) then     !x-line(searching at yz-plane)
-      i1s=3; i2s=2;
-    elseif(ii==2) then !x-line(searching at xz-plane)
-      i1s=3; i2s=1;
-    elseif(ii==3) then !z-line(searching at xy-plane)
-      i1s=2; i2s=1;
-    end if
-    do i2=ista(i2s),iend(i2s)
-    do i1=ista(i1s),iend(i1s)
-      if( (i1==id(i1s)).and.(i2==id(i2s)) ) ili(ii)=1
-    end do
-    end do
-  end do
-  
-  !determine pe including the plane
-  do ii=1,3
-    if(ii==1) then     !xy-plane(searching at z-line)
-      i1s=3;
-    elseif(ii==2) then !yz-plane(searching at x-line)
-      i1s=1;
-    elseif(ii==3) then !xz-plane(searching at y-line)
-      i1s=2;
-    end if
-    do i1=ista(i1s),iend(i1s)
-      if(i1==id(i1s)) ipl(ii)=1
-    end do
-  end do
-  
-end subroutine eh_find_point
-
-!=========================================================================================
-!= set coordinate ========================================================================
-subroutine eh_set_coo(iperi,Nd,ioe,ista,iend,hgs,coo)
-  implicit none
-  integer,intent(in)  :: iperi,Nd
-  integer,intent(in)  :: ioe(3),ista(3),iend(3)
-  real(8),intent(in)  :: hgs(3)
-  real(8),intent(out) :: coo(minval(ista(:))-Nd:maxval(iend(:))+Nd,3)
-  integer :: ii,ij
-  
-  do ii=1,3
-    select case(iperi)
-    case(0)
-      select case(ioe(ii))
-      case(1)
-        do ij=ista(ii)-Nd,iend(ii)+Nd
-          coo(ij,ii)=dble(ij)*hgs(ii)
-        end do
-      case(2)
-        do ij=ista(ii)-Nd,iend(ii)+Nd
-          coo(ij,ii)=(dble(ij)-0.5d0)*hgs(ii)
-        end do
-      end select
-    case(3)
-      do ij=ista(ii)-Nd,iend(ii)+Nd
-        coo(ij,ii)=dble(ij-1)*hgs(ii)
-      end do
-    end select
-  end do
-  
-end subroutine eh_set_coo
 
 !=========================================================================================
 != prepare GCEED =========================================================================
@@ -1596,10 +1494,10 @@ subroutine eh_prep_GCEED(fs,fw)
   use init_sendrecv_sub, only: init_updown,iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
   use sendrecv_grid,     only: init_sendrecv_grid
   use structures,        only: s_fdtd_system
-  use salmon_maxwell,    only: s_fdtd_work
+  use salmon_maxwell,    only: ls_fdtd_work
   implicit none
   type(s_fdtd_system)   :: fs
-  type(s_fdtd_work)     :: fw
+  type(ls_fdtd_work)    :: fw
   integer               :: neig_ng_eh(1:3,1:2)
   integer               :: id_tmp,ii
   
@@ -1628,8 +1526,6 @@ subroutine eh_prep_GCEED(fs,fw)
   allocate(inum_Mxin_s(3,0:nproc_size_global-1))
   call setng(fs%ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
              nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,1)
-  fs%lg_sta(:)=fs%lg%is(:); fs%lg_end(:)=fs%lg%ie(:);
-  fs%ng_sta(:)=fs%ng%is(:); fs%ng_end(:)=fs%ng%ie(:);
   fw%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment
@@ -1646,10 +1542,10 @@ subroutine eh_prep_GCEED(fs,fw)
   neig_ng_eh(3,1)=kup_array(id_tmp); neig_ng_eh(3,2)=kdw_array(id_tmp);
   !This process about ng is temporal. 
   !With modifying set_ng to be applied to arbitrary Nd, this process will be removed.
-  fs%ng%is_overlap(1:3)=fs%ng_sta(1:3)-fw%Nd
-  fs%ng%ie_overlap(1:3)=fs%ng_end(1:3)+fw%Nd
-  fs%ng%is_array(1:3)  =fs%ng_sta(1:3)-fw%Nd
-  fs%ng%ie_array(1:3)  =fs%ng_end(1:3)+fw%Nd
+  fs%ng%is_overlap(1:3)=fs%ng%is(1:3)-fw%Nd
+  fs%ng%ie_overlap(1:3)=fs%ng%ie(1:3)+fw%Nd
+  fs%ng%is_array(1:3)  =fs%ng%is(1:3)-fw%Nd
+  fs%ng%ie_array(1:3)  =fs%ng%ie(1:3)+fw%Nd
   if(allocated(fs%ng%idx)) deallocate(fs%ng%idx)
   if(allocated(fs%ng%idy)) deallocate(fs%ng%idy)
   if(allocated(fs%ng%idz)) deallocate(fs%ng%idz)
@@ -1665,7 +1561,7 @@ subroutine eh_prep_GCEED(fs,fw)
   do ii=fs%ng%is_overlap(3),fs%ng%ie_overlap(3)
     fs%ng%idz(ii)=ii
   end do
-  fs%ng%nd=fw%Nd
+  fs%ng%Nd=fw%Nd
   call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,nproc_id_global,neig_ng_eh)
   
 end subroutine eh_prep_GCEED

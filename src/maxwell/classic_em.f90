@@ -18,12 +18,12 @@ subroutine classic_em
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use structures,           only: s_fdtd_system, s_fdtd_field
-  use salmon_maxwell,       only: s_fdtd_work,init_maxwell,calc_maxwell,finalize_maxwell
+  use salmon_maxwell,       only: ls_fdtd_work,init_maxwell,calc_maxwell,finalize_maxwell
   use misc_routines,        only: get_wtime
   implicit none
   type(s_fdtd_system) :: fs
   type(s_fdtd_field)  :: ff
-  type(s_fdtd_work)   :: fw
+  type(ls_fdtd_work)  :: fw
   real(8)             :: elapsed_time
   
   elapsed_time=get_wtime()

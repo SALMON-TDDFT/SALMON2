@@ -384,7 +384,7 @@ contains
       & dl_em, &
       & dt_em, &
       & nt_em, &
-      & iboundary, &
+      & boundary_em, &
       & wave_input, &
       & ek_dir1, &
       & source_loc1, &
@@ -725,31 +725,31 @@ contains
     nmacro_write_group=-1
 
 !! == default for &maxwell
-    al_em(:)        = 0d0
-    dl_em(:)        = 0d0
-    dt_em           = 0d0
-    nt_em           = 0
-    iboundary(:,:)  = 0
-    wave_input      = 'none'
-    ek_dir1(:)      = 0d0
-    source_loc1(:)  = 0d0
-    ek_dir2(:)      = 0d0
-    source_loc2(:)  = 0d0
-    iobs_num_em     = 0
-    iobs_samp_em    = 1
-    obs_loc_em(:,:) = 0d0
-    obs_plane_em(:) = 'n'
-    shape_file      = 'none'
-    imedia_num      = 0
-    type_media(:)   = 'vacuum'
-    epsilon(:)      = 1d0
-    rmu(:)          = 1d0
-    sigma(:)        = 0d0
-    omega_p_d(:)    = 0d0
-    gamma_d(:)      = 0d0
-    smooth_d        = 'n'
-    weight_d        = 0.5d0
-    wf_em           = 'y'
+    al_em(:)         = 0d0
+    dl_em(:)         = 0d0
+    dt_em            = 0d0
+    nt_em            = 0
+    boundary_em(:,:) = 'default'
+    wave_input       = 'none'
+    ek_dir1(:)       = 0d0
+    source_loc1(:)   = 0d0
+    ek_dir2(:)       = 0d0
+    source_loc2(:)   = 0d0
+    iobs_num_em      = 0
+    iobs_samp_em     = 1
+    obs_loc_em(:,:)  = 0d0
+    obs_plane_em(:)  = 'n'
+    shape_file       = 'none'
+    imedia_num       = 0
+    type_media(:)    = 'vacuum'
+    epsilon(:)       = 1d0
+    rmu(:)           = 1d0
+    sigma(:)         = 0d0
+    omega_p_d(:)     = 0d0
+    gamma_d(:)       = 0d0
+    smooth_d         = 'n'
+    weight_d         = 0.5d0
+    wf_em            = 'y'
 
 !! == default for &analysis
     projection_option   = 'no'
@@ -1155,7 +1155,7 @@ contains
     call comm_bcast(dt_em        ,nproc_group_global)
     dt_em = dt_em * utime_to_au
     call comm_bcast(nt_em        ,nproc_group_global)
-    call comm_bcast(iboundary    ,nproc_group_global)
+    call comm_bcast(boundary_em  ,nproc_group_global)
     call comm_bcast(wave_input,nproc_group_global)
     call comm_bcast(ek_dir1      ,nproc_group_global)
     call comm_bcast(source_loc1  ,nproc_group_global)
@@ -1784,12 +1784,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(3)', dl_em(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iboundary(1,1)', iboundary(1,1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iboundary(1,2)', iboundary(1,2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iboundary(2,1)', iboundary(2,1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iboundary(2,2)', iboundary(2,2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iboundary(3,1)', iboundary(3,1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iboundary(3,2)', iboundary(3,2)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,2)', boundary_em(1,2)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,1)', boundary_em(2,1)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,2)', boundary_em(2,2)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,1)', boundary_em(3,1)
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,2)', boundary_em(3,2)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'wave_input', wave_input
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(1)', ek_dir1(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(2)', ek_dir1(2)

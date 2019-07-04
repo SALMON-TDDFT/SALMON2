@@ -7,6 +7,8 @@ set(SOURCES
     coulomb_init.f90
     coulomb_finalize.f90
     coulomb_calc.f90
+    set_coo_em.f90
+    find_point_em.f90
     eh_calc.f90
     eh_init.f90
     eh_finalize.f90

@@ -17,7 +17,7 @@
 module salmon_maxwell
   implicit none
   
-  type s_fdtd_work
+  type ls_fdtd_work
     !share
     
     !weyl
@@ -57,15 +57,15 @@ module salmon_maxwell
     real(8),allocatable :: ex_y(:,:,:),c1_ex_y(:,:,:),c2_ex_y(:,:,:),ex_z(:,:,:),c1_ex_z(:,:,:),c2_ex_z(:,:,:) !e
     real(8),allocatable :: ey_z(:,:,:),c1_ey_z(:,:,:),c2_ey_z(:,:,:),ey_x(:,:,:),c1_ey_x(:,:,:),c2_ey_x(:,:,:) !e
     real(8),allocatable :: ez_x(:,:,:),c1_ez_x(:,:,:),c2_ez_x(:,:,:),ez_y(:,:,:),c1_ez_y(:,:,:),c2_ez_y(:,:,:) !e
-    integer             :: iex_y_sta(3),iex_y_end(3),iex_z_sta(3),iex_z_end(3)                                 !e
-    integer             :: iey_z_sta(3),iey_z_end(3),iey_x_sta(3),iey_x_end(3)                                 !e
-    integer             :: iez_x_sta(3),iez_x_end(3),iez_y_sta(3),iez_y_end(3)                                 !e
+    integer             :: iex_y_is(3),iex_y_ie(3),iex_z_is(3),iex_z_ie(3)                                     !e
+    integer             :: iey_z_is(3),iey_z_ie(3),iey_x_is(3),iey_x_ie(3)                                     !e
+    integer             :: iez_x_is(3),iez_x_ie(3),iez_y_is(3),iez_y_ie(3)                                     !e
     real(8),allocatable :: hx_y(:,:,:),c1_hx_y(:,:,:),c2_hx_y(:,:,:),hx_z(:,:,:),c1_hx_z(:,:,:),c2_hx_z(:,:,:) !h
     real(8),allocatable :: hy_z(:,:,:),c1_hy_z(:,:,:),c2_hy_z(:,:,:),hy_x(:,:,:),c1_hy_x(:,:,:),c2_hy_x(:,:,:) !h
     real(8),allocatable :: hz_x(:,:,:),c1_hz_x(:,:,:),c2_hz_x(:,:,:),hz_y(:,:,:),c1_hz_y(:,:,:),c2_hz_y(:,:,:) !h
-    integer             :: ihx_y_sta(3),ihx_y_end(3),ihx_z_sta(3),ihx_z_end(3)                                 !h
-    integer             :: ihy_z_sta(3),ihy_z_end(3),ihy_x_sta(3),ihy_x_end(3)                                 !h
-    integer             :: ihz_x_sta(3),ihz_x_end(3),ihz_y_sta(3),ihz_y_end(3)                                 !h
+    integer             :: ihx_y_is(3),ihx_y_ie(3),ihx_z_is(3),ihx_z_ie(3)                                     !h
+    integer             :: ihy_z_is(3),ihy_z_ie(3),ihy_x_is(3),ihy_x_ie(3)                                     !h
+    integer             :: ihz_x_is(3),ihz_x_ie(3),ihz_y_is(3),ihz_y_ie(3)                                     !h
     real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)                                        !e for save
     real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)                                        !h for save
     real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)       !coeff. for general curr. dens.
@@ -86,7 +86,7 @@ module salmon_maxwell
     real(8),allocatable :: px_lr(:,:,:), py_lr(:,:,:), pz_lr(:,:,:)     !LR: poparization vector
     real(8),allocatable :: curr_lr(:,:)                                 !LR: current
     real(8),allocatable :: dip_lr(:,:)                                  !LR: dipolemoment
-  end type s_fdtd_work
+  end type ls_fdtd_work
   
   contains
   
@@ -96,7 +96,7 @@ module salmon_maxwell
     implicit none
     type(s_fdtd_system) :: fs
     type(s_fdtd_field)  :: ff
-    type(s_fdtd_work)   :: fw
+    type(ls_fdtd_work)  :: fw
     
     select case(theory)
     case('Maxwell+TDDFT')
@@ -129,7 +129,7 @@ module salmon_maxwell
     implicit none
     type(s_fdtd_system) :: fs
     type(s_fdtd_field)  :: ff
-    type(s_fdtd_work)   :: fw
+    type(ls_fdtd_work)  :: fw
     
     select case(fs%gauge)
     case('weyl')
@@ -146,7 +146,7 @@ module salmon_maxwell
     implicit none
     type(s_fdtd_system) :: fs
     type(s_fdtd_field)  :: ff
-    type(s_fdtd_work)   :: fw
+    type(ls_fdtd_work)  :: fw
     
     select case(fs%gauge)
     case('weyl')

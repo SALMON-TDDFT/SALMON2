@@ -196,8 +196,8 @@ Subroutine analysis_RT_using_GS(Rion_xyz_update,iter_GS_max,zu,it,action)
            nee  = sum(ovlp_occ(NBoccmax+1:NB,:))
            neh  = sum(occ)-sum(ovlp_occ(1:NBoccmax,:))
            write(408,30) time, nee, neh
-20         format(i6,500e16.6)
-30         format(1x,3e16.6E3)
+20         format(i6,500e26.16E3)
+30         format(1x,3e26.16E3)
         end if
 
         write(*,*) '  forces on atoms (GS):'
