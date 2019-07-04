@@ -592,5 +592,19 @@ iwk3num(1:3)=iwk3end(1:3)-iwk3sta(1:3)+1
 
 end subroutine make_iwksta_iwkend
 
+function check_rion_update() result(rion_update)
+  implicit none
+  logical :: rion_update
+  ! iflag_opt <= calculation%use_geometry_opt (in scf)
+  ! iflag_md  <= calculation%use_ehrenfest_md (in rt)
+  if (iscfrt == 1) then
+    rion_update = (iflag_opt == 1)
+  else if (iscfrt == 2) then
+    rion_update = (iflag_md == 1)
+  else
+    rion_update = .true.
+  end if
+end function
+
 END MODULE scf_data
 
