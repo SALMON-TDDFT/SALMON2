@@ -72,11 +72,16 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
 
   character(100) :: comment_line
 
+  logical :: rion_update
+
   call timer_begin(LOG_CALC_VBOX)
   
   idensity=0
   idiffDensity=1
-  ielf=2 
+  ielf=2
+
+  ! for calc_total_energy_periodic
+  rion_update = check_rion_update() .or. (itt == Miter_rt+1)
   
   if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%brl)
   
@@ -476,7 +481,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
     end if
     if(iflag_md==1) call calc_current_ion(system,curr_ion(:,itt))
 
-    call calc_Total_Energy_periodic(energy,system,pp,fg)
+    call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     rbox1=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction( + : rbox1 )
     do iz=ng_sta(3),ng_end(3)

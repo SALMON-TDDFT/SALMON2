@@ -99,7 +99,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_periodic(energy,system,pp,fg)
+  SUBROUTINE calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     use structures
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
@@ -109,15 +109,17 @@ CONTAINS
     type(s_pp_info),intent(in) :: pp
     type(s_fourier_grid),intent(in) :: fg
     type(s_energy)             :: energy
+    logical,intent(in)         :: rion_update
     !
     integer :: ix,iy,iz,ia,ib,ig
-    real(8) :: rr,rab(3),r(3),E_tmp,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
+    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
     complex(8) :: rho_e,rho_i
 
     sysvol = system%det_al
 
-!    if (Rion_update) then ! Ewald sum
     E_tmp = 0d0
+    E_tmp_l = 0d0
+    if (rion_update) then ! Ewald sum
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ia,ib,ix,iy,iz,r,rab,rr) &
@@ -143,7 +145,22 @@ CONTAINS
     end do
 !$omp end parallel do
     E_tmp = E_tmp - Pi*sum(pp%Zps(Kion(:)))**2/(2*aEwald*sysvol)-sqrt(aEwald/Pi)*sum(pp%Zps(Kion(:))**2)
-!    end if
+
+!$omp parallel do default(none) &
+!$omp          reduction(+:E_tmp_l) &
+!$omp          private(ig,g,G2,rho_i) &
+!$omp          shared(fg,aEwald,sysvol)
+      do ig=fg%ig_s,fg%ig_e
+        if(ig == fg%iGzero ) cycle
+        g(1) = fg%Gx(ig)
+        g(2) = fg%Gy(ig)
+        g(3) = fg%Gz(ig)
+        G2 = g(1)**2 + g(2)**2 + g(3)**2
+        rho_i = fg%rhoG_ion(ig)
+        E_tmp_l = E_tmp_l + sysvol*(4*Pi/G2)*(abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
+      end do
+!$omp end parallel do
+    end if
 
     E_wrk = 0d0
 !$omp parallel do default(none) &
@@ -158,26 +175,30 @@ CONTAINS
       G2 = g(1)**2 + g(2)**2 + g(3)**2
       rho_i = fg%rhoG_ion(ig)
       rho_e = fg%rhoG_elec(ig)
-      E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
-      E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
-      E_wrk(3) = E_wrk(3) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
+      E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
+      E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        E_wrk(4) = E_wrk(4) + conjg(rho_e)*fg%dVG_ion(ig,Kion(ia))*exp(-zI*Gd)         ! electron-ion (core)
+        E_wrk(3) = E_wrk(3) + conjg(rho_e)*fg%dVG_ion(ig,Kion(ia))*exp(-zI*Gd)         ! electron-ion (core)
       end do
     enddo
 !$omp end parallel do
-    call comm_summation(E_wrk,E_sum,4,fg%icomm_fourier)
 
+    if (rion_update) then
+      E_wrk(4) = E_tmp_l
+      call comm_summation(E_wrk,E_sum,4,fg%icomm_fourier)
   ! ion-ion energy
-    energy%E_ion_ion = E_tmp + E_sum(1)
+      energy%E_ion_ion = E_tmp + E_sum(4)
+    else
+      call comm_summation(E_wrk,E_sum,3,fg%icomm_fourier)
+    end if
 
   ! Hartree energy
-    energy%E_h = E_sum(2)
+    energy%E_h = E_sum(1)
 
   ! electron-ion energy (local part)
-    energy%E_ion_loc = E_sum(3) + E_sum(4)
+    energy%E_ion_loc = E_sum(2) + E_sum(3)
 
   ! total energy
     energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion

@@ -95,8 +95,8 @@ type(s_fourier_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_energy) :: energy
 type(s_force)  :: force
- 
 
+logical :: rion_update
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -596,7 +596,8 @@ if(iopt==1)then
         enddo
         enddo
       end if
-      call calc_Total_Energy_periodic(energy,system,pp,fg)
+      rion_update = .true. ! it's first calculation
+      call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
     if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
@@ -944,6 +945,9 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   Miter=Miter+1
 
+  ! for calc_total_energy_periodic
+  rion_update = check_rion_update() .or. (iter == 1)
+
   if(temperature_k>=0.d0.and.Miter>iditer_notemperature) then
     if(iperiodic.eq.3) then
       call ne2mu_p
@@ -1072,7 +1076,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         enddo
         enddo
       end if
-      call calc_Total_Energy_periodic(energy,system,pp,fg)
+      call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
     if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
@@ -1262,7 +1266,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         enddo
         enddo
       end if
-      call calc_Total_Energy_periodic(energy,system,pp,fg)
+      call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
     if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
