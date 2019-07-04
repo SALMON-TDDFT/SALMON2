@@ -17,7 +17,7 @@
 module salmon_maxwell
   implicit none
   
-  type s_fdtd_work
+  type ls_fdtd_work
     !share
     
     !weyl
@@ -86,7 +86,7 @@ module salmon_maxwell
     real(8),allocatable :: px_lr(:,:,:), py_lr(:,:,:), pz_lr(:,:,:)     !LR: poparization vector
     real(8),allocatable :: curr_lr(:,:)                                 !LR: current
     real(8),allocatable :: dip_lr(:,:)                                  !LR: dipolemoment
-  end type s_fdtd_work
+  end type ls_fdtd_work
   
   contains
   
@@ -96,7 +96,7 @@ module salmon_maxwell
     implicit none
     type(s_fdtd_system) :: fs
     type(s_fdtd_field)  :: ff
-    type(s_fdtd_work)   :: fw
+    type(ls_fdtd_work)  :: fw
     
     select case(theory)
     case('Maxwell+TDDFT')
@@ -129,7 +129,7 @@ module salmon_maxwell
     implicit none
     type(s_fdtd_system) :: fs
     type(s_fdtd_field)  :: ff
-    type(s_fdtd_work)   :: fw
+    type(ls_fdtd_work)  :: fw
     
     select case(fs%gauge)
     case('weyl')
@@ -146,7 +146,7 @@ module salmon_maxwell
     implicit none
     type(s_fdtd_system) :: fs
     type(s_fdtd_field)  :: ff
-    type(s_fdtd_work)   :: fw
+    type(ls_fdtd_work)  :: fw
     
     select case(fs%gauge)
     case('weyl')
