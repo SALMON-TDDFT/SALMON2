@@ -22,11 +22,11 @@ subroutine eh_finalize(fs,fw)
   use salmon_communication, only: comm_is_root
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: s_fdtd_work
+  use math_constants,       only: pi
   implicit none
   type(s_fdtd_system) :: fs
   type(s_fdtd_work)   :: fw
   integer             :: ii
-  real(8),parameter   :: pi=3.141592653589793d0
   character(128)      :: save_name
   
   !output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr)
@@ -128,9 +128,9 @@ subroutine eh_finalize(fs,fw)
             fs%hgs(2)*ulength_from_au,', ',&
             fs%hgs(3)*ulength_from_au
       write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_sta            =',&
-            fs%lg_sta(1),', ',fs%lg_sta(2),', ',fs%lg_sta(3)
+            fs%lg%is(1),', ',fs%lg%is(2),', ',fs%lg%is(3)
       write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_end            =',&
-            fs%lg_end(1),', ',fs%lg_end(2),', ',fs%lg_end(3)
+            fs%lg%ie(1),', ',fs%lg%ie(2),', ',fs%lg%ie(3)
       write(fw%ifn,'(A,I14)')                      'iobs_num_em       =',iobs_num_em
       write(fw%ifn,'(A,I14)')                      'iobs_samp_em      =',iobs_samp_em
       do ii=1,iobs_num_em
@@ -164,7 +164,8 @@ end subroutine eh_finalize
 !=========================================================================================
 != Fourier transformation in eh ==========================================================
 subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
-  use inputoutput, only: wf_em
+  use inputoutput,    only: wf_em
+  use math_constants, only: zi
   implicit none
   integer,intent(in)   :: nt,ne
   real(8),intent(in)   :: dt,de
@@ -173,7 +174,6 @@ subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
   integer              :: ie,it
   real(8)              :: ft_wf(nt)
   real(8)              :: hw
-  complex(8),parameter :: zi=(0.d0,1.d0)
   complex(8)           :: zf
   
   !apply window function

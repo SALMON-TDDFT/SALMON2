@@ -22,11 +22,11 @@ subroutine eh_calc(fs,fw)
   use salmon_communication, only: comm_is_root,comm_summation
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: s_fdtd_work
+  use math_constants,       only: pi
   implicit none
   type(s_fdtd_system) :: fs
   type(s_fdtd_work)   :: fw
   integer             :: iter,ii,ix,iy,iz
-  real(8),parameter   :: pi=3.141592653589793d0
   character(128)      :: save_name
   
   !time-iteration
@@ -48,17 +48,17 @@ subroutine eh_calc(fs,fw)
     end if
     
     !update e
-    call eh_fd(fw%iex_y_sta,fw%iex_y_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%iex_y_is,fw%iex_y_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ex_y,fw%c2_ex_y,fw%ex_y,fw%hz_x,fw%hz_y,      'e','y') !ex_y
-    call eh_fd(fw%iex_z_sta,fw%iex_z_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%iex_z_is,fw%iex_z_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ex_z,fw%c2_ex_z,fw%ex_z,fw%hy_z,fw%hy_x,      'e','z') !ex_z
-    call eh_fd(fw%iey_z_sta,fw%iey_z_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%iey_z_is,fw%iey_z_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ey_z,fw%c2_ey_z,fw%ey_z,fw%hx_y,fw%hx_z,      'e','z') !ey_z
-    call eh_fd(fw%iey_x_sta,fw%iey_x_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%iey_x_is,fw%iey_x_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ey_x,fw%c2_ey_x,fw%ey_x,fw%hz_x,fw%hz_y,      'e','x') !ey_x
-    call eh_fd(fw%iez_x_sta,fw%iez_x_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%iez_x_is,fw%iez_x_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ez_x,fw%c2_ez_x,fw%ez_x,fw%hy_z,fw%hy_x,      'e','x') !ez_x
-    call eh_fd(fw%iez_y_sta,fw%iez_y_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%iez_y_is,fw%iez_y_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ez_y,fw%c2_ez_y,fw%ez_y,fw%hx_y,fw%hx_z,      'e','y') !ez_y
     if(fw%inc_num>0) then                                !add incident current source
       if(fw%inc_dist1/='none') call eh_add_inc(1,amplitude1,pulse_tw1,omega1,phi_cep1,&
@@ -75,9 +75,9 @@ subroutine eh_calc(fs,fw)
     if( (iobs_num_em>0).and.(mod(iter,iobs_samp_em)==0) )then
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=(fs%ng_sta(3)-fw%Nd),(fs%ng_end(3)+fw%Nd)
-      do iy=(fs%ng_sta(2)-fw%Nd),(fs%ng_end(2)+fw%Nd)
-      do ix=(fs%ng_sta(1)-fw%Nd),(fs%ng_end(1)+fw%Nd)
+      do iz=(fs%ng%is_array(3)),(fs%ng%ie_array(3))
+      do iy=(fs%ng%is_array(2)),(fs%ng%ie_array(2))
+      do ix=(fs%ng%is_array(1)),(fs%ng%ie_array(1))
         fw%hx_s(ix,iy,iz)=fw%hx_y(ix,iy,iz)+fw%hx_z(ix,iy,iz)
         fw%hy_s(ix,iy,iz)=fw%hy_z(ix,iy,iz)+fw%hy_x(ix,iy,iz)
         fw%hz_s(ix,iy,iz)=fw%hz_x(ix,iy,iz)+fw%hz_y(ix,iy,iz)
@@ -89,17 +89,17 @@ subroutine eh_calc(fs,fw)
     end if
     
     !update h
-    call eh_fd(fw%ihx_y_sta,fw%ihx_y_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%ihx_y_is,fw%ihx_y_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_hx_y,fw%c2_hx_y,fw%hx_y,fw%ez_x,fw%ez_y,      'h','y') !hx_y
-    call eh_fd(fw%ihx_z_sta,fw%ihx_z_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%ihx_z_is,fw%ihx_z_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_hx_z,fw%c2_hx_z,fw%hx_z,fw%ey_z,fw%ey_x,      'h','z') !hx_z
-    call eh_fd(fw%ihy_z_sta,fw%ihy_z_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%ihy_z_is,fw%ihy_z_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_hy_z,fw%c2_hy_z,fw%hy_z,fw%ex_y,fw%ex_z,      'h','z') !hy_z
-    call eh_fd(fw%ihy_x_sta,fw%ihy_x_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%ihy_x_is,fw%ihy_x_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_hy_x,fw%c2_hy_x,fw%hy_x,fw%ez_x,fw%ez_y,      'h','x') !hy_x
-    call eh_fd(fw%ihz_x_sta,fw%ihz_x_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%ihz_x_is,fw%ihz_x_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_hz_x,fw%c2_hz_x,fw%hz_x,fw%ey_z,fw%ey_x,      'h','x') !hz_x
-    call eh_fd(fw%ihz_y_sta,fw%ihz_y_end,      fs%ng_sta,fs%ng_end,fw%Nd,&
+    call eh_fd(fw%ihz_y_is,fw%ihz_y_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_hz_y,fw%c2_hz_y,fw%hz_y,fw%ex_y,fw%ex_z,      'h','y') !hz_y
     call eh_sendrecv(fs,fw,'h')
     
@@ -108,9 +108,9 @@ subroutine eh_calc(fs,fw)
       !prepare e and h for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=(fs%ng_sta(3)-fw%Nd),(fs%ng_end(3)+fw%Nd)
-      do iy=(fs%ng_sta(2)-fw%Nd),(fs%ng_end(2)+fw%Nd)
-      do ix=(fs%ng_sta(1)-fw%Nd),(fs%ng_end(1)+fw%Nd)
+      do iz=(fs%ng%is_array(3)),(fs%ng%ie_array(3))
+      do iy=(fs%ng%is_array(2)),(fs%ng%ie_array(2))
+      do ix=(fs%ng%is_array(1)),(fs%ng%ie_array(1))
         fw%ex_s(ix,iy,iz)=fw%ex_y(ix,iy,iz)+fw%ex_z(ix,iy,iz)
         fw%ey_s(ix,iy,iz)=fw%ey_z(ix,iy,iz)+fw%ey_x(ix,iy,iz)
         fw%ez_s(ix,iy,iz)=fw%ez_x(ix,iy,iz)+fw%ez_y(ix,iy,iz)
@@ -150,17 +150,17 @@ subroutine eh_calc(fs,fw)
         !plane
         if(obs_plane_em(ii)=='y') then
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
-                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ex_s,'ex')
+                             fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fw%ifn,ii,iter,fw%ex_s,'ex')
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
-                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ey_s,'ey')
+                             fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fw%ifn,ii,iter,fw%ey_s,'ey')
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
-                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%ez_s,'ez')
+                             fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fw%ifn,ii,iter,fw%ez_s,'ez')
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
-                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hx_s,'hx')
+                             fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fw%ifn,ii,iter,fw%hx_s,'hx')
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
-                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hy_s,'hy')
+                             fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fw%ifn,ii,iter,fw%hy_s,'hy')
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uAperm_from_au,&
-                             fs%ng_sta,fs%ng_end,fs%lg_sta,fs%lg_end,fw%Nd,fw%ifn,ii,iter,fw%hz_s,'hz')
+                             fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fw%ifn,ii,iter,fw%hz_s,'hz')
         end if
       end do
       
@@ -180,9 +180,9 @@ contains
     !initialize
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fs%ng_sta(3),fs%ng_end(3)
-    do iy=fs%ng_sta(2),fs%ng_end(2)
-    do ix=fs%ng_sta(1),fs%ng_end(1)
+    do iz=fs%ng%is(3),fs%ng%ie(3)
+    do iy=fs%ng%is(2),fs%ng%ie(2)
+    do ix=fs%ng%is(1),fs%ng%ie(1)
       fw%rjx_sum_d(ix,iy,iz)=0.0d0; fw%rjy_sum_d(ix,iy,iz)=0.0d0; fw%rjz_sum_d(ix,iy,iz)=0.0d0;
     end do
     end do
@@ -194,9 +194,9 @@ contains
     do ii=1,fw%inum_d
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=fs%ng_sta(3),fs%ng_end(3)
-      do iy=fs%ng_sta(2),fs%ng_end(2)
-      do ix=fs%ng_sta(1),fs%ng_end(1)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
         fw%rjx_d(ix,iy,iz,ii)= fw%c1_j_d(ii)*fw%rjx_d(ix,iy,iz,ii) &
                                +fw%c2_j_d(ii)*( fw%ex_y(ix,iy,iz)+fw%ex_z(ix,iy,iz) )&
                                *dble(fw%idx_d(ix,iy,iz,ii))
@@ -234,9 +234,9 @@ contains
     !initialize current density
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fs%ng_sta(3),fs%ng_end(3)
-    do iy=fs%ng_sta(2),fs%ng_end(2)
-    do ix=fs%ng_sta(1),fs%ng_end(1)
+    do iz=fs%ng%is(3),fs%ng%ie(3)
+    do iy=fs%ng%is(2),fs%ng%ie(2)
+    do ix=fs%ng%is(1),fs%ng%ie(1)
       fw%rjx_lr(ix,iy,iz)=0.0d0; fw%rjy_lr(ix,iy,iz)=0.0d0; fw%rjz_lr(ix,iy,iz)=0.0d0;
     end do
     end do
@@ -248,9 +248,9 @@ contains
     if(fw%inum_d>0) then
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=fs%ng_sta(3),fs%ng_end(3)
-      do iy=fs%ng_sta(2),fs%ng_end(2)
-      do ix=fs%ng_sta(1),fs%ng_end(1)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
         fw%rjx_lr(ix,iy,iz)=fw%rjx_lr(ix,iy,iz)+fw%rjx_sum_d(ix,iy,iz)
         fw%rjy_lr(ix,iy,iz)=fw%rjy_lr(ix,iy,iz)+fw%rjy_sum_d(ix,iy,iz)
         fw%rjz_lr(ix,iy,iz)=fw%rjz_lr(ix,iy,iz)+fw%rjz_sum_d(ix,iy,iz)
@@ -265,9 +265,9 @@ contains
     if(iperiodic==0) then
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=fs%ng_sta(3),fs%ng_end(3)
-      do iy=fs%ng_sta(2),fs%ng_end(2)
-      do ix=fs%ng_sta(1),fs%ng_end(1)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
         fw%px_lr(ix,iy,iz)=fw%px_lr(ix,iy,iz)+fw%rjx_lr(ix,iy,iz)*fs%dt
         fw%py_lr(ix,iy,iz)=fw%py_lr(ix,iy,iz)+fw%rjy_lr(ix,iy,iz)*fs%dt
         fw%pz_lr(ix,iy,iz)=fw%pz_lr(ix,iy,iz)+fw%rjz_lr(ix,iy,iz)*fs%dt
@@ -280,9 +280,9 @@ contains
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
-      do iz=fs%ng_sta(3),fs%ng_end(3)
-      do iy=fs%ng_sta(2),fs%ng_end(2)
-      do ix=fs%ng_sta(1),fs%ng_end(1)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
         sum_lr_x=sum_lr_x+fw%px_lr(ix,iy,iz)
         sum_lr_y=sum_lr_y+fw%py_lr(ix,iy,iz)
         sum_lr_z=sum_lr_z+fw%pz_lr(ix,iy,iz)
@@ -299,9 +299,9 @@ contains
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
-      do iz=fs%ng_sta(3),fs%ng_end(3)
-      do iy=fs%ng_sta(2),fs%ng_end(2)
-      do ix=fs%ng_sta(1),fs%ng_end(1)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
         sum_lr_x=sum_lr_x+fw%rjx_lr(ix,iy,iz)
         sum_lr_y=sum_lr_y+fw%rjy_lr(ix,iy,iz)
         sum_lr_z=sum_lr_z+fw%rjz_lr(ix,iy,iz)
@@ -374,40 +374,40 @@ contains
     elseif(typ=='x-line') then
       if(fw%inc_li_pe(iord,1)==1) then
         iy=fw%inc_po_id(iord,2); iz=fw%inc_po_id(iord,3);
-        fw%ex_y(fw%iex_y_sta(1):fw%iex_y_end(1),iy,iz)=add_inc(1)/2.0d0
-        fw%ex_z(fw%iex_z_sta(1):fw%iex_z_end(1),iy,iz)=add_inc(1)/2.0d0
-        fw%ey_z(fw%iey_z_sta(1):fw%iey_z_end(1),iy,iz)=add_inc(2)/2.0d0
-        fw%ey_x(fw%iey_x_sta(1):fw%iey_x_end(1),iy,iz)=add_inc(2)/2.0d0
-        fw%ez_x(fw%iez_x_sta(1):fw%iez_x_end(1),iy,iz)=add_inc(3)/2.0d0
-        fw%ez_y(fw%iez_y_sta(1):fw%iez_y_end(1),iy,iz)=add_inc(3)/2.0d0
+        fw%ex_y(fw%iex_y_is(1):fw%iex_y_ie(1),iy,iz)=add_inc(1)/2.0d0
+        fw%ex_z(fw%iex_z_is(1):fw%iex_z_ie(1),iy,iz)=add_inc(1)/2.0d0
+        fw%ey_z(fw%iey_z_is(1):fw%iey_z_ie(1),iy,iz)=add_inc(2)/2.0d0
+        fw%ey_x(fw%iey_x_is(1):fw%iey_x_ie(1),iy,iz)=add_inc(2)/2.0d0
+        fw%ez_x(fw%iez_x_is(1):fw%iez_x_ie(1),iy,iz)=add_inc(3)/2.0d0
+        fw%ez_y(fw%iez_y_is(1):fw%iez_y_ie(1),iy,iz)=add_inc(3)/2.0d0
       end if
     elseif(typ=='y-line') then
       if(fw%inc_li_pe(iord,2)==1) then
         ix=fw%inc_po_id(iord,1); iz=fw%inc_po_id(iord,3);
-        fw%ex_y(ix,fw%iex_y_sta(2):fw%iex_y_end(2),iz)=add_inc(1)/2.0d0
-        fw%ex_z(ix,fw%iex_z_sta(2):fw%iex_z_end(2),iz)=add_inc(1)/2.0d0
-        fw%ey_z(ix,fw%iey_z_sta(2):fw%iey_z_end(2),iz)=add_inc(2)/2.0d0
-        fw%ey_x(ix,fw%iey_x_sta(2):fw%iey_x_end(2),iz)=add_inc(2)/2.0d0
-        fw%ez_x(ix,fw%iez_x_sta(2):fw%iez_x_end(2),iz)=add_inc(3)/2.0d0
-        fw%ez_y(ix,fw%iez_y_sta(2):fw%iez_y_end(2),iz)=add_inc(3)/2.0d0
+        fw%ex_y(ix,fw%iex_y_is(2):fw%iex_y_ie(2),iz)=add_inc(1)/2.0d0
+        fw%ex_z(ix,fw%iex_z_is(2):fw%iex_z_ie(2),iz)=add_inc(1)/2.0d0
+        fw%ey_z(ix,fw%iey_z_is(2):fw%iey_z_ie(2),iz)=add_inc(2)/2.0d0
+        fw%ey_x(ix,fw%iey_x_is(2):fw%iey_x_ie(2),iz)=add_inc(2)/2.0d0
+        fw%ez_x(ix,fw%iez_x_is(2):fw%iez_x_ie(2),iz)=add_inc(3)/2.0d0
+        fw%ez_y(ix,fw%iez_y_is(2):fw%iez_y_ie(2),iz)=add_inc(3)/2.0d0
       end if
     elseif(typ=='z-line') then
       if(fw%inc_li_pe(iord,3)==1) then
         ix=fw%inc_po_id(iord,1); iy=fw%inc_po_id(iord,2);
-        fw%ex_y(ix,iy,fw%iex_y_sta(3):fw%iex_y_end(3))=add_inc(1)/2.0d0
-        fw%ex_z(ix,iy,fw%iex_z_sta(3):fw%iex_z_end(3))=add_inc(1)/2.0d0
-        fw%ey_z(ix,iy,fw%iey_z_sta(3):fw%iey_z_end(3))=add_inc(2)/2.0d0
-        fw%ey_x(ix,iy,fw%iey_x_sta(3):fw%iey_x_end(3))=add_inc(2)/2.0d0
-        fw%ez_x(ix,iy,fw%iez_x_sta(3):fw%iez_x_end(3))=add_inc(3)/2.0d0
-        fw%ez_y(ix,iy,fw%iez_y_sta(3):fw%iez_y_end(3))=add_inc(3)/2.0d0
+        fw%ex_y(ix,iy,fw%iex_y_is(3):fw%iex_y_ie(3))=add_inc(1)/2.0d0
+        fw%ex_z(ix,iy,fw%iex_z_is(3):fw%iex_z_ie(3))=add_inc(1)/2.0d0
+        fw%ey_z(ix,iy,fw%iey_z_is(3):fw%iey_z_ie(3))=add_inc(2)/2.0d0
+        fw%ey_x(ix,iy,fw%iey_x_is(3):fw%iey_x_ie(3))=add_inc(2)/2.0d0
+        fw%ez_x(ix,iy,fw%iez_x_is(3):fw%iez_x_ie(3))=add_inc(3)/2.0d0
+        fw%ez_y(ix,iy,fw%iez_y_is(3):fw%iez_y_ie(3))=add_inc(3)/2.0d0
       end if
     elseif(typ=='xy-plane') then !z propagation !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       if(fw%inc_pl_pe(iord,1)==1) then
         iz=fw%inc_po_id(iord,3)
 !$omp parallel
 !$omp do private(ix,iy)
-        do iy=fw%iex_z_sta(2),fw%iex_z_end(2)
-        do ix=fw%iex_z_sta(1),fw%iex_z_end(1)
+        do iy=fw%iex_z_is(2),fw%iex_z_ie(2)
+        do ix=fw%iex_z_is(1),fw%iex_z_ie(1)
           fw%ex_z(ix,iy,iz)=fw%ex_z(ix,iy,iz)+fw%c2_inc_xyz(3)*add_inc(1)
         end do
         end do
@@ -415,8 +415,8 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy)
-        do iy=fw%iey_z_sta(2),fw%iey_z_end(2)
-        do ix=fw%iey_z_sta(1),fw%iey_z_end(1)
+        do iy=fw%iey_z_is(2),fw%iey_z_ie(2)
+        do ix=fw%iey_z_is(1),fw%iey_z_ie(1)
           fw%ey_z(ix,iy,iz)=fw%ey_z(ix,iy,iz)+fw%c2_inc_xyz(3)*add_inc(2)
         end do
         end do
@@ -428,8 +428,8 @@ contains
         ix=fw%inc_po_id(iord,1)
 !$omp parallel
 !$omp do private(iy,iz)
-        do iz=fw%iey_x_sta(3),fw%iey_x_end(3)
-        do iy=fw%iey_x_sta(2),fw%iey_x_end(2)
+        do iz=fw%iey_x_is(3),fw%iey_x_ie(3)
+        do iy=fw%iey_x_is(2),fw%iey_x_ie(2)
           fw%ey_x(ix,iy,iz)=fw%ey_x(ix,iy,iz)+fw%c2_inc_xyz(1)*add_inc(2)
         end do
         end do
@@ -437,8 +437,8 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(iy,iz)
-        do iz=fw%iez_x_sta(3),fw%iez_x_end(3)
-        do iy=fw%iez_x_sta(2),fw%iez_x_end(2)
+        do iz=fw%iez_x_is(3),fw%iez_x_ie(3)
+        do iy=fw%iez_x_is(2),fw%iez_x_ie(2)
           fw%ez_x(ix,iy,iz)=fw%ez_x(ix,iy,iz)+fw%c2_inc_xyz(1)*add_inc(3)
         end do
         end do
@@ -450,8 +450,8 @@ contains
         iy=fw%inc_po_id(iord,2)
 !$omp parallel
 !$omp do private(ix,iz)
-        do iz=fw%iex_y_sta(3),fw%iex_y_end(3)
-        do ix=fw%iex_y_sta(1),fw%iex_y_end(1)
+        do iz=fw%iex_y_is(3),fw%iex_y_ie(3)
+        do ix=fw%iex_y_is(1),fw%iex_y_ie(1)
           fw%ex_y(ix,iy,iz)=fw%ex_y(ix,iy,iz)+fw%c2_inc_xyz(2)*add_inc(1)
         end do
         end do
@@ -459,8 +459,8 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iz)
-        do iz=fw%iez_y_sta(3),fw%iez_y_end(3)
-        do ix=fw%iez_y_sta(1),fw%iez_y_end(1)
+        do iz=fw%iez_y_is(3),fw%iez_y_ie(3)
+        do ix=fw%iez_y_is(1),fw%iez_y_ie(1)
           fw%ez_y(ix,iy,iz)=fw%ez_y(ix,iy,iz)+fw%c2_inc_xyz(2)*add_inc(3)
         end do
         end do
@@ -475,22 +475,22 @@ contains
   != add current ===========================================================================
   subroutine eh_add_curr(rjx,rjy,rjz)
     implicit none
-    real(8),intent(in) :: rjx(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                              fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                              fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                          rjy(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                              fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                              fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-                          rjz(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                              fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                              fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd)
+    real(8),intent(in) :: rjx(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                              fs%ng%is_array(2):fs%ng%ie_array(2),&
+                              fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                          rjy(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                              fs%ng%is_array(2):fs%ng%ie_array(2),&
+                              fs%ng%is_array(3):fs%ng%ie_array(3)),&
+                          rjz(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                              fs%ng%is_array(2):fs%ng%ie_array(2),&
+                              fs%ng%is_array(3):fs%ng%ie_array(3))
     
     !ex
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fw%iex_y_sta(3),fw%iex_y_end(3)
-    do iy=fw%iex_y_sta(2),fw%iex_y_end(2)
-    do ix=fw%iex_y_sta(1),fw%iex_y_end(1)
+    do iz=fw%iex_y_is(3),fw%iex_y_ie(3)
+    do iy=fw%iex_y_is(2),fw%iex_y_ie(2)
+    do ix=fw%iex_y_is(1),fw%iex_y_ie(1)
       fw%ex_y(ix,iy,iz)=fw%ex_y(ix,iy,iz)+fw%c2_jx(ix,iy,iz)*rjx(ix,iy,iz)/2.0d0
     end do
     end do
@@ -499,9 +499,9 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fw%iex_z_sta(3),fw%iex_z_end(3)
-    do iy=fw%iex_z_sta(2),fw%iex_z_end(2)
-    do ix=fw%iex_z_sta(1),fw%iex_z_end(1)
+    do iz=fw%iex_z_is(3),fw%iex_z_ie(3)
+    do iy=fw%iex_z_is(2),fw%iex_z_ie(2)
+    do ix=fw%iex_z_is(1),fw%iex_z_ie(1)
       fw%ex_z(ix,iy,iz)=fw%ex_z(ix,iy,iz)+fw%c2_jx(ix,iy,iz)*rjx(ix,iy,iz)/2.0d0
     end do
     end do
@@ -512,9 +512,9 @@ contains
     !ey
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fw%iey_z_sta(3),fw%iey_z_end(3)
-    do iy=fw%iey_z_sta(2),fw%iey_z_end(2)
-    do ix=fw%iey_z_sta(1),fw%iey_z_end(1)
+    do iz=fw%iey_z_is(3),fw%iey_z_ie(3)
+    do iy=fw%iey_z_is(2),fw%iey_z_ie(2)
+    do ix=fw%iey_z_is(1),fw%iey_z_ie(1)
       fw%ey_z(ix,iy,iz)=fw%ey_z(ix,iy,iz)+fw%c2_jy(ix,iy,iz)*rjy(ix,iy,iz)/2.0d0
     end do
     end do
@@ -523,9 +523,9 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fw%iey_x_sta(3),fw%iey_x_end(3)
-    do iy=fw%iey_x_sta(2),fw%iey_x_end(2)
-    do ix=fw%iey_x_sta(1),fw%iey_x_end(1)
+    do iz=fw%iey_x_is(3),fw%iey_x_ie(3)
+    do iy=fw%iey_x_is(2),fw%iey_x_ie(2)
+    do ix=fw%iey_x_is(1),fw%iey_x_ie(1)
       fw%ey_x(ix,iy,iz)=fw%ey_x(ix,iy,iz)+fw%c2_jy(ix,iy,iz)*rjy(ix,iy,iz)/2.0d0
     end do
     end do
@@ -536,9 +536,9 @@ contains
     !ez
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fw%iez_x_sta(3),fw%iez_x_end(3)
-    do iy=fw%iez_x_sta(2),fw%iez_x_end(2)
-    do ix=fw%iez_x_sta(1),fw%iez_x_end(1)
+    do iz=fw%iez_x_is(3),fw%iez_x_ie(3)
+    do iy=fw%iez_x_is(2),fw%iez_x_ie(2)
+    do ix=fw%iez_x_is(1),fw%iez_x_ie(1)
       fw%ez_x(ix,iy,iz)=fw%ez_x(ix,iy,iz)+fw%c2_jz(ix,iy,iz)*rjz(ix,iy,iz)/2.0d0
     end do
     end do
@@ -547,9 +547,9 @@ contains
 !$omp end parallel
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fw%iez_y_sta(3),fw%iez_y_end(3)
-    do iy=fw%iez_y_sta(2),fw%iez_y_end(2)
-    do ix=fw%iez_y_sta(1),fw%iez_y_end(1)
+    do iz=fw%iez_y_is(3),fw%iez_y_ie(3)
+    do iy=fw%iez_y_is(2),fw%iez_y_ie(2)
+    do ix=fw%iez_y_is(1),fw%iez_y_ie(1)
       fw%ez_y(ix,iy,iz)=fw%ez_y(ix,iy,iz)+fw%c2_jz(ix,iy,iz)*rjz(ix,iy,iz)/2.0d0
     end do
     end do
@@ -563,15 +563,15 @@ contains
   != check and update maximum of e and h ===================================================
   subroutine eh_update_max
     implicit none
-    real(8) :: fe(fs%ng_sta(1):fs%ng_end(1),fs%ng_sta(2):fs%ng_end(2),fs%ng_sta(3):fs%ng_end(3)),&
-               fh(fs%ng_sta(1):fs%ng_end(1),fs%ng_sta(2):fs%ng_end(2),fs%ng_sta(3):fs%ng_end(3))
+    real(8) :: fe(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3)),&
+               fh(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))
     real(8) :: e_max_tmp(0:nproc_size_global-1), h_max_tmp(0:nproc_size_global-1),&
                e_max_tmp2(0:nproc_size_global-1),h_max_tmp2(0:nproc_size_global-1)
     
     e_max_tmp(:)=0.0d0; h_max_tmp(:)=0.0d0;
-    do iz=fs%ng_sta(3),fs%ng_end(3)
-    do iy=fs%ng_sta(2),fs%ng_end(2)
-    do ix=fs%ng_sta(1),fs%ng_end(1)
+    do iz=fs%ng%is(3),fs%ng%ie(3)
+    do iy=fs%ng%is(2),fs%ng%ie(2)
+    do ix=fs%ng%is(1),fs%ng%ie(1)
       fe(ix,iy,iz)=sqrt( fw%ex_s(ix,iy,iz)**2.0d0 + fw%ey_s(ix,iy,iz)**2.0d0 + fw%ez_s(ix,iy,iz)**2.0d0 )
       fh(ix,iy,iz)=sqrt( fw%hx_s(ix,iy,iz)**2.0d0 + fw%hy_s(ix,iy,iz)**2.0d0 + fw%hz_s(ix,iy,iz)**2.0d0 )
       if(e_max_tmp(nproc_id_global)<fe(ix,iy,iz)) e_max_tmp(nproc_id_global)=fe(ix,iy,iz)
@@ -592,25 +592,25 @@ end subroutine eh_calc
 
 !=========================================================================================
 != calculate finite difference in eh =====================================================
-subroutine eh_fd(ista,iend,ng_sta,ng_end,Nd,c1,c2,f1,f2,f3,var,dir)
+subroutine eh_fd(ista,iend,ng_is,ng_ie,Nd,c1,c2,f1,f2,f3,var,dir)
   implicit none
-  integer,intent(in)      :: ista(3),iend(3),ng_sta(3),ng_end(3)
+  integer,intent(in)      :: ista(3),iend(3),ng_is(3),ng_ie(3)
   integer,intent(in)      :: Nd
-  real(8),intent(in)      :: c1(ng_sta(1)-Nd:ng_end(1)+Nd,&
-                                ng_sta(2)-Nd:ng_end(2)+Nd,&
-                                ng_sta(3)-Nd:ng_end(3)+Nd),&
-                             c2(ng_sta(1)-Nd:ng_end(1)+Nd,&
-                                ng_sta(2)-Nd:ng_end(2)+Nd,&
-                                ng_sta(3)-Nd:ng_end(3)+Nd)
-  real(8),intent(inout)   :: f1(ng_sta(1)-Nd:ng_end(1)+Nd,&
-                                ng_sta(2)-Nd:ng_end(2)+Nd,&
-                                ng_sta(3)-Nd:ng_end(3)+Nd)
-  real(8),intent(in)      :: f2(ng_sta(1)-Nd:ng_end(1)+Nd,&
-                                ng_sta(2)-Nd:ng_end(2)+Nd,&
-                                ng_sta(3)-Nd:ng_end(3)+Nd),&
-                             f3(ng_sta(1)-Nd:ng_end(1)+Nd,&
-                                ng_sta(2)-Nd:ng_end(2)+Nd,&
-                                ng_sta(3)-Nd:ng_end(3)+Nd)
+  real(8),intent(in)      :: c1(ng_is(1)-Nd:ng_ie(1)+Nd,&
+                                ng_is(2)-Nd:ng_ie(2)+Nd,&
+                                ng_is(3)-Nd:ng_ie(3)+Nd),&
+                             c2(ng_is(1)-Nd:ng_ie(1)+Nd,&
+                                ng_is(2)-Nd:ng_ie(2)+Nd,&
+                                ng_is(3)-Nd:ng_ie(3)+Nd)
+  real(8),intent(inout)   :: f1(ng_is(1)-Nd:ng_ie(1)+Nd,&
+                                ng_is(2)-Nd:ng_ie(2)+Nd,&
+                                ng_is(3)-Nd:ng_ie(3)+Nd)
+  real(8),intent(in)      :: f2(ng_is(1)-Nd:ng_ie(1)+Nd,&
+                                ng_is(2)-Nd:ng_ie(2)+Nd,&
+                                ng_is(3)-Nd:ng_ie(3)+Nd),&
+                             f3(ng_is(1)-Nd:ng_ie(1)+Nd,&
+                                ng_is(2)-Nd:ng_ie(2)+Nd,&
+                                ng_is(3)-Nd:ng_ie(3)+Nd)
   character(1),intent(in) :: var,dir
   integer :: ix,iy,iz
   
@@ -708,18 +708,18 @@ end subroutine eh_fd
 
 !=========================================================================================
 != save plane data =======================================================================
-subroutine eh_save_plane(id,ipl,conv,ng_sta,ng_end,lg_sta,lg_end,Nd,ifn,iobs,iter,f,var)
+subroutine eh_save_plane(id,ipl,conv,ng_is,ng_ie,lg_is,lg_ie,Nd,ifn,iobs,iter,f,var)
   use inputoutput,          only: directory
   use salmon_parallel,      only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_summation
   implicit none
   integer,intent(in)      :: id(3),ipl(3)
   real(8),intent(in)      :: conv
-  integer,intent(in)      :: ng_sta(3),ng_end(3),lg_sta(3),lg_end(3)
+  integer,intent(in)      :: ng_is(3),ng_ie(3),lg_is(3),lg_ie(3)
   integer,intent(in)      :: Nd,ifn,iobs,iter
-  real(8),intent(in)      :: f(ng_sta(1)-Nd:ng_end(1)+Nd,&
-                               ng_sta(2)-Nd:ng_end(2)+Nd,&
-                               ng_sta(3)-Nd:ng_end(3)+Nd)
+  real(8),intent(in)      :: f(ng_is(1)-Nd:ng_ie(1)+Nd,&
+                               ng_is(2)-Nd:ng_ie(2)+Nd,&
+                               ng_is(3)-Nd:ng_ie(3)+Nd)
   character(2),intent(in) :: var
   real(8),allocatable     :: save_pl(:,:),save_pl2(:,:)
   integer          :: ii,inum,i1,i1s,i2,i2s
@@ -735,15 +735,15 @@ subroutine eh_save_plane(id,ipl,conv,ng_sta,ng_end,lg_sta,lg_end,Nd,ifn,iobs,ite
     elseif(ii==3) then !xz
       i1s=1; i2s=3; plane_name='xz';
     end if
-    allocate(save_pl(lg_sta(i1s):lg_end(i1s),lg_sta(i2s):lg_end(i2s)),&
-             save_pl2(lg_sta(i1s):lg_end(i1s),lg_sta(i2s):lg_end(i2s)))
+    allocate(save_pl(lg_is(i1s):lg_ie(i1s),lg_is(i2s):lg_ie(i2s)),&
+             save_pl2(lg_is(i1s):lg_ie(i1s),lg_is(i2s):lg_ie(i2s)))
     save_pl(:,:)=0.0d0; save_pl2(:,:)=0.0d0
-    inum=(lg_end(i1s)-lg_sta(i1s)+1)*(lg_end(i2s)-lg_sta(i2s)+1)
+    inum=(lg_ie(i1s)-lg_is(i1s)+1)*(lg_ie(i2s)-lg_is(i2s)+1)
     
     !prepare save data
     if(ipl(ii)==1) then
-      do i2=ng_sta(i2s),ng_end(i2s)
-      do i1=ng_sta(i1s),ng_end(i1s)
+      do i2=ng_is(i2s),ng_ie(i2s)
+      do i1=ng_is(i1s),ng_ie(i1s)
         if(ii==1) then     !xy
           save_pl(i1,i2)=f(i1,i2,id(3))
         elseif(ii==2) then !yz
@@ -763,8 +763,8 @@ subroutine eh_save_plane(id,ipl,conv,ng_sta,ng_end,lg_sta,lg_end,Nd,ifn,iobs,ite
       save_name=trim(adjustl(directory))//'/obs'//trim(adjustl(iobs_name))//'_'//var//&
                 '_'//plane_name//'_'//trim(adjustl(iter_name))//'.data'
       open(ifn,file=save_name)
-      do i2=lg_sta(i2s),lg_end(i2s)
-      do i1=lg_sta(i1s),lg_end(i1s)
+      do i2=lg_is(i2s),lg_ie(i2s)
+      do i1=lg_is(i1s),lg_ie(i1s)
         write(ifn,'(I8,I8,E16.6e3)') i1,i2,save_pl2(i1,i2)*conv
       end do
       end do
@@ -810,23 +810,23 @@ subroutine eh_sendrecv(fs,fw,var)
     call update_overlap_real8(fs%srg_ng,fs%ng,fw%rmedia)
   elseif(var=='s') then
     !allocate temporary variable
-    allocate(f1(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             f2(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd),&
-             f3(fs%ng_sta(1)-fw%Nd:fs%ng_end(1)+fw%Nd,&
-                fs%ng_sta(2)-fw%Nd:fs%ng_end(2)+fw%Nd,&
-                fs%ng_sta(3)-fw%Nd:fs%ng_end(3)+fw%Nd))
+    allocate(f1(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                fs%ng%is_array(2):fs%ng%ie_array(2),&
+                fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             f2(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                fs%ng%is_array(2):fs%ng%ie_array(2),&
+                fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             f3(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                fs%ng%is_array(2):fs%ng%ie_array(2),&
+                fs%ng%is_array(3):fs%ng%ie_array(3)))
     f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
     
     !spatially adjust e for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fs%ng_sta(3),fs%ng_end(3)
-    do iy=fs%ng_sta(2),fs%ng_end(2)
-    do ix=fs%ng_sta(1),fs%ng_end(1)
+    do iz=fs%ng%is(3),fs%ng%ie(3)
+    do iy=fs%ng%is(2),fs%ng%ie(2)
+    do ix=fs%ng%is(1),fs%ng%ie(1)
       f1(ix,iy,iz)=( fw%ex_s(ix,iy,iz)+fw%ex_s(ix-1,iy,iz) )/2.0d0
       f2(ix,iy,iz)=( fw%ey_s(ix,iy,iz)+fw%ey_s(ix,iy-1,iz) )/2.0d0
       f3(ix,iy,iz)=( fw%ez_s(ix,iy,iz)+fw%ez_s(ix,iy,iz-1) )/2.0d0
@@ -841,9 +841,9 @@ subroutine eh_sendrecv(fs,fw,var)
     !spatially adjust h for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fs%ng_sta(3),fs%ng_end(3)
-    do iy=fs%ng_sta(2),fs%ng_end(2)
-    do ix=fs%ng_sta(1),fs%ng_end(1)
+    do iz=fs%ng%is(3),fs%ng%ie(3)
+    do iy=fs%ng%is(2),fs%ng%ie(2)
+    do ix=fs%ng%is(1),fs%ng%ie(1)
       f1(ix,iy,iz)=( fw%hx_s(ix,iy,iz)+fw%hx_s(ix,iy-1,iz) )/2.0d0
       f2(ix,iy,iz)=( fw%hy_s(ix,iy,iz)+fw%hy_s(ix,iy,iz-1) )/2.0d0
       f3(ix,iy,iz)=( fw%hz_s(ix,iy,iz)+fw%hz_s(ix-1,iy,iz) )/2.0d0
@@ -859,9 +859,9 @@ subroutine eh_sendrecv(fs,fw,var)
     call update_overlap_real8(fs%srg_ng,fs%ng,fw%hz_s)
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=fs%ng_sta(3),fs%ng_end(3)
-    do iy=fs%ng_sta(2),fs%ng_end(2)
-    do ix=fs%ng_sta(1),fs%ng_end(1)
+    do iz=fs%ng%is(3),fs%ng%ie(3)
+    do iy=fs%ng%is(2),fs%ng%ie(2)
+    do ix=fs%ng%is(1),fs%ng%ie(1)
       f1(ix,iy,iz)=( fw%hx_s(ix,iy,iz)+fw%hx_s(ix,iy,iz-1) )/2.0d0
       f2(ix,iy,iz)=( fw%hy_s(ix,iy,iz)+fw%hy_s(ix-1,iy,iz) )/2.0d0
       f3(ix,iy,iz)=( fw%hz_s(ix,iy,iz)+fw%hz_s(ix,iy-1,iz) )/2.0d0
