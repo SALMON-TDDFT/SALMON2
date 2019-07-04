@@ -45,7 +45,7 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
-use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data_3d
+use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 implicit none
 
 type(s_rgrid) :: lg
@@ -387,11 +387,7 @@ if(comm_is_root(nproc_id_global))then
   end select
 
   !(header of SYSname_rt_energy.data)
-  select case(iperiodic)
-  case(0)
-  case(3)
-     call write_rt_energy_data_3d(-1,ofl,iflag_md,dt,energy,md)
-  end select
+  call write_rt_energy_data(-1,ofl,iflag_md,dt,energy,md)
 
   !(header in SYSname_proj.data)
   if(iwrite_projection==1)then
@@ -1429,17 +1425,14 @@ if(iflag_md==1) call init_md(system,md)
 
 !(force at initial step)
 if(iflag_md==1 .or. icalcforce==1)then
-   if(iperiodic==0)then
-      call calc_force_c(mg,srg,zpsi_in)  !this does not work now
-      force%F(:,:) = rforce(:,:)  !rforce must be removed in future
-   else if(iperiodic==3)then
+   if(iperiodic==3)then
       do ik=info%ik_s,info%ik_e
         stencil%kAc(ik,:) = k_rd(:,ik)
       end do
       call update_kvector_nonlocalpt(ppg,stencil%kAc,info%ik_s,info%ik_e)
       call get_fourier_grid_G_rt(system,lg,ng,fg)
-      call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
-   end if
+   endif
+   call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
 
    !open trj file for coordinate, velocity, and force (rvf) in xyz format
    write(comment_line,10) -1, 0.0d0

@@ -501,7 +501,7 @@ contains
 
   end subroutine
 
-  subroutine write_rt_energy_data_3d(it,ofl,iflag_md,dt,energy,md)
+  subroutine write_rt_energy_data(it,ofl,iflag_md,dt,energy,md)
     use structures, only: s_ofile,s_energy,s_md
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root

@@ -391,8 +391,6 @@ integer :: numspin
 integer :: icalcforce
 real(8),allocatable :: rforce(:,:)
 integer :: iflag_md
-real(8),allocatable :: dRion(:,:,:)
-real(8),allocatable :: Rion_eq(:,:)
 
 real(8) :: fcN(0:12)
 real(8) :: fbN(0:12)

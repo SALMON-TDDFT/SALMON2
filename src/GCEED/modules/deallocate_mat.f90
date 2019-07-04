@@ -46,9 +46,6 @@ if(iSCFRT==2)then
   if(iflag_fourier_omega==1)then
     deallocate(zalpha2,zalpha3)
   end if
-  if(iflag_MD==1)then
-    deallocate(dRion,Rion_eq)
-  end if
 end if
 
 if(iSCFRT==1.and.icalcforce==1)then

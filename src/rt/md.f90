@@ -280,13 +280,11 @@ subroutine update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
      !xxxx call prep_ps_periodic('update_all       ')
      call dealloc_init_ps(ppg,ppg_all,ppn)
      call init_ps(system%al,system%brl,stencil%matrix_A)
-     !if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
   else if (mod(itt,step_update_ps2)==0 ) then
      !xxxx call prep_ps_periodic('update_wo_realloc')
      !xxxxxxx this option is not yet made xxxxxx
      call dealloc_init_ps(ppg,ppg_all,ppn)
      call init_ps(system%al,system%brl,stencil%matrix_A)
-     !if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
   endif
 
 end subroutine 

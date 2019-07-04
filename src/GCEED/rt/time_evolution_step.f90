@@ -35,7 +35,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   use force_sub, only: calc_force_salmon
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
-  use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data_3d
+  use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -521,33 +521,25 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
   !(force)
   if(icalcforce==1)then  ! and or rvf flag in future
 
-    if(iperiodic==0)then !<--currently does not work
-    !currently, old subroutin calc_force_c for isolated system is used
-    !calc_force_salmon should be used, but now, 
-    !it does not support interaction with field for isolated system
-       !(currently does not work)
-       if(mod(itt,2)==0.or.propagator=='etrs')then
-          call calc_force_c(mg,srg,zpsi_in)
-       else
-          call calc_force_c(mg,srg,zpsi_out)
-       end if
-       force%F(:,:) = rforce(:,:)  !rforce must be removed in future
-    else if(iperiodic==3)then
-       call get_fourier_grid_G_rt(system,lg,ng,fg)
-       !now, interaction between ion and field is not included yet
-       if(mod(itt,2)==0.or.propagator=='etrs')then
-          call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
-       else
-          call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
-       end if
+     !(currently does not work)
+     if(iperiodic==3)then
+        call get_fourier_grid_G_rt(system,lg,ng,fg)
+     endif
 
-       !force on ion directly from field --- should put in calc_force_salmon?
-       do iatom=1,MI
-          FionE(:,iatom) = pp%Zps(Kion(iatom)) * E_tot(:,itt)
-       enddo
-       force%F(:,:) = force%F(:,:) + FionE(:,:)
+     if(mod(itt,2)==0.or.propagator=='etrs')then
+        call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in) 
+     else
+        call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
+     end if
 
-    end if  !ipediodic
+     !force on ion directly from field --- should put in calc_force_salmon?
+     do iatom=1,MI
+        FionE(:,iatom) = pp%Zps(Kion(iatom)) * E_tot(:,itt)
+     enddo
+     force%F(:,:) = force%F(:,:) + FionE(:,:)
+
+     rforce(:,:) = force%F(:,:)  !test not necessary
+
   endif
 
   !(MD: part2)
@@ -643,11 +635,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng,ppn
      end select
 
      !(Export to SYSname_rt_energy.data)
-     select case(iperiodic)
-     case(0)
-     case(3)
-        call write_rt_energy_data_3d(itt,ofl,iflag_md,dt,energy,md)
-     end select
+     call write_rt_energy_data(itt,ofl,iflag_md,dt,energy,md)
+
   endif
 
   if(iflag_fourier_omega==1)then
