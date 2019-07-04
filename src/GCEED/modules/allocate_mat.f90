@@ -159,13 +159,6 @@ if(iSCFRT==2)then
     allocate(zalpha3(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3),num_fourier_omega))
   end if
 
-  if(iflag_md==1)then
-    allocate(dRion(3,MI,-1:1))
-    allocate(Rion_eq(3,MI))
-    dRion(:,:,:)=0.d0
-    Rion_eq(:,:)=Rion(:,:)
-  end if
-
 end if
 
 ! FIX: Attempt to fetch from allocatable variable [RXK,RHXK,RGK,RPK]_OB when it is not allocated
