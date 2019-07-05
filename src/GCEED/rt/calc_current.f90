@@ -32,7 +32,7 @@ complex(8),parameter :: zi=(0.d0,1.d0)
 complex(8) :: ekr(maxMps,MI,k_sta:k_end)
 real(8) :: r(3)
 integer :: iatom,ik,jj,lm
-complex(8) :: uVpsi0,uVpsix,uVpsiy,uVpsiz
+complex(8) :: uVpsi0,uVpsix,uVpsiy,uVpsiz,uvpsi_tmp
 real(8) :: jxt,jyt,jzt
 real(8) :: curr1(3),curr2(3)
 integer :: p_allob
@@ -110,17 +110,14 @@ do iik=k_sta,k_end
       r(1)=(dble(Jxyz(1,jj,iatom)-1)-dble(Jxxyyzz(1,jj,iatom)*lg_num(1)))*Hgs(1)
       r(2)=(dble(Jxyz(2,jj,iatom)-1)-dble(Jxxyyzz(2,jj,iatom)*lg_num(2)))*Hgs(2)
       r(3)=(dble(Jxyz(3,jj,iatom)-1)-dble(Jxxyyzz(3,jj,iatom)*lg_num(3)))*Hgs(3)
-      ekr(jj,iatom,iik)=exp(zi*(k_rd(1,iik)*r(1)   &
-                          +k_rd(2,iik)*r(2)   &
-                          +k_rd(3,iik)*r(3)))
+      ekr(jj,iatom,iik)=exp(zi*(k_rd(1,iik)*r(1)+k_rd(2,iik)*r(2)+k_rd(3,iik)*r(3)))
     end do
   end do
+!$OMP parallel do collapse(2) private(iob,iatom,lm,ik,uVpsi0,uVpsix,uVpsiy,uVpsiz,r,uvpsi_tmp)
   do iob=1,iobnum
-    call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
-!$OMP parallel do private(iatom,lm,ik,uVpsi0,uVpsix,uVpsiy,uVpsiz,r)
-    do iatom=1,MI
-      ik=Kion(iatom)
-      do lm=1,(Mlps(ik)+1)**2
+  do iatom=1,MI
+    ik=Kion(iatom)
+    do lm=1,(Mlps(ik)+1)**2
         if ( abs(uVu(lm,iatom))<1.d-5 ) then
           uVpsibox1_j(1:4,lm,iatom,iob,iik)=0.d0
         else
@@ -129,22 +126,19 @@ do iik=k_sta,k_end
             r(1)=(dble(Jxyz(1,jj,iatom)-1)-dble(Jxxyyzz(1,jj,iatom)*lg_num(1)))*Hgs(1)
             r(2)=(dble(Jxyz(2,jj,iatom)-1)-dble(Jxxyyzz(2,jj,iatom)*lg_num(2)))*Hgs(2)
             r(3)=(dble(Jxyz(3,jj,iatom)-1)-dble(Jxxyyzz(3,jj,iatom)*lg_num(3)))*Hgs(3)
-            uVpsi0=uVpsi0+uV(jj,lm,iatom)*ekr(jj,iatom,iik)      &
-                     *tpsi(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),Jxyz(3,jj,iatom),iob,iik)
-            uVpsix=uVpsix+uV(jj,lm,iatom)*ekr(jj,iatom,iik)*r(1) &
-                     *tpsi(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),Jxyz(3,jj,iatom),iob,iik)
-            uVpsiy=uVpsiy+uV(jj,lm,iatom)*ekr(jj,iatom,iik)*r(2) &
-                     *tpsi(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),Jxyz(3,jj,iatom),iob,iik)
-            uVpsiz=uVpsiz+uV(jj,lm,iatom)*ekr(jj,iatom,iik)*r(3) &
-                     *tpsi(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),Jxyz(3,jj,iatom),iob,iik)
-          end do  
+            uvpsi_tmp=uV(jj,lm,iatom)*ekr(jj,iatom,iik)*tpsi(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),Jxyz(3,jj,iatom),iob,iik)
+            uVpsi0=uVpsi0+     uvpsi_tmp
+            uVpsix=uVpsix+r(1)*uvpsi_tmp
+            uVpsiy=uVpsiy+r(2)*uvpsi_tmp
+            uVpsiz=uVpsiz+r(3)*uvpsi_tmp
+          end do
           uVpsibox1_j(1,lm,iatom,iob,iik)=uVpsi0*Hvol/uVu(lm,iatom)
           uVpsibox1_j(2,lm,iatom,iob,iik)=uVpsix*Hvol
           uVpsibox1_j(3,lm,iatom,iob,iik)=uVpsiy*Hvol
           uVpsibox1_j(4,lm,iatom,iob,iik)=uVpsiz*Hvol
         end if
-      end do
     end do
+  end do
   end do
 end do
 call timer_end(LOG_CUR_NONLOCAL1)
