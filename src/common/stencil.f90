@@ -44,19 +44,19 @@ subroutine stencil_R(tpsi,htpsi,is_array,ie_array &
   do ix=is(1),ie(1)
 
     v =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1))) &
-        +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
-        +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
-        +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
+      & +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
+      & +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
+      & +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
 
     v =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1))) &
-        +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
-        +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
-        +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
+      & +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
+      & +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
+      & +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
 
     v =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1))) &
-        +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
-        +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
-        +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
+      & +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
+      & +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
+      & +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
 
     htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )*tpsi(ix,iy,iz) - 0.5d0 * v
   end do
@@ -90,34 +90,34 @@ subroutine stencil_C(tpsi,htpsi,is_array,ie_array &
   do ix=is(1),ie(1)
 
     v =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1))) &
-        +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
-        +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
-        +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
+      & +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
+      & +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
+      & +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
 
     v =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1))) &
-        +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
-        +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
-        +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
+      & +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
+      & +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
+      & +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
 
     v =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1))) &
-        +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
-        +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
-        +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
+      & +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
+      & +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
+      & +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
 
     w =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
-        +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
-        +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
-        +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+      & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+      & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+      & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
 
     w =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
-        +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
-        +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
-        +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4))) + w
+      & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+      & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+      & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4))) + w
 
     w =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
-        +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
-        +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
-        +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4))) + w
+      & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+      & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+      & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4))) + w
 
     htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )*tpsi(ix,iy,iz) - 0.5d0 * v - zI * w
   end do
@@ -151,34 +151,34 @@ subroutine stencil_nonorthogonal(tpsi,htpsi,is_array,ie_array,V_local,is,ie,idx,
   do ix=is(1),ie(1)
 
     v(1) =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1))) &
-           +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
-           +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
-           +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
+         & +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
+         & +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
+         & +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
 
     v(2) =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1))) &
-           +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
-           +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
-           +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4)))
+         & +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
+         & +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
+         & +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4)))
 
     v(3) =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1))) &
-           +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
-           +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
-           +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4)))
+         & +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
+         & +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
+         & +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4)))
 
     w(1) =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
-           +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
-           +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
-           +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+         & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+         & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+         & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
 
     w(2) =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
-           +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
-           +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
-           +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
+         & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+         & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+         & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
 
     w(3) =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
-           +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
-           +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
-           +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
+         & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+         & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+         & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
 
     htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )* tpsi(ix,iy,iz) &
                     - 0.5d0* ( F(1)*v(1) + F(2)*v(2) + F(3)*v(3) ) - zI* ( Bk(1)*w(1) + Bk(2)*w(2) + Bk(3)*w(3) )
@@ -198,21 +198,21 @@ subroutine stencil_nonorthogonal(tpsi,htpsi,is_array,ie_array,V_local,is,ie,idx,
 
   ! yz: (d/dz) * (df/dy)
     w(1) =  nabt(1,3)*(wrk(DZ(1),2) - wrk(DZ(-1),2)) &
-           +nabt(2,3)*(wrk(DZ(2),2) - wrk(DZ(-2),2)) &
-           +nabt(3,3)*(wrk(DZ(3),2) - wrk(DZ(-3),2)) &
-           +nabt(4,3)*(wrk(DZ(4),2) - wrk(DZ(-4),2))
+         & +nabt(2,3)*(wrk(DZ(2),2) - wrk(DZ(-2),2)) &
+         & +nabt(3,3)*(wrk(DZ(3),2) - wrk(DZ(-3),2)) &
+         & +nabt(4,3)*(wrk(DZ(4),2) - wrk(DZ(-4),2))
 
   ! zx: (d/dz) * (df/dx)
     w(2) =  nabt(1,3)*(wrk(DZ(1),1) - wrk(DZ(-1),1)) &
-           +nabt(2,3)*(wrk(DZ(2),1) - wrk(DZ(-2),1)) &
-           +nabt(3,3)*(wrk(DZ(3),1) - wrk(DZ(-3),1)) &
-           +nabt(4,3)*(wrk(DZ(4),1) - wrk(DZ(-4),1))
+         & +nabt(2,3)*(wrk(DZ(2),1) - wrk(DZ(-2),1)) &
+         & +nabt(3,3)*(wrk(DZ(3),1) - wrk(DZ(-3),1)) &
+         & +nabt(4,3)*(wrk(DZ(4),1) - wrk(DZ(-4),1))
 
   ! xy: (d/dy) * (df/dx)
     w(3) =  nabt(1,2)*(wrk(DY(1),1) - wrk(DY(-1),1)) &
-           +nabt(2,2)*(wrk(DY(2),1) - wrk(DY(-2),1)) &
-           +nabt(3,2)*(wrk(DY(3),1) - wrk(DY(-3),1)) &
-           +nabt(4,2)*(wrk(DY(4),1) - wrk(DY(-4),1))
+         & +nabt(2,2)*(wrk(DY(2),1) - wrk(DY(-2),1)) &
+         & +nabt(3,2)*(wrk(DY(3),1) - wrk(DY(-3),1)) &
+         & +nabt(4,2)*(wrk(DY(4),1) - wrk(DY(-4),1))
 
     htpsi(ix,iy,iz) = htpsi(ix,iy,iz) - 0.5d0* ( F(4)*w(1) + F(5)*w(2) + F(6)*w(3) )
 
@@ -248,44 +248,48 @@ subroutine stencil_nonorthogonal_highsymmetry(tpsi,htpsi,is_array,ie_array,V_loc
   do ix=is(1),ie(1)
 
     v =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1))) &
-        +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
-        +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
-        +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
+      & +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
+      & +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
+      & +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
 
     v =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1))) &
-        +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
-        +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
-        +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
+      & +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
+      & +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
+      & +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
 
     v =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1))) &
-        +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
-        +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
-        +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
+      & +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
+      & +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
+      & +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
 
     do idir=4,ndir
       sx = sign(1,idir)
       sy = sign(2,idir)
       sz = sign(3,idir)
-      v = v + lapt(1,idir) * ( tpsi(DR(1)) + tpsi(DR(-1)) ) &
-            + lapt(2,idir) * ( tpsi(DR(2)) + tpsi(DR(-2)) ) &
-            + lapt(3,idir) * ( tpsi(DR(3)) + tpsi(DR(-3)) ) &
-            + lapt(4,idir) * ( tpsi(DR(4)) + tpsi(DR(-4)) )
+      v = v + lapt(1,idir) * ( tpsi(DR(1))    &
+          &                  + tpsi(DR(-1)) ) &
+          & + lapt(2,idir) * ( tpsi(DR(2))    &
+          &                  + tpsi(DR(-2)) ) &
+          & + lapt(3,idir) * ( tpsi(DR(3))    &
+          &                  + tpsi(DR(-3)) ) &
+          & + lapt(4,idir) * ( tpsi(DR(4))    &
+          &                  + tpsi(DR(-4)) )
     end do
 
     w =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
-        +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
-        +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
-        +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+      & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+      & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+      & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
 
     w =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
-        +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
-        +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
-        +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4))) + w
+      & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+      & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+      & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4))) + w
 
     w =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
-        +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
-        +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
-        +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4))) + w
+      & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+      & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+      & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4))) + w
 
     htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )*tpsi(ix,iy,iz) - 0.5d0 * v - zI * w
   end do
@@ -317,19 +321,19 @@ subroutine calc_gradient_psi(tpsi,gtpsi,is_array,ie_array,is,ie,idx,idy,idz,nabt
   do ix=is(1),ie(1)
 
     w(1) =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
-           +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
-           +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
-           +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+         & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+         & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+         & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
 
     w(2) =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
-           +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
-           +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
-           +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
+         & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+         & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+         & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
 
     w(3) =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
-           +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
-           +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
-           +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
+         & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+         & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+         & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
 
     gtpsi(:,ix,iy,iz) = matmul(transpose(matrix_B),w) ! B^{T} * (nabla) psi
   end do
