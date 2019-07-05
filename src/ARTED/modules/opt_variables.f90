@@ -94,7 +94,7 @@ contains
   subroutine opt_vars_initialize_p2
     use global_variables
     use code_optimization, only: switch_stencil_optimization, &
-    &                            switch_openmp_parallelization, &
+    &                            stencil_is_parallelized_by_omp, &
     &                            set_modulo_tables
     implicit none
 
@@ -160,7 +160,8 @@ contains
     num(2) = NLy
     num(3) = NLx
     call switch_stencil_optimization(num)
-    call switch_openmp_parallelization(num)
+    ! In ARTED, we must disable openmp parallelization in the stencil.
+    stencil_is_parallelized_by_omp = .false.
     call set_modulo_tables(num)
   end subroutine
 
