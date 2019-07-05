@@ -2,7 +2,7 @@
 set(TARGET_SUFFIX               ".cpu")
 
 set(ARCH                        "-xAVX")
-set(SIMD_SET                    "AVX")
+set(SIMD_SET                    "")
 set(OPENMP_FLAGS                "-qopenmp")
 set(LAPACK_FLAGS                "-mkl=parallel")
 set(ScaLAPACK_FLAGS             "-mkl=cluster")
@@ -20,7 +20,6 @@ set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-O3")
 
 set(USE_MPI             ON)
-set(EXPLICIT_VEC        ON)
 set(REDUCE_FOR_MANYCORE ON)
 
 

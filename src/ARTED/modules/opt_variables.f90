@@ -31,9 +31,6 @@ module opt_variables
 
   integer,allocatable :: modx(:),mody(:),modz(:)
 
-  integer :: STENCIL_BLOCKING_X
-  integer :: STENCIL_BLOCKING_Y
-
   real(8),allocatable :: zcx(:,:),zcy(:,:),zcz(:,:)
 
   integer,allocatable    :: nprojector(:)       ! # of projector
@@ -41,10 +38,6 @@ module opt_variables
   integer,allocatable    :: idx_proj(:)         ! projector element index
   integer,allocatable    :: idx_lma(:)          ! start index of lma
   integer,allocatable    :: pseudo_start_idx(:) ! start index of pseudo-vector
-
-#ifdef ARTED_STENCIL_ORIGIN
-  integer,allocatable :: zifdx(:,:),zifdy(:,:),zifdz(:,:)
-#endif
 
 #ifdef ARTED_LBLK
   integer,allocatable :: t4ppt_nlma(:)    ! (PNL)
@@ -76,10 +69,6 @@ module opt_variables
 !dir$ attributes align:MEM_ALIGNED :: zcx,zcy,zcz
 !dir$ attributes align:MEM_ALIGNED :: modx,mody,modz
 
-#ifdef ARTED_STENCIL_ORIGIN
-!dir$ attributes align:MEM_ALIGNED :: zifdx,zifdy,zifdz
-#endif
-
 contains
   subroutine opt_vars_initialize_p1
     use global_variables
@@ -104,12 +93,16 @@ contains
 
   subroutine opt_vars_initialize_p2
     use global_variables
+    use code_optimization, only: switch_stencil_optimization, &
+    &                            switch_openmp_parallelization, &
+    &                            set_modulo_tables
     implicit none
 
     integer :: ix,iy,iz
+    integer :: num(3)
 
     PNLx = NLx
-#ifdef ARTED_STENCIL_PADDING
+#ifdef SALMON_STENCIL_PADDING
     PNLy = NLy + 1
 #else
     PNLy = NLy
@@ -137,16 +130,6 @@ contains
     lapt( 5: 8)=lapy(1:4)
     lapt( 9:12)=lapz(1:4)
 
-#ifdef ARTED_STENCIL_ORIGIN
-    allocate(zifdx(-4:4,0:NL-1))
-    allocate(zifdy(-4:4,0:NL-1))
-    allocate(zifdz(-4:4,0:NL-1))
-
-    zifdx(-4:4,0:NL-1) = ifdx(-4:4,1:NL) - 1
-    zifdy(-4:4,0:NL-1) = ifdy(-4:4,1:NL) - 1
-    zifdz(-4:4,0:NL-1) = ifdz(-4:4,1:NL) - 1
-#endif
-
     if(.not. allocated(zJxyz)) allocate(zJxyz(Nps,NI))  !AY see subroutine prep_ps_periodic
     !allocate(zJxyz(Nps,NI))
 
@@ -166,16 +149,19 @@ contains
       modz(iz) = mod(iz,NLz)
     end do
 
-#ifdef ARTED_STENCIL_PADDING
+#ifdef SALMON_STENCIL_PADDING
     call init_for_padding
     call init_projector(zKxyz)
 #else
     call init_projector(zJxyz)
 #endif
 
-#ifdef ARTED_STENCIL_ENABLE_LOOP_BLOCKING
-    call auto_blocking
-#endif
+    num(1) = NLz
+    num(2) = NLy
+    num(3) = NLx
+    call switch_stencil_optimization(num)
+    call switch_openmp_parallelization(num)
+    call set_modulo_tables(num)
   end subroutine
 
   subroutine init_for_padding
@@ -281,7 +267,7 @@ contains
     do ilma=1,Nlma
        ia=a_tbl(ilma)
        do j=1,Mps(ia)
-#ifdef ARTED_STENCIL_PADDING
+#ifdef SALMON_STENCIL_PADDING
           i=zKxyz(j,ia)
 #else
           i=zJxyz(j,ia)
@@ -313,7 +299,7 @@ contains
     do ilma=1,Nlma
        ia=a_tbl(ilma)
        do j=1,Mps(ia)
-#ifdef ARTED_STENCIL_PADDING
+#ifdef SALMON_STENCIL_PADDING
           i=zKxyz(j,ia)
 #else
           i=zJxyz(j,ia)
@@ -336,21 +322,6 @@ contains
 
   end subroutine
 #endif
-
-  subroutine auto_blocking
-    use misc_routines, only: floor_pow2
-    implicit none
-    integer,parameter :: L1cache_size =  8 * 1024
-    integer,parameter :: value_size   = 24
-    real(8) :: nyx
-    integer :: sq
-
-    nyx = dble(L1cache_size) / (PNLz * value_size)
-    sq  = int(floor(sqrt(nyx)))
-
-    STENCIL_BLOCKING_X = floor_pow2(min(sq, PNLx))
-    STENCIL_BLOCKING_Y = floor_pow2(min(sq, PNLy))
-  end subroutine
 
   subroutine opt_vars_reinitialize
     implicit none
@@ -384,12 +355,6 @@ contains
     SAFE_DEALLOCATE(idx_proj)
     SAFE_DEALLOCATE(idx_lma)
     SAFE_DEALLOCATE(pseudo_start_idx)
-
-#ifdef ARTED_STENCIL_ORIGIN
-    SAFE_DEALLOCATE(zifdx)
-    SAFE_DEALLOCATE(zifdy)
-    SAFE_DEALLOCATE(zifdz)
-#endif
 
 #ifdef ARTED_LBLK
     SAFE_DEALLOCATE(t4ppt_nlma)

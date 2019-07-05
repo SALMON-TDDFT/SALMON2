@@ -46,6 +46,7 @@ use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
 use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
+use code_optimization
 implicit none
 
 type(s_rgrid) :: lg
@@ -230,6 +231,7 @@ call init_sendrecv_matrix
 
 call allocate_sendrecv
 call init_persistent_requests
+call init_code_optimization
 
 if(ilsda==0)then
   numspin=1
@@ -690,7 +692,20 @@ call timer_end(LOG_TOTAL)
 call deallocate_mat
 
 call finalize_xc(xc_func)
-  
+
+contains
+
+subroutine init_code_optimization
+  implicit none
+  call switch_stencil_optimization(mg%num)
+  call switch_openmp_parallelization(mg%num)
+  call set_modulo_tables(mg%num + (nd*2))
+
+  if (comm_is_root(nproc_id_global)) then
+    call optimization_log
+  end if
+end subroutine
+
 END subroutine Real_Time_DFT
 
 !=========%==============================================================

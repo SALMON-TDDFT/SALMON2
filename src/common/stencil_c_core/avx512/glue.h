@@ -13,10 +13,8 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-#ifndef ARTED_INTEROP
-#define ARTED_INTEROP
-
-/* Stencil computation code with C supports Intel compiler only. */
+#ifndef SALMON_STENCIL_GLUE
+#define SALMON_STENCIL_GLUE
 
 /* currently Xeon CPUs and Xeon Phi are 64B cacheline. */
 #ifndef CACHELINE_SIZE
@@ -64,23 +62,6 @@
 #define MIN(n,m) (n < m ? n : m)
 
 #include <immintrin.h>
-
-#ifdef ARTED_STENCIL_LOOP_BLOCKING
-#define BX   opt_variables_mp_stencil_blocking_x_
-#define BY   opt_variables_mp_stencil_blocking_y_
-#endif
-
-#define NL   global_variables_mp_nl_
-#define NLx  global_variables_mp_nlx_
-#define NLy  global_variables_mp_nly_
-#define NLz  global_variables_mp_nlz_
-#define PNLx opt_variables_mp_pnlx_
-#define PNLy opt_variables_mp_pnly_
-#define PNLz opt_variables_mp_pnlz_
-
-#define modx opt_variables_mp_modx_
-#define mody opt_variables_mp_mody_
-#define modz opt_variables_mp_modz_
 
 
 #if defined(__AVX512F__) || (__KNC__)
@@ -157,4 +138,4 @@ __m256d dcast_to_dcmplx(double const *v) {
 }
 #endif
 
-#endif /* ARTED_INTEROP */
+#endif /* SALMON_STENCIL_GLUE */

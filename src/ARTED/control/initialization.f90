@@ -37,12 +37,9 @@ contains
     use inputfile,only: transfer_input
     use restart,only: prep_restart_read
     use io_gs_wfn_k,only: modify_initial_guess_copy_1stk_to_all
+    use code_optimization, only: optimization_log
     implicit none
 !$ integer :: omp_get_max_threads  
-
-    if(comm_is_root(nproc_id_global)) then
-       call print_optimize_message
-    end if
 
     NUMBER_THREADS=1
 !$  NUMBER_THREADS=omp_get_max_threads()
@@ -98,6 +95,9 @@ contains
 
 ! initialize for optimization.
     call opt_vars_initialize_p2
+    if (comm_is_root(nproc_id_global)) then
+      call optimization_log
+    end if
 
     if(use_ehrenfest_md=='y' .or. use_adiabatic_md=='y') then
        call init_md

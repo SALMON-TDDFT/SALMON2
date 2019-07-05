@@ -50,7 +50,7 @@ subroutine hpsi_acc_KB_RT_LBLK(tpsi,htpsi, ikb_s,ikb_e)
 contains
   subroutine pseudo_pt_LBLK(tpsi,htpsi, ikb_s,ikb_e)
     use Global_Variables, only: Mps,iuV,Hxyz,zproj,Nlma,a_tbl
-#ifdef ARTED_STENCIL_PADDING
+#ifdef SALMON_STENCIL_PADDING
     use opt_variables, only: zJxyz => zKxyz,PNL
 #else
     use opt_variables, only: zJxyz,PNL
@@ -70,7 +70,7 @@ contains
     !Calculating nonlocal part
 
 !$acc kernels pcopy(tpsi) create(uVpsi) pcopyin(a_tbl,zproj,ik_table,mps,iuv) &
-#ifdef ARTED_STENCIL_PADDING
+#ifdef SALMON_STENCIL_PADDING
 !$acc& pcopyin(zKxyz) &
 #else
 !$acc& pcopyin(zJxyz) &

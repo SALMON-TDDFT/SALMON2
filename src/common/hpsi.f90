@@ -72,9 +72,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      call stencil_R(tpsi%rwf(:,:,:,ispin,io,ik,im),htpsi%rwf(:,:,:,ispin,io,ik,im),mg%is_array,mg%ie_array &
-                    ,V_local(ispin)%f,mg%is,mg%ie &
-                    ,mg%idx,mg%idy,mg%idz,stencil%lap0,stencil%lapt)
+      call stencil_R(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                    ,tpsi%rwf(:,:,:,ispin,io,ik,im),htpsi%rwf(:,:,:,ispin,io,ik,im) &
+                    ,V_local(ispin)%f,stencil%lap0,stencil%lapt)
     end do
     end do
     end do
@@ -113,9 +113,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
         end if
         do io=io_s,io_e
         do ispin=1,Nspin
-          call stencil_C(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im),mg%is_array,mg%ie_array &
-                        ,V_local(ispin)%f,mg%is,mg%ie &
-                        ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%lapt,k_nabt)
+          call stencil_C(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                        ,V_local(ispin)%f,k_lap0,stencil%lapt,k_nabt)
         end do
         end do
       end do
@@ -137,10 +137,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
           end if
           do io=io_s,io_e
           do ispin=1,Nspin
-            call stencil_nonorthogonal(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                          ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
-                                          ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%lapt,stencil%nabt &
-                                          ,kAc,stencil%coef_F,htpsi%wrk)
+            call stencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%wrk &
+                                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                      ,V_local(ispin)%f,k_lap0,stencil%lapt,stencil%nabt,kAc,stencil%coef_F)
           end do
           end do
         end do
@@ -161,9 +160,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
           end if
           do io=io_s,io_e
           do ispin=1,Nspin
-            call stencil_nonorthogonal_highsymmetry(tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                          ,mg%is_array,mg%ie_array,V_local(ispin)%f,mg%is,mg%ie &
-                                          ,mg%idx,mg%idy,mg%idz,k_lap0,stencil%coef_lap,k_nabt,mg%ndir,stencil%sign)
+            call stencil_nonorthogonal_highsymmetry( &
+                                           mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,mg%ndir &
+                                          ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                          ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt,stencil%sign)
           end do
           end do
         end do

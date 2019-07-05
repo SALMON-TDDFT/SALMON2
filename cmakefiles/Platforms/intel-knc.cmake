@@ -2,7 +2,7 @@
 set(TARGET_SUFFIX               ".mic")
 
 set(ARCH                        "-mmic")
-set(SIMD_SET                    "IMCI")
+set(SIMD_SET                    "avx512")
 set(OPENMP_FLAGS                "-qopenmp")
 set(LAPACK_FLAGS                "-mkl=parallel")
 set(ScaLAPACK_FLAGS             "-mkl=cluster")

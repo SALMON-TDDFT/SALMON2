@@ -5,7 +5,6 @@ set(SOURCES
     Hartree.f90
     psi_rho.f90
     hpsi${HPSI_TEST_SUFFIX}.f90
-    preprocessor.f90
     restart.f90
     density_plot.f90
     projector.f90

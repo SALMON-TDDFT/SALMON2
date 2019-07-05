@@ -649,7 +649,9 @@ if(iscfrt==1)then
 else if(iscfrt==2)then
   lg%is_array(1:3)=lg_sta(1:3)-nd
   lg%ie_array(1:3)=lg_end(1:3)+nd
-  lg%ie_array(1)=lg%ie_array(1)+1 ! padding
+#ifdef SALMON_STENCIL_PADDING
+  lg%ie_array(2)=lg%ie_array(2)+1
+#endif
 end if
 
 if(allocated(lg%idx)) deallocate(lg%idx)
@@ -714,7 +716,7 @@ if(iperiodic==3 .and. nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
   if(allocated(mg%idx)) deallocate(mg%idx)
   if(allocated(mg%idy)) deallocate(mg%idy)
   if(allocated(mg%idz)) deallocate(mg%idz)
-  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
+  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) & ! add shadow region
           ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
   mg%idx = lg%idx
