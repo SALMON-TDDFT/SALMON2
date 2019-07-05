@@ -63,6 +63,9 @@ module timer
   integer,public,parameter :: LOG_CALC_PROJECTION       = 59
   integer,public,parameter :: LOG_CALC_QUADRUPOLE       = 60 ! FIXME: wrong name
   integer,public,parameter :: LOG_WRITE_ENERGIES        = 61
+  integer,public,parameter :: LOG_CALC_CURRENT_ION      = 65
+  integer,public,parameter :: LOG_CALC_EIGEN_ENERGY     = 66
+  integer,public,parameter :: LOG_CALC_TOTAL_ENERGY_PERIODIC = 67
   integer,public,parameter :: LOG_WRITE_RT_INFOS        = 62
   integer,public,parameter :: LOG_RT_MISC               = 63
   integer,public,parameter :: LOG_RT_ANALYSIS           = 64

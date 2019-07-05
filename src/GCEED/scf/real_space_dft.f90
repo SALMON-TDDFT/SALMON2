@@ -1466,18 +1466,18 @@ if(out_tm  == 'y') then
 end if
 
 ! force
-call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
-if(comm_is_root(nproc_id_global))then
-   write(*,*) "===== force ====="
-   do iatom=1,MI
-      select case(unit_system)
-      case('au','a.u.')
-        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
-      case('A_eV_fs')
-        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
-      end select
-   end do
-end if
+!call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+!if(comm_is_root(nproc_id_global))then
+!   write(*,*) "===== force ====="
+!   do iatom=1,MI
+!      select case(unit_system)
+!      case('au','a.u.')
+!        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
+!      case('A_eV_fs')
+!        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+!      end select
+!   end do
+!end if
 
 if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
 

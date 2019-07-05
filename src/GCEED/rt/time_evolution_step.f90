@@ -453,9 +453,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   call timer_end(LOG_CALC_QUADRUPOLE)
 
 
-  call timer_begin(LOG_WRITE_ENERGIES)
   if(iperiodic==3)then
     call subdip(rNe,1)
+
+    call timer_begin(LOG_WRITE_ENERGIES)
     if(iflag_hartree==2)then
       fg%rhoG_elec = rhoe_G
     else if(iflag_hartree==4)then
@@ -469,20 +470,35 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
       enddo
       enddo
     end if
+    call timer_end(LOG_WRITE_ENERGIES)
+
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_current(mg,zpsi_in)
       if(itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
+        call timer_begin(LOG_CALC_EIGEN_ENERGY)
         call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
+        call timer_end(LOG_CALC_EIGEN_ENERGY)
       end if
     else
       call calc_current(mg,zpsi_out)
       if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
+        call timer_begin(LOG_CALC_EIGEN_ENERGY)
         call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
+        call timer_end(LOG_CALC_EIGEN_ENERGY)
       end if
     end if
-    if(iflag_md==1) call calc_current_ion(system,curr_ion(:,itt))
 
+    if(iflag_md==1) then
+      call timer_begin(LOG_CALC_CURRENT_ION)
+      call calc_current_ion(system,curr_ion(:,itt))
+      call timer_begin(LOG_CALC_CURRENT_ION)
+    end if
+
+    call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+    call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
+
+    call timer_begin(LOG_WRITE_ENERGIES)
     rbox1=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction( + : rbox1 )
     do iz=ng_sta(3),ng_end(3)
@@ -513,8 +529,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
       write(19,'(f14.8, 3e16.8)')       &
         dble(itt)*dt*2.41888d-2, (E_ind(i1,itt),i1=1,3)
     end if
+    call timer_end(LOG_WRITE_ENERGIES)
   end if
-  call timer_end(LOG_WRITE_ENERGIES)
 
 
   call timer_begin(LOG_WRITE_RT_INFOS)
