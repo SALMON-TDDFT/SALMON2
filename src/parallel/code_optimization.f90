@@ -28,20 +28,24 @@ module code_optimization
 
 contains
   subroutine switch_stencil_optimization(nlens)
+    use salmon_global, only: want_stencil_hand_vectorization
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions
 #ifdef SALMON_EXPLICIT_VECTORIZATION
     ! unit-stride direction is should multiple of 4
-    optimized_stencil_is_callable = (mod(nlens(1), 4) == 0)
+    optimized_stencil_is_callable = (mod(nlens(1), 4) == 0) &
+    &    .and. (want_stencil_hand_vectorization == 'y')
 #else
     optimized_stencil_is_callable = .false.
 #endif
   end subroutine
 
   subroutine switch_openmp_parallelization(nlens)
+    use salmon_global, only: want_stencil_openmp_parallelization
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions
-    stencil_is_parallelized_by_omp = (nlens(1)*nlens(2)*nlens(3) >= 32*32*32)
+    stencil_is_parallelized_by_omp = (nlens(1)*nlens(2)*nlens(3) >= 32*32*32) &
+    &    .and. (want_stencil_openmp_parallelization == 'y')
   end subroutine
 
   subroutine set_modulo_tables(nlens)
