@@ -473,14 +473,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     call timer_end(LOG_WRITE_ENERGIES)
 
     if(mod(itt,2)==0.or.propagator=='etrs')then
-      call calc_current(mg,zpsi_in)
+      call calc_current(mg,srg,zpsi_in)
       if(itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
         call timer_begin(LOG_CALC_EIGEN_ENERGY)
         call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
         call timer_end(LOG_CALC_EIGEN_ENERGY)
       end if
     else
-      call calc_current(mg,zpsi_out)
+      call calc_current(mg,srg,zpsi_out)
       if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
         call timer_begin(LOG_CALC_EIGEN_ENERGY)
         call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)

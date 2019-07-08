@@ -846,12 +846,12 @@ if(iSCFRT==1)then
   end select
 else if(iSCFRT==2)then
   if(iobnum.ge.1)then
-    allocate(zpsi_in(mg%is_overlap(1):mg%ie_overlap(1), &
-                   & mg%is_overlap(2):mg%ie_overlap(2), &
-                   & mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end))
-    allocate(zpsi_out(mg%is_overlap(1):mg%ie_overlap(1), &
-                    & mg%is_overlap(2):mg%ie_overlap(2), &
-                    & mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end))
+    allocate(zpsi_in(mg%is_array(1):mg%ie_array(1), &
+                   & mg%is_array(2):mg%ie_array(2), &
+                   & mg%is_array(3):mg%ie_array(3), 1:iobnum, k_sta:k_end))
+    allocate(zpsi_out(mg%is_array(1):mg%ie_array(1), &
+                    & mg%is_array(2):mg%ie_array(2), &
+                    & mg%is_array(3):mg%ie_array(3), 1:iobnum, k_sta:k_end))
     zpsi_in(:,:,:,:,:)  = 0.d0
     zpsi_out(:,:,:,:,:) = 0.d0
   end if

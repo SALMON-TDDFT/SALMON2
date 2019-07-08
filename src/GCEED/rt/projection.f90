@@ -26,9 +26,9 @@ use allocate_mat_sub
 use structures, only: s_rgrid
 implicit none
 type(s_rgrid),intent(in) :: mg
-complex(8) :: tzpsi(mg%is_overlap(1):mg%ie_overlap(1) &
-&                  ,mg%is_overlap(2):mg%ie_overlap(2) &
-&                  ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
+complex(8) :: tzpsi(mg%is_array(1):mg%ie_array(1) &
+&                  ,mg%is_array(2):mg%ie_array(2) &
+&                  ,mg%is_array(3):mg%ie_array(3), 1:iobnum, k_sta:k_end)
 integer :: ix,iy,iz,iob,iik
 integer :: iob_myob,icorr_p,job,job_allob
 complex(8) :: coef_mat(itotMST,itotMST0,num_kpoints_rd,1)
