@@ -13,20 +13,21 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_current(mg,tpsi)
+subroutine calc_current(mg,srg,tpsi)
 use salmon_parallel, only: nproc_group_global, nproc_group_korbital
 use salmon_communication, only: comm_summation
 use timer
 use calc_allob_sub
 use scf_data
-use sendrecv_groupob_tmp_sub
 use allocate_psl_sub
 use structures, only: s_rgrid
+use sendrecv_grid, only: s_sendrecv_grid, update_overlap_complex8
 implicit none
 type(s_rgrid),intent(in) :: mg
-complex(8) :: tpsi(mg%is_overlap(1):mg%ie_overlap(1) &
-&                 ,mg%is_overlap(2):mg%ie_overlap(2) &
-&                 ,mg%is_overlap(3):mg%ie_overlap(3), 1:iobnum, k_sta:k_end)
+complex(8) :: tpsi(mg%is_array(1):mg%ie_array(1) &
+&                 ,mg%is_array(2):mg%ie_array(2) &
+&                 ,mg%is_array(3):mg%ie_array(3), 1:iobnum, k_sta:k_end)
+type(s_sendrecv_grid),intent(inout) :: srg
 integer :: ix,iy,iz,iob,iik
 complex(8),parameter :: zi=(0.d0,1.d0)
 complex(8) :: ekr(maxMps,MI,k_sta:k_end)
@@ -46,7 +47,7 @@ curr1(1:3)=0.d0
 
 
 call timer_begin(LOG_CUR_SENDRECV)
-call sendrecv_groupob_tmp(mg,tpsi)
+call update_overlap_complex8(srg, mg, tpsi)
 call timer_end(LOG_CUR_SENDRECV)
 
 
