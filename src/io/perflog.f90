@@ -253,9 +253,10 @@ contains
     call set(1, LOG_UHPSI_ALL,            'total')
     call set(2, LOG_UHPSI_UPDATE_OVERLAP, 'update overlap (comm.)')
     call set(3, LOG_UHPSI_STENCIL,        'stencil')
-    call set(4, LOG_UHPSI_PSEUDO,         'pseudo-pt')
-    call set(5, LOG_UHPSI_PSEUDO_COMM,    'pseudo-pt (comm.)')
-    call write_loadbalance(fd, 5, tsrc, headers, mode)
+    call set(4, LOG_UHPSI_SUBTRACTION,    'subtraction')
+    call set(5, LOG_UHPSI_PSEUDO,         'pseudo-pt')
+    call set(6, LOG_UHPSI_PSEUDO_COMM,    'pseudo-pt (comm.)')
+    call write_loadbalance(fd, 6, tsrc, headers, mode)
 
     call write_root(fd, '=== performance [GFLOPS] ===')
     call write_flops(fd, mode)

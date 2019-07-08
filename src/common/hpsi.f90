@@ -170,8 +170,15 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
         end do
       end if
     end if
+    call timer_end(LOG_UHPSI_STENCIL)
+
   ! subtraction
+    call timer_begin(LOG_UHPSI_SUBTRACTION)
     if(present(ttpsi)) then
+!$omp parallel do collapse(6) default(none) &
+!$omp          private(im,ik,io,ispin,iz,iy,ix) &
+!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg) &
+!$omp          shared(ttpsi,htpsi,V_local,tpsi)
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -188,8 +195,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
       end do
       end do
       end do
+!$omp end parallel do
     end if
-    call timer_end(LOG_UHPSI_STENCIL)
+    call timer_end(LOG_UHPSI_SUBTRACTION)
 
   ! pseudopotential
     call pseudo_C(tpsi,htpsi,info,nspin,ppg)

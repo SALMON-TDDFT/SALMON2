@@ -226,7 +226,7 @@ CONTAINS
     type(s_pp_grid),intent(in) :: ppg
     !
     integer :: ik,io,jo,ispin,im,nk,no,is(3),ie(3),Nspin
-    real(8) :: E_kin,E_ion_nloc,E_tmp
+    real(8) :: E_tmp,E_local(2),E_sum(2)
     real(8),allocatable :: wrk1(:,:),wrk2(:,:)
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_eigen_energy"
@@ -288,7 +288,7 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
-      call comm_summation(E_tmp,E_kin,info%icomm_rko)
+      E_local(1) = E_tmp
 
     ! nonlocal part (E_ion_nloc)
       ttpsi%zwf = 0d0
@@ -308,10 +308,12 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
-      call comm_summation(E_tmp,E_ion_nloc,info%icomm_rko)
+      E_local(2) = E_tmp
 
-      energy%E_kin = E_kin
-      energy%E_ion_nloc = E_ion_nloc
+      call comm_summation(E_local,E_sum,2,info%icomm_rko)
+
+      energy%E_kin      = E_sum(1)
+      energy%E_ion_nloc = E_sum(2)
 
     end if
 
