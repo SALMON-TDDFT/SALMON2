@@ -10,7 +10,7 @@ set(ADDITIONAL_MACRO            "")
 set(ADDITIONAL_OPTIMIZE_FLAGS   "-qopt-ra-region-strategy=block -ansi-alias -fno-alias -qopt-report=5 -qopt-report-phase=openmp,loop,vec")
 
 set(Fortran_FLAGS_General       "-traceback -fpp -nogen-interface -std03 -warn all -diag-disable 6477,7025")
-set(C_FLAGS_General             "-Wall -diag-disable=10388 -restrict")
+set(C_FLAGS_General             "-Wall -diag-disable=10388 -restrict -std=c99")
 
 set(CMAKE_Fortran_COMPILER      "mpiifort")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
