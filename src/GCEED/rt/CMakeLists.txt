@@ -9,7 +9,6 @@ set(SOURCES
     convert_input_rt.f90
     dip.f90
     gradient_ex.f90
-    hpsi_groupob.f90
     initA.f90
     projection.f90
     read_rt.f90
