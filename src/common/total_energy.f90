@@ -213,7 +213,6 @@ CONTAINS
     use structures
     use salmon_communication, only: comm_summation
     use hpsi_sub
-    use pseudo_pt_sub, only: pseudo_C
     implicit none
     type(s_energy)             :: energy
     type(s_wavefunction)       :: tpsi,htpsi,ttpsi
@@ -291,19 +290,25 @@ CONTAINS
       E_local(1) = E_tmp
 
     ! nonlocal part (E_ion_nloc)
-      ttpsi%zwf = 0d0
-      call pseudo_C(tpsi,ttpsi,info,nspin,ppg)
       E_tmp = 0d0
 !$omp parallel do collapse(3) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ispin,ik,io) &
-!$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
+!$omp          shared(Nspin,info,tpsi,htpsi,ttpsi,system,is,ie,im,V_local)
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          E_tmp = E_tmp + info%occ(io,ik,ispin) &
-                      * sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
-                                 * ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+
+          E_tmp = E_tmp + info%occ(io,ik,ispin) * system%hvol &
+            * sum( conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im)) &
+              * (htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                - (ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                   + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
+                   * tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                ) &
+              ) &
+            )
+
         end do
         end do
       end do

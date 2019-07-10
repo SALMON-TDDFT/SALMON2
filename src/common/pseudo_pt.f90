@@ -16,6 +16,8 @@
 module pseudo_pt_sub
   implicit none
 
+! WARNING: We must not call these except for hpsi routine.
+
 contains
 
 subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
