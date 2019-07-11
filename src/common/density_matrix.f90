@@ -126,7 +126,7 @@ contains
     is = rg%is
     ie = rg%ie
     nsize = rg%num(1) * rg%num(2) * rg%num(3)
-    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(get_nthreads()-1)))
+    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(get_nthreads())-1))
     wrk=0.d0
 
     if(allocated(psi%rwf)) then
