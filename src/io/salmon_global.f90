@@ -365,5 +365,8 @@ real(8),allocatable :: rion_red(:,:)
 character(1),allocatable :: flag_opt_atom(:)
 character(256),allocatable :: atom_name(:)
 
+!! &code
+  character(1) :: want_stencil_openmp_parallelization
+  character(1) :: want_stencil_hand_vectorization
 
 end module salmon_global

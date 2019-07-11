@@ -57,6 +57,7 @@ module inputoutput
   integer :: inml_group_hartree
   integer :: inml_group_file
   integer :: inml_group_others
+  integer :: inml_code
 
 !! === old variables: will be removed after some time
   integer :: inml_group_function
@@ -527,6 +528,10 @@ contains
       & iwdenstep, &
       & iflag_estatic
 
+    namelist/code/ &
+      & want_stencil_openmp_parallelization, &
+      & want_stencil_hand_vectorization
+
 
 !! == default for &unit ==
     unit_system='au'
@@ -864,7 +869,9 @@ contains
     iwdenoption                = 0
     iwdenstep                  = 0
     iflag_estatic              = 0
-
+!! == default for code
+    want_stencil_openmp_parallelization = 'y'
+    want_stencil_hand_vectorization     = 'y'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -943,6 +950,9 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=group_others, iostat=inml_group_others)
+      rewind(fh_namelist)
+
+      read(fh_namelist, nml=code, iostat=inml_code)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1303,6 +1313,9 @@ contains
     call comm_bcast(iwdenoption         ,nproc_group_global)
     call comm_bcast(iwdenstep           ,nproc_group_global)
     call comm_bcast(iflag_estatic       ,nproc_group_global)
+!! == bcast for code
+    call comm_bcast(want_stencil_openmp_parallelization,nproc_group_global)
+    call comm_bcast(want_stencil_hand_vectorization    ,nproc_group_global)
 
   end subroutine read_input_common
 
@@ -1982,6 +1995,11 @@ contains
         end do
       case default
       end select
+
+      if(inml_code >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'code', inml_code
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'want_stencil_openmp_parallelization', want_stencil_openmp_parallelization
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'want_stencil_hand_vectorization', want_stencil_hand_vectorization
 
       close(fh_variables_log)
 
