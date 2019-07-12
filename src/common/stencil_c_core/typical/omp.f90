@@ -135,14 +135,14 @@ subroutine stencil_C_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
     t(7) = tpsi(DZ(-3))
     t(8) = tpsi(DZ(-4))
 
-    v=(lapt(1)*(t(1)+t(5)) &
-    & +lapt(2)*(t(2)+t(6)) &
-    & +lapt(3)*(t(3)+t(7)) &
-    & +lapt(4)*(t(4)+t(8)))
-    w=(nabt(1)*(t(1)-t(5)) &
-    & +nabt(2)*(t(2)-t(6)) &
-    & +nabt(3)*(t(3)-t(7)) &
-    & +nabt(4)*(t(4)-t(8)))
+    v=(lapt( 9)*(t(1)+t(5)) &
+    & +lapt(10)*(t(2)+t(6)) &
+    & +lapt(11)*(t(3)+t(7)) &
+    & +lapt(12)*(t(4)+t(8)))
+    w=(nabt( 9)*(t(1)-t(5)) &
+    & +nabt(10)*(t(2)-t(6)) &
+    & +nabt(11)*(t(3)-t(7)) &
+    & +nabt(12)*(t(4)-t(8)))
 
     htpsi(ix,iy,iz) = htpsi(ix,iy,iz) &
                     - 0.5d0 * v - zI * w
