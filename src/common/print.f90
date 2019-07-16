@@ -598,4 +598,67 @@ contains
 
   end subroutine
 
+  subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
+    use structures,           only: s_rgrid, s_system, s_wf_info, s_wavefunction
+    use salmon_parallel,      only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use salmon_file,          only: open_filehandle
+    use inputoutput,          only: sysname, directory, num_kgrid
+    use band,                 only: calc_kgrid_prod
+    implicit none
+    type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
+    type(s_system),       intent(in) :: system
+    type(s_wf_info),      intent(in) :: wf_info
+    type(s_wavefunction), intent(in) :: wavefunction
+
+    integer, parameter :: ndk = 1
+    integer :: ik, ik1, ik2, ik3 
+    integer :: jdk1, jdk2, jdk3, io, jo
+    integer :: fh
+    character(256) :: file_prod_dk_data
+    integer :: ik3d_tbl(1:3, 1:system%nk)
+    complex(8) :: prod_dk( &
+      & 1:system%nk, 0:ndk, 0:ndk, 0:ndk, &
+      & 1:system%no, 1:system%no)
+
+    ! Export filename: project_directory/sysname_kprod_dk.data
+    file_prod_dk_data = trim(directory) // trim(sysname) // "_prod_dk.data"
+
+    ! If k-point is distributed as uniform rectangular grid:
+    if (0 < minval(num_kgrid)) then
+      ! Calculate inner-product table: prod_dk
+      call calc_kgrid_prod( &
+        & system, rgrid_lg, rgrid_mg, wf_info, wavefunction, &
+        & num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk, &
+        & ik3d_tbl, prod_dk)
+      
+      if(comm_is_root(nproc_id_global)) then
+        fh = open_filehandle(trim(file_prod_dk_data))
+        write(fh, '(a)') "# ik, ik1, ik2, ik3, jdk1, jdk2, jdk3, io, jo, re, im"
+        do ik = 1, system%nk
+          ik1 = ik3d_tbl(1, ik)
+          ik2 = ik3d_tbl(2, ik)
+          ik3 = ik3d_tbl(3, ik)
+          do jdk3 = 0, ndk
+            do jdk2 = 0, ndk
+              do jdk1 = 0, ndk
+                do jo = 1, system%no
+                  do io = 1, system%no
+                    write(fh, '(9(i6,1x),2(e24.16e3,1x))') &
+                      & ik, ik1, ik2, ik3, &
+                      & jdk1, jdk2, jdk3, io, jo, &
+                      & real(prod_dk(ik, jdk1, jdk2, jdk3, io, jo)), &
+                      & aimag(prod_dk(ik, jdk1, jdk2, jdk3, io, jo))
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end do
+        close(fh)
+      end if
+    end if
+    return
+  end subroutine write_prod_dk_data
+
 end module print_sub
