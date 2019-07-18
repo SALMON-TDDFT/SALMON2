@@ -124,7 +124,9 @@ subroutine stencil_C_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
                     - 0.5d0 * v - zI * w
   end do
 
+#ifndef __FUJITSU
 !$omp simd
+#endif
   do ix=is(1),ie(1)
     t(1) = tpsi(DZ( 1))
     t(2) = tpsi(DZ( 2))

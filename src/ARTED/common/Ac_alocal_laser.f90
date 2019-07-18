@@ -84,7 +84,7 @@ contains
      call comm_bcast(radi, nproc_group_global)
      call comm_bcast(sgm,  nproc_group_global)
 
-!$omp parallel
+!$omp parallel private(j,ia,ix,iy,iz,tmpx,tmpy,tmpz,ia2,x,y,z,r,tmp1)
      do j=1,NI_alocal
         ia=iatom(j)
         do ix=-2,2
@@ -93,7 +93,7 @@ contains
            tmpx = Rion(1,ia)+ix*aLx
            tmpy = Rion(2,ia)+iy*aLy
            tmpz = Rion(3,ia)+iz*aLz
-!$omp do private(i,x,y,z,r,tmp1)
+!$omp do private(i)
            do i=1,NL
               x=Lx(i)*Hx-tmpx
               y=Ly(i)*Hy-tmpy
@@ -107,6 +107,8 @@ contains
               endif
            enddo
 !$omp end do
+
+!$omp do private(ia2)
            do ia2=1,NI
               x=Rion(1,ia2)-tmpx
               y=Rion(2,ia2)-tmpy
@@ -119,6 +121,7 @@ contains
                  weight_Ac_alocal_ion(ia2)= weight_Ac_alocal_ion(ia2) + tmp1
               endif
            enddo
+!$omp end do
         enddo
         enddo
         enddo

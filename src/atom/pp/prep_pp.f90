@@ -130,7 +130,7 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
  !Vpsl_l   =0.d0
 !$omp parallel private(n)
   do n=ng_s,ng_e
-!$omp do private(i,gr,a,tmp_exp)
+!$omp do private(i,gr,a,tmp_exp,u,v,w,r)
     do i=1,NL
       u = lx(i)*hx
       v = ly(i)*hy
