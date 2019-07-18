@@ -111,10 +111,12 @@ Subroutine Gram_Schmidt_ompb
 !$omp end do
 
      do ibt=ib+2,NB-1,2
+!$omp single
         zov1a = sum(zov_omp(1,ibt,  :))*Hxyz
         zov1b = sum(zov_omp(2,ibt,  :))*Hxyz
         zov2a = sum(zov_omp(1,ibt+1,:))*Hxyz
         zov2b = sum(zov_omp(2,ibt+1,:))*Hxyz
+!$omp end single
 
 !$omp do private(i)
         do i=1,NL
