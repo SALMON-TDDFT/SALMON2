@@ -45,7 +45,7 @@ if(iSCFRT==1)then
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
     case(4)
-      call Hartree_FFTE(lg,mg,ng,rho,Vh,icheck_ascorder,hgs,npuw,npuy,npuz,   &
+      call Hartree_FFTE(lg,mg,ng,rho,Vh,hgs,npuw,npuy,npuz,   &
                         a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
     end select
   end select
@@ -71,7 +71,7 @@ else if(iSCFRT==2)then
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
       case(4)
-        call Hartree_FFTE(lg,mg,ng,rho,Vh_stock2,icheck_ascorder,hgs,npuw,npuy,npuz,   &
+        call Hartree_FFTE(lg,mg,ng,rho,Vh_stock2,hgs,npuw,npuy,npuz,   &
                           a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
       end select
     else
@@ -81,7 +81,7 @@ else if(iSCFRT==2)then
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
       case(4)
-        call Hartree_FFTE(lg,mg,ng,rho,Vh_stock1,icheck_ascorder,hgs,npuw,npuy,npuz,   &
+        call Hartree_FFTE(lg,mg,ng,rho,Vh_stock1,hgs,npuw,npuy,npuz,   &
                           a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
       end select
     end if

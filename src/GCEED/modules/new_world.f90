@@ -32,7 +32,6 @@ integer :: ibox_icoobox_bound
 ! FFTE routine
 integer :: iquot
 integer :: i11,i12,i13,i14,i15
-integer :: icheck_ascorder
 
 CONTAINS
 
@@ -50,10 +49,6 @@ integer :: ixs,iys,izs
 integer :: ibox
 integer :: icolor,ikey
 
-integer :: iarray_ascorder(0:nproc_size_global-1)
-integer :: iarray_ascorder2(0:nproc_size_global-1)
-integer :: icheck_ascorder_tmp
-integer :: icheck_ascorder_tmp2
 integer,allocatable :: iwork(:),iwork2(:)
 
 integer :: LNPU2(3)
@@ -557,90 +552,25 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
 
 !if(iflag_hartree==4)then
 
-  icheck_ascorder=1
-  
-  iarray_ascorder=0
-  iarray_ascorder(nproc_id_bound(2))=nproc_id_global
-  allocate(iwork(0:nproc_size_bound(2)-1),iwork2(0:nproc_size_bound(2)-1))
-  iwork(0:nproc_size_bound(2)-1)=iarray_ascorder(0:nproc_size_bound(2)-1)
-  call comm_summation(iwork,iwork2,nproc_size_bound(2),nproc_group_bound(2))
-  iarray_ascorder2(0:nproc_size_bound(2)-1)=iwork2(0:nproc_size_bound(2)-1)
-  deallocate(iwork,iwork2)
-
-  icheck_ascorder_tmp=1
-  do jj=0,nproc_size_bound(2)-2
-    if(iarray_ascorder2(jj)>iarray_ascorder2(jj+1)) icheck_ascorder_tmp=0
-  end do
-  
-  call comm_summation(icheck_ascorder_tmp,icheck_ascorder_tmp2,nproc_group_global)
- 
-  if(icheck_ascorder_tmp2/=nproc_size_global) icheck_ascorder=0
-
-  iarray_ascorder=0
-  iarray_ascorder(nproc_id_bound(3))=nproc_id_global
-  allocate(iwork(0:nproc_size_bound(3)-1),iwork2(0:nproc_size_bound(3)-1))
-  iwork(0:nproc_size_bound(3)-1)=iarray_ascorder(0:nproc_size_bound(3)-1)
-  call comm_summation(iwork,iwork2,nproc_size_bound(3),nproc_group_bound(3))
-  iarray_ascorder2(0:nproc_size_bound(3)-1)=iwork2(0:nproc_size_bound(3)-1)
-  deallocate(iwork,iwork2)
-
-  icheck_ascorder_tmp=1
-  do jj=0,nproc_size_bound(3)-2
-    if(iarray_ascorder2(jj)>iarray_ascorder2(jj+1)) icheck_ascorder_tmp=0
-  end do
-  
-  call comm_summation(icheck_ascorder_tmp,icheck_ascorder_tmp2,nproc_group_global)
- 
-  if(icheck_ascorder_tmp2/=nproc_size_global) icheck_ascorder=0
-
-  if(iperiodic==3.and.iflag_hartree==4)then
-    if(nproc_id_global==0)then
-      if(icheck_ascorder==0)then
-        write(*,*) "Ranks are NOT in ascending order. Allreduce is done in FFTE routine."
-      else if(icheck_ascorder==1)then
-        write(*,*) "Ranks are in ascending order. Allreduce is skipped in FFTE routine."
-      end if
-    end if
-  end if
-
 ! communicators for FFTE routine
-  if(icheck_ascorder==1)then
-    NPUW=nproc_Mxin_s_dm(1)*nproc_Mxin(1)
-    NPUY=nproc_Mxin_s_dm(2)*nproc_Mxin(2)
-    NPUZ=nproc_Mxin_s_dm(3)*nproc_Mxin(3)
- 
-    icolor=nproc_id_bound(3)+nproc_id_bound(1)*NPUZ 
-    ikey=nproc_id_bound(2)
-    nproc_group_icommy = comm_create_group(nproc_group_global, icolor, ikey)
-    call comm_get_groupinfo(nproc_group_icommy, nproc_id_icommy, nproc_size_icommy)
+  NPUW=nproc_Mxin_s_dm(1)*nproc_Mxin(1)
+  NPUY=nproc_Mxin_s_dm(2)*nproc_Mxin(2)
+  NPUZ=nproc_Mxin_s_dm(3)*nproc_Mxin(3)
 
-    icolor=nproc_id_bound(2)+nproc_id_bound(1)*NPUY 
-    ikey=nproc_id_bound(3)
-    nproc_group_icommz = comm_create_group(nproc_group_global, icolor, ikey)
-    call comm_get_groupinfo(nproc_group_icommz, nproc_id_icommz, nproc_size_icommz)
+  icolor=nproc_id_bound(3)+nproc_id_bound(1)*NPUZ
+  ikey=nproc_id_bound(2)
+  nproc_group_icommy = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(nproc_group_icommy, nproc_id_icommy, nproc_size_icommy)
 
-    icolor=nproc_id_bound(2)+nproc_id_bound(3)*NPUY 
-    ikey=nproc_id_bound(1)
-    nproc_group_icommw = comm_create_group(nproc_group_global, icolor, ikey)
-    call comm_get_groupinfo(nproc_group_icommw, nproc_id_icommw, nproc_size_icommw)
+  icolor=nproc_id_bound(2)+nproc_id_bound(1)*NPUY
+  ikey=nproc_id_bound(3)
+  nproc_group_icommz = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(nproc_group_icommz, nproc_id_icommz, nproc_size_icommz)
 
-  else
-    call factor(nproc_size_global,LNPU2)
-    NPUZ=(2**(LNPU2(1)/2))*(3**(LNPU2(2)/2))*(5**(LNPU2(3)/2))
-    NPUY=nproc_size_global/NPUZ
-    NPUW=1
-  
-    icolor=nproc_id_global/NPUY
-    ikey=0
-    nproc_group_icommy = comm_create_group(nproc_group_global, icolor, ikey)
-    call comm_get_groupinfo(nproc_group_icommy, nproc_id_icommy, nproc_size_icommy)
-
-    icolor=mod(nproc_id_global,NPUY)
-    ikey=0
-    nproc_group_icommz = comm_create_group(nproc_group_global, icolor, ikey)
-    call comm_get_groupinfo(nproc_group_icommz, nproc_id_icommz, nproc_size_icommz)
-    
-  end if
+  icolor=nproc_id_bound(2)+nproc_id_bound(3)*NPUY
+  ikey=nproc_id_bound(1)
+  nproc_group_icommw = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(nproc_group_icommw, nproc_id_icommw, nproc_size_icommw)
 
   iquot=nproc_id_global/(NPUY*NPUZ)
   
