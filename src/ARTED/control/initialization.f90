@@ -96,7 +96,7 @@ contains
 ! initialize for optimization.
     call opt_vars_initialize_p2
     if (comm_is_root(nproc_id_global)) then
-      call optimization_log
+      call optimization_log(nproc_k, nproc_ob, nproc_domain, nproc_domain_s)
     end if
 
     if(use_ehrenfest_md=='y' .or. use_adiabatic_md=='y') then

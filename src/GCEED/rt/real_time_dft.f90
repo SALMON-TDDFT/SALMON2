@@ -703,7 +703,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log
+    call optimization_log(nproc_k, nproc_ob, nproc_mxin, nproc_mxin_s)
   end if
 end subroutine
 
