@@ -50,7 +50,7 @@ module structures
     ! Number of orbitals (4-th dimension of grid)
     integer :: nb
     ! Communicator
-    integer :: icomm, myrank
+    integer :: icomm
     ! Neightboring MPI id (1:x,2:y,3:z, 1:upside,2:downside):
     integer :: neig(1:3, 1:2) 
     ! Communication requests (1:x,2:y,3:z, 1:upside,2:downside, 1:send,2:recv):

@@ -1562,6 +1562,6 @@ subroutine eh_prep_GCEED(fs,fw)
     fs%ng%idz(ii)=ii
   end do
   fs%ng%Nd=fw%Nd
-  call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,nproc_id_global,neig_ng_eh)
+  call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,neig_ng_eh)
   
 end subroutine eh_prep_GCEED

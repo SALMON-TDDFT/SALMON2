@@ -860,7 +860,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   neig(3, 1) = kup_array(1)
   neig(3, 2) = kdw_array(1)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-    & nproc_group_korbital, nproc_id_korbital, neig)
+    & nproc_group_korbital, neig)
 
   neig_ng(1, 1) = iup_array(2)
   neig_ng(1, 2) = idw_array(2)
@@ -869,7 +869,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   neig_ng(3, 1) = kup_array(2)
   neig_ng(3, 2) = kdw_array(2)
   call init_sendrecv_grid(srg_ng, ng, 1, &
-    & nproc_group_global, nproc_id_global, neig_ng)
+    & nproc_group_global, neig_ng)
 
   allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &
