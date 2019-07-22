@@ -77,9 +77,11 @@ CONTAINS
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE allocate_mat
+SUBROUTINE allocate_mat(cg)
 
-implicit none
+  use structures, only: s_cg
+  implicit none
+  type(s_cg),intent(out)   :: cg
 
 allocate (vecR(3,lg_sta(1):lg_end(1),    &
              lg_sta(2):lg_end(2),      &
@@ -161,23 +163,21 @@ if(iSCFRT==2)then
 
 end if
 
-! FIX: Attempt to fetch from allocatable variable [RXK,RHXK,RGK,RPK]_OB when it is not allocated
-!if(iSCFRT==1.and.iperiodic==0)then
-  allocate (rxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (rhxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (rgk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (rpk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-!end if
+if(iSCFRT==1.and.iperiodic==0)then
+  allocate (cg%rxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%rhxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%rgk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%rpk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+end if
 
-! FIX: Attempt to fetch from allocatable variable [ZXK,ZHXK,ZGK,ZPK,ZPKO,ZHTPSI]_OB when it is not allocated
-!if(iSCFRT==1.and.iperiodic==3)then
-  allocate (zxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (zhxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (zgk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (zpk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (zpko_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (zhtpsi_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-!end if
+if(iSCFRT==1.and.iperiodic==3)then
+  allocate (cg%zxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%zhxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%zgk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%zpk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%zpko_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+  allocate (cg%zhwf_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
+end if
 
 allocate (rho_tmp(ng_num(1), ng_num(2), ng_num(3)))
 allocate (rho_s_tmp(ng_num(1), ng_num(2), ng_num(3), 2))

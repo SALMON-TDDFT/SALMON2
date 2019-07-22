@@ -96,6 +96,7 @@ type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_force)  :: force
+type(s_cg)  :: cg
 
 logical :: rion_update
 
@@ -199,7 +200,7 @@ if(iopt==1)then
     end select
     call make_icoobox_bound
         
-    call allocate_mat
+    call allocate_mat(cg)
     call set_icoo1d
     call allocate_sendrecv
     call init_persistent_requests
@@ -612,9 +613,9 @@ if(iopt==1)then
   call timer_begin(LOG_INIT_GS_RESTART)
   case(1,3)
 
-    call IN_data(lg,mg,ng,system,info,stencil)
+    call IN_data(lg,mg,ng,system,info,stencil,cg)
 
-    call allocate_mat
+    call allocate_mat(cg)
     call set_icoo1d
     call allocate_sendrecv
     call init_persistent_requests
@@ -984,9 +985,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     if (.not. allocated(k_rd)) allocate(k_rd(3,num_kpoints_rd))
 
     call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                       num_kpoints_rd,k_rd,   &
-                       rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                       zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+                       num_kpoints_rd,k_rd,cg,   &
                        info_ob,ppg,vlocal,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
@@ -1124,8 +1123,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg, &
                      info_ob,ppg,vlocal)
         case('n')
           call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
@@ -1134,8 +1132,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+          call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,   &
                              info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
           call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &

@@ -24,9 +24,11 @@ CONTAINS
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE deallocate_mat
+SUBROUTINE deallocate_mat(cg)
 
-implicit none
+  use structures, only: s_cg
+  implicit none
+  type(s_cg),intent(out)   :: cg
 
 deallocate (vecR)
 deallocate (vecR_tmp)
@@ -55,12 +57,12 @@ else if(iSCFRT==2.and.icalcforce==1)then
 end if
 
 if(iSCFRT==1.and.iperiodic==0)then
-  deallocate(rxk_ob,rhxk_ob,rgk_ob,rpk_ob)
+  deallocate(cg%rxk_ob,cg%rhxk_ob,cg%rgk_ob,cg%rpk_ob)
 end if
 
 if(iSCFRT==1.and.iperiodic==3)then
-  deallocate(zxk_ob,zhxk_ob,zgk_ob,zpk_ob)
-  deallocate(zpko_ob,zhtpsi_ob)
+  deallocate(cg%zxk_ob,cg%zhxk_ob,cg%zgk_ob,cg%zpk_ob)
+  deallocate(cg%zpko_ob,cg%zhwf_ob)
 end if
 
 deallocate (rho_tmp)

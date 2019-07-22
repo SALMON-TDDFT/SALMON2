@@ -21,11 +21,10 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                 rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg, &
                  info_ob,ppg,vlocal)
   use inputoutput, only: ncg,ispin
-  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid,s_cg
   use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
   use timer
@@ -52,10 +51,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
-  real(8),intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  real(8),intent(inout) :: rhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  real(8),intent(inout) :: rgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  real(8),intent(inout) :: rpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
+  type(s_cg)            :: cg
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
@@ -133,8 +129,8 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rxk_ob(ix,iy,iz,iob)=spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)
-      stpsi%rwf(ix,iy,iz,1,1,1,1)=rxk_ob(ix,iy,iz,iob)
+      cg%rxk_ob(ix,iy,iz,iob)=spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)
+      stpsi%rwf(ix,iy,iz,1,1,1,1)=cg%rxk_ob(ix,iy,iz,iob)
     end do
     end do
     end do
@@ -165,13 +161,13 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rhxk_ob(ix,iy,iz,iob)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+      cg%rhxk_ob(ix,iy,iz,iob)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
     end do
     end do
     end do
   end do
   
-  call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rxk_ob,rhxk_ob,xkhxk_ob,system%hvol)
+  call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rhxk_ob,xkhxk_ob,system%hvol)
   
   xkxk_ob(:)=1.d0 
   rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
@@ -186,7 +182,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rgk_ob(ix,iy,iz,iob) = 2*( rhxk_ob(ix,iy,iz,iob) - rk_ob(iob_allob)*rxk_ob(ix,iy,iz,iob) )
+        cg%rgk_ob(ix,iy,iz,iob) = 2*( cg%rhxk_ob(ix,iy,iz,iob) - rk_ob(iob_allob)*cg%rxk_ob(ix,iy,iz,iob) )
       end do
       end do
       end do
@@ -200,7 +196,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+spsi%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)*rgk_ob(ix,iy,iz,iob)
+            sum0=sum0+spsi%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)*cg%rgk_ob(ix,iy,iz,iob)
           end do
           end do
           end do
@@ -216,7 +212,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            rgk_ob(ix,iy,iz,iob)=rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)
+            cg%rgk_ob(ix,iy,iz,iob)=cg%rgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%rwf(ix,iy,iz,is,job-(is-1)*info%numo,1,1)
           end do
           end do
           end do
@@ -248,7 +244,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            sum0=sum0+rmatbox_m(ix,iy,iz)*rgk_ob(ix,iy,iz,iob_myob)
+            sum0=sum0+rmatbox_m(ix,iy,iz)*cg%rgk_ob(ix,iy,iz,iob_myob)
           end do
           end do
           end do
@@ -257,7 +253,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            rgk_ob(ix,iy,iz,iob_myob)=rgk_ob(ix,iy,iz,iob_myob)-sum1*rmatbox_m(ix,iy,iz)
+            cg%rgk_ob(ix,iy,iz,iob_myob)=cg%rgk_ob(ix,iy,iz,iob_myob)-sum1*rmatbox_m(ix,iy,iz)
           end do
           end do
           end do
@@ -265,7 +261,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       end do
       end do
     end if 
-    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rgk_ob,rgk_ob,sum_ob0,system%hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rgk_ob,cg%rgk_ob,sum_ob0,system%hvol)
     if ( iter==1 ) then
       do iob=1,system%nspin*info%numo
         call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
@@ -273,7 +269,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          rpk_ob(ix,iy,iz,iob) = -rgk_ob(ix,iy,iz,iob)
+          cg%rpk_ob(ix,iy,iz,iob) = -cg%rgk_ob(ix,iy,iz,iob)
         end do
         end do
         end do
@@ -286,16 +282,16 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          rpk_ob(ix,iy,iz,iob) = -rgk_ob(ix,iy,iz,iob) + uk*rpk_ob(ix,iy,iz,iob)
+          cg%rpk_ob(ix,iy,iz,iob) = -cg%rgk_ob(ix,iy,iz,iob) + uk*cg%rpk_ob(ix,iy,iz,iob)
         end do
         end do
         end do
       end do
     end if 
     gkgk_ob(:)=sum_ob0(:)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rxk_ob,rpk_ob,xkpk_ob,system%hvol)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rpk_ob,rpk_ob,pkpk_ob,system%hvol)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rpk_ob,rhxk_ob,pkhxk_ob,system%hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rpk_ob,xkpk_ob,system%hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rpk_ob,pkpk_ob,system%hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rhxk_ob,pkhxk_ob,system%hvol)
   
     do iob=1,system%nspin*info%numo
       call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
@@ -303,7 +299,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        stpsi%rwf(ix,iy,iz,1,1,1,1) = rpk_ob(ix,iy,iz,iob)
+        stpsi%rwf(ix,iy,iz,1,1,1,1) = cg%rpk_ob(ix,iy,iz,iob)
       end do
       end do
       end do
@@ -334,12 +330,12 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-         rgk_ob(ix,iy,iz,iob)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
+         cg%rgk_ob(ix,iy,iz,iob)=shtpsi%rwf(ix,iy,iz,1,1,1,1)
       end do
       end do
       end do
     end do
-    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rpk_ob,rgk_ob,pkHpk_ob,system%hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rgk_ob,pkHpk_ob,system%hvol)
     do iob=1,system%nspin*info%numo
       call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
       ak=pkHpk_ob(iob_allob)*xkpk_ob(iob_allob)-pkhxk_ob(iob_allob)*pkpk_ob(iob_allob)
@@ -351,21 +347,21 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rxk_ob(ix,iy,iz,iob) = rxk_ob(ix,iy,iz,iob) + alpha*rpk_ob(ix,iy,iz,iob)
-        rhxk_ob(ix,iy,iz,iob) = rhxk_ob(ix,iy,iz,iob) + alpha*rgk_ob(ix,iy,iz,iob)
+        cg%rxk_ob(ix,iy,iz,iob) = cg%rxk_ob(ix,iy,iz,iob) + alpha*cg%rpk_ob(ix,iy,iz,iob)
+        cg%rhxk_ob(ix,iy,iz,iob) = cg%rhxk_ob(ix,iy,iz,iob) + alpha*cg%rgk_ob(ix,iy,iz,iob)
       end do
       end do
       end do
     end do
-    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rxk_ob,rhxk_ob,xkhxk_ob,system%hvol)
-    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rxk_ob,rxk_ob,xkxk_ob,system%hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rhxk_ob,xkhxk_ob,system%hvol)
+    call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rxk_ob,xkxk_ob,system%hvol)
     rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
   end do Iteration
   call timer_end(LOG_GSCG_ITERATION)
 
 
   call timer_begin(LOG_GSCG_DEINIT)
-  call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,rxk_ob,rxk_ob,sum_ob0,system%hvol)
+  call inner_product7(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rxk_ob,sum_ob0,system%hvol)
   do iob=1,system%nspin*info%numo
     call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
     if(ilsda==0.or.ilsda==1.and.iob<=info%numo)then
@@ -377,7 +373,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)=rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
+      spsi%rwf(ix,iy,iz,is,iob-(is-1)*info%numo,1,1)=cg%rxk_ob(ix,iy,iz,iob)/sqrt(sum_ob0(iob_allob))
     end do
     end do
     end do
