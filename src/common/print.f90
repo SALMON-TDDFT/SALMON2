@@ -599,7 +599,7 @@ contains
   end subroutine
 
   subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
-    use structures,           only: s_rgrid, s_system, s_wf_info, s_wavefunction
+    use structures,           only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
     use salmon_parallel,      only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file,          only: open_filehandle
@@ -607,9 +607,9 @@ contains
     use band,                 only: calc_kgrid_prod
     implicit none
     type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
-    type(s_system),       intent(in) :: system
-    type(s_wf_info),      intent(in) :: wf_info
-    type(s_wavefunction), intent(in) :: wavefunction
+    type(s_dft_system),       intent(in) :: system
+    type(s_orbital_parallel),      intent(in) :: wf_info
+    type(s_orbital), intent(in) :: wavefunction
 
     ! Specify the neighboring k-grid region to consider:
     integer, parameter :: ndk = 1 
