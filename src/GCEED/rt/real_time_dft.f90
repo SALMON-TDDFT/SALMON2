@@ -713,7 +713,7 @@ END subroutine Real_Time_DFT
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & !nproc_group_grid,   &
-                           nproc_group_h, nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
+                           nproc_group_h, nproc_group_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
@@ -834,7 +834,8 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
     if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
+                       ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
   do jj=1,3
     do ii=1,4

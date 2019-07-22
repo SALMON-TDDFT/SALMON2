@@ -491,7 +491,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     if(iflag_md==1) then
       call timer_begin(LOG_CALC_CURRENT_ION)
       call calc_current_ion(system,curr_ion(:,itt))
-      call timer_begin(LOG_CALC_CURRENT_ION)
+      call timer_end(LOG_CALC_CURRENT_ION)
     end if
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)

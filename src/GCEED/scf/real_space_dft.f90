@@ -42,7 +42,7 @@ subroutine Real_Space_DFT
 use structures!, only: s_rgrid, s_orbital_parallel, s_orbital, s_dft_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
-                           nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
+                           nproc_group_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
@@ -1471,18 +1471,20 @@ if(out_tm  == 'y') then
 end if
 
 ! force
-!call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
-!if(comm_is_root(nproc_id_global))then
-!   write(*,*) "===== force ====="
-!   do iatom=1,MI
-!      select case(unit_system)
-!      case('au','a.u.')
-!        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
-!      case('A_eV_fs')
-!        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
-!      end select
-!   end do
-!end if
+!(if you don't want to calculate force due to certain reason(very large calc. etc),
+! please commented out here then)
+call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+if(comm_is_root(nproc_id_global))then
+   write(*,*) "===== force ====="
+   do iatom=1,MI
+      select case(unit_system)
+      case('au','a.u.')
+        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
+      case('A_eV_fs')
+        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+      end select
+   end do
+end if
 
 if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 
