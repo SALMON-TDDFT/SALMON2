@@ -81,7 +81,7 @@ SUBROUTINE allocate_mat(cg)
 
   use structures, only: s_cg
   implicit none
-  type(s_cg),intent(out)   :: cg
+  type(s_cg),intent(inout) :: cg
 
 allocate (vecR(3,lg_sta(1):lg_end(1),    &
              lg_sta(2):lg_end(2),      &

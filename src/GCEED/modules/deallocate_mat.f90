@@ -28,7 +28,7 @@ SUBROUTINE deallocate_mat(cg)
 
   use structures, only: s_cg
   implicit none
-  type(s_cg),intent(out)   :: cg
+  type(s_cg),intent(inout) :: cg
 
 deallocate (vecR)
 deallocate (vecR_tmp)

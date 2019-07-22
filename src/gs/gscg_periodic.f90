@@ -50,7 +50,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
-  type(s_cg)            :: cg
+  type(s_cg),intent(inout)       :: cg
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: num_kpoints_rd
