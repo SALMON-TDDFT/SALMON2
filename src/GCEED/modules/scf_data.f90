@@ -411,8 +411,6 @@ integer,allocatable::icoo1d(:,:)
 
 integer :: MI_read
 
-integer :: ik_oddeven
-
 ! variables for FFTE routine
 integer,dimension(3) :: LNPU
 integer :: NPUZ,NPUY,NPUW

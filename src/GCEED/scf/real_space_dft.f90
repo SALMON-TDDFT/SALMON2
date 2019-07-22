@@ -412,7 +412,8 @@ if(iopt==1)then
       &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
       &                 ,1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_k_rd(k_rd,ksquare,1,system%primitive_b)
+      call init_kvector(system)
+      k_rd = system%vec_k
     end if
 
     allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -562,10 +563,8 @@ if(iopt==1)then
     call allgatherv_vlocal
 
     if(iperiodic==3) then
-      allocate(stencil%vec_kAc(k_sta:k_end,3))
-      do jj=1,3
-        stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
-      end do
+      allocate(stencil%vec_kAc(3,k_sta:k_end))
+      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
     end if
     do jspin=1,system%nspin
@@ -827,7 +826,8 @@ if(iopt==1)then
       &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
       &                 ,1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_k_rd(k_rd,ksquare,1)
+      call init_kvector(system)
+      k_rd = system%vec_k
     end if
 
     if(iperiodic==3)then
@@ -1042,10 +1042,8 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
-      allocate(stencil%vec_kAc(k_sta:k_end,3))
-      do jj=1,3
-        stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
-      end do
+      allocate(stencil%vec_kAc(3,k_sta:k_end))
+      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
     end if
     do jspin=1,system%nspin
@@ -1230,10 +1228,8 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
-      allocate(stencil%vec_kAc(k_sta:k_end,3))
-      do jj=1,3
-        stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
-      end do
+      allocate(stencil%vec_kAc(3,k_sta:k_end))
+      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
     end if
     do jspin=1,system%nspin
@@ -1438,10 +1434,8 @@ end select
 
 !(prepare variables for the next analysis)
 if(iperiodic==3) then
-   allocate(stencil%vec_kAc(k_sta:k_end,3))
-   do jj=1,3
-      stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
-   end do
+   allocate(stencil%vec_kAc(3,k_sta:k_end))
+   stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
 endif
 

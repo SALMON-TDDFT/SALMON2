@@ -39,11 +39,15 @@ module structures
     integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
     real(8) :: hvol,hgs(3),primitive_a(3,3),det_a,primitive_b(3,3)
-    real(8),allocatable :: Mass(:)       ! Atomic weight
-    real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
-    real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
+    real(8),allocatable :: vec_k(:,:)    ! (1:3,1:nk), k-vector
     real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
     real(8),allocatable :: rocc(:,:,:)   ! (1:no,1:nk,1:nspin), occupation rate
+    real(8),allocatable :: Mass(:)       ! (1:nion), Atomic weight
+    real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
+    real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
+
+  ! external field
+    real(8) vec_Ac(3) ! A/c, A: vector potential
   end type s_dft_system
 
   type s_dft_energy
@@ -111,11 +115,9 @@ module structures
 
   type s_stencil
     real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
-    real(8),allocatable :: vec_kAc(:,:) ! (Nk,3)
-
-  ! for non-orthogonal lattice
+    real(8),allocatable :: vec_kAc(:,:) ! (1:3,ik_s:ik_e)
     logical :: if_orthogonal
-    real(8) :: rmatrix_a(3,3),rmatrix_b(3,3),coef_f(6)
+    real(8) :: rmatrix_a(3,3),rmatrix_b(3,3),coef_f(6) ! for non-orthogonal lattice
     integer,allocatable :: isign(:,:) ! sign(3,4:ndir) (for ndir=4~6)
 
   ! Experimental implementation of srg

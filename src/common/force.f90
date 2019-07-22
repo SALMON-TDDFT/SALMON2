@@ -134,7 +134,7 @@ contains
       end do
 
     ! nonlocal part
-      if(allocated(stencil%vec_kAc)) kAc(1:3) = stencil%vec_kAc(ik,1:3)
+      if(allocated(stencil%vec_kAc)) kAc(1:3) = stencil%vec_kAc(1:3,ik)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         duVpsi = 0d0

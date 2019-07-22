@@ -84,7 +84,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   ! for calc_total_energy_periodic
   rion_update = check_rion_update() .or. (itt == Miter_rt+1)
   
-  if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%primitive_b)
+  if(iperiodic==3) then
+    call calc_vecAc(system%vec_Ac,1)
+    do ik=1,system%nk
+      k_rd(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+    end do
+  end if
   
   select case(ikind_eext)
     case(0,3,9:12)
@@ -155,7 +160,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     end do
 
     if(iperiodic==0.and.ikind_eext==1) call calcVbox(itt+1)
-    if(iperiodic==3) call init_k_rd(k_rd,ksquare,4,system%primitive_b)
+    if(iperiodic==3) then
+      call calc_vecAc(system%vec_Ac,4)
+      do ik=1,system%nk
+        k_rd(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      end do
+    end if
 
     if(iobnum.ge.1)then
       call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &

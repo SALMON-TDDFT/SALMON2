@@ -810,8 +810,9 @@ end if
 
 allocate(k_rd0(3,num_kpoints_rd),ksquare0(num_kpoints_rd))
 if(iperiodic==3)then
-  call init_k_rd(k_rd0,ksquare0,3,system%primitive_b)
+  call init_kvector(system)
 end if
+k_rd0 = system%vec_k
 
 allocate( matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
 allocate( cmatbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
