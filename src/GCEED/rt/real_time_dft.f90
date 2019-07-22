@@ -205,7 +205,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,system,info,stencil)
+call IN_data(lg,mg,ng,system,stencil)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then
@@ -713,7 +713,7 @@ END subroutine Real_Time_DFT
 
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global, & !nproc_group_grid,   &
+use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
                            nproc_group_h, nproc_group_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
@@ -921,7 +921,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   end do
 
   if(iperiodic==3) then
-    allocate(stencil%vec_kAc(info%ik_s:info%ik_e,3))
+    allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
 
 !????????? get_fourier_grid_G @ real_space_dft.f90
     if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
@@ -1444,7 +1444,7 @@ if(iflag_md==1) call init_md(system,md)
 if(iflag_md==1 .or. icalcforce==1)then
    if(iperiodic==3)then
       do ik=info%ik_s,info%ik_e
-        stencil%vec_kAc(ik,:) = k_rd(:,ik)
+        stencil%vec_kAc(:,ik) = k_rd(:,ik)
       end do
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
       call get_fourier_grid_G_rt(system,lg,ng,fg)

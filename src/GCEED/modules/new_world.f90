@@ -42,16 +42,12 @@ use salmon_communication, only: comm_create_group, comm_get_groupinfo, &
                                 comm_summation
 use misc_routines, only: get_wtime
 implicit none
-integer :: ii,jj
+integer :: ii
 integer :: i1,i2,i3,i4,i5
 integer :: ix,iy,iz
 integer :: ixs,iys,izs
 integer :: ibox
 integer :: icolor,ikey
-
-integer,allocatable :: iwork(:),iwork2(:)
-
-integer :: LNPU2(3)
 
 !new_world for comm_kgrid
 if(isequential==1)then

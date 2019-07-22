@@ -98,7 +98,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
       do im=im_s,im_e
       do ik=ik_s,ik_e
         if(if_kAc) then
-          kAc(1:3) = stencil%vec_kAc(ik,1:3)
+          kAc(1:3) = stencil%vec_kAc(1:3,ik)
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
           k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
           k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
@@ -127,7 +127,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
           kAc = 0d0
           k_lap0 = 0d0
           if(if_kAc) then
-            kAc(1:3) = stencil%vec_kAc(ik,1:3) ! Cartesian vector
+            kAc(1:3) = stencil%vec_kAc(1:3,ik) ! Cartesian vector
             k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
             kAc(1:3) = matmul(stencil%rmatrix_B,kAc) ! B* (k+A/c)
           end if
@@ -142,29 +142,6 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
         end do
       else if(mg%ndir > 3) then
         stop "error: high symmetry nonorthogonal lattice is not implemented"
-!      ! non-orthogonal lattice (high symmetry)
-!        do im=im_s,im_e
-!        do ik=ik_s,ik_e
-!          if(if_kAc) then
-!            kAc(1:3) = stencil%vec_kAc(ik,1:3) ! Cartesian vector
-!            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
-!            k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
-!            k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
-!            k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
-!          else
-!            k_lap0 = stencil%coef_lap0
-!            k_nabt = 0d0
-!          end if
-!          do io=io_s,io_e
-!          do ispin=1,Nspin
-!            call stencil_nonorthogonal_highsymmetry( &
-!                                           mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,mg%ndir &
-!                                          ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-!                                          ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt,stencil%isign)
-!          end do
-!          end do
-!        end do
-!        end do
       end if
     end if
     call timer_end(LOG_UHPSI_STENCIL)
@@ -214,14 +191,14 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   implicit none
   type(s_pp_grid)    :: ppg
   integer,intent(in) :: ik_s,ik_e
-  real(8),intent(in) :: kAc(ik_s:ik_e,3)
+  real(8),intent(in) :: kAc(3,ik_s:ik_e)
   !
   integer :: ilma,iatom,j,ik
   real(8) :: x,y,z,k(3)
   complex(8) :: ekr
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ik=ik_s,ik_e
-    k = kAc(ik,:)
+    k = kAc(:,ik)
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
       do j=1,ppg%mps(iatom)

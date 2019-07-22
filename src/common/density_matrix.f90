@@ -238,7 +238,7 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(ik,:),mg%is_array,mg%ie_array,mg%is,mg%ie)
+        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,mg%is,mg%ie)
         wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
         call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
@@ -379,7 +379,7 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(ik,:),mg%is_array,mg%ie_array,is,ie)
+        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,is,ie)
         wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
 !       call nonlocal_part

@@ -20,14 +20,12 @@ module hartree_ffte_sub
 contains
 
 subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
-                        a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
+                        a_ffte,b_ffte,rhoe_g,coef_poisson)
   use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_group_global
-  use salmon_parallel, only: nproc_id_icommy, nproc_group_icommy
-  use salmon_parallel, only: nproc_id_icommz, nproc_group_icommz
+  use salmon_parallel, only: nproc_id_icommy
+  use salmon_parallel, only: nproc_id_icommz
   use salmon_parallel, only: nproc_group_icommw
   use salmon_communication, only: comm_summation
-  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use math_constants, only : pi
 !$  use omp_lib
@@ -41,8 +39,6 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
   complex(8),intent(out)   :: b_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
   complex(8),intent(out)   :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
   real(8),intent(in)       :: coef_poisson(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
-  real(8),intent(out) :: matbox_l(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-  real(8),intent(out) :: matbox_l2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   integer :: ix,iy,iz
   integer :: iix,iiy,iiz
   integer :: iz_sta,iz_end,iy_sta,iy_end

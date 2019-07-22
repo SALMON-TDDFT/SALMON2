@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng,system,info,stencil,cg)
+SUBROUTINE IN_data(lg,mg,ng,system,stencil,cg)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -435,7 +435,6 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system) :: system
-type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
 type(s_cg) :: cg
 integer :: NI0,Ndv0,Nps0,Nd0
@@ -811,8 +810,9 @@ end if
 
 allocate(k_rd0(3,num_kpoints_rd),ksquare0(num_kpoints_rd))
 if(iperiodic==3)then
-  call init_k_rd(k_rd0,ksquare0,3,system%primitive_b)
+  call init_kvector(system)
 end if
+k_rd0 = system%vec_k
 
 allocate( matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
 allocate( cmatbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )

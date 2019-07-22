@@ -13,15 +13,12 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine init_k_rd(tk_rd,tksquare,imode,brl)
+subroutine calc_vecAc(vec_Ac,imode)
 use scf_data
 !$ use omp_lib
 implicit none
-integer :: jj
-real(8) :: tk_rd(3,num_kpoints_rd)
-real(8) :: tksquare(num_kpoints_rd)
+real(8) :: vec_Ac(3)
 integer :: imode
-real(8),intent(in) :: brl(3,3)
 !
 integer :: ix,iy,iz
 integer :: ik
@@ -53,30 +50,6 @@ else if(iSCFRT==2)then
     end if
   end if
 end if
+vec_Ac = vecA
 
-if(ik_oddeven==1)then
-  shift_k(1:3)=0.d0
-  do jj=1,3
-    if(num_kpoints_3d(jj)==1)then
-      shift_k(jj)=0.5d0  ! tk_rd becomes zero
-    end if
-  end do
-else if(ik_oddeven==2)then
-  shift_k(1:3)=0.5d0
-end if
-
-do ik=1,num_kpoints_rd
-  ix=mod(ik-1,num_kpoints_3d(1))+1
-  iy=mod((ik-1)/num_kpoints_3d(1),num_kpoints_3d(2))+1
-  iz=mod((ik-1)/(num_kpoints_3d(1)*num_kpoints_3d(2)),num_kpoints_3d(3))+1
-  k(1) = (dble(ix)-shift_k(1))/dble(num_kpoints_3d(1))-0.5d0
-  k(2) = (dble(iy)-shift_k(2))/dble(num_kpoints_3d(2))-0.5d0
-  k(3) = (dble(iz)-shift_k(3))/dble(num_kpoints_3d(3))-0.5d0
-  tk_rd(1,ik) = k(1)*Brl(1,1) + k(2)*Brl(1,2) + k(3)*Brl(1,3)
-  tk_rd(2,ik) = k(1)*Brl(2,1) + k(2)*Brl(2,2) + k(3)*Brl(2,3)
-  tk_rd(3,ik) = k(1)*Brl(3,1) + k(2)*Brl(3,2) + k(3)*Brl(3,3)
-  tk_rd(:,ik) = tk_rd(:,ik) + vecA
-  tksquare(ik)=tk_rd(1,ik)**2+tk_rd(2,ik)**2+tk_rd(3,ik)**2
-end do
-
-end subroutine init_k_rd
+end subroutine calc_vecAc

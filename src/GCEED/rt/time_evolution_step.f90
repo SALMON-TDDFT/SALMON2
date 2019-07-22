@@ -84,7 +84,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   ! for calc_total_energy_periodic
   rion_update = check_rion_update() .or. (itt == Miter_rt+1)
   
-  if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%primitive_b)
+  if(iperiodic==3) then
+    call calc_vecAc(system%vec_Ac,1)
+    do ik=1,system%nk
+      k_rd(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+    end do
+  end if
   
   select case(ikind_eext)
     case(0,3,9:12)
@@ -135,8 +140,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
@@ -155,22 +160,27 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     end do
 
     if(iperiodic==0.and.ikind_eext==1) call calcVbox(itt+1)
-    if(iperiodic==3) call init_k_rd(k_rd,ksquare,4,system%primitive_b)
+    if(iperiodic==3) then
+      call calc_vecAc(system%vec_Ac,4)
+      do ik=1,system%nk
+        k_rd(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      end do
+    end if
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
   else 
 
     if(iobnum.ge.1)then
       if(mod(itt,2)==1)then
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
       else
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
       end if
     end if
     

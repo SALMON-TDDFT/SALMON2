@@ -525,7 +525,7 @@ end subroutine set_lma_tbl
 subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                    lx,ly,lz,nl,hx,hy,hz,  &
                    flag_use_grad_wf_on_force,property,hvol0)
-  use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
+  use salmon_global,only : natom,kion,iperiodic,domain_parallel
   use math_constants,only : pi
   use structures,only : s_pp_info,s_pp_grid
   implicit none

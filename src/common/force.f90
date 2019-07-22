@@ -106,9 +106,7 @@ contains
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 
     if(info%if_divide_rspace) then
-       if(allocated(tpsi%rwf)) call dealloc_cache(srg)
        call update_overlap_complex8(srg, mg, tpsi%zwf)
-       if(allocated(tpsi%rwf)) call dealloc_cache(srg)
     end if
 
     kAc = 0d0
@@ -136,7 +134,7 @@ contains
       end do
 
     ! nonlocal part
-      if(allocated(stencil%vec_kAc)) kAc(1:3) = stencil%vec_kAc(ik,1:3)
+      if(allocated(stencil%vec_kAc)) kAc(1:3) = stencil%vec_kAc(1:3,ik)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         duVpsi = 0d0
