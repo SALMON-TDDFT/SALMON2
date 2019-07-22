@@ -74,7 +74,6 @@ contains
                        ,mg%is_array(3):mg%ie_array(3) &
                        ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
       tpsi%zwf = cmplx(tpsi%rwf)
-      srg%pcomm_initialized=.false.
     end if
 
     allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
@@ -107,13 +106,9 @@ contains
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 
     if(info%if_divide_rspace) then
-
-!       call dealloc_cache(srg)
+       if(allocated(tpsi%rwf)) call dealloc_cache(srg)
        call update_overlap_complex8(srg, mg, tpsi%zwf)
-       if(allocated(tpsi%rwf)) then
-          srg%pcomm_initialized=.false.
-          call dealloc_cache(srg)
-       endif
+       if(allocated(tpsi%rwf)) call dealloc_cache(srg)
     end if
 
     kAc = 0d0
