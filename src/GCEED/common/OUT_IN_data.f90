@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng,system,info,stencil,cg)
+SUBROUTINE IN_data(lg,mg,ng,system,stencil,cg)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -435,7 +435,6 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system) :: system
-type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
 type(s_cg) :: cg
 integer :: NI0,Ndv0,Nps0,Nd0

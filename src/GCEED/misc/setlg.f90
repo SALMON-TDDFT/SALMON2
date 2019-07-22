@@ -14,13 +14,12 @@
 !  limitations under the License.
 !
 subroutine setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-                 Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
+                 Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(out) :: lg
   integer :: iperiodic
   integer :: lg_sta(3),lg_end(3),lg_num(3)
-  integer,intent(in) :: iscfrt
   integer :: ista_Mx_ori(3),iend_Mx_ori(3),inum_Mx_ori(3)
   integer :: Nd
   integer :: imesh_oddeven(3)

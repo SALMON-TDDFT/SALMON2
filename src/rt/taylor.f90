@@ -18,9 +18,9 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
-  use inputoutput, only: iperiodic,ispin,natom,n_hamil
+subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
+  use inputoutput, only: iperiodic,ispin,n_hamil
   use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
   use calc_allob_sub
@@ -30,11 +30,8 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tsps
   type(s_rgrid),intent(in) :: mg
   integer,intent(in)    :: nspin
   type(s_orbital_parallel),intent(in) :: info
-  integer,intent(in) :: itotmst
-  integer,intent(in) :: mst(2)
   integer,intent(in) :: lg_sta(3)
   integer,intent(in) :: lg_end(3)
-  integer,intent(in)    :: ilsda
   type(s_stencil),intent(inout) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg
   type(s_orbital),intent(inout) :: tspsi_in
@@ -49,9 +46,6 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tsps
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
   complex(8),intent(in) :: zc(n_hamil)
   integer,intent(in)    :: ihpsieff
-  real(8),intent(in)    :: rocc(itotmst,num_kpoints_rd)
-  real(8),intent(in)    :: wtk(num_kpoints_rd)
-  integer,intent(in)    :: iparaway_ob
   type(s_scalar),allocatable :: v(:)
   integer :: nn,ix,iy,iz
   integer :: ik,io
