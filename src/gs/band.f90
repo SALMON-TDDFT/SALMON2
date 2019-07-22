@@ -23,10 +23,10 @@ module band
     subroutine calc_kgrid_prod(system, rgrid_lg, rgrid_mg, wf_info, wavefunction, nk1, nk2, nk3, ndk, ik3d_tbl, prod_dk)
         use structures
         implicit none
-        type(s_system), intent(in) :: system
+        type(s_dft_system), intent(in) :: system
         type(s_rgrid), intent(in) :: rgrid_lg, rgrid_mg
-        type(s_wf_info), intent(in) :: wf_info
-        type(s_wavefunction), intent(in) :: wavefunction
+        type(s_orbital_parallel), intent(in) :: wf_info
+        type(s_orbital), intent(in) :: wavefunction
         integer, intent(in) :: nk1, nk2, nk3, ndk
         integer, intent(out) :: ik3d_tbl(1:3, nk1*nk2*nk3)
         complex(8), intent(out) :: prod_dk( &
