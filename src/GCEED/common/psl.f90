@@ -35,8 +35,8 @@ case(0)
   call calcJxyz_all
   call calcuV
   call calcVpsl
-  allocate(ppg%ekr_uV(ppg%nps,ppg%nlma,1))
-  ppg%ekr_uV(:,:,1) = cmplx(ppg%uV)
+  allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
+  ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
 case(3)
   select case(iflag_hartree)
   case(2)
@@ -68,7 +68,7 @@ SUBROUTINE dealloc_init_ps(ppg,ppg_all,ppn)
   deallocate(ppg_all%rinv_uvu,ppg_all%uv,ppg_all%duv)
 
   deallocate(ppg%Vpsl_atom)
-  if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
+  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc)
   if(allocated(ppn%tau_nlcc)) deallocate(ppn%tau_nlcc)

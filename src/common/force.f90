@@ -26,18 +26,18 @@ contains
     use structures
     use hpsi_sub
     use stencil_sub
-    use update_overlap_sub
+    use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
     use salmon_communication, only: comm_summation
     implicit none
-    type(s_system) ,intent(in) :: system
-    type(s_pp_info),intent(in) :: pp
-    type(s_fourier_grid),intent(in) :: fg
-    type(s_wf_info),intent(in) :: info
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_pp_info)         ,intent(in) :: pp
+    type(s_reciprocal_grid) ,intent(in) :: fg
+    type(s_orbital_parallel),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
-    type(s_sendrecv_grid),intent(in) :: srg
+    type(s_sendrecv_grid)      :: srg
     type(s_pp_grid),intent(in) :: ppg
-    type(s_wavefunction)       :: tpsi
+    type(s_orbital)            :: tpsi
     type(s_force)              :: force
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,norb,iorb,nlma,ik,io,ispin,ilma,j
@@ -95,7 +95,7 @@ contains
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         uVpsibox(ilma,iorb) = uVpsi
@@ -106,9 +106,7 @@ contains
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 
     if(info%if_divide_rspace) then
-      call update_overlap_C(tpsi%zwf,mg%is_array,mg%ie_array,norb,4 & !????????
-                           ,mg%is,mg%ie,info%irank_r,info%icomm_r)
-      !call update_overlap_complex8(srg, mg, tpsi%rwf)
+      call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
     kAc = 0d0
@@ -121,7 +119,7 @@ contains
 
     ! gtpsi = (nabla) psi
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%nabt,stencil%matrix_B)
+          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,stencil%rmatrix_B)
 
     ! local part
       do ia=1,nion
@@ -129,14 +127,14 @@ contains
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
           w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin) * dble(w(:))* ppg%Vpsl_atom(ix,iy,iz,ia) * system%Hvol
+          F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin,im) * dble(w(:))* ppg%Vpsl_atom(ix,iy,iz,ia) * system%Hvol
         end do
         end do
         end do
       end do
 
     ! nonlocal part
-      if(allocated(stencil%kAc)) kAc(1:3) = stencil%kAc(ik,1:3)
+      if(allocated(stencil%vec_kAc)) kAc(1:3) = stencil%vec_kAc(ik,1:3)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         duVpsi = 0d0
@@ -145,9 +143,9 @@ contains
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
           w = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          duVpsi = duVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
+          duVpsi = duVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
         end do
-        F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin) * dble( conjg(duVpsi(:)) * uVpsibox2(ilma,iorb) ) * system%Hvol
+        F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin,im) * dble( conjg(duVpsi(:)) * uVpsibox2(ilma,iorb) ) * system%Hvol
       end do
 
     end do
@@ -167,11 +165,11 @@ contains
     use salmon_global, only: kion,NEwald,aEwald
     use salmon_communication, only: comm_summation
     implicit none
-    type(s_system) ,intent(in) :: system
-    type(s_pp_info),intent(in) :: pp
-    type(s_fourier_grid),intent(in) :: fg
-    integer,intent(in) :: nion
-    real(8) :: F_tmp(3,nion),F_sum(3,nion)
+    type(s_dft_system),intent(in) :: system
+    type(s_pp_info)   ,intent(in) :: pp
+    type(s_reciprocal_grid),intent(in) :: fg
+    integer           ,intent(in) :: nion
+    real(8)                       :: F_tmp(3,nion),F_sum(3,nion)
     !
     integer :: ix,iy,iz,ia,ib,ig
     real(8) :: rr,rab(3),r(3),g(3),G2,Gd
@@ -191,6 +189,7 @@ contains
       end do
 
     case(3)
+
       F_tmp = 0d0
       do ia=1,nion
         r = system%Rion(1:3,ia)
@@ -201,12 +200,12 @@ contains
           g(3) = fg%Gz(ig)
           G2 = g(1)**2 + g(2)**2 + g(3)**2
           Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-          rho_i = fg%rhoG_ion(ig)
+          rho_i = fg%zrhoG_ion(ig)
           F_tmp(:,ia) = F_tmp(:,ia) + g(:)*(4*Pi/G2)*exp(-G2/(4*aEwald))*pp%Zps(Kion(ia)) &
                                       *zI*0.5d0*(conjg(rho_i)*exp(-zI*Gd)-rho_i*exp(zI*Gd))
         end do
       end do
-      call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_fourier)
+      call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_G)
 
       F_tmp = 0d0
       do ia=1,nion
@@ -215,9 +214,9 @@ contains
         do iz=-NEwald,NEwald
           do ib=1,nion
             if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
-            r(1) = ix*system%al(1,1) + iy*system%al(1,2) + iz*system%al(1,3)
-            r(2) = ix*system%al(2,1) + iy*system%al(2,2) + iz*system%al(2,3)
-            r(3) = ix*system%al(3,1) + iy*system%al(3,2) + iz*system%al(3,3)
+            r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
+            r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
+            r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
             rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
             rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
             rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
@@ -230,6 +229,7 @@ contains
         end do
       end do
       F_sum = F_sum + F_tmp
+      
     end select
   end subroutine force_ion_ion
 end module force_sub

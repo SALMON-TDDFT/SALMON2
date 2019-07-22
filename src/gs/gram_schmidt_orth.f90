@@ -15,7 +15,7 @@
 !
 !=======================================================================
 module gram_schmidt_orth
-  use structures, only: s_system, s_rgrid, s_wf_info, s_wavefunction
+  use structures, only: s_dft_system, s_rgrid, s_orbital_parallel, s_orbital
   use pack_unpack, only: copy_data
   implicit none
 
@@ -24,10 +24,10 @@ contains
   subroutine gram_schmidt(sys, rg, wfi, wf)
     use timer
     implicit none
-    type(s_system),       intent(in)    :: sys
+    type(s_dft_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_wf_info),      intent(in)    :: wfi
-    type(s_wavefunction), intent(inout) :: wf
+    type(s_orbital_parallel),      intent(in)    :: wfi
+    type(s_orbital), intent(inout) :: wf
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
 
@@ -50,10 +50,10 @@ contains
     use timer
     use salmon_communication, only: comm_bcast, comm_summation
     implicit none
-    type(s_system),       intent(in)    :: sys
+    type(s_dft_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_wf_info),      intent(in)    :: wfi
-    type(s_wavefunction), intent(inout) :: wf
+    type(s_orbital_parallel),      intent(in)    :: wfi
+    type(s_orbital), intent(inout) :: wf
 
     integer :: nsize_rg
     integer :: ik, im, ispin
@@ -237,10 +237,10 @@ contains
     use timer
     use salmon_communication, only: comm_bcast, comm_summation
     implicit none
-    type(s_system),       intent(in)    :: sys
+    type(s_dft_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_wf_info),      intent(in)    :: wfi
-    type(s_wavefunction), intent(inout) :: wf
+    type(s_orbital_parallel),      intent(in)    :: wfi
+    type(s_orbital), intent(inout) :: wf
 
     integer :: nsize_rg
     integer :: ik, im, ispin

@@ -72,10 +72,10 @@ subroutine read_wfn(lg,mg,psi,info,system,k_rd)
   use salmon_communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
-  type(s_system) ,intent(in) :: system
-  type(s_wf_info),intent(in) :: info
+  type(s_dft_system) ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
   real(8),intent(in) :: k_rd(3,system%nk)
-  type(s_wavefunction) :: psi
+  type(s_orbital) :: psi
   !
   character(7),parameter :: filename="wfn.bin"
   integer,parameter :: fp=104
@@ -116,15 +116,15 @@ subroutine read_wfn(lg,mg,psi,info,system,k_rd)
 
   do ik=ik_s,ik_e
     ik0 = 1
-    rmin = sum(system%brl**2)
+    rmin = sum(system%primitive_b**2)
     do i=1,nk0
       kk = k_rd(:,ik) - k_tmp(:,i)
       do ix=-2,2
       do iy=-2,2
       do iz=-2,2
-        dk(1) = ix*system%brl(1,1) + iy*system%brl(1,2) + iz*system%brl(1,3)
-        dk(2) = ix*system%brl(2,1) + iy*system%brl(2,2) + iz*system%brl(2,3)
-        dk(3) = ix*system%brl(3,1) + iy*system%brl(3,2) + iz*system%brl(3,3)
+        dk(1) = ix*system%primitive_b(1,1) + iy*system%primitive_b(1,2) + iz*system%primitive_b(1,3)
+        dk(2) = ix*system%primitive_b(2,1) + iy*system%primitive_b(2,2) + iz*system%primitive_b(2,3)
+        dk(3) = ix*system%primitive_b(3,1) + iy*system%primitive_b(3,2) + iz*system%primitive_b(3,3)
         dk = dk + kk
         r = dk(1)**2 + dk(2)**2 + dk(3)**2
         if(rmin > r) then
@@ -156,10 +156,10 @@ subroutine write_wfn(lg,mg,psi,info,system,k_rd)
   use salmon_communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
-  type(s_system) ,intent(in) :: system
-  type(s_wf_info),intent(in) :: info
+  type(s_dft_system) ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
   real(8),intent(in) :: k_rd(3,system%nk)
-  type(s_wavefunction),intent(in) :: psi
+  type(s_orbital),intent(in) :: psi
   !
   character(7),parameter :: filename="wfn.bin"
   integer,parameter :: fp=104

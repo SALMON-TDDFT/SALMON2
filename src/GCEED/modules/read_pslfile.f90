@@ -41,11 +41,11 @@ module read_pslfile_sub
   subroutine read_pslfile(system)
     use salmon_communication, only: comm_is_root
     use salmon_pp, only: init_pp
-    use structures, only: s_system
+    use structures, only: s_dft_system
     use input_pp_sub, only: input_pp
     use prep_pp_sub, only: init_mps
     implicit none
-    type(s_system), intent(inout)  :: system
+    type(s_dft_system), intent(inout)  :: system
     integer :: ak,i,ll
     
     allocate( Mlps0(MKI) )

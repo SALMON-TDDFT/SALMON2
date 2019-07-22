@@ -39,7 +39,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine Real_Space_DFT
-use structures!, only: s_rgrid, s_wf_info, s_wavefunction, s_system, s_stencil
+use structures!, only: s_rgrid, s_orbital_parallel, s_orbital, s_dft_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
                            nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
@@ -84,17 +84,17 @@ integer :: neig_ng(1:3, 1:2)
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
-type(s_wf_info) :: info_ob
-type(s_wf_info) :: info
+type(s_orbital_parallel) :: info_ob
+type(s_orbital_parallel) :: info
 type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob, srg_ng
-type(s_wavefunction) :: spsi,shpsi,sttpsi
-type(s_system) :: system
+type(s_orbital) :: spsi,shpsi,sttpsi
+type(s_dft_system) :: system
 type(s_stencil) :: stencil
 type(s_scalar) :: sVh
 type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
-type(s_fourier_grid) :: fg
+type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
-type(s_energy) :: energy
+type(s_dft_energy) :: energy
 type(s_force)  :: force
 
 logical :: rion_update
@@ -124,16 +124,16 @@ if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
    al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
   stencil%if_orthogonal = .true.
-  system%al = 0d0
-  system%al(1,1) = al(1)
-  system%al(2,2) = al(2)
-  system%al(3,3) = al(3)
+  system%primitive_a = 0d0
+  system%primitive_a(1,1) = al(1)
+  system%primitive_a(2,2) = al(2)
+  system%primitive_a(3,3) = al(3)
 else
   if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
   stencil%if_orthogonal = .false.
-  system%al(1:3,1) = al_vec1
-  system%al(1:3,2) = al_vec2
-  system%al(1:3,3) = al_vec3
+  system%primitive_a(1:3,1) = al_vec1
+  system%primitive_a(1:3,2) = al_vec2
+  system%primitive_a(1:3,3) = al_vec3
   rLsize(1,1) = sqrt(sum(al_vec1**2))
   rLsize(2,1) = sqrt(sum(al_vec2**2))
   rLsize(3,1) = sqrt(sum(al_vec3**2))
@@ -272,7 +272,7 @@ if(iopt==1)then
     info%icomm_ko   = nproc_group_rho
     info%icomm_ro   = nproc_group_k
     info%icomm_rko  = nproc_group_global
-    allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+    allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
               ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
               ,info%irank_jo(1:system%no))
  
@@ -287,7 +287,7 @@ if(iopt==1)then
       do ik=info%ik_s,info%ik_e
         do iob=info%io_s,info%io_e
           jj = info%io_tbl(iob)+(jspin-1)*mst(1)
-          info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+          info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
         end do
       end do
     end do
@@ -297,15 +297,16 @@ if(iopt==1)then
     end do
     
     if(stencil%if_orthogonal) then
-      stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
     else
       if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-      stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2  &
+      & + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
     end if
     do jj=1,3
       do ii=1,4
-        stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-        stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+        stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+        stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
       end do
     end do
     
@@ -410,7 +411,7 @@ if(iopt==1)then
       &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
       &                 ,1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_k_rd(k_rd,ksquare,1,system%brl)
+      call init_k_rd(k_rd,ksquare,1,system%primitive_b)
     end if
 
     allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -425,7 +426,7 @@ if(iopt==1)then
     else
       call read_pslfile(system)
       call allocate_psl
-      call init_ps(system%al,system%brl,stencil%matrix_A)
+      call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
     end if
 
     if(iperiodic==3) call get_fourier_grid_G(fg)
@@ -546,7 +547,7 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,stencil)
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
     
     if(ilsda == 0) then
       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -560,11 +561,11 @@ if(iopt==1)then
     call allgatherv_vlocal
 
     if(iperiodic==3) then
-      allocate(stencil%kAc(k_sta:k_end,3))
+      allocate(stencil%vec_kAc(k_sta:k_end,3))
       do jj=1,3
-        stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+        stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
       end do
-      call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
     end if
     do jspin=1,system%nspin
       V_local(jspin)%f = Vlocal(:,:,:,jspin)
@@ -586,14 +587,14 @@ if(iopt==1)then
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
       if(iflag_hartree==2)then
-        fg%rhoG_elec = rhoe_G
+        fg%zrhoG_ele = rhoe_G
       else if(iflag_hartree==4)then
         do iz=1,lg_num(3)/NPUZ
         do iy=1,lg_num(2)/NPUY
         do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
           n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
           nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%rhoG_elec(nn) = rhoe_G(n)
+          fg%zrhoG_ele(nn) = rhoe_G(n)
         enddo
         enddo
         enddo
@@ -602,7 +603,7 @@ if(iopt==1)then
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
-    if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
+    if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 
     call timer_end(LOG_INIT_GS)
         
@@ -687,7 +688,7 @@ if(iopt==1)then
     info%icomm_ko  = nproc_group_rho
     info%icomm_ro  = nproc_group_k
     info%icomm_rko = nproc_group_global
-    allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+    allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
             ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
             ,info%irank_jo(1:system%no))
  
@@ -702,7 +703,7 @@ if(iopt==1)then
       do ik=info%ik_s,info%ik_e
         do iob=info%io_s,info%io_e
           jj = info%io_tbl(iob)+(jspin-1)*mst(1)
-          info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+          info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
         end do
       end do
     end do
@@ -712,15 +713,16 @@ if(iopt==1)then
     end do
     
     if(stencil%if_orthogonal) then
-      stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
     else
       if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-      stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2  &
+      & + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
     end if
     do jj=1,3
       do ii=1,4
-        stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-        stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+        stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+        stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
       end do
     end do
     
@@ -834,7 +836,7 @@ if(iopt==1)then
     if(iflag_ps/=0) then
       call read_pslfile(system)
       call allocate_psl
-      call init_ps(system%al,system%brl,stencil%matrix_A)
+      call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
     end if
 
     if(iperiodic==3) call get_fourier_grid_G(fg)
@@ -852,7 +854,7 @@ else if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     call dealloc_init_ps(ppg,ppg_all,ppn)
-    call init_ps(system%al,system%brl,stencil%matrix_A)
+    call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
     if(iperiodic==3) call get_fourier_grid_G(fg)
 
   end if
@@ -967,7 +969,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
         jj = info%io_tbl(iob)+(jspin-1)*mst(1)
-        info%occ(iob,ik,jspin) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
       end do
     end do
   end do
@@ -1024,7 +1026,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%Brl,srg_ng,stencil)
+      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
     end if
     call timer_end(LOG_CALC_HARTREE)
   
@@ -1041,11 +1043,11 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
-      allocate(stencil%kAc(k_sta:k_end,3))
+      allocate(stencil%vec_kAc(k_sta:k_end,3))
       do jj=1,3
-        stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+        stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
       end do
-      call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
     end if
     do jspin=1,system%nspin
       V_local(jspin)%f = Vlocal(:,:,:,jspin)
@@ -1067,14 +1069,14 @@ DFT_Iteration : do iter=1,iDiter(img)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
       if(iflag_hartree==2)then
-        fg%rhoG_elec = rhoe_G
+        fg%zrhoG_ele = rhoe_G
       else if(iflag_hartree==4)then
         do iz=1,lg_num(3)/NPUZ
         do iy=1,lg_num(2)/NPUY
         do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
           n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
           nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%rhoG_elec(nn) = rhoe_G(n)
+          fg%zrhoG_ele(nn) = rhoe_G(n)
         enddo
         enddo
         enddo
@@ -1082,7 +1084,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
-    if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
+    if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
 
@@ -1188,7 +1190,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
+      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
     end if
     call timer_end(LOG_CALC_HARTREE)
 
@@ -1231,11 +1233,11 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
-      allocate(stencil%kAc(k_sta:k_end,3))
+      allocate(stencil%vec_kAc(k_sta:k_end,3))
       do jj=1,3
-        stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+        stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
       end do
-      call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
     end if
     do jspin=1,system%nspin
       V_local(jspin)%f = Vlocal(:,:,:,jspin)
@@ -1257,14 +1259,14 @@ DFT_Iteration : do iter=1,iDiter(img)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
     case(3)
       if(iflag_hartree==2)then
-        fg%rhoG_elec = rhoe_G
+        fg%zrhoG_ele = rhoe_G
       else if(iflag_hartree==4)then
         do iz=1,lg_num(3)/NPUZ
         do iy=1,lg_num(2)/NPUY
         do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
           n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
           nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%rhoG_elec(nn) = rhoe_G(n)
+          fg%zrhoG_ele(nn) = rhoe_G(n)
         enddo
         enddo
         enddo
@@ -1272,7 +1274,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
-    if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
+    if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
   end if
 
@@ -1439,11 +1441,11 @@ end select
 
 !(prepare variables for the next analysis)
 if(iperiodic==3) then
-   allocate(stencil%kAc(k_sta:k_end,3))
+   allocate(stencil%vec_kAc(k_sta:k_end,3))
    do jj=1,3
-      stencil%kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
+      stencil%vec_kAc(k_sta:k_end,jj) = k_rd(jj,k_sta:k_end)
    end do
-   call update_kvector_nonlocalpt(ppg,stencil%kAc,k_sta,k_end)
+   call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
 endif
 
 ! output the wavefunctions for next GS calculations
@@ -1482,7 +1484,7 @@ end if
 !   end do
 !end if
 
-if(iperiodic==3) deallocate(stencil%kAc,ppg%ekr_uV)
+if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 
 deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
@@ -1685,35 +1687,35 @@ subroutine band_information
 end subroutine band_information
 
 subroutine get_fourier_grid_G(fg)
-  use structures, only: s_fourier_grid
+  use structures, only: s_reciprocal_grid
   implicit none
-  type(s_fourier_grid) :: fg
+  type(s_reciprocal_grid) :: fg
 
   if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
-  if(allocated(fg%rhoG_ion)) deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
+  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
 
   jj = system%ngrid/nproc_size_global
   fg%ig_s = nproc_id_global*jj+1
   fg%ig_e = (nproc_id_global+1)*jj
   if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-  fg%icomm_fourier = nproc_group_global
+  fg%icomm_G = nproc_group_global
   fg%ng = system%ngrid
   allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-  allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
   if(iflag_hartree==2)then
      fg%iGzero = nGzero
      fg%Gx = Gx
      fg%Gy = Gy
      fg%Gz = Gz
-     fg%rhoG_ion = rhoion_G
-     fg%dVG_ion = dVloc_G
+     fg%zrhoG_ion = rhoion_G
+     fg%zdVG_ion = dVloc_G
   else if(iflag_hartree==4)then
      fg%iGzero = 1
      fg%Gx = 0.d0
      fg%Gy = 0.d0
      fg%Gz = 0.d0
-     fg%rhoG_ion = 0.d0
-     fg%dVG_ion = 0.d0
+     fg%zrhoG_ion = 0.d0
+     fg%zdVG_ion = 0.d0
      do iz=1,lg_num(3)/NPUZ
      do iy=1,lg_num(2)/NPUY
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
@@ -1722,8 +1724,8 @@ subroutine get_fourier_grid_G(fg)
         fg%Gx(nn) = Gx(n)
         fg%Gy(nn) = Gy(n)
         fg%Gz(nn) = Gz(n)
-        fg%rhoG_ion(nn) = rhoion_G(n)
-        fg%dVG_ion(nn,:) = dVloc_G(n,:)
+        fg%zrhoG_ion(nn) = rhoion_G(n)
+        fg%zdVG_ion(nn,:) = dVloc_G(n,:)
      enddo
      enddo
      enddo

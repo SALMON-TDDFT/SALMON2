@@ -203,11 +203,11 @@ call timer_end(LOG_CALC_CURRENT)
 end subroutine calc_current
 
 subroutine calc_current_ion(system,j_ion)
-  use structures, only: s_system
+  use structures, only: s_dft_system
   use salmon_global, only: MI,Kion
   use scf_data, only: pp,lg_num,Hvol
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   integer :: ia
   real(8) :: j_ion(3)
 

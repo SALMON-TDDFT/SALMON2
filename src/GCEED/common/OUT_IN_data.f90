@@ -434,8 +434,8 @@ implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
-type(s_system) :: system
-type(s_wf_info) :: info
+type(s_dft_system) :: system
+type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
@@ -810,7 +810,7 @@ end if
 
 allocate(k_rd0(3,num_kpoints_rd),ksquare0(num_kpoints_rd))
 if(iperiodic==3)then
-  call init_k_rd(k_rd0,ksquare0,3,system%brl)
+  call init_k_rd(k_rd0,ksquare0,3,system%primitive_b)
 end if
 
 allocate( matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )

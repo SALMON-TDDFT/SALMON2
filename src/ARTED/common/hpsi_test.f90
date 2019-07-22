@@ -116,26 +116,26 @@ contains
     complex(8),intent(out),optional :: ttpsi0(0:PNLz-1,0:PNLy-1,0:PNLx-1)
     !
     integer :: i,ix,iy,iz,irank_overlap(6),icomm_overlap,icomm_pseudo
-    type(s_wf_info) :: info
+    type(s_orbital_parallel) :: info
     type(s_rgrid)   :: rg
     type(s_stencil) :: stencil
-    type(s_wavefunction) :: tpsi, htpsi, ttpsi
+    type(s_orbital) :: tpsi, htpsi, ttpsi
     type(s_scalar) :: V_local(1)
 
-    stencil%lap0 = -(lapx(0)+lapy(0)+lapz(0))*0.5d0
+    stencil%coef_lap0 = -(lapx(0)+lapy(0)+lapz(0))*0.5d0
 
-    stencil%lapt(1:4,1) = lapz(1:4) ! x <--> z
-    stencil%lapt(1:4,2) = lapy(1:4)
-    stencil%lapt(1:4,3) = lapx(1:4) ! x <--> z
+    stencil%coef_lap(1:4,1) = lapz(1:4) ! x <--> z
+    stencil%coef_lap(1:4,2) = lapy(1:4)
+    stencil%coef_lap(1:4,3) = lapx(1:4) ! x <--> z
 
-    stencil%nabt(1:4,1) = nabz(1:4) ! x <--> z
-    stencil%nabt(1:4,2) = naby(1:4)
-    stencil%nabt(1:4,3) = nabx(1:4) ! x <--> z
+    stencil%coef_nab(1:4,1) = nabz(1:4) ! x <--> z
+    stencil%coef_nab(1:4,2) = naby(1:4)
+    stencil%coef_nab(1:4,3) = nabx(1:4) ! x <--> z
 
-    allocate(stencil%kAc(1,3))
-    stencil%kAc(1,1) = kAc(ik,3) ! x <--> z
-    stencil%kAc(1,2) = kAc(ik,2)
-    stencil%kAc(1,3) = kAc(ik,1) ! x <--> z
+    allocate(stencil%vec_kAc(1,3))
+    stencil%vec_kAc(1,1) = kAc(ik,3) ! x <--> z
+    stencil%vec_kAc(1,2) = kAc(ik,2)
+    stencil%vec_kAc(1,3) = kAc(ik,1) ! x <--> z
 
     rg%is = 0
     rg%ie(1) = NLz-1 ! x <--> z

@@ -29,7 +29,7 @@ contains
     use salmon_communication, only: comm_is_root,comm_sync_all
     use salmon_file, only: open_filehandle
     implicit none
-    type(s_system) ,intent(in) :: system
+    type(s_dft_system) ,intent(in) :: system
     type(s_stencil),intent(in) :: stencil
     real(8),intent(in) :: k_rd(3,system%nk)
     !
@@ -58,9 +58,9 @@ contains
         do ik = 1, NK
           write(fh_k, '(I6,99(1X,E23.15E3))') &
             & ik, &
-            & k_rd(1,ik) / system%brl(1,1), &
-            & k_rd(2,ik) / system%brl(2,2), &
-            & k_rd(3,ik) / system%brl(3,3), &
+            & k_rd(1,ik) / system%primitive_b(1,1), &
+            & k_rd(2,ik) / system%primitive_b(2,2), &
+            & k_rd(3,ik) / system%primitive_b(3,3), &
             & wk !??????? wk=1 only (symmetry weight)
         end do !ik
       else
@@ -70,7 +70,7 @@ contains
         write(fh_k, '("#",1X,A,":",1X,A)') "kx,ky,kz", "k-vectors"
         write(fh_k, '("#",1X,A,":",1X,A)') "wk", "Weight of k-point"
         write(fh_k, '("#",A,"[",A,"]")') "brl(1:3,1:3)", "a.u."
-        write(fh_k, '(9(1X,E23.15E3))') system%brl(1:3,1:3)
+        write(fh_k, '(9(1X,E23.15E3))') system%primitive_b(1:3,1:3)
         write(fh_k, '("#",99(1X,I0,":",A,"[",A,"]"))') &
           & 1, "ik", "none", &
           & 2, "kx", "a.u.", &
@@ -102,13 +102,13 @@ contains
     use salmon_communication, only: comm_is_root,comm_summation,comm_sync_all
     use salmon_file, only: open_filehandle
     implicit none
-    type(s_system) ,intent(in) :: system
-    type(s_wf_info),intent(in) :: info
+    type(s_dft_system) ,intent(in) :: system
+    type(s_orbital_parallel),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
     type(s_sendrecv_grid),intent(inout) :: srg
     type(s_pp_grid),intent(in) :: ppg
-    type(s_wavefunction)       :: tpsi
+    type(s_orbital)       :: tpsi
     !
     integer :: fh_tm
     integer :: i,j,ik,ib,ib1,ib2,ilma,nlma,ia,ix,iy,iz,NB,NK,im,ispin,ik_s,ik_e,is(3),ie(3)
@@ -177,7 +177,7 @@ contains
 
     ! gtpsi = (nabla) psi
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%nabt,stencil%matrix_B)
+          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,stencil%rmatrix_B)
       do ib1=1,NB
         do i=1,3
           wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,ib1,ik,im)) &
@@ -203,7 +203,7 @@ contains
           ix = ppg%Jxyz(1,j,ia)
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
-          veik = conjg(ppg%ekr_uV(j,ilma,ik))
+          veik = conjg(ppg%zekr_uV(j,ilma,ik))
           do ib=1,NB
           uVpsi( ib,ik) =uVpsi( ib,ik)+ veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
           uVpsix(ib,ik) =uVpsix(ib,ik)+ veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
@@ -253,7 +253,7 @@ contains
           ix = ppg%Jxyz(1,j,ia)
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
-          veik = conjg(ppg%ekr_uV(j,ilma,ik))
+          veik = conjg(ppg%zekr_uV(j,ilma,ik))
           do ib=1,NB
           uVpsi(  ib,ik)=uVpsi(  ib,ik)+veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
           uVpsix( ib,ik)=uVpsix( ib,ik)+veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
@@ -377,14 +377,14 @@ contains
   subroutine write_xyz(comment,action,rvf,system,force)
   ! Write xyz in xyz format but also velocity and force are printed if necessary
   ! (these can be used for restart of opt and md)
-    use structures, only: s_system, s_force
+    use structures, only: s_dft_system, s_force
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,atom_name
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     implicit none
 
-    type(s_system),intent(in) :: system
+    type(s_dft_system),intent(in) :: system
     type(s_force),intent(in) :: force
 
     integer :: ia,unit_xyz=200
@@ -502,14 +502,14 @@ contains
   end subroutine
 
   subroutine write_rt_energy_data(it,ofl,iflag_md,dt,energy,md)
-    use structures, only: s_ofile,s_energy,s_md
+    use structures, only: s_ofile,s_dft_energy,s_md
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_global, only: ensemble, thermostat
     use salmon_file, only: open_filehandle
     use inputoutput, only: t_unit_time,t_unit_energy
     implicit none
-    type(s_energy) :: energy
+    type(s_dft_energy) :: energy
     type(s_md) :: md
     type(s_ofile) :: ofl
     integer, intent(in) :: it,iflag_md
@@ -599,7 +599,7 @@ contains
   end subroutine
 
   subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
-    use structures,           only: s_rgrid, s_system, s_wf_info, s_wavefunction
+    use structures,           only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
     use salmon_parallel,      only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file,          only: open_filehandle
@@ -607,9 +607,9 @@ contains
     use band,                 only: calc_kgrid_prod
     implicit none
     type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
-    type(s_system),       intent(in) :: system
-    type(s_wf_info),      intent(in) :: wf_info
-    type(s_wavefunction), intent(in) :: wavefunction
+    type(s_dft_system),       intent(in) :: system
+    type(s_orbital_parallel),      intent(in) :: wf_info
+    type(s_orbital), intent(in) :: wavefunction
 
     ! Specify the neighboring k-grid region to consider:
     integer, parameter :: ndk = 1 

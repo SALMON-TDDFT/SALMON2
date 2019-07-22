@@ -31,8 +31,8 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
                   ,mst,iflag_diisjump,norm_diff_psi_stock  &
                   ,info_ob,ppg,vlocal,iparaway_ob)
   use inputoutput, only: ncg,lambda1_diis,lambda2_diis
-  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,   &
-                        s_energy,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,   &
+                        s_dft_energy,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use calc_allob_sub
@@ -41,10 +41,10 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   implicit none
   
   type(s_rgrid),intent(in) :: mg
-  type(s_system),intent(in) :: system
-  type(s_wf_info) :: info
-  type(s_wavefunction) :: spsi
-  type(s_energy) :: energy
+  type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel) :: info
+  type(s_orbital) :: spsi
+  type(s_dft_energy) :: energy
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
@@ -52,14 +52,14 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   integer,intent(in)    :: mst(2)
   integer,intent(out)   :: iflag_diisjump
   real(8),intent(out)   :: norm_diff_psi_stock(itotmst,1)
-  type(s_wf_info)       :: info_ob
+  type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
   integer,intent(in)    :: iparaway_ob
   integer,parameter :: nd=4
   integer :: iob,iob_allob,iter,ix,iy,iz
   integer :: nspin_1
-  type(s_wavefunction)  :: stpsi
-  type(s_wavefunction)  :: shtpsi
+  type(s_orbital)  :: stpsi
+  type(s_orbital)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
   integer,allocatable :: iflagdiis(:)
   integer,allocatable :: iobcheck(:,:)
@@ -514,7 +514,7 @@ end subroutine
 
 subroutine setv(mg,vlocal,v,iob_allob,mst)
   use inputoutput, only: ispin
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
@@ -551,13 +551,13 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
 end subroutine
 
 subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
-  use structures, only: s_rgrid,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
-  type(s_wavefunction)  :: stpsi
-  type(s_wavefunction)  :: shtpsi
-  type(s_wf_info)       :: info_ob
+  type(s_orbital)  :: stpsi
+  type(s_orbital)  :: shtpsi
+  type(s_orbital_parallel)       :: info_ob
   type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
   integer :: nspin_1

@@ -26,10 +26,10 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
   use timer
   implicit none
   integer,intent(in) :: nspin
-  type(s_wf_info),intent(in) :: info
+  type(s_orbital_parallel),intent(in) :: info
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction),intent(in) :: tpsi
-  type(s_wavefunction) :: htpsi
+  type(s_orbital),intent(in) :: tpsi
+  type(s_orbital) :: htpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma
@@ -164,10 +164,10 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   use timer
   implicit none
   integer,intent(in) :: nspin
-  type(s_wf_info),intent(in) :: info
+  type(s_orbital_parallel),intent(in) :: info
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction),intent(in) :: tpsi
-  type(s_wavefunction) :: htpsi
+  type(s_orbital),intent(in) :: tpsi
+  type(s_orbital) :: htpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma
@@ -206,7 +206,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         uVpsibox(ilma,ispin,io,ik,im) = uVpsi
@@ -240,7 +240,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          wrk = uVpsi * ppg%ekr_uV(j,ilma,ik)
+          wrk = uVpsi * ppg%zekr_uV(j,ilma,ik)
           htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
         end do
       end do
@@ -269,14 +269,14 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
           iz = ppg%jxyz(3,j,ia)
-          wrk = uVpsi * ppg%ekr_uV(j,ilma,ik)
+          wrk = uVpsi * ppg%zekr_uV(j,ilma,ik)
           htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
         end do
       end do

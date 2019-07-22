@@ -24,7 +24,7 @@ contains
 subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
                 info_ob,ppg,vlocal)
   use inputoutput, only: ncg,ispin
-  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
   use salmon_communication, only: comm_bcast,comm_summation
   use misc_routines, only: get_wtime
@@ -39,9 +39,9 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   implicit none
   
   type(s_rgrid),intent(in) :: mg
-  type(s_system),intent(in)    :: system
-  type(s_wf_info) :: info
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_dft_system),intent(in)    :: system
+  type(s_orbital_parallel) :: info
+  type(s_orbital),intent(inout) :: spsi
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
@@ -51,15 +51,15 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
-  type(s_wf_info)       :: info_ob
+  type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
   integer :: iter,iob,job
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
   integer :: nspin_1
-  type(s_wavefunction)  :: stpsi
-  type(s_wavefunction)  :: shtpsi
+  type(s_orbital)  :: stpsi
+  type(s_orbital)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
   real(8) :: sum0,xkhxk,xkxk,Rk,gkgk,xkpk,pkpk,pkhxk,pkhpk,sum1
   real(8) :: uk,alpha,ak,bk,ck
