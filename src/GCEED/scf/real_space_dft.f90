@@ -213,11 +213,11 @@ if(iopt==1)then
     neig(3, 1) = kup_array(1)
     neig(3, 2) = kdw_array(1)
     call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob, mg, nspin, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob_1, mg, 1, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
 
     neig_ng(1, 1) = iup_array(2)
     neig_ng(1, 2) = idw_array(2)
@@ -226,7 +226,7 @@ if(iopt==1)then
     neig_ng(3, 1) = kup_array(2)
     neig_ng(3, 2) = kdw_array(2)
     call init_sendrecv_grid(srg_ng, ng, 1, &
-      & nproc_group_global, nproc_id_global, neig_ng)
+      & nproc_group_global, neig_ng)
 
     if(ispin==0)then
       nspin=1
@@ -627,11 +627,11 @@ if(iopt==1)then
     neig(3, 1) = kup_array(1)
     neig(3, 2) = kdw_array(1)
     call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob, mg, nspin, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob_1, mg, 1, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
 
     neig_ng(1, 1) = iup_array(2)
     neig_ng(1, 2) = idw_array(2)
@@ -640,7 +640,7 @@ if(iopt==1)then
     neig_ng(3, 1) = kup_array(2)
     neig_ng(3, 2) = kdw_array(2)
     call init_sendrecv_grid(srg_ng, ng, 1, &
-      & nproc_group_global, nproc_id_global, neig_ng)
+      & nproc_group_global, neig_ng)
 
     if(ispin==0)then
       nspin=1

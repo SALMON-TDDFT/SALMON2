@@ -59,11 +59,11 @@ module sendrecv_grid
   ! * This subroutine is commonly used for real type and complex type.
   ! * The cache region MUST be allocated after this initialization 
   !   by using `alloc_cache_real8/complex8`.
-  subroutine init_sendrecv_grid(srg, rg, nb, icomm, myrank, neig)
+  subroutine init_sendrecv_grid(srg, rg, nb, icomm, neig)
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
-    integer, intent(in) ::  nb, icomm, myrank, neig(1:3, 1:2)
+    integer, intent(in) ::  nb, icomm, neig(1:3, 1:2)
 
     integer :: idir, iaxis
     integer :: is_block(1:3, 1:2, 1:2, 1:3)
@@ -114,7 +114,6 @@ module sendrecv_grid
     srg%is_block(:, :, :, :) = is_block
     srg%ie_block(:, :, :, :) = ie_block
     srg%icomm = icomm
-    srg%myrank = myrank
     srg%ireq = -1
     ! Flag for persistent communication
     srg%pcomm_initialized = .false.
@@ -146,7 +145,8 @@ module sendrecv_grid
   end subroutine
 
   subroutine update_overlap_real8(srg, rg, data)
-    use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
+    use salmon_communication, only: comm_get_groupinfo, &
+      & comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
@@ -157,6 +157,10 @@ module sendrecv_grid
       rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
     integer :: idir, iside
+    integer :: myrank, nprocs
+
+    ! Obtain myrank in communication group:
+    call comm_get_groupinfo(srg%icomm, myrank, nprocs)
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
     if (.not. srg%pcomm_initialized) call alloc_cache()
@@ -164,7 +168,7 @@ module sendrecv_grid
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Store the overlap reigion into the cache 
             call pack_cache(idir, iside) 
             ! In the first call of this subroutine, setup the persistent communication:
@@ -183,7 +187,7 @@ module sendrecv_grid
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Wait for recieving
             call comm_wait_all(srg%ireq(idir, iside, :))
             ! Write back the recieved cache
@@ -276,7 +280,8 @@ module sendrecv_grid
 
 
   subroutine update_overlap_complex8(srg, rg, data)
-    use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
+    use salmon_communication, only: comm_get_groupinfo, &
+      & comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
@@ -287,6 +292,10 @@ module sendrecv_grid
       rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
     integer :: idir, iside
+    integer :: myrank, nprocs
+
+    ! Obtain myrank in communication group:
+    call comm_get_groupinfo(srg%icomm, myrank, nprocs)
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
     if (.not. srg%pcomm_initialized) call alloc_cache()
@@ -294,7 +303,7 @@ module sendrecv_grid
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Store the overlap reigion into the cache 
             call pack_cache(idir, iside) 
             ! In the first call of this subroutine, setup the persistent communication:
@@ -313,7 +322,7 @@ module sendrecv_grid
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Wait for recieving
             call comm_wait_all(srg%ireq(idir, iside, :))
             ! Write back the recieved cache
