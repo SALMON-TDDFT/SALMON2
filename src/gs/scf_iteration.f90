@@ -42,9 +42,9 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
-  type(s_system),        intent(in)    :: system
-  type(s_wf_info),       intent(in)    :: info
-  type(s_wavefunction),  intent(inout) :: spsi
+  type(s_dft_system),        intent(in)    :: system
+  type(s_orbital_parallel),       intent(in)    :: info
+  type(s_orbital),  intent(inout) :: spsi
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg_ob_1
   type(s_pp_grid),       intent(in)    :: ppg
@@ -66,10 +66,10 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   complex(8),            intent(inout) :: zpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
   complex(8),            intent(inout) :: zpko_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
   complex(8),            intent(inout) :: zhtpsi_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  type(s_wf_info),       intent(in)    :: info_ob
+  type(s_orbital_parallel),       intent(in)    :: info_ob
   real(8),               intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,               intent(inout) :: iflag_diisjump
-  type(s_energy),        intent(inout) :: energy
+  type(s_dft_energy),        intent(inout) :: energy
   real(8),               intent(out)   :: norm_diff_psi_stock(itotmst,1)
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditerybcg

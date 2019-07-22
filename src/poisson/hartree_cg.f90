@@ -108,7 +108,7 @@ subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk
   end do
   end do
   call update_overlap_real8(srg_ng, ng, pk)
-  call laplacian_poisson(ng,pk,rlap_wk,stencil%lap0,stencil%lapt)
+  call laplacian_poisson(ng,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
 !$omp parallel do private(iz,iy,ix) collapse(2)
   do iz=ng%is_array(3),ng%ie_array(3)
@@ -150,7 +150,7 @@ subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk
   iteration : do iter=1,maxiter
   
     call update_overlap_real8(srg_ng, ng, pk)
-    call laplacian_poisson(ng,pk,rlap_wk,stencil%lap0,stencil%lapt)
+    call laplacian_poisson(ng,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
     totbox=0d0
 !$omp parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)

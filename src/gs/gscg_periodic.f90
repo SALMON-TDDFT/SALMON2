@@ -25,7 +25,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                          zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
                          info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin,natom
-  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_id_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
   use timer
@@ -39,9 +39,9 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
-  type(s_system),intent(in) :: system
-  type(s_wf_info) :: info
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel) :: info
+  type(s_orbital),intent(inout) :: spsi
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
@@ -57,7 +57,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   complex(8),intent(out) :: zpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
   complex(8),intent(out) :: zpko_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
   complex(8),intent(out) :: zhtpsi_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  type(s_wf_info)       :: info_ob
+  type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
@@ -68,8 +68,8 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer :: ix,iy,iz
   integer :: is,iobsta(2),iobend(2)
   integer :: nspin_1
-  type(s_wavefunction)  :: stpsi
-  type(s_wavefunction)  :: shtpsi
+  type(s_orbital)  :: stpsi
+  type(s_orbital)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
   complex(8) :: sum0,sum1
   complex(8) :: sum_ob1(itotmst)
@@ -98,7 +98,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
-  allocate(stencil%kAc(1:1,3))
+  allocate(stencil%vec_kAc(1:1,3))
 
   nspin_1=1
   allocate(v(nspin_1))
@@ -132,9 +132,9 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
 
     call timer_begin(LOG_GSCG_INIT_ITERATION)
     do j=1,3
-      stencil%kAc(1,j) = k_rd(j,ik)
+      stencil%vec_kAc(1,j) = k_rd(j,ik)
     end do
-    call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
+    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,1,1)
 
     iter_bak_ob(:)=0 
   
@@ -438,10 +438,10 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   end if
   
   deallocate(stpsi%zwf,shtpsi%zwf)
-  deallocate(stencil%kAc)
+  deallocate(stencil%vec_kAc)
   deallocate(v(nspin_1)%f)
   deallocate(v)
-  if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
+  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
   call timer_end(LOG_GSCG_DEINIT)
 
   call timer_end(LOG_GSCG_TOTAL)

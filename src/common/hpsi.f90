@@ -15,7 +15,7 @@
 !
 module hpsi_sub
   implicit none
-  integer,private,parameter :: Nd = 4 !????????
+  integer,private,parameter :: Nd = 4
 
 contains
 
@@ -30,17 +30,17 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   use timer
   implicit none
   integer        ,intent(in) :: Nspin
-  type(s_wf_info),intent(in) :: info
+  type(s_orbital_parallel),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
   type(s_scalar) ,intent(in) :: V_local(Nspin)
   type(s_stencil),intent(in) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg
   type(s_pp_grid),intent(in) :: ppg
-  type(s_wavefunction)       :: tpsi,htpsi
-  type(s_wavefunction),optional :: ttpsi
+  type(s_orbital)            :: tpsi,htpsi
+  type(s_orbital),optional   :: ttpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
-  real(8) :: k_nabt(Nd,3),k_lap0,kAc(3) !?????
+  real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
   logical :: if_kAc
 
   call timer_begin(LOG_UHPSI_ALL)
@@ -53,7 +53,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   io_e = info%io_e
   norb = Nspin* info%numo * info%numk * info%numm
   
-  if_kAc = allocated(stencil%kAc)
+  if_kAc = allocated(stencil%vec_kAc)
 
   if(allocated(tpsi%rwf)) then
 
@@ -61,8 +61,6 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     call timer_begin(LOG_UHPSI_UPDATE_OVERLAP)
     if(info%if_divide_rspace) then
       call update_overlap_real8(srg, mg, tpsi%rwf)
-!      call update_overlap_R(tpsi%rwf,mg%is_array,mg%ie_array,norb,Nd & !?????????
-!                           ,mg%is,mg%ie,info%irank_r,info%icomm_r)
     end if
     call timer_end(LOG_UHPSI_UPDATE_OVERLAP)
 
@@ -74,7 +72,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     do ispin=1,Nspin
       call stencil_R(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                     ,tpsi%rwf(:,:,:,ispin,io,ik,im),htpsi%rwf(:,:,:,ispin,io,ik,im) &
-                    ,V_local(ispin)%f,stencil%lap0,stencil%lapt)
+                    ,V_local(ispin)%f,stencil%coef_lap0,stencil%coef_lap)
     end do
     end do
     end do
@@ -89,8 +87,6 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   ! overlap region communication
     call timer_begin(LOG_UHPSI_UPDATE_OVERLAP)
     if(info%if_divide_rspace) then
-      !call update_overlap_C(tpsi%zwf,mg%is_array,mg%ie_array,norb,Nd & !????????
-      !                     ,mg%is,mg%ie,info%irank_r,info%icomm_r)
       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
     call timer_end(LOG_UHPSI_UPDATE_OVERLAP)
@@ -102,20 +98,20 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
       do im=im_s,im_e
       do ik=ik_s,ik_e
         if(if_kAc) then
-          kAc(1:3) = stencil%kAc(ik,1:3)
-          k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
-          k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
-          k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
-          k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
+          kAc(1:3) = stencil%vec_kAc(ik,1:3)
+          k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+          k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
+          k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
+          k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
         else
-          k_lap0 = stencil%lap0
+          k_lap0 = stencil%coef_lap0
           k_nabt = 0d0
         end if
         do io=io_s,io_e
         do ispin=1,Nspin
           call stencil_C(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                         ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                        ,V_local(ispin)%f,k_lap0,stencil%lapt,k_nabt)
+                        ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
         end do
         end do
       end do
@@ -123,51 +119,52 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
     else
       if(mg%ndir==3) then
       ! non-orthogonal lattice (general)
-        if(.not.allocated(htpsi%wrk)) allocate(htpsi%wrk(mg%is_array(1):mg%ie_array(1) &
-                                                        ,mg%is_array(2):mg%ie_array(2) &
-                                                        ,mg%is_array(3):mg%ie_array(3),2) )
+        if(.not.allocated(htpsi%ztmp)) allocate(htpsi%ztmp(mg%is_array(1):mg%ie_array(1) &
+                                                          ,mg%is_array(2):mg%ie_array(2) &
+                                                          ,mg%is_array(3):mg%ie_array(3),2) )
         do im=im_s,im_e
         do ik=ik_s,ik_e
           kAc = 0d0
           k_lap0 = 0d0
           if(if_kAc) then
-            kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
-            k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
-            kAc(1:3) = matmul(stencil%matrix_B,kAc) ! B* (k+A/c)
+            kAc(1:3) = stencil%vec_kAc(ik,1:3) ! Cartesian vector
+            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+            kAc(1:3) = matmul(stencil%rmatrix_B,kAc) ! B* (k+A/c)
           end if
           do io=io_s,io_e
           do ispin=1,Nspin
-            call stencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%wrk &
+            call stencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%ztmp &
                                       ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                      ,V_local(ispin)%f,k_lap0,stencil%lapt,stencil%nabt,kAc,stencil%coef_F)
+                                      ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
           end do
           end do
         end do
         end do
       else if(mg%ndir > 3) then
-      ! non-orthogonal lattice (high symmetry)
-        do im=im_s,im_e
-        do ik=ik_s,ik_e
-          if(if_kAc) then
-            kAc(1:3) = stencil%kAc(ik,1:3) ! Cartesian vector
-            k_lap0 = stencil%lap0 + 0.5d0* sum(kAc(1:3)**2)
-            k_nabt(:,1) = kAc(1) * stencil%nabt(:,1)
-            k_nabt(:,2) = kAc(2) * stencil%nabt(:,2)
-            k_nabt(:,3) = kAc(3) * stencil%nabt(:,3)
-          else
-            k_lap0 = stencil%lap0
-            k_nabt = 0d0
-          end if
-          do io=io_s,io_e
-          do ispin=1,Nspin
-            call stencil_nonorthogonal_highsymmetry( &
-                                           mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,mg%ndir &
-                                          ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                          ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt,stencil%sign)
-          end do
-          end do
-        end do
-        end do
+        stop "error: high symmetry nonorthogonal lattice is not implemented"
+!      ! non-orthogonal lattice (high symmetry)
+!        do im=im_s,im_e
+!        do ik=ik_s,ik_e
+!          if(if_kAc) then
+!            kAc(1:3) = stencil%vec_kAc(ik,1:3) ! Cartesian vector
+!            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+!            k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
+!            k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
+!            k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
+!          else
+!            k_lap0 = stencil%coef_lap0
+!            k_nabt = 0d0
+!          end if
+!          do io=io_s,io_e
+!          do ispin=1,Nspin
+!            call stencil_nonorthogonal_highsymmetry( &
+!                                           mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,mg%ndir &
+!                                          ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+!                                          ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt,stencil%isign)
+!          end do
+!          end do
+!        end do
+!        end do
       end if
     end if
     call timer_end(LOG_UHPSI_STENCIL)
@@ -222,7 +219,7 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   integer :: ilma,iatom,j,ik
   real(8) :: x,y,z,k(3)
   complex(8) :: ekr
-  if(.not.allocated(ppg%ekr_uV)) allocate(ppg%ekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
+  if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ik=ik_s,ik_e
     k = kAc(ik,:)
     do ilma=1,ppg%nlma
@@ -232,7 +229,7 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
         y = ppg%rxyz(2,j,iatom)
         z = ppg%rxyz(3,j,iatom)
         ekr = exp(zi*(k(1)*x+k(2)*y+k(3)*z))
-        ppg%ekr_uV(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
+        ppg%zekr_uV(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
       end do
     end do
   end do

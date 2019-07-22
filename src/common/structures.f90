@@ -17,21 +17,39 @@
 module structures
   implicit none
 
-  type s_system
+! scalar field
+  type s_scalar
+    real(8),allocatable :: f(:,:,:) ! f(x,y,z)
+  end type s_scalar
+
+! vector field
+  type s_vector
+    real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
+  end type s_vector
+
+  type s_force
+    real(8),allocatable :: F(:,:) ! (1:3,1:Nion)
+  end type s_force
+
+  type s_dmatrix
+    complex(8),allocatable :: zrho_mat(:,:,:,:,:,:,:) ! (ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
+  end type s_dmatrix
+
+  type s_dft_system
     integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
-    real(8) :: Hvol,Hgs(3),al(3,3),det_al,brl(3,3)
+    real(8) :: hvol,hgs(3),primitive_a(3,3),det_a,primitive_b(3,3)
     real(8),allocatable :: Mass(:)       ! Atomic weight
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
     real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
     real(8),allocatable :: rocc(:,:,:)   ! (1:no,1:nk,1:nspin), occupation rate
-  end type s_system
+  end type s_dft_system
 
-  type s_energy
+  type s_dft_energy
     real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
-  end type s_energy
+  end type s_dft_energy
 
   type s_rgrid
     integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
@@ -63,7 +81,7 @@ module structures
     logical :: pcomm_initialized
   end type s_sendrecv_grid
 
-  type s_wf_info
+  type s_orbital_parallel
     logical :: if_divide_rspace
     logical :: if_divide_orbit
     integer :: irank_r(6)
@@ -75,27 +93,27 @@ module structures
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
-    real(8),allocatable :: occ(:,:,:) ! occ(io_s:io_e,ik_s:ik_e,1:nspin) = rocc*wk, occupation numbers
     integer,allocatable :: io_tbl(:)  ! jo=io_tbl(io), io=io_s~io_e, jo=1~no
     integer,allocatable :: jo_tbl(:)  ! io=io_tbl(jo), jo=1~no, io=io_s~io_e
     integer,allocatable :: irank_jo(:) ! MPI rank of the orbital index #jo
-  end type s_wf_info
+    real(8),allocatable :: occ(:,:,:,:) ! (io,ik,ispin,im), occ = rocc*wk, occupation numbers
+  end type s_orbital_parallel
 
-  type s_wavefunction
-    real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! rwf(x,y,z,ispin,io,ik,im)
-    complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! zwf(x,y,z,ispin,io,ik,im)
-    complex(8),allocatable :: wrk(:,:,:,:)
-  end type s_wavefunction
+  type s_orbital
+  ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e
+    real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
+    complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
+    complex(8),allocatable :: ztmp(:,:,:,:)
+  end type s_orbital
 
   type s_stencil
-    real(8) :: lap0,lapt(4,3),nabt(4,3) !????? (4,3) --> (Nd,3)
-    real(8),allocatable :: kAc(:,:) ! kAc(Nk,3)
+    real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
+    real(8),allocatable :: vec_kAc(:,:) ! (Nk,3)
 
   ! for non-orthogonal lattice
     logical :: if_orthogonal
-    integer,allocatable :: sign(:,:) ! sign(3,4:ndir) (for ndir=4~6) 
-    real(8),allocatable :: coef_lap(:,:),coef_nab(:,:) !?????? --> lapt,nabt (future work)
-    real(8) :: matrix_A(3,3),matrix_B(3,3),coef_F(6)
+    real(8) :: rmatrix_a(3,3),rmatrix_b(3,3),coef_f(6)
+    integer,allocatable :: isign(:,:) ! sign(3,4:ndir) (for ndir=4~6)
 
   ! Experimental implementation of srg
     type(s_sendrecv_grid) :: srg
@@ -148,39 +166,21 @@ module structures
     integer,allocatable :: lma_tbl(:,:)
     integer,allocatable :: ia_tbl(:)
     real(8),allocatable :: rinv_uvu(:)
-    complex(8),allocatable :: ekr_uV(:,:,:) ! ekr_uV(j,ilma,ik) = exp(-i(k+A/c)r)*uv ! j=1~Mps(ia), ilma=1~Nlma
+    complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
   end type s_pp_grid
-
-! rho%f, V_local(1:nspin)%f, tau%f, V_H%f, V_xc%f, current(3)%f?
-  type s_scalar
-    real(8),allocatable :: f(:,:,:) ! f(x,y,z)
-  end type s_scalar
-
-! current%v, vec_A%v
-  type s_vector
-    real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
-  end type s_vector
-
-  type s_force
-    real(8),allocatable :: F(:,:) ! (1:3,1:Nion)
-  end type s_force
-
-  type s_dmatrix
-    complex(8),allocatable :: rho(:,:,:,:,:,:,:) ! rho(ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
-  end type s_dmatrix
 
   type s_pp_nlcc
     real(8), allocatable :: rho_nlcc(:,:,:)
     real(8), allocatable :: tau_nlcc(:,:,:)
   end type s_pp_nlcc
 
-  type s_fourier_grid
-    integer :: icomm_fourier
+  type s_reciprocal_grid
+    integer :: icomm_G
     integer :: ng,iG_s,iG_e,iGzero
     real(8),allocatable :: Gx(:),Gy(:),Gz(:)
-    complex(8),allocatable :: rhoG_ion(:),rhoG_elec(:),dVG_ion(:,:)
-  end type s_fourier_grid
+    complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zdVG_ion(:,:)
+  end type s_reciprocal_grid
 
   type s_fdtd_system
     type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
@@ -216,18 +216,18 @@ contains
 
 # define DEAL(x) if(allocated(x)) deallocate(x)
 
-  subroutine deallocate_system(system)
-    type(s_system) :: system
+  subroutine deallocate_dft_system(system)
+    type(s_dft_system) :: system
     DEAL(system%rocc)
     DEAL(system%wtk)
     DEAL(system%Rion)
     DEAL(system%Velocity)
-  end subroutine deallocate_system
+  end subroutine deallocate_dft_system
 
-  subroutine deallocate_energy(energy)
-    type(s_energy) :: energy
+  subroutine deallocate_dft_energy(energy)
+    type(s_dft_energy) :: energy
     DEAL(energy%esp)
-  end subroutine deallocate_energy
+  end subroutine deallocate_dft_energy
 
   subroutine deallocate_rgrid(rg)
     type(s_rgrid) :: rg
@@ -236,27 +236,25 @@ contains
     DEAL(rg%idz)
   end subroutine deallocate_rgrid
 
-  subroutine deallocate_wf_info(info)
-    type(s_wf_info) :: info
+  subroutine deallocate_orbital_parallel(info)
+    type(s_orbital_parallel) :: info
     DEAL(info%io_tbl)
     DEAL(info%jo_tbl)
     DEAL(info%occ)
     DEAL(info%irank_jo)
-  end subroutine deallocate_wf_info
+  end subroutine deallocate_orbital_parallel
 
-  subroutine deallocate_wavefunction(psi)
-    type(s_wavefunction) :: psi
+  subroutine deallocate_orbital(psi)
+    type(s_orbital) :: psi
     DEAL(psi%rwf)
     DEAL(psi%zwf)
-    DEAL(psi%wrk)
-  end subroutine deallocate_wavefunction
+    DEAL(psi%ztmp)
+  end subroutine deallocate_orbital
 
   subroutine deallocate_stencil(stencil)
     type(s_stencil) :: stencil
-    DEAL(stencil%kAc)
-    DEAL(stencil%sign)
-    DEAL(stencil%coef_lap)
-    DEAL(stencil%coef_nab)
+    DEAL(stencil%vec_kAc)
+    DEAL(stencil%isign)
   end subroutine deallocate_stencil
 
   subroutine deallocate_pp_info(pp)
@@ -301,7 +299,7 @@ contains
     DEAL(ppg%lma_tbl)
     DEAL(ppg%ia_tbl)
     DEAL(ppg%rinv_uvu)
-    DEAL(ppg%ekr_uV)
+    DEAL(ppg%zekr_uV)
     DEAL(ppg%Vpsl_atom)
   end subroutine deallocate_pp_grid
 
@@ -322,17 +320,17 @@ contains
 
   subroutine deallocate_dmatrix(dm)
     type(s_dmatrix) :: dm
-    DEAL(dm%rho)
+    DEAL(dm%zrho_mat)
   end subroutine deallocate_dmatrix
 
-  subroutine deallocate_fourier_grid(fg)
-    type(s_fourier_grid) :: fg
+  subroutine deallocate_reciprocal_grid(fg)
+    type(s_reciprocal_grid) :: fg
     DEAL(fg%Gx)
     DEAL(fg%Gy)
     DEAL(fg%Gz)
-    DEAL(fg%rhoG_ion)
-    DEAL(fg%rhoG_elec)
-    DEAL(fg%dVG_ion)
-  end subroutine deallocate_fourier_grid
+    DEAL(fg%zrhoG_ion)
+    DEAL(fg%zrhoG_ele)
+    DEAL(fg%zdVG_ion)
+  end subroutine deallocate_reciprocal_grid
 
 end module structures

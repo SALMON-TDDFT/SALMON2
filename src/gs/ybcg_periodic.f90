@@ -24,7 +24,7 @@ contains
 subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
                          info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg
-  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
@@ -37,9 +37,9 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in)           :: mg
-  type(s_system),intent(in) :: system
-  type(s_wf_info),intent(in)         :: info
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel),intent(in)         :: info
+  type(s_orbital),intent(inout) :: spsi
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
@@ -49,7 +49,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
-  type(s_wf_info)       :: info_ob
+  type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
   integer,intent(in)    :: num_kpoints_rd
   real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
@@ -60,9 +60,9 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer :: ix,iy,iz
   integer :: is,pstart(2),pend(2)
   integer :: nspin_1
-  type(s_wavefunction)  :: stpsi
-  type(s_wavefunction)  :: shtpsi
-  type(s_wavefunction)  :: sttpsi
+  type(s_orbital)  :: stpsi
+  type(s_orbital)  :: shtpsi
+  type(s_orbital)  :: sttpsi
   type(s_scalar),allocatable :: v(:)
   complex(8) :: sum0,sum1,xkhxk,xkxk,rk,gkgk,pkhpk
   complex(8) :: uk
@@ -90,7 +90,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
-  allocate(stencil%kAc(1:1,3))
+  allocate(stencil%vec_kAc(1:1,3))
 
   nspin_1=1
   allocate(v(nspin_1))
@@ -148,9 +148,9 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   orbital : do p=pstart(is),pend(is)
 
     do j=1,3
-      stencil%kAc(1,j) = k_rd(j,ik)
+      stencil%vec_kAc(1,j) = k_rd(j,ik)
     end do
-    call update_kvector_nonlocalpt(ppg,stencil%kAc,1,1)
+    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,1,1)
 
     call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
     call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
@@ -451,10 +451,10 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   
   deallocate(stpsi%zwf,shtpsi%zwf,sttpsi%zwf)
  
-  deallocate(stencil%kAc)
+  deallocate(stencil%vec_kAc)
   deallocate(v(nspin_1)%f)
   deallocate(v)
-  if(allocated(ppg%ekr_uV)) deallocate(ppg%ekr_uV)
+  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   return
   

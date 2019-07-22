@@ -285,10 +285,10 @@ module salmon_pp
 !======================================================================
   subroutine calc_nlcc(pp, sys, rg, ppn)
     use salmon_global,only : kion
-    use structures, only : s_system, s_pp_info, s_pp_nlcc, s_rgrid
+    use structures, only : s_dft_system, s_pp_info, s_pp_nlcc, s_rgrid
     implicit none
     
-    type(s_system), intent(in) :: sys
+    type(s_dft_system), intent(in) :: sys
     type(s_rgrid), intent(in) :: rg
     type(s_pp_info), intent(in) :: pp
     type(s_pp_nlcc), intent(inout) :: ppn
@@ -339,9 +339,9 @@ module salmon_pp
       do i1 = irepr_min, irepr_max
       do i2 = irepr_min, irepr_max
       do i3 = irepr_min, irepr_max
-        rion_repr(1) = sys%rion(1, a) + i1 * sys%al(1, 1)
-        rion_repr(2) = sys%rion(2, a) + i2 * sys%al(2, 2)
-        rion_repr(3) = sys%rion(3, a) + i3 * sys%al(3, 3)
+        rion_repr(1) = sys%rion(1, a) + i1 * sys%primitive_a(1, 1)
+        rion_repr(2) = sys%rion(2, a) + i2 * sys%primitive_a(2, 2)
+        rion_repr(3) = sys%rion(3, a) + i3 * sys%primitive_a(3, 3)
         do j1 = rg%is(1), rg%ie(1)
         do j2 = rg%is(2), rg%ie(2)
         do j3 = rg%is(3), rg%ie(3)

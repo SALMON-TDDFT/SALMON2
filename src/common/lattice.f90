@@ -24,7 +24,7 @@ SUBROUTINE init_lattice(system,stencil,lg)
   use math_constants,only : pi
   use structures
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   type(s_stencil) :: stencil
   type(s_rgrid),intent(in) :: lg
   !
@@ -32,14 +32,14 @@ SUBROUTINE init_lattice(system,stencil,lg)
   real(8) :: a1(3),a2(3),a3(3),detA,normA(3),f_uu,f_vv,f_ww,f_uv,f_uw,f_vw
 
 ! al = [ a1, a2, a3 ]
-  A = system%al ! a (primitive lattice vectors)
+  A = system%primitive_a ! primitive lattice vectors
   a1 = A(1:3,1)
   a2 = A(1:3,2)
   a3 = A(1:3,3)
   call calc_inverse(A,wrk,detA)
-  system%det_al = detA
+  system%det_a = detA
   system%Hvol = detA/dble(system%ngrid)
-  system%brl = 2d0*pi* transpose(wrk) ! b (reciprocal primitive lattice vectors)
+  system%primitive_b = 2d0*pi* transpose(wrk) ! reciprocal primitive lattice vectors
   ! [ b1 b2 b3 ]^{T} = 2*pi* [ a1 a2 a3 ]^{-1}
 
   normA(1) = sqrt(sum(a1**2))
@@ -66,8 +66,8 @@ SUBROUTINE init_lattice(system,stencil,lg)
   f_uw = F(1,3) + F(3,1)
   f_vw = F(2,3) + F(3,2)
 
-  stencil%matrix_A = A
-  stencil%matrix_B = B
+  stencil%rmatrix_A = A
+  stencil%rmatrix_B = B
   stencil%coef_F(1) = f_uu
   stencil%coef_F(2) = f_vv
   stencil%coef_F(3) = f_ww

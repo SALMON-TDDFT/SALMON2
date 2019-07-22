@@ -19,12 +19,12 @@ module md_sub
 contains
 
 subroutine init_md(system,md)
-  use structures, only: s_system,s_md
+  use structures, only: s_dft_system,s_md
   use salmon_global, only: MI,out_rvf_rt, ensemble, thermostat,set_ini_velocity,step_velocity_scaling
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   implicit none    
-  type(s_system) :: system
+  type(s_dft_system) :: system
   type(s_md) :: md
 
   if(out_rvf_rt=='n') then
@@ -56,14 +56,14 @@ subroutine init_md(system,md)
 end subroutine init_md
 
 subroutine set_initial_velocity(system,md)
-  use structures, only: s_system,s_md
+  use structures, only: s_dft_system,s_md
   use salmon_global, only: MI,Kion,temperature0_ion
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_bcast
   use math_constants, only: Pi
   use const, only: umass,hartree2J,kB
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   type(s_md) :: md
   integer :: ia,ixyz,iseed
   real(8) :: rnd1,rnd2,rnd, sqrt_kT_im, kB_au, mass_au
@@ -137,12 +137,12 @@ subroutine read_initial_velocity(system,md)
   !    vx(i)  vy(i)  vz(i)
   ! enddo
   ! xi_nh  !only for nose-hoover thermostat option
-  use structures, only: s_system,s_md
+  use structures, only: s_dft_system,s_md
   use salmon_global, only: MI,file_ini_velocity, ensemble, thermostat
   use salmon_parallel, only: nproc_id_global,nproc_group_global,end_parallel
   use salmon_communication, only: comm_is_root,comm_bcast
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   type(s_md) :: md
   integer :: ia,ixyz
 
@@ -170,14 +170,14 @@ end subroutine read_initial_velocity
 
 subroutine remove_system_momentum(flag_print_check,system)
   ! remove center of mass and momentum of whole system
-  use structures, only: s_system
+  use structures, only: s_dft_system
   use salmon_global, only: MI,Kion
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   use const, only: umass
 !  use scf_data, only: ppg,ppg_all
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   integer :: ia, flag_print_check
   real(8) :: v_com(3), sum_mass, mass_au
 
@@ -210,11 +210,11 @@ subroutine remove_system_momentum(flag_print_check,system)
 end subroutine remove_system_momentum
 
 subroutine cal_Tion_Temperature_ion(Ene_ion,Temp_ion,system)
-  use structures, only: s_system
+  use structures, only: s_dft_system
   use salmon_global, only: MI,Kion
   use const, only: umass,hartree2J,kB
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   integer :: ia
   real(8) :: mass_au, Ene_ion,Temp_ion
 
@@ -230,11 +230,11 @@ end subroutine cal_Tion_Temperature_ion
 
 
 subroutine time_evolution_step_md_part1(system,force,md)
-  use structures, only: s_system, s_force, s_md
+  use structures, only: s_dft_system, s_force, s_md
   use salmon_global, only: MI,Kion,dt, Rion
   use const, only: umass,hartree2J,kB
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   type(s_force),intent(in) :: force
   type(s_md) :: md
   integer :: iatom
@@ -260,14 +260,14 @@ subroutine time_evolution_step_md_part1(system,force,md)
 end subroutine 
 
 subroutine update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
-  use structures, only: s_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_fourier_grid
+  use structures, only: s_dft_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_reciprocal_grid
   use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
-  type(s_fourier_grid) :: fg
+  type(s_reciprocal_grid) :: fg
   type(s_stencil),intent(inout) :: stencil
   type(s_pp_nlcc), intent(in) :: ppn
   type(s_pp_grid) :: ppg,ppg_all
@@ -279,22 +279,22 @@ subroutine update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
   if (mod(itt,step_update_ps)==0 ) then
      !xxxx call prep_ps_periodic('update_all       ')
      call dealloc_init_ps(ppg,ppg_all,ppn)
-     call init_ps(system%al,system%brl,stencil%matrix_A)
+     call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
   else if (mod(itt,step_update_ps2)==0 ) then
      !xxxx call prep_ps_periodic('update_wo_realloc')
      !xxxxxxx this option is not yet made xxxxxx
      call dealloc_init_ps(ppg,ppg_all,ppn)
-     call init_ps(system%al,system%brl,stencil%matrix_A)
+     call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
   endif
 
 end subroutine 
 
 subroutine time_evolution_step_md_part2(system,force,md)
-  use structures, only: s_system, s_force, s_md
+  use structures, only: s_dft_system, s_force, s_md
   use salmon_global, only: MI,Kion,dt,stop_system_momt
   use const, only: umass,hartree2J,kB
   implicit none
-  type(s_system) :: system
+  type(s_dft_system) :: system
   type(s_force),intent(in) :: force
   type(s_md) :: md
   integer :: iatom

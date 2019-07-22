@@ -17,7 +17,7 @@
 
 module density_matrix
   implicit none
-  integer,private,parameter :: Nd = 4 !????????
+  integer,private,parameter :: Nd = 4
 
 contains
 
@@ -25,40 +25,40 @@ contains
 ! dmat(r,-dr) = conjg(dmat(r-dr,dr))
 ! j(r) = sum occ aimag( conjg(psi(r))* (sum nabt*psi)(r) ) = aimag( sum_dr nabt(dr)* dmat(r,dr) )
 
-  subroutine calc_density_matrix(dmat,psi,info,rg,nspin)
+  subroutine calc_density_matrix(dmat,psi,info,mg,srg,nspin)
     use structures
-    use update_overlap_sub
+    use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
     use salmon_communication, only: comm_summation
     implicit none
     integer        ,intent(in) :: nspin
-    type(s_wf_info),intent(in) :: info
-    type(s_rgrid)  ,intent(in) :: rg
-    type(s_wavefunction)       :: psi
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_rgrid)  ,intent(in) :: mg
+    type(s_sendrecv_grid)      :: srg
+    type(s_orbital)            :: psi
     type(s_dmatrix)            :: dmat
     !
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,norb
     complex(8),allocatable :: wrk(:,:,:,:,:),wrk2(:,:,:,:,:)
 
-    is = rg%is
-    ie = rg%ie
-    nsize = Nd* rg%ndir * (rg%num(1)+Nd) * (rg%num(2)+Nd) * (rg%num(3)+Nd)
+    is = mg%is
+    ie = mg%ie
+    nsize = Nd* mg%ndir * (mg%num(1)+Nd) * (mg%num(2)+Nd) * (mg%num(3)+Nd)
 
     if(allocated(psi%rwf)) then
-      allocate(psi%zwf(rg%is_array(1):rg%ie_array(1) &
-                      ,rg%is_array(2):rg%ie_array(2) &
-                      ,rg%is_array(3):rg%ie_array(3) &
+      allocate(psi%zwf(mg%is_array(1):mg%ie_array(1) &
+                      ,mg%is_array(2):mg%ie_array(2) &
+                      ,mg%is_array(3):mg%ie_array(3) &
                       ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
       psi%zwf = cmplx(psi%rwf)
     end if
 
-    allocate( wrk(Nd,rg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) &
-            ,wrk2(Nd,rg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) )
+    allocate( wrk(Nd,mg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) &
+            ,wrk2(Nd,mg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) )
 
   ! overlap region communication
     if(info%if_divide_rspace) then
       norb = Nspin* info%numo * info%numk * info%numm
-      call update_overlap_C(psi%zwf,rg%is_array,rg%ie_array,norb,Nd & !????????
-                           ,rg%is,rg%ie,info%irank_r,info%icomm_r)
+      call update_overlap_complex8(srg, mg, psi%zwf)
     end if
 
     do im=info%im_s,info%im_e
@@ -66,12 +66,12 @@ contains
       wrk = 0d0
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
-        call calc_dm(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),rg%is_array,rg%ie_array,is,ie,rg%idx,rg%idy,rg%idz,rg%ndir)
-        wrk = wrk + wrk2 * info%occ(io,ik,ispin)
+        call calc_dm(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz,mg%ndir)
+        wrk = wrk + wrk2 * info%occ(io,ik,ispin,im)
       end do
       end do
       call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
-      dmat%rho(:,:,:,:,:,ispin,im) = wrk2(:,:,:,:,:)
+      dmat%zrho_mat(:,:,:,:,:,ispin,im) = wrk2(:,:,:,:,:)
     end do
     end do
 
@@ -107,7 +107,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_density(rho,psi,info,rg,nspin)
+  subroutine calc_density(rho,psi,info,mg,nspin)
     use structures
     use salmon_communication, only: comm_summation
     use salmon_parallel, only: get_thread_id,get_nthreads
@@ -115,17 +115,17 @@ contains
     use timer
     implicit none
     integer        ,intent(in) :: nspin
-    type(s_wf_info),intent(in) :: info
-    type(s_rgrid)  ,intent(in) :: rg
-    type(s_wavefunction),intent(in) :: psi
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_rgrid)  ,intent(in) :: mg
+    type(s_orbital),intent(in) :: psi
     type(s_scalar) :: rho(nspin,info%im_s:info%im_e)
     !
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
-    is = rg%is
-    ie = rg%ie
-    nsize = rg%num(1) * rg%num(2) * rg%num(3)
+    is = mg%is
+    ie = mg%ie
+    nsize = mg%num(1) * mg%num(2) * mg%num(3)
     allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(get_nthreads())-1))
     wrk=0.d0
 
@@ -144,7 +144,7 @@ contains
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
           wrk2 = abs( psi%rwf(ix,iy,iz,ispin,io,ik,im) )**2
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin)
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin,im)
         end do
         end do
         end do
@@ -183,7 +183,7 @@ contains
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
           wrk2 = abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin)
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin,im)
         end do
         end do
         end do
@@ -215,15 +215,15 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_current(curr,nspin,ngrid,rg,stencil,info,psi,ppg,dmat)
+  subroutine calc_current(curr,nspin,ngrid,mg,stencil,info,psi,ppg,dmat)
     use structures
     use salmon_communication, only: comm_summation
     implicit none
     integer,intent(in) :: nspin,ngrid
-    type(s_rgrid)  ,intent(in) :: rg
+    type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
-    type(s_wf_info),intent(in) :: info
-    type(s_wavefunction),intent(in) :: psi
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_orbital),intent(in) :: psi
     type(s_pp_grid),intent(in) :: ppg
     type(s_dmatrix),intent(in) :: dmat
     real(8) :: curr(3,nspin,info%im_s:info%im_e)
@@ -238,17 +238,17 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%kAc(ik,:),rg%is_array,rg%ie_array,rg%is,rg%ie)
-        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin)
+        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(ik,:),mg%is_array,mg%ie_array,mg%is,mg%ie)
+        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
-        call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,rg%is_array,rg%ie_array,ik)
-        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin)
+        call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
       end do
       end do
       call comm_summation(wrk2,wrk,3,info%icomm_ko)
 
-      call stencil_current(wrk2,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,rg%is,rg%ie,rg%ndir)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
       wrk2 = wrk + wrk2
 
       call comm_summation(wrk2,wrk,3,info%icomm_r)
@@ -295,8 +295,6 @@ contains
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
-      !?????? Nd = 4 ?
-      !?????? yz,zx,xy ?
         tmp(1) = tmp(1) + nabt(1,1) * zdm(1,1,ix,iy,iz) * 2d0 &
                         + nabt(2,1) * zdm(2,1,ix,iy,iz) * 2d0 &
                         + nabt(3,1) * zdm(3,1,ix,iy,iz) * 2d0 &
@@ -340,10 +338,10 @@ contains
           ix = ppg%Jxyz(1,j,ia)
           iy = ppg%Jxyz(2,j,ia)
           iz = ppg%Jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%ekr_uV(j,ilma,ik)) * psi(ix,iy,iz)
-          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%ekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
-          uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%ekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
-          uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%ekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
+          uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * psi(ix,iy,iz)
+          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
+          uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
+          uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
@@ -355,24 +353,24 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_microscopic_current(curr,nspin,rg,stencil,info,psi,dmat)
+  subroutine calc_microscopic_current(curr,nspin,mg,stencil,info,psi,dmat)
     use structures
     use salmon_communication, only: comm_summation
     implicit none
     integer,intent(in) :: nspin
-    type(s_rgrid)  ,intent(in) :: rg
+    type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
-    type(s_wf_info),intent(in) :: info
-    type(s_wavefunction),intent(in) :: psi
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_orbital),intent(in) :: psi
     type(s_dmatrix),intent(in) :: dmat
     type(s_vector)             :: curr(nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
-    is = rg%is
-    ie = rg%ie
+    is = mg%is
+    ie = mg%ie
     allocate(wrk(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)),wrk2(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)))
-    nsize = 3* rg%num(1) * rg%num(2) * rg%num(3)
+    nsize = 3* mg%num(1) * mg%num(2) * mg%num(3)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
@@ -381,8 +379,8 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%kAc(ik,:),rg%is_array,rg%ie_array,is,ie)
-        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin)
+        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(ik,:),mg%is_array,mg%ie_array,is,ie)
+        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
 !       call nonlocal_part
 
@@ -390,7 +388,7 @@ contains
       end do
       call comm_summation(wrk2,wrk,nsize,info%icomm_ko)
 
-      call stencil_current(wrk2,dmat%rho(:,:,:,:,:,ispin,im),stencil%nabt,is,ie,rg%idx,rg%idy,rg%idz,rg%ndir)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz,mg%ndir)
 
       curr(ispin,im)%v = wrk + wrk2
     end do
@@ -432,8 +430,6 @@ contains
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
-      !?????? Nd = 4 ?
-      !?????? yz,zx,xy ?
         tmp(1) = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,idx(ix-1),iy,iz)) ) & ! dmat(x,-dx)==conjg(dmat(x-dx,dx))
                + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,idx(ix-2),iy,iz)) ) &
                + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,idx(ix-3),iy,iz)) ) &

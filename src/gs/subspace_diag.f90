@@ -22,7 +22,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
                 info_ob,ppg,vlocal)
 
   use inputoutput, only: ispin
-  use structures, only: s_rgrid,s_system,s_wf_info,s_wavefunction,s_stencil,s_scalar,s_pp_grid
+  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
   use hpsi_sub
@@ -35,9 +35,9 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   type(s_rgrid),intent(in) :: mg
-  type(s_system),intent(in) :: system
-  type(s_wf_info)       :: info
-  type(s_wavefunction),intent(inout) :: spsi
+  type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel)       :: info
+  type(s_orbital),intent(inout) :: spsi
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
@@ -48,14 +48,14 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
   integer,intent(in)  :: k_sta,k_end
-  type(s_wf_info)       :: info_ob
+  type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
   integer :: iob,job,ii,jj
   integer :: ix,iy,iz,is
   integer :: nspin_1
-  type(s_wavefunction)  :: stpsi
-  type(s_wavefunction)  :: shtpsi
+  type(s_orbital)  :: stpsi
+  type(s_orbital)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
   real(8),allocatable :: amat(:,:)
   real(8),allocatable :: amat2(:,:)

@@ -41,17 +41,17 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  type(s_system),intent(inout) :: system
+  type(s_dft_system),intent(inout) :: system
   integer,intent(in) :: nspin
-  type(s_wf_info),intent(in) :: info
+  type(s_orbital_parallel),intent(in) :: info
   type(s_stencil),intent(inout) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
   type(s_pp_nlcc), intent(in) :: ppn
-  type(s_wavefunction),intent(inout) :: spsi_in,spsi_out
-  type(s_wavefunction),intent(inout) :: tpsi1,tpsi2 ! temporary wavefunctions
-  type(s_fourier_grid) :: fg
+  type(s_orbital),intent(inout) :: spsi_in,spsi_out
+  type(s_orbital),intent(inout) :: tpsi1,tpsi2 ! temporary wavefunctions
+  type(s_reciprocal_grid) :: fg
   type(s_force),intent(inout) :: force
-  type(s_energy) :: energy
+  type(s_dft_energy) :: energy
   type(s_scalar) :: sVh
   type(s_scalar),allocatable :: srho(:),V_local(:),sVxc(:)
   type(s_md) :: md
@@ -84,7 +84,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   ! for calc_total_energy_periodic
   rion_update = check_rion_update() .or. (itt == Miter_rt+1)
   
-  if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%brl)
+  if(iperiodic==3) call init_k_rd(k_rd,ksquare,1,system%primitive_b)
   
   select case(ikind_eext)
     case(0,3,9:12)
@@ -155,7 +155,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     end do
 
     if(iperiodic==0.and.ikind_eext==1) call calcVbox(itt+1)
-    if(iperiodic==3) call init_k_rd(k_rd,ksquare,4,system%brl)
+    if(iperiodic==3) call init_k_rd(k_rd,ksquare,4,system%primitive_b)
 
     if(iobnum.ge.1)then
       call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
@@ -298,7 +298,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   end if
 
   
-  call Hartree_ns(lg,mg,ng,system%brl,srg_ng,stencil)
+  call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
   call timer_end(LOG_CALC_HARTREE)
 
 
@@ -458,14 +458,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
     call timer_begin(LOG_WRITE_ENERGIES)
     if(iflag_hartree==2)then
-      fg%rhoG_elec = rhoe_G
+      fg%zrhoG_ele = rhoe_G
     else if(iflag_hartree==4)then
       do iz=1,lg_num(3)/NPUZ
       do iy=1,lg_num(2)/NPUY
       do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
         n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
         nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-        fg%rhoG_elec(nn) = rhoe_G(n)
+        fg%zrhoG_ele(nn) = rhoe_G(n)
       enddo
       enddo
       enddo
@@ -704,43 +704,43 @@ END SUBROUTINE time_evolution_step
 
 subroutine get_fourier_grid_G_rt(system,lg,ng,fg)
   use salmon_global, only: nelem
-  use structures, only: s_system, s_fourier_grid, s_rgrid
+  use structures, only: s_dft_system, s_reciprocal_grid, s_rgrid
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
   use scf_data
   use allocate_psl_sub
   implicit none
-  type(s_system),intent(in) :: system
+  type(s_dft_system),intent(in) :: system
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
-  type(s_fourier_grid) :: fg
+  type(s_reciprocal_grid) :: fg
 
   integer :: jj,ix,iy,iz,n,nn
 
   if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
-  if(allocated(fg%rhoG_ion)) deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
+  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
 
   jj = system%ngrid/nproc_size_global
   fg%ig_s = nproc_id_global*jj+1
   fg%ig_e = (nproc_id_global+1)*jj
   if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-  fg%icomm_fourier = nproc_group_global
+  fg%icomm_G = nproc_group_global
   fg%ng = system%ngrid
   allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-  allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
   if(iflag_hartree==2)then
      fg%iGzero = nGzero
      fg%Gx = Gx
      fg%Gy = Gy
      fg%Gz = Gz
-     fg%rhoG_ion = rhoion_G
-     fg%dVG_ion = dVloc_G
+     fg%zrhoG_ion = rhoion_G
+     fg%zdVG_ion = dVloc_G
   else if(iflag_hartree==4)then
      fg%iGzero = 1
      fg%Gx = 0.d0
      fg%Gy = 0.d0
      fg%Gz = 0.d0
-     fg%rhoG_ion = 0.d0
-     fg%dVG_ion = 0.d0
+     fg%zrhoG_ion = 0.d0
+     fg%zdVG_ion = 0.d0
      do iz=1,lg_num(3)/NPUZ
      do iy=1,lg_num(2)/NPUY
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
@@ -749,8 +749,8 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,fg)
         fg%Gx(nn) = Gx(n)
         fg%Gy(nn) = Gy(n)
         fg%Gz(nn) = Gz(n)
-        fg%rhoG_ion(nn) = rhoion_G(n)
-        fg%dVG_ion(nn,:) = dVloc_G(n,:)
+        fg%zrhoG_ion(nn) = rhoion_G(n)
+        fg%zdVG_ion(nn,:) = dVloc_G(n,:)
      enddo
      enddo
      enddo

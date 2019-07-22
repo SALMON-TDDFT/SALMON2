@@ -52,11 +52,11 @@ implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
-type(s_system)  :: system
-type(s_wf_info) :: info
+type(s_dft_system)  :: system
+type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
-type(s_fourier_grid) :: fg
-type(s_energy) :: energy
+type(s_reciprocal_grid) :: fg
+type(s_dft_energy) :: energy
 type(s_force)   :: force
 type(s_md) :: md
 type(s_ofile) :: ofl
@@ -97,16 +97,16 @@ if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
    al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
   stencil%if_orthogonal = .true.
-  system%al = 0d0
-  system%al(1,1) = al(1)
-  system%al(2,2) = al(2)
-  system%al(3,3) = al(3)
+  system%primitive_a = 0d0
+  system%primitive_a(1,1) = al(1)
+  system%primitive_a(2,2) = al(2)
+  system%primitive_a(3,3) = al(3)
 else
   if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
   stencil%if_orthogonal = .false.
-  system%al(1:3,1) = al_vec1
-  system%al(1:3,2) = al_vec2
-  system%al(1:3,3) = al_vec3
+  system%primitive_a(1:3,1) = al_vec1
+  system%primitive_a(1:3,2) = al_vec2
+  system%primitive_a(1:3,3) = al_vec3
 end if
 
 call setbN
@@ -223,7 +223,7 @@ end if
 
 call read_pslfile(system)
 call allocate_psl
-call init_ps(system%al,system%brl,stencil%matrix_A)
+call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
 
 call init_updown
 call init_itype
@@ -731,17 +731,17 @@ use print_sub, only: write_xyz
 implicit none
 
 type(s_rgrid) :: lg,mg,ng
-type(s_system) :: system
-type(s_wf_info) :: info
+type(s_dft_system) :: system
+type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
-type(s_wavefunction) :: spsi_in,spsi_out
-type(s_wavefunction) :: tpsi1,tpsi2 ! temporary wavefunctions
+type(s_orbital) :: spsi_in,spsi_out
+type(s_orbital) :: tpsi1,tpsi2 ! temporary wavefunctions
 type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_nlcc) :: ppn
-type(s_fourier_grid) :: fg
+type(s_reciprocal_grid) :: fg
 type(s_force) :: force
 type(s_md) :: md
-type(s_energy) :: energy
+type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
 
 complex(8),parameter :: zi=(0.d0,1.d0)
@@ -817,7 +817,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%icomm_ro = nproc_group_k
   info%icomm_rko = nproc_group_global
 
-  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin) &
+  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
           ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
           ,info%irank_jo(1:system%no))
   info%jo_tbl(:) = 0 ! info%io_s-1 (initial value)
@@ -831,15 +831,15 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   end do
 
   if(stencil%if_orthogonal) then
-    stencil%lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
+    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
     if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-    stencil%lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
   do jj=1,3
     do ii=1,4
-      stencil%lapt(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-      stencil%nabt(ii,jj) = bnmat(ii,4)/hgs(jj)
+      stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
+      stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
     end do
   end do
 
@@ -847,7 +847,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     do iob=info%io_s,info%io_e
       do jspin=1,system%nspin
         jj = info%io_tbl(iob)+(jspin-1)*mst(1)
-        info%occ(iob,ik,jspin) = system%rocc(jj,ik,1)*system%wtk(ik)
+        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,1)*system%wtk(ik)
       end do
     end do
   end do
@@ -919,33 +919,33 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   end do
 
   if(iperiodic==3) then
-    allocate(stencil%kAc(info%ik_s:info%ik_e,3))
+    allocate(stencil%vec_kAc(info%ik_s:info%ik_e,3))
 
 !????????? get_fourier_grid_G @ real_space_dft.f90
     if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
-    if(allocated(fg%rhoG_ion)) deallocate(fg%rhoG_ion,fg%rhoG_elec,fg%dVG_ion)
+    if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
     jj = system%ngrid/nproc_size_global
     fg%ig_s = nproc_id_global*jj+1
     fg%ig_e = (nproc_id_global+1)*jj
     if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-    fg%icomm_fourier = nproc_group_global
+    fg%icomm_G = nproc_group_global
     fg%ng = system%ngrid
     allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-    allocate(fg%rhoG_ion(fg%ng),fg%rhoG_elec(fg%ng),fg%dVG_ion(fg%ng,nelem))
+    allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
     if(iflag_hartree==2)then
        fg%iGzero = nGzero
        fg%Gx = Gx
        fg%Gy = Gy
        fg%Gz = Gz
-       fg%rhoG_ion = rhoion_G
-       fg%dVG_ion = dVloc_G
+       fg%zrhoG_ion = rhoion_G
+       fg%zdVG_ion = dVloc_G
     else if(iflag_hartree==4)then
        fg%iGzero = 1
        fg%Gx = 0.d0
        fg%Gy = 0.d0
        fg%Gz = 0.d0
-       fg%rhoG_ion = 0.d0
-       fg%dVG_ion = 0.d0
+       fg%zrhoG_ion = 0.d0
+       fg%zdVG_ion = 0.d0
        do iz=1,lg_num(3)/NPUZ
        do iy=1,lg_num(2)/NPUY
        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
@@ -954,8 +954,8 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
           fg%Gx(nn) = Gx(n)
           fg%Gy(nn) = Gy(n)
           fg%Gz(nn) = Gz(n)
-          fg%rhoG_ion(nn) = rhoion_G(n)
-          fg%dVG_ion(nn,:) = dVloc_G(n,:)
+          fg%zrhoG_ion(nn) = rhoion_G(n)
+          fg%zdVG_ion(nn,:) = dVloc_G(n,:)
        enddo
        enddo
        enddo
@@ -1442,9 +1442,9 @@ if(iflag_md==1) call init_md(system,md)
 if(iflag_md==1 .or. icalcforce==1)then
    if(iperiodic==3)then
       do ik=info%ik_s,info%ik_e
-        stencil%kAc(ik,:) = k_rd(:,ik)
+        stencil%vec_kAc(ik,:) = k_rd(:,ik)
       end do
-      call update_kvector_nonlocalpt(ppg,stencil%kAc,info%ik_s,info%ik_e)
+      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
       call get_fourier_grid_G_rt(system,lg,ng,fg)
    endif
    call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
@@ -1512,7 +1512,7 @@ else
 end if
 call timer_end(LOG_RT_ITERATION)
 
-  if(iperiodic==3) deallocate(stencil%kAc)
+  if(iperiodic==3) deallocate(stencil%vec_kAc)
 
 close(030) ! laser
 

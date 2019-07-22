@@ -27,12 +27,12 @@ CONTAINS
     use salmon_global, only: kion
     use salmon_communication, only: comm_summation
     implicit none
-    type(s_system) ,intent(in) :: system
-    type(s_wf_info),intent(in) :: info
-    type(s_rgrid)  ,intent(in) :: ng
-    type(s_pp_info),intent(in) :: pp
-    type(s_scalar) ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
-    type(s_energy)             :: energy
+    type(s_dft_system),intent(in) :: system
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_rgrid)     ,intent(in) :: ng
+    type(s_pp_info)   ,intent(in) :: pp
+    type(s_scalar)    ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
+    type(s_dft_energy)            :: energy
     !
     integer :: io,ik,ispin,Nspin
     integer :: ix,iy,iz,ia,ib
@@ -105,17 +105,17 @@ CONTAINS
     use salmon_global, only: kion,NEwald,aEwald
     use salmon_communication, only: comm_summation
     implicit none
-    type(s_system) ,intent(in) :: system
-    type(s_pp_info),intent(in) :: pp
-    type(s_fourier_grid),intent(in) :: fg
-    type(s_energy)             :: energy
-    logical,intent(in)         :: rion_update
+    type(s_dft_system) ,intent(in) :: system
+    type(s_pp_info)    ,intent(in) :: pp
+    type(s_reciprocal_grid),intent(in) :: fg
+    type(s_dft_energy)             :: energy
+    logical,intent(in)             :: rion_update
     !
     integer :: ix,iy,iz,ia,ib,ig
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
     complex(8) :: rho_e,rho_i
 
-    sysvol = system%det_al
+    sysvol = system%det_a
 
     E_tmp = 0d0
     E_tmp_l = 0d0
@@ -130,9 +130,9 @@ CONTAINS
       do iz=-NEwald,NEwald
         do ib=1,system%nion
           if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
-          r(1) = ix*system%al(1,1) + iy*system%al(1,2) + iz*system%al(1,3)
-          r(2) = ix*system%al(2,1) + iy*system%al(2,2) + iz*system%al(2,3)
-          r(3) = ix*system%al(3,1) + iy*system%al(3,2) + iz*system%al(3,3)
+          r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
+          r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
+          r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
           rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
           rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
           rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
@@ -156,7 +156,7 @@ CONTAINS
         g(2) = fg%Gy(ig)
         g(3) = fg%Gz(ig)
         G2 = g(1)**2 + g(2)**2 + g(3)**2
-        rho_i = fg%rhoG_ion(ig)
+        rho_i = fg%zrhoG_ion(ig)
         E_tmp_l = E_tmp_l + sysvol*(4*Pi/G2)*(abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
       end do
 !$omp end parallel do
@@ -173,25 +173,25 @@ CONTAINS
       g(2) = fg%Gy(ig)
       g(3) = fg%Gz(ig)
       G2 = g(1)**2 + g(2)**2 + g(3)**2
-      rho_i = fg%rhoG_ion(ig)
-      rho_e = fg%rhoG_elec(ig)
+      rho_i = fg%zrhoG_ion(ig)
+      rho_e = fg%zrhoG_ele(ig)
       E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
       E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        E_wrk(3) = E_wrk(3) + conjg(rho_e)*fg%dVG_ion(ig,Kion(ia))*exp(-zI*Gd)         ! electron-ion (core)
+        E_wrk(3) = E_wrk(3) + conjg(rho_e)*fg%zdVG_ion(ig,Kion(ia))*exp(-zI*Gd)         ! electron-ion (core)
       end do
     enddo
 !$omp end parallel do
 
     if (rion_update) then
       E_wrk(4) = E_tmp_l
-      call comm_summation(E_wrk,E_sum,4,fg%icomm_fourier)
+      call comm_summation(E_wrk,E_sum,4,fg%icomm_G)
   ! ion-ion energy
       energy%E_ion_ion = E_tmp + E_sum(4)
     else
-      call comm_summation(E_wrk,E_sum,3,fg%icomm_fourier)
+      call comm_summation(E_wrk,E_sum,3,fg%icomm_G)
     end if
 
   ! Hartree energy
@@ -214,10 +214,10 @@ CONTAINS
     use salmon_communication, only: comm_summation
     use hpsi_sub
     implicit none
-    type(s_energy)             :: energy
-    type(s_wavefunction)       :: tpsi,htpsi,ttpsi
-    type(s_system) ,intent(in) :: system
-    type(s_wf_info),intent(in) :: info
+    type(s_dft_energy)         :: energy
+    type(s_orbital)            :: tpsi,htpsi,ttpsi
+    type(s_dft_system),intent(in) :: system
+    type(s_orbital_parallel),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_scalar) ,intent(in) :: V_local(system%Nspin)
     type(s_stencil),intent(in) :: stencil
@@ -280,7 +280,7 @@ CONTAINS
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          E_tmp = E_tmp + info%occ(io,ik,ispin) &
+          E_tmp = E_tmp + info%occ(io,ik,ispin,im) &
                       * sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
                                  * ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
@@ -299,7 +299,7 @@ CONTAINS
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
 
-          E_tmp = E_tmp + info%occ(io,ik,ispin) * system%hvol &
+          E_tmp = E_tmp + info%occ(io,ik,ispin,im) * system%hvol &
             * sum( conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im)) &
               * (htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
                 - (ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
