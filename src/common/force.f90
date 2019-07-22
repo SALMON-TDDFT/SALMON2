@@ -26,7 +26,7 @@ contains
     use structures
     use hpsi_sub
     use stencil_sub
-    use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
+    use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
     implicit none
     type(s_dft_system)      ,intent(in) :: system
@@ -74,6 +74,7 @@ contains
                        ,mg%is_array(3):mg%ie_array(3) &
                        ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
       tpsi%zwf = cmplx(tpsi%rwf)
+      srg%pcomm_initialized=.false.
     end if
 
     allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
@@ -106,7 +107,13 @@ contains
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 
     if(info%if_divide_rspace) then
-      call update_overlap_complex8(srg, mg, tpsi%zwf)
+
+!       call dealloc_cache(srg)
+       call update_overlap_complex8(srg, mg, tpsi%zwf)
+       if(allocated(tpsi%rwf)) then
+          srg%pcomm_initialized=.false.
+          call dealloc_cache(srg)
+       endif
     end if
 
     kAc = 0d0
