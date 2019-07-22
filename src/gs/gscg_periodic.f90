@@ -98,7 +98,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                       mg%is_array(2):mg%ie_array(2),  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
-  allocate(stencil%vec_kAc(1:1,3))
+  allocate(stencil%vec_kAc(3,1:1))
 
   nspin_1=1
   allocate(v(nspin_1))
@@ -132,7 +132,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
 
     call timer_begin(LOG_GSCG_INIT_ITERATION)
     do j=1,3
-      stencil%vec_kAc(1,j) = k_rd(j,ik)
+      stencil%vec_kAc(j,1) = k_rd(j,ik)
     end do
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,1,1)
 

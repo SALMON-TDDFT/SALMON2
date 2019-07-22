@@ -919,7 +919,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   end do
 
   if(iperiodic==3) then
-    allocate(stencil%vec_kAc(info%ik_s:info%ik_e,3))
+    allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
 
 !????????? get_fourier_grid_G @ real_space_dft.f90
     if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
@@ -1442,7 +1442,7 @@ if(iflag_md==1) call init_md(system,md)
 if(iflag_md==1 .or. icalcforce==1)then
    if(iperiodic==3)then
       do ik=info%ik_s,info%ik_e
-        stencil%vec_kAc(ik,:) = k_rd(:,ik)
+        stencil%vec_kAc(:,ik) = k_rd(:,ik)
       end do
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
       call get_fourier_grid_G_rt(system,lg,ng,fg)

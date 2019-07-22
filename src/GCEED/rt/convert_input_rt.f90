@@ -25,7 +25,6 @@ implicit none
 integer :: Ntime
 real(8) :: dip_spacing
 
-ik_oddeven=2
 ilsda=ispin
 icalcforce=0
 

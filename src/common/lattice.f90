@@ -102,4 +102,34 @@ SUBROUTINE calc_inverse(a,b,detA) ! b = a^{-1}
   return
 end SUBROUTINE calc_inverse
 
+SUBROUTINE init_kvector(system)
+  use structures
+  use salmon_global,only : num_kgrid
+  implicit none
+  type(s_dft_system) :: system
+  !
+  integer :: ix,iy,iz
+  integer :: ik,nk
+  real(8) :: shift_k(3),k(3),B(3,3)
+  nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+  system%nk = nk
+  allocate(system%vec_k(3,nk))
+
+  B = system%primitive_b
+  shift_k(1:3) = 0.5d0
+  do ik=1,nk
+    ix=mod(ik-1,num_kgrid(1))+1
+    iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
+    iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
+    k(1) = (dble(ix)-shift_k(1))/dble(num_kgrid(1))-0.5d0
+    k(2) = (dble(iy)-shift_k(2))/dble(num_kgrid(2))-0.5d0
+    k(3) = (dble(iz)-shift_k(3))/dble(num_kgrid(3))-0.5d0
+    system%vec_k(1,ik) = k(1)*B(1,1) + k(2)*B(1,2) + k(3)*B(1,3)
+    system%vec_k(2,ik) = k(1)*B(2,1) + k(2)*B(2,2) + k(3)*B(2,3)
+    system%vec_k(3,ik) = k(1)*B(3,1) + k(2)*B(3,2) + k(3)*B(3,3)
+  end do
+
+  return
+end SUBROUTINE init_kvector
+
 end module lattice

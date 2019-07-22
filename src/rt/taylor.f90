@@ -91,7 +91,7 @@ subroutine taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,tsps
   do ik=info%ik_s,info%ik_e
     if(iperiodic==3)then
       do j=1,3
-        stencil%vec_kAc(ik,j) = k_rd(j,ik)
+        stencil%vec_kAc(j,ik) = k_rd(j,ik)
       end do
     end if
   end do

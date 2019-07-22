@@ -29,7 +29,6 @@ integer :: icheck1,icheck2
 character(100) :: file_atoms_coo
 real(8) :: dip_spacing
 
-ik_oddeven=2
 iterVh = 0         ! Iteration counter
 ilsda = ispin
 icalcforce=0
