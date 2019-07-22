@@ -135,8 +135,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
@@ -158,19 +158,19 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     if(iperiodic==3) call init_k_rd(k_rd,ksquare,4,system%primitive_b)
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
   else 
 
     if(iobnum.ge.1)then
       if(mod(itt,2)==1)then
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
       else
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
       end if
     end if
     

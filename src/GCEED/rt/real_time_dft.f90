@@ -205,7 +205,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,system,info,stencil)
+call IN_data(lg,mg,ng,system,stencil)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then
@@ -713,8 +713,8 @@ END subroutine Real_Time_DFT
 
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global, & !nproc_group_grid,   &
-                           nproc_group_h, nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
+use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
+                           nproc_group_h, nproc_group_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density

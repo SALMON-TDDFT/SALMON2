@@ -41,12 +41,12 @@ if(iSCFRT==1)then
   case(3)
     select case(iflag_hartree)
     case(2)
-      call Hartree_periodic(lg,mg,ng,rho,Vh,hgs,iscfrt,itcalc_ene,itt,   &
+      call Hartree_periodic(lg,mg,ng,rho,Vh,hgs,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
     case(4)
       call Hartree_FFTE(lg,mg,ng,rho,Vh,hgs,npuw,npuy,npuz,   &
-                        a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
+                        a_ffte,b_ffte,rhoe_g,coef_poisson)
     end select
   end select
 else if(iSCFRT==2)then
@@ -67,22 +67,22 @@ else if(iSCFRT==2)then
     if(mod(itt,2)==1)then
       select case(iflag_hartree)
       case(2)
-        call Hartree_periodic(lg,mg,ng,rho,Vh_stock2,hgs,iscfrt,itcalc_ene,itt,   &
+        call Hartree_periodic(lg,mg,ng,rho,Vh_stock2,hgs,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
       case(4)
         call Hartree_FFTE(lg,mg,ng,rho,Vh_stock2,hgs,npuw,npuy,npuz,   &
-                          a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
+                          a_ffte,b_ffte,rhoe_g,coef_poisson)
       end select
     else
       select case(iflag_hartree)
       case(2)
-        call Hartree_periodic(lg,mg,ng,rho,Vh_stock1,hgs,iscfrt,itcalc_ene,itt,   &
+        call Hartree_periodic(lg,mg,ng,rho,Vh_stock1,hgs,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
       case(4)
         call Hartree_FFTE(lg,mg,ng,rho,Vh_stock1,hgs,npuw,npuy,npuz,   &
-                          a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
+                          a_ffte,b_ffte,rhoe_g,coef_poisson)
       end select
     end if
   end select

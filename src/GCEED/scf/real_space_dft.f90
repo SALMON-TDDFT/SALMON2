@@ -42,7 +42,7 @@ subroutine Real_Space_DFT
 use structures!, only: s_rgrid, s_orbital_parallel, s_orbital, s_dft_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
-                           nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
+                           nproc_group_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
@@ -613,7 +613,7 @@ if(iopt==1)then
   call timer_begin(LOG_INIT_GS_RESTART)
   case(1,3)
 
-    call IN_data(lg,mg,ng,system,info,stencil,cg)
+    call IN_data(lg,mg,ng,system,stencil,cg)
 
     call allocate_mat(cg)
     call set_icoo1d
@@ -1764,7 +1764,7 @@ if(comm_is_root(nproc_id_global))      &
 
 rLsize1(:)=rLsize(:,itmg)
 call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
+           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
 call check_fourier
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))

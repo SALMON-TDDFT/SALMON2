@@ -23,7 +23,7 @@ contains
 
 subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,  &
                          info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
-  use inputoutput, only: ncg,ispin,natom
+  use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid,s_cg
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_id_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation

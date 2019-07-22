@@ -19,7 +19,7 @@ module hartree_periodic_sub
 
 contains
 
-subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
+subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
   use structures, only: s_rgrid
@@ -33,9 +33,6 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,iscfrt,itcalc_ene,itt,  &
   real(8),intent(in)  :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8),intent(out) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8),intent(in)  :: hgs(3)
-  integer,intent(in)  :: iscfrt
-  integer,intent(in)  :: itcalc_ene
-  integer,intent(in)  :: itt
   complex(8),intent(out) :: ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   complex(8),intent(out) :: ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
   complex(8),intent(out) :: ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3))
