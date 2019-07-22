@@ -19,7 +19,7 @@ module hartree_ffte_sub
 
 contains
 
-subroutine hartree_ffte(lg,mg,ng,trho,tvh,icheck_ascorder,hgs,npuw,npuy,npuz,  &
+subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
                         a_ffte,b_ffte,rhoe_g,coef_poisson,matbox_l,matbox_l2)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
@@ -35,7 +35,6 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,icheck_ascorder,hgs,npuw,npuy,npuz,  &
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  integer,intent(in)       :: icheck_ascorder
   real(8),intent(in)       :: hgs(3)
   integer,intent(in)       :: npuw,npuy,npuz
   complex(8),intent(out)   :: a_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
@@ -68,59 +67,29 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,icheck_ascorder,hgs,npuw,npuy,npuz,  &
   
 !  rhoe_G_tmp=0.d0
 
-  if(icheck_ascorder==1)then
-    if(npuw==1)then
+  if(npuw==1)then
 !$OMP parallel do private(iiz,iiy)
-      do iz=iz_sta,iz_end
-        iiz=iz+nproc_id_icommz*lg%num(3)/npuz
-        do iy=iy_sta,iy_end
-          iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-          a_ffte(1:lg%ie(1),iy,iz)=trho(1:lg%ie(1),iiy,iiz)
-        end do
-      end do
-    else
-      a_ffte_tmp=0.d0
-!$OMP parallel do private(iiz,iiy,ix)
-      do iz=iz_sta,iz_end
-        iiz=iz+nproc_id_icommz*lg%num(3)/npuz
-        do iy=iy_sta,iy_end
-          iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-          do iix=ng%is(1),ng%ie(1)
-            ix=iix-lg%is(1)+1
-            a_ffte_tmp(ix,iy,iz)=trho(iix,iiy,iiz)
-          end do
-        end do
-      end do
-      call comm_summation(a_ffte_tmp,a_ffte,lg%num(1)*lg%num(2)/npuy*lg%num(3)/npuz,nproc_group_icommw)
-    end if
-  else
-!$OMP parallel do
-    do iz = lg%is(3),lg%ie(3)
-    do iy = lg%is(2),lg%ie(2)
-    do ix = lg%is(1),lg%ie(1)
-      matbox_l(ix,iy,iz)=0.d0
-    end do
-    end do
-    end do
-!$OMP parallel do
-    do iz = ng%is(3),ng%ie(3)
-    do iy = ng%is(2),ng%ie(2)
-    do ix = ng%is(1),ng%ie(1)
-      matbox_l(ix,iy,iz)=trho(ix,iy,iz)
-    end do
-    end do
-    end do
-
-    call comm_summation(matbox_l,matbox_l2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
-
-!!$OMP parallel do private(iiz,iiy)
     do iz=iz_sta,iz_end
       iiz=iz+nproc_id_icommz*lg%num(3)/npuz
       do iy=iy_sta,iy_end
         iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-        a_ffte(1:lg%ie(1),iy,iz)=matbox_l2(1:lg%ie(1),iiy,iiz)
+        a_ffte(1:lg%ie(1),iy,iz)=trho(1:lg%ie(1),iiy,iiz)
       end do
     end do
+  else
+    a_ffte_tmp=0.d0
+!$OMP parallel do private(iiz,iiy,ix)
+    do iz=iz_sta,iz_end
+      iiz=iz+nproc_id_icommz*lg%num(3)/npuz
+      do iy=iy_sta,iy_end
+        iiy=iy+nproc_id_icommy*lg%num(2)/npuy
+        do iix=ng%is(1),ng%ie(1)
+          ix=iix-lg%is(1)+1
+          a_ffte_tmp(ix,iy,iz)=trho(iix,iiy,iiz)
+        end do
+      end do
+    end do
+    call comm_summation(a_ffte_tmp,a_ffte,lg%num(1)*lg%num(2)/npuy*lg%num(3)/npuz,nproc_group_icommw)
   end if
 
   CALL PZFFT3DV_MOD(a_ffte,b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0) 
@@ -142,56 +111,28 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,icheck_ascorder,hgs,npuw,npuy,npuz,  &
 
   CALL PZFFT3DV_MOD(b_ffte,a_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,1)
 
-  if(icheck_ascorder==1)then
-    if(npuw==1)then
+  if(npuw==1)then
 !$OMP parallel do private(iiz,iiy)
-      do iz=iz_sta,iz_end
-        iiz=iz+nproc_id_icommz*lg%num(3)/npuz
-        do iy=iy_sta,iy_end
-          iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-          tvh(1:lg%ie(1),iiy,iiz)=a_ffte(1:lg%ie(1),iy,iz)
-        end do
-      end do
-    else
-!$OMP parallel do private(iiz,iiy,ix)
-      do iz=iz_sta,iz_end
-        iiz=iz+nproc_id_icommz*lg%num(3)/npuz
-        do iy=iy_sta,iy_end
-          iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-          do iix=ng%is(1),ng%ie(1)
-            ix=iix-lg%is(1)+1
-            tvh(iix,iiy,iiz)=a_ffte(ix,iy,iz)
-          end do
-        end do
-      end do
-    end if
-  else
-!$OMP parallel do
-    do iz = lg%is(3),lg%ie(3)
-    do iy = lg%is(2),lg%ie(2)
-    do ix = lg%is(1),lg%ie(1)
-      matbox_l(ix,iy,iz)=0.d0
-    end do
-    end do
-    end do
-!!$OMP parallel do private(iiz,iiy)
     do iz=iz_sta,iz_end
       iiz=iz+nproc_id_icommz*lg%num(3)/npuz
       do iy=iy_sta,iy_end
         iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-        matbox_l(1:lg%ie(1),iiy,iiz)=a_ffte(1:lg%ie(1),iy,iz)
+        tvh(1:lg%ie(1),iiy,iiz)=a_ffte(1:lg%ie(1),iy,iz)
       end do
     end do
-    call comm_summation(matbox_l,matbox_l2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
-!$OMP parallel do
-    do iz = mg%is(3),mg%ie(3)
-    do iy = mg%is(2),mg%ie(2)
-    do ix = mg%is(1),mg%ie(1)
-      tvh(ix,iy,iz)=matbox_l2(ix,iy,iz)
+  else
+!$OMP parallel do private(iiz,iiy,ix)
+    do iz=iz_sta,iz_end
+      iiz=iz+nproc_id_icommz*lg%num(3)/npuz
+      do iy=iy_sta,iy_end
+        iiy=iy+nproc_id_icommy*lg%num(2)/npuy
+        do iix=ng%is(1),ng%ie(1)
+          ix=iix-lg%is(1)+1
+          tvh(iix,iiy,iiz)=a_ffte(ix,iy,iz)
+        end do
+      end do
     end do
-    end do
-    end do
-  end if 
+  end if
 
   return
 end subroutine hartree_ffte

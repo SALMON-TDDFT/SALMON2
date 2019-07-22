@@ -157,77 +157,46 @@ subroutine calcVpsl_periodic_FFTE
 
   CALL PZFFT3DV_MOD(B_FFTE,A_FFTE,lg_num(1),lg_num(2),lg_num(3),NPUY,NPUZ,1)
 
-  if(icheck_ascorder==1)then
 !$OMP parallel do
-    do iz = lg_sta(3),lg_end(3)
-    do iy = lg_sta(2),lg_end(2)
-    do ix = lg_sta(1),lg_end(1)
-      matbox_l(ix,iy,iz)=0.d0
-    end do
-    end do
-    end do
-    if(NPUW==1)then
-!$OMP parallel do private(iiz,iiy)
-      do iz=iz_sta,iz_end
-        iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
-        do iy=iy_sta,iy_end
-          iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
-!            Vpsl(1:lg_end(1),iiy,iiz)=A_FFTE(1:lg_end(1),iy,iz)
-          matbox_l(1:lg_end(1),iiy,iiz)=A_FFTE(1:lg_end(1),iy,iz)
-        end do
-      end do
-    else
-!$OMP parallel do private(iiz,iiy,ix)
-      do iz=iz_sta,iz_end
-        iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
-        do iy=iy_sta,iy_end
-          iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
-          do iix=ng_sta(1),ng_end(1)
-            ix=iix-lg_sta(1)+1
-            matbox_l(iix,iiy,iiz)=A_FFTE(ix,iy,iz)
-          end do
-        end do
-      end do
-    end if
-    call comm_summation(matbox_l,matbox_l2,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
-!$OMP parallel do
-    do iz = mg_sta(3),mg_end(3)
-    do iy = mg_sta(2),mg_end(2)
-    do ix = mg_sta(1),mg_end(1)
-      Vpsl(ix,iy,iz)=matbox_l2(ix,iy,iz) 
-    end do
-    end do
-    end do
-  else
-!$OMP parallel do
-    do iz = lg_sta(3),lg_end(3)
-    do iy = lg_sta(2),lg_end(2)
-    do ix = lg_sta(1),lg_end(1)
-      matbox_l(ix,iy,iz)=0.d0
-    end do
-    end do
-    end do
-
+  do iz = lg_sta(3),lg_end(3)
+  do iy = lg_sta(2),lg_end(2)
+  do ix = lg_sta(1),lg_end(1)
+    matbox_l(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+  if(NPUW==1)then
 !$OMP parallel do private(iiz,iiy)
     do iz=iz_sta,iz_end
       iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
       do iy=iy_sta,iy_end
         iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
+!            Vpsl(1:lg_end(1),iiy,iiz)=A_FFTE(1:lg_end(1),iy,iz)
         matbox_l(1:lg_end(1),iiy,iiz)=A_FFTE(1:lg_end(1),iy,iz)
       end do
     end do
-  
-    call comm_summation(matbox_l,matbox_l2,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
-   
-!$OMP parallel do
-    do iz = mg_sta(3),mg_end(3)
-    do iy = mg_sta(2),mg_end(2)
-    do ix = mg_sta(1),mg_end(1)
-      Vpsl(ix,iy,iz)=matbox_l2(ix,iy,iz)
-    end do
-    end do
+  else
+!$OMP parallel do private(iiz,iiy,ix)
+    do iz=iz_sta,iz_end
+      iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
+      do iy=iy_sta,iy_end
+        iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
+        do iix=ng_sta(1),ng_end(1)
+          ix=iix-lg_sta(1)+1
+          matbox_l(iix,iiy,iiz)=A_FFTE(ix,iy,iz)
+        end do
+      end do
     end do
   end if
+  call comm_summation(matbox_l,matbox_l2,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
+!$OMP parallel do
+  do iz = mg_sta(3),mg_end(3)
+  do iy = mg_sta(2),mg_end(2)
+  do ix = mg_sta(1),mg_end(1)
+    Vpsl(ix,iy,iz)=matbox_l2(ix,iy,iz)
+  end do
+  end do
+  end do
 
   return
 

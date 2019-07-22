@@ -14,6 +14,7 @@ set(SOURCES
     scf_iteration.f90
     structure_opt.f90
     read_gs.f90
+    band.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

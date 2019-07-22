@@ -598,4 +598,70 @@ contains
 
   end subroutine
 
+  subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
+    use structures,           only: s_rgrid, s_system, s_wf_info, s_wavefunction
+    use salmon_parallel,      only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use salmon_file,          only: open_filehandle
+    use inputoutput,          only: sysname, directory, num_kgrid
+    use band,                 only: calc_kgrid_prod
+    implicit none
+    type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
+    type(s_system),       intent(in) :: system
+    type(s_wf_info),      intent(in) :: wf_info
+    type(s_wavefunction), intent(in) :: wavefunction
+
+    ! Specify the neighboring k-grid region to consider:
+    integer, parameter :: ndk = 1 
+    ! (ndk=1 corresponds to first nearlest neighbors)
+
+    integer :: ik, ik1, ik2, ik3 
+    integer :: jdk1, jdk2, jdk3, io, jo
+    integer :: fh
+    character(256) :: file_prod_dk_data
+    integer :: ik3d_tbl(1:3, 1:system%nk)
+    complex(8) :: prod_dk( &
+      & 1:system%nk, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
+      & 1:system%no, 1:system%no)
+
+    ! Export filename: project_directory/sysname_kprod_dk.data
+    file_prod_dk_data = trim(directory) // trim(sysname) // "_prod_dk.data"
+
+    ! If k-point is distributed as uniform rectangular grid:
+    if (0 < minval(num_kgrid)) then
+      ! Calculate inner-product table: prod_dk
+      call calc_kgrid_prod( &
+        & system, rgrid_lg, rgrid_mg, wf_info, wavefunction, &
+        & num_kgrid(1), num_kgrid(2), num_kgrid(3), ndk, &
+        & ik3d_tbl, prod_dk)
+      
+      if(comm_is_root(nproc_id_global)) then
+        fh = open_filehandle(trim(file_prod_dk_data))
+        write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jdk1 6:jdk2 7:jdk3 8:io 9:jo 10:re 11:im"
+        do ik = 1, system%nk
+          ik1 = ik3d_tbl(1, ik)
+          ik2 = ik3d_tbl(2, ik)
+          ik3 = ik3d_tbl(3, ik)
+          do jdk3 = -ndk, ndk
+            do jdk2 = -ndk, ndk
+              do jdk1 = -ndk, ndk
+                do jo = 1, system%no
+                  do io = 1, system%no
+                    write(fh, '(9(i10),2(e25.16e3))') &
+                      & ik, ik1, ik2, ik3, &
+                      & jdk1, jdk2, jdk3, io, jo, &
+                      & real(prod_dk(ik, jdk1, jdk2, jdk3, io, jo)), &
+                      & aimag(prod_dk(ik, jdk1, jdk2, jdk3, io, jo))
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end do
+        close(fh)
+      end if
+    end if
+    return
+  end subroutine write_prod_dk_data
+
 end module print_sub
