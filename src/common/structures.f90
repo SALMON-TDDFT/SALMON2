@@ -78,7 +78,7 @@ module structures
     ! Range (dim=1:x,2:y,3:z, dir=1:upside,2:downside, 1:src/2:dst, axis=1...3)
     integer :: is_block(1:3, 1:2, 1:2, 1:3)
     integer :: ie_block(1:3, 1:2, 1:2, 1:3)
-    logical :: pcomm_initialized
+    logical :: if_pcomm_initialized
   end type s_sendrecv_grid
 
   type s_orbital_parallel
