@@ -26,7 +26,7 @@ contains
     use structures
     use hpsi_sub
     use stencil_sub
-    use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
+    use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
     implicit none
     type(s_dft_system)      ,intent(in) :: system
@@ -106,7 +106,7 @@ contains
     call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 
     if(info%if_divide_rspace) then
-      call update_overlap_complex8(srg, mg, tpsi%zwf)
+       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
     kAc = 0d0

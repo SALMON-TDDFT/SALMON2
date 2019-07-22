@@ -149,9 +149,9 @@ module sendrecv_grid
         do itype = 1, 2
           ! Release allocated cache regions
           if (allocated(srg%cache(idir, iside, itype)%dbuf)) &
-            deallocate(srg%cache(idir, iside, itype)%dbuf)
+            deallocate( srg%cache(idir, iside, itype)%dbuf)
           if (allocated(srg%cache(idir, iside, itype)%zbuf)) &
-            deallocate(srg%cache(idir, iside, itype)%zbuf)
+            deallocate( srg%cache(idir, iside, itype)%zbuf)
         end do
       end do
     end do
