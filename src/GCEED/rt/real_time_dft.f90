@@ -60,6 +60,7 @@ type(s_dft_energy) :: energy
 type(s_force)   :: force
 type(s_md) :: md
 type(s_ofile) :: ofl
+type(s_cg) :: cg
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -689,7 +690,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 
 call timer_end(LOG_TOTAL)
 
-call deallocate_mat
+call deallocate_mat(cg)
 
 call finalize_xc(xc_func)
 

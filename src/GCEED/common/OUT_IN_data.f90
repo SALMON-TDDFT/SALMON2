@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng,system,info,stencil)
+SUBROUTINE IN_data(lg,mg,ng,system,info,stencil,cg)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -437,6 +437,7 @@ type(s_rgrid) :: ng
 type(s_dft_system) :: system
 type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
+type(s_cg) :: cg
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
 integer :: ix,iy,iz
@@ -804,7 +805,7 @@ call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
 
 if(iSCFRT==2)then
-  call allocate_mat
+  call allocate_mat(cg)
   call set_icoo1d
 end if
 

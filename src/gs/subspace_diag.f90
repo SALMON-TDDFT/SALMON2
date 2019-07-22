@@ -18,7 +18,7 @@ module subspace_diag_sub
 
 contains
 
-subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,  &
+subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,mst,ifmst,  &
                 info_ob,ppg,vlocal)
 
   use inputoutput, only: ispin
@@ -47,7 +47,6 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
   integer,intent(in)  :: iobnum
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
-  integer,intent(in)  :: k_sta,k_end
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
@@ -153,7 +152,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
     
       do job=iobsta(is),iobend(is)
         call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -214,7 +213,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
        
       do job=iobsta(is),iobend(is)
         call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)

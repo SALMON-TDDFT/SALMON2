@@ -116,7 +116,7 @@ module sendrecv_grid
     srg%icomm = icomm
     srg%ireq = -1
     ! Flag for persistent communication
-    srg%pcomm_initialized = .false.
+    srg%if_pcomm_initialized = .false.
 
     return
   end subroutine init_sendrecv_grid
@@ -141,6 +141,8 @@ module sendrecv_grid
       end do
     end do
 
+    if_pcomm_initialized = .false.
+
     return
   end subroutine
 
@@ -163,7 +165,7 @@ module sendrecv_grid
     call comm_get_groupinfo(srg%icomm, myrank, nprocs)
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
-    if (.not. srg%pcomm_initialized) call alloc_cache()
+    if (.not. srg%if_pcomm_initialized) call alloc_cache()
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
@@ -172,7 +174,7 @@ module sendrecv_grid
             ! Store the overlap reigion into the cache 
             call pack_cache(idir, iside) 
             ! In the first call of this subroutine, setup the persistent communication:
-            if (.not. srg%pcomm_initialized) call init_pcomm(idir, iside)
+            if (.not. srg%if_pcomm_initialized) call init_pcomm(idir, iside)
             ! Start to communication
             call comm_start_all(srg%ireq(idir, iside, :))
           else
@@ -198,8 +200,8 @@ module sendrecv_grid
     end do
     call timer_end(LOG_SENDRECV_GRID)
 
-    if (.not. srg%pcomm_initialized) &
-      srg%pcomm_initialized = .true. ! Update pcomm_initialized
+    if (.not. srg%if_pcomm_initialized) &
+      srg%if_pcomm_initialized = .true. ! Update if_pcomm_initialized
     
     return
     contains
@@ -298,7 +300,7 @@ module sendrecv_grid
     call comm_get_groupinfo(srg%icomm, myrank, nprocs)
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
-    if (.not. srg%pcomm_initialized) call alloc_cache()
+    if (.not. srg%if_pcomm_initialized) call alloc_cache()
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
@@ -307,7 +309,7 @@ module sendrecv_grid
             ! Store the overlap reigion into the cache 
             call pack_cache(idir, iside) 
             ! In the first call of this subroutine, setup the persistent communication:
-            if (.not. srg%pcomm_initialized) call init_pcomm(idir, iside)
+            if (.not. srg%if_pcomm_initialized) call init_pcomm(idir, iside)
             ! Start to communication
             call comm_start_all(srg%ireq(idir, iside, :))
           else
@@ -333,8 +335,8 @@ module sendrecv_grid
     end do
     call timer_end(LOG_SENDRECV_GRID)
 
-    if (.not. srg%pcomm_initialized) &
-      srg%pcomm_initialized = .true. ! Update pcomm_initialized
+    if (.not. srg%if_pcomm_initialized) &
+      srg%if_pcomm_initialized = .true. ! Update if_pcomm_initialized
 
     return
     contains
