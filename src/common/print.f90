@@ -611,14 +611,17 @@ contains
     type(s_wf_info),      intent(in) :: wf_info
     type(s_wavefunction), intent(in) :: wavefunction
 
-    integer, parameter :: ndk = 1
+    ! Specify the neighboring k-grid region to consider:
+    integer, parameter :: ndk = 1 
+    ! (ndk=1 corresponds to first nearlest neighbors)
+
     integer :: ik, ik1, ik2, ik3 
     integer :: jdk1, jdk2, jdk3, io, jo
     integer :: fh
     character(256) :: file_prod_dk_data
     integer :: ik3d_tbl(1:3, 1:system%nk)
     complex(8) :: prod_dk( &
-      & 1:system%nk, 0:ndk, 0:ndk, 0:ndk, &
+      & 1:system%nk, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
       & 1:system%no, 1:system%no)
 
     ! Export filename: project_directory/sysname_kprod_dk.data
@@ -634,17 +637,17 @@ contains
       
       if(comm_is_root(nproc_id_global)) then
         fh = open_filehandle(trim(file_prod_dk_data))
-        write(fh, '(a)') "# ik, ik1, ik2, ik3, jdk1, jdk2, jdk3, io, jo, re, im"
+        write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jdk1 6:jdk2 7:jdk3 8:io 9:jo 10:re 11:im"
         do ik = 1, system%nk
           ik1 = ik3d_tbl(1, ik)
           ik2 = ik3d_tbl(2, ik)
           ik3 = ik3d_tbl(3, ik)
-          do jdk3 = 0, ndk
-            do jdk2 = 0, ndk
-              do jdk1 = 0, ndk
+          do jdk3 = -ndk, ndk
+            do jdk2 = -ndk, ndk
+              do jdk1 = -ndk, ndk
                 do jo = 1, system%no
                   do io = 1, system%no
-                    write(fh, '(9(i6,1x),2(e24.16e3,1x))') &
+                    write(fh, '(9(i10),2(e25.16e3))') &
                       & ik, ik1, ik2, ik3, &
                       & jdk1, jdk2, jdk3, io, jo, &
                       & real(prod_dk(ik, jdk1, jdk2, jdk3, io, jo)), &

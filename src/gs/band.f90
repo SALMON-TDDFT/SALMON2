@@ -29,11 +29,13 @@ module band
         type(s_wavefunction), intent(in) :: wavefunction
         integer, intent(in) :: nk1, nk2, nk3, ndk
         integer, intent(out) :: ik3d_tbl(1:3, nk1*nk2*nk3)
-        complex(8), intent(out) :: prod_dk(nk1*nk2*nk3, 0:ndk, 0:ndk, 0:ndk, system%no, system%no)
+        complex(8), intent(out) :: prod_dk( &
+            & nk1*nk2*nk3, &
+            & -ndk:ndk, -ndk:ndk, -ndk:ndk, &
+            & system%no, system%no)
         
-        integer, parameter :: nrep = 2
+        integer, parameter :: nrep = 1
 
-        integer :: ik_tbl(nk1*nrep, nk2*nrep, nk3*nrep)
         integer :: im, ik, jk
         integer :: ik1, ik2, ik3
         integer :: jdk1, jdk2, jdk3
@@ -42,6 +44,10 @@ module band
             & rgrid_lg%is(2):rgrid_lg%ie(2), &
             & rgrid_lg%is(3):rgrid_lg%ie(3), &
             & system%nspin, system%no, system%nk)
+        integer :: ik_tbl( &
+            & -nrep*nk1:(nrep+1)*nk1, &
+            & -nrep*nk2:(nrep+1)*nk2, &
+            & -nrep*nk3:(nrep+1)*nk3)
 
         ! Create ik_tbl with periodic boundary condition:
         call create_ik_tbl()
@@ -54,9 +60,9 @@ module band
             do ik2 = 1, nk2
                 do ik1 = 1, nk1
                     ik = ik_tbl(ik1, ik2, ik3)
-                    do jdk3 = 0, ndk
-                        do jdk2 = 0, ndk
-                            do jdk1 = 0, ndk
+                    do jdk3 = -ndk, ndk
+                        do jdk2 = -ndk, ndk
+                            do jdk1 = -ndk, ndk
                                 jk = ik_tbl(ik1+jdk1, ik2+jdk2, ik3+jdk3)
                                 call calc_prod(ik, jk, prod_dk(ik, jdk1, jdk2, jdk3, :, :))
                             end do
@@ -88,11 +94,11 @@ module band
                     ik3d_tbl(2, ik_count) = ik2_o
                     ik3d_tbl(3, ik_count) = ik3_o
                     ! Assign to ik_tbl with replicated coordinates:
-                    do ir3 = 0, nrep-1
+                    do ir3 = -nrep, nrep
                         ik3_r = ik3_o + ir3 * nk3
-                        do ir2 = 0, nrep-1
+                        do ir2 = -nrep, nrep
                             ik2_r = ik2_o + ir2 * nk2
-                            do ir1 = 0, nrep-1
+                            do ir1 = -nrep, nrep
                                 ik1_r = ik1_o + ir1 * nk1
                                 ik_tbl(ik1_r, ik2_r, ik3_r) = ik_count
                             end do
@@ -156,19 +162,13 @@ module band
 
         complex(8) ZDOTC ! From BLAS
 
-        do iio = 1, system%no
-            do jjo = 1, iio
+        do jjo = 1, system%no
+            do iio = 1, system%no
                 ! Compute dot-products: <iik,iio|jjk,jjo>
                 prod_ij(iio, jjo) = system%Hvol * ZDOTC( &
                     & system%ngrid * system%nspin, &
                     & zwf_all(:, :, :, :, iio, iik), 1, &
                     & zwf_all(:, :, :, :, jjo, jjk), 1)
-            end do
-        end do
-
-        do iio = 1, system%no
-            do jjo = iio+1, system%no
-                prod_ij(iio, jjo) = conjg(prod_ij(jjo, iio))
             end do
         end do
 
