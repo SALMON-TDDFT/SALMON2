@@ -751,9 +751,10 @@ mg%ndir = 3
 ng%ndir = 3
 system%ngrid = lg%num(1)*lg%num(2)*lg%num(3)
 
-call init_lattice(system,stencil,lg)
+call init_lattice(lg,system,stencil)
 Hvol = system%Hvol
 Hgs = system%Hgs
+call init_kvector(num_kgrid,system)
 
 if(iflag_ps.eq.1)then
    if(comm_is_root(nproc_id_global))then
@@ -810,7 +811,6 @@ end if
 
 allocate(k_rd0(3,num_kpoints_rd),ksquare0(num_kpoints_rd))
 if(iperiodic==3)then
-  call init_kvector(system)
 end if
 k_rd0 = system%vec_k
 

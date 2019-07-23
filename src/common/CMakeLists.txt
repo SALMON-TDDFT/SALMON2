@@ -32,6 +32,7 @@ set(SOURCES
    print.f90
    stencil_c_core/typical/omp.f90
    stencil_c_core/typical/seq.f90
+   initialization.f90
    )
 
 if (EXPLICIT_VEC)

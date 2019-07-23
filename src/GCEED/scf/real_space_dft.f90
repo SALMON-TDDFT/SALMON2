@@ -70,6 +70,7 @@ use gram_schmidt_orth, only: gram_schmidt
 use print_sub
 use read_gs
 use code_optimization
+use salmon_initialization
 implicit none
 integer :: ix,iy,iz,ik,ikoa, is
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -120,26 +121,11 @@ call check_dos_pdos
 
 call convert_input_scf(file_atoms_coo)
 
-if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
-   al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+call init_dft(lg,system,stencil)
+if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
-  stencil%if_orthogonal = .true.
-  system%primitive_a = 0d0
-  system%primitive_a(1,1) = al(1)
-  system%primitive_a(2,2) = al(2)
-  system%primitive_a(3,3) = al(3)
 else
   if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
-  stencil%if_orthogonal = .false.
-  system%primitive_a(1:3,1) = al_vec1
-  system%primitive_a(1:3,2) = al_vec2
-  system%primitive_a(1:3,3) = al_vec3
-  rLsize(1,1) = sqrt(sum(al_vec1**2))
-  rLsize(2,1) = sqrt(sum(al_vec2**2))
-  rLsize(3,1) = sqrt(sum(al_vec3**2))
-  if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) == 0d0) then
-    Harray(1:3,1) = rLsize(1:3,1) / dble(num_rgrid(1:3))
-  end if
 end if
 allocate(system%mass(1:nelem))
 
@@ -171,8 +157,8 @@ if(iopt==1)then
 
     call timer_begin(LOG_INIT_GS)
 
-    Hgs(1:3)=Harray(1:3,1)
-    Hvol=Hgs(1)*Hgs(2)*Hgs(3)
+    Hvol = system%Hvol
+    Hgs = system%Hgs
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
@@ -181,14 +167,8 @@ if(iopt==1)then
     call init_mesh_s(ng)
     call check_mg(mg)
     call check_ng(ng)
-    lg%ndir = 3
     mg%ndir = 3
     ng%ndir = 3
-    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-
-    call init_lattice(system,stencil,lg)
-    Hvol = system%Hvol
-    Hgs = system%Hgs
     
     call init_updown
     call init_itype
@@ -233,15 +213,10 @@ if(iopt==1)then
     else
       nspin=2
     end if
-    
-    system%iperiodic = iperiodic
-    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-    system%nspin = nspin
-    system%no    = itotMST
-    system%nk    = num_kpoints_rd
-    system%nion  = MI
-    
-    allocate(system%Rion(3,system%nion) &
+
+    system%no    = itotMST ! --> init_dft (future work)
+
+    allocate(system%Rion(3,system%nion) & ! --> init_dft (future work)
             ,system%wtk(system%nk) &
             ,system%rocc(system%no,system%nk,system%nspin))
     system%wtk  = wtk
@@ -411,7 +386,6 @@ if(iopt==1)then
       &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
       &                 ,1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_kvector(system)
       k_rd = system%vec_k
     end if
 
@@ -647,15 +621,10 @@ if(iopt==1)then
     else
       nspin=2
     end if
-    
-    system%iperiodic = iperiodic
-    system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-    system%nspin = nspin
-    system%no    = itotMST
-    system%nk    = num_kpoints_rd
-    system%nion  = MI
-    
-    allocate(system%Rion(3,system%nion) &
+
+    system%no    = itotMST ! --> init_dft (future work)
+
+    allocate(system%Rion(3,system%nion) & ! --> init_dft (future work)
             ,system%wtk(system%nk) &
             ,system%rocc(system%no,system%nk,system%nspin))
     system%wtk  = wtk
@@ -825,7 +794,6 @@ if(iopt==1)then
       &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
       &                 ,1:iobnum,k_sta:k_end))
       allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-      call init_kvector(system)
       k_rd = system%vec_k
     end if
 
@@ -1750,7 +1718,7 @@ use salmon_communication, only: comm_is_root
 use inputoutput, only: iperiodic
 use global_variables_scf
 implicit none
-type(s_rgrid),intent(out) :: lg
+type(s_rgrid) :: lg
 type(s_rgrid),intent(out) :: mg
 integer,intent(in) :: itmg
 integer :: j
@@ -1760,8 +1728,11 @@ if(comm_is_root(nproc_id_global))      &
     print *,"----------------------------------- init_mesh"
 
 rLsize1(:)=rLsize(:,itmg)
-call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
+!call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+!           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
+lg_sta(1:3) = lg%is(1:3)
+lg_end(1:3) = lg%ie(1:3)
+lg_num(1:3) = lg%num(1:3)
 call check_fourier
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
@@ -1774,30 +1745,6 @@ if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
 
 if(iperiodic==3 .and. nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
   if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
-  lg%is(1:3)=lg_sta(1:3)
-  lg%ie(1:3)=lg_end(1:3)
-  lg%num(1:3)=lg_num(1:3)
-  lg%is_overlap(1:3)=lg_sta(1:3)-nd
-  lg%ie_overlap(1:3)=lg_end(1:3)+nd
-  lg%is_array(1:3)=lg_sta(1:3)
-  lg%ie_array(1:3)=lg_end(1:3)
-
-  if(allocated(lg%idx)) deallocate(lg%idx)
-  if(allocated(lg%idy)) deallocate(lg%idy)
-  if(allocated(lg%idz)) deallocate(lg%idz)
-  allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
-          ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
-          ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
-  do j=lg%is_overlap(1),lg%ie_overlap(1)
-    lg%idx(j) = mod(j+lg%num(1)-1,lg%num(1))+1
-  end do
-  do j=lg%is_overlap(2),lg%ie_overlap(2)
-    lg%idy(j) = mod(j+lg%num(2)-1,lg%num(2))+1
-  end do
-  do j=lg%is_overlap(3),lg%ie_overlap(3)
-    lg%idz(j) = mod(j+lg%num(3)-1,lg%num(3))+1
-  end do
-
   mg%is(1:3)=lg%is(1:3)
   mg%ie(1:3)=lg%ie(1:3)
   mg%num(1:3)=lg%num(1:3)
