@@ -952,7 +952,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     ! FIX: Attempt to fetch from allocatable variable K_RD when it is not allocated
     if (.not. allocated(k_rd)) allocate(k_rd(3,num_kpoints_rd))
 
-    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
+    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
                        num_kpoints_rd,k_rd,cg,   &
                        info_ob,ppg,vlocal,  &
                        iflag_diisjump,energy, &
@@ -961,7 +961,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                        iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
 
     call timer_begin(LOG_CALC_RHO)
-    call calc_density(srho,spsi,info,mg,nspin)
+
     if(ilsda==0)then
       !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)

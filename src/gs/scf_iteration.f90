@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
+subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
                num_kpoints_rd,k_rd,cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
@@ -37,12 +37,14 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   use gram_schmidt_orth, only: gram_schmidt 
   use subspace_diag_sub
   use subspace_diag_periodic_sub
+  use density_matrix, only: calc_density
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
   type(s_dft_system),        intent(in)    :: system
   type(s_orbital_parallel),       intent(in)    :: info
   type(s_orbital),  intent(inout) :: spsi
+  type(s_scalar),        intent(inout) :: srho(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg_ob_1
   type(s_pp_grid),       intent(in)    :: ppg
@@ -124,6 +126,11 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     end if
   end if
   
+! density
+  call timer_begin(LOG_CALC_RHO)
+  call calc_density(srho,spsi,info,mg,system%nspin)
+  call timer_end(LOG_CALC_RHO)
+
 end subroutine scf_iteration
 
 end module scf_iteration_sub
