@@ -19,7 +19,6 @@ set(SOURCES
    set_isstaend.f90
    stencil.f90
    pseudo_pt.f90
-   update_overlap.f90
    set_numcpu.f90
    structures.f90
    density_matrix.f90
@@ -33,6 +32,7 @@ set(SOURCES
    print.f90
    stencil_c_core/typical/omp.f90
    stencil_c_core/typical/seq.f90
+   initialization.f90
    )
 
 if (EXPLICIT_VEC)
