@@ -57,7 +57,7 @@ subroutine init_dft(lg,system,stencil)
   call init_grid_whole(rsize,system%hgs,lg)
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
-  call init_lattice(lg,system,stencil)
+  call init_lattice(system,stencil)
   call init_kvector(num_kgrid,system)
 
   system%iperiodic = iperiodic
