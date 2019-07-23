@@ -94,25 +94,6 @@ posplane=0.d0
 
 inumcpu_check=0
 
-if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
-   al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
-  if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
-  stencil%if_orthogonal = .true.
-  system%primitive_a = 0d0
-  system%primitive_a(1,1) = al(1)
-  system%primitive_a(2,2) = al(2)
-  system%primitive_a(3,3) = al(3)
-else
-  if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
-  stencil%if_orthogonal = .false.
-  system%primitive_a(1:3,1) = al_vec1
-  system%primitive_a(1:3,2) = al_vec2
-  system%primitive_a(1:3,3) = al_vec3
-end if
-
-call setbN
-call setcN
-
 call convert_input_rt(Ntime)
 allocate(system%mass(1:nelem))
 
@@ -775,15 +756,8 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     nspin=2
   end if
 
-  system%iperiodic = iperiodic
-  system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-  system%nspin = nspin
-  system%no = itotMST
-  system%nk = num_kpoints_rd
-  system%nion = MI
-  system%Hvol = Hvol
-  system%Hgs = Hgs
-  allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) &
+  system%no = itotMST ! --> init_dft (future work)
+  allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) & ! --> init_dft (future work)
           ,system%wtk(system%nk) &
           ,system%rocc(system%no,system%nk,system%nspin))
   system%wtk = wtk
@@ -829,20 +803,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   end do
   do jj=1, system%no
     call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
-  end do
-
-  if(stencil%if_orthogonal) then
-    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-  else
-    if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
-                       ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
-  end if
-  do jj=1,3
-    do ii=1,4
-      stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-      stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
-    end do
   end do
 
   do ik=info%ik_s,info%ik_e

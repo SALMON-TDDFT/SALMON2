@@ -26,8 +26,6 @@ set(SOURCES
     prep_poisson_fft.f90
     read_copy_pot.f90
     sendrecv_copy.f90
-    setbN.f90
-    setcN.f90
     set_filename.f90
     set_gridcoo.f90
     set_icoo1d.f90
