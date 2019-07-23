@@ -482,6 +482,9 @@ integer :: j
 
 integer :: nspin
 
+call setbN(bnmat)
+call setcN(cnmat)
+
 if(comm_is_root(nproc_id_global))then
   write(*,*) file_IN
   open(96,file=file_IN,form='unformatted')

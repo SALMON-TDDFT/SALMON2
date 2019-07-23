@@ -114,8 +114,8 @@ call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 inumcpu_check=0
 
-call setbN
-call setcN
+call setbN(bnmat)
+call setcN(cnmat)
 
 call check_dos_pdos
 
@@ -269,20 +269,6 @@ if(iopt==1)then
     
     do jj=1, system%no
       call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
-    end do
-    
-    if(stencil%if_orthogonal) then
-      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-    else
-      if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2  &
-      & + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
-    end if
-    do jj=1,3
-      do ii=1,4
-        stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-        stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
-      end do
     end do
     
     info_ob%im_s = 1
@@ -678,20 +664,6 @@ if(iopt==1)then
     
     do jj=1, system%no
       call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
-    end do
-    
-    if(stencil%if_orthogonal) then
-      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
-    else
-      if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-      stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2  &
-      & + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
-    end if
-    do jj=1,3
-      do ii=1,4
-        stencil%coef_lap(ii,jj) = cnmat(ii,4)/hgs(jj)**2
-        stencil%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
-      end do
     end do
     
     info_ob%im_s = 1
