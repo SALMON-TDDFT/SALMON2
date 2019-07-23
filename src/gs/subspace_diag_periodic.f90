@@ -19,7 +19,7 @@ module subspace_diag_periodic_sub
 contains
 
 subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                  iobnum,itotmst,k_sta,k_end,mst,ifmst,   &
+                                  iobnum,itotmst,mst,ifmst,   &
                                   info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
 
   use inputoutput, only: ispin
@@ -49,7 +49,6 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
   integer,intent(in)  :: iobnum
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
-  integer,intent(in)  :: k_sta,k_end
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: num_kpoints_rd
@@ -128,7 +127,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
   call timer_end(LOG_DIAG_INIT)
 
   
-  do ik=k_sta,k_end
+  do ik=info%ik_s,info%ik_e
   do is=is_sta,is_end
 
     call timer_begin(LOG_DIAG_VLOCAL)
@@ -202,7 +201,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
     
       do jj=iobsta(is),iobend(is)
         call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -265,7 +264,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
       call timer_begin(LOG_DIAG_UPDATE)
       do jj=iobsta(is),iobend(is)
         call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)

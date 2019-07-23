@@ -72,17 +72,20 @@ module structures
     ! Number of orbitals (4-th dimension of grid)
     integer :: nb
     ! Communicator
-    integer :: icomm, myrank
+    integer :: icomm
     ! Neightboring MPI id (1:x,2:y,3:z, 1:upside,2:downside):
     integer :: neig(1:3, 1:2) 
     ! Communication requests (1:x,2:y,3:z, 1:upside,2:downside, 1:send,2:recv):
-    integer :: ireq(1:3, 1:2, 1:2)
+    integer :: ireq_real8(1:3, 1:2, 1:2)
+    integer :: ireq_complex8(1:3, 1:2, 1:2)
     ! PComm cache (1:x,2:y,3:z, 1:upside,2:downside, 1:src/2:dst)
     type(s_pcomm_cache) :: cache(1:3, 1:2, 1:2)
     ! Range (dim=1:x,2:y,3:z, dir=1:upside,2:downside, 1:src/2:dst, axis=1...3)
     integer :: is_block(1:3, 1:2, 1:2, 1:3)
     integer :: ie_block(1:3, 1:2, 1:2, 1:3)
-    logical :: pcomm_initialized
+    ! Initialization flags
+    logical :: if_pcomm_real8_initialized
+    logical :: if_pcomm_complex8_initialized
   end type s_sendrecv_grid
 
   type s_orbital_parallel
@@ -211,6 +214,19 @@ module structures
      integer :: fh_rt, fh_rt_energy
      character(256) :: file_rt_data, file_rt_energy_data
   end type s_ofile
+
+  type s_cg
+    real(8), allocatable :: rxk_ob(:,:,:,:)
+    real(8), allocatable :: rhxk_ob(:,:,:,:)
+    real(8), allocatable :: rgk_ob(:,:,:,:)
+    real(8), allocatable :: rpk_ob(:,:,:,:)
+    complex(8), allocatable :: zxk_ob(:,:,:,:)
+    complex(8), allocatable :: zhxk_ob(:,:,:,:)
+    complex(8), allocatable :: zgk_ob(:,:,:,:)
+    complex(8), allocatable :: zpk_ob(:,:,:,:)
+    complex(8), allocatable :: zpko_ob(:,:,:,:)
+    complex(8), allocatable :: zhwf_ob(:,:,:,:)
+  end type s_cg
 
 !===================================================================================================================================
 

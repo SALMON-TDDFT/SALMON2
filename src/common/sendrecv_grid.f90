@@ -59,11 +59,11 @@ module sendrecv_grid
   ! * This subroutine is commonly used for real type and complex type.
   ! * The cache region MUST be allocated after this initialization 
   !   by using `alloc_cache_real8/complex8`.
-  subroutine init_sendrecv_grid(srg, rg, nb, icomm, myrank, neig)
+  subroutine init_sendrecv_grid(srg, rg, nb, icomm, neig)
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
-    integer, intent(in) ::  nb, icomm, myrank, neig(1:3, 1:2)
+    integer, intent(in) ::  nb, icomm, neig(1:3, 1:2)
 
     integer :: idir, iaxis
     integer :: is_block(1:3, 1:2, 1:2, 1:3)
@@ -114,39 +114,57 @@ module sendrecv_grid
     srg%is_block(:, :, :, :) = is_block
     srg%ie_block(:, :, :, :) = ie_block
     srg%icomm = icomm
-    srg%myrank = myrank
-    srg%ireq = -1
+    srg%ireq_real8 = -1
+    srg%ireq_complex8 = -1
     ! Flag for persistent communication
-    srg%pcomm_initialized = .false.
+    srg%if_pcomm_real8_initialized = .false.
+    srg%if_pcomm_complex8_initialized = .false.
 
     return
   end subroutine init_sendrecv_grid
 
   subroutine dealloc_cache(srg)
-    use salmon_communication, only: comm_free_reqs
+    use salmon_communication, only: comm_get_groupinfo, &
+      & comm_free_reqs, comm_proc_null
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
     integer :: idir, iside, itype
+    integer :: myrank, nprocs
+
+    ! Obtain myrank in communication group:
+    call comm_get_groupinfo(srg%icomm, myrank, nprocs)
 
     do idir = 1, 3
       do iside = 1, 2
         ! Release persistent communication requests
-        call comm_free_reqs(srg%ireq(idir, iside, :))
+        if (srg%neig(idir, iside) /= comm_proc_null) then
+          if (srg%neig(idir, iside) /= myrank) then
+            if (srg%if_pcomm_real8_initialized) &
+              call comm_free_reqs(srg%ireq_real8(idir, iside, :))
+            if (srg%if_pcomm_complex8_initialized) &
+              call comm_free_reqs(srg%ireq_complex8(idir, iside, :))
+          end if
+        end if
+
         do itype = 1, 2
           ! Release allocated cache regions
           if (allocated(srg%cache(idir, iside, itype)%dbuf)) &
-            deallocate(srg%cache(idir, iside, itype)%dbuf)
+            deallocate( srg%cache(idir, iside, itype)%dbuf)
           if (allocated(srg%cache(idir, iside, itype)%zbuf)) &
-            deallocate(srg%cache(idir, iside, itype)%zbuf)
+            deallocate( srg%cache(idir, iside, itype)%zbuf)
         end do
       end do
     end do
+
+    srg%if_pcomm_real8_initialized = .false.
+    srg%if_pcomm_complex8_initialized = .false.
 
     return
   end subroutine
 
   subroutine update_overlap_real8(srg, rg, data)
-    use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
+    use salmon_communication, only: comm_get_groupinfo, &
+      & comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
@@ -157,20 +175,24 @@ module sendrecv_grid
       rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
     integer :: idir, iside
+    integer :: myrank, nprocs
+
+    ! Obtain myrank in communication group:
+    call comm_get_groupinfo(srg%icomm, myrank, nprocs)
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
-    if (.not. srg%pcomm_initialized) call alloc_cache()
+    if (.not. srg%if_pcomm_real8_initialized) call alloc_cache()
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Store the overlap reigion into the cache 
             call pack_cache(idir, iside) 
             ! In the first call of this subroutine, setup the persistent communication:
-            if (.not. srg%pcomm_initialized) call init_pcomm(idir, iside)
+            if (.not. srg%if_pcomm_real8_initialized) call init_pcomm(idir, iside)
             ! Start to communication
-            call comm_start_all(srg%ireq(idir, iside, :))
+            call comm_start_all(srg%ireq_real8(idir, iside, :))
           else
             ! NOTE: If neightboring nodes are itself (periodic with single proc),
             !       a simple side-to-side copy is used instead of the MPI comm.
@@ -183,9 +205,9 @@ module sendrecv_grid
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Wait for recieving
-            call comm_wait_all(srg%ireq(idir, iside, :))
+            call comm_wait_all(srg%ireq_real8(idir, iside, :))
             ! Write back the recieved cache
             call unpack_cache(idir, iside)
           end if
@@ -194,8 +216,8 @@ module sendrecv_grid
     end do
     call timer_end(LOG_SENDRECV_GRID)
 
-    if (.not. srg%pcomm_initialized) &
-      srg%pcomm_initialized = .true. ! Update pcomm_initialized
+    if (.not. srg%if_pcomm_real8_initialized) &
+      srg%if_pcomm_real8_initialized = .true. ! Update if_pcomm_initialized
     
     return
     contains
@@ -221,13 +243,13 @@ module sendrecv_grid
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
-      srg%ireq(jdir, jside, itype_send) = comm_send_init( &
+      srg%ireq_real8(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%dbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      srg%ireq(jdir, jside, itype_recv) = comm_recv_init( &
+      srg%ireq_real8(jdir, jside, itype_recv) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%dbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, flip(jside)), & ! `jside` in sender side
@@ -276,7 +298,8 @@ module sendrecv_grid
 
 
   subroutine update_overlap_complex8(srg, rg, data)
-    use salmon_communication, only: comm_start_all, comm_wait_all, comm_proc_null
+    use salmon_communication, only: comm_get_groupinfo, &
+      & comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
@@ -287,20 +310,24 @@ module sendrecv_grid
       rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
     integer :: idir, iside
+    integer :: myrank, nprocs
+
+    ! Obtain myrank in communication group:
+    call comm_get_groupinfo(srg%icomm, myrank, nprocs)
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
-    if (.not. srg%pcomm_initialized) call alloc_cache()
+    if (.not. srg%if_pcomm_complex8_initialized) call alloc_cache()
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Store the overlap reigion into the cache 
             call pack_cache(idir, iside) 
             ! In the first call of this subroutine, setup the persistent communication:
-            if (.not. srg%pcomm_initialized) call init_pcomm(idir, iside)
+            if (.not. srg%if_pcomm_complex8_initialized) call init_pcomm(idir, iside)
             ! Start to communication
-            call comm_start_all(srg%ireq(idir, iside, :))
+            call comm_start_all(srg%ireq_complex8(idir, iside, :))
           else
             ! NOTE: If neightboring nodes are itself (periodic with single proc),
             !       a simple side-to-side copy is used instead of the MPI comm.
@@ -313,9 +340,9 @@ module sendrecv_grid
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= srg%myrank) then
+          if (srg%neig(idir, iside) /= myrank) then
             ! Wait for recieving
-            call comm_wait_all(srg%ireq(idir, iside, :))
+            call comm_wait_all(srg%ireq_complex8(idir, iside, :))
             ! Write back the recieved cache
             call unpack_cache(idir, iside)
           end if
@@ -324,8 +351,8 @@ module sendrecv_grid
     end do
     call timer_end(LOG_SENDRECV_GRID)
 
-    if (.not. srg%pcomm_initialized) &
-      srg%pcomm_initialized = .true. ! Update pcomm_initialized
+    if (.not. srg%if_pcomm_complex8_initialized) &
+      srg%if_pcomm_complex8_initialized = .true. ! Update if_pcomm_initialized
 
     return
     contains
@@ -351,13 +378,13 @@ module sendrecv_grid
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
-      srg%ireq(jdir, jside, itype_send) = comm_send_init( &
+      srg%ireq_complex8(jdir, jside, itype_send) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%zbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      srg%ireq(jdir, jside, itype_recv) = comm_recv_init( &
+      srg%ireq_complex8(jdir, jside, itype_recv) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%zbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, flip(jside)), & ! `jside` in sender

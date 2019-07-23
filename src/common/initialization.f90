@@ -86,7 +86,6 @@ subroutine init_grid_whole(rsize,hgs,lg)
   real(8),parameter :: epsilon=1.d-10
   !
   integer :: lg_sta(3),lg_end(3),lg_num(3)
-!  integer :: ista_Mx_ori(3),iend_Mx_ori(3),inum_Mx_ori(3)
   integer :: imesh_oddeven(3)
   integer :: j,jj
 
@@ -103,28 +102,22 @@ subroutine init_grid_whole(rsize,hgs,lg)
 
   select case(iperiodic)
     case(0)
-!      iend_Mx_ori(:)=int((rsize(:)+epsilon)/2.d0/Hgs(:))+Nd
       lg_end(:)=int((rsize(:)+epsilon)/2.d0/Hgs(:))
 
       do jj=1,3
         select case(imesh_oddeven(jj))
           case(1)
-!            ista_Mx_ori(jj)=-(int((rsize(jj)+epsilon)/2.d0/Hgs(jj))+Nd)
             lg_sta(jj)=-(int((rsize(jj)+epsilon)/2.d0/Hgs(jj)))
           case(2)
-!            ista_Mx_ori(jj)=-(int((rsize(jj)+epsilon)/2.d0/Hgs(jj))+Nd)+1
             lg_sta(jj)=-(int((rsize(jj)+epsilon)/2.d0/Hgs(jj)))+1
         end select
       end do
 
     case(3)
-!      ista_Mx_ori(:)=1-Nd
       lg_sta(:)=1
-!      iend_Mx_ori(:)=int((rsize(:)+epsilon)/Hgs(:))+Nd
       lg_end(:)=int((rsize(:)+epsilon)/Hgs(:))
   end select
 
-!  inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
   lg_num(:)=lg_end(:)-lg_sta(:)+1
 
   lg%is(1:3) = lg_sta(1:3)

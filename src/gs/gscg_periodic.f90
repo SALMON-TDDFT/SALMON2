@@ -21,11 +21,10 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
-                         zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,  &
                          info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
-  use inputoutput, only: ncg,ispin,natom
-  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
+  use inputoutput, only: ncg,ispin
+  use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid,s_cg
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital, nproc_id_korbital, nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
   use timer
@@ -51,12 +50,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   integer,intent(in)    :: iparaway_ob
-  complex(8),intent(out) :: zxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),intent(out) :: zhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),intent(out) :: zgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),intent(out) :: zpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),intent(out) :: zpko_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),intent(out) :: zhtpsi_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
+  type(s_cg),intent(inout)       :: cg
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,intent(in)    :: num_kpoints_rd
@@ -150,8 +144,8 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        zxk_ob(ix,iy,iz,iob_myob)=spsi%zwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,ik,1)
-        stpsi%zwf(ix,iy,iz,1,1,1,1)=zxk_ob(ix,iy,iz,iob_myob)
+        cg%zxk_ob(ix,iy,iz,iob_myob)=spsi%zwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,ik,1)
+        stpsi%zwf(ix,iy,iz,1,1,1,1)=cg%zxk_ob(ix,iy,iz,iob_myob)
       end do
       end do
       end do
@@ -182,13 +176,13 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        zhxk_ob(ix,iy,iz,iob_myob)=shtpsi%zwf(ix,iy,iz,1,1,1,1)
+        cg%zhxk_ob(ix,iy,iz,iob_myob)=shtpsi%zwf(ix,iy,iz,1,1,1,1)
       end do
       end do
       end do
   
     end do
-    call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zxk_ob,zhxk_ob,xkHxk_ob,system%hvol)
+    call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhxk_ob,xkHxk_ob,system%hvol)
     call timer_end(LOG_GSCG_INIT_ITERATION)
 
 
@@ -201,7 +195,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          zgk_ob(ix,iy,iz,iob_myob) = zhxk_ob(ix,iy,iz,iob_myob) - xkHxk_ob(iob_allob)*zxk_ob(ix,iy,iz,iob_myob) 
+          cg%zgk_ob(ix,iy,iz,iob_myob) = cg%zhxk_ob(ix,iy,iz,iob_myob) - xkHxk_ob(iob_allob)*cg%zxk_ob(ix,iy,iz,iob_myob) 
         end do
         end do
         end do
@@ -218,7 +212,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              sum0=sum0+conjg(spsi%zwf(ix,iy,iz,is,job-(is-1)*info%numo,ik,1))*zgk_ob(ix,iy,iz,iob)
+              sum0=sum0+conjg(spsi%zwf(ix,iy,iz,is,job-(is-1)*info%numo,ik,1))*cg%zgk_ob(ix,iy,iz,iob)
             end do
             end do
             end do
@@ -240,7 +234,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zgk_ob(ix,iy,iz,iob)=zgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%zwf(ix,iy,iz,is,job-(is-1)*info%numo,ik,1)
+              cg%zgk_ob(ix,iy,iz,iob)=cg%zgk_ob(ix,iy,iz,iob)-sum_obmat1(iob,job)*spsi%zwf(ix,iy,iz,is,job-(is-1)*info%numo,ik,1)
             end do
             end do
             end do
@@ -272,7 +266,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*zgk_ob(ix,iy,iz,iob_myob)
+              sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*cg%zgk_ob(ix,iy,iz,iob_myob)
             end do
             end do
             end do
@@ -281,7 +275,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              zgk_ob(ix,iy,iz,iob_myob)=zgk_ob(ix,iy,iz,iob_myob)-sum1*zmatbox_m(ix,iy,iz)
+              cg%zgk_ob(ix,iy,iz,iob_myob)=cg%zgk_ob(ix,iy,iz,iob_myob)-sum1*zmatbox_m(ix,iy,iz)
             end do
             end do
             end do
@@ -289,7 +283,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         end do
         end do
       end if
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zgk_ob,zgk_ob,sum_ob1,system%hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zgk_ob,cg%zgk_ob,sum_ob1,system%hvol)
         
       do iob_myob=1,system%nspin*info%numo
         call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
@@ -299,7 +293,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            zpk_ob(ix,iy,iz,iob_myob)=zgk_ob(ix,iy,iz,iob_myob)
+            cg%zpk_ob(ix,iy,iz,iob_myob)=cg%zgk_ob(ix,iy,iz,iob_myob)
           end do
           end do
           end do
@@ -309,7 +303,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            zpk_ob(ix,iy,iz,iob_myob)=zgk_ob(ix,iy,iz,iob_myob)+uk*zpk_ob(ix,iy,iz,iob_myob)
+            cg%zpk_ob(ix,iy,iz,iob_myob)=cg%zgk_ob(ix,iy,iz,iob_myob)+uk*cg%zpk_ob(ix,iy,iz,iob_myob)
           end do
           end do
           end do
@@ -317,7 +311,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         gkgk_ob(iob_allob)=sum_ob1(iob_allob)
       end do
 
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zxk_ob,zpk_ob,zs_ob,system%hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zpk_ob,zs_ob,system%hvol)
 
       do iob_myob=1,system%nspin*info%numo
         call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
@@ -325,12 +319,12 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          zpko_ob(ix,iy,iz,iob_myob)=zpk_ob(ix,iy,iz,iob_myob)-zs_ob(iob_allob)*zxk_ob(ix,iy,iz,iob_myob)
+          cg%zpko_ob(ix,iy,iz,iob_myob)=cg%zpk_ob(ix,iy,iz,iob_myob)-zs_ob(iob_allob)*cg%zxk_ob(ix,iy,iz,iob_myob)
         end do
         end do
         end do
       end do
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zpko_ob,zpko_ob,sum_ob1,system%hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zpko_ob,cg%zpko_ob,sum_ob1,system%hvol)
 
       do iob_myob=1,system%nspin*info%numo
         call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
@@ -338,8 +332,8 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          zpko_ob(ix,iy,iz,iob_myob)=zpko_ob(ix,iy,iz,iob_myob)/sqrt(sum_ob1(iob_allob))
-          stpsi%zwf(ix,iy,iz,1,1,1,1)=zpko_ob(ix,iy,iz,iob_myob)
+          cg%zpko_ob(ix,iy,iz,iob_myob)=cg%zpko_ob(ix,iy,iz,iob_myob)/sqrt(sum_ob1(iob_allob))
+          stpsi%zwf(ix,iy,iz,1,1,1,1)=cg%zpko_ob(ix,iy,iz,iob_myob)
         end do
         end do
         end do
@@ -370,13 +364,13 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          zhtpsi_ob(ix,iy,iz,iob_myob)=shtpsi%zwf(ix,iy,iz,1,1,1,1)
+          cg%zhwf_ob(ix,iy,iz,iob_myob)=shtpsi%zwf(ix,iy,iz,1,1,1,1)
         end do
         end do
         end do
       end do
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zxk_ob,zhtpsi_ob,xkHpk_ob,system%hvol)
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zpko_ob,zhtpsi_ob,pkHpk_ob,system%hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhwf_ob,xkHpk_ob,system%hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zpko_ob,cg%zhwf_ob,pkHpk_ob,system%hvol)
         
     
       do iob_myob=1,system%nspin*info%numo
@@ -392,15 +386,15 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          zxk_ob(ix,iy,iz,iob_myob)=cx*zxk_ob(ix,iy,iz,iob_myob)+cp*zpko_ob(ix,iy,iz,iob_myob)
-          zhxk_ob(ix,iy,iz,iob_myob)=cx*zhxk_ob(ix,iy,iz,iob_myob)+cp*zhtpsi_ob(ix,iy,iz,iob_myob)
+          cg%zxk_ob(ix,iy,iz,iob_myob)=cx*cg%zxk_ob(ix,iy,iz,iob_myob)+cp*cg%zpko_ob(ix,iy,iz,iob_myob)
+          cg%zhxk_ob(ix,iy,iz,iob_myob)=cx*cg%zhxk_ob(ix,iy,iz,iob_myob)+cp*cg%zhwf_ob(ix,iy,iz,iob_myob)
         end do
         end do
         end do
       end do 
     
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zxk_ob,zhxk_ob,xkHxk_ob,system%hvol)
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,zxk_ob,zxk_ob,xkxk_ob,system%hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhxk_ob,xkHxk_ob,system%hvol)
+      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zxk_ob,xkxk_ob,system%hvol)
 
       do iob_myob=1,system%nspin*info%numo
         call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
@@ -415,7 +409,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,ik,1)=zxk_ob(ix,iy,iz,iob_myob)/sqrt(xkxk_ob(iob_allob))
+            spsi%zwf(ix,iy,iz,is,iob_myob-(is-1)*info%numo,ik,1)=cg%zxk_ob(ix,iy,iz,iob_myob)/sqrt(xkxk_ob(iob_allob))
           end do
           end do
           end do

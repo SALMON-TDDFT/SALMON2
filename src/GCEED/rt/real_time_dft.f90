@@ -60,6 +60,7 @@ type(s_dft_energy) :: energy
 type(s_force)   :: force
 type(s_md) :: md
 type(s_ofile) :: ofl
+type(s_cg) :: cg
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
 real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
@@ -204,7 +205,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,system,info,stencil)
+call IN_data(lg,mg,ng,system,stencil)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then
@@ -689,7 +690,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 
 call timer_end(LOG_TOTAL)
 
-call deallocate_mat
+call deallocate_mat(cg)
 
 call finalize_xc(xc_func)
 
@@ -702,7 +703,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log
+    call optimization_log(nproc_k, nproc_ob, nproc_mxin, nproc_mxin_s)
   end if
 end subroutine
 
@@ -712,8 +713,8 @@ END subroutine Real_Time_DFT
 
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global, & !nproc_group_grid,   &
-                           nproc_group_h, nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
+use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
+                           nproc_group_h, nproc_group_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
@@ -834,7 +835,8 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
     if(info%if_divide_rspace) stop "error: nonorthogonal lattice and r-space parallelization"
-    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
+    stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
+                       ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
   do jj=1,3
     do ii=1,4
@@ -860,7 +862,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   neig(3, 1) = kup_array(1)
   neig(3, 2) = kdw_array(1)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-    & nproc_group_korbital, nproc_id_korbital, neig)
+    & nproc_group_korbital, neig)
 
   neig_ng(1, 1) = iup_array(2)
   neig_ng(1, 2) = idw_array(2)
@@ -869,7 +871,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   neig_ng(3, 1) = kup_array(2)
   neig_ng(3, 2) = kdw_array(2)
   call init_sendrecv_grid(srg_ng, ng, 1, &
-    & nproc_group_global, nproc_id_global, neig_ng)
+    & nproc_group_global, neig_ng)
 
   allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
                        mg%is_array(2):mg%ie_array(2),  &

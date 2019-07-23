@@ -42,7 +42,7 @@ subroutine Real_Space_DFT
 use structures!, only: s_rgrid, s_orbital_parallel, s_orbital, s_dft_system, s_stencil
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
-                           nproc_group_korbital, nproc_id_korbital, nproc_group_rho, &
+                           nproc_group_korbital, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
@@ -97,6 +97,7 @@ type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_force)  :: force
+type(s_cg)  :: cg
 
 logical :: rion_update
 
@@ -179,7 +180,7 @@ if(iopt==1)then
     end select
     call make_icoobox_bound
         
-    call allocate_mat
+    call allocate_mat(cg)
     call set_icoo1d
     call allocate_sendrecv
     call init_persistent_requests
@@ -193,11 +194,11 @@ if(iopt==1)then
     neig(3, 1) = kup_array(1)
     neig(3, 2) = kdw_array(1)
     call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob, mg, nspin, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob_1, mg, 1, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
 
     neig_ng(1, 1) = iup_array(2)
     neig_ng(1, 2) = idw_array(2)
@@ -206,7 +207,7 @@ if(iopt==1)then
     neig_ng(3, 1) = kup_array(2)
     neig_ng(3, 2) = kdw_array(2)
     call init_sendrecv_grid(srg_ng, ng, 1, &
-      & nproc_group_global, nproc_id_global, neig_ng)
+      & nproc_group_global, neig_ng)
 
     if(ispin==0)then
       nspin=1
@@ -585,9 +586,9 @@ if(iopt==1)then
   call timer_begin(LOG_INIT_GS_RESTART)
   case(1,3)
 
-    call IN_data(lg,mg,ng,system,info,stencil)
+    call IN_data(lg,mg,ng,system,stencil,cg)
 
-    call allocate_mat
+    call allocate_mat(cg)
     call set_icoo1d
     call allocate_sendrecv
     call init_persistent_requests
@@ -601,11 +602,11 @@ if(iopt==1)then
     neig(3, 1) = kup_array(1)
     neig(3, 2) = kdw_array(1)
     call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob, mg, nspin, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
     call init_sendrecv_grid(srg_ob_1, mg, 1, &
-      & nproc_group_korbital, nproc_id_korbital, neig)
+      & nproc_group_korbital, neig)
 
     neig_ng(1, 1) = iup_array(2)
     neig_ng(1, 2) = idw_array(2)
@@ -614,7 +615,7 @@ if(iopt==1)then
     neig_ng(3, 1) = kup_array(2)
     neig_ng(3, 2) = kdw_array(2)
     call init_sendrecv_grid(srg_ng, ng, 1, &
-      & nproc_group_global, nproc_id_global, neig_ng)
+      & nproc_group_global, neig_ng)
 
     if(ispin==0)then
       nspin=1
@@ -952,14 +953,12 @@ DFT_Iteration : do iter=1,iDiter(img)
     if (.not. allocated(k_rd)) allocate(k_rd(3,num_kpoints_rd))
 
     call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                       num_kpoints_rd,k_rd,   &
-                       rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-                       zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+                       num_kpoints_rd,k_rd,cg,   &
                        info_ob,ppg,vlocal,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,k_sta,k_end)
+                       iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
 
     call timer_begin(LOG_CALC_RHO)
     call calc_density(srho,spsi,info,mg,nspin)
@@ -1069,12 +1068,12 @@ DFT_Iteration : do iter=1,iDiter(img)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
-        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,mst,ifmst,  &
+        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,mst,ifmst,  &
                 info_ob,ppg,vlocal)
 
       case(3)
         call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                    iobnum,itotmst,k_sta,k_end,mst,ifmst,   &
+                                    iobnum,itotmst,mst,ifmst,   &
                                     info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
 
       end select
@@ -1090,8 +1089,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                     rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg, &
                      info_ob,ppg,vlocal)
         case('n')
           call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
@@ -1100,8 +1098,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
-                             zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+          call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,   &
                              info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
           call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
@@ -1433,17 +1430,19 @@ if(out_tm  == 'y') then
 end if
 
 ! force
-!call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
-!if(comm_is_root(nproc_id_global))then
-!   write(*,*) "===== force ====="
-!   do iatom=1,MI
-!      select case(unit_system)
-!      case('au','a.u.')
-!        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
-!      case('A_eV_fs')
-!        write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
-!      end select
-!   end do
+!if(iflag_opt==1) then
+   call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+   if(comm_is_root(nproc_id_global))then
+      write(*,*) "===== force ====="
+      do iatom=1,MI
+         select case(unit_system)
+         case('au','a.u.')
+            write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
+         case('A_eV_fs')
+            write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+         end select
+      end do
+   end if
 !end if
 
 if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
@@ -1702,7 +1701,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log
+    call optimization_log(nproc_k, nproc_ob, nproc_mxin, nproc_mxin_s)
   end if
 end subroutine
 
@@ -1727,12 +1726,12 @@ real(8) :: rLsize1(3)
 if(comm_is_root(nproc_id_global))      &
     print *,"----------------------------------- init_mesh"
 
-rLsize1(:)=rLsize(:,itmg)
-!call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-!           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic,iscfrt)
 lg_sta(1:3) = lg%is(1:3)
 lg_end(1:3) = lg%ie(1:3)
 lg_num(1:3) = lg%num(1:3)
+!rLsize1(:)=rLsize(:,itmg)
+!call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
+!           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
 call check_fourier
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))

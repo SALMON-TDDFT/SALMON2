@@ -422,11 +422,6 @@ real(8) :: absorption_id(0:100000)
 integer :: iflag_dos
 integer :: iflag_pdos
 
-real(8) , allocatable :: rxk_ob(:,:,:,:),rhxk_ob(:,:,:,:),rgk_ob(:,:,:,:),rpk_ob(:,:,:,:)
-
-complex(8) , allocatable :: zxk_ob(:,:,:,:),zhxk_ob(:,:,:,:),zgk_ob(:,:,:,:),zpk_ob(:,:,:,:)
-complex(8) , allocatable :: zpko_ob(:,:,:,:),zhtpsi_ob(:,:,:,:)
-
 integer :: iflag_ELF
 
 integer :: iflag_indA
@@ -544,7 +539,7 @@ allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-
 allocate(inum_Mxin_s(3,0:nproc_size_global-1))
 
 call setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-           nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,iscfrt)
+           nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
 
 end subroutine init_mesh_s
 

@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   &
-                 nproc,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,iscfrt)
+                 nproc,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(out) :: ng
@@ -26,7 +26,6 @@ subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   
   integer :: ista_Mxin(3,0:nproc-1),iend_Mxin(3,0:nproc-1)
   integer :: nproc_Mxin_mul,nproc_Mxin_mul_s_dm
   integer :: isequential
-  integer,intent(in) :: iscfrt
   integer :: nproc_Mxin(3),nproc_Mxin_s_dm(3)
   integer :: j
   integer,parameter :: nd=4

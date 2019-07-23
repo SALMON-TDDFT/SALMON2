@@ -1517,7 +1517,7 @@ subroutine eh_prep_GCEED(fs,fw)
   Hgs(:)=Harray(:,1); Hvol=Hgs(1)*Hgs(2)*Hgs(3);
   call set_imesh_oddeven(1)
   call setlg(fs%lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-             Hgs,Nd,rLsize(:,1),imesh_oddeven,iperiodic,1)
+             Hgs,Nd,rLsize(:,1),imesh_oddeven,iperiodic)
   allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1), &
            inum_Mxin(3,0:nproc_size_global-1))
   call setmg(fs%mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
@@ -1525,7 +1525,7 @@ subroutine eh_prep_GCEED(fs,fw)
   allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
   allocate(inum_Mxin_s(3,0:nproc_size_global-1))
   call setng(fs%ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-             nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential,1)
+             nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
   fw%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment
@@ -1562,6 +1562,6 @@ subroutine eh_prep_GCEED(fs,fw)
     fs%ng%idz(ii)=ii
   end do
   fs%ng%Nd=fw%Nd
-  call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,nproc_id_global,neig_ng_eh)
+  call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,neig_ng_eh)
   
 end subroutine eh_prep_GCEED

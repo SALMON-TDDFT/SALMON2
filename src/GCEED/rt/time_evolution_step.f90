@@ -140,8 +140,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
@@ -168,19 +168,19 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     end if
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
+                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
   else 
 
     if(iobnum.ge.1)then
       if(mod(itt,2)==1)then
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_in,spsi_out,tpsi1,   &
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
       else
-        call taylor(mg,nspin,info,itotmst,mst,lg_sta,lg_end,ilsda,stencil,srg,spsi_out,spsi_in,tpsi1,   &
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff,rocc,wtk,iparaway_ob)
+        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
+                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
       end if
     end if
     
@@ -501,7 +501,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     if(iflag_md==1) then
       call timer_begin(LOG_CALC_CURRENT_ION)
       call calc_current_ion(system,curr_ion(:,itt))
-      call timer_begin(LOG_CALC_CURRENT_ION)
+      call timer_end(LOG_CALC_CURRENT_ION)
     end if
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)

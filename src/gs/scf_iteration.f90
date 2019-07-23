@@ -20,14 +20,12 @@ module scf_iteration_sub
 contains
 
 subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-               num_kpoints_rd,k_rd,   &
-               rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
-               zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob, &
+               num_kpoints_rd,k_rd,cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
-               iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,k_sta,k_end)
+               iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
   use inputoutput, only: iperiodic,ispin,amin_routine,gscg
   use structures
   use timer
@@ -56,16 +54,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,               intent(in)    :: iparaway_ob
   integer,               intent(in)    :: num_kpoints_rd
   real(8),               intent(in)    :: k_rd(3,num_kpoints_rd)
-  real(8),               intent(inout) :: rxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  real(8),               intent(inout) :: rhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  real(8),               intent(inout) :: rgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  real(8),               intent(inout) :: rpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),            intent(inout) :: zxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),            intent(inout) :: zhxk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),            intent(inout) :: zgk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),            intent(inout) :: zpk_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),            intent(inout) :: zpko_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
-  complex(8),            intent(inout) :: zhtpsi_ob(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin*info%numo)
+  type(s_cg),            intent(inout) :: cg
   type(s_orbital_parallel),       intent(in)    :: info_ob
   real(8),               intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,               intent(inout) :: iflag_diisjump
@@ -77,7 +66,6 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,               intent(in)    :: iditer_nosubspace_diag
   integer,               intent(in)    :: iobnum
   integer,               intent(in)    :: ifmst(2)
-  integer,               intent(in)    :: k_sta,k_end
 
 ! solve Kohn-Sham equation by minimization techniques
   call timer_begin(LOG_CALC_MINIMIZATION)
@@ -88,8 +76,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     case(0)
       select case(gscg)
       case('y')
-        call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
-                   rxk_ob,rhxk_ob,rgk_ob,rpk_ob,   &
+        call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg, &
                    info_ob,ppg,vlocal)
       case('n')
         call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
@@ -98,8 +85,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     case(3)
       select case(gscg)
       case('y')
-        call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
-                           zxk_ob,zhxk_ob,zgk_ob,zpk_ob,zpko_ob,zhtpsi_ob,   &
+        call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,   &
                            info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
       case('n')
         call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
@@ -127,12 +113,12 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      
-        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,k_sta,k_end,   &
+        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,   &
                            mst,ifmst,info_ob,ppg,vlocal)
 
       case(3)
         call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
-                                    iobnum,itotmst,k_sta,k_end,mst,ifmst,   &
+                                    iobnum,itotmst,mst,ifmst,   &
                                     info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
       end select
     end if

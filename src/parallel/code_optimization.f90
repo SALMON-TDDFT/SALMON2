@@ -72,9 +72,20 @@ contains
     end do
   end subroutine
 
-  subroutine optimization_log
+  subroutine optimization_log(nproc_k, nproc_ob, nproc_domain, nproc_domain_s)
+    use salmon_parallel, only: is_distributed_parallel, get_nthreads
     implicit none
+    integer, intent(in) :: nproc_k, nproc_ob
+    integer, intent(in) :: nproc_domain(3), nproc_domain_s(3)
     print *, '========== code optimization log =========='
+    if (is_distributed_parallel()) then
+      print *, 'MPI distribution:'
+      print *, '  nproc_ob       :', nproc_ob
+      print *, '  nproc_domain   :', nproc_domain
+      print *, '  nproc_domain_s :', nproc_domain_s
+    end if
+    print *, 'OpenMP parallelization:'
+    print *, '  number of threads :', get_nthreads()
     print *, 'hpsi stencil:'
     print *, '  enables hand-coding vectorization :', optimized_stencil_is_callable
     print *, '  enables openmp parallelization    :', stencil_is_parallelized_by_omp

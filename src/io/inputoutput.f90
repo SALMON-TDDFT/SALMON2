@@ -215,7 +215,6 @@ contains
       & use_ehrenfest_md, &
       & use_adiabatic_md, &
       & use_ms_maxwell, &
-      & use_force, &
       & use_geometry_opt, &
       & use_potential_model   !AY trial
 
@@ -574,7 +573,6 @@ contains
     use_ehrenfest_md    = 'n'
     use_adiabatic_md    = 'n'
     use_ms_maxwell      = 'n'
-    use_force           = 'n'
     use_geometry_opt    = 'n'
     use_potential_model = 'n'
 !! == default for &control
@@ -965,7 +963,6 @@ contains
     call comm_bcast(use_ehrenfest_md   ,nproc_group_global)
     call comm_bcast(use_adiabatic_md   ,nproc_group_global)
     call comm_bcast(use_ms_maxwell     ,nproc_group_global)
-    call comm_bcast(use_force          ,nproc_group_global)
     call comm_bcast(use_geometry_opt   ,nproc_group_global)
     call comm_bcast(use_potential_model,nproc_group_global)
 !! == bcast for &control
@@ -1577,7 +1574,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'use_ehrenfest_md', use_ehrenfest_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'use_adiabatic_md', use_adiabatic_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'use_ms_maxwell', use_ms_maxwell
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_force', use_force
       write(fh_variables_log, '("#",4X,A,"=",A)') 'use_geometry_opt', use_geometry_opt
 !     write(fh_variables_log, '("#",4X,A,"=",A)') 'use_potential_model', use_potential_model !AY not open now
 
@@ -1690,9 +1686,14 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nt', nt
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt', dt
 
+      if(inml_propagation >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'propagation', inml_propagation
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
+
       if(inml_scf >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'amin_routine', amin_routine
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'amin_routine', amin_routine
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
       write(fh_variables_log, '("#",4X,A,"=",A)') 'amixing', amixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rmixrate', rmixrate
