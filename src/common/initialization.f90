@@ -146,7 +146,7 @@ subroutine init_grid_whole(rsize,hgs,lg)
   end if
 
   if(sum(abs(dl)) == 0d0) then
-    if(num_rgrid /= lg%num) stop "error: num_rgrid /= lg%num"
+    if( maxval(abs(num_rgrid-lg%num)) > 0) stop "error: num_rgrid /= lg%num"
   else
     if( maxval(abs((rsize/dl)-dble(lg%num))) > 1d-15 ) stop "error: abs((rsize/dl)-dble(lg%num)) is too large"
   end if
