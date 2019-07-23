@@ -986,7 +986,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     select case(amixing)
       case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden'); call buffer_broyden_ns(iter)
+      case ('broyden'); call buffer_broyden_ns(ng,system,srho,mst,ifmst,iter)
     end select
     call timer_end(LOG_CALC_RHO)
     
@@ -1147,7 +1147,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     select case(amixing)
       case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden'); call buffer_broyden_ns(iter)
+      case ('broyden'); call buffer_broyden_ns(ng,system,srho,mst,ifmst,iter)
     end select
  
 
