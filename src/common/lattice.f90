@@ -20,18 +20,15 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE init_lattice(lg,system,stencil)
+SUBROUTINE init_lattice(system,stencil)
   use math_constants,only : pi
   use structures
   implicit none
-  type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system
   type(s_stencil)    :: stencil
   !
   real(8),dimension(3,3) :: A,B,F,wrk
   real(8) :: a1(3),a2(3),a3(3),detA,normA(3),f_uu,f_vv,f_ww,f_uv,f_uw,f_vw
-
-  system%ngrid = lg%num(1) * lg%num(2) * lg%num(3) ! --> init_dft (future work)
 
 ! al = [ a1, a2, a3 ]
   A = system%primitive_a ! primitive lattice vectors
@@ -47,10 +44,6 @@ SUBROUTINE init_lattice(lg,system,stencil)
   normA(1) = sqrt(sum(a1**2))
   normA(2) = sqrt(sum(a2**2))
   normA(3) = sqrt(sum(a3**2))
-
-  system%Hgs(1) = normA(1)/dble(lg%num(1)) ! --> init_dft (future work)
-  system%Hgs(2) = normA(2)/dble(lg%num(2))
-  system%Hgs(3) = normA(3)/dble(lg%num(3))
 
 ! cf. A. Natan et al., PRB 78, 075109 (2008).
 ! A = [ u, v, w ], B = A^{-1}

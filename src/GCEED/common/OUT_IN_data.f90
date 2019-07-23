@@ -751,9 +751,9 @@ mg%ndir = 3
 ng%ndir = 3
 system%ngrid = lg%num(1)*lg%num(2)*lg%num(3)
 
-call init_lattice(lg,system,stencil)
+system%Hgs = Hgs
+call init_lattice(system,stencil)
 Hvol = system%Hvol
-Hgs = system%Hgs
 call init_kvector(num_kgrid,system)
 
 if(iflag_ps.eq.1)then
