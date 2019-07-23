@@ -61,7 +61,6 @@ use subspace_diag_periodic_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
-use lattice
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub

@@ -775,15 +775,8 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     nspin=2
   end if
 
-  system%iperiodic = iperiodic
-  system%ngrid = lg_num(1)*lg_num(2)*lg_num(3)
-  system%nspin = nspin
-  system%no = itotMST
-  system%nk = num_kpoints_rd
-  system%nion = MI
-  system%Hvol = Hvol
-  system%Hgs = Hgs
-  allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) &
+  system%no = itotMST ! --> init_dft (future work)
+  allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) & ! --> init_dft (future work)
           ,system%wtk(system%nk) &
           ,system%rocc(system%no,system%nk,system%nspin))
   system%wtk = wtk
