@@ -638,6 +638,7 @@ inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
 
 lg_num(:)=lg_end(:)-lg_sta(:)+1
 
+dl = Hgs ! input variables should not be changed (future work)
 call init_dft(lg,system,stencil)
 
 if(iscfrt==2)then
