@@ -214,14 +214,7 @@ if(iopt==1)then
       nspin=2
     end if
 
-    system%no    = itotMST ! --> init_dft (future work)
-
-    allocate(system%Rion(3,system%nion) & ! --> init_dft (future work)
-            ,system%wtk(system%nk) &
-            ,system%rocc(system%no,system%nk,system%nspin))
-    system%wtk  = wtk
-    system%rion = rion
-    system%rocc(:,:,1) = rocc
+    system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
     
     allocate(energy%esp(system%no,system%nk,system%nspin))
 
@@ -508,7 +501,7 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
     
     if(ilsda == 0) then
       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -608,14 +601,7 @@ if(iopt==1)then
       nspin=2
     end if
 
-    system%no    = itotMST ! --> init_dft (future work)
-
-    allocate(system%Rion(3,system%nion) & ! --> init_dft (future work)
-            ,system%wtk(system%nk) &
-            ,system%rocc(system%no,system%nk,system%nspin))
-    system%wtk  = wtk
-    system%rion = rion
-    system%rocc(:,:,1) = rocc
+    system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
 
     allocate(energy%esp(system%no,system%nk,system%nspin))
 
@@ -903,7 +889,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call calc_occupation
   endif
 
-  system%rocc(:,:,1) = rocc
+  system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
 
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
@@ -964,7 +950,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
+      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
     end if
     call timer_end(LOG_CALC_HARTREE)
   
@@ -1124,7 +1110,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
+      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
     end if
     call timer_end(LOG_CALC_HARTREE)
 
