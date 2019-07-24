@@ -1,5 +1,4 @@
-# recommended version : 3.0.2
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.0.2)
 enable_testing()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Platforms)
@@ -9,8 +8,10 @@ include(${CMAKE_SOURCE_DIR}/cmakefiles/setup.cmake)
 include(${CMAKE_SOURCE_DIR}/cmakefiles/get_git_info.cmake)
 
 ### Project settings
-project(SALMON Fortran C)
-
+project(SALMON
+        VERSION   2.0.0
+        LANGUAGES Fortran C
+        )
 
 # Bulid options
 ## Library
