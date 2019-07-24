@@ -106,9 +106,12 @@ SUBROUTINE init_kvector(num_kgrid,system)
   integer :: ix,iy,iz
   integer :: ik,nk
   real(8) :: shift_k(3),k(3),B(3,3)
+
   nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
   system%nk = nk
-  allocate(system%vec_k(3,nk))
+  allocate(system%vec_k(3,nk),system%wtk(nk))
+
+  system%wtk  = 1d0/dble(nk)
 
   B = system%primitive_b
   shift_k(1:3) = 0.5d0

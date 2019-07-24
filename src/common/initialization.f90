@@ -24,7 +24,8 @@ contains
 subroutine init_dft(lg,system,stencil)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
+  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain,rion
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -64,8 +65,8 @@ subroutine init_dft(lg,system,stencil)
   call init_kvector(num_kgrid,system)
 
   system%iperiodic = iperiodic
-!  system%no    = itotMST ! (future work)
-  system%nion  = natom
+  system%no   = nstate
+  system%nion = natom
 
   if(ispin==0)then
     system%nspin=1
@@ -73,9 +74,9 @@ subroutine init_dft(lg,system,stencil)
     system%nspin=2
   end if
 
-!  allocate(system%Rion(3,system%nion) & ! (future work)
-!          ,system%wtk(system%nk) &
-!          ,system%rocc(system%no,system%nk,system%nspin))
+  allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
+  system%rion = rion
+  system%rocc = 0d0 ! initial value
 
   call setbn(bnmat)
   call setcn(cnmat)

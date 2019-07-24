@@ -756,14 +756,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     nspin=2
   end if
 
-  system%no = itotMST ! --> init_dft (future work)
-  allocate(system%Rion(3,system%nion), system%Velocity(3,system%nion) & ! --> init_dft (future work)
-          ,system%wtk(system%nk) &
-          ,system%rocc(system%no,system%nk,system%nspin))
-  system%wtk = wtk
-  system%rion = rion
-
-  system%rocc(:,:,1) = rocc(:,:)
+  system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
 
   allocate(force%F(3,system%nion))
   allocate(energy%esp(system%no,system%nk,system%nspin))
