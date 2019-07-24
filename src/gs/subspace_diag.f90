@@ -18,7 +18,7 @@ module subspace_diag_sub
 
 contains
 
-subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,mst,ifmst,  &
+subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iobnum,itotmst,mst,ifmst,  &
                 info_ob,ppg,vlocal)
 
   use inputoutput, only: ispin
@@ -43,7 +43,6 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
   type(s_pp_grid) :: ppg
   integer,intent(in)  :: ilsda
   integer,intent(in)  :: nproc_ob
-  integer,intent(in)  :: iparaway_ob
   integer,intent(in)  :: iobnum
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
@@ -151,8 +150,8 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
       end do
     
       do job=iobsta(is),iobend(is)
-        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -172,11 +171,11 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
           end do
           end do
         end if
-        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+        call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         
         do iob=1,iobnum
-          call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
+          call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
           if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
             rbox=0.d0
   !$OMP parallel do reduction(+:rbox) private(iz,iy,ix)
@@ -197,7 +196,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
       call eigen_subdiag(amat,evec,iter,ier2)
      
       do job=1,iobnum
-        call calc_allob(job,job_allob,iparaway_ob,itotmst,mst,iobnum)
+        call calc_allob(job,job_allob,itotmst,mst,iobnum)
         if(job_allob>=iobsta(is).and.job_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -212,8 +211,8 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
       end do
        
       do job=iobsta(is),iobend(is)
-        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -224,10 +223,10 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
           end do
           end do
         end if
-        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+        call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
         call comm_bcast(rmatbox_m,nproc_group_kgrid,iroot)
         do iob=1,iobnum
-          call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
+          call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
           if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
@@ -244,7 +243,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,ipa
       end do
     
       do iob=1,iobnum
-        call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
+        call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
         if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
           rbox=0.d0
   !$OMP parallel do reduction(+:rbox) private(iz,iy,ix)

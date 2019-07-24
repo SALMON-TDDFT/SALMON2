@@ -306,10 +306,6 @@ call comm_bcast(iflag_pdos,     nproc_group_global)
 
 !===== namelist for group_others =====
 if(comm_is_root(nproc_id_global))then
-  if(iparaway_ob<=0.or.iparaway_ob>=3)then
-    write(*,*) "iparaway_ob must be equal to 1 or 2."
-    stop
-  end if
   if(iflag_dos<=-1.or.iflag_dos>=2)then
     write(*,*) "iflag_dos must be equal to 0 or 1."
     stop

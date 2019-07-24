@@ -501,14 +501,12 @@ contains
       & oc_rt
 
     namelist/group_others/ &
-      & iparaway_ob, &
       & iscf_order, &
       & iswitch_orbital_mesh, &
       & iflag_psicube, &
       & lambda1_diis, &
       & lambda2_diis, &
       & file_ini, &
-      & iparaway_ob, &
       & num_projection, &
       & iwrite_projection_ob, &
       & iwrite_projection_k, &
@@ -841,7 +839,6 @@ contains
     ic_rt = 0
     oc_rt = 0
 !! == default for &group_others
-    iparaway_ob = 2
     iscf_order  = 1
     iswitch_orbital_mesh = 0
     iflag_psicube        = 0
@@ -1282,14 +1279,12 @@ contains
     call comm_bcast(ic_rt,nproc_group_global)
     call comm_bcast(oc_rt,nproc_group_global)
 !! == bcast for &group_others
-    call comm_bcast(iparaway_ob         ,nproc_group_global)
     call comm_bcast(iscf_order          ,nproc_group_global)
     call comm_bcast(iswitch_orbital_mesh,nproc_group_global)
     call comm_bcast(iflag_psicube       ,nproc_group_global)
     call comm_bcast(lambda1_diis        ,nproc_group_global)
     call comm_bcast(lambda2_diis        ,nproc_group_global)
     call comm_bcast(file_ini            ,nproc_group_global)
-    call comm_bcast(iparaway_ob         ,nproc_group_global)
     call comm_bcast(num_projection      ,nproc_group_global)
     call comm_bcast(iwrite_projection_ob,nproc_group_global)
     call comm_bcast(iwrite_projection_k ,nproc_group_global)
@@ -1950,14 +1945,12 @@ contains
 
       if(inml_group_others >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iparaway_ob', iparaway_ob
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iscf_order', iscf_order
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iswitch_orbital_mesh', iswitch_orbital_mesh
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_psicube', iflag_psicube
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda1_diis', lambda1_diis
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda2_diis', lambda2_diis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_ini', file_ini
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iparaway_ob', iparaway_ob
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)

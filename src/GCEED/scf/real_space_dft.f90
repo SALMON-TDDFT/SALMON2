@@ -133,7 +133,7 @@ call set_filename
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 
-call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob,iparaway_ob)
+call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)
@@ -253,7 +253,7 @@ if(iopt==1)then
  
     info%jo_tbl(:) = 0 !(initial value)
     do iob=info%io_s,info%io_e
-      call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+      call calc_allob(iob,jj,itotmst,mst,iobnum)
       info%io_tbl(iob) = jj
       info%jo_tbl(jj)  = iob
     end do
@@ -268,7 +268,7 @@ if(iopt==1)then
     end do
     
     do jj=1, system%no
-      call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+      call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
     end do
     
     info_ob%im_s = 1
@@ -648,7 +648,7 @@ if(iopt==1)then
  
     info%jo_tbl(:) = 0 !(initial value)
     do iob=info%io_s,info%io_e
-      call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+      call calc_allob(iob,jj,itotmst,mst,iobnum)
       info%io_tbl(iob) = jj
       info%jo_tbl(jj)  = iob
     end do
@@ -663,7 +663,7 @@ if(iopt==1)then
     end do
     
     do jj=1, system%no
-      call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+      call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
     end do
     
     info_ob%im_s = 1
@@ -923,7 +923,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     ! FIX: Attempt to fetch from allocatable variable K_RD when it is not allocated
     if (.not. allocated(k_rd)) allocate(k_rd(3,num_kpoints_rd))
 
-    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
+    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,iflag,itotmst,mst,ilsda,nproc_ob, &
                        num_kpoints_rd,k_rd,cg,   &
                        info_ob,ppg,vlocal,  &
                        iflag_diisjump,energy, &
@@ -1039,11 +1039,11 @@ DFT_Iteration : do iter=1,iDiter(img)
     if(Miter>iDiter_nosubspace_diag)then
       select case(iperiodic)
       case(0)
-        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,mst,ifmst,  &
+        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iobnum,itotmst,mst,ifmst,  &
                 info_ob,ppg,vlocal)
 
       case(3)
-        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,  &
                                     iobnum,itotmst,mst,ifmst,   &
                                     info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
 
@@ -1060,19 +1060,19 @@ DFT_Iteration : do iter=1,iDiter(img)
       case(0)
         select case(gscg)
         case('y')
-          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg, &
+          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg, &
                      info_ob,ppg,vlocal)
         case('n')
-          call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
+          call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,  &
                     info_ob,ppg,vlocal)
         end select
       case(3)
         select case(gscg)
         case('y')
-          call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,   &
+          call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,   &
                              info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
         case('n')
-          call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
+          call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
                              info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
         end select
       end select
@@ -1080,7 +1080,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       select case(iperiodic)
       case(0)
         call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,iflag_diisjump, &
-                     norm_diff_psi_stock,info_ob,ppg,vlocal,iparaway_ob)
+                     norm_diff_psi_stock,info_ob,ppg,vlocal)
       case(3)
         stop "rmmdiis method is not implemented for periodic systems."
       end select
