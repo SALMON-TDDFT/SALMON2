@@ -307,8 +307,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     end if
   end if
 
-  
-  call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil)
+  if(mod(itt,2)==1)then
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh_stock2)
+  else
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh_stock1)
+  end if
   call timer_end(LOG_CALC_HARTREE)
 
 
