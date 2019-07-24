@@ -91,7 +91,7 @@ type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_stencil) :: stencil
 type(s_scalar) :: sVh
-type(s_scalar),allocatable :: V_local(:),srho(:),sVxc(:)
+type(s_scalar),allocatable :: V_local(:),srho(:,:),srho_s(:,:),sVxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
@@ -283,13 +283,20 @@ if(iopt==1)then
     info_ob%irank_r(6) = kdw_array(1)
     info_ob%icomm_r    = nproc_group_korbital
     
-    allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
+    allocate(srho(1,1))
+    allocate(V_local(system%nspin),sVxc(system%nspin))
+    allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     do jspin=1,system%nspin
       allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-      allocate(srho(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
       allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     end do
     allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(srho_s(2,1))
+    if(system%nspin==2) then
+      do jspin=1,system%nspin
+        allocate(srho_s(jspin,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      end do
+    end if
     
     select case(iperiodic)
     case(0)
@@ -461,7 +468,11 @@ if(iopt==1)then
     end if
 
     if(read_gs_dns_cube == 'n') then
-      call calc_density(srho,spsi,info,mg,nspin)
+      if(system%nspin==1)then
+        call calc_density(srho,spsi,info,mg,nspin)
+      else
+        call calc_density(srho_s,spsi,info,mg,nspin)
+      end if
     else
       call read_dns(lg,mg,rho) ! cube file only
     end if
@@ -471,7 +482,7 @@ if(iopt==1)then
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -480,9 +491,9 @@ if(iopt==1)then
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -524,11 +535,11 @@ if(iopt==1)then
     end do
     if(ilsda == 1) then
       do jspin=1,system%nspin
-        srho(jspin)%f = rho_s(:,:,:,jspin)
+        srho_s(jspin,1)%f = rho_s(:,:,:,jspin)
         sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
       end do
     else
-      srho(1)%f = rho
+      srho(1,1)%f = rho
       sVxc(1)%f = Vxc
     end if
     sVh%f = Vh
@@ -536,7 +547,11 @@ if(iopt==1)then
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      if(system%nspin==1)then
+        call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      else
+        call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+      end if
     case(3)
       if(iflag_hartree==2)then
         fg%zrhoG_ele = rhoe_G
@@ -670,13 +685,20 @@ if(iopt==1)then
     info_ob%irank_r(6) = kdw_array(1)
     info_ob%icomm_r    = nproc_group_korbital
     
-    allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
+    allocate(srho(1,1))
+    allocate(V_local(system%nspin),sVxc(system%nspin))
+    allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     do jspin=1,system%nspin
       allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-      allocate(srho(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
       allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     end do
     allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(srho_s(2,1))
+    if(system%nspin==2)then
+      do jspin=1,system%nspin
+        allocate(srho_s(jspin,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+      end do
+    end if
 
     select case(iperiodic)
     case(0)
@@ -909,7 +931,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     ! FIX: Attempt to fetch from allocatable variable K_RD when it is not allocated
     if (.not. allocated(k_rd)) allocate(k_rd(3,num_kpoints_rd))
 
-    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,iflag,itotmst,mst,ilsda,nproc_ob, &
+    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                        num_kpoints_rd,k_rd,cg,   &
                        info_ob,ppg,vlocal,  &
                        iflag_diisjump,energy, &
@@ -924,7 +946,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -933,9 +955,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -943,7 +965,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     select case(amixing)
       case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden'); call buffer_broyden_ns(ng,system,srho,mst,ifmst,iter)
+      case ('broyden'); call buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     end select
     call timer_end(LOG_CALC_RHO)
     
@@ -976,11 +998,11 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
     if(ilsda == 1) then
       do jspin=1,system%nspin
-        srho(jspin)%f = rho_s(:,:,:,jspin)
+        srho_s(jspin,1)%f = rho_s(:,:,:,jspin)
         sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
       end do
     else
-      srho(1)%f = rho
+      srho(1,1)%f = rho
       sVxc(1)%f = Vxc
     end if
     sVh%f = Vh
@@ -988,7 +1010,11 @@ DFT_Iteration : do iter=1,iDiter(img)
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      if(system%nspin==1)then
+        call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      else
+        call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+      end if
     case(3)
       if(iflag_hartree==2)then
         fg%zrhoG_ele = rhoe_G
@@ -1077,13 +1103,17 @@ DFT_Iteration : do iter=1,iDiter(img)
     call gram_schmidt(system, mg, info, spsi)    
 
     call timer_begin(LOG_CALC_RHO)
-    call calc_density(srho,spsi,info,mg,nspin)
+    if(system%nspin==1)then
+      call calc_density(srho,spsi,info,mg,nspin)
+    else
+      call calc_density(srho_s,spsi,info,mg,nspin)
+    end if
     if(ilsda==0)then
       !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -1092,9 +1122,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -1104,7 +1134,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     select case(amixing)
       case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden'); call buffer_broyden_ns(ng,system,srho,mst,ifmst,iter)
+      case ('broyden'); call buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     end select
  
 
@@ -1126,13 +1156,17 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     
     call timer_begin(LOG_CALC_RHO)
-    call calc_density(srho,spsi,info,mg,nspin)
+    if(system%nspin==1)then
+      call calc_density(srho,spsi,info,mg,nspin)
+    else
+      call calc_density(srho_s,spsi,info,mg,nspin)
+    end if
     if(ilsda==0)then
       !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -1141,9 +1175,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho(1)%f(ix,iy,iz)+srho(2)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,1)=srho(1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,2)=srho(2)%f(ix,iy,iz)
+        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
+        rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -1162,11 +1196,11 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
     if(ilsda == 1) then
       do jspin=1,system%nspin
-        srho(jspin)%f = rho_s(:,:,:,jspin)
+        srho_s(jspin,1)%f = rho_s(:,:,:,jspin)
         sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
       end do
     else
-      srho(1)%f = rho
+      srho(1,1)%f = rho
       sVxc(1)%f = Vxc
     end if
     sVh%f = Vh
@@ -1174,7 +1208,11 @@ DFT_Iteration : do iter=1,iDiter(img)
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      if(system%nspin==1)then
+        call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho,sVh,sVxc)
+      else
+        call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+      end if
     case(3)
       if(iflag_hartree==2)then
         fg%zrhoG_ele = rhoe_G

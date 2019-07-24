@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine buffer_broyden_ns(ng,system,srho,mst,ifmst,iter)
+subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
   use structures, only: s_rgrid,s_dft_system,s_scalar
   use salmon_parallel, only: nproc_group_global
   use broyden_sub
@@ -22,7 +22,8 @@ subroutine buffer_broyden_ns(ng,system,srho,mst,ifmst,iter)
   implicit none
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
-  type(s_scalar),intent(inout) :: srho(system%nspin)
+  type(s_scalar),intent(inout) :: srho(1,1)
+  type(s_scalar),intent(inout) :: srho_s(2,1)
   integer,intent(in) :: mst(2),ifmst(2)
   integer,intent(in) :: iter
   integer :: ix,iy,iz,is
