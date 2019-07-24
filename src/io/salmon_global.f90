@@ -331,7 +331,6 @@ module salmon_global
   integer        :: oc_rt
 
 !! &group_others
-  integer        :: iparaway_ob
   integer        :: iscf_order
   integer        :: iswitch_orbital_mesh
   integer        :: iflag_psicube

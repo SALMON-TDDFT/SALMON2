@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
+subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
                          info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
@@ -48,7 +48,6 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: mst(2)
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: iparaway_ob
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
   integer,intent(in)    :: num_kpoints_rd
@@ -152,8 +151,8 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     end do
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,1,1)
 
-    call calc_myob(p,p_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
-    call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+    call calc_myob(p,p_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+    call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
   
 
   
@@ -183,8 +182,8 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       end do
     else
       do q=pstart(is),p-1
-        call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
-        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+        call calc_myob(q,q_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+        call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_q==1)then
   !$omp parallel do
           do iz=mg%is(3),mg%ie(3)
@@ -195,7 +194,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
           end do
           end do
         end if
-        call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+        call calc_iroot(q,iroot,ilsda,nproc_ob,itotmst,mst)
         call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
         sum0=0.d0
         if(icorr_p==1)then
@@ -268,7 +267,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       end do
     end if
   
-    call calc_iroot(p,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+    call calc_iroot(p,iroot,ilsda,nproc_ob,itotmst,mst)
     call comm_bcast(xk,nproc_group_kgrid,iroot)
     call comm_bcast(hxk,nproc_group_kgrid,iroot)
     call comm_bcast(txk,nproc_group_kgrid,iroot)
@@ -310,8 +309,8 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         end do
       else
         do q=pstart(is),p-1
-          call calc_myob(q,q_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
-          call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+          call calc_myob(q,q_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+          call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
           if(icorr_q==1)then
   !$omp parallel do
             do iz=mg%is(3),mg%ie(3)
@@ -322,7 +321,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
             end do
             end do
           end if
-          call calc_iroot(q,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+          call calc_iroot(q,iroot,ilsda,nproc_ob,itotmst,mst)
           call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
           sum0=0.d0
   !$omp parallel do reduction(+ : sum0)

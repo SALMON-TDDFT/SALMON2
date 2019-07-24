@@ -797,12 +797,12 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
           ,info%irank_jo(1:system%no))
   info%jo_tbl(:) = 0 ! info%io_s-1 (initial value)
   do iob=info%io_s,info%io_e
-    call calc_allob(iob,jj,iparaway_ob,itotmst,mst,iobnum)
+    call calc_allob(iob,jj,itotmst,mst,iobnum)
     info%io_tbl(iob) = jj
     info%jo_tbl(jj) = iob
   end do
   do jj=1, system%no
-    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
   end do
 
   do ik=info%ik_s,info%ik_e

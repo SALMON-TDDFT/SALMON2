@@ -29,7 +29,7 @@ contains
 
 subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
                   ,mst,iflag_diisjump,norm_diff_psi_stock  &
-                  ,info_ob,ppg,vlocal,iparaway_ob)
+                  ,info_ob,ppg,vlocal)
   use inputoutput, only: ncg,lambda1_diis,lambda2_diis
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,   &
                         s_dft_energy,s_stencil,s_scalar,s_pp_grid
@@ -54,7 +54,6 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   real(8),intent(out)   :: norm_diff_psi_stock(itotmst,1)
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
-  integer,intent(in)    :: iparaway_ob
   integer,parameter :: nd=4
   integer :: iob,iob_allob,iter,ix,iy,iz
   integer :: nspin_1
@@ -135,7 +134,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   iflag_diisjump=0
   
   do iob=1,system%nspin*numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*numo)
+    call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*numo)
     if(iob>numo)then
       is=2
     else
@@ -261,7 +260,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   
   iflag_diisjump=0
   do iob=1,system%nspin*numo
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*numo)
+    call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*numo)
     if(iob>numo)then
       is=2
     else
@@ -293,7 +292,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
       psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:system%nspin,  &
                       1:numo,info%ik_s:info%ik_e,1)
     do iob=1,system%nspin*numo
-      call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*numo)
+      call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*numo)
       if(iob>numo)then
         is=2
       else

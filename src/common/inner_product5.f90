@@ -1,4 +1,4 @@
-subroutine inner_product5(mg,iparaway_ob,itotmst,mst,iobnum,zmatbox1,zmatbox2,zbox,hvol)
+subroutine inner_product5(mg,itotmst,mst,iobnum,zmatbox1,zmatbox2,zbox,hvol)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_korbital
   use salmon_communication, only: comm_summation
@@ -7,7 +7,6 @@ subroutine inner_product5(mg,iparaway_ob,itotmst,mst,iobnum,zmatbox1,zmatbox2,zb
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
-  integer,intent(in)  :: iparaway_ob
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2)
   integer,intent(in)  :: iobnum
@@ -22,7 +21,7 @@ subroutine inner_product5(mg,iparaway_ob,itotmst,mst,iobnum,zmatbox1,zmatbox2,zb
   
   zbox2(:)=0.d0
   do iob=1,iobnum
-    call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
+    call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
     sum0=0.d0
     !$OMP parallel do collapse(2) reduction(+ : sum0)
     do iz=mg%is(3),mg%ie(3)

@@ -18,33 +18,21 @@ module calc_iroot_sub
 
 contains
 
-subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+subroutine calc_iroot(iob,iroot,ilsda,nproc_ob,itotmst,mst)
   use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iroot
-  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,mst(2)
+  integer,intent(in)  :: ilsda,nproc_ob,itotmst,mst(2)
   
   if(ilsda==0)then
-    if(iparaway_ob==1)then
-      call calc_iquotient(iob,nproc_ob,itotmst,iroot)
-    else if(iparaway_ob==2)then
-      iroot=mod(iob-1,nproc_ob)
-    end if
+    call calc_iquotient(iob,nproc_ob,itotmst,iroot)
   else
-    if(iparaway_ob==1)then
-      if(iob<=mst(1))then
-        call calc_iquotient(iob,nproc_ob,mst(1),iroot)
-      else
-        call calc_iquotient(iob-mst(1),nproc_ob,mst(2),iroot)
-      end if
-    else if(iparaway_ob==2)then
-      if(iob<=mst(1))then
-        iroot=mod(iob-1,nproc_ob)
-      else
-        iroot=mod(iob-1-mst(1),nproc_ob)
-      end if
-    end if 
+    if(iob<=mst(1))then
+      call calc_iquotient(iob,nproc_ob,mst(1),iroot)
+    else
+      call calc_iquotient(iob-mst(1),nproc_ob,mst(2),iroot)
+    end if
   end if
 
 end subroutine calc_iroot

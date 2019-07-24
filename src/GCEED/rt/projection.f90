@@ -55,8 +55,8 @@ coef_mat=0.d0
 
 do iik=k_sta,k_end
 do iob=1,itotMST0
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -67,7 +67,7 @@ do iob=1,itotMST0
     end do
     end do
   end if
-  call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+  call calc_iroot(iob,iroot,ilsda,nproc_ob,itotmst,mst)
   call comm_bcast(cmatbox_m,nproc_group_kgrid,iroot)
   do job=1,iobmax
     cbox=0.d0
@@ -79,7 +79,7 @@ do iob=1,itotMST0
     end do
     end do
     end do
-    call calc_allob(job,job_allob,iparaway_ob,itotmst,mst,iobnum)
+    call calc_allob(job,job_allob,itotmst,mst,iobnum)
     coef_mat(job_allob,iob,iik,1)=coef_mat(job_allob,iob,iik,1)+cbox
   end do
 end do
