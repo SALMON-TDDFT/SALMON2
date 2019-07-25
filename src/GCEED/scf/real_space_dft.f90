@@ -229,12 +229,6 @@ if(iopt==1)then
     info%numo = iobnum/nspin
     
     info%if_divide_rspace = nproc_mxin_mul.ne.1
-    info%irank_r(1) = iup_array(1)
-    info%irank_r(2) = idw_array(1)
-    info%irank_r(3) = jup_array(1)
-    info%irank_r(4) = jdw_array(1)
-    info%irank_r(5) = kup_array(1)
-    info%irank_r(6) = kdw_array(1)
     info%icomm_r    = nproc_group_korbital
     info%icomm_o    = nproc_group_kgrid
     info%icomm_ko   = nproc_group_rho
@@ -275,12 +269,6 @@ if(iopt==1)then
     info_ob%numo = 1
     info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
     info_ob%if_divide_orbit  = nproc_ob.ne.1
-    info_ob%irank_r(1) = iup_array(1)
-    info_ob%irank_r(2) = idw_array(1)
-    info_ob%irank_r(3) = jup_array(1)
-    info_ob%irank_r(4) = jdw_array(1)
-    info_ob%irank_r(5) = kup_array(1)
-    info_ob%irank_r(6) = kdw_array(1)
     info_ob%icomm_r    = nproc_group_korbital
     
     allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))
@@ -617,12 +605,6 @@ if(iopt==1)then
     
     info%if_divide_rspace = nproc_mxin_mul.ne.1
     info%if_divide_orbit  = nproc_ob.ne.1
-    info%irank_r(1) = iup_array(1)
-    info%irank_r(2) = idw_array(1)
-    info%irank_r(3) = jup_array(1)
-    info%irank_r(4) = jdw_array(1)
-    info%irank_r(5) = kup_array(1)
-    info%irank_r(6) = kdw_array(1)
     info%icomm_r   = nproc_group_korbital
     info%icomm_o   = nproc_group_kgrid
     info%icomm_ko  = nproc_group_rho
@@ -662,12 +644,6 @@ if(iopt==1)then
     info_ob%io_e = 1
     info_ob%numo = 1
     info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
-    info_ob%irank_r(1) = iup_array(1)
-    info_ob%irank_r(2) = idw_array(1)
-    info_ob%irank_r(3) = jup_array(1)
-    info_ob%irank_r(4) = jdw_array(1)
-    info_ob%irank_r(5) = kup_array(1)
-    info_ob%irank_r(6) = kdw_array(1)
     info_ob%icomm_r    = nproc_group_korbital
     
     allocate(V_local(system%nspin),srho(system%nspin),sVxc(system%nspin))

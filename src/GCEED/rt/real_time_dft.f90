@@ -773,12 +773,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
   info%if_divide_orbit = nproc_ob.ne.1
-  info%irank_r(1) = iup_array(1)
-  info%irank_r(2) = idw_array(1)
-  info%irank_r(3) = jup_array(1)
-  info%irank_r(4) = jdw_array(1)
-  info%irank_r(5) = kup_array(1)
-  info%irank_r(6) = kdw_array(1)
   info%icomm_r = nproc_group_korbital
   info%icomm_o = nproc_group_kgrid
   info%icomm_ko = nproc_group_rho

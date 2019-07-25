@@ -91,7 +91,6 @@ module structures
   type s_orbital_parallel
     logical :: if_divide_rspace
     logical :: if_divide_orbit
-    integer :: irank_r(6)
     integer :: icomm_r   ! communicator for r-space
     integer :: icomm_o   ! communicator for orbital
     integer :: icomm_ro  ! communicator for r-space & orbital
