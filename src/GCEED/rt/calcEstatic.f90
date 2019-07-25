@@ -13,13 +13,17 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcEstatic
+subroutine calcEstatic(ng, srg_ng)
 use salmon_parallel, only: nproc_group_grid
 use salmon_communication, only: comm_summation
 use scf_data
 use new_world_sub
-use sendrecvh_sub
+use structures, only: s_rgrid,s_sendrecv_grid
+use sendrecv_grid, only: update_overlap_real8
 implicit none
+type(s_rgrid),intent(in) :: ng
+type(s_sendrecv_grid),intent(inout) :: srg_ng
+
 integer :: ist,ix,iy,iz
 real(8) :: Vh_wk(ng_sta(1)-Ndh:ng_end(1)+Ndh,   &
                  ng_sta(2)-Ndh:ng_end(2)+Ndh,   &
@@ -63,7 +67,7 @@ else
   end do
 end if
 
-call sendrecvh(Vh_wk)
+call update_overlap_real8(srg_ng, ng, Vh_wk)
 
 if(ng_sta(1)==lg_sta(1))then
 !$OMP parallel do private(iz,iy,ix)

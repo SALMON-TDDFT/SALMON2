@@ -704,7 +704,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   end if
   if(out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call calcEstatic
+      call calcEstatic(ng, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
