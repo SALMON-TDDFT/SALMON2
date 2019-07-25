@@ -745,7 +745,6 @@ real(8)    :: rbox1q,rbox1q12,rbox1q23,rbox1q31
 
 character(100) :: comment_line
 
-type(s_scalar),allocatable :: srho(:,:)
 type(s_scalar),allocatable :: srho_s(:,:)
 
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
@@ -961,14 +960,10 @@ allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   end do
   end do
 
-  if(ilsda==0)then  
-    allocate(srho(1,1))
-    allocate(srho(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  else
-    allocate(srho_s(nspin,1))
-    allocate(srho_s(1,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(srho_s(2,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  end if
+  allocate(srho_s(nspin,1))
+  do is=1,nspin
+    allocate(srho_s(is,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  end do
 
   call calc_nlcc(pp, system, mg, ppn)
   if (comm_is_root(nproc_id_global)) then
@@ -976,23 +971,19 @@ allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
     write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
   end if
 
-  if(ilsda==0)then
-    call calc_density(srho,spsi_in,info,mg,nspin)
-  else
-    call calc_density(srho_s,spsi_in,info,mg,nspin)
-  end if
+  call calc_density(srho_s,spsi_in,info,mg,nspin)
 
   if(ilsda==0)then  
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rho(ix,iy,iz)=srho(1,1)%f(ix,iy,iz)
+      rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)
     end do
     end do
     end do
-    deallocate(srho(1,1)%f)
-    deallocate(srho)
+    deallocate(srho_s(1,1)%f)
+    deallocate(srho_s)
   else if(ilsda==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)

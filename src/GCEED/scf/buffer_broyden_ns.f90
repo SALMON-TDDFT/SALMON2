@@ -22,7 +22,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
   implicit none
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
-  type(s_scalar),intent(inout) :: srho(1,1)
+  type(s_scalar),intent(inout) :: srho
   type(s_scalar),intent(inout) :: srho_s(2,1)
   integer,intent(in) :: mst(2),ifmst(2)
   integer,intent(in) :: iter

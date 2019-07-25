@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                num_kpoints_rd,k_rd,cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
@@ -44,8 +44,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,srho_s,iflag,
   type(s_dft_system),        intent(in)    :: system
   type(s_orbital_parallel),       intent(in)    :: info
   type(s_orbital),  intent(inout) :: spsi
-  type(s_scalar),        intent(inout) :: srho(1,1)
-  type(s_scalar),        intent(inout) :: srho_s(2,1)
+  type(s_scalar),        intent(inout) :: srho_s(system%nspin,1)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg_ob_1
   type(s_pp_grid),       intent(in)    :: ppg
@@ -129,11 +128,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho,srho_s,iflag,
 ! density
   call timer_begin(LOG_CALC_RHO)
 
-  if(system%nspin==1)then
-    call calc_density(srho,spsi,info,mg,system%nspin)
-  else
-    call calc_density(srho_s,spsi,info,mg,system%nspin)
-  end if
+  call calc_density(srho_s,spsi,info,mg,system%nspin)
 
   call timer_end(LOG_CALC_RHO)
 
