@@ -506,7 +506,7 @@ if(iopt==1)then
     end if
     allocate( esp(itotMST,num_kpoints_rd) )
 
-    call exc_cor_ns(ng, srg_ng, system%nspin,srho_s,ppn,sVxc,energy%E_xc)
+    call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
 
     call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
@@ -908,7 +908,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_EXC_COR)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call exc_cor_ns(ng, srg_ng, system%nspin,srho_s,ppn,sVxc,energy%E_xc)
+      call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
     end if
     call timer_end(LOG_CALC_EXC_COR)
 
