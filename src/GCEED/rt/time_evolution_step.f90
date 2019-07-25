@@ -52,7 +52,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   type(s_reciprocal_grid) :: fg
   type(s_force),intent(inout) :: force
   type(s_dft_energy) :: energy
-  type(s_scalar) :: sVh
+  type(s_scalar) :: sVh,sVpsl
   type(s_scalar),allocatable :: srho(:),V_local(:),sVxc(:)
   type(s_md) :: md
   type(s_ofile) :: ofl
@@ -224,6 +224,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   end do
   allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(sVpsl%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  sVpsl%f = Vpsl
 
   if(iperiodic==0)then
     if(ikind_eext==0.and.itt>=2)then
@@ -309,8 +311,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(mod(itt,2)==1)then
     call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh_stock2)
+    sVh%f = Vh_stock2
   else
     call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh_stock1)
+    sVh%f = Vh_stock1
   end if
   call timer_end(LOG_CALC_HARTREE)
 
@@ -320,15 +324,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     call exc_cor_ns(ppn)
   end if
   call timer_end(LOG_CALC_EXC_COR)
-
-
-  call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
-  call allgatherv_vlocal
-  call timer_end(LOG_CALC_VLOCAL)
-
-  do jspin=1,system%nspin
-    V_local(jspin)%f = Vlocal(:,:,:,jspin)
-  end do
   if(ilsda == 1) then
     do jspin=1,system%nspin
       sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
@@ -336,8 +331,15 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   else
     sVxc(1)%f = Vxc
   end if
-  sVh%f = Vh
   energy%E_xc = Exc
+
+  call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
+  call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+  call timer_end(LOG_CALC_VLOCAL)
+
+  do jspin=1,system%nspin
+    Vlocal(:,:,:,jspin) = V_local(jspin)%f
+  end do
 
 ! result
 
