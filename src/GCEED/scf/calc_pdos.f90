@@ -62,7 +62,7 @@ pdos_l_tmp=0.d0
 
 do iik=k_sta,k_end
 do iob=1,iobmax
-  call calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
+  call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
   rbox_pdos=0.d0
   do iatom=1,MI
     ikoa=Kion(iatom)

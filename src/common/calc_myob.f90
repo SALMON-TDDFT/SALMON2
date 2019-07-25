@@ -18,42 +18,24 @@ module calc_myob_sub
 
 contains
 
-subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
+subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
   use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iob_myob
-  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,itotmst,mst(2),iobnum
+  integer,intent(in)  :: ilsda,nproc_ob,itotmst,mst(2),iobnum
   integer :: iquotient,iob_min
   integer :: iob_tmp
   
   if(ilsda==0)then
-    if(iparaway_ob==1)then
-      call calc_iquotient(iob,nproc_ob,itotmst,iquotient)
-      iob_min=itotmst*iquotient/nproc_ob
-      iob_myob=iob-iob_min
-    else if(iparaway_ob==2)then
-      iob_myob=(iob-1)/nproc_ob+1
-    end if
+    call calc_iquotient(iob,nproc_ob,itotmst,iquotient)
+    iob_min=itotmst*iquotient/nproc_ob
+    iob_myob=iob-iob_min
   else
-    if(iparaway_ob==1)then
-      if(iob<=mst(1))then
-        call calc_iquotient(iob,nproc_ob,mst(1),iquotient)
-        iob_min=mst(1)*iquotient/nproc_ob
-        iob_myob=iob-iob_min
-      else
-        iob_tmp=iob-mst(1)
-        call calc_iquotient(iob_tmp,nproc_ob,mst(1),iquotient)
-        iob_min=mst(1)*iquotient/nproc_ob
-        iob_myob=iob_tmp-iob_min+iobnum/2
-      end if
-    else if(iparaway_ob==2)then
-      if(iob<=mst(1))then
-        iob_myob=(iob-1)/nproc_ob+1
-      else
-        iob_tmp=iob-mst(1)
-        iob_myob=(iob_tmp-1)/nproc_ob+1+iobnum/2
-      end if
+    if(iob<=mst(1))then
+      call calc_iquotient(iob,nproc_ob,mst(1),iquotient)
+      iob_min=mst(1)*iquotient/nproc_ob
+      iob_myob=iob-iob_min
     end if
   end if
 

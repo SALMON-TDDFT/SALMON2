@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,  &
+subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,  &
                          info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid,s_cg
@@ -49,7 +49,6 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: mst(2)
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: iparaway_ob
   type(s_cg),intent(inout)       :: cg
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
@@ -133,7 +132,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     iter_bak_ob(:)=0 
   
     do iob_myob=1,system%nspin*info%numo
-      call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
+      call calc_allob(iob_myob,iob_allob,itotmst,mst,system%nspin*info%numo)
       if(ilsda==0.or.ilsda==1.and.iob_myob<=info%numo)then
         is=1
       else
@@ -182,14 +181,14 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       end do
   
     end do
-    call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhxk_ob,xkHxk_ob,system%hvol)
+    call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhxk_ob,xkHxk_ob,system%hvol)
     call timer_end(LOG_GSCG_INIT_ITERATION)
 
 
     call timer_begin(LOG_GSCG_ITERATION)
     Iteration : do iter=1,Ncg
       do iob_myob=1,system%nspin*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_allob(iob_myob,iob_allob,itotmst,mst,system%nspin*info%numo)
     
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
@@ -244,11 +243,11 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       else
         do is=is_sta,is_end
         do iob=iobsta(is),iobend(is)
-          call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
-          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+          call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+          call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
           do job=iobsta(is),iob-1
-            call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
-            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+            call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+            call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
             if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)
               do iz=mg%is(3),mg%ie(3)
@@ -259,7 +258,7 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
               end do
               end do
             end if
-            call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+            call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
             call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
             sum0=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
@@ -283,10 +282,10 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         end do
         end do
       end if
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zgk_ob,cg%zgk_ob,sum_ob1,system%hvol)
+      call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zgk_ob,cg%zgk_ob,sum_ob1,system%hvol)
         
       do iob_myob=1,system%nspin*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_allob(iob_myob,iob_allob,itotmst,mst,system%nspin*info%numo)
     
         if(iter==1)then
     !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -311,10 +310,10 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         gkgk_ob(iob_allob)=sum_ob1(iob_allob)
       end do
 
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zpk_ob,zs_ob,system%hvol)
+      call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zpk_ob,zs_ob,system%hvol)
 
       do iob_myob=1,system%nspin*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_allob(iob_myob,iob_allob,itotmst,mst,system%nspin*info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -324,10 +323,10 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         end do
         end do
       end do
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zpko_ob,cg%zpko_ob,sum_ob1,system%hvol)
+      call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zpko_ob,cg%zpko_ob,sum_ob1,system%hvol)
 
       do iob_myob=1,system%nspin*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_allob(iob_myob,iob_allob,itotmst,mst,system%nspin*info%numo)
     !$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -369,12 +368,12 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         end do
         end do
       end do
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhwf_ob,xkHpk_ob,system%hvol)
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zpko_ob,cg%zhwf_ob,pkHpk_ob,system%hvol)
+      call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhwf_ob,xkHpk_ob,system%hvol)
+      call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zpko_ob,cg%zhwf_ob,pkHpk_ob,system%hvol)
         
     
       do iob_myob=1,system%nspin*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_allob(iob_myob,iob_allob,itotmst,mst,system%nspin*info%numo)
 
         ev=0.5d0*((xkHxk_ob(iob_allob)+pkHpk_ob(iob_allob))   &
                  -sqrt((xkHxk_ob(iob_allob)-pkHpk_ob(iob_allob))**2+4.d0*abs(xkHpk_ob(iob_allob))**2))
@@ -393,11 +392,11 @@ subroutine gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         end do
       end do 
     
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhxk_ob,xkHxk_ob,system%hvol)
-      call inner_product5(mg,iparaway_ob,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zxk_ob,xkxk_ob,system%hvol)
+      call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zhxk_ob,xkHxk_ob,system%hvol)
+      call inner_product5(mg,itotmst,mst,system%nspin*info%numo,cg%zxk_ob,cg%zxk_ob,xkxk_ob,system%hvol)
 
       do iob_myob=1,system%nspin*info%numo
-        call calc_allob(iob_myob,iob_allob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_allob(iob_myob,iob_allob,itotmst,mst,system%nspin*info%numo)
         if(ilsda==0.or.ilsda==1.and.iob_myob<=info%numo)then
           is=1
         else

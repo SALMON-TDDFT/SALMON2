@@ -47,8 +47,8 @@ allocate(matbox2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)))
 if(icopy_psi_mesh==1)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
     matbox=0.d0
     if(icheck_corrkob==1)then
 !$OMP parallel do private(iz,iy,ix) 
@@ -76,8 +76,8 @@ if(icopy_psi_mesh==1)then
 else if(icopy_psi_mesh==2)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
     matbox=0.d0
 !$OMP parallel do private(iz,iy,ix) 
     do iz=ng_sta(3),ng_end(3)
@@ -131,8 +131,8 @@ allocate(matbox2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)))
 if(icopy_psi_mesh==1)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
     matbox=0.d0
     if(icheck_corrkob==1)then
 !$OMP parallel do private(iz,iy,ix) 
@@ -160,8 +160,8 @@ if(icopy_psi_mesh==1)then
 else if(icopy_psi_mesh==2)then
   do iik=1,num_kpoints_rd
   do iob=1,itotMST
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+    call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
     matbox=0.d0
 !$OMP parallel do private(iz,iy,ix) 
     do iz=ng_sta(3),ng_end(3)

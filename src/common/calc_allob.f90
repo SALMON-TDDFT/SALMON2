@@ -18,36 +18,23 @@ module calc_allob_sub
 
 contains
 
-subroutine calc_allob(iob,iob_allob,iparaway_ob,itotmst,mst,iobnum)
+subroutine calc_allob(iob,iob_allob,itotmst,mst,iobnum)
   use inputoutput, only: ispin,nproc_ob
   use salmon_parallel, only: nproc_id_kgrid
   implicit none
   integer,intent(in) :: iob
   integer,intent(out) ::  iob_allob
-  integer,intent(in) :: iparaway_ob,itotmst,mst(2),iobnum
+  integer,intent(in) :: itotmst,mst(2),iobnum
   integer :: iob_tmp
   
   if(ispin==0)then
-    if(iparaway_ob==1)then
-      iob_allob=nproc_id_kgrid*itotmst/nproc_ob+iob
-    else if(iparaway_ob==2)then
-      iob_allob=(iob-1)*nproc_ob+nproc_id_kgrid+1
-    end if
+    iob_allob=nproc_id_kgrid*itotmst/nproc_ob+iob
   else
-    if(iparaway_ob==1)then
-      if(iob<=iobnum/2)then
-        iob_allob=nproc_id_kgrid*mst(1)/nproc_ob+iob
-      else
-        iob_tmp=iob-iobnum/2
-        iob_allob=nproc_id_kgrid*mst(2)/nproc_ob+iob_tmp+mst(1)
-      end if
-    else if(iparaway_ob==2)then
-      if(iob<=iobnum/2)then
-        iob_allob=(iob-1)*nproc_ob+nproc_id_kgrid+1
-      else
-        iob_tmp=iob-iobnum/2
-        iob_allob=(iob_tmp-1)*nproc_ob+nproc_id_kgrid+1+mst(1)
-      end if
+    if(iob<=iobnum/2)then
+      iob_allob=nproc_id_kgrid*mst(1)/nproc_ob+iob
+    else
+      iob_tmp=iob-iobnum/2
+      iob_allob=nproc_id_kgrid*mst(2)/nproc_ob+iob_tmp+mst(1)
     end if
   end if
   

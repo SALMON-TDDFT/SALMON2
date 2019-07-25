@@ -18,13 +18,13 @@ module check_corrkob_sub
 
 contains
 
-subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst)
+subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   use salmon_parallel, only: nproc_id_kgrid
   use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob,ik
   integer,intent(out) :: icorr_p
-  integer,intent(in)  :: ilsda,nproc_ob,iparaway_ob,k_sta,k_end,mst(2)
+  integer,intent(in)  :: ilsda,nproc_ob,k_sta,k_end,mst(2)
   integer :: iquotient
   integer :: iob_tmp
 
@@ -34,19 +34,11 @@ subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,iparaway_ob,k_sta,k_end,m
     iob_tmp=iob-mst(1)
   end if 
 
-  if(iparaway_ob==1)then
-    call calc_iquotient(iob_tmp,nproc_ob,mst(1),iquotient)
-    if(nproc_id_kgrid==iquotient.and.ik>=k_sta.and.ik<=k_end)then
-      icorr_p=1
-    else
-      icorr_p=0
-    end if
-  else if(iparaway_ob==2)then
-    if(nproc_id_kgrid==mod(iob_tmp-1,nproc_ob).and.ik>=k_sta.and.ik<=k_end)then
-      icorr_p=1
-    else
-      icorr_p=0
-    end if
+  call calc_iquotient(iob_tmp,nproc_ob,mst(1),iquotient)
+  if(nproc_id_kgrid==iquotient.and.ik>=k_sta.and.ik<=k_end)then
+    icorr_p=1
+  else
+    icorr_p=0
   end if
   
 end subroutine check_corrkob

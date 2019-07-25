@@ -1,5 +1,6 @@
 set(SOURCES
     math_constants.f90
+    phys_constants.f90
     salmon_math.f90
    )
 

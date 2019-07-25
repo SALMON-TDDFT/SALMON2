@@ -13,57 +13,63 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine buffer_broyden_ns(iter)
+subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
+  use structures, only: s_rgrid,s_dft_system,s_scalar
   use salmon_parallel, only: nproc_group_global
   use broyden_sub
-  use scf_data, only: ng_sta,ng_end,ng_num,num_rho_stock,rho,rho_in,rho_out,  &
-                      ilsda,rho_s,rho_s_in,rho_s_out,MST,ifMST
+  use scf_data, only: num_rho_stock,rho,rho_in,rho_out,  &
+                      rho_s,rho_s_in,rho_s_out
   implicit none
+  type(s_rgrid) :: ng
+  type(s_dft_system),intent(in) :: system
+  type(s_scalar),intent(inout) :: srho
+  type(s_scalar),intent(inout) :: srho_s(2,1)
+  integer,intent(in) :: mst(2),ifmst(2)
   integer,intent(in) :: iter
   integer :: ix,iy,iz,is
-  real(8) :: vecr(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3))
+  real(8) :: vecr(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
 
-  if(ilsda==0)then
+  if(system%nspin==1)then
 
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
       vecr(ix,iy,iz)=rho(ix,iy,iz)
     end do
     end do
     end do
 
-    call broyden(vecr,rho_in,rho_out,ng_num(1)*ng_num(2)*ng_num(3),  &
+    call broyden(vecr,rho_in,rho_out,ng%num(1)*ng%num(2)*ng%num(3),  &
                  iter,num_rho_stock,num_rho_stock,nproc_group_global)
   
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
       rho(ix,iy,iz)= vecr(ix,iy,iz)
     end do
     end do
     end do
 
-  else if(ilsda==1)then
+  else if(system%nspin==2)then
     
     do is=1,2
-      if(ifMST(is)>=1.and.MST(is)>=1)then
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
+      if(ifmst(is)>=1.and.mst(is)>=1)then
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
           vecr(ix,iy,iz)=rho_s(ix,iy,iz,is)
         end do
         end do
         end do
   
-        call broyden(vecr,rho_s_in(ng_sta(1):,ng_sta(2):,ng_sta(3):,1:,is),  &
-                     rho_s_out(ng_sta(1):,ng_sta(2):,ng_sta(3):,1:,is),  &
-                     ng_num(1)*ng_num(2)*ng_num(3),  &
+        call broyden(vecr,rho_s_in(ng%is(1):,ng%is(2):,ng%is(3):,1:,is),  &
+                     rho_s_out(ng%is(1):,ng%is(2):,ng%is(3):,1:,is),  &
+                     ng%num(1)*ng%num(2)*ng%num(3),  &
                      iter,num_rho_stock,num_rho_stock,nproc_group_global)
   
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
           rho_s(ix,iy,iz,is)= vecr(ix,iy,iz)
         end do
         end do
@@ -71,9 +77,9 @@ subroutine buffer_broyden_ns(iter)
       end if
     end do
 
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
       rho(ix,iy,iz)= rho_s(ix,iy,iz,1)+rho_s(ix,iy,iz,2)
     end do
     end do

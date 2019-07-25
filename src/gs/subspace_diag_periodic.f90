@@ -18,7 +18,7 @@ module subspace_diag_periodic_sub
 
 contains
 
-subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,  &
                                   iobnum,itotmst,mst,ifmst,   &
                                   info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
 
@@ -45,7 +45,6 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
   type(s_pp_grid) :: ppg
   integer,intent(in)  :: ilsda
   integer,intent(in)  :: nproc_ob
-  integer,intent(in)  :: iparaway_ob
   integer,intent(in)  :: iobnum
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2),ifmst(2)
@@ -177,7 +176,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
     
   !do jj=1,itotmst
       do jj=1,iobnum
-        call calc_allob(jj,j_allob,iparaway_ob,itotmst,mst,iobnum)
+        call calc_allob(jj,j_allob,itotmst,mst,iobnum)
         if(j_allob>=iobsta(is).and.j_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -200,8 +199,8 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
       end do
     
       do jj=iobsta(is),iobend(is)
-        call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+        call calc_myob(jj,j_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -212,10 +211,10 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
           end do
           end do
         end if
-        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+        call calc_iroot(jj,iroot,ilsda,nproc_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
-          call calc_allob(ii,i_allob,iparaway_ob,itotmst,mst,iobnum)
+          call calc_allob(ii,i_allob,itotmst,mst,iobnum)
           if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then
             cbox=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction (+ : cbox)
@@ -245,7 +244,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
 
       call timer_begin(LOG_DIAG_SET_ORBITAL)
       do jj=1,iobnum
-        call calc_allob(jj,j_allob,iparaway_ob,itotmst,mst,iobnum)
+        call calc_allob(jj,j_allob,itotmst,mst,iobnum)
         if(j_allob>=iobsta(is).and.j_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -263,8 +262,8 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
 
       call timer_begin(LOG_DIAG_UPDATE)
       do jj=iobsta(is),iobend(is)
-        call calc_myob(jj,j_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,iobnum)
-        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+        call calc_myob(jj,j_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -275,10 +274,10 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
           end do
           end do
         end if
-        call calc_iroot(jj,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+        call calc_iroot(jj,iroot,ilsda,nproc_ob,itotmst,mst)
         call comm_bcast(htpsi,nproc_group_kgrid,iroot)
         do ii=1,iobnum
-          call calc_allob(ii,i_allob,iparaway_ob,itotmst,mst,iobnum)
+          call calc_allob(ii,i_allob,itotmst,mst,iobnum)
           if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then
   !$OMP parallel do private(iz,iy,ix)
             do iz=mg%is(3),mg%ie(3)
@@ -294,7 +293,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
       end do
     
       do ii=1,iobnum
-        call calc_allob(ii,i_allob,iparaway_ob,itotmst,mst,iobnum)
+        call calc_allob(ii,i_allob,itotmst,mst,iobnum)
         if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then
           rbox=0.d0
   !$OMP parallel do private(iz,iy,ix) reduction(+:rbox)

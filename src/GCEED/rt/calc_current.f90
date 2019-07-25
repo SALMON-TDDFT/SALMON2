@@ -54,7 +54,7 @@ call timer_end(LOG_CUR_SENDRECV)
 call timer_begin(LOG_CUR_LOCAL)
 do iik=k_sta,k_end
 do iob=1,iobnum
-  call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
+  call calc_allob(iob,p_allob,itotmst,mst,iobnum)
   jxt=0.d0
 !$OMP parallel do private(iz,iy,ix) reduction(+ : jxt)
   do iz=mg%is(3),mg%ie(3)
@@ -155,7 +155,7 @@ call timer_end(LOG_ALLREDUCE_CURRENT)
 call timer_begin(LOG_CUR_NONLOCAL2)
 do iik=k_sta,k_end
   do iob=1,iobnum
-    call calc_allob(iob,p_allob,iparaway_ob,itotmst,mst,iobnum)
+    call calc_allob(iob,p_allob,itotmst,mst,iobnum)
     do iatom=1,MI
       ik=Kion(iatom)
       do lm=1,(Mlps(ik)+1)**2

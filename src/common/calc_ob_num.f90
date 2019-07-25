@@ -18,12 +18,12 @@ module calc_iobnum_sub
 
 contains
 
-subroutine calc_iobnum(tmst,tproc,trank,tiobnum,nproc_ob,iparaway_ob)
+subroutine calc_iobnum(tmst,tproc,trank,tiobnum,nproc_ob)
   use inputoutput, only : ispin
   implicit none
   integer :: tmst,tproc,trank,tiobnum
   integer :: ttmst
-  integer :: nproc_ob,iparaway_ob
+  integer :: nproc_ob
   
   if(ispin==0)then
     ttmst=tmst
@@ -31,19 +31,7 @@ subroutine calc_iobnum(tmst,tproc,trank,tiobnum,nproc_ob,iparaway_ob)
     ttmst=tmst/2
   end if
   
-  if(iparaway_ob==1)then
-    tiobnum=(trank+1)*ttmst/nproc_ob-trank*ttmst/nproc_ob
-  else if(iparaway_ob==2)then
-    if(mod(ttmst,tproc)==0)then
-      tiobnum=ttmst/tproc
-    else
-      if(trank<mod(ttmst,tproc))then
-        tiobnum=ttmst/tproc+1
-      else
-        tiobnum=ttmst/tproc
-      end if
-    end if
-  end if
+  tiobnum=(trank+1)*ttmst/nproc_ob-trank*ttmst/nproc_ob
   
   if(ispin==1)then
     tiobnum=tiobnum*2

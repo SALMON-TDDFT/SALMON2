@@ -21,7 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,  &
+subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,  &
                 info_ob,ppg,vlocal)
   use inputoutput, only: ncg,ispin
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
@@ -50,7 +50,6 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   integer,intent(in)    :: mst(2)
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
-  integer,intent(in)    :: iparaway_ob
   type(s_orbital_parallel)       :: info_ob
   real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
   integer,parameter :: nd=4
@@ -127,8 +126,8 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
     end do
 
   orbital : do iob=iobsta(is),iobend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
-    call check_corrkob(iob,1,icorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+    call check_corrkob(iob,1,icorr,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
 
   
     if(icorr==1)then
@@ -180,13 +179,13 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
         end do
         end do
       end if
-      call calc_iroot(iob,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+      call calc_iroot(iob,iroot,ilsda,nproc_ob,itotmst,mst)
       call comm_bcast(gk,nproc_group_grid,iroot)
   
       do job=iobsta(is),iob-1
         sum0=0.d0
-        call calc_myob(job,job_myob,ilsda,nproc_ob,iparaway_ob,itotmst,mst,system%nspin*info%numo)
-        call check_corrkob(job,1,jcorr,ilsda,nproc_ob,iparaway_ob,info%ik_s,info%ik_e,mst)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+        call check_corrkob(job,1,jcorr,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(jcorr==1)then
   !$OMP parallel do reduction(+ : sum0) private(iz,iy,ix) 
           do iz=mg%is(3),mg%ie(3)
@@ -208,7 +207,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
           end do
         end if
   
-        call calc_iroot(job,iroot,ilsda,nproc_ob,iparaway_ob,itotmst,mst)
+        call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
         call comm_bcast(gk,nproc_group_grid,iroot)
       end do
   

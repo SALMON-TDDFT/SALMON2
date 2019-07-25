@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob, &
+subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                num_kpoints_rd,k_rd,cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
@@ -37,12 +37,14 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   use gram_schmidt_orth, only: gram_schmidt 
   use subspace_diag_sub
   use subspace_diag_periodic_sub
+  use density_matrix, only: calc_density
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
   type(s_dft_system),        intent(in)    :: system
   type(s_orbital_parallel),       intent(in)    :: info
   type(s_orbital),  intent(inout) :: spsi
+  type(s_scalar),        intent(inout) :: srho_s(system%nspin,1)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg_ob_1
   type(s_pp_grid),       intent(in)    :: ppg
@@ -51,7 +53,6 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,               intent(in)    :: mst(2)
   integer,               intent(in)    :: ilsda
   integer,               intent(in)    :: nproc_ob
-  integer,               intent(in)    :: iparaway_ob
   integer,               intent(in)    :: num_kpoints_rd
   real(8),               intent(in)    :: k_rd(3,num_kpoints_rd)
   type(s_cg),            intent(inout) :: cg
@@ -76,19 +77,19 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     case(0)
       select case(gscg)
       case('y')
-        call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg, &
+        call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg, &
                    info_ob,ppg,vlocal)
       case('n')
-        call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
+        call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
                   info_ob,ppg,vlocal)
       end select
     case(3)
       select case(gscg)
       case('y')
-        call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,cg,   &
+        call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,   &
                            info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
       case('n')
-        call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,iparaway_ob,   &
+        call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
                            info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
       end select
     end select
@@ -97,7 +98,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     case(0)
       call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,   &
                    iflag_diisjump, &
-                   norm_diff_psi_stock,info_ob,ppg,vlocal,iparaway_ob)
+                   norm_diff_psi_stock,info_ob,ppg,vlocal)
     case(3)
       stop "rmmdiis method is not implemented for periodic systems."
     end select
@@ -113,17 +114,24 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      
-        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,iobnum,itotmst,   &
+        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iobnum,itotmst,   &
                            mst,ifmst,info_ob,ppg,vlocal)
 
       case(3)
-        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iparaway_ob,  &
+        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,  &
                                     iobnum,itotmst,mst,ifmst,   &
                                     info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
       end select
     end if
   end if
   
+! density
+  call timer_begin(LOG_CALC_RHO)
+
+  call calc_density(srho_s,spsi,info,mg,system%nspin)
+
+  call timer_end(LOG_CALC_RHO)
+
 end subroutine scf_iteration
 
 end module scf_iteration_sub
