@@ -13,19 +13,22 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE simple_mixing(c1,c2)
+SUBROUTINE simple_mixing(nspin,c1,c2,srho_s)
+use structures
 use scf_data
 implicit none
+integer,intent(in) :: nspin
+real(8),intent(IN) :: c1,c2
+type(s_scalar) :: srho_s(nspin)
 
 integer :: ix,iy,iz
-real(8),intent(IN) :: c1,c2
 
 if(ilsda == 0)then
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_out(ix,iy,iz,num_rho_stock)=rho(ix,iy,iz)
+    rho_out(ix,iy,iz,num_rho_stock)=srho_s(1)%f(ix,iy,iz)
   end do
   end do
   end do
@@ -34,7 +37,8 @@ elseif( ilsda==1 )then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_s_out(ix,iy,iz,num_rho_stock,1:2)=rho_s(ix,iy,iz,1:2)
+    rho_s_out(ix,iy,iz,num_rho_stock,1)=srho_s(1)%f(ix,iy,iz)
+    rho_s_out(ix,iy,iz,num_rho_stock,2)=srho_s(2)%f(ix,iy,iz)
   end do
   end do
   end do
@@ -45,8 +49,8 @@ if(ilsda == 0)then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho(ix,iy,iz) = c1*rho_in(ix,iy,iz,num_rho_stock) + c2*rho_out(ix,iy,iz,num_rho_stock)
-    rho_in(ix,iy,iz,num_rho_stock+1) = rho(ix,iy,iz) 
+    srho_s(1)%f(ix,iy,iz) = c1*rho_in(ix,iy,iz,num_rho_stock) + c2*rho_out(ix,iy,iz,num_rho_stock)
+    rho_in(ix,iy,iz,num_rho_stock+1) = srho_s(1)%f(ix,iy,iz)
   end do
   end do
   end do
@@ -54,11 +58,10 @@ else if(ilsda == 1)then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_s(ix,iy,iz,1) = c1*rho_s_in(ix,iy,iz,num_rho_stock,1) + c2*rho_s_out(ix,iy,iz,num_rho_stock,1)
-    rho_s(ix,iy,iz,2) = c1*rho_s_in(ix,iy,iz,num_rho_stock,2) + c2*rho_s_out(ix,iy,iz,num_rho_stock,2)
-    rho(ix,iy,iz) = rho_s(ix,iy,iz,1)+rho_s(ix,iy,iz,2)
-    rho_s_in(ix,iy,iz,num_rho_stock+1,1) = rho_s(ix,iy,iz,1) 
-    rho_s_in(ix,iy,iz,num_rho_stock+1,2) = rho_s(ix,iy,iz,2) 
+    srho_s(1)%f(ix,iy,iz) = c1*rho_s_in(ix,iy,iz,num_rho_stock,1) + c2*rho_s_out(ix,iy,iz,num_rho_stock,1)
+    srho_s(2)%f(ix,iy,iz) = c1*rho_s_in(ix,iy,iz,num_rho_stock,2) + c2*rho_s_out(ix,iy,iz,num_rho_stock,2)
+    rho_s_in(ix,iy,iz,num_rho_stock+1,1) = srho_s(1)%f(ix,iy,iz)
+    rho_s_in(ix,iy,iz,num_rho_stock+1,2) = srho_s(2)%f(ix,iy,iz)
   end do
   end do
   end do
