@@ -3,7 +3,6 @@ set(SOURCES
     allocate_psl.f90
     calc_density.f90
     change_order.f90
-    copyVlocal.f90
     copy_psi_mesh.f90
     deallocate_mat.f90
     gradient2.f90

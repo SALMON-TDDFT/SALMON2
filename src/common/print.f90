@@ -167,8 +167,6 @@ contains
                     ,mg%is_array(3):mg%ie_array(3)))
   ! overlap region communication
     if(info%if_divide_rspace) then
-      !call update_overlap_C(tpsi%zwf,mg%is_array,mg%ie_array,norb,Nd & !????????
-      !                     ,mg%is,mg%ie,info%irank_r,info%icomm_r)
       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 

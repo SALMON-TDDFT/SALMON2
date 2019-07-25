@@ -91,7 +91,7 @@ type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_stencil) :: stencil
 type(s_scalar) :: srho
-type(s_scalar) :: sVh
+type(s_scalar) :: sVh,sVpsl
 type(s_scalar),allocatable :: V_local(:),srho_s(:,:),sVxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
@@ -230,12 +230,6 @@ if(iopt==1)then
     info%numo = iobnum/nspin
     
     info%if_divide_rspace = nproc_mxin_mul.ne.1
-    info%irank_r(1) = iup_array(1)
-    info%irank_r(2) = idw_array(1)
-    info%irank_r(3) = jup_array(1)
-    info%irank_r(4) = jdw_array(1)
-    info%irank_r(5) = kup_array(1)
-    info%irank_r(6) = kdw_array(1)
     info%icomm_r    = nproc_group_korbital
     info%icomm_o    = nproc_group_kgrid
     info%icomm_ko   = nproc_group_rho
@@ -276,12 +270,6 @@ if(iopt==1)then
     info_ob%numo = 1
     info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
     info_ob%if_divide_orbit  = nproc_ob.ne.1
-    info_ob%irank_r(1) = iup_array(1)
-    info_ob%irank_r(2) = idw_array(1)
-    info_ob%irank_r(3) = jup_array(1)
-    info_ob%irank_r(4) = jdw_array(1)
-    info_ob%irank_r(5) = kup_array(1)
-    info_ob%irank_r(6) = kdw_array(1)
     info_ob%icomm_r    = nproc_group_korbital
     
     allocate(srho_s(system%nspin,1),V_local(system%nspin),sVxc(system%nspin))
@@ -293,6 +281,7 @@ if(iopt==1)then
       allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     end do
     allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(sVpsl%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     
     select case(iperiodic)
     case(0)
@@ -385,6 +374,7 @@ if(iopt==1)then
       call allocate_psl
       call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
     end if
+    sVpsl%f = Vpsl
 
     if(iperiodic==3) call get_fourier_grid_G(fg)
 
@@ -449,7 +439,7 @@ if(iopt==1)then
     call gram_schmidt(system, mg, info, spsi)
 
 
-    allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
+    allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     allocate( rho_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) )  
     allocate( rho_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) ) 
     rho_in =0d0
@@ -507,6 +497,7 @@ if(iopt==1)then
     Vh=0.d0
 
     call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
+    sVh%f = Vh
     
     if(ilsda == 0) then
       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -516,17 +507,6 @@ if(iopt==1)then
     allocate( esp(itotMST,num_kpoints_rd) )
 
     call exc_cor_ns(ppn)
-
-    call allgatherv_vlocal
-
-    if(iperiodic==3) then
-      allocate(stencil%vec_kAc(3,k_sta:k_end))
-      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
-      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
-    end if
-    do jspin=1,system%nspin
-      V_local(jspin)%f = Vlocal(:,:,:,jspin)
-    end do
     if(ilsda == 1) then
       do jspin=1,system%nspin
         srho_s(jspin,1)%f = rho_s(:,:,:,jspin)
@@ -536,8 +516,18 @@ if(iopt==1)then
       srho_s(1,1)%f = rho
       sVxc(1)%f = Vxc
     end if
-    sVh%f = Vh
     energy%E_xc = Exc
+
+    call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+    do jspin=1,system%nspin
+      Vlocal(:,:,:,jspin) = V_local(jspin)%f
+    end do
+
+    if(iperiodic==3) then
+      allocate(stencil%vec_kAc(3,k_sta:k_end))
+      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
+      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
+    end if
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
@@ -622,12 +612,6 @@ if(iopt==1)then
     
     info%if_divide_rspace = nproc_mxin_mul.ne.1
     info%if_divide_orbit  = nproc_ob.ne.1
-    info%irank_r(1) = iup_array(1)
-    info%irank_r(2) = idw_array(1)
-    info%irank_r(3) = jup_array(1)
-    info%irank_r(4) = jdw_array(1)
-    info%irank_r(5) = kup_array(1)
-    info%irank_r(6) = kdw_array(1)
     info%icomm_r   = nproc_group_korbital
     info%icomm_o   = nproc_group_kgrid
     info%icomm_ko  = nproc_group_rho
@@ -667,12 +651,6 @@ if(iopt==1)then
     info_ob%io_e = 1
     info_ob%numo = 1
     info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
-    info_ob%irank_r(1) = iup_array(1)
-    info_ob%irank_r(2) = idw_array(1)
-    info_ob%irank_r(3) = jup_array(1)
-    info_ob%irank_r(4) = jdw_array(1)
-    info_ob%irank_r(5) = kup_array(1)
-    info_ob%irank_r(6) = kdw_array(1)
     info_ob%icomm_r    = nproc_group_korbital
     
     allocate(srho_s(system%nspin,1),V_local(system%nspin),sVxc(system%nspin))
@@ -960,6 +938,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
       call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
+      sVh%f = Vh
     end if
     call timer_end(LOG_CALC_HARTREE)
   
@@ -969,31 +948,26 @@ DFT_Iteration : do iter=1,iDiter(img)
       call exc_cor_ns(ppn)
     end if
     call timer_end(LOG_CALC_EXC_COR)
-   
+    if(ilsda == 1) then
+      do jspin=1,system%nspin
+        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+      end do
+    else
+      sVxc(1)%f = Vxc
+    end if
+    energy%E_xc = Exc
 
-    call allgatherv_vlocal
-    
-  
+    call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+    do jspin=1,system%nspin
+      Vlocal(:,:,:,jspin) = V_local(jspin)%f
+    end do
+
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
       allocate(stencil%vec_kAc(3,k_sta:k_end))
       stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
     end if
-    do jspin=1,system%nspin
-      V_local(jspin)%f = Vlocal(:,:,:,jspin)
-    end do
-    if(ilsda == 1) then
-      do jspin=1,system%nspin
-        srho_s(jspin,1)%f = rho_s(:,:,:,jspin)
-        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-      end do
-    else
-      srho_s(1,1)%f = rho
-      sVxc(1)%f = Vxc
-    end if
-    sVh%f = Vh
-    energy%E_xc = Exc
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
@@ -1024,188 +998,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       call change_order(psi)
     end if
     call timer_end(LOG_CALC_CHANGE_ORDER)
-  
-  else if(iscf_order==2)then
 
-    call gram_schmidt(system, mg, info, spsi)
-
-
-    call timer_begin(LOG_CALC_SUBSPACE_DIAG)
-    if(Miter>iDiter_nosubspace_diag)then
-      select case(iperiodic)
-      case(0)
-        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iobnum,itotmst,mst,ifmst,  &
-                info_ob,ppg,vlocal)
-
-      case(3)
-        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,  &
-                                    iobnum,itotmst,mst,ifmst,   &
-                                    info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
-
-      end select
-    end if
-    call timer_end(LOG_CALC_SUBSPACE_DIAG)
-
-    call gram_schmidt(system, mg, info, spsi)    
-
-! solve Kohn-Sham equation by minimization techniques
-    call timer_begin(LOG_CALC_MINIMIZATION)
-    if( amin_routine == 'cg' .or. (amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
-      select case(iperiodic)
-      case(0)
-        select case(gscg)
-        case('y')
-          call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg, &
-                     info_ob,ppg,vlocal)
-        case('n')
-          call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,  &
-                    info_ob,ppg,vlocal)
-        end select
-      case(3)
-        select case(gscg)
-        case('y')
-          call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,   &
-                             info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
-        case('n')
-          call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
-                             info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
-        end select
-      end select
-    else if( amin_routine == 'diis' .or. amin_routine == 'cg-diis' ) then
-      select case(iperiodic)
-      case(0)
-        call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,iflag_diisjump, &
-                     norm_diff_psi_stock,info_ob,ppg,vlocal)
-      case(3)
-        stop "rmmdiis method is not implemented for periodic systems."
-      end select
-    end if
-    call timer_end(LOG_CALC_MINIMIZATION)
-
-
-    call gram_schmidt(system, mg, info, spsi)    
-
-    call timer_begin(LOG_CALC_RHO)
-    call calc_density(srho_s,spsi,info,mg,nspin)
-
-    if(ilsda==0)then
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)
-      end do
-      end do
-      end do
-    else if(ilsda==1)then
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
-      end do
-      end do
-      end do
-    end if
-    call timer_end(LOG_CALC_RHO)
-
-
-    select case(amixing)
-      case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden'); call buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
-    end select
- 
-
-    call timer_begin(LOG_CALC_HARTREE)
-    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
-    end if
-    call timer_end(LOG_CALC_HARTREE)
-
-  
-    call timer_begin(LOG_CALC_EXC_COR)
-    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call exc_cor_ns(ppn)
-    end if
-    call timer_end(LOG_CALC_EXC_COR)
-   
-
-    call allgatherv_vlocal
-
-    
-    call timer_begin(LOG_CALC_RHO)
-    call calc_density(srho_s,spsi,info,mg,nspin)
-    if(ilsda==0)then
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        srho%f(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)
-        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)
-      end do
-      end do
-      end do
-    else if(ilsda==1)then
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        srho%f(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
-        rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
-      end do
-      end do
-      end do
-    end if
-    call timer_end(LOG_CALC_RHO)
-
-
-    call timer_begin(LOG_CALC_TOTAL_ENERGY)
-    if(iperiodic==3) then
-      allocate(stencil%vec_kAc(3,k_sta:k_end))
-      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
-      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
-    end if
-    do jspin=1,system%nspin
-      V_local(jspin)%f = Vlocal(:,:,:,jspin)
-    end do
-    if(ilsda == 1) then
-      do jspin=1,system%nspin
-        srho_s(jspin,1)%f = rho_s(:,:,:,jspin)
-        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-      end do
-    else
-      srho_s(1,1)%f = rho
-      sVxc(1)%f = Vxc
-    end if
-    sVh%f = Vh
-    energy%E_xc = Exc
-    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
-    select case(iperiodic)
-    case(0)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
-    case(3)
-      if(iflag_hartree==2)then
-        fg%zrhoG_ele = rhoe_G
-      else if(iflag_hartree==4)then
-        do iz=1,lg_num(3)/NPUZ
-        do iy=1,lg_num(2)/NPUY
-        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%zrhoG_ele(nn) = rhoe_G(n)
-        enddo
-        enddo
-        enddo
-      end if
-      call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
-    end select
-    esp = energy%esp(:,:,1) !++++++++
-    if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
-    call timer_end(LOG_CALC_TOTAL_ENERGY)
   end if
 
   call timer_begin(LOG_WRITE_GS_RESULTS)
