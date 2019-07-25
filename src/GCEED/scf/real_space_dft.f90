@@ -506,15 +506,7 @@ if(iopt==1)then
     end if
     allocate( esp(itotMST,num_kpoints_rd) )
 
-    call exc_cor_ns(ppn)
-    if(ilsda == 1) then
-      do jspin=1,system%nspin
-        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-      end do
-    else
-      sVxc(1)%f = Vxc
-    end if
-    energy%E_xc = Exc
+    call exc_cor_ns(system%nspin,srho_s,ppn,sVxc,energy%E_xc)
 
     call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
@@ -883,7 +875,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
   end do
 
-  call copy_density(system%nspin,srho,srho_s)
+  call copy_density(system%nspin,srho_s)
 
   if(iscf_order==1)then
 
@@ -897,16 +889,16 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_RHO)
 
+    select case(amixing)
+      case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
+      case ('broyden'); call buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
+    end select
+    call timer_end(LOG_CALC_RHO)
+
     srho%f = 0d0
     do jspin=1,nspin
       srho%f = srho%f + srho_s(jspin)%f
     end do
-
-    select case(amixing)
-      case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
-      case ('broyden'); call buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
-    end select
-    call timer_end(LOG_CALC_RHO)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
@@ -916,17 +908,9 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_EXC_COR)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call exc_cor_ns(ppn)
+      call exc_cor_ns(system%nspin,srho_s,ppn,sVxc,energy%E_xc)
     end if
     call timer_end(LOG_CALC_EXC_COR)
-    if(ilsda == 1) then
-      do jspin=1,system%nspin
-        sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-      end do
-    else
-      sVxc(1)%f = Vxc
-    end if
-    energy%E_xc = Exc
 
     call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
 
@@ -1100,6 +1084,14 @@ end do DFT_Iteration
 ! for OUT_data
 Vh = sVh%f
 rho = srho%f
+if(ilsda == 1) then
+  do jspin=1,system%nspin
+    Vxc_s(:,:,:,jspin) = sVxc(jspin)%f
+  end do
+else
+  Vxc = sVxc(1)%f
+end if
+Exc = energy%E_xc
 
 ! Store to psi/zpsi
 select case(iperiodic)

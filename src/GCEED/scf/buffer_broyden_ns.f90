@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
+subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
   use structures, only: s_rgrid,s_dft_system,s_scalar
   use salmon_parallel, only: nproc_group_global
   use broyden_sub
@@ -22,7 +22,6 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
   implicit none
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
-  type(s_scalar),intent(inout) :: srho
   type(s_scalar),intent(inout) :: srho_s(system%nspin)
   integer,intent(in) :: mst(2),ifmst(2)
   integer,intent(in) :: iter
@@ -34,7 +33,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      vecr(ix,iy,iz)=srho%f(ix,iy,iz)
+      vecr(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -45,7 +44,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      srho%f(ix,iy,iz)= vecr(ix,iy,iz)
+      srho_s(1)%f(ix,iy,iz)= vecr(ix,iy,iz)
     end do
     end do
     end do
@@ -77,13 +76,6 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
       end if
     end do
 
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      srho%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz) + srho_s(2)%f(ix,iy,iz)
-    end do
-    end do
-    end do
   end if
 
 end subroutine buffer_broyden_ns

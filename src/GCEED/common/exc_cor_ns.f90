@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine exc_cor_ns(ppn)
+subroutine exc_cor_ns(nspin,srho_s,ppn,sVxc,E_xc)
   use salmon_parallel, only: nproc_group_h
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
@@ -21,9 +21,13 @@ subroutine exc_cor_ns(ppn)
   use new_world_sub
   use allocate_mat_sub
   use sendrecvh_sub
-  use structures, only: s_pp_nlcc
+  use structures, only: s_pp_nlcc,s_scalar
   implicit none
+  integer         ,intent(in) :: nspin
+  type(s_scalar)  ,intent(in) :: srho_s(nspin)
   type(s_pp_nlcc), intent(in) :: ppn
+  type(s_scalar)              :: sVxc(nspin)
+  real(8)                     :: E_xc
 
   integer :: ix,iy,iz,is
   real(8) :: tot_exc
@@ -34,7 +38,7 @@ subroutine exc_cor_ns(ppn)
     do iz=1,ng_num(3)
     do iy=1,ng_num(2)
     do ix=1,ng_num(1)
-      rho_tmp(ix,iy,iz)=rho(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)
+      rho_tmp(ix,iy,iz)=srho_s(1)%f(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)
     end do
     end do
     end do
@@ -43,7 +47,7 @@ subroutine exc_cor_ns(ppn)
     do iz=1,ng_num(3)
     do iy=1,ng_num(2)
     do ix=1,ng_num(1)
-      rho_s_tmp(ix,iy,iz,is)=rho_s(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1,is)
+      rho_s_tmp(ix,iy,iz,is)=srho_s(is)%f(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)
     end do
     end do
     end do
@@ -64,7 +68,7 @@ subroutine exc_cor_ns(ppn)
     do iz=ng_sta(3),ng_end(3)
     do iy=ng_sta(2),ng_end(2)
     do ix=ng_sta(1),ng_end(1)
-      rhd(ix,iy,iz)=dble(rho(ix,iy,iz))
+      rhd(ix,iy,iz)=dble(srho_s(1)%f(ix,iy,iz))
     enddo
     enddo
     enddo
@@ -115,7 +119,7 @@ subroutine exc_cor_ns(ppn)
     do iz=1,ng_num(3)
     do iy=1,ng_num(2)
     do ix=1,ng_num(1)
-      vxc(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)=vxc_tmp(ix,iy,iz)
+      sVxc(1)%f(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)=vxc_tmp(ix,iy,iz)
     end do
     end do
     end do
@@ -124,7 +128,7 @@ subroutine exc_cor_ns(ppn)
     do iz=1,ng_num(3)
     do iy=1,ng_num(2)
     do ix=1,ng_num(1)
-      vxc_s(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1,is)=vxc_s_tmp(ix,iy,iz,is)
+      sVxc(is)%f(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
     end do
     end do
     end do
@@ -141,7 +145,7 @@ subroutine exc_cor_ns(ppn)
   end do
   tot_exc=tot_exc*hvol
  
-  call comm_summation(tot_exc,Exc,nproc_group_h)
+  call comm_summation(tot_exc,E_xc,nproc_group_h)
 
   return
 end subroutine exc_cor_ns

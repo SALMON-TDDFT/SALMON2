@@ -328,17 +328,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   call timer_begin(LOG_CALC_EXC_COR)
   if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-    call exc_cor_ns(ppn)
+    call exc_cor_ns(system%nspin,srho_s,ppn,sVxc,energy%E_xc)
   end if
   call timer_end(LOG_CALC_EXC_COR)
-  if(ilsda == 1) then
-    do jspin=1,system%nspin
-      sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-    end do
-  else
-    sVxc(1)%f = Vxc
-  end if
-  energy%E_xc = Exc
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
   call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
