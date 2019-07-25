@@ -23,7 +23,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
   type(s_scalar),intent(inout) :: srho
-  type(s_scalar),intent(inout) :: srho_s(2,1)
+  type(s_scalar),intent(inout) :: srho_s(system%nspin)
   integer,intent(in) :: mst(2),ifmst(2)
   integer,intent(in) :: iter
   integer :: ix,iy,iz,is
@@ -34,7 +34,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      vecr(ix,iy,iz)=rho(ix,iy,iz)
+      vecr(ix,iy,iz)=srho%f(ix,iy,iz)
     end do
     end do
     end do
@@ -45,7 +45,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      rho(ix,iy,iz)= vecr(ix,iy,iz)
+      srho%f(ix,iy,iz)= vecr(ix,iy,iz)
     end do
     end do
     end do
@@ -57,7 +57,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
-          vecr(ix,iy,iz)=rho_s(ix,iy,iz,is)
+          vecr(ix,iy,iz)=srho_s(is)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -70,7 +70,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
-          rho_s(ix,iy,iz,is)= vecr(ix,iy,iz)
+          srho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
         end do
         end do
         end do
@@ -80,7 +80,7 @@ subroutine buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      rho(ix,iy,iz)= rho_s(ix,iy,iz,1)+rho_s(ix,iy,iz,2)
+      srho%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz) + srho_s(2)%f(ix,iy,iz)
     end do
     end do
     end do

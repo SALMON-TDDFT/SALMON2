@@ -13,9 +13,13 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine copy_density
+subroutine copy_density(nspin,srho,srho_s)
+use structures
 use scf_data
 implicit none
+integer       ,intent(in) :: nspin
+type(s_scalar),intent(in) :: srho
+type(s_scalar),intent(in) :: srho_s(nspin)
 integer :: iiter
 integer :: is
 integer :: ix,iy,iz
@@ -25,7 +29,7 @@ if(Miter==1)then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_in(ix,iy,iz,num_rho_stock+1)=rho(ix,iy,iz)
+    rho_in(ix,iy,iz,num_rho_stock+1)=srho%f(ix,iy,iz)
   end do
   end do
   end do
@@ -34,7 +38,8 @@ if(Miter==1)then
     do iz=ng_sta(3),ng_end(3)
     do iy=ng_sta(2),ng_end(2)
     do ix=ng_sta(1),ng_end(1)
-      rho_s_in(ix,iy,iz,num_rho_stock+1,1:2)=rho_s(ix,iy,iz,1:2)
+      rho_s_in(ix,iy,iz,num_rho_stock+1,1)=srho_s(1)%f(ix,iy,iz)
+      rho_s_in(ix,iy,iz,num_rho_stock+1,2)=srho_s(2)%f(ix,iy,iz)
     end do
     end do
     end do

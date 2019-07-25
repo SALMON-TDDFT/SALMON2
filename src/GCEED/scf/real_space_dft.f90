@@ -883,9 +883,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
   end do
 
-  call copy_density
-
-
+  call copy_density(system%nspin,srho,srho_s)
 
   if(iscf_order==1)then
 
@@ -899,45 +897,23 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_RHO)
 
-    if(ilsda==0)then
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        srho%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
-        rho(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
-      end do
-      end do
-      end do
-    else if(ilsda==1)then
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        srho%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)+srho_s(2)%f(ix,iy,iz)
-        rho(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)+srho_s(2)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,1)=srho_s(1)%f(ix,iy,iz)
-        rho_s(ix,iy,iz,2)=srho_s(2)%f(ix,iy,iz)
-      end do
-      end do
-      end do
-    end if
+    srho%f = 0d0
+    do jspin=1,nspin
+      srho%f = srho%f + srho_s(jspin)%f
+    end do
 
     select case(amixing)
       case ('simple') ; call simple_mixing(1.d0-rmixrate,rmixrate)
       case ('broyden'); call buffer_broyden_ns(ng,system,srho,srho_s,mst,ifmst,iter)
     end select
     call timer_end(LOG_CALC_RHO)
-    
-  
+
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
       call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh)
-      Vh = sVh%f
     end if
     call timer_end(LOG_CALC_HARTREE)
-  
-  
+
     call timer_begin(LOG_CALC_EXC_COR)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
       call exc_cor_ns(ppn)
@@ -953,9 +929,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     energy%E_xc = Exc
 
     call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
-    do jspin=1,system%nspin
-      Vlocal(:,:,:,jspin) = V_local(jspin)%f
-    end do
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
@@ -1005,7 +978,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng_sta(3),ng_end(3) 
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
-        sum0=sum0+abs(rho(ix,iy,iz)-rho_stock(ix,iy,iz,1))
+        sum0=sum0+abs(srho%f(ix,iy,iz)-rho_stock(ix,iy,iz,1))
       end do
       end do
       end do
@@ -1021,7 +994,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng_sta(3),ng_end(3) 
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
-        sum0=sum0+(rho(ix,iy,iz)-rho_stock(ix,iy,iz,1))**2
+        sum0=sum0+(srho%f(ix,iy,iz)-rho_stock(ix,iy,iz,1))**2
       end do
       end do
       end do
@@ -1035,7 +1008,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng_sta(3),ng_end(3) 
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
-        sum0=sum0+(Vlocal(ix,iy,iz,1)-Vlocal_stock(ix,iy,iz,1))**2
+        sum0=sum0+(V_local(1)%f(ix,iy,iz)-Vlocal_stock(ix,iy,iz,1))**2
       end do
       end do
       end do
@@ -1088,7 +1061,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rNebox1=rNebox1+rho(ix,iy,iz)
+    rNebox1=rNebox1+srho%f(ix,iy,iz)
   end do
   end do
   end do
@@ -1104,8 +1077,8 @@ if(ilsda==0)then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_stock(ix,iy,iz,1)=rho(ix,iy,iz)
-    Vlocal_stock(ix,iy,iz,1)=Vlocal(ix,iy,iz,1)
+    rho_stock(ix,iy,iz,1)=srho%f(ix,iy,iz)
+    Vlocal_stock(ix,iy,iz,1)=V_local(1)%f(ix,iy,iz)
   end do
   end do
   end do
@@ -1114,14 +1087,19 @@ else if(ilsda==1)then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_stock(ix,iy,iz,1)=rho(ix,iy,iz)
-    Vlocal_stock(ix,iy,iz,1:2)=Vlocal(ix,iy,iz,1:2)
+    rho_stock(ix,iy,iz,1)=srho%f(ix,iy,iz)
+    Vlocal_stock(ix,iy,iz,1)=V_local(1)%f(ix,iy,iz)
+    Vlocal_stock(ix,iy,iz,2)=V_local(2)%f(ix,iy,iz)
   end do
   end do
   end do
 end if
 
 end do DFT_Iteration
+
+! for OUT_data
+Vh = sVh%f
+rho = srho%f
 
 ! Store to psi/zpsi
 select case(iperiodic)
