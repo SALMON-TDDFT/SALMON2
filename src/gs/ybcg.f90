@@ -51,7 +51,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   type(s_orbital_parallel)       :: info_ob
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  type(s_scalar),intent(in) :: vlocal(system%nspin)
   integer,parameter :: nd=4
   integer :: iter,iob,job
   integer :: ix,iy,iz
@@ -120,7 +120,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,is)
+      v(1)%f(ix,iy,iz) = vlocal(is)%f(ix,iy,iz)
     end do
     end do
     end do
