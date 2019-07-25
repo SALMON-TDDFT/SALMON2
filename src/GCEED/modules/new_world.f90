@@ -979,6 +979,44 @@ CONTAINS
   end subroutine copyVlocal
 end subroutine allgatherv_vlocal
 
+subroutine wrapper_allgatherv_vlocal ! --> remove (future works)
+  use structures
+  implicit none
+  type(s_scalar) :: sVh,sVpsl
+  type(s_scalar),allocatable :: sVlocal(:),sVxc(:)
+  integer :: nspin,jspin
+
+  nspin = 1
+  if(ispin==1) nspin = 2
+  allocate(sVlocal(nspin),sVxc(nspin))
+  do jspin=1,nspin
+    allocate(sVlocal(jspin)%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+    allocate(sVxc(jspin)%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  end do
+  allocate(sVh%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  allocate(sVpsl%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  sVpsl%f = Vpsl
+  sVh%f = Vh
+  if(ilsda == 1) then
+    do jspin=1,nspin
+      sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+    end do
+  else
+    sVxc(1)%f = Vxc
+  end if
+
+  call allgatherv_vlocal(nspin,sVh,sVpsl,sVxc,sVlocal)
+
+  do jspin=1,nspin
+    Vlocal(:,:,:,jspin) = sVlocal(jspin)%f
+    call deallocate_scalar(sVxc(jspin))
+    call deallocate_scalar(sVlocal(jspin))
+  end do
+  call deallocate_scalar(sVh)
+  call deallocate_scalar(sVpsl)
+  return
+end subroutine wrapper_allgatherv_vlocal
+
 !======================================================================
 subroutine mpibcast_mesh_s_kxc(Vbox)
 use salmon_parallel, only: nproc_id_global, nproc_group_h, nproc_id_h

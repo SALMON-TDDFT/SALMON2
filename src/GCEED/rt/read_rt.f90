@@ -482,7 +482,7 @@ end do
 end do
 
 itt=Miter_rt
-!call allgatherv_vlocal
+call wrapper_allgatherv_vlocal
 
 if(comm_is_root(nproc_id_global))then
   read(98) (vecDs(jj),jj=1,3)

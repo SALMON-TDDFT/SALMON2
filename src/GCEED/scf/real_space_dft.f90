@@ -496,7 +496,8 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,sVh%f)
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
+    sVh%f = Vh
     
     if(ilsda == 0) then
       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )  
@@ -518,6 +519,9 @@ if(iopt==1)then
     energy%E_xc = Exc
 
     call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+    do jspin=1,system%nspin
+      Vlocal(:,:,:,jspin) = V_local(jspin)%f
+    end do
 
     if(iperiodic==3) then
       allocate(stencil%vec_kAc(3,k_sta:k_end))
@@ -933,7 +937,8 @@ DFT_Iteration : do iter=1,iDiter(img)
   
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,sVh%f)
+      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh)
+      sVh%f = Vh
     end if
     call timer_end(LOG_CALC_HARTREE)
   
@@ -953,6 +958,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     energy%E_xc = Exc
 
     call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+    do jspin=1,system%nspin
+      Vlocal(:,:,:,jspin) = V_local(jspin)%f
+    end do
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
