@@ -15,8 +15,8 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil,Vh_out)
-  use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
+SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil,srho,sVh)
+  use structures, only: s_rgrid,s_sendrecv_grid,s_stencil,s_scalar
   use hartree_cg_sub
   use hartree_periodic_sub
   use hartree_ffte_sub
@@ -30,22 +30,23 @@ SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil,Vh_out)
   real(8)      ,intent(in) :: Brl(3,3)
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
-  real(8) :: Vh_out(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  type(s_scalar) ,intent(in) :: srho
+  type(s_scalar)             :: sVh
 
   select case(iperiodic)
   case(0)
-    call Hartree_cg(lg,mg,ng,rho,Vh_out,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,   &
+    call Hartree_cg(lg,mg,ng,srho%f,sVh%f,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,   &
                     meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                     iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole, &
                     ibox_icoobox_bound,icoobox_bound)
   case(3)
     select case(iflag_hartree)
     case(2)
-      call Hartree_periodic(lg,mg,ng,rho,Vh_out,hgs,   &
+      call Hartree_periodic(lg,mg,ng,srho%f,sVh%f,hgs,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
     case(4)
-      call Hartree_FFTE(lg,mg,ng,rho,Vh_out,hgs,npuw,npuy,npuz,   &
+      call Hartree_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,npuw,npuy,npuz,   &
                         a_ffte,b_ffte,rhoe_g,coef_poisson)
     end select
   end select
