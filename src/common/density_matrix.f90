@@ -120,14 +120,15 @@ contains
     type(s_orbital),intent(in) :: psi
     type(s_scalar) :: rho(nspin,info%im_s:info%im_e)
     !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz
+    integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
     is = mg%is
     ie = mg%ie
     nsize = mg%num(1) * mg%num(2) * mg%num(3)
-    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(get_nthreads())-1))
-    wrk=0.d0
+    nthreads = get_nthreads()
+
+    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(nthreads)-1))
 
     if(allocated(psi%rwf)) then
 
@@ -136,6 +137,7 @@ contains
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
+        wrk(:,:,:,tid) = 0.d0
 
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
@@ -154,7 +156,7 @@ contains
 
         ix = size(wrk,4)/2
         do while(ix > 0)
-          if(tid < ix) then
+          if(tid < ix .and. tid + ix < nthreads) then
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
           end if
           ix = ix/2
@@ -175,6 +177,7 @@ contains
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
+        wrk(:,:,:,tid) = 0.d0
 
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
@@ -193,7 +196,7 @@ contains
 
         ix = size(wrk,4)/2
         do while(ix > 0)
-          if(tid < ix) then
+          if(tid < ix .and. tid + ix < nthreads) then
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
           end if
           ix = ix/2
