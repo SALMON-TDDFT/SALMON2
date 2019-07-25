@@ -172,6 +172,10 @@ module structures
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
+
+    ! atom oriented
+    integer,allocatable :: nprojector(:)  ! number of projector for atom
+    integer,allocatable :: iplma(:,:)     ! lma list for atom
   end type s_pp_grid
 
   type s_pp_nlcc

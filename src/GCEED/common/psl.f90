@@ -16,6 +16,7 @@
 SUBROUTINE init_ps(alat,brl,matrix_A)
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root
+use prep_pp_sub, only: set_atom_parameter
 use scf_data
 use allocate_psl_sub
 implicit none
@@ -48,16 +49,21 @@ case(3)
   call calcuV
 end select
 
+call set_atom_parameter(ppg)
+
 return
 
 END SUBROUTINE init_ps
 
 SUBROUTINE dealloc_init_ps(ppg,ppg_all,ppn)
   use structures, only: s_pp_grid, s_pp_nlcc
+  use prep_pp_sub, only: finalize_atom_parameter
   use salmon_global
   implicit none
   type(s_pp_grid) :: ppg,ppg_all
   type(s_pp_nlcc) :: ppn
+
+  call finalize_atom_parameter(ppg)
 
   deallocate(ppg%jxyz, ppg%jxx, ppg%jyy, ppg%jzz, ppg%rxyz)
   deallocate(ppg%lma_tbl, ppg%ia_tbl)

@@ -522,6 +522,51 @@ subroutine set_lma_tbl(pp,ppg)
 
 end subroutine set_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine set_atom_parameter(ppg)
+  use salmon_global,only : natom
+  use structures,only : s_pp_grid
+  implicit none
+  type(s_pp_grid) :: ppg
+  integer :: i,j,n
+
+  call finalize_atom_parameter(ppg) ! for structure opt.
+
+  allocate(ppg%nprojector(natom))
+
+  do i=1,natom
+    n = 0
+    do j=1,ppg%nlma
+      if (ppg%ia_tbl(j) == i) then
+        n = n + 1
+      end if
+    end do
+    ppg%nprojector(i) = n
+  end do
+
+  allocate(ppg%iplma(maxval(ppg%nprojector),natom))
+
+  do i=1,natom
+    n = 1
+    do j=1,ppg%nlma
+      if (ppg%ia_tbl(j) == i) then
+        ppg%iplma(n,i) = j
+        n = n + 1
+      end if
+    end do
+  end do
+
+end subroutine set_atom_parameter
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine finalize_atom_parameter(ppg)
+  use structures,only : s_pp_grid
+  implicit none
+  type(s_pp_grid) :: ppg
+
+  if (allocated(ppg%nprojector)) deallocate(ppg%nprojector)
+  if (allocated(ppg%iplma))      deallocate(ppg%iplma)
+
+end subroutine finalize_atom_parameter
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                    lx,ly,lz,nl,hx,hy,hz,  &
                    flag_use_grad_wf_on_force,property,hvol0)
