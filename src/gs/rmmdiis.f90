@@ -53,7 +53,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   integer,intent(out)   :: iflag_diisjump
   real(8),intent(out)   :: norm_diff_psi_stock(itotmst,1)
   type(s_orbital_parallel)       :: info_ob
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
+  type(s_scalar),intent(in) :: vlocal(system%nspin)
   integer,parameter :: nd=4
   integer :: iob,iob_allob,iter,ix,iy,iz
   integer :: nspin_1
@@ -517,7 +517,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_scalar)        :: v(1)
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  type(s_scalar),intent(in) :: vlocal(ispin+1)
   integer,intent(in)    :: iob_allob
   integer,intent(in)    :: mst(2)
   integer :: ix,iy,iz
@@ -532,7 +532,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
     do iz=mg_zs,mg_ze
     do iy=mg_ys,mg_ye
     do ix=mg_xs,mg_xe
-      v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,1)
+      v(1)%f(ix,iy,iz) = vlocal(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -541,7 +541,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
     do iz=mg_zs,mg_ze
     do iy=mg_ys,mg_ye
     do ix=mg_xs,mg_xe
-      v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,2)
+      v(1)%f(ix,iy,iz) = vlocal(2)%f(ix,iy,iz)
     end do
     end do
     end do

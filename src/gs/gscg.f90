@@ -52,7 +52,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
   integer,intent(in)    :: nproc_ob
   type(s_cg),intent(inout)            :: cg
   type(s_orbital_parallel)       :: info_ob
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  type(s_scalar),intent(in) :: vlocal(system%nspin)
   integer,parameter :: nd=4
   integer :: iter,iob,job
   integer :: ix,iy,iz
@@ -139,7 +139,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,1)
+        v(1)%f(ix,iy,iz) = vlocal(1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -148,7 +148,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,2)
+        v(1)%f(ix,iy,iz) = vlocal(2)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -308,7 +308,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,1)
+          v(1)%f(ix,iy,iz) = vlocal(1)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -317,7 +317,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,2)
+          v(1)%f(ix,iy,iz) = vlocal(2)%f(ix,iy,iz)
         end do
         end do
         end do
