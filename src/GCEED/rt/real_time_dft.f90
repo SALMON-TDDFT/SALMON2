@@ -755,7 +755,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
 
-  allocate(system%Force(3,system%nion))
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
   info%im_s=1
