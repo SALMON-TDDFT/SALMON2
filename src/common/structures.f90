@@ -89,6 +89,7 @@ module structures
     logical :: if_divide_rspace
     logical :: if_divide_orbit
     integer :: icomm_r   ! communicator for r-space
+    integer :: icomm_k   ! communicator for k-space
     integer :: icomm_o   ! communicator for orbital
     integer :: icomm_ro  ! communicator for r-space & orbital
     integer :: icomm_ko  ! communicator for k-space & orbital
