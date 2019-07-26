@@ -96,7 +96,6 @@ type(s_scalar),allocatable :: V_local(:),srho_s(:,:),sVxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
-type(s_force)  :: force
 type(s_cg)  :: cg
 
 logical :: rion_update
@@ -140,7 +139,7 @@ if(iflag_opt==1)then
    call structure_opt_ini(MI)
    flag_opt_conv=.false.
    write(comment_line,10) 0
-   call write_xyz(comment_line,"new","r  ",system,force)
+   call write_xyz(comment_line,"new","r  ",system)
 10 format("#opt iteration step=",i5)
 end if
 call timer_end(LOG_INIT_GS)
@@ -1193,15 +1192,15 @@ end if
 
 ! force
 !if(iflag_opt==1) then
-   call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+   call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
       do iatom=1,MI
          select case(unit_system)
          case('au','a.u.')
-            write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
+            write(*,'(i6,3e16.8)') iatom,(system%Force(ix,iatom),ix=1,3)
          case('A_eV_fs')
-            write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+            write(*,'(i6,3e16.8)') iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
          end select
       end do
    end if
@@ -1214,14 +1213,14 @@ call timer_end(LOG_GS_ITERATION)
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(iflag_opt==1) then
-  call structure_opt_check(MI,iopt,flag_opt_conv,force)
-  if(.not.flag_opt_conv) call structure_opt(MI,iopt,force,system%Rion)
+  call structure_opt_check(MI,iopt,flag_opt_conv,system%Force)
+  if(.not.flag_opt_conv) call structure_opt(MI,iopt,system)
   !! Rion is old variables to be removed 
   !! but currently it is used in many subroutines.
   Rion(:,:) = system%Rion(:,:) 
 
   write(comment_line,10) iopt
-  call write_xyz(comment_line,"add","r  ",system,force)
+  call write_xyz(comment_line,"add","r  ",system)
 
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"

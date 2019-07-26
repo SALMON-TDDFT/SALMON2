@@ -34,7 +34,7 @@ subroutine init_md(system,md)
   endif
 
   allocate(md%Rion_last(3,MI))
-  allocate(md%force_last(3,MI))
+  allocate(md%Force_last(3,MI))
 
   md%E_work = 0d0
 
@@ -229,13 +229,12 @@ subroutine cal_Tion_Temperature_ion(Ene_ion,Temp_ion,system)
 end subroutine cal_Tion_Temperature_ion
 
 
-subroutine time_evolution_step_md_part1(system,force,md)
-  use structures, only: s_dft_system, s_force, s_md
+subroutine time_evolution_step_md_part1(system,md)
+  use structures, only: s_dft_system, s_md
   use salmon_global, only: MI,Kion,dt, Rion
   use const, only: umass,hartree2J,kB
   implicit none
   type(s_dft_system) :: system
-  type(s_force),intent(in) :: force
   type(s_md) :: md
   integer :: iatom
   real(8) :: mass_au, dt_h
@@ -245,11 +244,11 @@ subroutine time_evolution_step_md_part1(system,force,md)
      !update ion velocity with dt/2
      do iatom=1,MI
         mass_au = umass * system%Mass(Kion(iatom))
-        system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
+        system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
      enddo
 
      md%Rion_last(:,:) = system%Rion(:,:)
-     md%force_last(:,:)= force%F(:,:)
+     md%Force_last(:,:)= system%Force(:,:)
 
      !update ion coordinate with dt
      do iatom=1,MI
@@ -289,25 +288,24 @@ subroutine update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
 
 end subroutine 
 
-subroutine time_evolution_step_md_part2(system,force,md)
-  use structures, only: s_dft_system, s_force, s_md
+subroutine time_evolution_step_md_part2(system,md)
+  use structures, only: s_dft_system, s_md
   use salmon_global, only: MI,Kion,dt,stop_system_momt
   use const, only: umass,hartree2J,kB
   implicit none
   type(s_dft_system) :: system
-  type(s_force),intent(in) :: force
   type(s_md) :: md
   integer :: iatom
   real(8) :: mass_au,dt_h, aforce(3,MI), dR(3,MI)
 
   dt_h = dt*0.5d0
-  aforce(:,:) = 0.5d0*( md%force_last(:,:) + force%F(:,:) )
+  aforce(:,:) = 0.5d0*( md%Force_last(:,:) + system%Force(:,:) )
 
   !update ion velocity with dt/2
   dR(:,:) = system%Rion(:,:) - md%Rion_last(:,:)
   do iatom=1,MI
      mass_au = umass * system%Mass(Kion(iatom))
-     system%Velocity(:,iatom) = system%Velocity(:,iatom) + force%F(:,iatom)/mass_au * dt_h
+     system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
      md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
   enddo
 
