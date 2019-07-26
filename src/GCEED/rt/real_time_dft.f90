@@ -819,52 +819,10 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   call init_sendrecv_grid(srg_ng, ng, 1, &
     & nproc_group_global, neig_ng)
 
-  allocate(spsi_in%zwf(mg%is_array(1):mg%ie_array(1),  &
-                       mg%is_array(2):mg%ie_array(2),  &
-                       mg%is_array(3):mg%ie_array(3),  &
-                       1:nspin,  &
-                       info%io_s:info%io_e,  &
-                       info%ik_s:info%ik_e,  &
-                       1))
-  allocate(spsi_out%zwf(mg%is_array(1):mg%ie_array(1),  &
-                        mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),  &
-                        1:nspin,  &
-                        info%io_s:info%io_e,  &
-                        info%ik_s:info%ik_e,  &
-                        1))
-  allocate(tpsi1%zwf(mg%is_array(1):mg%ie_array(1),  &
-                        mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),  &
-                        1:nspin,  &
-                        info%io_s:info%io_e,  &
-                        info%ik_s:info%ik_e,  &
-                        1))
-  allocate(tpsi2%zwf(mg%is_array(1):mg%ie_array(1),  &
-                        mg%is_array(2):mg%ie_array(2),  &
-                        mg%is_array(3):mg%ie_array(3),  &
-                        1:nspin,  &
-                        info%io_s:info%io_e,  &
-                        info%ik_s:info%ik_e,  &
-                        1))
-
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-        spsi_out%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-        tpsi1%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-        tpsi2%zwf(ix,iy,iz,is,iob,ik,1)=0.d0
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
+  call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
+  call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
+  call allocate_orbital_complex(system%nspin,mg,info,tpsi1)
+  call allocate_orbital_complex(system%nspin,mg,info,tpsi2)
 
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
@@ -938,21 +896,6 @@ allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
   allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
-
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob+(is-1)*info%numo,ik)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
 
   allocate(srho_s(nspin,1))
   do is=1,nspin
@@ -1310,6 +1253,21 @@ if(iperiodic==0)then
   end if
 end if
 
+!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
+  do ik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+    do is=1,nspin
+      do iz=mg%is_array(3),mg%ie_array(3)
+      do iy=mg%is_array(2),mg%ie_array(2)
+      do ix=mg%is_array(1),mg%ie_array(1)
+        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob+(is-1)*info%numo,ik)
+      end do
+      end do
+      end do
+    end do
+  end do
+  end do
+
 rIe(0)=rbox_array2(4)*Hvol
 Dp(:,0)=0.d0
 Qp(:,:,0)=0.d0
@@ -1418,36 +1376,49 @@ if(itotNtime-Miter_rt<=10000)then
       end if
     end if
 
-    if(itt>=Miter_rt+1) &
-         call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+    if(itt>=Miter_rt+1) then
+      if(mod(itt,2)==1)then
+        call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
          ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+      else
+        call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,fg,energy,force,md,ofl)
+      end if
+    end if
   end do TE
 
 else
 
-  TE1 : do itt=Miter_rt+1-1,Miter_rt+10
-    if(iwrite_projection==1.and.itt==Miter_rt+1-1) then
-      if(mod(itt,2)==1)then 
+!  TE1 : do itt=Miter_rt+1-1,Miter_rt+10
+  TE1 : do itt=Miter_rt+1-1,itotNtime
+    if(iwrite_projection==1.and.itt==Miter_rt+1-1 .and. itt<=Miter_rt+10) then
+      if(mod(itt,2)==1)then
         call projection(zpsi_out)
       else
         call projection(zpsi_in)
       end if
     end if
 
-    if(itt>=Miter_rt+1) &
-      call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-      ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+    if(itt>=Miter_rt+1) then
+      if(mod(itt,2)==1)then
+        call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+      else
+        call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,fg,energy,force,md,ofl)
+      end if
+    end if
   end do TE1
 
-  TE2 : do itt=Miter_rt+11,itotNtime-5
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
-  end do TE2
+!  TE2 : do itt=Miter_rt+11,itotNtime-5
+!    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+!    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+!  end do TE2
 
-  TE3 : do itt=itotNtime-4,itotNtime
-    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
-  end do TE3
+!  TE3 : do itt=itotNtime-4,itotNtime
+!    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
+!    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+!  end do TE3
 
 end if
 call timer_end(LOG_RT_ITERATION)

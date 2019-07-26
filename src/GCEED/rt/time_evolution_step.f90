@@ -104,34 +104,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   
   
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob+(is-1)*info%numo,ik)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        spsi_out%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_out(ix,iy,iz,iob+(is-1)*info%numo,ik)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
 
   !(MD:part1 & update of pseudopotential)
   if(iflag_md==1) then
@@ -141,7 +113,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,tpsi1,tpsi2,   & ! spsi_in --> tpsi1
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
@@ -169,20 +141,15 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     end if
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tpsi1,spsi_out,tpsi2,   & ! tpsi1 --> spsi_out
                   ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
     end if
 
   else 
 
     if(iobnum.ge.1)then
-      if(mod(itt,2)==1)then
-        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   &
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   & ! spsi_in --> spsi_out
                     ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
-      else
-        call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_out,spsi_in,tpsi1,   &
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
-      end if
     end if
     
   end if
@@ -190,20 +157,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
 
 !$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        zpsi_in(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi_in%zwf(ix,iy,iz,is,iob,ik,1)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-!$OMP parallel do private(ik,iob,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
     do is=1,nspin
@@ -246,11 +199,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
       end if
       sVh%f = Vh
       energy%E_xc = Exc
-      if(mod(itt,2)==0.or.propagator=='etrs')then
-        call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-      else
-        call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-      end if
+      call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
       Etot = energy%E_tot
       call subdip(rNe,2)
@@ -259,11 +208,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
 
   call timer_begin(LOG_CALC_RHO)
-  if(mod(itt,2)==0.or.propagator=='etrs')then
-    call calc_density(srho_s,spsi_in,info,mg,nspin)
-  else
-    call calc_density(srho_s,spsi_out,info,mg,nspin)
-  end if
+  call calc_density(srho_s,spsi_out,info,mg,nspin)
   
   if(ilsda==0)then  
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -290,41 +235,31 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   end if
   call timer_end(LOG_CALC_RHO)
 
-
   call timer_begin(LOG_CALC_HARTREE)
-  if(itt/=1)then
-    if(mod(itt,2)==1)then
-!$OMP parallel do private(iz,iy,ix)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
-        Vh_stock2(ix,iy,iz)=2.d0*Vh_stock1(ix,iy,iz)-Vh_stock2(ix,iy,iz)
-      end do
-      end do
-      end do
-    else
-!$OMP parallel do private(iz,iy,ix)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
-        Vh_stock1(ix,iy,iz)=2.d0*Vh_stock2(ix,iy,iz)-Vh_stock1(ix,iy,iz)
-      end do
-      end do
-      end do
-    end if
-  end if
+!  if(itt/=1)then
+!    if(mod(itt,2)==1)then
+!!$OMP parallel do private(iz,iy,ix)
+!      do iz=ng_sta(3),ng_end(3)
+!      do iy=ng_sta(2),ng_end(2)
+!      do ix=ng_sta(1),ng_end(1)
+!        Vh_stock2(ix,iy,iz)=2.d0*Vh_stock1(ix,iy,iz)-Vh_stock2(ix,iy,iz)
+!      end do
+!      end do
+!      end do
+!    else
+!!$OMP parallel do private(iz,iy,ix)
+!      do iz=ng_sta(3),ng_end(3)
+!      do iy=ng_sta(2),ng_end(2)
+!      do ix=ng_sta(1),ng_end(1)
+!        Vh_stock1(ix,iy,iz)=2.d0*Vh_stock2(ix,iy,iz)-Vh_stock1(ix,iy,iz)
+!      end do
+!      end do
+!      end do
+!    end if
+!  end if
 
-  if(mod(itt,2)==1)then
-    sVh%f = Vh_stock2
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
-    Vh_stock2 = sVh%f
-  else
-    sVh%f = Vh_stock1
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
-    Vh_stock1 = sVh%f
-  end if
+  call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
   call timer_end(LOG_CALC_HARTREE)
-
 
   call timer_begin(LOG_CALC_EXC_COR)
   if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
@@ -346,11 +281,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     if(ikind_eext/=0.or.(ikind_eext==0.and.itt==itotNtime))then
   
       ihpsieff=0
-      if(mod(itt,2)==0.or.propagator=='etrs')then
-        call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-      else
-        call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-      end if
+      call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
       Etot = energy%E_tot
       call subdip(rNe,1)
@@ -359,11 +290,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
-    if(mod(itt,2)==0.or.propagator=='etrs')then
-      call projection(mg,zpsi_in)
-    else
-      call projection(mg,zpsi_out)
-    end if
+    call projection(mg,zpsi_out)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
@@ -470,20 +397,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   if(iperiodic==3)then
     call subdip(rNe,1)
 
-    if(mod(itt,2)==0.or.propagator=='etrs')then
-      call calc_current(mg,srg,zpsi_in)
-      if(itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
-        call timer_begin(LOG_CALC_EIGEN_ENERGY)
-        call calc_eigen_energy(energy,spsi_in,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-        call timer_end(LOG_CALC_EIGEN_ENERGY)
-      end if
-    else
-      call calc_current(mg,srg,zpsi_out)
-      if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
-        call timer_begin(LOG_CALC_EIGEN_ENERGY)
-        call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-        call timer_end(LOG_CALC_EIGEN_ENERGY)
-      end if
+    call calc_current(mg,srg,zpsi_out)
+    if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
+      call timer_begin(LOG_CALC_EIGEN_ENERGY)
+      call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
+      call timer_end(LOG_CALC_EIGEN_ENERGY)
     end if
 
     if(iflag_md==1) then
@@ -541,11 +459,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
         call get_fourier_grid_G_rt(system,lg,ng,fg)
      endif
 
-     if(mod(itt,2)==0.or.propagator=='etrs')then
-        call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in) 
-     else
-        call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
-     end if
+     call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
 
      !force on ion directly from field --- should put in calc_force_salmon?
      do iatom=1,MI
@@ -577,25 +491,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
     do iik=k_sta,k_end
     do iob=1,iobnum
-      if(mod(itt,2)==0.or.propagator=='etrs')then
 !$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          cmatbox1(ix,iy,iz)=zpsi_in(ix,iy,iz,iob,iik)
-        end do
-        end do
-        end do
-      else
-!$OMP parallel do private(iz,iy,ix)
-        do iz=mg_sta(3),mg_end(3)
-        do iy=mg_sta(2),mg_end(2)
-        do ix=mg_sta(1),mg_end(1)
-          cmatbox1(ix,iy,iz)=zpsi_out(ix,iy,iz,iob,iik)
-        end do
-        end do
-        end do
-      end if
+      do iz=mg_sta(3),mg_end(3)
+      do iy=mg_sta(2),mg_end(2)
+      do ix=mg_sta(1),mg_end(1)
+        cmatbox1(ix,iy,iz)=zpsi_out(ix,iy,iz,iob,iik)
+      end do
+      end do
+      end do
 
       call comm_summation(cmatbox1,cmatbox2,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_korbital)
       cbox3=0.d0
