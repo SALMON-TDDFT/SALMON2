@@ -1338,7 +1338,7 @@ end do
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
     if(out_estatic_rt=='y')then
-      call calcEstatic
+      call calcEstatic(ng, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end do
