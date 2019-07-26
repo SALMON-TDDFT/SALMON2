@@ -20,7 +20,7 @@ module scf_iteration_sub
 contains
 
 subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
-               num_kpoints_rd,k_rd,cg,   &
+               cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
@@ -41,10 +41,10 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotm
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
-  type(s_dft_system),        intent(in)    :: system
-  type(s_orbital_parallel),       intent(in)    :: info
-  type(s_orbital),  intent(inout) :: spsi
-  type(s_scalar),        intent(inout) :: srho_s(system%nspin,1)
+  type(s_dft_system),    intent(in)    :: system
+  type(s_orbital_parallel),intent(in)  :: info
+  type(s_orbital),       intent(inout) :: spsi
+  type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg_ob_1
   type(s_pp_grid),       intent(in)    :: ppg
@@ -53,13 +53,11 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotm
   integer,               intent(in)    :: mst(2)
   integer,               intent(in)    :: ilsda
   integer,               intent(in)    :: nproc_ob
-  integer,               intent(in)    :: num_kpoints_rd
-  real(8),               intent(in)    :: k_rd(3,num_kpoints_rd)
   type(s_cg),            intent(inout) :: cg
-  type(s_orbital_parallel),       intent(in)    :: info_ob
-  real(8),               intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
+  type(s_orbital_parallel),intent(in)  :: info_ob
+  type(s_scalar),        intent(in)    :: vlocal(system%nspin)
   integer,               intent(inout) :: iflag_diisjump
-  type(s_dft_energy),        intent(inout) :: energy
+  type(s_dft_energy),    intent(inout) :: energy
   real(8),               intent(out)   :: norm_diff_psi_stock(itotmst,1)
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditerybcg
@@ -87,10 +85,10 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotm
       select case(gscg)
       case('y')
         call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,   &
-                           info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
+                           info_ob,ppg,vlocal)
       case('n')
         call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
-                           info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
+                           info_ob,ppg,vlocal)
       end select
     end select
   else if( amin_routine  == 'diis' .or. amin_routine == 'cg-diis' ) then
@@ -120,7 +118,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotm
       case(3)
         call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,  &
                                     iobnum,itotmst,mst,ifmst,   &
-                                    info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
+                                    info_ob,ppg,vlocal)
       end select
     end if
   end if

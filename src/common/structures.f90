@@ -228,6 +228,42 @@ module structures
 
 contains
 
+  subroutine allocate_scalar(rg,field)
+    implicit none
+    type(s_rgrid),intent(in) :: rg
+    type(s_scalar)           :: field
+    allocate(field%f(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
+    field%f = 0d0
+  end subroutine allocate_scalar
+
+  subroutine allocate_orbital_real(nspin,mg,info,psi)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_orbital)                     :: psi
+    allocate(psi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    psi%rwf = 0d0
+  end subroutine allocate_orbital_real
+
+  subroutine allocate_orbital_complex(nspin,mg,info,psi)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_orbital)                     :: psi
+    allocate(psi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    psi%zwf = 0d0
+  end subroutine allocate_orbital_complex
+
+!===================================================================================================================================
+
 # define DEAL(x) if(allocated(x)) deallocate(x)
 
   subroutine deallocate_dft_system(system)

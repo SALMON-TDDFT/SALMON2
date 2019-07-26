@@ -53,7 +53,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   type(s_dft_energy) :: energy
   type(s_scalar) :: srho
   type(s_scalar) :: sVh,sVpsl
-  type(s_scalar),allocatable :: srho_s(:,:),V_local(:),sVxc(:)
+  type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
   type(s_md) :: md
   type(s_ofile) :: ofl
 
@@ -217,11 +217,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   end do
   end do
 
-  allocate(srho_s(nspin,1),V_local(nspin),sVxc(nspin))
+  allocate(srho_s(nspin),V_local(nspin),sVxc(nspin))
 
   allocate(srho%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   do jspin=1,system%nspin
-    allocate(srho_s(jspin,1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(srho_s(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   end do
@@ -236,11 +236,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
       end do
       if(ilsda == 1) then
         do jspin=1,system%nspin
-          srho_s(jspin,1)%f = rho_s(:,:,:,jspin)
+          srho_s(jspin)%f = rho_s(:,:,:,jspin)
           sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
         end do
       else
-        srho_s(1,1)%f = rho
+        srho_s(1)%f = rho
         sVxc(1)%f = Vxc
       end if
       sVh%f = Vh
@@ -269,8 +269,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      srho%f(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)
-      rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)
+      srho%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+      rho(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -279,10 +279,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      srho%f(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
-      rho_s(ix,iy,iz,1)=srho_s(1,1)%f(ix,iy,iz)
-      rho_s(ix,iy,iz,2)=srho_s(2,1)%f(ix,iy,iz)
-      rho(ix,iy,iz)=srho_s(1,1)%f(ix,iy,iz)+srho_s(2,1)%f(ix,iy,iz)
+      srho%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)+srho_s(2)%f(ix,iy,iz)
+      rho_s(ix,iy,iz,1)=srho_s(1)%f(ix,iy,iz)
+      rho_s(ix,iy,iz,2)=srho_s(2)%f(ix,iy,iz)
+      rho(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)+srho_s(2)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -314,28 +314,22 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   end if
 
   if(mod(itt,2)==1)then
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh_stock2)
     sVh%f = Vh_stock2
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
+    Vh_stock2 = sVh%f
   else
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,Vh_stock1)
     sVh%f = Vh_stock1
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
+    Vh_stock1 = sVh%f
   end if
   call timer_end(LOG_CALC_HARTREE)
 
 
   call timer_begin(LOG_CALC_EXC_COR)
   if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-    call exc_cor_ns(ppn)
+    call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
   end if
   call timer_end(LOG_CALC_EXC_COR)
-  if(ilsda == 1) then
-    do jspin=1,system%nspin
-      sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-    end do
-  else
-    sVxc(1)%f = Vxc
-  end if
-  energy%E_xc = Exc
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
   call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
@@ -474,22 +468,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(iperiodic==3)then
     call subdip(rNe,1)
-
-    call timer_begin(LOG_WRITE_ENERGIES)
-    if(iflag_hartree==2)then
-      fg%zrhoG_ele = rhoe_G
-    else if(iflag_hartree==4)then
-      do iz=1,lg_num(3)/NPUZ
-      do iy=1,lg_num(2)/NPUY
-      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-        fg%zrhoG_ele(nn) = rhoe_G(n)
-      enddo
-      enddo
-      enddo
-    end if
-    call timer_end(LOG_WRITE_ENERGIES)
 
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_current(mg,srg,zpsi_in)
@@ -703,7 +681,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   end if
   if(out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call calcEstatic
+      call calcEstatic(ng, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
@@ -711,7 +689,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   call deallocate_scalar(sVh)
   do jspin=1,nspin
-    call deallocate_scalar(srho_s(jspin,1))
+    call deallocate_scalar(srho_s(jspin))
     call deallocate_scalar(V_local(jspin))
     call deallocate_scalar(sVxc(jspin))
   end do
