@@ -351,7 +351,8 @@ if(iopt==1)then
         do ik=k_sta,k_end
         do iob=1,info%numo
           do is=1,nspin
-            spsi%rwf(:,:,:,is,iob,ik,1)=psi(:,:,:,iob+(is-1)*info%numo,ik)
+            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+            & psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
           end do
         end do
         end do
@@ -359,7 +360,8 @@ if(iopt==1)then
         do ik=k_sta,k_end
         do iob=1,info%numo
           do is=1,nspin
-            spsi%zwf(:,:,:,is,iob,ik,1)=zpsi(:,:,:,iob+(is-1)*info%numo,ik)
+            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+            & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
           end do
         end do
       end do
@@ -445,7 +447,8 @@ if(iopt==1)then
       do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
-          spsi%rwf(:,:,:,is,iob,ik,1)=psi(:,:,:,iob+(is-1)*info%numo,ik)
+          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+          & psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
         end do
       end do
       end do
@@ -453,7 +456,8 @@ if(iopt==1)then
       do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
-          spsi%zwf(:,:,:,is,iob,ik,1)=zpsi(:,:,:,iob+(is-1)*info%numo,ik)
+          spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+          & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
         end do
       end do
     end do
