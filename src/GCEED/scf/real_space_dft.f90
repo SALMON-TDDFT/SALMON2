@@ -405,7 +405,7 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh)
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
     Vh = sVh%f
 
     if(ilsda == 0) then
@@ -432,19 +432,6 @@ if(iopt==1)then
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
     case(3)
-      if(iflag_hartree==2)then
-        fg%zrhoG_ele = rhoe_G
-      else if(iflag_hartree==4)then
-        do iz=1,lg_num(3)/NPUZ
-        do iy=1,lg_num(2)/NPUY
-        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%zrhoG_ele(nn) = rhoe_G(n)
-        enddo
-        enddo
-        enddo
-      end if
       rion_update = .true. ! it's first calculation
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
@@ -636,7 +623,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
-      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh)
+      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
     end if
     call timer_end(LOG_CALC_HARTREE)
 
@@ -659,19 +646,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
     case(3)
-      if(iflag_hartree==2)then
-        fg%zrhoG_ele = rhoe_G
-      else if(iflag_hartree==4)then
-        do iz=1,lg_num(3)/NPUZ
-        do iy=1,lg_num(2)/NPUY
-        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-          fg%zrhoG_ele(nn) = rhoe_G(n)
-        enddo
-        enddo
-        enddo
-      end if
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++

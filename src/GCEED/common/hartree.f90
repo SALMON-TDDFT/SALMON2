@@ -15,8 +15,8 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil,srho,sVh)
-  use structures, only: s_rgrid,s_sendrecv_grid,s_stencil,s_scalar
+SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil,srho,sVh,fg)
+  use structures, only: s_rgrid,s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
   use hartree_cg_sub
   use hartree_periodic_sub
   use hartree_ffte_sub
@@ -32,6 +32,9 @@ SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil,srho,sVh)
   type(s_stencil),intent(in) :: stencil
   type(s_scalar) ,intent(in) :: srho
   type(s_scalar)             :: sVh
+  type(s_reciprocal_grid)    :: fg
+  !
+  integer :: ix,iy,iz,n,nn
 
   select case(iperiodic)
   case(0)
@@ -45,9 +48,19 @@ SUBROUTINE Hartree_ns(lg,mg,ng,Brl,srg_ng,stencil,srho,sVh)
       call Hartree_periodic(lg,mg,ng,srho%f,sVh%f,hgs,   &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
+      fg%zrhoG_ele = rhoe_G
     case(4)
       call Hartree_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,npuw,npuy,npuz,   &
                         a_ffte,b_ffte,rhoe_g,coef_poisson)
+      do iz=1,lg%num(3)/NPUZ
+      do iy=1,lg%num(2)/NPUY
+      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+        n=(iz-1)*lg%num(2)/NPUY*lg%num(1)+(iy-1)*lg%num(1)+ix
+        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+        fg%zrhoG_ele(nn) = rhoe_G(n)
+      enddo
+      enddo
+      enddo
     end select
   end select
 

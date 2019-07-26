@@ -316,11 +316,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(mod(itt,2)==1)then
     sVh%f = Vh_stock2
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh)
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
     Vh_stock2 = sVh%f
   else
     sVh%f = Vh_stock1
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh)
+    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
     Vh_stock1 = sVh%f
   end if
   call timer_end(LOG_CALC_HARTREE)
@@ -469,22 +469,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(iperiodic==3)then
     call subdip(rNe,1)
-
-    call timer_begin(LOG_WRITE_ENERGIES)
-    if(iflag_hartree==2)then
-      fg%zrhoG_ele = rhoe_G
-    else if(iflag_hartree==4)then
-      do iz=1,lg_num(3)/NPUZ
-      do iy=1,lg_num(2)/NPUY
-      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-        fg%zrhoG_ele(nn) = rhoe_G(n)
-      enddo
-      enddo
-      enddo
-    end if
-    call timer_end(LOG_WRITE_ENERGIES)
 
     if(mod(itt,2)==0.or.propagator=='etrs')then
       call calc_current(mg,srg,zpsi_in)
