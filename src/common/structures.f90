@@ -27,10 +27,6 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
-  type s_force
-    real(8),allocatable :: F(:,:) ! (1:3,1:Nion)
-  end type s_force
-
   type s_dmatrix
     complex(8),allocatable :: zrho_mat(:,:,:,:,:,:,:) ! (ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
@@ -45,6 +41,7 @@ module structures
     real(8),allocatable :: Mass(:)       ! (1:nion), Atomic weight
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
+    real(8),allocatable :: Force(:,:)    ! (1:3,1:nion), force on atom
 
   ! external field
     real(8) vec_Ac(3) ! A/c, A: vector potential
@@ -206,7 +203,7 @@ module structures
 
   type s_md
      real(8) :: Tene, Temperature, E_work, xi_nh
-     real(8),allocatable :: Rion_last(:,:), force_last(:,:)
+     real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
   type s_ofile
@@ -275,6 +272,7 @@ contains
     DEAL(system%wtk)
     DEAL(system%Rion)
     DEAL(system%Velocity)
+    DEAL(system%Force)
   end subroutine deallocate_dft_system
 
   subroutine deallocate_dft_energy(energy)
@@ -365,11 +363,6 @@ contains
     type(s_vector) :: x
     DEAL(x%v)
   end subroutine deallocate_vector
-
-  subroutine deallocate_force(x)
-    type(s_force) :: x
-    DEAL(x%F)
-  end subroutine deallocate_force
 
   subroutine deallocate_dmatrix(dm)
     type(s_dmatrix) :: dm

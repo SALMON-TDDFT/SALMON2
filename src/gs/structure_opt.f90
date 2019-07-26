@@ -39,14 +39,14 @@ contains
   end subroutine structure_opt_ini
 
   !======================================================convergence check
-  subroutine structure_opt_check(natom,iopt,flag_opt_conv,force)
+  subroutine structure_opt_check(natom,iopt,flag_opt_conv,Force)
     use structures
     use salmon_global, only: convrg_opt_fmax,unit_system,flag_opt_atom
     use salmon_parallel, only: nproc_id_global,nproc_group_global
     use salmon_communication, only: comm_is_root,comm_bcast
     implicit none
-    type(s_force),intent(in) :: force
     integer,intent(in) :: natom,iopt
+    real(8),intent(in) :: Force(3,natom)
     logical,intent(inout) :: flag_opt_conv
     real(8),parameter :: a_B=0.529177d0,Ry=13.6058d0
     integer :: iatom,iatom_count
@@ -57,7 +57,7 @@ contains
     do iatom=1,natom
       if(flag_opt_atom(iatom)=='y') then
         iatom_count=iatom_count+1
-        fabs= sum(force%F(:,iatom)**2.0d0)
+        fabs= sum(Force(:,iatom)**2.0d0)
         fave= fave + fabs
         if(fabs>=fmax) fmax=fabs
       end if
@@ -83,15 +83,14 @@ contains
   end subroutine structure_opt_check
 
   !===========================================================optimization
-  subroutine structure_opt(natom,iopt,force,Rion_opt)
-    use structures
+  subroutine structure_opt(natom,iopt,system)
+    use structures, only: s_dft_system
     use salmon_global, only: flag_opt_atom
     use salmon_parallel, only: nproc_group_global
     use salmon_communication, only: comm_bcast
     implicit none
-    type(s_force),intent(in) :: force
+    type(s_dft_system),intent(inout) :: system
     integer,intent(in) :: natom,iopt
-    real(8),intent(inout) :: Rion_opt(3,natom)
     !theta_opt=0.0d0:DFP,theta_opt=1.0d0:BFGS in Quasi_Newton method
     real(8), parameter :: alpha=1.0d0,theta_opt=1.0d0
     integer :: ii,ij,icount_opt,iatom
@@ -103,7 +102,7 @@ contains
     icount_opt=1
     do iatom=1,natom
       do ii=1,3
-        force_1d(icount_opt)=force%F(ii,iatom)
+        force_1d(icount_opt)=system%Force(ii,iatom)
         icount_opt=icount_opt+1
       end do
     end do
@@ -158,10 +157,10 @@ contains
     !update Rion
     do iatom=1,natom
       if(flag_opt_atom(iatom)=='y') then
-        Rion_opt(1:3,iatom)=Rion_opt(1:3,iatom)+alpha*del_Rion(1:3,iatom)
+        system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*del_Rion(1:3,iatom)
       end if
     end do
-    call comm_bcast(Rion_opt,nproc_group_global) !<-- need?
+   !call comm_bcast(system%Rion,nproc_group_global) !<-- need?
 
   end subroutine structure_opt
 

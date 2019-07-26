@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
-&   ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+&   ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,md,ofl)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -50,7 +50,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi1,tpsi2 ! temporary wavefunctions
   type(s_reciprocal_grid) :: fg
-  type(s_force),intent(inout) :: force
   type(s_dft_energy) :: energy
   type(s_scalar) :: srho
   type(s_scalar) :: sVh,sVpsl
@@ -135,7 +134,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   !(MD:part1 & update of pseudopotential)
   if(iflag_md==1) then
-     call time_evolution_step_md_part1(system,force,md)
+     call time_evolution_step_md_part1(system,md)
      call update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
   endif
 
@@ -542,23 +541,23 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
      endif
 
      if(mod(itt,2)==0.or.propagator=='etrs')then
-        call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in) 
+        call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in) 
      else
-        call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
+        call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
      end if
 
      !force on ion directly from field --- should put in calc_force_salmon?
      do iatom=1,MI
         FionE(:,iatom) = pp%Zps(Kion(iatom)) * E_tot(:,itt)
      enddo
-     force%F(:,:) = force%F(:,:) + FionE(:,:)
+     system%Force(:,:) = system%Force(:,:) + FionE(:,:)
 
-     rforce(:,:) = force%F(:,:)  !test not necessary
+     rforce(:,:) = system%Force(:,:)  !test not necessary
 
   endif
 
   !(MD: part2)
-  if(iflag_md==1) call time_evolution_step_md_part2(system,force,md)
+  if(iflag_md==1) call time_evolution_step_md_part2(system,md)
 
 
   if(circular=='y')then
@@ -636,7 +635,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
      if(iflag_md==1 .and. ensemble=="NVT" .and. thermostat=="nose-hoover") &
           &  write(comment_line,12) trim(comment_line), md%xi_nh
 12   format(a,"  xi_nh=",e18.10)
-     call write_xyz(comment_line,"add","rvf",system,force)
+     call write_xyz(comment_line,"add","rvf",system)
   endif
 
 

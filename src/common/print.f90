@@ -372,10 +372,10 @@ contains
   end subroutine write_tm_data
 
 !--------------------------------------------------------------------------------
-  subroutine write_xyz(comment,action,rvf,system,force)
+  subroutine write_xyz(comment,action,rvf,system)
   ! Write xyz in xyz format but also velocity and force are printed if necessary
   ! (these can be used for restart of opt and md)
-    use structures, only: s_dft_system, s_force
+    use structures, only: s_dft_system
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,atom_name
     use salmon_parallel, only: nproc_id_global
@@ -383,7 +383,6 @@ contains
     implicit none
 
     type(s_dft_system),intent(in) :: system
-    type(s_force),intent(in) :: force
 
     integer :: ia,unit_xyz=200
     character(3) :: action,rvf
@@ -407,7 +406,7 @@ contains
           else if( rvf=="rv " ) then
              write(unit_xyz,110) trim(atom_name(ia)),system%Rion(1:3,ia)*au_length_aa,system%Velocity(1:3,ia)
           else if( rvf=="rvf" ) then
-             write(unit_xyz,120) trim(atom_name(ia)),system%Rion(1:3,ia)*au_length_aa,system%Velocity(1:3,ia),force%F(1:3,ia)
+             write(unit_xyz,120) trim(atom_name(ia)),system%Rion(1:3,ia)*au_length_aa,system%Velocity(1:3,ia),system%Force(1:3,ia)
           endif
        enddo
 
