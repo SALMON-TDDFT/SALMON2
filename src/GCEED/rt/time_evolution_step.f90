@@ -16,8 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
-&   ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
+SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
+&   ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,force,md,ofl)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -42,39 +42,34 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   type(s_dft_system),intent(inout) :: system
-  integer,intent(in) :: nspin
   type(s_orbital_parallel),intent(in) :: info
   type(s_stencil),intent(inout) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
-  type(s_pp_nlcc), intent(in) :: ppn
+  type(s_pp_nlcc),intent(in)    :: ppn
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi1,tpsi2 ! temporary wavefunctions
+  type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin)
+  type(s_scalar), intent(in)    :: sVpsl
   type(s_reciprocal_grid) :: fg
   type(s_force),intent(inout) :: force
   type(s_dft_energy) :: energy
-  type(s_scalar) :: srho
-  type(s_scalar) :: sVh,sVpsl
-  type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
   type(s_md) :: md
   type(s_ofile) :: ofl
 
-  integer :: ix,iy,iz,i1,mm,jj,jspin,n,nn
+  integer :: ix,iy,iz,i1,mm,jj,jspin,n,nn,nspin
   integer :: iob,iatom,iik,ik
   real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
   complex(8),allocatable :: cmatbox1(:,:,:),cmatbox2(:,:,:)
   real(8) :: absr2
-  
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
-  
   complex(8),parameter :: zi=(0.d0,1.d0)
-  
   complex(8) :: cbox1,cbox2,cbox3
   integer :: is
-
   character(100) :: comment_line
-
   logical :: rion_update
+
+  nspin = system%nspin
 
   call timer_begin(LOG_CALC_VBOX)
   
@@ -171,34 +166,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   end do
   end do
 
-  allocate(srho_s(nspin),V_local(nspin),sVxc(nspin))
-
-  allocate(srho%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  do jspin=1,system%nspin
-    allocate(srho_s(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(V_local(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(sVxc(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  end do
-  allocate(sVh%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  allocate(sVpsl%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  sVpsl%f = Vpsl
-
   if(iperiodic==0)then
     if(ikind_eext==0.and.itt>=2)then
       do jspin=1,system%nspin
         V_local(jspin)%f = Vlocal(:,:,:,jspin)
       end do
-      if(ilsda == 1) then
-        do jspin=1,system%nspin
-          srho_s(jspin)%f = rho_s(:,:,:,jspin)
-          sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
-        end do
-      else
-        srho_s(1)%f = rho
-        sVxc(1)%f = Vxc
-      end if
-      sVh%f = Vh
-      energy%E_xc = Exc
       call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
       Etot = energy%E_tot
@@ -236,29 +208,23 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
   call timer_end(LOG_CALC_RHO)
 
   call timer_begin(LOG_CALC_HARTREE)
-!  if(itt/=1)then
-!    if(mod(itt,2)==1)then
-!!$OMP parallel do private(iz,iy,ix)
-!      do iz=ng_sta(3),ng_end(3)
-!      do iy=ng_sta(2),ng_end(2)
-!      do ix=ng_sta(1),ng_end(1)
-!        Vh_stock2(ix,iy,iz)=2.d0*Vh_stock1(ix,iy,iz)-Vh_stock2(ix,iy,iz)
-!      end do
-!      end do
-!      end do
-!    else
-!!$OMP parallel do private(iz,iy,ix)
-!      do iz=ng_sta(3),ng_end(3)
-!      do iy=ng_sta(2),ng_end(2)
-!      do ix=ng_sta(1),ng_end(1)
-!        Vh_stock1(ix,iy,iz)=2.d0*Vh_stock2(ix,iy,iz)-Vh_stock1(ix,iy,iz)
-!      end do
-!      end do
-!      end do
-!    end if
-!  end if
-
+  if(itt/=1)then
+    if(mod(itt,2)==1)then
+      Vh_stock2 = 2.d0*Vh_stock1 - Vh_stock2
+      sVh%f = Vh_stock2
+    else
+      Vh_stock1 = 2.d0*Vh_stock2 - Vh_stock1
+      sVh%f = Vh_stock1
+    end if
+  end if
   call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
+  if(itt/=1)then
+    if(mod(itt,2)==1)then
+      Vh_stock2 = sVh%f
+    else
+      Vh_stock1 = sVh%f
+    end if
+  end if
   call timer_end(LOG_CALC_HARTREE)
 
   call timer_begin(LOG_CALC_EXC_COR)
@@ -304,7 +270,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
         do iz=ng_sta(3),ng_end(3)
         do iy=ng_sta(2),ng_end(2)
         do ix=ng_sta(1),ng_end(1)
-          rbox1=rbox1+vecR(i1,ix,iy,iz)*rho(ix,iy,iz)*rto_ix(ix,jj)
+          rbox1=rbox1+vecR(i1,ix,iy,iz)*srho%f(ix,iy,iz)*rto_ix(ix,jj)
         end do
         end do
         end do
@@ -321,7 +287,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 !------------QUADRUPOLE-start------------
 
     if(quadrupole=='y')then
-      rho_diff(:,:,:) = rho(:,:,:)-rho0(:,:,:)
+      rho_diff(:,:,:) = srho%f(:,:,:)-rho0(:,:,:)
       do jj=1,num_dip2
         vecR_tmp(:,:,:,:)=vecR(:,:,:,:)
         vecR_tmp(1,:,:,:)=vecR_tmp(1,:,:,:)-dip2center(jj)/Hgs(1)
@@ -377,7 +343,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
         do iz=ng_sta(3),ng_end(3)
         do iy=ng_sta(2),ng_end(2)
         do ix=ng_sta(1),ng_end(1)
-          rbox1e=rbox1e+rho(ix,iy,iz)*rto_ix(ix,jj)
+          rbox1e=rbox1e+srho%f(ix,iy,iz)*rto_ix(ix,jj)
         end do
         end do
         end do
@@ -420,7 +386,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     do iz=ng_sta(3),ng_end(3)
     do iy=ng_sta(2),ng_end(2)
     do ix=ng_sta(1),ng_end(1)
-      rbox1=rbox1+rho(ix,iy,iz)
+      rbox1=rbox1+srho%f(ix,iy,iz)
     end do
     end do
     end do
@@ -564,7 +530,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
         zalpha2(ix,iy,iz,mm)=zalpha2(ix,iy,iz,mm)   &
-                             +exp(zi*fourier_omega(mm)*(itt*dt))*(rho(ix,iy,iz)-rho0(ix,iy,iz)) & 
+                             +exp(zi*fourier_omega(mm)*(itt*dt))*(srho%f(ix,iy,iz)-rho0(ix,iy,iz)) &
                              *(1-3*(itt/itotNtime2)**2+2*(itt/itotNtime2)**3)
       end do
       end do
@@ -574,7 +540,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
 
   if(out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
+      call writedns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
   end if
   if(out_elf_rt=='y')then
@@ -590,14 +556,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,nspin,info,stencil,srg,srg_ng, &
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)
-
-  call deallocate_scalar(sVh)
-  do jspin=1,nspin
-    call deallocate_scalar(srho_s(jspin))
-    call deallocate_scalar(V_local(jspin))
-    call deallocate_scalar(sVxc(jspin))
-  end do
-  deallocate(srho_s,V_local,sVxc)
 
   return
 
