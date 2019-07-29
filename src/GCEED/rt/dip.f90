@@ -60,57 +60,6 @@ call timer_begin(LOG_CALC_DP)
    end do
    rbox_array(4)=rbox1
    
-!-----------QUADRUPOLE-start----------
-
-if(quadrupole=='y')then
-   rho_diff(:,:,:) = rho(:,:,:)-rho0(:,:,:)
-
-!$OMP parallel do private(i1,i2)
-   do i1=1,3
-     do i2=1,3
-       rbox_arrayq(i1, i2)=0.d0
-     end do
-   end do
-
-! diag-compornents
-
-   do i1=1,3
-     rbox1q=0.d0
-!$OMP parallel do reduction( + : rbox1q ) private(absr2,iz,iy,ix)
-     do iz=ng_sta(3),ng_end(3)
-     do iy=ng_sta(2),ng_end(2)
-     do ix=ng_sta(1),ng_end(1)
-       absr2=vecR(1,ix,iy,iz)**2+vecR(2,ix,iy,iz)**2+vecR(3,ix,iy,iz)**2
-       rbox1q=rbox1q+(3.d0*vecR(i1,ix,iy,iz)*vecR(i1,ix,iy,iz)-absr2)*rho_diff(ix,iy,iz)
-     end do
-     end do
-     end do
-     rbox_arrayq(i1, i1)=rbox1q
-   end do
-
-! non-diag compornents
-
-     rbox1q12=0.d0
-     rbox1q23=0.d0
-     rbox1q31=0.d0
-!$OMP parallel do reduction( + : rbox1q12,rbox1q23,rbox1q31 ) private(iz,iy,ix)
-     do iz=ng_sta(3),ng_end(3)
-     do iy=ng_sta(2),ng_end(2)
-     do ix=ng_sta(1),ng_end(1)
-       rbox1q12=rbox1q12+3.d0*vecR(1,ix,iy,iz)*vecR(2,ix,iy,iz)*rho_diff(ix,iy,iz)
-       rbox1q23=rbox1q23+3.d0*vecR(2,ix,iy,iz)*vecR(3,ix,iy,iz)*rho_diff(ix,iy,iz)
-       rbox1q31=rbox1q31+3.d0*vecR(3,ix,iy,iz)*vecR(1,ix,iy,iz)*rho_diff(ix,iy,iz)
-     end do
-     end do
-     end do
-     rbox_arrayq(1,2)=rbox1q12 ; rbox_arrayq(2,1)=rbox1q12
-     rbox_arrayq(2,3)=rbox1q23 ; rbox_arrayq(3,2)=rbox1q23
-     rbox_arrayq(3,1)=rbox1q31 ; rbox_arrayq(1,3)=rbox1q31
-
-end if
-   
-   !-----------QUADRUPOLE-end----------
-
    call timer_begin(LOG_ALLREDUCE_DIPOLE)
    call comm_summation(rbox_array,rbox_array2,4,nproc_group_h)
    call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_h)

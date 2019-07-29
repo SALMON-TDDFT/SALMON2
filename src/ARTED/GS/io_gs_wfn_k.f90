@@ -335,7 +335,6 @@ contains
                          epdir_re2, epdir_im2, &
                          rlaser_int_wcm2_1, rlaser_int_wcm2_2, &
                          t1_t2, &
-                         quadrupole, quadrupole_pot, &
                          rlaserbound_sta, rlaserbound_end, &
                          alocal_laser
       case(iflag_read_rt )
@@ -351,7 +350,6 @@ contains
                          epdir_re2, epdir_im2, &
                          rlaser_int_wcm2_1, rlaser_int_wcm2_2, &
                          t1_t2, &
-                         quadrupole, quadrupole_pot, &
                          rlaserbound_sta, rlaserbound_end, &
                          alocal_laser_tmp
       end select
@@ -397,8 +395,6 @@ contains
       call comm_bcast(rlaser_int_wcm2_1, nproc_group_global)
       call comm_bcast(rlaser_int_wcm2_2, nproc_group_global)
       call comm_bcast(t1_t2,             nproc_group_global)
-      call comm_bcast(quadrupole,        nproc_group_global)
-      call comm_bcast(quadrupole_pot,    nproc_group_global)
       call comm_bcast(rlaserbound_sta,   nproc_group_global)
       call comm_bcast(rlaserbound_end,   nproc_group_global)
       call comm_bcast(alocal_laser,      nproc_group_global)

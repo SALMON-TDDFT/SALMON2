@@ -174,8 +174,6 @@ module salmon_global
   real(8)        :: phi_cep2
   real(8)        :: t1_t2
   real(8)        :: t1_delay
-  character(1)   :: quadrupole
-  character(8)   :: quadrupole_pot
   character(1)   :: alocal_laser
   real(8)        :: rlaserbound_sta(3)
   real(8)        :: rlaserbound_end(3)
@@ -342,7 +340,6 @@ module salmon_global
   integer        :: iwrite_projection_k(200)
   character(100) :: filename_pot
   integer        :: iwrite_external
-  integer        :: iflag_dip2
   integer        :: iflag_intelectron
   integer        :: num_dip2
   real(8)        :: dip2boundary(100)
