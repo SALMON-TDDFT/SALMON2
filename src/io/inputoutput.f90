@@ -348,8 +348,6 @@ contains
       & phi_cep2, &
       & t1_t2, &
       & t1_delay, &
-      & quadrupole, &
-      & quadrupole_pot, &
       & alocal_laser , &
       & rlaserbound_sta , &
       & rlaserbound_end , &
@@ -691,8 +689,6 @@ contains
     phi_cep2       = 0d0
     t1_t2          = 0d0
     t1_delay       = 0d0
-    quadrupole     = 'n'
-    quadrupole_pot = ''
     alocal_laser    = 'n'
     rlaserbound_sta(1) = -1.d7*ulength_from_au ! a.u.
     rlaserbound_sta(2) = -1.d7*ulength_from_au ! a.u.
@@ -1112,8 +1108,6 @@ contains
     t1_t2 = t1_t2 * utime_to_au
     call comm_bcast(t1_delay ,nproc_group_global)
     t1_delay = t1_delay * utime_to_au
-    call comm_bcast(quadrupole    ,nproc_group_global)
-    call comm_bcast(quadrupole_pot,nproc_group_global)
     call comm_bcast(alocal_laser  ,nproc_group_global)
     call comm_bcast(rlaserbound_sta,nproc_group_global)
     rlaserbound_sta = rlaserbound_sta * ulength_to_au
@@ -1738,8 +1732,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep2', phi_cep2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_t2', t1_t2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_delay', t1_delay
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'quadrupole', quadrupole
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'quadrupole_pot', quadrupole_pot
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alocal_laser', alocal_laser
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(1)', rlaserbound_sta(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(2)', rlaserbound_sta(2)

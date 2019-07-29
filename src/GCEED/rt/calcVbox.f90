@@ -80,48 +80,6 @@ SUBROUTINE calcVbox(itt_t)
     if(ae_shape1 == 'impulse')then
       continue
     else
-      if(quadrupole=='y')then
-        if(comm_is_root(nproc_id_global))then
-          ipulse=1
-          call calc_env_trigon(ipulse,env_trigon_1)
-          write(191,*) dt*itt_t*0.0241889d0, amplitude1*env_trigon_1
-        end if
-        if(quadrupole_pot=='sum')then
-          ipulse=1
-          call calc_env_trigon(ipulse,env_trigon_1)
-        !$OMP parallel do collapse(2) private(ix,iy,iz)
-          do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
-          do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
-          do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+  &
-                           amplitude1*(epdir_re1(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
-                                       epdir_re1(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
-                                       epdir_re1(3)*(gridcoo(iz,3)-rlaser_center(3))+   &
-                                       epdir_re2(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
-                                       epdir_re2(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
-                                       epdir_re2(3)*(gridcoo(iz,3)-rlaser_center(3)))*env_trigon_1
-          end do
-          end do
-          end do
-        else if(quadrupole_pot=='product')then
-          ipulse=1
-          call calc_env_trigon(ipulse,env_trigon_1)
-        !$OMP parallel do collapse(2) private(ix,iy,iz)
-          do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
-          do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
-          do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+  &
-                           amplitude1*(epdir_re1(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
-                                       epdir_re1(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
-                                       epdir_re1(3)*(gridcoo(iz,3)-rlaser_center(3)))   &
-                                     *(epdir_re2(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
-                                       epdir_re2(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
-                                       epdir_re2(3)*(gridcoo(iz,3)-rlaser_center(3)))*env_trigon_1
-          end do
-          end do
-          end do
-        end if
-      else
         if(dt*dble(itt_t) <= pulse_tw1)then
           ipulse=1
           call calc_env_trigon(ipulse,env_trigon_1)
@@ -158,7 +116,6 @@ SUBROUTINE calcVbox(itt_t)
           end do
           end do
         end if
-      end if
     end if
   end if
    
