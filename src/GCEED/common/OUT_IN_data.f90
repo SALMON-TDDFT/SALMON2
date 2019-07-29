@@ -702,9 +702,6 @@ if(iflag_ps.eq.1)then
   MI=MI_read
 end if
 
-mg%ndir = 3
-ng%ndir = 3
-
 Hgs = system%Hgs
 Hvol = system%Hvol
 
