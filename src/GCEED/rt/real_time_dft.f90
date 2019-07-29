@@ -61,12 +61,8 @@ type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_cg) :: cg
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
-real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:) 
-real(8),allocatable :: alpha2_R(:,:,:),alpha2_I(:,:,:) 
-real(8),allocatable :: alpha2q_R(:,:,:,:),alpha2q_I(:,:,:,:) 
-real(8),allocatable :: Dp_box(:,:),alpha_R_box(:,:),alpha_I_box(:,:) 
-real(8),allocatable :: Qp_box(:,:,:),alpha_Rq_box(:,:,:),alpha_Iq_box(:,:,:) 
-real(8),allocatable :: Sf(:),Sf2(:,:),Sq2(:,:,:)
+real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
+real(8),allocatable :: Sf(:)
 integer :: jj,nn
 integer :: iene,nntime,ix,iy,iz
 character(100):: alpha2OutFile, comment_line
@@ -540,21 +536,17 @@ type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
 
 complex(8),parameter :: zi=(0.d0,1.d0)
-integer :: ii,iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik,n,nn
+integer :: iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik,n,nn
 integer :: nspin
 real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
-real(8) :: absr2
 integer :: is,jspin
 integer :: neig(1:3, 1:2)
 integer :: neig_ng(1:3, 1:2)
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
-real(8)    :: rbox_arrayq(3,3)
-real(8)    :: rbox_arrayq2(3,3)
-real(8)    :: rbox1q,rbox1q12,rbox1q23,rbox1q31
 
 character(100) :: comment_line
 
@@ -903,6 +895,10 @@ end if
   end do
   end do
 
+  do is=1,system%nspin
+    V_local(is)%f = Vlocal(:,:,:,is)
+  end do
+
 rIe(0)=rbox_array2(4)*Hvol
 Dp(:,0)=0.d0
 Qp(:,:,0)=0.d0
@@ -956,8 +952,6 @@ if(iflag_fourier_omega==1)then
     end do
   end do
 end if
-
-allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
 
 if(iperiodic==3) call calcAext
 

@@ -19,8 +19,8 @@ module taylor_sub
 contains
 
 subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
-  use inputoutput, only: iperiodic,ispin,n_hamil
+                  ppg,V_local,zc)
+  use inputoutput, only: iperiodic,n_hamil
   use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
   use calc_allob_sub
@@ -32,66 +32,18 @@ subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,ssh
   type(s_orbital_parallel),intent(in) :: info
   integer,intent(in) :: lg_sta(3)
   integer,intent(in) :: lg_end(3)
-  type(s_stencil),intent(inout) :: stencil
+  type(s_stencil),intent(in) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg
   type(s_orbital),intent(inout) :: tspsi_in
   type(s_orbital),intent(inout) :: tspsi_out
   type(s_orbital),intent(inout) :: sshtpsi
-  type(s_pp_grid),intent(inout) :: ppg
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),ispin+1)
-  real(8),intent(in)    :: vbox(lg_sta(1)-nd:lg_end(1)+nd,  &
-                                lg_sta(2)-nd:lg_end(2)+nd,  &
-                                lg_sta(3)-nd:lg_end(3)+nd)
-  integer,intent(in)    :: num_kpoints_rd
-  real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_scalar) ,intent(in) :: V_local(nspin)
   complex(8),intent(in) :: zc(n_hamil)
-  integer,intent(in)    :: ihpsieff
-  type(s_scalar),allocatable :: v(:)
   integer :: nn,ix,iy,iz
   integer :: ik,io
-  integer :: j
   complex(8),parameter :: zi=(0.d0,1.d0)
   integer :: is
-  
-  allocate(v(nspin))
-  do is=1,nspin
-    allocate(v(is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  end do
-
-  if(iperiodic==0.and.ihpsieff==1)then
-!$OMP parallel do collapse(3) private(is,iz,iy,ix)
-    do is=1,nspin
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        v(is)%f(ix,iy,iz)=vlocal(ix,iy,iz,is)+vbox(ix,iy,iz)
-      end do
-      end do
-      end do
-    end do
-  else
-!$OMP parallel do collapse(3) private(is,iz,iy,ix)
-    do is=1,nspin
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        v(is)%f(ix,iy,iz)=vlocal(ix,iy,iz,is)
-      end do
-      end do
-      end do
-    end do
-  end if
-
-  do ik=info%ik_s,info%ik_e
-    if(iperiodic==3)then
-      do j=1,3
-        stencil%vec_kAc(j,ik) = k_rd(j,ik)
-      end do
-    end if
-  end do
-  if(iperiodic==3) then
-    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-  end if
 
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
   do ik=info%ik_s,info%ik_e
@@ -110,7 +62,7 @@ subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,ssh
 
   do nn=1,n_hamil
     if(mod(nn,2)==1)then
-      call hpsi(tspsi_in,sshtpsi,info,mg,v,nspin,stencil,srg,ppg)
+      call hpsi(tspsi_in,sshtpsi,info,mg,V_local,nspin,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -127,7 +79,7 @@ subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,ssh
       end do
       end do
     else
-      call hpsi(sshtpsi,tspsi_in,info,mg,v,nspin,stencil,srg,ppg)
+      call hpsi(sshtpsi,tspsi_in,info,mg,V_local,nspin,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -145,11 +97,6 @@ subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,ssh
       end do
     end if
   end do
-
-  do is=1,nspin
-    deallocate(v(is)%f)
-  end do
-  deallocate(v)
 
 end subroutine taylor
 

@@ -37,6 +37,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
   use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
+  use hpsi_sub, only: update_kvector_nonlocalpt
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -56,11 +57,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_md) :: md
   type(s_ofile) :: ofl
 
-  integer :: ix,iy,iz,i1,mm,jj,jspin,n,nn,nspin
+  integer :: ix,iy,iz,i1,mm,jspin,nspin
   integer :: iob,iatom,iik,ik
-  real(8) :: rbox1,rbox1q,rbox1q12,rbox1q23,rbox1q31,rbox1e
+  real(8) :: rbox1
   complex(8),allocatable :: cmatbox1(:,:,:),cmatbox2(:,:,:)
-  real(8) :: absr2
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
   real(8) :: curr_tmp(3,2)
@@ -81,13 +81,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   ! for calc_total_energy_periodic
   rion_update = check_rion_update() .or. (itt == Miter_rt+1)
   
-  if(iperiodic==3) then
-    call calc_vecAc(system%vec_Ac,1)
-    do ik=1,system%nk
-      k_rd(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-    end do
-  end if
-  
   select case(ikind_eext)
     case(0,3,9:12)
       ihpsieff=0
@@ -95,10 +88,31 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
       ihpsieff=1
   end select
   
-  if(iperiodic==0.and.ikind_eext==1) call calcVbox(itt)
+  select case(iperiodic)
+  case(0)
+    if(ikind_eext==1) call calcVbox(itt)
+    if(ihpsieff==1) then
+!$OMP parallel do collapse(3) private(is,iz,iy,ix)
+      do is=1,nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + vbox(ix,iy,iz)
+      end do
+      end do
+      end do
+      end do
+    end if
+  case(3)
+    call calc_vecAc(system%vec_Ac,1)
+    do ik=info%ik_s,info%ik_e
+      stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+    end do
+    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+  end select
+
   call timer_end(LOG_CALC_VBOX)
-  
-  
+
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
   !(MD:part1 & update of pseudopotential)
@@ -109,8 +123,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,tpsi1,tpsi2,   & ! spsi_in --> tpsi1
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,tpsi1,tpsi2,ppg,V_local,zc) ! spsi_in --> tpsi1
     end if
 
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
@@ -118,39 +131,51 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      vloc_t(ix,iy,iz,is)=vlocal(ix,iy,iz,is)
-      vloc_new(ix,iy,iz,is) = 3d0*vlocal(ix,iy,iz,is) - 3d0*vloc_old(ix,iy,iz,is,1) + vloc_old(ix,iy,iz,is,2)
+      vloc_t(ix,iy,iz,is) = V_local(is)%f(ix,iy,iz)
+      vloc_new(ix,iy,iz,is) = 3d0*V_local(is)%f(ix,iy,iz) - 3d0*vloc_old(ix,iy,iz,is,1) + vloc_old(ix,iy,iz,is,2)
       vloc_old(ix,iy,iz,is,2) = vloc_old(ix,iy,iz,is,1)
-      vloc_old(ix,iy,iz,is,1) = vlocal(ix,iy,iz,is)
-      vlocal(ix,iy,iz,is) = vloc_new(ix,iy,iz,is)
+      vloc_old(ix,iy,iz,is,1) = V_local(is)%f(ix,iy,iz)
+      V_local(is)%f(ix,iy,iz) = vloc_new(ix,iy,iz,is)
     end do
     end do
     end do
     end do
 
-    if(iperiodic==0.and.ikind_eext==1) call calcVbox(itt+1)
-    if(iperiodic==3) then
+    select case(iperiodic)
+    case(0)
+      if(ikind_eext==1) call calcVbox(itt+1)
+      if(ihpsieff==1)then
+  !$OMP parallel do collapse(3) private(is,iz,iy,ix)
+        do is=1,nspin
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + vbox(ix,iy,iz)
+        end do
+        end do
+        end do
+        end do
+      end if
+    case(3)
       call calc_vecAc(system%vec_Ac,4)
-      do ik=1,system%nk
-        k_rd(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      do ik=info%ik_s,info%ik_e
+        stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
       end do
-    end if
+      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+    end select
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tpsi1,spsi_out,tpsi2,   & ! tpsi1 --> spsi_out
-                  ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tpsi1,spsi_out,tpsi2,ppg,V_local,zc) ! tpsi1 --> spsi_out
     end if
 
   else 
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,   & ! spsi_in --> spsi_out
-                    ppg,vlocal,vbox,num_kpoints_rd,k_rd,zc,ihpsieff)
+      call taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,spsi_in,spsi_out,tpsi1,ppg,V_local,zc) ! spsi_in --> spsi_out
     end if
     
   end if
   call timer_end(LOG_CALC_TIME_PROPAGATION)
-
 
 !$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
   do ik=info%ik_s,info%ik_e
@@ -166,19 +191,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
     end do
   end do
   end do
-
-  if(iperiodic==0)then
-    if(ikind_eext==0.and.itt>=2)then
-      do jspin=1,system%nspin
-        V_local(jspin)%f = Vlocal(:,:,:,jspin)
-      end do
-      call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
-      Etot = energy%E_tot
-      call subdip(rNe,2)
-    end if
-  end if
-
 
   call timer_begin(LOG_CALC_RHO)
   call calc_density(srho_s,spsi_out,info,mg,nspin)
@@ -238,22 +250,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
   call timer_end(LOG_CALC_VLOCAL)
 
-  do jspin=1,system%nspin
-    Vlocal(:,:,:,jspin) = V_local(jspin)%f
-  end do
-
 ! result
-
-  if(iperiodic==0)then
-    if(ikind_eext/=0.or.(ikind_eext==0.and.itt==itotNtime))then
-  
-      ihpsieff=0
-      call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
-      Etot = energy%E_tot
-      call subdip(rNe,1)
-    end if
-  end if
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
@@ -261,7 +258,21 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
-  if(iperiodic==3)then
+  if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
+    call timer_begin(LOG_CALC_EIGEN_ENERGY)
+    call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
+    call timer_end(LOG_CALC_EIGEN_ENERGY)
+  end if
+
+  select case(iperiodic)
+  case(0)
+
+    call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+    if(ikind_eext==0.and.itt>=2) call subdip(rNe,2)
+    if(ikind_eext/=0.or.(ikind_eext==0.and.itt==itotNtime)) call subdip(rNe,1)
+
+  case(3)
+
     call subdip(rNe,1)
 
     call timer_begin(LOG_CALC_CURRENT)
@@ -269,12 +280,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
     call calc_current(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
     call calc_emfields(nspin,curr_tmp)
     call timer_end(LOG_CALC_CURRENT)
-
-    if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
-      call timer_begin(LOG_CALC_EIGEN_ENERGY)
-      call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
-      call timer_end(LOG_CALC_EIGEN_ENERGY)
-    end if
 
     if(iflag_md==1) then
       call timer_begin(LOG_CALC_CURRENT_ION)
@@ -318,8 +323,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
         dble(itt)*dt*2.41888d-2, (E_ind(i1,itt),i1=1,3)
     end if
     call timer_end(LOG_WRITE_ENERGIES)
-  end if
-
+  end select
+  Etot = energy%E_tot
 
   call timer_begin(LOG_WRITE_RT_INFOS)
 
