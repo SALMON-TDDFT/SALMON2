@@ -188,13 +188,10 @@ module structures
   type s_fdtd_system
     type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
     type(s_sendrecv_grid) :: srg_ng       ! Structure for send and receive in fdtd
-    real(8) :: dt                         ! Delta t
-    integer :: iter_now                   ! Present iteration Number
     real(8) :: rlsize(3)                  ! Size of Cell
     real(8) :: hgs(3)                     ! Grid Spacing
     real(8) :: origin(3)                  ! Coordinate of Origin Point (TBA)
-    character(8)  :: bc(3,2)              ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
-    character(16) :: gauge                ! Gauge Condition (TBD)
+    character(8)  :: a_bc(3,2)            ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
     integer, allocatable :: imedia(:,:,:) ! Material information
   end type s_fdtd_system
 

@@ -18,18 +18,17 @@ subroutine classic_em
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use structures,           only: s_fdtd_system, s_fdtd_field
-  use salmon_maxwell,       only: ls_fdtd_work,init_maxwell,calc_maxwell,finalize_maxwell
+  use salmon_maxwell,       only: ls_fdtd_work
   use misc_routines,        only: get_wtime
   implicit none
   type(s_fdtd_system) :: fs
-  type(s_fdtd_field)  :: ff
   type(ls_fdtd_work)  :: fw
   real(8)             :: elapsed_time
   
   elapsed_time=get_wtime()
-  call init_maxwell(fs,ff,fw)
-  call calc_maxwell(fs,ff,fw)
-  call finalize_maxwell(fs,ff,fw)
+  call eh_init(fs,fw)
+  call eh_calc(fs,fw)
+  call eh_finalize(fs,fw)
   elapsed_time=get_wtime()-elapsed_time
   if(comm_is_root(nproc_id_global)) then
     write(*,'(A,f16.8)') " elapsed time [s] = ", elapsed_time
