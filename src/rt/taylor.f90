@@ -18,7 +18,7 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
+subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
                   ppg,V_local,zc)
   use inputoutput, only: iperiodic,n_hamil
   use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
@@ -30,8 +30,6 @@ subroutine taylor(mg,nspin,info,lg_sta,lg_end,stencil,srg,tspsi_in,tspsi_out,ssh
   type(s_rgrid),intent(in) :: mg
   integer,intent(in)    :: nspin
   type(s_orbital_parallel),intent(in) :: info
-  integer,intent(in) :: lg_sta(3)
-  integer,intent(in) :: lg_end(3)
   type(s_stencil),intent(in) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg
   type(s_orbital),intent(inout) :: tspsi_in

@@ -908,6 +908,7 @@ do iz=mg_sta(3),mg_end(3)
 do iy=mg_sta(2),mg_end(2)
 do ix=mg_sta(1),mg_end(1)
   Vh0(ix,iy,iz)=Vh(ix,iy,iz)
+  sVh%f(ix,iy,iz)=Vh(ix,iy,iz)
 end do
 end do
 end do
@@ -917,11 +918,11 @@ end do
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
     if(out_elf_rt=='y')then
-      call calcELF
+      call calcELF(srho)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
     if(out_estatic_rt=='y')then
-      call calcEstatic(ng, srg_ng)
+      call calcEstatic(ng, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end do

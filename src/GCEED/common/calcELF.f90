@@ -13,7 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcELF(filename_ELF,ttmp)
+subroutine calcELF(srho,filename_ELF,ttmp)
+use structures
 use salmon_parallel, only: nproc_group_global,nproc_group_kgrid
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
@@ -23,6 +24,7 @@ use gradient_sub
 use allocate_mat_sub
 use new_world_sub
 implicit none
+type(s_scalar),intent(in) :: srho
 
 integer :: iob,ix,iy,iz
 integer :: p_allob
@@ -69,7 +71,7 @@ character(50) :: filename_ELF
 do iz=mg_sta(3),mg_end(3)
 do iy=mg_sta(2),mg_end(2)
 do ix=mg_sta(1),mg_end(1)
-  rho_half(ix,iy,iz)=rho(ix,iy,iz)/2.d0
+  rho_half(ix,iy,iz)=srho%f(ix,iy,iz)/2.d0
 end do
 end do
 end do
