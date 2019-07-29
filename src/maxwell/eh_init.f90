@@ -31,12 +31,12 @@ subroutine eh_init(fs,fw)
   use salmon_maxwell,       only: ls_fdtd_work
   use math_constants,       only: pi
   implicit none
-  type(s_fdtd_system) :: fs
-  type(ls_fdtd_work)  :: fw
-  integer             :: ii,ij,ix,iy,iz,icount,icount_d,iflag_lr,iflag_pml
-  real(8)             :: dt_cfl,diff_cep
-  character(1)        :: dir
-  character(128)      :: save_name
+  type(s_fdtd_system),intent(inout) :: fs
+  type(ls_fdtd_work), intent(inout) :: fw
+  integer                           :: ii,ij,ix,iy,iz,icount,icount_d,iflag_lr,iflag_pml
+  real(8)                           :: dt_cfl,diff_cep
+  character(1)                      :: dir
+  character(128)                    :: save_name
   
   !set initial parameter and value
   fw%c_0        = 1.370359991378353d2
@@ -54,19 +54,19 @@ subroutine eh_init(fs,fw)
     select case(boundary_em(ii,ij))
     case('default')
       if(iperiodic==0) then
-        fs%bc(ii,ij)='pml'
+        fs%a_bc(ii,ij)='pml'
         iflag_pml   =1
       elseif(iperiodic==3) then
-        fs%bc(ii,ij)='periodic'
+        fs%a_bc(ii,ij)='periodic'
       end if
     case('pml')
-      fs%bc(ii,ij)='pml'
+      fs%a_bc(ii,ij)='pml'
       iflag_pml   =1
     case('pec')
       if(comm_is_root(nproc_id_global).and.(iperiodic==3)) &
       write(*,*) "For iperiodic = 3, boundary_em must be default or pml."
       stop
-      fs%bc(ii,ij)='pec'
+      fs%a_bc(ii,ij)='pec'
     case('periodic')
       if(comm_is_root(nproc_id_global).and.(iperiodic==0)) &
       write(*,*) "For iperiodic = 0, boundary_em must be default, pml, or pec."
@@ -96,10 +96,10 @@ subroutine eh_init(fs,fw)
          fw%c_0*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
          )
   if(dt_em==0.0d0) then
-    fs%dt=dt_cfl*0.99d0
+    dt_em=dt_cfl*0.99d0
     if(comm_is_root(nproc_id_global)) then
       write(*,*) "**************************"
-      write(*,*) "From CFL condition, dt_em is determined by", fs%dt*utime_from_au
+      write(*,*) "From CFL condition, dt_em is determined by", dt_em*utime_from_au
       write(*,*) "in the unit system, ",trim(unit_system),"."
       write(*,*) "**************************"
     end if
@@ -112,28 +112,17 @@ subroutine eh_init(fs,fw)
     end if
     stop
   else
-    fs%dt=dt_em
     if(comm_is_root(nproc_id_global)) then
       write(*,*) "**************************"
-      write(*,*) "dt_em =", fs%dt*utime_from_au
+      write(*,*) "dt_em =", dt_em*utime_from_au
       write(*,*) "in the unit system, ",trim(unit_system),"."
       write(*,*) "**************************"
     end if
   end if
-  call comm_bcast(fs%dt,nproc_group_global)
+  call comm_bcast(dt_em,nproc_group_global)
   
-  !allocate
+  !fundamental allocation in eh-FDTD
   call eh_allocate
-  allocate(fw%c2_jx(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                    fs%ng%is_array(2):fs%ng%ie_array(2),&
-                    fs%ng%is_array(3):fs%ng%ie_array(3)),&
-           fw%c2_jy(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                    fs%ng%is_array(2):fs%ng%ie_array(2),&
-                    fs%ng%is_array(3):fs%ng%ie_array(3)),&
-           fw%c2_jz(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                    fs%ng%is_array(2):fs%ng%ie_array(2),&
-                    fs%ng%is_array(3):fs%ng%ie_array(3)) )
-  fw%c2_jx(:,:,:)=0.0d0; fw%c2_jy(:,:,:)=0.0d0; fw%c2_jz(:,:,:)=0.0d0;
   
   !input fdtd shape
   allocate(fs%imedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
@@ -291,28 +280,28 @@ subroutine eh_init(fs,fw)
   fw%ihy_x_is(:)=fs%ng%is(:); fw%ihy_x_ie(:)=fs%ng%ie(:);
   fw%ihz_x_is(:)=fs%ng%is(:); fw%ihz_x_ie(:)=fs%ng%ie(:);
   fw%ihz_y_is(:)=fs%ng%is(:); fw%ihz_y_ie(:)=fs%ng%ie(:);
-  if((fs%bc(1,1)=='pml').and.(fs%ng%is(1)==fs%lg%is(1))) then !x, bottom
+  if((fs%a_bc(1,1)=='pml').and.(fs%ng%is(1)==fs%lg%is(1))) then !x, bottom
     fw%iey_x_is(1)=fs%ng%is(1)+1; fw%iez_x_is(1)=fs%ng%is(1)+1;
   end if
-  if((fs%bc(1,2)=='pml').and.(fs%ng%ie(1)==fs%lg%ie(1))) then !x, top
+  if((fs%a_bc(1,2)=='pml').and.(fs%ng%ie(1)==fs%lg%ie(1))) then !x, top
     fw%iex_y_ie(1)=fs%ng%ie(1)-1; fw%iex_z_ie(1)=fs%ng%ie(1)-1;
     fw%iey_x_ie(1)=fs%ng%ie(1)-1; fw%iez_x_ie(1)=fs%ng%ie(1)-1;
     fw%ihy_z_ie(1)=fs%ng%ie(1)-1; fw%ihy_x_ie(1)=fs%ng%ie(1)-1;
     fw%ihz_x_ie(1)=fs%ng%ie(1)-1; fw%ihz_y_ie(1)=fs%ng%ie(1)-1;
   end if
-  if((fs%bc(2,1)=='pml').and.(fs%ng%is(2)==fs%lg%is(2))) then !y, bottom
+  if((fs%a_bc(2,1)=='pml').and.(fs%ng%is(2)==fs%lg%is(2))) then !y, bottom
     fw%iex_y_is(2)=fs%ng%is(2)+1; fw%iez_y_is(2)=fs%ng%is(2)+1;
   end if
-  if((fs%bc(2,2)=='pml').and.(fs%ng%ie(2)==fs%lg%ie(2))) then !y, top
+  if((fs%a_bc(2,2)=='pml').and.(fs%ng%ie(2)==fs%lg%ie(2))) then !y, top
     fw%iex_y_ie(2)=fs%ng%ie(2)-1; fw%iey_z_ie(2)=fs%ng%ie(2)-1;
     fw%iey_x_ie(2)=fs%ng%ie(2)-1; fw%iez_y_ie(2)=fs%ng%ie(2)-1;
     fw%ihx_y_ie(2)=fs%ng%ie(2)-1; fw%ihx_z_ie(2)=fs%ng%ie(2)-1;
     fw%ihz_x_ie(2)=fs%ng%ie(2)-1; fw%ihz_y_ie(2)=fs%ng%ie(2)-1;
   end if
-  if((fs%bc(3,1)=='pml').and.(fs%ng%is(3)==fs%lg%is(3))) then !z, bottom
+  if((fs%a_bc(3,1)=='pml').and.(fs%ng%is(3)==fs%lg%is(3))) then !z, bottom
     fw%iex_z_is(3)=fs%ng%is(3)+1; fw%iey_z_is(3)=fs%ng%is(3)+1;
   end if
-  if((fs%bc(3,2)=='pml').and.(fs%ng%ie(3)==fs%lg%ie(3))) then !z, top
+  if((fs%a_bc(3,2)=='pml').and.(fs%ng%ie(3)==fs%lg%ie(3))) then !z, top
     fw%iex_z_ie(3)=fs%ng%ie(3)-1; fw%iey_z_ie(3)=fs%ng%ie(3)-1;
     fw%iez_x_ie(3)=fs%ng%ie(3)-1; fw%iez_y_ie(3)=fs%ng%ie(3)-1;
     fw%ihx_y_ie(3)=fs%ng%ie(3)-1; fw%ihx_z_ie(3)=fs%ng%ie(3)-1;
@@ -338,11 +327,11 @@ subroutine eh_init(fs,fw)
         elseif(ii==3) then
           dir='z'
         end if
-        if(fs%bc(ii,1)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+        if(fs%a_bc(ii,1)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
                                  ' PML has been set for ',dir,'-direction: ',&
                                  fw%coo(fs%lg%is(ii),ii)*ulength_from_au,' to ',&
                                  fw%coo(fs%lg%is(ii)+fw%ipml_l,ii)*ulength_from_au,'.'
-        if(fs%bc(ii,2)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
+        if(fs%a_bc(ii,2)=='pml') write(*,'(A,A,A,ES12.5,A,ES12.5,A)') &
                                  ' PML has been set for ',dir,'-direction: ',&
                                  fw%coo(fs%lg%ie(ii)-fw%ipml_l,ii)*ulength_from_au,' to ',&
                                  fw%coo(fs%lg%ie(ii),ii)*ulength_from_au,'.'
@@ -541,8 +530,8 @@ subroutine eh_init(fs,fw)
     allocate(fw%inc_pl_pe(fw%inc_num,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
     fw%inc_po_id(:,:)=0; fw%inc_po_pe(:)=0; fw%inc_li_pe(:,:)=0; fw%inc_pl_pe(:,:)=0; 
     do ii=1,3
-      fw%c2_inc_xyz(ii)=(fw%c_0/fw%rep(0)*fs%dt) &
-                         /(1.0d0+2.0d0*pi*fw%sig(0)/fw%rep(0)*fs%dt) &
+      fw%c2_inc_xyz(ii)=(fw%c_0/fw%rep(0)*dt_em) &
+                         /(1.0d0+2.0d0*pi*fw%sig(0)/fw%rep(0)*dt_em) &
                          *2.0d0/( fs%hgs(ii)*sqrt(fw%rmu(0)/fw%rep(0)) )
     end do
     
@@ -865,6 +854,17 @@ contains
                         fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%hz_y(:,:,:)=0.0d0; fw%c1_hz_y(:,:,:)=0.0d0; fw%c2_hz_y(:,:,:)=0.0d0;
     
+    allocate(fw%c2_jx(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                      fs%ng%is_array(2):fs%ng%ie_array(2),&
+                      fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%c2_jy(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                      fs%ng%is_array(2):fs%ng%ie_array(2),&
+                      fs%ng%is_array(3):fs%ng%ie_array(3)),&
+             fw%c2_jz(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                      fs%ng%is_array(2):fs%ng%ie_array(2),&
+                      fs%ng%is_array(3):fs%ng%ie_array(3)) )
+    fw%c2_jx(:,:,:)=0.0d0; fw%c2_jy(:,:,:)=0.0d0; fw%c2_jz(:,:,:)=0.0d0;
+    
   end subroutine eh_allocate
   
   !=========================================================================================
@@ -878,28 +878,28 @@ contains
     fw%rep(ii)=epsilon(ii); fw%rmu(ii)=rmu(ii); fw%sig(ii)=sigma(ii);
     
     !prepare coefficient
-    c1_e  =(1.0d0-2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt) &
-           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)
-    c2_e_x=(fw%c_0/fw%rep(ii)*fs%dt) &
-           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)/fs%hgs(1)
-    c2_e_y=(fw%c_0/fw%rep(ii)*fs%dt) &
-           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)/fs%hgs(2)
-    c2_e_z=(fw%c_0/fw%rep(ii)*fs%dt) &
-           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)/fs%hgs(3)
+    c1_e  =(1.0d0-2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)
+    c2_e_x=(fw%c_0/fw%rep(ii)*dt_em) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)/fs%hgs(1)
+    c2_e_y=(fw%c_0/fw%rep(ii)*dt_em) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)/fs%hgs(2)
+    c2_e_z=(fw%c_0/fw%rep(ii)*dt_em) &
+           /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)/fs%hgs(3)
     call comm_bcast(c1_e,  nproc_group_global)
     call comm_bcast(c2_e_x,nproc_group_global)
     call comm_bcast(c2_e_y,nproc_group_global)
     call comm_bcast(c2_e_z,nproc_group_global)
     c1_h=1.0d0
-    c2_h_x=fw%c_0/fw%rmu(ii)*fs%dt/fs%hgs(1)
-    c2_h_y=fw%c_0/fw%rmu(ii)*fs%dt/fs%hgs(2)
-    c2_h_z=fw%c_0/fw%rmu(ii)*fs%dt/fs%hgs(3)
+    c2_h_x=fw%c_0/fw%rmu(ii)*dt_em/fs%hgs(1)
+    c2_h_y=fw%c_0/fw%rmu(ii)*dt_em/fs%hgs(2)
+    c2_h_z=fw%c_0/fw%rmu(ii)*dt_em/fs%hgs(3)
     call comm_bcast(c1_h,  nproc_group_global)
     call comm_bcast(c2_h_x,nproc_group_global)
     call comm_bcast(c2_h_y,nproc_group_global)
     call comm_bcast(c2_h_z,nproc_group_global)
-    c2_j=(4.0d0*pi/fw%rep(ii)*fs%dt) &
-         /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*fs%dt)
+    c2_j=(4.0d0*pi/fw%rep(ii)*dt_em) &
+         /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)
     call comm_bcast(c2_j,nproc_group_global)
     
     !check type_media
@@ -948,8 +948,8 @@ contains
       end do
       end do
       end do
-      fw%c1_j_d(icount_d)=(1.0d0-gamma_d(ii)*fs%dt/2.0d0)           / (1.0d0+gamma_d(ii)*fs%dt/2.0d0);
-      fw%c2_j_d(icount_d)=((omega_p_d(ii)**2.0d0)*fs%dt/(4.0d0*pi)) / (1.0d0+gamma_d(ii)*fs%dt/2.0d0);
+      fw%c1_j_d(icount_d)=(1.0d0-gamma_d(ii)*dt_em/2.0d0)           / (1.0d0+gamma_d(ii)*dt_em/2.0d0);
+      fw%c2_j_d(icount_d)=((omega_p_d(ii)**2.0d0)*dt_em/(4.0d0*pi)) / (1.0d0+gamma_d(ii)*dt_em/2.0d0);
       icount_d=icount_d+1
     end select
     
@@ -1057,16 +1057,16 @@ contains
             fw%c1_ex_z(ix,iy,iz)=c1_e; fw%c2_ex_z(ix,iy,iz)=-c2_e_z;
             fw%c2_jx(ix,iy,iz)=-c2_j;
           elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt)
-            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em)
+            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(2)
-            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(3)
-            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt)
+            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em)
             fw%c1_ex_y(ix,iy,iz)=c1_e_mid; fw%c2_ex_y(ix,iy,iz)= c2_e_y_mid;
             fw%c1_ex_z(ix,iy,iz)=c1_e_mid; fw%c2_ex_z(ix,iy,iz)=-c2_e_z_mid;
             fw%c2_jx(ix,iy,iz)=-c2_j_mid;
@@ -1082,16 +1082,16 @@ contains
             fw%c1_ey_x(ix,iy,iz)=c1_e; fw%c2_ey_x(ix,iy,iz)=-c2_e_x;
             fw%c2_jy(ix,iy,iz)=-c2_j;
           elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt)
-            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em)
+            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /fs%hgs(3)
-            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
+            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /fs%hgs(1)
-            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*fs%dt)
+            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em)
             fw%c1_ey_z(ix,iy,iz)=c1_e_mid; fw%c2_ey_z(ix,iy,iz)= c2_e_z_mid;
             fw%c1_ey_x(ix,iy,iz)=c1_e_mid; fw%c2_ey_x(ix,iy,iz)=-c2_e_x_mid;
             fw%c2_jy(ix,iy,iz)=-c2_j_mid;
@@ -1107,16 +1107,16 @@ contains
             fw%c1_ez_y(ix,iy,iz)=c1_e; fw%c2_ez_y(ix,iy,iz)=-c2_e_y;
             fw%c2_jz(ix,iy,iz)=-c2_j;
           elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt)
-            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
+            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em)
+            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
                        /fs%hgs(1)
-            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*fs%dt) &
+            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(2)
-            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*fs%dt)
+            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em)
             fw%c1_ez_x(ix,iy,iz)=c1_e_mid; fw%c2_ez_x(ix,iy,iz)= c2_e_x_mid;
             fw%c1_ez_y(ix,iy,iz)=c1_e_mid; fw%c2_ez_y(ix,iy,iz)=-c2_e_y_mid;
             fw%c2_jz(ix,iy,iz)=-c2_j_mid;
@@ -1250,24 +1250,24 @@ contains
     
     !set pml coefficient
     do ii=1,(fw%ipml_l+1)
-      c1_pml(ii)=(1.0d0-2.0d0*pi*s_l(ii)/fw%rep(0)*fs%dt) &
-                 /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*fs%dt);
-      c2_pml(ii)=(fw%c_0/fw%rep(0)*fs%dt) &
-                 /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*fs%dt)/pml_del
+      c1_pml(ii)=(1.0d0-2.0d0*pi*s_l(ii)/fw%rep(0)*dt_em) &
+                 /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*dt_em);
+      c2_pml(ii)=(fw%c_0/fw%rep(0)*dt_em) &
+                 /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*dt_em)/pml_del
     end do
     call comm_bcast(c1_pml,nproc_group_global)
     call comm_bcast(c2_pml,nproc_group_global)
     do ii=1,fw%ipml_l
-      c1_pml_h(ii)=(1.0d0-2.0d0*pi*sh_l(ii)/fw%rmu(0)*fs%dt) &
-                   /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*fs%dt);
-      c2_pml_h(ii)=(fw%c_0/fw%rmu(0)*fs%dt) &
-                   /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*fs%dt)/pml_del
+      c1_pml_h(ii)=(1.0d0-2.0d0*pi*sh_l(ii)/fw%rmu(0)*dt_em) &
+                   /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*dt_em);
+      c2_pml_h(ii)=(fw%c_0/fw%rmu(0)*dt_em) &
+                   /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*dt_em)/pml_del
     end do
     call comm_bcast(c1_pml_h,nproc_group_global)
     call comm_bcast(c2_pml_h,nproc_group_global)
     
     !set pml(bottom)
-    if((fs%bc(idir,1)=='pml').and.(fs%ng%is(idir)<=(fs%lg%is(idir)+fw%ipml_l))) then
+    if((fs%a_bc(idir,1)=='pml').and.(fs%ng%is(idir)<=(fs%lg%is(idir)+fw%ipml_l))) then
       !e
       iend=fs%lg%is(idir)+fw%ipml_l
       if(fs%ng%ie(idir)<iend) then
@@ -1321,7 +1321,7 @@ contains
     end if
     
     !set pml(top)
-    if((fs%bc(idir,2)=='pml').and.(fs%ng%ie(idir)>=(fs%lg%ie(idir)-fw%ipml_l))) then
+    if((fs%a_bc(idir,2)=='pml').and.(fs%ng%ie(idir)>=(fs%lg%ie(idir)-fw%ipml_l))) then
       !e
       ista=fs%lg%ie(idir)-fw%ipml_l
       if(fs%ng%is(idir)>ista) then
@@ -1496,10 +1496,10 @@ subroutine eh_prep_GCEED(fs,fw)
   use structures,        only: s_fdtd_system
   use salmon_maxwell,    only: ls_fdtd_work
   implicit none
-  type(s_fdtd_system)   :: fs
-  type(ls_fdtd_work)    :: fw
-  integer               :: neig_ng_eh(1:3,1:2)
-  integer               :: id_tmp,ii
+  type(s_fdtd_system),intent(inout) :: fs
+  type(ls_fdtd_work), intent(inout) :: fw
+  integer                           :: neig_ng_eh(1:3,1:2)
+  integer                           :: id_tmp,ii
   
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
