@@ -17,11 +17,11 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
-&   ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
+&   ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use density_matrix, only: calc_density
+  use density_matrix, only: calc_density, calc_density_matrix, calc_current
   use writefield
   use timer
   use inputoutput
@@ -50,6 +50,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_orbital),intent(inout) :: tpsi1,tpsi2 ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin)
   type(s_scalar), intent(in)    :: sVpsl
+  type(s_dmatrix),intent(inout) :: dmat
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
   type(s_md) :: md
@@ -62,6 +63,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   real(8) :: absr2
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
+  real(8) :: curr_tmp(3,2)
   complex(8),parameter :: zi=(0.d0,1.d0)
   complex(8) :: cbox1,cbox2,cbox3
   integer :: is
@@ -362,7 +364,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   if(iperiodic==3)then
     call subdip(rNe,1)
 
-    call calc_current(mg,srg,zpsi_out)
+    call timer_begin(LOG_CALC_CURRENT)
+    call calc_density_matrix(nspin,info,mg,srg,spsi_out,dmat)
+    call calc_current(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
+    call calc_emfields(nspin,curr_tmp)
+    call timer_end(LOG_CALC_CURRENT)
+
     if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
       call timer_begin(LOG_CALC_EIGEN_ENERGY)
       call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)

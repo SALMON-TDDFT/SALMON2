@@ -27,6 +27,7 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
+! density matrix rho(r,r')
   type s_dmatrix
     complex(8),allocatable :: zrho_mat(:,:,:,:,:,:,:) ! (ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
@@ -236,6 +237,16 @@ contains
     allocate(field%f(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
     field%f = 0d0
   end subroutine allocate_scalar
+
+  subroutine allocate_dmatrix(nspin,mg,info,dmat)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_dmatrix)                     :: dmat
+    allocate(dmat%zrho_mat(mg%Nd,mg%ndir,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
+    & nspin,info%im_s:info%im_e))
+  end subroutine allocate_dmatrix
 
   subroutine allocate_orbital_real(nspin,mg,info,psi)
     implicit none

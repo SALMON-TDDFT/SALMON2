@@ -746,6 +746,7 @@ character(100) :: comment_line
 
 type(s_scalar) :: srho,sVh,sVpsl
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
+type(s_dmatrix) :: dmat
 
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
@@ -823,6 +824,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi1)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi2)
+  call allocate_dmatrix(system%nspin,mg,info,dmat)
 
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
@@ -1366,62 +1368,15 @@ call timer_end(LOG_INIT_RT)
 
 
 call timer_begin(LOG_RT_ITERATION)
-if(itotNtime-Miter_rt<=10000)then
-
-  TE : do itt=Miter_rt+1-1,itotNtime
-    if(iwrite_projection==1.and.itt==Miter_rt+1-1) then
-      if(mod(itt,2)==1)then 
-        call projection(mg,zpsi_out)
-      else
-        call projection(mg,zpsi_in)
-      end if
-    end if
-
-    if(itt>=Miter_rt+1) then
-      if(mod(itt,2)==1)then
-        call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
-      else
-        call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
-      end if
-    end if
-  end do TE
-
-else
-
-!  TE1 : do itt=Miter_rt+1-1,Miter_rt+10
-  TE1 : do itt=Miter_rt+1-1,itotNtime
-    if(iwrite_projection==1.and.itt==Miter_rt+1-1 .and. itt<=Miter_rt+10) then
-      if(mod(itt,2)==1)then
-        call projection(mg,zpsi_out)
-      else
-        call projection(mg,zpsi_in)
-      end if
-    end if
-
-    if(itt>=Miter_rt+1) then
-      if(mod(itt,2)==1)then
-        call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
-      else
-        call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
-      end if
-    end if
-  end do TE1
-
-!  TE2 : do itt=Miter_rt+11,itotNtime-5
-!    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-!    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
-!  end do TE2
-
-!  TE3 : do itt=itotNtime-4,itotNtime
-!    call time_evolution_step(lg,mg,ng,system,nspin,info,stencil &
-!    ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,fg,energy,force,md,ofl)
-!  end do TE3
-
-end if
+TE : do itt=Miter_rt+1,itotNtime
+  if(mod(itt,2)==1)then
+    call time_evolution_step(lg,mg,ng,system,info,stencil &
+     ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
+  else
+    call time_evolution_step(lg,mg,ng,system,info,stencil &
+     ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
+  end if
+end do TE
 call timer_end(LOG_RT_ITERATION)
 
   if(iperiodic==3) deallocate(stencil%vec_kAc)

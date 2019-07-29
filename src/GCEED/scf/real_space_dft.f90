@@ -164,8 +164,6 @@ if(iopt==1)then
     call init_mesh_s(ng)
     call check_mg(mg)
     call check_ng(ng)
-    mg%ndir = 3
-    ng%ndir = 3
 
   case(1,3) ! Continue the previous calculation
 

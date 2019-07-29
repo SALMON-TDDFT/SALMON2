@@ -202,6 +202,31 @@ call timer_end(LOG_CALC_CURRENT)
 
 end subroutine calc_current
 
+subroutine calc_emfields(nspin,curr_in)
+  use math_constants, only : pi
+  use salmon_global, only : ispin
+  use scf_data, only : curr,itt,iflag_indA,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
+  implicit none
+  integer,intent(in) :: nspin
+  real(8),intent(in) :: curr_in(3,nspin)
+
+  curr(1:3,itt) = curr_in(1:3,1)
+  if(ispin==1) curr(1:3,itt) = curr(1:3,itt) + curr_in(1:3,2)
+
+  if(iflag_indA==1)then
+    A_ind(:,itt+1)=2.d0*A_ind(:,itt)-A_ind(:,itt-1)-4.d0*Pi*curr(:,itt)*dt**2
+  else if(iflag_indA==0)then
+    A_ind(:,itt+1)=0.d0
+  end if
+
+  A_tot(:,itt+1)=A_ext(:,itt+1)+A_ind(:,itt+1)
+
+  E_ext(:,itt)=-(A_ext(:,itt+1)-A_ext(:,itt-1))/(2.d0*dt)
+  E_ind(:,itt)=-(A_ind(:,itt+1)-A_ind(:,itt-1))/(2.d0*dt)
+  E_tot(:,itt)=-(A_tot(:,itt+1)-A_tot(:,itt-1))/(2.d0*dt)
+
+end subroutine calc_emfields
+
 subroutine calc_current_ion(system,j_ion)
   use structures, only: s_dft_system
   use salmon_global, only: MI,Kion
