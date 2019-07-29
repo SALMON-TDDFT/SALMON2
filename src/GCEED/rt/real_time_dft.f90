@@ -57,7 +57,6 @@ type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
 type(s_reciprocal_grid) :: fg
 type(s_dft_energy) :: energy
-type(s_force)   :: force
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_cg) :: cg
@@ -384,12 +383,12 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 if(iflag_md==1 .or. icalcforce==1)then
-   call write_xyz(comment_line,"new","rvf",system,force)
+   call write_xyz(comment_line,"new","rvf",system)
 endif
 
 
 ! Go into Time-Evolution
-call Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
+call Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -692,11 +691,12 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,force,md,ofl)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
                            nproc_group_h, nproc_group_korbital, nproc_group_rho, &
-                           nproc_group_kgrid, nproc_group_k, nproc_size_global
+                           nproc_group_kgrid, nproc_group_k, nproc_size_global, &
+                           nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -721,7 +721,6 @@ type(s_orbital) :: tpsi1,tpsi2 ! temporary wavefunctions
 type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_nlcc) :: ppn
 type(s_reciprocal_grid) :: fg
-type(s_force) :: force
 type(s_md) :: md
 type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
@@ -758,7 +757,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
 
-  allocate(force%F(3,system%nion))
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
   info%im_s=1
@@ -774,6 +772,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
   info%if_divide_orbit = nproc_ob.ne.1
   info%icomm_r = nproc_group_korbital
+  info%icomm_k = nproc_group_grid
   info%icomm_o = nproc_group_kgrid
   info%icomm_ko = nproc_group_rho
   info%icomm_ro = nproc_group_k
@@ -1347,13 +1346,13 @@ if(iflag_md==1 .or. icalcforce==1)then
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
       call get_fourier_grid_G_rt(system,lg,ng,fg)
    endif
-   call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
+   call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
 
    !open trj file for coordinate, velocity, and force (rvf) in xyz format
    write(comment_line,10) -1, 0.0d0
    if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
         &  write(comment_line,12) trim(comment_line), md%xi_nh
-   call write_xyz(comment_line,"add","rvf",system,force)
+   call write_xyz(comment_line,"add","rvf",system)
 10 format("#rt   step=",i8,"   time",e16.6)
 12 format(a,"  xi_nh=",e18.10)
 end if
@@ -1381,10 +1380,10 @@ if(itotNtime-Miter_rt<=10000)then
     if(itt>=Miter_rt+1) then
       if(mod(itt,2)==1)then
         call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,force,md,ofl)
+         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
       else
         call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,force,md,ofl)
+         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
       end if
     end if
   end do TE
@@ -1404,10 +1403,10 @@ else
     if(itt>=Miter_rt+1) then
       if(mod(itt,2)==1)then
         call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,force,md,ofl)
+         ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
       else
         call time_evolution_step(lg,mg,ng,system,info,stencil &
-         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,force,md,ofl)
+         ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVpsl,sVxc,fg,energy,md,ofl)
       end if
     end if
   end do TE1

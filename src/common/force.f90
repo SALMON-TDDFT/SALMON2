@@ -22,14 +22,14 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,tpsi)
+  subroutine calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,tpsi)
     use structures
     use hpsi_sub
     use stencil_sub
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
     implicit none
-    type(s_dft_system)      ,intent(in) :: system
+    type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in) :: pp
     type(s_reciprocal_grid) ,intent(in) :: fg
     type(s_orbital_parallel),intent(in) :: info
@@ -38,7 +38,6 @@ contains
     type(s_sendrecv_grid)      :: srg
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital)            :: tpsi
-    type(s_force)              :: force
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,norb,iorb,nlma,ik,io,ispin,ilma,j
     real(8) :: kAc(3)
@@ -47,7 +46,7 @@ contains
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:),uVpsibox2(:,:)
 
     nion = system%nion
-    if(.not.allocated(force%F)) allocate(force%F(3,nion))
+    if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
     allocate(F_tmp(3,nion),F_sum(3,nion))
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_force_periodic" !??????
@@ -64,7 +63,7 @@ contains
 
   ! Ewald sum of ion-ion interaction
     call force_ion_ion(F_sum,F_tmp,system,pp,fg,nion)
-    force%F = F_sum
+    system%Force = F_sum
 
   ! electron-ion interaction
 
@@ -152,7 +151,7 @@ contains
     end do
     end do
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
-    force%F = force%F + F_sum
+    system%Force = system%Force + F_sum
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)
     deallocate(F_tmp,F_sum,gtpsi,uVpsibox,uVpsibox2)

@@ -75,6 +75,7 @@ subroutine init_dft(lg,system,stencil)
   end if
 
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
+  allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
   system%rion = rion
   system%rocc = 0d0 ! initial value
 

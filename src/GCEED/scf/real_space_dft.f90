@@ -43,7 +43,7 @@ use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
                            nproc_group_korbital, nproc_group_rho, &
-                           nproc_group_kgrid, nproc_group_k
+                           nproc_group_kgrid, nproc_group_k, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -96,7 +96,6 @@ type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
-type(s_force)  :: force
 type(s_cg)  :: cg
 
 logical :: rion_update
@@ -140,7 +139,7 @@ if(iflag_opt==1)then
    call structure_opt_ini(MI)
    flag_opt_conv=.false.
    write(comment_line,10) 0
-   call write_xyz(comment_line,"new","r  ",system,force)
+   call write_xyz(comment_line,"new","r  ",system)
 10 format("#opt iteration step=",i5)
 end if
 call timer_end(LOG_INIT_GS)
@@ -234,6 +233,7 @@ if(iopt==1)then
 
   info%if_divide_rspace = nproc_mxin_mul.ne.1
   info%icomm_r    = nproc_group_korbital
+  info%icomm_k    = nproc_group_grid
   info%icomm_o    = nproc_group_kgrid
   info%icomm_ko   = nproc_group_rho
   info%icomm_ro   = nproc_group_k
@@ -870,15 +870,15 @@ end if
 
 ! force
 !if(iflag_opt==1) then
-   call calc_force_salmon(force,system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+   call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
       do iatom=1,MI
          select case(unit_system)
          case('au','a.u.')
-            write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom),ix=1,3)
+            write(*,'(i6,3e16.8)') iatom,(system%Force(ix,iatom),ix=1,3)
          case('A_eV_fs')
-            write(*,'(i6,3e16.8)') iatom,(force%f(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+            write(*,'(i6,3e16.8)') iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
          end select
       end do
    end if
@@ -891,14 +891,14 @@ call timer_end(LOG_GS_ITERATION)
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(iflag_opt==1) then
-  call structure_opt_check(MI,iopt,flag_opt_conv,force)
-  if(.not.flag_opt_conv) call structure_opt(MI,iopt,force,system%Rion)
+  call structure_opt_check(MI,iopt,flag_opt_conv,system%Force)
+  if(.not.flag_opt_conv) call structure_opt(MI,iopt,system)
   !! Rion is old variables to be removed 
   !! but currently it is used in many subroutines.
   Rion(:,:) = system%Rion(:,:) 
 
   write(comment_line,10) iopt
-  call write_xyz(comment_line,"add","r  ",system,force)
+  call write_xyz(comment_line,"add","r  ",system)
 
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
