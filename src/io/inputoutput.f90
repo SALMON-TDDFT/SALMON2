@@ -510,7 +510,6 @@ contains
       & iwrite_projection_k, &
       & filename_pot, &
       & iwrite_external, &
-      & iflag_dip2, &
       & iflag_intelectron, &
       & num_dip2, &
       & dip2boundary, &
@@ -848,7 +847,6 @@ contains
     iwrite_projection_k(1:200) = 1
     filename_pot               = 'pot'
     iwrite_external            = 0
-    iflag_dip2                 = 0
     iflag_intelectron          = 0
     num_dip2                   = 1
     dip2boundary(1:100)        = 0.d0*ulength_from_au ! a.u.
@@ -1284,7 +1282,6 @@ contains
     call comm_bcast(iwrite_projection_k ,nproc_group_global)
     call comm_bcast(filename_pot        ,nproc_group_global)
     call comm_bcast(iwrite_external     ,nproc_group_global)
-    call comm_bcast(iflag_dip2          ,nproc_group_global)
     call comm_bcast(iflag_intelectron   ,nproc_group_global)
     call comm_bcast(num_dip2            ,nproc_group_global)
     call comm_bcast(dip2boundary        ,nproc_group_global)
@@ -1951,7 +1948,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'filename_pot', filename_pot
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_external', iwrite_external
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_dip2', iflag_dip2
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_intelectron', iflag_intelectron
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_dip2', num_dip2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2boundary(1)', dip2boundary(1)

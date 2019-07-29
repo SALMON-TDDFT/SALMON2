@@ -244,12 +244,6 @@ if(comm_is_root(nproc_id_global)) then
   do it2=1,itotNtime
      write(99) tene(it2)
   end do
-  if(iflag_dip2==1)then
-    write(99) ((vecDs2(jj,kk),jj=1,3),kk=1,num_dip2)
-    do it2=1,itotNtime
-      write(99) ((Dp2(jj,it2,kk),jj=1,3),kk=1,num_dip2)
-    end do
-  end if
   
   close(99)
   
@@ -297,11 +291,6 @@ itotNtime=Ntime+Miter_rt
 allocate(rIe(0:itotNtime))
 allocate(Dp(3,0:itotNtime))
 allocate(tene(0:itotNtime))
-if(iflag_dip2==1) then
-    allocate(rIe2(0:itotNtime,1:num_dip2))
-    allocate(Dp2(3,0:itotNtime,1:num_dip2))
-    allocate(Qp2(3,3,0:itotNtime,1:num_dip2))
-end if
 allocate(Qp(3,3,0:itotNtime))
 
 if(num_datafiles_IN>=2.and.num_datafiles_IN<=nproc_size_global)then
@@ -504,19 +493,6 @@ end do
 do it2=1,Miter_rt
    call comm_bcast(tene(it2),nproc_group_global)
 end do
-
-if(iflag_dip2==1)then
-  if(comm_is_root(nproc_id_global))then
-    read(98) ((vecDs2(jj,kk),jj=1,3),kk=1,num_dip2)
-    do it2=1,Miter_rt
-      read(98) ((Dp2(jj,it2,kk),jj=1,3),kk=1,num_dip2)
-    end do
-  end if
-  call comm_bcast(vecDs2,nproc_group_global)
-  do kk=1,num_dip2
-    call comm_bcast(Dp2(:,:,kk),nproc_group_global)
-  end do
-end if
 
 if(comm_is_root(nproc_id_global)) close(98)
 

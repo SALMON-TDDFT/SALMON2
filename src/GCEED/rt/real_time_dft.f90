@@ -134,14 +134,6 @@ if(comm_is_root(nproc_id_global))then
       write(*,'(a21,f16.8)') "rcycle                =",rcycle
   end select
   
-  if(iflag_dip2 == 1) then
-    write(*,'(a21)',advance="no") "dipole boundary      ="
-    do jj=1,num_dip2-2
-      write(*,'(1e16.8,a8)',advance="no") dip2boundary(jj)*au_length_aa, "[A],"
-    end do
-    write(*,'(1e16.8,a8)',advance="yes") dip2boundary(num_dip2-1)*au_length_aa, "[A]"
-  end if
-  
   if(iflag_fourier_omega == 1) then
     write(*,'(a61)') "===== List of frequencies for fourier transform (in eV) ====="
     do jj=1,num_fourier_omega  
@@ -226,17 +218,6 @@ call timer_end(LOG_READ_LDA_DATA)
 
 
 call timer_begin(LOG_INIT_RT)
-if(iflag_dip2==1) then
-  if(imesh_oddeven(1)==1)then
-    dip2boundary(1:num_dip2-1)=dip2boundary(1:num_dip2-1) !/a_B
-    idip2int(1:num_dip2-1)=nint(dip2boundary(1:num_dip2-1)/Hgs(1))
-    rto(1:num_dip2-1)=(dip2boundary(1:num_dip2-1)-((dble(idip2int(1:num_dip2-1))-0.5d0)*Hgs(1)))/Hgs(1)
-  else if(imesh_oddeven(1)==2)then
-    dip2boundary(1:num_dip2-1)=dip2boundary(1:num_dip2-1) !/a_B
-    idip2int(1:num_dip2-1)=nint(dip2boundary(1:num_dip2-1)/Hgs(1)+0.5d0)
-    rto(1:num_dip2-1)=(dip2boundary(1:num_dip2-1)-((dble(idip2int(1:num_dip2-1))-1.0d0)*Hgs(1)))/Hgs(1)
-  end if
-end if
 
 if(iflag_fourier_omega==1) then
    allocate(alpha2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3),num_fourier_omega))
@@ -288,12 +269,6 @@ if(IC_rt==0) then
   allocate( Qp(3,3,0:Ntime) )
   allocate( tene(0:Ntime) )
   call initA(Ntime)
-
-  if(iflag_dip2==1) then
-    allocate( rIe2(0:Ntime,1:num_dip2) ) 
-    allocate( Dp2(3,0:Ntime,1:num_dip2) ) 
-    allocate( Qp2(3,3,0:Ntime,1:num_dip2) )
-  end if
   itotNtime=Ntime
   Miter_rt=0
 else if(IC_rt==1) then
@@ -307,17 +282,6 @@ allocate( alpha_R(3,0:Nenergy), &
                     alpha_I(3,0:Nenergy), Sf(3) )
 allocate( alphaq_R(3,3,0:Nenergy), & 
                     alphaq_I(3,3,0:Nenergy) )
-
-if(iflag_dip2==1)then
-  allocate( alpha2_R(3,0:Nenergy,1:num_dip2), & 
-                    alpha2_I(3,0:Nenergy,1:num_dip2), Sf2(3,1:num_dip2) )
-  allocate( alpha_R_box(3,0:Nenergy), alpha_I_box(3,0:Nenergy) )
-  allocate( Dp_box(3,0:Ntime) )
-
-  allocate( alpha2q_R(3,3,0:Nenergy,1:num_dip2), alpha2q_I(3,3,0:Nenergy,1:num_dip2), Sq2(3,3,1:num_dip2) )
-  allocate( alpha_Rq_box(3,3,0:Nenergy), alpha_Iq_box(3,3,0:Nenergy) )
-  allocate( Qp_box(3,3,0:Ntime) )
-end if
 
 ntmg=1
 ! 'Hartree' parameter
@@ -438,33 +402,7 @@ case(0)
        end do
       close(1)
     end if
-  
-    if(iflag_dip2==1)then
-      open(1,file=file_RT_dip2)
-      write(1,'(a)') "# time[fs],    dipoleMoment(x,y,z)[A]" 
-        do nntime=1,itotNtime
-          write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-          do jj=1,num_dip2-1
-            write(1,'(3e16.8)',advance="no") (Dp2(iii,nntime,jj)*a_B, iii=1,3)
-          end do
-          write(1,'(3e16.8)',advance="yes") (Dp2(iii,nntime,num_dip2)*a_B, iii=1,3)
-        end do
-      close(1)
-  
-      if(iflag_intelectron==1)then
-        open(1,file=file_RT_dip2_e)
-        write(1,'(a)') "# time[fs],    integrated electron density" 
-          do nntime=1,itotNtime
-            write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-            do jj=1,num_dip2-1
-              write(1,'(e16.8)',advance="no") rIe2(nntime,jj)
-            end do
-            write(1,'(e16.8)',advance="yes") rIe2(nntime,num_dip2)
-          end do
-        close(1)
-      end if
-    end if
-  
+
   ! Alpha
     if(ae_shape1=='impulse')then
       open(1,file=file_alpha_lr)
@@ -488,56 +426,7 @@ case(0)
       end do
     end if 
     close(1)
-  
-    if(iflag_dip2==1)then
-      open(1,file=file_alpha_dip2)
-      if(ae_shape1=='impulse')then
-        write(1,'(a)') "# energy[eV], Re[alpha1](x,y,z)[A**3], Im[alpha1](x,y,z)[A**3], df1/dE(x,y,z)[1/eV],",  &
-                   " Re[alpha2](x,y,z)[A**3], ..."
-        do jj=1,num_dip2
-          Dp_box(:,:)=Dp2(:,:,jj)
-          call Fourier3D(Dp_box,alpha_R_box,alpha_I_box)
-          alpha2_R(:,:,jj)=alpha_R_box(:,:)
-          alpha2_I(:,:,jj)=alpha_I_box(:,:)
-        end do
-        do iene=0,Nenergy
-          Sf2(1:3,1:num_dip2)=2*iene*dE/(Pi)*alpha2_I(1:3,iene,1:num_dip2)
-          write(1,'(e13.5)',advance="no") iene*dE*2d0*Ry
-          do jj=1,num_dip2-1
-            write(1,'(3e16.8)',advance="no") (alpha2_R(iii,iene,jj)*(a_B)**3, iii=1,3)
-            write(1,'(3e16.8)',advance="no") (alpha2_I(iii,iene,jj)*(a_B)**3, iii=1,3)
-            write(1,'(3e16.8)',advance="no") (Sf2(iii,jj)/2d0/Ry, iii=1,3)
-          end do
-          write(1,'(3e16.8)',advance="no") (alpha2_R(iii,iene,num_dip2)*(a_B)**3, iii=1,3)
-          write(1,'(3e16.8)',advance="no") (alpha2_I(iii,iene,num_dip2)*(a_B)**3, iii=1,3)
-          write(1,'(3e16.8)',advance="yes") (Sf2(iii,num_dip2)/2d0/Ry, iii=1,3)
-        end do
-      else
-        write(1,'(a)') "# energy[eV], Re[d1(w)](x,y,z)[A*fs],  Im[d1(w)](x,y,z)[A*fs],  |d1(w)|^2(x,y,z)[A**2*fs**2], ", &
-                   " Re[d2(w)](x,y,z)[A*fs],  ..."
-        do jj=1,num_dip2
-          Dp_box(:,:)=Dp2(:,:,jj)
-          call Fourier3D(Dp_box,alpha_R_box,alpha_I_box)
-          alpha2_R(:,:,jj)=alpha_R_box(:,:)
-          alpha2_I(:,:,jj)=alpha_I_box(:,:)
-        end do
-        do iene=0,Nenergy
-          Sf2(1:3,1:num_dip2)=2*iene*dE/(Pi)*alpha2_I(1:3,iene,1:num_dip2)
-          write(1,'(e13.5)',advance="no") iene*dE*2d0*Ry
-          do jj=1,num_dip2-1
-            write(1,'(3e16.8)',advance="no") (alpha2_R(iii,iene,jj)*(a_B)*(2.d0*Ry*fs2eVinv), iii=1,3)
-            write(1,'(3e16.8)',advance="no") (alpha2_I(iii,iene,jj)*(a_B)*(2.d0*Ry*fs2eVinv), iii=1,3)
-            write(1,'(3e16.8)',advance="no") ((alpha2_R(iii,iene,jj)**2+alpha2_I(iii,iene,jj)**2)  &
-                                              *a_B**2*(2.d0*Ry*fs2eVinv)**2, iii=1,3)
-          end do
-          write(1,'(3e16.8)',advance="no") (alpha2_R(iii,iene,num_dip2)*(a_B)**3, iii=1,3)
-          write(1,'(3e16.8)',advance="no") (alpha2_I(iii,iene,num_dip2)*(a_B)**3, iii=1,3)
-          write(1,'(3e16.8)',advance="yes") ((alpha2_R(iii,iene,num_dip2)**2+alpha2_I(iii,iene,num_dip2)**2)  &
-                                              *a_B**2*(2.d0*Ry*fs2eVinv)**2, iii=1,3)
-        end do
-      end if
-      close(1)
-    end if
+
   end if
   
   if(iflag_fourier_omega==1)then

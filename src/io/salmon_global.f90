@@ -340,7 +340,6 @@ module salmon_global
   integer        :: iwrite_projection_k(200)
   character(100) :: filename_pot
   integer        :: iwrite_external
-  integer        :: iflag_dip2
   integer        :: iflag_intelectron
   integer        :: num_dip2
   real(8)        :: dip2boundary(100)
