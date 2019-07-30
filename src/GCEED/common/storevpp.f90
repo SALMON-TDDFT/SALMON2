@@ -18,7 +18,7 @@ SUBROUTINE storevpp
 use scf_data
 use allocate_psl_sub
 implicit none
-integer :: i,ak,L
+integer :: i,ak,L,l0,ll
 real(8) :: r
 
 !-------------------- Read atomic pseudopotential data
@@ -43,29 +43,56 @@ do ak=1,MKI
       do i=Mr(ak)+1,Nr
         rad_psl(i,ak) = rad_f(Mr(ak),ak)+ step(ak)*dble(i-Mr(ak))
       end do
+    case default
+       do i=0,size(rad_psl,1)-1
+         rad_psl(i,ak)=i*step(ak)
+       end do
   end select
 
-  do L=0,Mlps0(ak)
+  l0=0
+  do ll=0,Mlps0(ak)
+  do L=l0,l0+pp%nproj(ll,ak)-1
     do i=1,Mr(ak)
       r=rad_psl(i,ak)
-      uppr(i,L,ak)=upp_f(i,L,ak)/r**(L+1)*sqrt((2*L+1)/(4*Pi))
+      uppr(i,L,ak)=upp_f(i,L,ak)/r**(ll+1)*sqrt((2*ll+1)/(4*Pi))
     end do
     uppr(0,L,ak)=uppr(1,L,ak)
   end do
+  l0=L
+  end do
 
-  do L=0,Mlps0(ak)
+  l0=0
+  do ll=0,Mlps0(ak)
+  do L=l0,l0+pp%nproj(ll,ak)-1
     do i=0,Mr(ak)
       vpp(i,L,ak)=vpp_f(i,L,ak)
     end do
   end do
+  l0=L
+  end do
+  if( Lref(ak) > Mlps0(ak) )then
+    do i=0,Mr(ak)
+      vpp(i,Lref(ak),ak)=vpp_f(i,Lref(ak),ak)
+    end do
+  end if
 
   uppr(Mr(ak)+1:Nr,:,ak)=0.d0
 
-  do L=0,Mlps0(ak)
+  l0=0
+  do ll=0,Mlps0(ak)
+  do L=l0,l0+pp%nproj(ll,ak)-1
     do i=Mr(ak)+1,Nr
       r=rad_psl(i,ak) ; vpp(i,L,ak)=-Zps(ak)/r
     end do
   end do
+  l0=L
+  end do
+  if( Lref(ak) > Mlps0(ak) )then
+    do i=Mr(ak)+1,Nr
+       r=rad_psl(i,ak)
+      vpp(i,Lref(ak),ak)=-Zps(ak)/r
+    end do
+  end if
 
 end do
 

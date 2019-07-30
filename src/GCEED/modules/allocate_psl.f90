@@ -51,7 +51,7 @@ subroutine allocate_psl
 use scf_data
 implicit none
 real(8) :: r
-integer :: Nr0
+integer :: Nr0,nprj_u,nprj_v
 
 select case(iperiodic)
 case(0)
@@ -74,7 +74,7 @@ allocate(Mps_all(1:MI))
 allocate(Mps(1:MI))
 
 maxMps=int(4.d0/3.d0*Pi*(rmaxRps+4.d0*maxval(Hgs(:)))**3/Hvol)
-Mlmps=(maxval(Mlps)+1)**2
+Mlmps=maxlm
 
 allocate(Jxyz_all(1:3,1:maxMps,1:MI))
 allocate(Jxyz_tmp1(1:3,1:maxMps,1:MI))
@@ -83,15 +83,17 @@ if(iperiodic==3)then
   allocate(Jxxyyzz_tmp1(1:3,1:maxMps,1:MI))
   allocate(Jxxyyzz_tmp2(1:3,1:maxMps,1:MI))
 end if
-allocate(uV_all(maxMps,Mlmps,MI), uVu(Mlmps,MI))
+allocate(uV_all(maxMps,Mlmps,MI), uVu(Mlmps,MI)); uVu=0.0d0
 
+nprj_u=size(upp_f,2)
+nprj_v=size(vpp_f,2)
 allocate(rhopp(0:Nr,MKI))
-allocate(vpp(0:Nr,0:Nlps,MKI))
-allocate(uppr(0:Nr,0:Nlps,MKI))
-allocate(uVnl(0:Nr,0:Nlps,MKI))
+allocate(vpp(0:Nr,0:nprj_v-1,MKI))
+allocate(uppr(0:Nr,0:nprj_u-1,MKI))
+allocate(uVnl(0:Nr,0:nprj_u-1,MKI))
 allocate(rad_psl(0:Nr,MKI))
 
-allocate(ur(maxMps,Nlmps))
+allocate(ur(maxMps,Mlmps))
 
 allocate(rho_core(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 

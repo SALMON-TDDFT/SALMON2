@@ -32,7 +32,7 @@ Subroutine prep_ps_periodic(property)
   implicit none
   character(17) :: property
   logical :: flag_alloc1, flag_alloc2
-  integer :: ik,i,a,j,ix,iy,iz,l,m,lm,ir,intr
+  integer :: ik,i,a,j,ix,iy,iz,l,m,lm,ir,intr,l0,ll
   integer :: PNLx,PNLy,PNLz,narray
   real(8) :: x,y,z,r
   real(8) :: ratio1,ratio2,rc
@@ -42,7 +42,8 @@ Subroutine prep_ps_periodic(property)
   !(Local pseudopotential in G-space (radial part))
   if(property == 'initial') then
 
-    allocate(lma_tbl((Lmax+1)**2,NI))
+    ll=maxval(pp%nproj)*(Lmax+1)**2
+    allocate(lma_tbl(ll,NI)); lma_tbl=0
     call init_lma_tbl(pp,ppg)
 
     call calc_vloc(pp,dVloc_G,Gx,Gy,Gz,NG,NG_s,NG_e,ngzero)
@@ -179,10 +180,10 @@ Subroutine prep_ps_periodic(property)
   if(property /= 'update_wo_realloc') then
 
   if(property == 'initial') then
-     allocate( save_udVtbl_a(Nrmax,0:Lmax,NI) )
-     allocate( save_udVtbl_b(Nrmax,0:Lmax,NI) )
-     allocate( save_udVtbl_c(Nrmax,0:Lmax,NI) )
-     allocate( save_udVtbl_d(Nrmax,0:Lmax,NI) )
+     allocate( save_udVtbl_a(Nrmax,0:2*Lmax+1,NI) )
+     allocate( save_udVtbl_b(Nrmax,0:2*Lmax+1,NI) )
+     allocate( save_udVtbl_c(Nrmax,0:2*Lmax+1,NI) )
+     allocate( save_udVtbl_d(Nrmax,0:2*Lmax+1,NI) )
   endif
 
   end if
@@ -200,12 +201,16 @@ Subroutine prep_ps_periodic(property)
     ik=Kion(a)
     if(property /= 'update_wo_realloc') then
       lm=0
-      do l=0,Mlps(ik)
+      l0=0
+      do ll=0,Mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
         if(inorm(l,ik)==0) cycle
-        do m=-l,l
+        do m=-ll,ll
           lm=lm+1
           iuV(lma_tbl(lm,a))=inorm(l,ik)
         enddo
+      enddo
+      l0=l
       enddo
     endif
   enddo

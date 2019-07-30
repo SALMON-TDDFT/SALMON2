@@ -129,14 +129,14 @@ CONTAINS
       do iy=-NEwald,NEwald
       do iz=-NEwald,NEwald
         do ib=1,system%nion
-          if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+          !if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle ! iwata
           r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
           r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
           r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
           rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
           rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
           rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
-          rr = sum(rab(:)**2)
+          rr = sum(rab(:)**2) ; if ( rr == 0.0d0 ) cycle ! iwata 
           E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
         end do
       end do
@@ -168,15 +168,17 @@ CONTAINS
 !$omp          private(ig,g,G2,rho_i,rho_e,ia,r,Gd) &
 !$omp          shared(fg,aEwald,system,sysvol,kion)
     do ig=fg%ig_s,fg%ig_e
-      if(ig == fg%iGzero ) cycle
+      !if(ig == fg%iGzero ) cycle !iwata
       g(1) = fg%Gx(ig)
       g(2) = fg%Gy(ig)
       g(3) = fg%Gz(ig)
       G2 = g(1)**2 + g(2)**2 + g(3)**2
       rho_i = fg%zrhoG_ion(ig)
       rho_e = fg%zrhoG_ele(ig)
+      if( ig /= fg%iGzero )then ! iwata
       E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
       E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
+      end if ! iwata
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)

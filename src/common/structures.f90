@@ -133,6 +133,7 @@ module structures
     integer,allocatable :: lref(:)
     integer,allocatable :: nrps(:)
     integer,allocatable :: mlps(:)
+    integer,allocatable :: nproj(:,:)
     integer,allocatable :: zps(:)
     integer,allocatable :: nrloc(:)
     real(8),allocatable :: rloc(:)

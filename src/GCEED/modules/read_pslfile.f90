@@ -45,8 +45,8 @@ module read_pslfile_sub
     use input_pp_sub, only: input_pp
     use prep_pp_sub, only: init_mps
     implicit none
+    integer :: ak,i,ll,l0,l,nprj_u,nprj_v
     type(s_dft_system), intent(inout)  :: system
-    integer :: ak,i,ll
     
     allocate( Mlps0(MKI) )
     allocate( Mr(MKI) )
@@ -59,24 +59,37 @@ module read_pslfile_sub
     call init_mps(ppg)
     call init_mps(ppg_all)
     
-    allocate(upp_f(0:Nrmax,0:Nlps,MKI))
+    nprj_u = size( pp%upp_f, 2 )
+    nprj_v = size( pp%vpp_f, 2 )
+    allocate(upp_f(0:Nrmax,0:nprj_u-1,MKI))
     allocate(rhopp_f(0:Nrmax,MKI))
-    allocate(vpp_f(0:Nrmax,0:Nlps,MKI))
+    allocate(vpp_f(0:Nrmax,0:nprj_v-1,MKI)); vpp_f=0.0d0
     allocate(rad_f(0:Nrmax,MKI) )
     
     call input_pp(pp,harray(1,1),harray(2,1),harray(3,1))
  
     system%mass(1:MKI)=pp%rmass(1:MKI)
   
+    Lref(1:MKI)=pp%lref(1:MKI)
+
     do ak=1,MKI
       Mr(ak)=pp%mr(ak)
       Mlps0(ak)=pp%mlps(ak)
+      l0=0
       do ll=0,Mlps0(ak)
+      do l=l0,l0+pp%nproj(ll,ak)-1
         do i=0,Mr(ak)
-          upp_f(i,ll,ak)=pp%upp_f(i,ll,ak)
-          vpp_f(i,ll,ak)=pp%vpp_f(i,ll,ak)
+          upp_f(i,l,ak)=pp%upp_f(i,l,ak)
+          vpp_f(i,l,ak)=pp%vpp_f(i,l,ak)
         end do
       end do
+      l0=l
+      end do
+      if( Lref(ak) > Mlps0(ak) )then
+        do i=0,Mr(ak)
+          vpp_f(i,Lref(ak),ak) = pp%vpp_f(i,Lref(ak),ak)
+        end do
+      end if
       do i=1,Mr(ak)
         rad_f(i-1,ak)=pp%rad(i,ak)
       end do
@@ -95,6 +108,11 @@ module read_pslfile_sub
         step(ak)=0.01d0/a_B
       case('ABINITFHI','FHI')
         step(ak)=pp%rad(2,ak)/pp%rad(1,ak)
+      case('ABINITPSP8')
+        step(ak)=pp%rad(2,ak)-pp%rad(1,ak)
+      case default
+        write(*,*) "Undifiend ps_format: ps_format(ak=",ak,")=",ps_format(ak)
+        stop 'stop@GCEED/modules/read_pslfile.f90'
       end select
     end do
     rmin_step=minval(step(1:MKI))
@@ -103,7 +121,7 @@ module read_pslfile_sub
     do ak=1,MKI
       if(Mlps(ak)>maxlm) maxlm=Mlps(ak)
     end do
-    maxlm=(maxlm+1)**2
+    maxlm=maxval(pp%nproj)*(maxlm+1)**2
 
     do ak=1,MKI
       select case(ps_format(ak))
@@ -113,6 +131,8 @@ module read_pslfile_sub
         ipsfileform(ak) = n_ABINIT_psformat
       case('ABINITFHI')
         ipsfileform(ak) = n_ABINITFHI_psformat
+      case('ABINITPSP8')
+        ipsfileform(ak) = 0
       case('FHI')
         ipsfileform(ak) = n_FHI_psformat
       end select

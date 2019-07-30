@@ -17,6 +17,8 @@
 module input_pp_sub
   implicit none
 
+  logical,private :: flag_abinitpsp8=.false.
+
 contains
 
 subroutine input_pp(pp,hx,hy,hz)
@@ -32,7 +34,7 @@ subroutine input_pp(pp,hx,hy,hz)
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
   real(8),intent(in) :: hx,hy,hz
-  integer :: ik,l,i
+  integer :: ik,l,i,l0,ll
   real(8) :: rrc(0:pp%lmax0)
   real(8) :: r1
   real(8),allocatable :: rhor_nlcc(:,:)   !zero in radial index for taking derivative
@@ -59,6 +61,8 @@ subroutine input_pp(pp,hx,hy,hz)
         call read_ps_abinit(pp,rrc,ik,ps_file)
       case('ABINITFHI')
         call read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+      case('ABINITPSP8')
+        call read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
       case('FHI')
         call read_ps_fhi(pp,rrc,ik,ps_file)
 !      case('ATOM')      ; call read_ps_ATOM
@@ -76,22 +80,41 @@ subroutine input_pp(pp,hx,hy,hz)
       pp%rloc(ik)=pp%rps(ik)
       pp%radnl(:,ik)=pp%rad(:,ik)
 
-      do l=0,pp%mlps(ik)
-        pp%anorm(l,ik) = 0.d0
-        do i=1,pp%mr(ik)-1
-          r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
-          pp%anorm(l,ik) = pp%anorm(l,ik)  &
-               + (pp%upp(i,l)**2*(pp%vpp(i,l)-pp%vpp(i,pp%lref(ik)))+pp%upp(i-1,l)**2*(pp%vpp(i-1,l)-pp%vpp(i-1,pp%lref(ik))))*r1
+      if( flag_abinitpsp8 )then
+        l0=0
+        do ll=0,pp%mlps(ik)
+        do l=l0,l0+pp%nproj(ll,ik)-1
+          pp%inorm(l,ik) = 1
+          if( pp%anorm(l,ik) < 0.0d0 )then
+            pp%anorm(l,ik) = -pp%anorm(l,ik)
+            pp%inorm(l,ik) = -1
+          end if
+          if ( abs(pp%anorm(l,ik)) < Eps0 ) pp%inorm(l,ik)=0
+          pp%anorm(l,ik) = sqrt( pp%anorm(l,ik) )
         end do
-        pp%anorm(l,ik) = 0.5d0*pp%anorm(l,ik)
-        pp%inorm(l,ik)=+1
-        if(pp%anorm(l,ik).lt.0.d0) then
-          pp%anorm(l,ik)=-pp%anorm(l,ik)
-          pp%inorm(l,ik)=-1
-        endif
-        if(abs(pp%anorm(l,ik)).lt.Eps0)pp%inorm(l,ik)=0
-        pp%anorm(l,ik)=sqrt(pp%anorm(l,ik))
-      enddo
+        l0=l
+        end do
+      else
+        do l=0,pp%mlps(ik)
+          pp%anorm(l,ik) = 0.d0
+          do i=1,pp%mr(ik)-1
+            r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+            pp%anorm(l,ik) = pp%anorm(l,ik)  &
+                 + (pp%upp(i,l)**2*(pp%vpp(i,l)-pp%vpp(i,pp%lref(ik)))+pp%upp(i-1,l)**2*(pp%vpp(i-1,l)-pp%vpp(i-1,pp%lref(ik))))*r1
+          end do
+          pp%anorm(l,ik) = 0.5d0*pp%anorm(l,ik)
+          pp%inorm(l,ik)=+1
+          if(pp%anorm(l,ik).lt.0.d0) then
+            pp%anorm(l,ik)=-pp%anorm(l,ik)
+            pp%inorm(l,ik)=-1
+          endif
+          if(abs(pp%anorm(l,ik)).lt.Eps0)pp%inorm(l,ik)=0
+          pp%anorm(l,ik)=sqrt(pp%anorm(l,ik))
+        enddo
+      end if
+
+! number of non-local projectors
+      if ( all(pp%nproj(:,ik)==0) ) pp%nproj(0:pp%mlps(ik),ik)=1
 
       write(*,*) '===================pseudopotential data==================='
       write(*,*) 'ik ,atom_symbol=',ik, pp%atom_symbol(ik)
@@ -100,8 +123,9 @@ subroutine input_pp(pp,hx,hy,hz)
       write(*,*) 'Zps(ik), Mlps(ik) =',pp%zps(ik), pp%mlps(ik)
       write(*,*) 'Rps(ik), NRps(ik) =',pp%rps(ik), pp%nrps(ik)
       write(*,*) 'Lref(ik) =',pp%lref(ik)
-      write(*,*) 'anorm(ik,l) =',(real(pp%anorm(l,ik)),l=0,pp%mlps(ik))
-      write(*,*) 'inorm(ik,l) =',(pp%inorm(l,ik),l=0,pp%mlps(ik))
+      write(*,*) 'nproj(ik,l) =',(pp%nproj(l,ik),l=0,pp%mlps(ik))
+      write(*,*) 'anorm(ik,l) =',(real(pp%anorm(l,ik)),l=0,sum(pp%nproj(:,ik))-1)
+      write(*,*) 'inorm(ik,l) =',(pp%inorm(l,ik),l=0,sum(pp%nproj(:,ik))-1)
       write(*,*) 'Mass(ik) =',pp%rmass(ik)
       write(*,*) 'flag_nlcc_element(ik) =',flag_nlcc_element(ik)
       write(*,*) '=========================================================='
@@ -138,6 +162,8 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%mr,nproc_group_global)
   call comm_bcast(pp%zps,nproc_group_global)
   call comm_bcast(pp%mlps,nproc_group_global)
+  call comm_bcast(pp%lref,nproc_group_global)
+  call comm_bcast(pp%nproj,nproc_group_global)
   call comm_bcast(pp%rps,nproc_group_global)
   call comm_bcast(pp%nrps,nproc_group_global)
   call comm_bcast(pp%nrloc,nproc_group_global)
@@ -358,6 +384,122 @@ subroutine read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   return
 end subroutine read_ps_abinitfhi
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+  use structures,only : s_pp_info
+  use salmon_global,only : Lmax_ps, nelem
+  implicit none
+  type(s_pp_info),intent(inout) :: pp
+  real(8),intent(out) :: rhor_nlcc(0:pp%nrmax0,0:2)
+  logical,intent(inout) :: flag_nlcc_element(nelem)
+!argument
+  integer,intent(in) :: ik
+  real(8),intent(out) :: rrc(0:pp%lmax0)
+  character(256),intent(in) :: ps_file
+!local variable
+  integer :: i,j,j0,ll,nproj,lloc,lloc_check,lmaxabinit
+  real(8) :: rzps,rcpsp,pi4
+  real(8) :: zatom, pspdat,pspcod,pspxc,mmax,r2well,dr
+  real(8) :: rchrg,fchrg,qchrg,sum_rho_pp,sum_rho_nlcc,rho_tmp,r_tmp
+  character(1) :: dummy_text
+
+  flag_abinitpsp8 = .true.
+
+  open(4,file=ps_file,status='old')
+! header
+  read(4,*) dummy_text
+  read(4,*) zatom, pp%zion, pspdat
+  rzps = pp%zion
+  pp%zps(ik)=int(rzps+1d-10)
+  read(4,*) pspcod,pspxc,lmaxabinit,lloc,mmax,r2well
+  pp%mlps(ik)=lmaxabinit
+  if (lloc /= pp%lref(ik)) write(*,*) "Warning! Lref(ik=",ik,") is different from intended one in ",ps_file
+  pp%mr(ik) = mmax - 1
+  if ( pp%mr(ik)   > pp%nrmax0) stop 'Mr>Nrmax0 at Read_PS_ABINIT'
+  if ( pp%mlps(ik) > pp%lmax0 ) stop 'Mlps(ik)>Lmax0 at Read_PS_ABINIT'
+  if ( pp%mlps(ik) > pp%lmax  ) stop 'Mlps(ik)>Lmax at Read_PS_ABINIT'
+  read(4,*) rchrg,fchrg,qchrg
+  read(4,*) ( pp%nproj(ll,ik), ll=0,pp%mlps(ik) )
+  if( maxval(pp%nproj(:,ik)) > 2 )then
+    write(*,*) "stop!!! maxval(pp%nproj)=",maxval(pp%nproj(:,ik))
+    goto 999
+  end if
+  read(4,*)
+! non-local projectors
+  j0=0
+  do ll=0,pp%mlps(ik)
+    nproj=pp%nproj(ll,ik)
+    read(4,*) dummy_text, ( pp%anorm(j,ik), j=j0,j0+nproj-1 )
+    do i=1,pp%mr(ik)+1
+      read(4,*) dummy_text, pp%rad(i,ik), ( pp%vpp(i-1,j), j=j0,j0+nproj-1 )
+    end do
+    j0=j0+nproj
+  end do
+! local poetntial
+  read(4,*) lloc_check
+  if( lloc_check == lloc .or. lloc_check > lmaxabinit )then
+    j=size(pp%vpp,2)-1
+    do i=1,pp%mr(ik)+1
+      read(4,*) dummy_text, pp%rad(i,ik), pp%vpp(i-1,j)
+    end do
+    pp%lref(ik)=j
+    write(*,*) "Lref (ik=",ik,") is replaced to",j
+  else
+    write(*,*) "stop!!! lloc,lloc_check,lmaxabinit =",lloc,lloc_check,lmaxabinit
+    goto 999
+  end if
+! constans for charge integration
+  dr=pp%rad(2,ik)-pp%rad(1,ik)
+  pi4=4.0d0*acos(-1.0d0)
+! core charge for nonlinear core correction and its derivatives
+  if( fchrg > 0.0d0 )then
+    flag_nlcc_element(ik)=.true.
+    do i=1,pp%mr(ik)+1
+      read(4,*) dummy_text,r_tmp,rhor_nlcc(i-1,0),rhor_nlcc(i-1,1),rhor_nlcc(i-1,2) !,rhor_nlcc(i-1,3)
+    end do
+    rhor_nlcc=rhor_nlcc/pi4
+    sum_rho_nlcc=0.0d0
+    do i=1,pp%mr(ik)+1
+      sum_rho_nlcc=sum_rho_nlcc+rhor_nlcc(i-1,0)*pp%rad(i,ik)**2
+    end do
+    write(*,*) "sum(rho_nlcc)=",sum_rho_nlcc*pi4*dr
+  end if
+! valence charge density
+  sum_rho_pp=0.0d0
+  do i=1,pp%mr(ik)+1
+    read(4,*) dummy_text, r_tmp, rho_tmp
+    sum_rho_pp=sum_rho_pp+rho_tmp*r_tmp**2
+  end do
+  write(*,*) "sum(rho_pp)=",sum_rho_pp*dr
+  close(4)
+! extend radial grid data
+  do i=pp%mr(ik)+2,pp%nrmax
+    pp%rad(i,ik)=dr*(i-1)
+  end do
+! cut-off radius of the non-local projector
+  rrc=0.0d0
+  j0=0
+  do ll=0,pp%mlps(ik)
+    rcpsp=0.0d0
+    do j=j0,j0+pp%nproj(ll,ik)-1
+      do i=pp%mr(ik)+1,1,-1
+        if ( abs(pp%vpp(i-1,j)) > 1.d-12 ) then
+          rcpsp = max( rcpsp, pp%rad(i,ik) ) 
+          exit
+        end if
+      end do
+    end do
+    j0=j
+    rrc(ll)=rcpsp
+  end do
+
+  !if ( Lmax_ps(ik) >= 0 ) pp%mlps(ik) = Lmax_ps(ik) ! Maximum angular momentum given by input
+
+  return
+
+999 stop "stop@atom/pp/input_pp.f90:read_ps_abinitpsp8"
+
+end subroutine read_ps_abinitpsp8
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine read_ps_fhi(pp,rrc,ik,ps_file)
 !This is for original FHI98PP and not for FHI pseudopotential listed in abinit web page
 !See http://th.fhi-berlin.mpg.de/th/fhi98md/fhi98PP/
@@ -448,11 +590,11 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
   logical,intent(in) :: flag_nlcc_element(nelem)
   real(8) :: eta
   integer :: ncounter
-  real(8) :: uvpp(0:pp%nrmax0,0:pp%lmax0),duvpp(0:pp%nrmax0,0:pp%lmax0)
+  real(8) :: uvpp(0:pp%nrmax0,0:2*pp%lmax0+1),duvpp(0:pp%nrmax0,0:2*pp%lmax0+1)
   real(8) :: vpploc(0:pp%nrmax0),dvpploc(0:pp%nrmax0)
   real(8) :: grid_function(0:pp%nrmax0)
-  integer :: i,l
-  real(8) :: r1,r2,r3,r4
+  integer :: i,l,ll,l0,mr
+  real(8) :: r1,r2,r3,r4,const
 
   ncounter = 0
   do i=0,pp%mr(ik)
@@ -466,25 +608,59 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
     end if
   end do
 
-  vpploc(:) = pp%vpp(:,pp%lref(ik))
-  do l=0,pp%mlps(ik)
-    do i=0,pp%mr(ik)
-       uvpp(i,l)=pp%upp(i,l)*(pp%vpp(i,l)-pp%vpp(i,pp%lref(ik)))
-    end do
-    do i=1,pp%mr(ik)-1
+  if( flag_abinitpsp8 )then
+    mr=pp%mr(ik)
+    vpploc(:) = pp%vpp(:,pp%lref(ik))
+    do i=1,mr-1
       r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
       r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
       r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
       r4 = r1/r2
-      duvpp(i,l)=(r4+1.d0)*(uvpp(i,l)-uvpp(i-1,l))/r1-(uvpp(i+1,l)-uvpp(i-1,l))/r3*r4
       dvpploc(i)=(r4+1.d0)*(vpploc(i)-vpploc(i-1))/r1-(vpploc(i+1)-vpploc(i-1))/r3*r4
     end do
-    duvpp(0,l)=2.d0*duvpp(1,l)-duvpp(2,l)
-    duvpp(pp%mr(ik),l)=2.d0*duvpp(pp%mr(ik)-1,l)-duvpp(pp%mr(ik)-2,l)
     dvpploc(0)=dvpploc(1)-(dvpploc(2)-dvpploc(1))/(pp%rad(3,ik)-pp%rad(2,ik))*(pp%rad(2,ik)-pp%rad(1,ik))
-    dvpploc(pp%mr(ik))=dvpploc(pp%mr(ik)-1)+(dvpploc(pp%mr(ik)-1)-dvpploc(pp%mr(ik)-2))/(pp%rad(pp%mr(ik),ik)  &
-                      -pp%rad(pp%mr(ik)-1,ik))*(pp%rad(pp%mr(ik)+1,ik)-pp%rad(pp%mr(ik),ik))
-  end do
+    dvpploc(mr)=dvpploc(mr-1)+(dvpploc(mr-1)-dvpploc(mr-2))/(pp%rad(mr,ik)  &
+                             -pp%rad(mr-1,ik))*(pp%rad(mr+1,ik)-pp%rad(mr,ik))
+    l0=0
+    do ll=0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=0,mr
+        uvpp(i,l)=pp%vpp(i,l)
+      end do
+      do i=1,mr-1
+        r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+        r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
+        r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
+        r4 = r1/r2
+        duvpp(i,l)=(r4+1.d0)*(uvpp(i,l)-uvpp(i-1,l))/r1-(uvpp(i+1,l)-uvpp(i-1,l))/r3*r4
+        dvpploc(i)=(r4+1.d0)*(vpploc(i)-vpploc(i-1))/r1-(vpploc(i+1)-vpploc(i-1))/r3*r4
+      end do
+      duvpp(0,l)=2.d0*duvpp(1,l)-duvpp(2,l)
+      duvpp(mr,l)=2.d0*duvpp(mr-1,l)-duvpp(mr-2,l)
+    end do
+    l0=l
+    end do
+  else
+    vpploc(:) = pp%vpp(:,pp%lref(ik))
+    do l=0,pp%mlps(ik)
+      do i=0,pp%mr(ik)
+        uvpp(i,l)=pp%upp(i,l)*(pp%vpp(i,l)-pp%vpp(i,pp%lref(ik)))
+      end do
+      do i=1,pp%mr(ik)-1
+        r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+        r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
+        r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
+        r4 = r1/r2
+        duvpp(i,l)=(r4+1.d0)*(uvpp(i,l)-uvpp(i-1,l))/r1-(uvpp(i+1,l)-uvpp(i-1,l))/r3*r4
+        dvpploc(i)=(r4+1.d0)*(vpploc(i)-vpploc(i-1))/r1-(vpploc(i+1)-vpploc(i-1))/r3*r4
+      end do
+      duvpp(0,l)=2.d0*duvpp(1,l)-duvpp(2,l)
+      duvpp(pp%mr(ik),l)=2.d0*duvpp(pp%mr(ik)-1,l)-duvpp(pp%mr(ik)-2,l)
+      dvpploc(0)=dvpploc(1)-(dvpploc(2)-dvpploc(1))/(pp%rad(3,ik)-pp%rad(2,ik))*(pp%rad(2,ik)-pp%rad(1,ik))
+      dvpploc(pp%mr(ik))=dvpploc(pp%mr(ik)-1)+(dvpploc(pp%mr(ik)-1)-dvpploc(pp%mr(ik)-2))/(pp%rad(pp%mr(ik),ik)  &
+                        -pp%rad(pp%mr(ik)-1,ik))*(pp%rad(pp%mr(ik)+1,ik)-pp%rad(pp%mr(ik),ik))
+    end do
+  end if
 
   open(4,file="PSbeforemask_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//".dat")
   write(4,*) "# Mr =",pp%mr(ik)
@@ -511,33 +687,58 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
   close(4)
 
 ! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
-  do l=0,pp%mlps(ik)
+  l0=0
+  do ll=0,pp%mlps(ik)
+    const=sqrt( (2.0d0*ll+1.0d0)/(4.0d0*pi) )
+  do l=l0,l0+pp%nproj(ll,ik)-1
     do i=1,pp%mr(ik)
-      uvpp(i,l)=uvpp(i,l)*sqrt((2*l+1.d0)/(4*pi))/(pp%rad(i+1,ik))**(l+1)
-      duvpp(i,l)=duvpp(i,l)*sqrt((2*l+1.d0)/(4*pi))/(pp%rad(i+1,ik))**(l+1) &
-           &- (l+1.d0)*uvpp(i,l)/pp%rad(i+1,ik)
-    enddo
+      uvpp(i,l)=uvpp(i,l)*const/(pp%rad(i+1,ik))**(ll+1)
+      duvpp(i,l)=duvpp(i,l)*const/(pp%rad(i+1,ik))**(ll+1) &
+                -(ll+1)*uvpp(i,l)/pp%rad(i+1,ik)
+    end do
     uvpp(0,l)=2.d0*uvpp(1,l)-uvpp(2,l)
     duvpp(0,l)=2.d0*duvpp(1,l)-duvpp(2,l)
-  enddo
+  end do
+  l0=l
+  end do
 
-  do l=0,pp%mlps(ik)
-    do i=1,pp%nrps(ik)
+  if( flag_abinitpsp8 )then
+    do i=1,pp%mr(ik)
       pp%vloctbl(i,ik)=vpploc(i-1)
       pp%dvloctbl(i,ik)=dvpploc(i-1)
-      pp%udvtbl(i,l,ik)=uvpp(i-1,l)
-      pp%dudvtbl(i,l,ik)=duvpp(i-1,l)
+    end do
+    l0=0
+    do ll=0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=1,pp%mr(ik)+1
+        pp%udvtbl(i,l,ik)=uvpp(i-1,l)
+        pp%dudvtbl(i,l,ik)=duvpp(i-1,l)
+      end do
+      if (pp%inorm(l,ik) == 0) cycle
+      pp%udvtbl(1:pp%mr(ik)+1,l,ik)=pp%udvtbl(1:pp%mr(ik)+1,l,ik)*pp%anorm(l,ik)
+      pp%dudvtbl(1:pp%mr(ik)+1,l,ik)=pp%dudvtbl(1:pp%mr(ik)+1,l,ik)*pp%anorm(l,ik)
+    end do
+    l0=l  
+    end do
+  else
+    do l=0,pp%mlps(ik)
+      do i=1,pp%nrps(ik)
+        pp%vloctbl(i,ik)=vpploc(i-1)
+        pp%dvloctbl(i,ik)=dvpploc(i-1)
+        pp%udvtbl(i,l,ik)=uvpp(i-1,l)
+        pp%dudvtbl(i,l,ik)=duvpp(i-1,l)
+      enddo
+      if (pp%inorm(l,ik) == 0) cycle
+      pp%udvtbl(1:pp%nrps(ik),l,ik)=pp%udvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
+      pp%dudvtbl(1:pp%nrps(ik),l,ik)=pp%dudvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
     enddo
-    if (pp%inorm(l,ik) == 0) cycle
-    pp%udvtbl(1:pp%nrps(ik),l,ik)=pp%udvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
-    pp%dudvtbl(1:pp%nrps(ik),l,ik)=pp%dudvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
-  enddo
-
+  end if
 
   pp%flag_nlcc = pp%flag_nlcc.or.flag_nlcc_element(ik)
   pp%rho_nlcc_tbl(:,ik)=0d0; pp%tau_nlcc_tbl(:,ik)=0d0
   if(.not.flag_nlcc_element(ik))return
-  do i=1,pp%nrps(ik)
+!  do i=1,pp%nrps(ik)
+  do i=1,pp%mr(ik)
     if(rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7)exit
     pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
@@ -555,8 +756,8 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   integer,intent(in) :: ik
   logical,intent(in) :: flag_nlcc_element(nelem)
   real(8),intent(in) :: rhor_nlcc(0:pp%nrmax0,0:2)
-  integer :: i,l
-  real(8) :: r1,r2,r3,r4
+  integer :: i,l,l0,ll
+  real(8) :: r1,r2,r3,r4,const
 
 ! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
   do l=0,pp%mlps(ik)
@@ -567,7 +768,9 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
 !    pp%upp(0,l)=2.d0*pp%upp(1,l)-pp%upp(2,l)
   enddo
 
-  do l=0,pp%mlps(ik)
+  l0=0
+  do ll=0,pp%mlps(ik)
+  do l=l0,l0+pp%nproj(ll,ik)-1
     do i=1,pp%mr(ik)-1
       r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
       r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
@@ -585,24 +788,64 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
 !    pp%dupp(0,l)=2.d0*pp%dupp(1,l)-pp%dupp(2,l)
 !    pp%dupp(pp%mr(ik),l)=2.d0*pp%dupp(pp%mr(ik)-1,l)-pp%dupp(pp%mr(ik)-2,l)
   end do
+  l0=l
+  end do
 
-  do l=0,pp%mlps(ik)
-    do i=1,pp%nrps(ik)
+  if( flag_abinitpsp8 )then
+    l=pp%lref(ik)
+    do i=1,pp%mr(ik)-1
+      r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+      r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
+      r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
+      r4 = r1/r2
+      pp%dvpp(i,l)=(r4+1.d0)*(pp%vpp(i,l)-pp%vpp(i-1,l))/r1-(pp%vpp(i+1,l)-pp%vpp(i-1,l))/r3*r4
+    end do
+    pp%dvpp(0,l)=pp%dvpp(1,l)
+    pp%dvpp(pp%mr(ik),l)=pp%dvpp(pp%mr(ik)-1,l)
+  end if
+
+  if( flag_abinitpsp8 )then
+    do i=1,pp%mr(ik)
       pp%vloctbl(i,ik)=pp%vpp(i-1,pp%lref(ik))
       pp%dvloctbl(i,ik)=pp%dvpp(i-1,pp%lref(ik))
-      pp%udvtbl(i,l,ik)=(pp%vpp(i-1,l)-pp%vpp(i-1,pp%lref(ik)))*pp%upp(i-1,l)
-      pp%dudvtbl(i,l,ik)=(pp%dvpp(i-1,l)-pp%dvpp(i-1,pp%lref(ik)))*pp%upp(i-1,l)   &
-                          + (pp%vpp(i-1,l)-pp%vpp(i-1,pp%lref(ik)))*pp%dupp(i-1,l)
+    end do
+    l0=0
+    do ll=0,pp%mlps(ik)
+      const=sqrt( (2.0d0*ll+1.0d0)/(4.0d0*pi) )
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=2,pp%mr(ik)
+        pp%udvtbl(i,l,ik)=pp%vpp(i-1,l)/pp%rad(i,ik)**(ll+1)*const
+        pp%dudvtbl(i,l,ik)=pp%dvpp(i-1,l)/pp%rad(i,ik)**(ll+1)*const &
+                          +pp%vpp(i-1,l)*( -const*(ll+1)/pp%rad(i,ik)**(ll+2) )
+      end do
+      pp%udvtbl(1,l,ik)=pp%udvtbl(2,l,ik)
+      pp%dudvtbl(1,l,ik)=pp%dudvtbl(2,l,ik)
+      if (pp%inorm(l,ik) == 0) cycle
+      pp%udvtbl(1:pp%mr(ik),l,ik)=pp%udvtbl(1:pp%nrps(ik),l,ik)*pp%anorm(l,ik)
+      pp%dudvtbl(1:pp%mr(ik),l,ik)=pp%dudvtbl(1:pp%nrps(ik),l,ik)*pp%anorm(l,ik)
+    end do
+    l0=l
+    end do
+  else
+    do l=0,pp%mlps(ik)
+      do i=1,pp%nrps(ik)
+        pp%vloctbl(i,ik)=pp%vpp(i-1,pp%lref(ik))
+        pp%dvloctbl(i,ik)=pp%dvpp(i-1,pp%lref(ik))
+        pp%udvtbl(i,l,ik)=(pp%vpp(i-1,l)-pp%vpp(i-1,pp%lref(ik)))*pp%upp(i-1,l)
+        pp%dudvtbl(i,l,ik)=(pp%dvpp(i-1,l)-pp%dvpp(i-1,pp%lref(ik)))*pp%upp(i-1,l)   &
+                            + (pp%vpp(i-1,l)-pp%vpp(i-1,pp%lref(ik)))*pp%dupp(i-1,l)
+      enddo
+      if (pp%inorm(l,ik) == 0) cycle
+      pp%udvtbl(1:pp%nrps(ik),l,ik)=pp%udvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
+      pp%dudvtbl(1:pp%nrps(ik),l,ik)=pp%dudvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
     enddo
-    if (pp%inorm(l,ik) == 0) cycle
-    pp%udvtbl(1:pp%nrps(ik),l,ik)=pp%udvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
-    pp%dudvtbl(1:pp%nrps(ik),l,ik)=pp%dudvtbl(1:pp%nrps(ik),l,ik)/pp%anorm(l,ik)
-  enddo
+  end if
 
   pp%flag_nlcc = pp%flag_nlcc.or.flag_nlcc_element(ik)
   pp%rho_nlcc_tbl(:,ik)=0d0; pp%tau_nlcc_tbl(:,ik)=0d0
   if(.not.flag_nlcc_element(ik))return
-  do i=1,pp%nrps(ik)
+  do i=1,pp%mr(ik)
+  !do i=1,pp%nrps(ik)
     if(rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7)exit
     pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
@@ -620,13 +863,13 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   type(s_pp_info),intent(inout) :: pp
 !argument
   integer,intent(in) :: ik
-  real(8),intent(inout) :: uvpp(0:pp%nrmax0,0:pp%lmax0)
-  real(8),intent(out) :: duvpp(0:pp%nrmax0,0:pp%lmax0)
+  real(8),intent(inout) :: uvpp(0:pp%nrmax0,0:2*pp%lmax0+1)
+  real(8),intent(out) :: duvpp(0:pp%nrmax0,0:2*pp%lmax0+1)
   real(8),intent(in) :: hx,hy,hz
 !local variable
 !Normalized mask function
   integer,parameter :: nkmax=1000
-  integer :: i,j,l
+  integer :: i,j,l,l0,ll
   real(8) :: kmax,k1,k2,kr1,kr2,dr,dk
   real(8),allocatable :: radk(:),wk(:,:) !Fourier staffs
 !Mask function
@@ -646,12 +889,17 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
 
 !Make
   do i = 0,pp%nrps(ik)-1
-    do l = 0,pp%mlps(ik)
+    l0=0
+    do ll = 0,pp%mlps(ik)
+    do l = l0,l0+pp%nproj(ll,ik)-1
       uvpp(i,l) = uvpp(i,l)/mask(i+1)
+    end do
+    l0=l
     end do
   end do
 
-  allocate(radk(nkmax),wk(nkmax,0:pp%mlps(ik)))
+  ll=sum(pp%nproj(:,ik))
+  allocate(radk(nkmax),wk(nkmax,0:ll-1))
   wk(:,:)=0.d0
 !  kmax = alpha_mask*Pi*sqrt(1.d0/Hx**2+1.d0/Hy**2+1.d0/Hz**2)
   kmax = alpha_mask*pi/max(Hx,Hy,Hz)
@@ -664,9 +912,13 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
       kr1 = radk(i)*pp%rad(j,ik)
       kr2 = radk(i)*pp%rad(j+1,ik)
       dr = pp%rad(j+1,ik) - pp%rad(j,ik)
-      do l=0,pp%mlps(ik)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
         wk(i,l) = wk(i,l) &
-             &+ 0.5d0*(xjl(kr1,l)*uvpp(j-1,l) + xjl(kr2,l)*uvpp(j,l))*dr
+             &+ 0.5d0*(xjl(kr1,ll)*uvpp(j-1,l) + xjl(kr2,ll)*uvpp(j,l))*dr
+      end do
+      l0=l
       end do
     end do
   end do
@@ -676,11 +928,12 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
   write(4,*) "#  Pi/max(Hx,Hy,Hz) =", pi/max(Hx,Hy,Hz)
   write(4,*) "#  Pi*sqrt(1.d0/Hx**2+1.d0/Hy**2+1.d0/Hz**2) =", pi*sqrt(1.d0/Hx**2+1.d0/Hy**2+1.d0/Hz**2)
+  ll=sum(pp%nproj(:,ik))
   do i=1,nkmax
     if(radk(i) < (Pi/max(Hx,Hy,Hz))) then
-      write(4,'(8e21.12)') radk(i),(wk(i,l),l=0,pp%mlps(ik)),1.d0
+      write(4,'(8e21.12)') radk(i),(wk(i,l),l=0,ll-1),1.d0
     else 
-      write(4,'(8e21.12)') radk(i),(wk(i,l),l=0,pp%mlps(ik)),0.d0
+      write(4,'(8e21.12)') radk(i),(wk(i,l),l=0,ll-1),0.d0
     end if
   end do
   close(4)
@@ -693,27 +946,39 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
       k1 = radk(i)
       k2 = radk(i+1)
       dk = radk(i+1) - radk(i)
-      do l=0,pp%mlps(ik)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
         uvpp(j-1,l) = uvpp(j-1,l) &
-             &+ 0.5d0*(xjl(kr1,l)*wk(i,l) + xjl(kr2,l)*wk(i+1,l))*dk
+             &+ 0.5d0*(xjl(kr1,ll)*wk(i,l) + xjl(kr2,ll)*wk(i+1,l))*dk
         duvpp(j-1,l) = duvpp(j-1,l) &
-             &+ 0.5d0*(k1*dxjl(kr1,l)*wk(i,l) + k2*dxjl(kr2,l)*wk(i+1,l))*dk
+             &+ 0.5d0*(k1*dxjl(kr1,ll)*wk(i,l) + k2*dxjl(kr2,ll)*wk(i+1,l))*dk
+      end do
+      l0=l
       end do
     end do
   end do
 
-  do l=0,pp%mlps(ik)
+  l0=0
+  do ll=0,pp%mlps(ik)
+  do l=l0,l0+pp%nproj(ll,ik)-1
     uvpp(pp%mr(ik),l) = 2.d0*uvpp(pp%mr(ik)-1,l) - uvpp(pp%mr(ik)-2,l)
     duvpp(pp%mr(ik),l) = 2.d0*duvpp(pp%mr(ik)-1,l) - duvpp(pp%mr(ik)-2,l)
+  end do
+  l0=l
   end do
   uvpp = (2.d0/pi)*uvpp
   duvpp = (2.d0/pi)*duvpp
 
   do i=0,pp%nrps(ik)-1
-    do l = 0,pp%mlps(ik)
+    l0=0
+    do ll = 0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
 !Derivative calculation before constructing uvpp to avoid overwrite
       duvpp(i,l) = duvpp(i,l)*mask(i+1) + uvpp(i,l)*dmask(i+1)
       uvpp(i,l) = uvpp(i,l)*mask(i+1)
+    end do
+    l0=l
     end do
   end do
 

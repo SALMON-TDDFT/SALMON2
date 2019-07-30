@@ -51,7 +51,8 @@ do a=1,MI
     else
       write(*,*) "intr error",nproc_id_global,intr,r
     end if
-    if(Lref(ak)>Nlps.or.Lref(ak)<0) write(*,*) "Lref error",nproc_id_global,Lref(ak)
+    !if(Lref(ak)>Nlps.or.Lref(ak)<0) write(*,*) "Lref error",nproc_id_global,Lref(ak)
+    if(Lref(ak)>size(vpp,2)-1.or.Lref(ak)<0) write(*,*) "Lref error",nproc_id_global,Lref(ak)
     Vpsl(ix,iy,iz)=Vpsl(ix,iy,iz)      &
                 +ratio1*vpp(intr+1,Lref(ak),ak)      &
                 +ratio2*vpp(intr,Lref(ak),ak)

@@ -21,7 +21,7 @@ use allocate_psl_sub
 implicit none
 integer :: iatom,jj,lm
 
-  integer :: i,ik,ix,iy,iz,l
+  integer :: i,ik,ix,iy,iz,l,ll,l0,m
   integer :: nl
 
   real(8) :: hx,hy,hz
@@ -87,11 +87,10 @@ integer :: iatom,jj,lm
   call set_lma_tbl(pp,ppg)
   call set_lma_tbl(pp,ppg_all)
 
-  allocate( save_udVtbl_a(pp%nrmax,0:pp%lmax,natom) )
-  allocate( save_udVtbl_b(pp%nrmax,0:pp%lmax,natom) )
-  allocate( save_udVtbl_c(pp%nrmax,0:pp%lmax,natom) )
-  allocate( save_udVtbl_d(pp%nrmax,0:pp%lmax,natom) )
-     
+  allocate( save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,natom) )
+  allocate( save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,natom) )
+  allocate( save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,natom) )
+  allocate( save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,natom) )
 
   call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                lx,ly,lz,nl,hx,hy,hz,  &
@@ -106,19 +105,23 @@ integer :: iatom,jj,lm
   lma = 0
   do iatom=1,MI
     ik=Kion(iatom)
+    lm=0
+    l0=0
     do l=0,Mlps(ik)
-      if ( pp%inorm(l,ik)==0) then
-        do lm=l**2+1,(l+1)**2
-          do jj=1,ppg%mps(iatom)
-            uV(jj,lm,iatom) = 0.d0
-          end do
-          do jj=1,ppg_all%mps(iatom)
-            uV_all(jj,lm,iatom) = 0.d0
-          end do
-          uVu(lm,iatom)=1.d-10
-        end do 
+    do ll=l0,l0+pp%nproj(l,ik)-1
+      if ( pp%inorm(ll,ik)==0) then
+        !do lm=l**2+1,(l+1)**2
+        !  do jj=1,ppg%mps(iatom)
+        !    uV(jj,lm,iatom) = 0.d0
+        !  end do
+        !  do jj=1,ppg_all%mps(iatom)
+        !    uV_all(jj,lm,iatom) = 0.d0
+        !  end do
+        !  uVu(lm,iatom)=1.d-10
+        !end do 
       else
-        do lm=l**2+1,(l+1)**2
+        do m=l**2+1,(l+1)**2
+          lm = lm + 1
           lma = lma + 1
           do jj=1,ppg%mps(iatom)
             uV(jj,lm,iatom) = ppg%uv(jj,lma)
@@ -129,6 +132,8 @@ integer :: iatom,jj,lm
           uVu(lm,iatom)=ppg%rinv_uvu(lma)*rinv_hvol
         end do 
       end if
+    end do
+    l0=ll
     end do
   end do
 

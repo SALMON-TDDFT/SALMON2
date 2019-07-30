@@ -436,8 +436,10 @@ subroutine init_lma_tbl(pp,ppg)
   implicit none 
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
+  integer :: n
 
-  allocate(ppg%lma_tbl((pp%lmax+1)**2,natom))
+  n=maxval(pp%nproj)*(pp%lmax+1)**2
+  allocate(ppg%lma_tbl(n,natom)); ppg%lma_tbl=0
 
 end subroutine init_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -456,9 +458,11 @@ subroutine init_uv(pp,ppg)
   implicit none 
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
+  integer :: n
 
-  allocate(ppg%ia_tbl((pp%lmax+1)**2*natom))
-  allocate(ppg%rinv_uvu((pp%lmax+1)**2*natom))
+  n=maxval(pp%nproj)*(pp%lmax+1)**2
+  allocate(ppg%ia_tbl(n*natom)); ppg%ia_tbl=0
+  allocate(ppg%rinv_uvu(n*natom)); ppg%rinv_uvu=0.0d0
   allocate(ppg%uv(ppg%nps,ppg%nlma),ppg%duv(ppg%nps,ppg%nlma,3))
 
 end subroutine init_uv
@@ -480,16 +484,20 @@ subroutine set_nlma(pp,ppg)
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   integer :: lma
-  integer :: a,ik,m,l
+  integer :: a,ik,m,l,ll,l0
 
   lma=0
   do a=1,natom
     ik=kion(a)
-    do l=0,pp%mlps(ik)
+    l0=0
+    do ll=0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
       if(pp%inorm(l,ik)==0) cycle
-      do m=-l,l
+      do m=-ll,ll
         lma=lma+1
       enddo
+    enddo
+    l0=l
     enddo
   enddo
   ppg%nlma=lma
@@ -503,20 +511,24 @@ subroutine set_lma_tbl(pp,ppg)
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   integer :: lm,lma
-  integer :: a,ik,m,l
+  integer :: a,ik,m,l,l0,ll
 
   lma=0
   do a=1,natom
     ik=kion(a)
     lm=0
-    do l=0,pp%mlps(ik)
+    l0=0
+    do ll=0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
       if(pp%inorm(l,ik)==0) cycle
-      do m=-l,l
+      do m=-ll,ll
         lm=lm+1
         lma=lma+1
         ppg%lma_tbl(lm,a)=lma
         ppg%ia_tbl(lma)=a
       enddo
+    enddo
+    l0=l
     enddo
   enddo
 
@@ -536,17 +548,17 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   real(8),intent(in) :: hx,hy,hz
   logical,intent(in) :: flag_use_grad_wf_on_force
   character(17),intent(in) :: property
-  real(8),intent(out) :: save_udvtbl_a(pp%nrmax,0:pp%lmax,natom)
-  real(8),intent(out) :: save_udvtbl_b(pp%nrmax,0:pp%lmax,natom)
-  real(8),intent(out) :: save_udvtbl_c(pp%nrmax,0:pp%lmax,natom)
-  real(8),intent(out) :: save_udvtbl_d(pp%nrmax,0:pp%lmax,natom)
+  real(8),intent(out) :: save_udvtbl_a(pp%nrmax,0:2*pp%lmax+1,natom)
+  real(8),intent(out) :: save_udvtbl_b(pp%nrmax,0:2*pp%lmax+1,natom)
+  real(8),intent(out) :: save_udvtbl_c(pp%nrmax,0:2*pp%lmax+1,natom)
+  real(8),intent(out) :: save_udvtbl_d(pp%nrmax,0:2*pp%lmax+1,natom)
   real(8),intent(in),optional :: hvol0
-  integer :: a,ik,j,l,lm,m
+  integer :: a,ik,j,l,lm,m,ll,l0
   integer :: ilma,intr,ir,lma
   real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
-  real(8) :: dudvtbl_a(pp%nrmax,0:pp%lmax), dudvtbl_b(pp%nrmax,0:pp%lmax)
-  real(8) :: dudvtbl_c(pp%nrmax,0:pp%lmax), dudvtbl_d(pp%nrmax,0:pp%lmax)
-  real(8) :: uvr(0:pp%lmax),duvr(0:pp%lmax)
+  real(8) :: dudvtbl_a(pp%nrmax,0:2*pp%lmax+1), dudvtbl_b(pp%nrmax,0:2*pp%lmax+1)
+  real(8) :: dudvtbl_c(pp%nrmax,0:2*pp%lmax+1), dudvtbl_d(pp%nrmax,0:2*pp%lmax+1)
+  real(8) :: uvr(0:2*pp%lmax+1),duvr(0:2*pp%lmax+1)
   real(8) :: r,x,y,z
   real(8) :: xx
   real(8) :: ylm,dylm
@@ -590,13 +602,17 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
               ,bn(0:pp%nrps(ik)-2),cn(0:pp%nrps(ik)-2),dn(0:pp%nrps(ik)-2))
   
       xn(0:pp%nrps(ik)-1) = pp%radnl(1:pp%nrps(ik),ik)
-      do l=0,pp%mlps(ik)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
         yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
         call spline(pp%nrps(ik),xn,yn,an,bn,cn,dn)
         save_udvtbl_a(1:pp%nrps(ik)-1,l,a) = an(0:pp%nrps(ik)-2)
         save_udvtbl_b(1:pp%nrps(ik)-1,l,a) = bn(0:pp%nrps(ik)-2)
         save_udvtbl_c(1:pp%nrps(ik)-1,l,a) = cn(0:pp%nrps(ik)-2)
         save_udvtbl_d(1:pp%nrps(ik)-1,l,a) = dn(0:pp%nrps(ik)-2)
+      end do
+      l0=l
       end do
       deallocate(xn,yn,an,bn,cn,dn)
     enddo
@@ -609,7 +625,9 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
       allocate(xn(0:pp%nrps(ik)-1),yn(0:pp%nrps(ik)-1),an(0:pp%nrps(ik)-2) &
               ,bn(0:pp%nrps(ik)-2),cn(0:pp%nrps(ik)-2),dn(0:pp%nrps(ik)-2))
       xn(0:pp%nrps(ik)-1) = pp%radnl(1:pp%nrps(ik),ik)
-      do l=0,pp%mlps(ik)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
         yn(0:pp%nrps(ik)-1) = pp%dudvtbl(1:pp%nrps(ik),l,ik)
         call spline(pp%nrps(ik),xn,yn,an,bn,cn,dn)
         dudvtbl_a(1:pp%nrps(ik)-1,l) = an(0:pp%nrps(ik)-2)
@@ -617,11 +635,13 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
         dudvtbl_c(1:pp%nrps(ik)-1,l) = cn(0:pp%nrps(ik)-2)
         dudvtbl_d(1:pp%nrps(ik)-1,l) = dn(0:pp%nrps(ik)-2)
       end do
+      l0=l
+      end do
       deallocate(xn,yn,an,bn,cn,dn)
     endif
  
   !!$omp parallel
-  !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,duvr,ilma)
+  !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,duvr,ilma,l0,ll)
      do j=1,ppg%mps(a)
        x=ppg%rxyz(1,j,a)
        y=ppg%rxyz(2,j,a)
@@ -633,7 +653,9 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
        intr=ir-1
        if (intr.lt.0.or.intr.ge.pp%nrps(ik))stop 'bad intr at prep_ps'
        xx = r - pp%radnl(intr,ik)
-       do l=0,pp%mlps(ik)
+       l0=0
+       do ll=0,pp%mlps(ik)
+       do l=l0,l0+pp%nproj(ll,ik)-1
          uvr(l) = save_udvtbl_a(intr,l,a)*xx**3 + save_udvtbl_b(intr,l,a)*xx**2 &
                 + save_udvtbl_c(intr,l,a)*xx    + save_udvtbl_d(intr,l,a)
          if(.not.flag_use_grad_wf_on_force)then !legacy for ion-force
@@ -641,26 +663,32 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
                   +dudvtbl_c(intr,l)*xx    +dudvtbl_d(intr,l)
          endif
        enddo
+       l0=l
+       enddo
  
        lm=0
-       do l=0,pp%mlps(ik)
+       l0=0
+       do ll=0,pp%mlps(ik)
+       do l=l0,l0+pp%nproj(ll,ik)-1
          if(pp%inorm(l,ik)==0) cycle
-         do m=-l,l
+         do m=-ll,ll
            lm=lm+1
            ilma=ppg%lma_tbl(lm,a)
-           ppg%uv(j,ilma)=uvr(l)*ylm(x,y,z,l,m)
+           ppg%uv(j,ilma)=uvr(l)*ylm(x,y,z,ll,m)
            if(.not.flag_use_grad_wf_on_force)then !legacy for ion-force
              if(r>1d-6)then
-               ppg%duv(j,ilma,1) = duvr(l)*(x/r)*ylm(x,y,z,l,m)+uvr(l)*dylm(x,y,z,l,m,1)
-               ppg%duv(j,ilma,2) = duvr(l)*(y/r)*ylm(x,y,z,l,m)+uvr(l)*dylm(x,y,z,l,m,2)
-               ppg%duv(j,ilma,3) = duvr(l)*(z/r)*ylm(x,y,z,l,m)+uvr(l)*dylm(x,y,z,l,m,3)
+               ppg%duv(j,ilma,1) = duvr(l)*(x/r)*ylm(x,y,z,ll,m)+uvr(l)*dylm(x,y,z,ll,m,1)
+               ppg%duv(j,ilma,2) = duvr(l)*(y/r)*ylm(x,y,z,ll,m)+uvr(l)*dylm(x,y,z,ll,m,2)
+               ppg%duv(j,ilma,3) = duvr(l)*(z/r)*ylm(x,y,z,ll,m)+uvr(l)*dylm(x,y,z,ll,m,3)
              else
-               ppg%duv(j,ilma,1) = uvr(l)*dylm(x,y,z,l,m,1)
-               ppg%duv(j,ilma,2) = uvr(l)*dylm(x,y,z,l,m,2)
-               ppg%duv(j,ilma,3) = uvr(l)*dylm(x,y,z,l,m,3)
+               ppg%duv(j,ilma,1) = uvr(l)*dylm(x,y,z,ll,m,1)
+               ppg%duv(j,ilma,2) = uvr(l)*dylm(x,y,z,ll,m,2)
+               ppg%duv(j,ilma,3) = uvr(l)*dylm(x,y,z,ll,m,3)
              end if
            end if
          enddo
+       enddo
+       l0=l
        enddo
  
      enddo
@@ -673,12 +701,16 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   do a=1,natom
     ik=kion(a)
     if(property /= 'update_wo_realloc') then
-    do l=0,pp%mlps(ik)
+    l0=0
+    do ll=0,pp%mlps(ik)
+    do l=l0,l0+pp%nproj(ll,ik)-1
       if(pp%inorm(l,ik)==0) cycle
-      do m=-l,l
+      do m=-ll,ll
         lma=lma+1
         ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol
       enddo
+    enddo
+    l0=l
     enddo
     endif
   enddo

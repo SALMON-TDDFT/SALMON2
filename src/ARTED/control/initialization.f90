@@ -503,7 +503,7 @@ contains
     allocate(Zps(NE),NRloc(NE),Rloc(NE),Mass(NE),force(3,NI))
     allocate(dVloc_G(NG_s:NG_e,NE),FionAc(3,NI))
     allocate(Mps(NI),Mlps(NE))
-    allocate(anorm(0:Lmax,NE),inorm(0:Lmax,NE))
+    allocate(anorm(0:2*Lmax+1,NE),inorm(0:2*Lmax+1,NE))
     allocate(rad(Nrmax,NE),vloctbl(Nrmax,NE),dvloctbl(Nrmax,NE))
     allocate(radnl(Nrmax,NE))
     allocate(udVtbl(Nrmax,0:Lmax,NE),dudVtbl(Nrmax,0:Lmax,NE))
