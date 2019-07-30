@@ -220,6 +220,7 @@ contains
   subroutine calc_current(nspin,ngrid,mg,stencil,info,psi,ppg,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
+    use pseudo_pt_sub, only: calc_uVpsi_rdivided
     implicit none
     integer        ,intent(in) :: nspin,ngrid
     type(s_rgrid)  ,intent(in) :: mg
@@ -236,7 +237,7 @@ contains
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
     BT = transpose(stencil%rmatrix_B)
-    if(info%if_divide_rspace) call nonlocal_part_rdivided1(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+    if(info%if_divide_rspace) call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
@@ -249,7 +250,7 @@ contains
         wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
         if(info%if_divide_rspace) then
-          call nonlocal_part_rdivided2(wrk,psi%zwf(:,:,:,ispin,io,ik,im) &
+          call nonlocal_part_rdivided(wrk,psi%zwf(:,:,:,ispin,io,ik,im) &
           & ,ppg,mg%is_array,mg%ie_array,ik,uVpsibox2(:,ispin,io,ik,im))
         else
           call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
@@ -363,64 +364,7 @@ contains
       return
     end subroutine nonlocal_part
 
-    subroutine nonlocal_part_rdivided1(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
-      implicit none
-      integer        ,intent(in) :: nspin
-      type(s_orbital_parallel),intent(in) :: info
-      type(s_pp_grid),intent(in) :: ppg
-      type(s_orbital),intent(in) :: tpsi
-      complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
-      complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
-      !
-      integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-      integer :: ilma,ia,j,ix,iy,iz,Nlma
-      complex(8) :: uVpsi,wrk
-
-      im_s = info%im_s
-      im_e = info%im_e
-      ik_s = info%ik_s
-      ik_e = info%ik_e
-      io_s = info%io_s
-      io_e = info%io_e
-      norb = Nspin* info%numo * info%numk * info%numm
-
-      Nlma = ppg%Nlma
-
-      allocate(uVpsibox (Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
-      allocate(uVpsibox2(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
-
-!$omp parallel do collapse(4) &
-!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-
-        do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
-          uVpsi = 0.d0
-          do j=1,ppg%mps(ia)
-            ix = ppg%jxyz(1,j,ia)
-            iy = ppg%jxyz(2,j,ia)
-            iz = ppg%jxyz(3,j,ia)
-            uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          end do
-          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-          uVpsibox(ilma,ispin,io,ik,im) = uVpsi
-        end do
-
-      end do
-      end do
-      end do
-      end do
-!$omp end parallel do
-
-      call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
-
-      return
-    end subroutine nonlocal_part_rdivided1
-
-    subroutine nonlocal_part_rdivided2(jw,psi,ppg,is_array,ie_array,ik,uVpsibox)
+    subroutine nonlocal_part_rdivided(jw,psi,ppg,is_array,ie_array,ik,uVpsibox)
       implicit none
       integer   ,intent(in) :: is_array(3),ie_array(3),ik
       complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
@@ -450,7 +394,7 @@ contains
         jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
       end do
       return
-    end subroutine nonlocal_part_rdivided2
+    end subroutine nonlocal_part_rdivided
 
   end subroutine calc_current
 
