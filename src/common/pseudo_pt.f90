@@ -160,7 +160,6 @@ end subroutine pseudo_R
 
 subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   use structures
-  use salmon_communication, only: comm_summation
   use timer
   implicit none
   integer,intent(in) :: nspin
@@ -169,7 +168,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   type(s_orbital),intent(in) :: tpsi
   type(s_orbital) :: htpsi
   !
-  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e
   integer :: ilma,ia,j,ix,iy,iz,Nlma
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
@@ -183,48 +182,12 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-  norb = Nspin* info%numo * info%numk * info%numm
 
   Nlma = ppg%Nlma
 
   if(info%if_divide_rspace) then
 
-    allocate(uVpsibox (Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
-    allocate(uVpsibox2(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
-
-!$omp parallel do collapse(4) &
-!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
-    do im=im_s,im_e
-    do ik=ik_s,ik_e
-    do io=io_s,io_e
-    do ispin=1,Nspin
-
-      do ilma=1,Nlma
-        ia = ppg%ia_tbl(ilma)
-        uVpsi = 0.d0
-        do j=1,ppg%mps(ia)
-          ix = ppg%jxyz(1,j,ia)
-          iy = ppg%jxyz(2,j,ia)
-          iz = ppg%jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-        end do
-        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-        uVpsibox(ilma,ispin,io,ik,im) = uVpsi
-      end do
-
-    end do
-    end do
-    end do
-    end do
-!$omp end parallel do
-
-    call timer_end(LOG_UHPSI_PSEUDO)
-
-    call timer_begin(LOG_UHPSI_PSEUDO_COMM)
-    call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
-    call timer_end(LOG_UHPSI_PSEUDO_COMM)
-
-    call timer_begin(LOG_UHPSI_PSEUDO)
+    call calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
@@ -293,5 +256,67 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
 
   return
 end subroutine pseudo_C
+
+subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
+  use structures
+  use salmon_communication, only: comm_summation
+  use timer
+  implicit none
+  integer        ,intent(in) :: nspin
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_orbital),intent(in) :: tpsi
+  complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
+  complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
+  !
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
+  integer :: ilma,ia,j,ix,iy,iz,Nlma
+  complex(8) :: uVpsi
+
+  im_s = info%im_s
+  im_e = info%im_e
+  ik_s = info%ik_s
+  ik_e = info%ik_e
+  io_s = info%io_s
+  io_e = info%io_e
+  norb = Nspin* info%numo * info%numk * info%numm
+
+  Nlma = ppg%Nlma
+
+  allocate(uVpsibox (Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+  allocate(uVpsibox2(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+
+!$omp parallel do collapse(4) &
+!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
+  do im=im_s,im_e
+  do ik=ik_s,ik_e
+  do io=io_s,io_e
+  do ispin=1,Nspin
+
+    do ilma=1,Nlma
+      ia = ppg%ia_tbl(ilma)
+      uVpsi = 0.d0
+      do j=1,ppg%mps(ia)
+        ix = ppg%jxyz(1,j,ia)
+        iy = ppg%jxyz(2,j,ia)
+        iz = ppg%jxyz(3,j,ia)
+        uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+      end do
+      uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+      uVpsibox(ilma,ispin,io,ik,im) = uVpsi
+    end do
+
+  end do
+  end do
+  end do
+  end do
+!$omp end parallel do
+
+  call timer_begin(LOG_UHPSI_PSEUDO_COMM)
+  call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
+  call timer_end(LOG_UHPSI_PSEUDO_COMM)
+
+  return
+end subroutine calc_uVpsi_rdivided
 
 end module

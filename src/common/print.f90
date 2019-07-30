@@ -22,7 +22,7 @@ contains
 
 !--------------------------------------------------------------------------------
 !! export SYSNAME_k.data file
-  subroutine write_k_data(k_rd,system,stencil)
+  subroutine write_k_data(system,stencil)
     use structures
     use salmon_global, only: sysname
     use salmon_parallel, only: nproc_id_global
@@ -31,7 +31,6 @@ contains
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_stencil),intent(in) :: stencil
-    real(8),intent(in) :: k_rd(3,system%nk)
     !
     integer :: fh_k
     integer :: ik,NK
@@ -58,9 +57,9 @@ contains
         do ik = 1, NK
           write(fh_k, '(I6,99(1X,E23.15E3))') &
             & ik, &
-            & k_rd(1,ik) / system%primitive_b(1,1), &
-            & k_rd(2,ik) / system%primitive_b(2,2), &
-            & k_rd(3,ik) / system%primitive_b(3,3), &
+            & system%vec_k(1,ik) / system%primitive_b(1,1), &
+            & system%vec_k(2,ik) / system%primitive_b(2,2), &
+            & system%vec_k(3,ik) / system%primitive_b(3,3), &
             & wk !??????? wk=1 only (symmetry weight)
         end do !ik
       else
@@ -80,9 +79,9 @@ contains
         do ik = 1, NK
           write(fh_k, '(I6,99(1X,E23.15E3))') &
             & ik, &
-            & k_rd(1,ik), &
-            & k_rd(2,ik), &
-            & k_rd(3,ik), &
+            & system%vec_k(1,ik), &
+            & system%vec_k(2,ik), &
+            & system%vec_k(3,ik), &
             & wk !??????? wk=1 only (symmetry weight)
         end do !ik
       end if
