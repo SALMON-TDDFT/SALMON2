@@ -13,17 +13,23 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine exc_cor_ns(ppn)
+subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
   use salmon_parallel, only: nproc_group_h
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
   use scf_data
   use new_world_sub
   use allocate_mat_sub
-  use sendrecvh_sub
-  use structures, only: s_pp_nlcc
+  use structures, only: s_pp_nlcc, s_scalar, s_rgrid,s_sendrecv_grid
+  use sendrecv_grid, only: update_overlap_real8
   implicit none
+  type(s_rgrid),intent(in) :: ng
+  type(s_sendrecv_grid),intent(inout) :: srg_ng
+  integer         ,intent(in) :: nspin
+  type(s_scalar)  ,intent(in) :: srho_s(nspin)
   type(s_pp_nlcc), intent(in) :: ppn
+  type(s_scalar)              :: sVxc(nspin)
+  real(8)                     :: E_xc
 
   integer :: ix,iy,iz,is
   real(8) :: tot_exc
@@ -31,19 +37,19 @@ subroutine exc_cor_ns(ppn)
   integer :: iwk_dum
 
   if(ilsda==0)then
-    do iz=1,ng_num(3)
-    do iy=1,ng_num(2)
-    do ix=1,ng_num(1)
-      rho_tmp(ix,iy,iz)=rho(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+    do ix=1,ng%num(1)
+      rho_tmp(ix,iy,iz)=srho_s(1)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
     end do
     end do
     end do
   else if(ilsda==1)then
     do is=1,2
-    do iz=1,ng_num(3)
-    do iy=1,ng_num(2)
-    do ix=1,ng_num(1)
-      rho_s_tmp(ix,iy,iz,is)=rho_s(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1,is)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+    do ix=1,ng%num(1)
+      rho_s_tmp(ix,iy,iz,is)=srho_s(is)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
     end do
     end do
     end do
@@ -53,18 +59,18 @@ subroutine exc_cor_ns(ppn)
   if(xc=='pz'.or.xc=='PZ')then
     continue
   else
-    allocate (rhd (ng_sta(1)-Ndh:ng_end(1)+Ndh, &
-                   ng_sta(2)-Ndh:ng_end(2)+Ndh, &
-                   ng_sta(3)-Ndh:ng_end(3)+Ndh))
-    allocate (delr(ng_sta(1):ng_end(1), &
-                   ng_sta(2):ng_end(2), &
-                   ng_sta(3):ng_end(3),3))
+    allocate (rhd (ng%is_array(1):ng%ie_array(1), &
+                   ng%is_array(2):ng%ie_array(2), &
+                   ng%is_array(3):ng%ie_array(3)))
+    allocate (delr(ng%is(1):ng%ie(1), &
+                   ng%is(2):ng%ie(2), &
+                   ng%is(3):ng%ie(3),3))
   
 !$OMP parallel do private(ix,iy,iz)
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      rhd(ix,iy,iz)=dble(rho(ix,iy,iz))
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      rhd(ix,iy,iz)=dble(srho_s(1)%f(ix,iy,iz))
     enddo
     enddo
     enddo
@@ -73,13 +79,14 @@ subroutine exc_cor_ns(ppn)
     iwk_dum=iwk_size
     iwk_size=12
     call make_iwksta_iwkend
-    call sendrecvh(rhd)
+    call update_overlap_real8(srg_ng, ng, rhd)
+
     iwk_size=iwk_dum
 
 !$OMP parallel do private(ix,iy,iz)
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
        delr(ix,iy,iz,1)= (1.0d0/Hgs(1))*(   &
           bN1*( rhd(ix+1,iy,iz) - rhd(ix-1,iy,iz))  &
         + bN2*( rhd(ix+2,iy,iz) - rhd(ix-2,iy,iz)) &
@@ -114,19 +121,19 @@ subroutine exc_cor_ns(ppn)
   end if
 
   if(ilsda==0)then
-    do iz=1,ng_num(3)
-    do iy=1,ng_num(2)
-    do ix=1,ng_num(1)
-      vxc(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1)=vxc_tmp(ix,iy,iz)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+    do ix=1,ng%num(1)
+      sVxc(1)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
     end do
     end do
     end do
   else if(ilsda==1)then 
     do is=1,2
-    do iz=1,ng_num(3)
-    do iy=1,ng_num(2)
-    do ix=1,ng_num(1)
-      vxc_s(ng_sta(1)+ix-1,ng_sta(2)+iy-1,ng_sta(3)+iz-1,is)=vxc_s_tmp(ix,iy,iz,is)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+    do ix=1,ng%num(1)
+      sVxc(is)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
     end do
     end do
     end do
@@ -134,16 +141,16 @@ subroutine exc_cor_ns(ppn)
   end if
 
   tot_exc=0.d0
-  do iz=1,ng_num(3)
-  do iy=1,ng_num(2)
-  do ix=1,ng_num(1)
+  do iz=1,ng%num(3)
+  do iy=1,ng%num(2)
+  do ix=1,ng%num(1)
     tot_exc=tot_exc+eexc_tmp(ix,iy,iz)
   end do
   end do
   end do
   tot_exc=tot_exc*hvol
  
-  call comm_summation(tot_exc,Exc,nproc_group_h)
+  call comm_summation(tot_exc,E_xc,nproc_group_h)
 
   return
 end subroutine exc_cor_ns

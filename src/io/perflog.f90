@@ -192,7 +192,6 @@ contains
     call set( 9, LOG_CALC_CURRENT         , 'calculating curr')
     call set(10, LOG_CALC_TOTAL_ENERGY    , 'calculating Etot')
     call set(11, LOG_CALC_PROJECTION      , 'calc. projection')
-    call set(12, LOG_CALC_QUADRUPOLE      , 'calc. quadrupole')  ! FIXME: wrong name
     call set(13, LOG_WRITE_ENERGIES       , 'writing energies')
     call set(14, LOG_CALC_EIGEN_ENERGY    , 'calc_eigen_energy')
     call set(15, LOG_CALC_CURRENT_ION     , 'calc_current_ion')

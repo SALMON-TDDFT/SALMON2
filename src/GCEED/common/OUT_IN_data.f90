@@ -702,9 +702,6 @@ if(iflag_ps.eq.1)then
   MI=MI_read
 end if
 
-mg%ndir = 3
-ng%ndir = 3
-
 Hgs = system%Hgs
 Hvol = system%Hvol
 
@@ -1374,7 +1371,7 @@ if(iSCFRT==2)then
   end do
 end if
 
-call allgatherv_vlocal
+call wrapper_allgatherv_vlocal
 
 if(iscfrt==2.and.propagator=='etrs')then
   if(ilsda==0)then

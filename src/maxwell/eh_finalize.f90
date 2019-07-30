@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_finalize(fs,fw)
-  use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,iperiodic,&
+  use inputoutput,          only: dt_em,utime_from_au,ulength_from_au,uenergy_from_au,unit_system,iperiodic,&
                                   ae_shape1,ae_shape2,e_impulse,sysname,nt_em,nenergy,de, &
                                   directory,iobs_num_em,iobs_samp_em,obs_plane_em
   use salmon_parallel,      only: nproc_id_global
@@ -24,10 +24,10 @@ subroutine eh_finalize(fs,fw)
   use salmon_maxwell,       only: ls_fdtd_work
   use math_constants,       only: pi
   implicit none
-  type(s_fdtd_system) :: fs
-  type(ls_fdtd_work)  :: fw
-  integer             :: ii
-  character(128)      :: save_name
+  type(s_fdtd_system),intent(in)    :: fs
+  type(ls_fdtd_work), intent(inout) :: fw
+  integer                           :: ii
+  character(128)                    :: save_name
   
   !output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr)
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
@@ -50,9 +50,9 @@ subroutine eh_finalize(fs,fw)
       end if
       
       !output lr data
-      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%dip_lr(:,1),fw%fr_lr(:,1),fw%fi_lr(:,1))
-      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%dip_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
-      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%dip_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%dip_lr(:,1),fw%fr_lr(:,1),fw%fi_lr(:,1))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%dip_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%dip_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_lr.data'
         open(fw%ifn,file=save_name)
@@ -89,9 +89,9 @@ subroutine eh_finalize(fs,fw)
       end if
       
       !output lr data
-      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%curr_lr(:,1),fw%fr_lr(:,1),fw%fi_lr(:,1))
-      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%curr_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
-      call eh_fourier(nt_em,nenergy,fs%dt,de,fw%time_lr,fw%curr_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%curr_lr(:,1),fw%fr_lr(:,1),fw%fi_lr(:,1))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%curr_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%curr_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_lr.data'
         open(fw%ifn,file=save_name)
@@ -117,7 +117,7 @@ subroutine eh_finalize(fs,fw)
       open(fw%ifn,file=trim(directory)//"/obs0_info.data")
       write(fw%ifn,'(A,A14)')                      'unit_system       =',trim(unit_system)
       write(fw%ifn,'(A,I14)')                      'iperiodic         =',iperiodic
-      write(fw%ifn,'(A,ES14.5)')                   'dt_em             =',fs%dt*utime_from_au
+      write(fw%ifn,'(A,ES14.5)')                   'dt_em             =',dt_em*utime_from_au
       write(fw%ifn,'(A,I14)')                      'nt_em             =',(fw%iter_end-fw%iter_sta+1)
       write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'al_em             =',&
             fs%rlsize(1)*ulength_from_au,', ',&

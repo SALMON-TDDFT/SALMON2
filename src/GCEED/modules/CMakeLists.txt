@@ -3,7 +3,6 @@ set(SOURCES
     allocate_psl.f90
     calc_density.f90
     change_order.f90
-    copyVlocal.f90
     copy_psi_mesh.f90
     deallocate_mat.f90
     gradient2.f90
@@ -15,7 +14,6 @@ set(SOURCES
     scf_data.f90
     sendrecv.f90
     sendrecv_groupob.f90
-    sendrecvh.f90
     writebox_rt.f90
     persistent_comm.f90
     )

@@ -13,13 +13,18 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcEstatic
+subroutine calcEstatic(ng, sVh, srg_ng)
 use salmon_parallel, only: nproc_group_grid
 use salmon_communication, only: comm_summation
 use scf_data
 use new_world_sub
-use sendrecvh_sub
+use structures
+use sendrecv_grid, only: update_overlap_real8
 implicit none
+type(s_rgrid),intent(in) :: ng
+type(s_scalar),intent(in) :: sVh
+type(s_sendrecv_grid),intent(inout) :: srg_ng
+
 integer :: ist,ix,iy,iz
 real(8) :: Vh_wk(ng_sta(1)-Ndh:ng_end(1)+Ndh,   &
                  ng_sta(2)-Ndh:ng_end(2)+Ndh,   &
@@ -41,29 +46,16 @@ end do
 end do
 end do
 
-if(mod(itt,2)==1)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-!    Vh_wk(ix,iy,iz) = Vh_stock2(ix,iy,iz)-Vh0(ix,iy,iz)
-    Vh_wk(ix,iy,iz) = Vh_stock2(ix,iy,iz)
-  end do
-  end do
-  end do
-else
-!$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-!    Vh_wk(ix,iy,iz) = Vh_stock1(ix,iy,iz)-Vh0(ix,iy,iz)
-    Vh_wk(ix,iy,iz) = Vh_stock1(ix,iy,iz)
-  end do
-  end do
-  end do
-end if
+do iz=ng_sta(3),ng_end(3)
+do iy=ng_sta(2),ng_end(2)
+do ix=ng_sta(1),ng_end(1)
+  Vh_wk(ix,iy,iz) = sVh%f(ix,iy,iz)
+end do
+end do
+end do
 
-call sendrecvh(Vh_wk)
+call update_overlap_real8(srg_ng, ng, Vh_wk)
 
 if(ng_sta(1)==lg_sta(1))then
 !$OMP parallel do private(iz,iy,ix)

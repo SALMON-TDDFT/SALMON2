@@ -27,10 +27,7 @@ module structures
     real(8),allocatable :: v(:,:,:,:) ! v(1:3,x,y,z)
   end type s_vector
 
-  type s_force
-    real(8),allocatable :: F(:,:) ! (1:3,1:Nion)
-  end type s_force
-
+! density matrix rho(r,r')
   type s_dmatrix
     complex(8),allocatable :: zrho_mat(:,:,:,:,:,:,:) ! (ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~6(xx,yy,zz,yz,zx,xy)
   end type s_dmatrix
@@ -42,9 +39,10 @@ module structures
     real(8),allocatable :: vec_k(:,:)    ! (1:3,1:nk), k-vector
     real(8),allocatable :: wtk(:)        ! (1:nk), weight of k points
     real(8),allocatable :: rocc(:,:,:)   ! (1:no,1:nk,1:nspin), occupation rate
-    real(8),allocatable :: Mass(:)       ! (1:nion), Atomic weight
+    real(8),allocatable :: Mass(:)       ! (1:nelem), Atomic weight
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
+    real(8),allocatable :: Force(:,:)    ! (1:3,1:nion), force on atom
 
   ! external field
     real(8) vec_Ac(3) ! A/c, A: vector potential
@@ -91,8 +89,8 @@ module structures
   type s_orbital_parallel
     logical :: if_divide_rspace
     logical :: if_divide_orbit
-    integer :: irank_r(6)
     integer :: icomm_r   ! communicator for r-space
+    integer :: icomm_k   ! communicator for k-space
     integer :: icomm_o   ! communicator for orbital
     integer :: icomm_ro  ! communicator for r-space & orbital
     integer :: icomm_ko  ! communicator for k-space & orbital
@@ -191,13 +189,10 @@ module structures
   type s_fdtd_system
     type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
     type(s_sendrecv_grid) :: srg_ng       ! Structure for send and receive in fdtd
-    real(8) :: dt                         ! Delta t
-    integer :: iter_now                   ! Present iteration Number
     real(8) :: rlsize(3)                  ! Size of Cell
     real(8) :: hgs(3)                     ! Grid Spacing
     real(8) :: origin(3)                  ! Coordinate of Origin Point (TBA)
-    character(8)  :: bc(3,2)              ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
-    character(16) :: gauge                ! Gauge Condition (TBD)
+    character(8)  :: a_bc(3,2)            ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
     integer, allocatable :: imedia(:,:,:) ! Material information
   end type s_fdtd_system
 
@@ -208,7 +203,7 @@ module structures
 
   type s_md
      real(8) :: Tene, Temperature, E_work, xi_nh
-     real(8),allocatable :: Rion_last(:,:), force_last(:,:)
+     real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
   type s_ofile
@@ -233,6 +228,53 @@ module structures
 
 contains
 
+  subroutine allocate_scalar(rg,field)
+    implicit none
+    type(s_rgrid),intent(in) :: rg
+    type(s_scalar)           :: field
+    allocate(field%f(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
+    field%f = 0d0
+  end subroutine allocate_scalar
+
+  subroutine allocate_dmatrix(nspin,mg,info,dmat)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_dmatrix)                     :: dmat
+    allocate(dmat%zrho_mat(mg%Nd,mg%ndir,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
+    & nspin,info%im_s:info%im_e))
+    dmat%zrho_mat = 0d0
+  end subroutine allocate_dmatrix
+
+  subroutine allocate_orbital_real(nspin,mg,info,psi)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_orbital)                     :: psi
+    allocate(psi%rwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    psi%rwf = 0d0
+  end subroutine allocate_orbital_real
+
+  subroutine allocate_orbital_complex(nspin,mg,info,psi)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_orbital)                     :: psi
+    allocate(psi%zwf(mg%is_array(1):mg%ie_array(1),  &
+                     mg%is_array(2):mg%ie_array(2),  &
+                     mg%is_array(3):mg%ie_array(3),  &
+                     nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+    psi%zwf = 0d0
+  end subroutine allocate_orbital_complex
+
+!===================================================================================================================================
+
 # define DEAL(x) if(allocated(x)) deallocate(x)
 
   subroutine deallocate_dft_system(system)
@@ -241,6 +283,7 @@ contains
     DEAL(system%wtk)
     DEAL(system%Rion)
     DEAL(system%Velocity)
+    DEAL(system%Force)
   end subroutine deallocate_dft_system
 
   subroutine deallocate_dft_energy(energy)
@@ -331,11 +374,6 @@ contains
     type(s_vector) :: x
     DEAL(x%v)
   end subroutine deallocate_vector
-
-  subroutine deallocate_force(x)
-    type(s_force) :: x
-    DEAL(x%F)
-  end subroutine deallocate_force
 
   subroutine deallocate_dmatrix(dm)
     type(s_dmatrix) :: dm

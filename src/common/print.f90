@@ -22,7 +22,7 @@ contains
 
 !--------------------------------------------------------------------------------
 !! export SYSNAME_k.data file
-  subroutine write_k_data(k_rd,system,stencil)
+  subroutine write_k_data(system,stencil)
     use structures
     use salmon_global, only: sysname
     use salmon_parallel, only: nproc_id_global
@@ -31,7 +31,6 @@ contains
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_stencil),intent(in) :: stencil
-    real(8),intent(in) :: k_rd(3,system%nk)
     !
     integer :: fh_k
     integer :: ik,NK
@@ -58,9 +57,9 @@ contains
         do ik = 1, NK
           write(fh_k, '(I6,99(1X,E23.15E3))') &
             & ik, &
-            & k_rd(1,ik) / system%primitive_b(1,1), &
-            & k_rd(2,ik) / system%primitive_b(2,2), &
-            & k_rd(3,ik) / system%primitive_b(3,3), &
+            & system%vec_k(1,ik) / system%primitive_b(1,1), &
+            & system%vec_k(2,ik) / system%primitive_b(2,2), &
+            & system%vec_k(3,ik) / system%primitive_b(3,3), &
             & wk !??????? wk=1 only (symmetry weight)
         end do !ik
       else
@@ -80,9 +79,9 @@ contains
         do ik = 1, NK
           write(fh_k, '(I6,99(1X,E23.15E3))') &
             & ik, &
-            & k_rd(1,ik), &
-            & k_rd(2,ik), &
-            & k_rd(3,ik), &
+            & system%vec_k(1,ik), &
+            & system%vec_k(2,ik), &
+            & system%vec_k(3,ik), &
             & wk !??????? wk=1 only (symmetry weight)
         end do !ik
       end if
@@ -167,8 +166,6 @@ contains
                     ,mg%is_array(3):mg%ie_array(3)))
   ! overlap region communication
     if(info%if_divide_rspace) then
-      !call update_overlap_C(tpsi%zwf,mg%is_array,mg%ie_array,norb,Nd & !????????
-      !                     ,mg%is,mg%ie,info%irank_r,info%icomm_r)
       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
@@ -374,10 +371,10 @@ contains
   end subroutine write_tm_data
 
 !--------------------------------------------------------------------------------
-  subroutine write_xyz(comment,action,rvf,system,force)
+  subroutine write_xyz(comment,action,rvf,system)
   ! Write xyz in xyz format but also velocity and force are printed if necessary
   ! (these can be used for restart of opt and md)
-    use structures, only: s_dft_system, s_force
+    use structures, only: s_dft_system
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,atom_name
     use salmon_parallel, only: nproc_id_global
@@ -385,7 +382,6 @@ contains
     implicit none
 
     type(s_dft_system),intent(in) :: system
-    type(s_force),intent(in) :: force
 
     integer :: ia,unit_xyz=200
     character(3) :: action,rvf
@@ -409,7 +405,7 @@ contains
           else if( rvf=="rv " ) then
              write(unit_xyz,110) trim(atom_name(ia)),system%Rion(1:3,ia)*au_length_aa,system%Velocity(1:3,ia)
           else if( rvf=="rvf" ) then
-             write(unit_xyz,120) trim(atom_name(ia)),system%Rion(1:3,ia)*au_length_aa,system%Velocity(1:3,ia),force%F(1:3,ia)
+             write(unit_xyz,120) trim(atom_name(ia)),system%Rion(1:3,ia)*au_length_aa,system%Velocity(1:3,ia),system%Force(1:3,ia)
           endif
        enddo
 
@@ -621,8 +617,8 @@ contains
     character(256) :: file_prod_dk_data
     integer :: ik3d_tbl(1:3, 1:system%nk)
     complex(8) :: prod_dk( &
-      & 1:system%nk, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
-      & 1:system%no, 1:system%no)
+      & 1:system%no, 1:system%no, -ndk:ndk, -ndk:ndk, -ndk:ndk, &
+      & 1:system%nk)
 
     ! Export filename: project_directory/sysname_kprod_dk.data
     file_prod_dk_data = trim(directory) // trim(sysname) // "_prod_dk.data"
@@ -637,7 +633,7 @@ contains
       
       if(comm_is_root(nproc_id_global)) then
         fh = open_filehandle(trim(file_prod_dk_data))
-        write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jdk1 6:jdk2 7:jdk3 8:io 9:jo 10:re 11:im"
+        write(fh, '(a)') "# 1:ik 2:ik1 3:ik2 4:ik3 5:jk1-ik1 6:jk2-ik2 7:jk3-ik3 8:io 9:jo 10:re 11:im"
         do ik = 1, system%nk
           ik1 = ik3d_tbl(1, ik)
           ik2 = ik3d_tbl(2, ik)
@@ -650,8 +646,8 @@ contains
                     write(fh, '(9(i10),2(e25.16e3))') &
                       & ik, ik1, ik2, ik3, &
                       & jdk1, jdk2, jdk3, io, jo, &
-                      & real(prod_dk(ik, jdk1, jdk2, jdk3, io, jo)), &
-                      & aimag(prod_dk(ik, jdk1, jdk2, jdk3, io, jo))
+                      & real(prod_dk(io, jo, jdk1, jdk2, jdk3, ik)), &
+                      & aimag(prod_dk(io, jo, jdk1, jdk2, jdk3, ik))
                   end do
                 end do
               end do

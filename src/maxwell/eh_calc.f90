@@ -15,7 +15,8 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_calc(fs,fw)
-  use inputoutput,          only: iobs_num_em,iobs_samp_em,obs_plane_em,directory,utime_from_au,t1_t2,t1_delay,&
+  use inputoutput,          only: dt_em,iobs_num_em,iobs_samp_em,obs_plane_em,&
+                                  directory,utime_from_au,t1_t2,t1_delay,&
                                   amplitude1,pulse_tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                   amplitude2,pulse_tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
   use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
@@ -24,17 +25,17 @@ subroutine eh_calc(fs,fw)
   use salmon_maxwell,       only: ls_fdtd_work
   use math_constants,       only: pi
   implicit none
-  type(s_fdtd_system) :: fs
-  type(ls_fdtd_work)  :: fw
-  integer             :: iter,ii,ix,iy,iz
-  character(128)      :: save_name
+  type(s_fdtd_system),intent(inout) :: fs
+  type(ls_fdtd_work), intent(inout) :: fw
+  integer                           :: iter,ii,ix,iy,iz
+  character(128)                    :: save_name
   
   !time-iteration
   do iter=fw%iter_sta,fw%iter_end
     !update iter_now
-    fs%iter_now=iter
+    fw%iter_now=iter
     if(comm_is_root(nproc_id_global))then
-      write(*,*) fs%iter_now
+      write(*,*) fw%iter_now
     end if
     
     !update drude
@@ -131,7 +132,7 @@ subroutine eh_calc(fs,fw)
           write(save_name,*) ii
           save_name=trim(adjustl(directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
           open(fw%ifn,file=save_name,status='old',position='append')
-          write(fw%ifn, '(E13.5)',advance="no") dble(iter)*fs%dt*utime_from_au
+          write(fw%ifn, '(E13.5)',advance="no") dble(iter)*dt_em*utime_from_au
           write(fw%ifn,'(E16.6e3)',advance="no") &
                 fw%ex_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uVperm_from_au
           write(fw%ifn,'(E16.6e3)',advance="no") &
@@ -229,7 +230,7 @@ contains
     real(8) :: sum_lr(3),sum_lr2(3)
     
     !update time
-    fw%time_lr(fw%iter_lr)=dble(fw%iter_lr)*fs%dt
+    fw%time_lr(fw%iter_lr)=dble(fw%iter_lr)*dt_em
     
     !initialize current density
 !$omp parallel
@@ -268,9 +269,9 @@ contains
       do iz=fs%ng%is(3),fs%ng%ie(3)
       do iy=fs%ng%is(2),fs%ng%ie(2)
       do ix=fs%ng%is(1),fs%ng%ie(1)
-        fw%px_lr(ix,iy,iz)=fw%px_lr(ix,iy,iz)+fw%rjx_lr(ix,iy,iz)*fs%dt
-        fw%py_lr(ix,iy,iz)=fw%py_lr(ix,iy,iz)+fw%rjy_lr(ix,iy,iz)*fs%dt
-        fw%pz_lr(ix,iy,iz)=fw%pz_lr(ix,iy,iz)+fw%rjz_lr(ix,iy,iz)*fs%dt
+        fw%px_lr(ix,iy,iz)=fw%px_lr(ix,iy,iz)+fw%rjx_lr(ix,iy,iz)*dt_em
+        fw%py_lr(ix,iy,iz)=fw%py_lr(ix,iy,iz)+fw%rjy_lr(ix,iy,iz)*dt_em
+        fw%pz_lr(ix,iy,iz)=fw%pz_lr(ix,iy,iz)+fw%rjz_lr(ix,iy,iz)*dt_em
       end do
       end do
       end do
@@ -338,7 +339,7 @@ contains
     elseif(iord==2) then
       t_sta=t1_delay+t1_t2
     end if
-    t=(dble(iter)-0.5d0)*fs%dt-t_sta
+    t=(dble(iter)-0.5d0)*dt_em-t_sta
     theta1=pi/tw*(t-0.5d0*tw)                         !for cos(theta1)**2
     alpha =pi/tw                                      !for cos(theta1)**2
     theta2_r=omega*(t-0.5d0*tw)+cep*2d0*pi            !for cos(theta2)
@@ -358,7 +359,7 @@ contains
       tf_i=-(-alpha*sin(2.d0*theta1)*cos(theta2_i)   &
              -beta*cos(theta1)**2*sin(theta2_i))*gamma
     end if
-!    tf_r=exp(-0.5d0*(( ((dble(iter)-0.5d0)*fs%dt-10.0d0*pulse_tw1)/pulse_tw1 )**2.0d0) ) !test time factor
+!    tf_r=exp(-0.5d0*(( ((dble(iter)-0.5d0)*dt_em-10.0d0*pulse_tw1)/pulse_tw1 )**2.0d0) ) !test time factor
     add_inc(:)=amp*(tf_r*ep_r(:)+tf_i*ep_i(:))
     
     if(typ=='point') then
@@ -786,11 +787,11 @@ subroutine eh_sendrecv(fs,fw,var)
   use structures,     only: s_fdtd_system
   use salmon_maxwell, only: ls_fdtd_work
   implicit none
-  type(s_fdtd_system)     :: fs
-  type(ls_fdtd_work)      :: fw
-  character(1),intent(in) :: var
-  integer                 :: ix,iy,iz
-  real(8),allocatable     :: f1(:,:,:),f2(:,:,:),f3(:,:,:)
+  type(s_fdtd_system),intent(inout) :: fs
+  type(ls_fdtd_work), intent(inout) :: fw
+  character(1),intent(in)           :: var
+  integer                           :: ix,iy,iz
+  real(8),allocatable               :: f1(:,:,:),f2(:,:,:),f3(:,:,:)
   
   if(var=='e') then
     call update_overlap_real8(fs%srg_ng,fs%ng,fw%ex_y)

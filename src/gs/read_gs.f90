@@ -66,7 +66,7 @@ subroutine read_dns(lg,mg,rho)
   return
 end subroutine read_dns
 
-subroutine read_wfn(lg,mg,psi,info,system,k_rd)
+subroutine read_wfn(lg,mg,psi,info,system)
   use structures
   use salmon_parallel
   use salmon_communication
@@ -74,7 +74,6 @@ subroutine read_wfn(lg,mg,psi,info,system,k_rd)
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system) ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  real(8),intent(in) :: k_rd(3,system%nk)
   type(s_orbital) :: psi
   !
   character(7),parameter :: filename="wfn.bin"
@@ -118,7 +117,7 @@ subroutine read_wfn(lg,mg,psi,info,system,k_rd)
     ik0 = 1
     rmin = sum(system%primitive_b**2)
     do i=1,nk0
-      kk = k_rd(:,ik) - k_tmp(:,i)
+      kk = system%vec_k(:,ik) - k_tmp(:,i)
       do ix=-2,2
       do iy=-2,2
       do iz=-2,2
@@ -150,7 +149,7 @@ subroutine read_wfn(lg,mg,psi,info,system,k_rd)
   return
 end subroutine read_wfn
 
-subroutine write_wfn(lg,mg,psi,info,system,k_rd)
+subroutine write_wfn(lg,mg,psi,info,system)
   use structures
   use salmon_parallel
   use salmon_communication
@@ -158,7 +157,6 @@ subroutine write_wfn(lg,mg,psi,info,system,k_rd)
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system) ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  real(8),intent(in) :: k_rd(3,system%nk)
   type(s_orbital),intent(in) :: psi
   !
   character(7),parameter :: filename="wfn.bin"
@@ -196,7 +194,7 @@ subroutine write_wfn(lg,mg,psi,info,system,k_rd)
     write(*,*) "write GS wavefunction wfn.bin"
     open(fp,file=filename,form='unformatted')
     write(fp) lg%num(1),lg%num(2),lg%num(3),no,nk
-    write(fp) k_rd
+    write(fp) system%vec_k
     write(fp) tmp2
     close(fp)
   end if

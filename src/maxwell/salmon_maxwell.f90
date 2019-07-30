@@ -29,6 +29,7 @@ module salmon_maxwell
     integer             :: Nd              !number of additional grid in mpi
     integer             :: iter_sta        !start of time-iteration
     integer             :: iter_end        !end of time-iteration
+    integer             :: iter_now        !present iteration Number
     integer             :: ifn             !file number for inputing or saving data
     integer             :: ioddeven(3)     !odd or even grid paterns
     integer             :: ipml_l          !pml parameter
@@ -87,75 +88,5 @@ module salmon_maxwell
     real(8),allocatable :: curr_lr(:,:)                                 !LR: current
     real(8),allocatable :: dip_lr(:,:)                                  !LR: dipolemoment
   end type ls_fdtd_work
-  
-  contains
-  
-  subroutine init_maxwell(fs,ff,fw)
-    use inputoutput, only: theory, use_ms_maxwell
-    use structures,  only: s_fdtd_system, s_fdtd_field
-    implicit none
-    type(s_fdtd_system) :: fs
-    type(s_fdtd_field)  :: ff
-    type(ls_fdtd_work)  :: fw
-    
-    select case(theory)
-    case('Maxwell+TDDFT')
-      !this selection is temporary. 
-      !After removing use_ms_maxwell, this selection is revised.
-      select case(use_ms_maxwell) 
-      case('y')
-        fs%gauge = 'weyl' 
-      case('s')
-        fs%gauge = 'coulomb' 
-      end select
-    case('Maxwell')
-      fs%gauge = 'eh' 
-    case default
-      stop 'invalid theory'
-    end select
-    
-    select case(fs%gauge)
-    case('weyl')
-      call weyl_init(fs,ff,fw)
-    case('coulomb')
-      call coulomb_init(fs,ff,fw)
-    case('eh')
-      call eh_init(fs,fw)
-    end select
-  end subroutine init_maxwell
-  
-  subroutine finalize_maxwell(fs,ff,fw)
-    use structures,  only: s_fdtd_system, s_fdtd_field
-    implicit none
-    type(s_fdtd_system) :: fs
-    type(s_fdtd_field)  :: ff
-    type(ls_fdtd_work)  :: fw
-    
-    select case(fs%gauge)
-    case('weyl')
-      call weyl_finalize(fs,ff,fw)
-    case('coulomb')
-      call coulomb_finalize(fs,ff,fw)
-    case('eh')
-      call eh_finalize(fs,fw)
-    end select
-  end subroutine finalize_maxwell
-  
-  subroutine calc_maxwell(fs,ff,fw)
-    use structures,  only: s_fdtd_system, s_fdtd_field
-    implicit none
-    type(s_fdtd_system) :: fs
-    type(s_fdtd_field)  :: ff
-    type(ls_fdtd_work)  :: fw
-    
-    select case(fs%gauge)
-    case('weyl')
-      call weyl_calc(fs,ff,fw)
-    case('coulomb')
-      call coulomb_calc(fs,ff,fw)
-    case('eh')
-      call eh_calc(fs,fw)
-    end select
-  end subroutine calc_maxwell
   
 end module salmon_maxwell

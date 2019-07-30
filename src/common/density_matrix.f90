@@ -25,7 +25,7 @@ contains
 ! dmat(r,-dr) = conjg(dmat(r-dr,dr))
 ! j(r) = sum occ aimag( conjg(psi(r))* (sum nabt*psi)(r) ) = aimag( sum_dr nabt(dr)* dmat(r,dr) )
 
-  subroutine calc_density_matrix(dmat,psi,info,mg,srg,nspin)
+  subroutine calc_density_matrix(nspin,info,mg,srg,psi,dmat)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
     use salmon_communication, only: comm_summation
@@ -37,7 +37,7 @@ contains
     type(s_orbital)            :: psi
     type(s_dmatrix)            :: dmat
     !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize,norb
+    integer :: im,ispin,ik,io,is(3),ie(3),nsize
     complex(8),allocatable :: wrk(:,:,:,:,:),wrk2(:,:,:,:,:)
 
     is = mg%is
@@ -57,7 +57,6 @@ contains
 
   ! overlap region communication
     if(info%if_divide_rspace) then
-      norb = Nspin* info%numo * info%numk * info%numm
       call update_overlap_complex8(srg, mg, psi%zwf)
     end if
 
@@ -89,6 +88,7 @@ contains
       !
       integer :: ix,iy,iz,ii
       zdm = 0d0
+!$omp parallel do collapse(4) private(iz,iy,ix,ii)
       do iz=is(3)-Nd,ie(3)
       do iy=is(2)-Nd,ie(2)
       do ix=is(1)-Nd,ie(1)
@@ -101,6 +101,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       return
     end subroutine calc_dm
   end subroutine calc_density_matrix
@@ -120,14 +121,15 @@ contains
     type(s_orbital),intent(in) :: psi
     type(s_scalar) :: rho(nspin,info%im_s:info%im_e)
     !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz
+    integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
     is = mg%is
     ie = mg%ie
     nsize = mg%num(1) * mg%num(2) * mg%num(3)
-    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(get_nthreads())-1))
-    wrk=0.d0
+    nthreads = get_nthreads()
+
+    allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(nthreads)-1))
 
     if(allocated(psi%rwf)) then
 
@@ -136,6 +138,7 @@ contains
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
+        wrk(:,:,:,tid) = 0.d0
 
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
@@ -154,7 +157,7 @@ contains
 
         ix = size(wrk,4)/2
         do while(ix > 0)
-          if(tid < ix) then
+          if(tid < ix .and. tid + ix < nthreads) then
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
           end if
           ix = ix/2
@@ -175,6 +178,7 @@ contains
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
+        wrk(:,:,:,tid) = 0.d0
 
 !$omp do collapse(4)
         do ik=info%ik_s,info%ik_e
@@ -193,7 +197,7 @@ contains
 
         ix = size(wrk,4)/2
         do while(ix > 0)
-          if(tid < ix) then
+          if(tid < ix .and. tid + ix < nthreads) then
             wrk(:,:,:,tid) = wrk(:,:,:,tid) + wrk(:,:,:,tid + ix)
           end if
           ix = ix/2
@@ -215,11 +219,12 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_current(curr,nspin,ngrid,mg,stencil,info,psi,ppg,dmat)
+  subroutine calc_current(nspin,ngrid,mg,stencil,info,psi,ppg,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
+    use pseudo_pt_sub, only: calc_uVpsi_rdivided
     implicit none
-    integer,intent(in) :: nspin,ngrid
+    integer        ,intent(in) :: nspin,ngrid
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
     type(s_orbital_parallel),intent(in) :: info
@@ -229,7 +234,12 @@ contains
     real(8) :: curr(3,nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io
-    real(8) :: wrk(3),wrk2(3)
+    real(8) :: wrk(3),wrk2(3),BT(3,3)
+    complex(8),allocatable :: uVpsibox (:,:,:,:,:)
+    complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+
+    BT = transpose(stencil%rmatrix_B)
+    if(info%if_divide_rspace) call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
@@ -241,7 +251,12 @@ contains
         call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,mg%is,mg%ie)
         wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
-        call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+        if(info%if_divide_rspace) then
+          call nonlocal_part_rdivided(wrk,psi%zwf(:,:,:,ispin,io,ik,im) &
+          & ,ppg,mg%is_array,mg%ie_array,ik,uVpsibox2(:,ispin,io,ik,im))
+        else
+          call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+        end if
         wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
       end do
@@ -249,13 +264,15 @@ contains
       call comm_summation(wrk2,wrk,3,info%icomm_ko)
 
       call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
-      wrk2 = wrk + wrk2
+      wrk2 = wrk + matmul(BT,wrk2)
 
       call comm_summation(wrk2,wrk,3,info%icomm_r)
 
       curr(:,ispin,im) = wrk / dble(ngrid) ! ngrid = aLxyz/Hxyz
     end do
     end do
+
+    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2)
 
     return
 
@@ -271,6 +288,7 @@ contains
       integer :: ik,io,ix,iy,iz
       real(8) :: tmp
       tmp = 0d0
+!$omp parallel do collapse(3) private(iz,iy,ix) reduction(+:tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
@@ -278,6 +296,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       jw = kAc(:) * tmp
       return
     end subroutine kvec_part
@@ -292,6 +311,7 @@ contains
       integer :: ix,iy,iz
       complex(8) :: tmp(3)
       tmp = 0d0
+!$omp parallel do collapse(3) private(iz,iy,ix) reduction(+:tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
@@ -312,6 +332,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       jw = aimag(tmp)
       return
     end subroutine stencil_current
@@ -327,6 +348,7 @@ contains
       real(8)    :: x,y,z
       complex(8) :: uVpsi,uVpsi_r(3)
       jw = 0d0
+!$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
       do ilma=1,ppg%Nlma
         ia=ppg%ia_tbl(ilma)
         uVpsi = 0d0
@@ -346,14 +368,49 @@ contains
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
       end do
+!$omp end parallel do
       return
     end subroutine nonlocal_part
+
+    subroutine nonlocal_part_rdivided(jw,psi,ppg,is_array,ie_array,ik,uVpsibox)
+      implicit none
+      integer   ,intent(in) :: is_array(3),ie_array(3),ik
+      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+      type(s_pp_grid),intent(in) :: ppg
+      complex(8),intent(in) :: uVpsibox(ppg%Nlma)
+      real(8)               :: jw(3)
+      !
+      integer    :: ilma,ia,j,i,ix,iy,iz
+      real(8)    :: x,y,z
+      complex(8) :: uVpsi,uVpsi_r(3)
+      jw = 0d0
+!$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
+      do ilma=1,ppg%Nlma
+        ia=ppg%ia_tbl(ilma)
+        uVpsi_r = 0d0
+        do j=1,ppg%Mps(ia)
+          x = ppg%Rxyz(1,j,ia)
+          y = ppg%Rxyz(2,j,ia)
+          z = ppg%Rxyz(3,j,ia)
+          ix = ppg%Jxyz(1,j,ia)
+          iy = ppg%Jxyz(2,j,ia)
+          iz = ppg%Jxyz(3,j,ia)
+          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
+          uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
+          uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
+        end do
+        uVpsi = uVpsibox(ilma)
+        jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
+      end do
+!$omp end parallel do
+      return
+    end subroutine nonlocal_part_rdivided
 
   end subroutine calc_current
 
 !===================================================================================================================================
 
-  subroutine calc_microscopic_current(curr,nspin,mg,stencil,info,psi,dmat)
+  subroutine calc_microscopic_current(nspin,mg,stencil,info,psi,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
     implicit none

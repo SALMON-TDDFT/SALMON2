@@ -13,7 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subdip(rNe,ifunc)
+subroutine subdip(ng,srho,rNe,ifunc)
+use structures
 use salmon_parallel, only: nproc_group_h, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
@@ -21,6 +22,8 @@ use new_world_sub
 use allocate_mat_sub
 use timer
 implicit none
+type(s_rgrid) ,intent(in) :: ng
+type(s_scalar),intent(in) :: srho
 integer :: ifunc
 integer :: i1,ix,iy,iz,i2
 real(8) :: rNe
@@ -39,10 +42,10 @@ call timer_begin(LOG_CALC_DP)
    do i1=1,3
      rbox1=0.d0
 !$OMP parallel do reduction( + : rbox1 ) private(iz,iy,ix)
-     do iz=ng_sta(3),ng_end(3)
-     do iy=ng_sta(2),ng_end(2)
-     do ix=ng_sta(1),ng_end(1)
-       rbox1=rbox1+vecR(i1,ix,iy,iz)*rho(ix,iy,iz)
+     do iz=ng%is(3),ng%ie(3)
+     do iy=ng%is(2),ng%ie(2)
+     do ix=ng%is(1),ng%ie(1)
+       rbox1=rbox1+vecR(i1,ix,iy,iz)*srho%f(ix,iy,iz)
      end do
      end do
      end do
@@ -51,66 +54,15 @@ call timer_begin(LOG_CALC_DP)
    
    rbox1=0.d0
 !$OMP parallel do reduction( + : rbox1 ) private(iz,iy,ix)
-   do iz=ng_sta(3),ng_end(3)
-   do iy=ng_sta(2),ng_end(2)
-   do ix=ng_sta(1),ng_end(1)
-     rbox1=rbox1+rho(ix,iy,iz)
+   do iz=ng%is(3),ng%ie(3)
+   do iy=ng%is(2),ng%ie(2)
+   do ix=ng%is(1),ng%ie(1)
+     rbox1=rbox1+srho%f(ix,iy,iz)
    end do
    end do
    end do
    rbox_array(4)=rbox1
    
-!-----------QUADRUPOLE-start----------
-
-if(quadrupole=='y')then
-   rho_diff(:,:,:) = rho(:,:,:)-rho0(:,:,:)
-
-!$OMP parallel do private(i1,i2)
-   do i1=1,3
-     do i2=1,3
-       rbox_arrayq(i1, i2)=0.d0
-     end do
-   end do
-
-! diag-compornents
-
-   do i1=1,3
-     rbox1q=0.d0
-!$OMP parallel do reduction( + : rbox1q ) private(absr2,iz,iy,ix)
-     do iz=ng_sta(3),ng_end(3)
-     do iy=ng_sta(2),ng_end(2)
-     do ix=ng_sta(1),ng_end(1)
-       absr2=vecR(1,ix,iy,iz)**2+vecR(2,ix,iy,iz)**2+vecR(3,ix,iy,iz)**2
-       rbox1q=rbox1q+(3.d0*vecR(i1,ix,iy,iz)*vecR(i1,ix,iy,iz)-absr2)*rho_diff(ix,iy,iz)
-     end do
-     end do
-     end do
-     rbox_arrayq(i1, i1)=rbox1q
-   end do
-
-! non-diag compornents
-
-     rbox1q12=0.d0
-     rbox1q23=0.d0
-     rbox1q31=0.d0
-!$OMP parallel do reduction( + : rbox1q12,rbox1q23,rbox1q31 ) private(iz,iy,ix)
-     do iz=ng_sta(3),ng_end(3)
-     do iy=ng_sta(2),ng_end(2)
-     do ix=ng_sta(1),ng_end(1)
-       rbox1q12=rbox1q12+3.d0*vecR(1,ix,iy,iz)*vecR(2,ix,iy,iz)*rho_diff(ix,iy,iz)
-       rbox1q23=rbox1q23+3.d0*vecR(2,ix,iy,iz)*vecR(3,ix,iy,iz)*rho_diff(ix,iy,iz)
-       rbox1q31=rbox1q31+3.d0*vecR(3,ix,iy,iz)*vecR(1,ix,iy,iz)*rho_diff(ix,iy,iz)
-     end do
-     end do
-     end do
-     rbox_arrayq(1,2)=rbox1q12 ; rbox_arrayq(2,1)=rbox1q12
-     rbox_arrayq(2,3)=rbox1q23 ; rbox_arrayq(3,2)=rbox1q23
-     rbox_arrayq(3,1)=rbox1q31 ; rbox_arrayq(1,3)=rbox1q31
-
-end if
-   
-   !-----------QUADRUPOLE-end----------
-
    call timer_begin(LOG_ALLREDUCE_DIPOLE)
    call comm_summation(rbox_array,rbox_array2,4,nproc_group_h)
    call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_h)
@@ -132,7 +84,8 @@ end if
    end if
 
   if(comm_is_root(nproc_id_global))then
-    if(iperiodic==0)then
+    select case(iperiodic)
+    case(0)
       if(ifunc==1)then
         if(circular=='y')then
           write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5,f16.8)')       &
@@ -152,7 +105,23 @@ end if
         end if
         tene(itt-1)=Etot
       end if
-    end if
+    case(3)
+      write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
+        itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
+      if(iflag_md==1) then
+        write(16,'(f14.8, 6e16.8, f15.8,f18.8)')       &
+        dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3),(curr_ion(i1,itt),i1=1,3),rNe, Etot*2d0*Ry
+      else
+        write(16,'(f14.8, 3e16.8, f15.8,f18.8)')       &
+        dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
+      endif
+      write(17,'(f14.8, 3e16.8)')       &
+        dble(itt)*dt*2.41888d-2, (E_tot(i1,itt),i1=1,3)
+      write(18,'(f14.8, 3e16.8)')       &
+        dble(itt)*dt*2.41888d-2, (E_ext(i1,itt),i1=1,3)
+      write(19,'(f14.8, 3e16.8)')       &
+        dble(itt)*dt*2.41888d-2, (E_ind(i1,itt),i1=1,3)
+    end select
   end if
 
   fact=1.d0

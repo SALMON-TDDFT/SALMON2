@@ -860,12 +860,16 @@ end subroutine make_icoobox_bound
 
 !=====================================================================
 !======================================================================
-subroutine allgatherv_vlocal
+subroutine allgatherv_vlocal(nspin,Vh,Vpsl,Vxc,Vlocal)
+use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_grid
 use salmon_communication, only: comm_allgatherv
 use timer
-
 implicit none
+integer       ,intent(in) :: nspin
+type(s_scalar),intent(in) :: Vh,Vpsl,Vxc(nspin)
+type(s_scalar)            :: Vlocal(nspin)
+!
 integer :: i
 integer :: i1,i2,i3
 integer :: ix,iy,iz
@@ -900,75 +904,17 @@ do i=1,nproc_Mxin_mul_s_dm-1
   idisp(i)=idisp(i-1)+ircnt(i-1)
 end do
 
-if(ilsda==0)then
-  is_sta=1
-  is_end=1
-else
-  is_sta=1
-  is_end=2
-end if
-
-do is=is_sta,is_end
-
-  if(iSCFRT==1)then
+do is=1,nspin
 !$OMP parallel do private(ibox3,ix,iy,iz)
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
-                    +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
-      matbox11(ibox3) = Vpsl(ix,iy,iz)+Vh(ix,iy,iz)
-    end do
-    end do
-    end do
-  else if(iSCFRT==2)then
-    if(mod(itt,2)==1)then
-!$OMP parallel do private(ibox3,ix,iy,iz)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
-        ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
-                      +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
-        matbox11(ibox3) = Vpsl(ix,iy,iz)+Vh_stock2(ix,iy,iz)
-      end do
-      end do
-      end do
-    else
-!$OMP parallel do private(ibox3,ix,iy,iz)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
-        ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
-                      +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
-        matbox11(ibox3) = Vpsl(ix,iy,iz)+Vh_stock1(ix,iy,iz)
-      end do
-      end do
-      end do
-    end if
-  end if
-  if(ilsda==0)then
-!$OMP parallel do private(ibox3,ix,iy,iz)
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
-                    +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
-      matbox11(ibox3) = matbox11(ibox3)+Vxc(ix,iy,iz)
-    end do
-    end do
-    end do
-  else
-!$OMP parallel do private(ibox3,ix,iy,iz)
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
-                    +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
-      matbox11(ibox3) = matbox11(ibox3)+Vxc_s(ix,iy,iz,is)
-    end do
-    end do
-    end do
-  end if
+  do iz=ng_sta(3),ng_end(3)
+  do iy=ng_sta(2),ng_end(2)
+  do ix=ng_sta(1),ng_end(1)
+    ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
+                  +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
+    matbox11(ibox3) = Vpsl%f(ix,iy,iz) + Vh%f(ix,iy,iz) + Vxc(is)%f(ix,iy,iz)
+  end do
+  end do
+  end do
 
   call timer_begin(LOG_ALLGATHERV_TOTAL)
   call comm_allgatherv(matbox11,matbox12,ircnt,idisp,nproc_group_grid)
@@ -985,7 +931,7 @@ do is=is_sta,is_end
 
       call copyVlocal(matbox12(idisp(ibox2):  &
                       (idisp(ibox2)+inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox))-1),  &
-                      ibox,is)
+                      ibox,Vlocal(is)%f)
 
     end do
     end do
@@ -1001,20 +947,75 @@ do is=is_sta,is_end
 
       call copyVlocal(matbox12(idisp(ibox2):  &
                       (idisp(ibox2)+inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox))-1),  &
-                      ibox,is)
+                      ibox,Vlocal(is)%f)
 
     end do
     end do
     end do
   end if
 
-end do
+end do ! is=1,nspin
 
 deallocate (ircnt,idisp)
 deallocate (matbox11)
 deallocate (matbox12)
 
+CONTAINS
+  subroutine copyVlocal(matbox,ibox,V)
+    implicit none
+    integer,intent(in) :: ibox
+    real(8),intent(in) :: matbox(ista_Mxin_s(1,ibox):iend_Mxin_s(1,ibox),     &
+                        ista_Mxin_s(2,ibox):iend_Mxin_s(2,ibox),     &
+                        ista_Mxin_s(3,ibox):iend_Mxin_s(3,ibox))
+    real(8) :: V(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
+    V( ista_Mxin_s(1,ibox):iend_Mxin_s(1,ibox),     &
+            ista_Mxin_s(2,ibox):iend_Mxin_s(2,ibox),     &
+            ista_Mxin_s(3,ibox):iend_Mxin_s(3,ibox)) = &
+             matbox(ista_Mxin_s(1,ibox):iend_Mxin_s(1,ibox),     &
+                      ista_Mxin_s(2,ibox):iend_Mxin_s(2,ibox),     &
+                      ista_Mxin_s(3,ibox):iend_Mxin_s(3,ibox))
+
+    return
+  end subroutine copyVlocal
 end subroutine allgatherv_vlocal
+
+subroutine wrapper_allgatherv_vlocal ! --> remove (future works)
+  use structures
+  implicit none
+  type(s_scalar) :: sVh,sVpsl
+  type(s_scalar),allocatable :: sVlocal(:),sVxc(:)
+  integer :: nspin,jspin
+
+  nspin = 1
+  if(ispin==1) nspin = 2
+  allocate(sVlocal(nspin),sVxc(nspin))
+  do jspin=1,nspin
+    allocate(sVlocal(jspin)%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+    allocate(sVxc(jspin)%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  end do
+  allocate(sVh%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  allocate(sVpsl%f(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  sVpsl%f = Vpsl
+  sVh%f = Vh
+  if(ilsda == 1) then
+    do jspin=1,nspin
+      sVxc(jspin)%f = Vxc_s(:,:,:,jspin)
+    end do
+  else
+    sVxc(1)%f = Vxc
+  end if
+
+  call allgatherv_vlocal(nspin,sVh,sVpsl,sVxc,sVlocal)
+
+  do jspin=1,nspin
+    Vlocal(:,:,:,jspin) = sVlocal(jspin)%f
+    call deallocate_scalar(sVxc(jspin))
+    call deallocate_scalar(sVlocal(jspin))
+  end do
+  call deallocate_scalar(sVh)
+  call deallocate_scalar(sVpsl)
+  return
+end subroutine wrapper_allgatherv_vlocal
 
 !======================================================================
 subroutine mpibcast_mesh_s_kxc(Vbox)

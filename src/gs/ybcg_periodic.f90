@@ -22,7 +22,7 @@ contains
 !======================================= Conjugate-Gradient minimization
 
 subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
-                         info_ob,ppg,vlocal,num_kpoints_rd,k_rd)
+                         info_ob,ppg,vlocal)
   use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_korbital
@@ -49,9 +49,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   integer,intent(in)    :: ilsda
   integer,intent(in)    :: nproc_ob
   type(s_orbital_parallel)       :: info_ob
-  real(8),intent(in)    :: vlocal(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),system%nspin)
-  integer,intent(in)    :: num_kpoints_rd
-  real(8),intent(in)    :: k_rd(3,num_kpoints_rd)
+  type(s_scalar),intent(in) :: vlocal(system%nspin)
   integer,parameter :: nd=4
   integer :: j
   integer :: iter,p,q
@@ -139,7 +137,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      v(1)%f(ix,iy,iz) = vlocal(ix,iy,iz,is)
+      v(1)%f(ix,iy,iz) = vlocal(is)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -147,7 +145,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
   orbital : do p=pstart(is),pend(is)
 
     do j=1,3
-      stencil%vec_kAc(j,1) = k_rd(j,ik)
+      stencil%vec_kAc(j,1) = system%vec_k(j,ik)
     end do
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,1,1)
 

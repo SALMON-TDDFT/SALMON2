@@ -147,16 +147,6 @@ end if
 
 !===== namelist for group_others =====
 
-if(iflag_dip2==0)then
-  allocate(rto(1))
-  allocate(idip2int(1))
-else if(iflag_dip2==1)then
-  allocate(rto(1:num_dip2-1))
-  allocate(idip2int(1:num_dip2-1))
-
-!  dip2center(:)=dip2center(:)/a_B
-end if
-
 if(comm_is_root(nproc_id_global))then
   if(iwdenoption/=0.and.iwdenoption/=1)then
     write(*,*)  'iwdenoption must be equal to 0 or 1.'
