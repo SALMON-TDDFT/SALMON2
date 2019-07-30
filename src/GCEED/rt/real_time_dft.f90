@@ -527,7 +527,7 @@ type(s_dft_system) :: system
 type(s_orbital_parallel) :: info
 type(s_stencil) :: stencil
 type(s_orbital) :: spsi_in,spsi_out
-type(s_orbital) :: tpsi1,tpsi2 ! temporary wavefunctions
+type(s_orbital) :: tpsi ! temporary wavefunctions
 type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_nlcc) :: ppn
 type(s_reciprocal_grid) :: fg
@@ -628,8 +628,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
-  call allocate_orbital_complex(system%nspin,mg,info,tpsi1)
-  call allocate_orbital_complex(system%nspin,mg,info,tpsi2)
+  call allocate_orbital_complex(system%nspin,mg,info,tpsi)
   call allocate_dmatrix(system%nspin,mg,info,dmat)
 
   if(iperiodic==3) then
@@ -992,10 +991,10 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,stencil &
-     ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
+     ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
   else
     call time_evolution_step(lg,mg,ng,system,info,stencil &
-     ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
+     ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
   end if
 end do TE
 call timer_end(LOG_RT_ITERATION)

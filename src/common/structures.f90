@@ -246,6 +246,7 @@ contains
     type(s_dmatrix)                     :: dmat
     allocate(dmat%zrho_mat(mg%Nd,mg%ndir,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
     & nspin,info%im_s:info%im_e))
+    dmat%zrho_mat = 0d0
   end subroutine allocate_dmatrix
 
   subroutine allocate_orbital_real(nspin,mg,info,psi)

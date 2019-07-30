@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
-&   ppn,spsi_in,spsi_out,tpsi1,tpsi2,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
+&   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -48,7 +48,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
   type(s_pp_nlcc),intent(in)    :: ppn
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
-  type(s_orbital),intent(inout) :: tpsi1,tpsi2 ! temporary wavefunctions
+  type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin)
   type(s_scalar), intent(in)    :: sVpsl
   type(s_dmatrix),intent(inout) :: dmat
@@ -124,7 +124,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,stencil,srg,spsi_in,tpsi1,tpsi2,ppg,V_local,zc) ! spsi_in --> tpsi1
+    ! spsi_in --> tpsi, (spsi_out = working array)
+      call taylor(mg,nspin,info,stencil,srg,spsi_in,tpsi,spsi_out,ppg,V_local,zc)
     end if
 
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
@@ -166,13 +167,15 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
     end select
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,stencil,srg,tpsi1,spsi_out,tpsi2,ppg,V_local,zc) ! tpsi1 --> spsi_out
+    ! tpsi --> spsi_out (spsi_in = working array)
+      call taylor(mg,nspin,info,stencil,srg,tpsi,spsi_out,spsi_in,ppg,V_local,zc)
     end if
 
   else 
 
     if(iobnum.ge.1)then
-      call taylor(mg,nspin,info,stencil,srg,spsi_in,spsi_out,tpsi1,ppg,V_local,zc) ! spsi_in --> spsi_out
+    ! spsi_in --> spsi_out (tpsi = working array)
+      call taylor(mg,nspin,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,zc)
     end if
     
   end if
@@ -242,7 +245,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
     call timer_begin(LOG_CALC_EIGEN_ENERGY)
-    call calc_eigen_energy(energy,spsi_out,tpsi1,tpsi2,system,info,mg,V_local,stencil,srg,ppg)
+    ! tpsi,spsi_in = working arrays
+    call calc_eigen_energy(energy,spsi_out,tpsi,spsi_in,system,info,mg,V_local,stencil,srg,ppg)
     call timer_end(LOG_CALC_EIGEN_ENERGY)
   end if
 
