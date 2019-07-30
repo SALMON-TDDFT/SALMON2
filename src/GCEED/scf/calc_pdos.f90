@@ -42,6 +42,11 @@ real(8) :: fk,ww,dw
 integer :: iw
 real(8) :: ene_homo,ene_lumo,ene_min,ene_max,efermi,eshift
 
+if( all(uppr==0.0d0) )then
+  write(*,*) "@calc_pdos: Pseudoatom wave function is not available"
+  return
+end if
+
 call calc_pmax(iobmax)
 
 ene_min = minval(esp(:,:))

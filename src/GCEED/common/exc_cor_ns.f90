@@ -101,6 +101,7 @@ subroutine exc_cor_ns(ppn)
 !$omp end parallel do
   end if
 
+  if( allocated(ppn%rho_nlcc) )then
   if(xc=='pz'.or.xc=='PZ')then
     if(ilsda==0)then
       call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
@@ -109,6 +110,7 @@ subroutine exc_cor_ns(ppn)
     end if
   else
     call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+  end if
   end if
 
   if(ilsda==0)then

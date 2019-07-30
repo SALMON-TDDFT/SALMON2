@@ -29,8 +29,8 @@ subroutine pp_postprocess
   NRloc(1:NE)=pp%nrloc(1:NE)
   Rloc(1:NE)=pp%rloc(1:NE)
 
-  anorm(0:Lmax,1:NE)=pp%anorm(0:Lmax,1:NE)
-  inorm(0:Lmax,1:NE)=pp%inorm(0:Lmax,1:NE)
+  anorm(0:,1:NE)=pp%anorm(0:,1:NE)
+  inorm(0:,1:NE)=pp%inorm(0:,1:NE)
   
   rad(1:NRmax,1:NE)=pp%rad(1:Nrmax,1:NE)
   radnl(1:NRmax,1:NE)=pp%radnl(1:Nrmax,1:NE)

@@ -202,7 +202,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
 !    gz=kkz*blz
     g2=gx**2+gy**2+gz**2
     if(kx-1==0.and.ky-1==0.and.kz-1==0)then
-      rhoe_G_tmp(n)=0.d0
+      rhoe_G_tmp(n)=ff2x(kx,ky,kz) ! iwata
       ff1z(kx,ky,kz)=0.d0
     else
       rhoe_G_tmp(n)=ff2x(kx,ky,kz)

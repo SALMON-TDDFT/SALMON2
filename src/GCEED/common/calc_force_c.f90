@@ -104,7 +104,7 @@ do iatom=1,MI
   ikoa=Kion(iatom)
   do iik=k_sta,k_end
   do iob=1,iobnum
-    loop_lm2 : do lm=1,(Mlps(ikoa)+1)**2
+    loop_lm2 : do lm=1,maxlm
       if ( abs(uVu(lm,iatom))<1.d-5 ) cycle loop_lm2
       cbox1=0.d0
 !$OMP parallel do reduction( + : cbox1 )
@@ -127,7 +127,7 @@ do iatom=1,MI
     do iik=k_sta,k_end
     do iob=1,iobnum
       do jj=1,Mps(iatom)
-        do lm=1,(Mlps(ikoa)+1)**2
+        do lm=1,maxlm
           rbox1=rbox1-2.d0*rocc(iob,iik)*dble(uV(jj,lm,iatom)*   &
                   conjg(cgrad_wk(Jxyz(1,jj,iatom),Jxyz(2,jj,iatom),  &
                                  Jxyz(3,jj,iatom),iob,iik,j2))* &

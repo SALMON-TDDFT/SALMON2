@@ -116,9 +116,9 @@ do iik=k_sta,k_end
   end do
 !$OMP parallel do collapse(2) private(iob,iatom,lm,ik,uVpsi0,uVpsix,uVpsiy,uVpsiz,r,uvpsi_tmp)
   do iob=1,iobnum
-  do iatom=1,MI
-    ik=Kion(iatom)
-    do lm=1,(Mlps(ik)+1)**2
+    do iatom=1,MI
+      ik=Kion(iatom)
+      do lm=1,maxlm
         if ( abs(uVu(lm,iatom))<1.d-5 ) then
           uVpsibox1_j(1:4,lm,iatom,iob,iik)=0.d0
         else
@@ -138,8 +138,8 @@ do iik=k_sta,k_end
           uVpsibox1_j(3,lm,iatom,iob,iik)=uVpsiy*Hvol
           uVpsibox1_j(4,lm,iatom,iob,iik)=uVpsiz*Hvol
         end if
+      end do
     end do
-  end do
   end do
 end do
 call timer_end(LOG_CUR_NONLOCAL1)
@@ -158,7 +158,7 @@ do iik=k_sta,k_end
     call calc_allob(iob,p_allob,itotmst,mst,iobnum)
     do iatom=1,MI
       ik=Kion(iatom)
-      do lm=1,(Mlps(ik)+1)**2
+      do lm=1,maxlm
         jxt=jxt+rocc(p_allob,iik)*wtk(iik)/(lg_num(1)*lg_num(2)*lg_num(3)*Hvol)   &
                           *2.d0*aimag(conjg(uVpsibox2_j(2,lm,iatom,iob,iik))  &
                           *uVpsibox2_j(1,lm,iatom,iob,iik))/dble(nproc_Mxin_mul) 

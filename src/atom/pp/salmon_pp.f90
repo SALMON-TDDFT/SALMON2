@@ -47,19 +47,24 @@ module salmon_pp
          
         ps_file = trim(pseudo_file(ik))
         nlen_psf = len_trim(ps_file)
-        if(ps_file(nlen_psf+1-8:nlen_psf) == '_rps.dat')then
+
+        if(ps_file(max(1,nlen_psf+1-8):nlen_psf) == '_rps.dat')then
           ips_type = n_Yabana_Bertsch_psformat
           ps_format(ik) = 'KY'
           call read_mr_yb(pp,ik,ps_file)
-        else if(ps_file(nlen_psf+1-6:nlen_psf) == '.pspnc')then
+        else if(ps_file(max(1,nlen_psf+1-6):nlen_psf) == '.pspnc')then
           ips_type = n_ABINIT_psformat
           ps_format(ik) = 'ABINIT'
           call read_mr_abinit(pp,ik,ps_file)
-        else if(ps_file(nlen_psf+1-4:nlen_psf) == '.fhi')then
+        else if(ps_file(max(1,nlen_psf+1-5):nlen_psf) == '.psp8')then
+          ips_type = n_ABINIT_psformat
+          ps_format(ik) = 'ABINITPSP8'
+          call read_mr_abinit(pp,ik,ps_file)
+        else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.fhi')then
           ips_type = n_ABINITFHI_psformat
           ps_format(ik) = 'ABINITFHI'
           call read_mr_abinitfhi(pp,ik,ps_file)
-        else if(ps_file(nlen_psf+1-4:nlen_psf) == '.cpi')then
+        else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.cpi')then
           ips_type = n_FHI_psformat
           ps_format(ik) = 'FHI'
           call read_mr_fhi(pp,ik,ps_file)
@@ -186,27 +191,32 @@ module salmon_pp
     allocate(pp%nrps(1:nelem))
     allocate(pp%rps(1:nelem))
     allocate(pp%mlps(1:nelem))
+    allocate(pp%nproj(0:lmax,1:nelem)); pp%nproj=0
     allocate(pp%zps(1:nelem))
     allocate(pp%nrloc(1:nelem))
     allocate(pp%rloc(1:nelem))
+
+! # of angular momenta is lmax+1,
+! and the maximum # of projector for each angular momentum is assumed to 2
+! so that the maximum number of projectors becomes 2*(lmax+1).
     
-    allocate(pp%anorm(0:lmax,nelem))
-    allocate(pp%inorm(0:lmax,nelem))
+    allocate(pp%anorm(0:2*lmax+1,nelem)); pp%anorm=0.0d0
+    allocate(pp%inorm(0:2*lmax+1,nelem)); pp%inorm=0
   
     allocate(pp%rad(nrmax,nelem))
     allocate(pp%radnl(nrmax,nelem))
     
     allocate(pp%vloctbl(nrmax,nelem))
     allocate(pp%dvloctbl(nrmax,nelem))
-    allocate(pp%udvtbl(nrmax,0:lmax,nelem))
-    allocate(pp%dudvtbl(nrmax,0:lmax,nelem))
+    allocate(pp%udvtbl(nrmax,0:2*lmax+1,nelem)); pp%udvtbl=0.0d0
+    allocate(pp%dudvtbl(nrmax,0:2*lmax+1,nelem)); pp%dudvtbl=0.0d0
     
     allocate(pp%rho_nlcc_tbl(nrmax,nelem))
     allocate(pp%tau_nlcc_tbl(nrmax,nelem))
   
-    allocate(pp%vpp(0:nrmax0,0:lmax0),pp%upp(0:nrmax0,0:lmax0))
-    allocate(pp%dvpp(0:nrmax0,0:lmax0),pp%dupp(0:nrmax0,0:lmax0))
-    allocate(pp%vpp_f(0:nrmax0,0:lmax0,nelem),pp%upp_f(0:nrmax0,0:lmax0,nelem))
+    allocate(pp%vpp(0:nrmax0,0:2*lmax0+2),pp%upp(0:nrmax0,0:2*lmax0+1))
+    allocate(pp%dvpp(0:nrmax0,0:2*lmax0+2),pp%dupp(0:nrmax0,0:2*lmax0+1))
+    allocate(pp%vpp_f(0:nrmax0,0:2*lmax0+2,nelem),pp%upp_f(0:nrmax0,0:2*lmax0+1,nelem))
   
     pp%flag_nlcc=flag_nlcc
   
@@ -345,21 +355,21 @@ module salmon_pp
         do j1 = rg%is(1), rg%ie(1)
         do j2 = rg%is(2), rg%ie(2)
         do j3 = rg%is(3), rg%ie(3)
-          r1 = j1 * sys%hgs(1) - rion_repr(1)
-          r2 = j2 * sys%hgs(2) - rion_repr(2)
-          r3 = j3 * sys%hgs(3) - rion_repr(3)
+          r1 = (j1-1) * sys%hgs(1) - rion_repr(1) ! iwata
+          r2 = (j2-1) * sys%hgs(2) - rion_repr(2) ! iwata
+          r3 = (j3-1) * sys%hgs(3) - rion_repr(3) ! iwata
           r = sqrt(r1**2 + r2**2 + r3**2)
           if (r <= rc) then
-            do i = 1, pp%nrmax
+            do ir = 1, pp%nrmax ! iwata
               if (pp%rad(ir,ik) .gt. r) exit
             end do
             intr = ir - 1
             if (intr.lt.0.or.intr.ge.pp%NRmax) stop 'bad intr at prep_ps'
             ratio1=(r-pp%rad(intr,ik))/(pp%rad(intr+1,ik)-pp%rad(intr,ik))
             ratio2=1-ratio1
-            ppn%rho_nlcc(i1, i2, i3) = ppn%rho_nlcc(i1, i2, i3) &
+            ppn%rho_nlcc(j1, j2, j3) = ppn%rho_nlcc(j1, j2, j3) & ! iwata
               +ratio1*pp%rho_nlcc_tbl(intr+1,ik)+ratio2*pp%rho_nlcc_tbl(intr,ik)
-            ppn%tau_nlcc(i1, i2, i3) = ppn%tau_nlcc(i1, i2, i3) &
+            ppn%tau_nlcc(j1, j2, j3) = ppn%tau_nlcc(j1, j2, j3) & ! iwata
               +ratio1*pp%tau_nlcc_tbl(intr+1,ik)+ratio2*pp%tau_nlcc_tbl(intr,ik)
           end if
         end do
