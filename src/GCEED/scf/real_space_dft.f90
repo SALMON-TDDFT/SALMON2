@@ -299,8 +299,6 @@ if(iopt==1)then
     &                 ,mg%is_overlap(2):mg%ie_overlap(2) &
     &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
     &                 ,1:iobnum,k_sta:k_end))
-    allocate(k_rd(3,num_kpoints_rd),ksquare(num_kpoints_rd))
-    k_rd = system%vec_k
   end if
 
   if(iperiodic==3 .and. iflag_hartree==4)then
@@ -366,7 +364,7 @@ if(iopt==1)then
       end select
     else
       if(iperiodic==0) stop "error: read_gs_wfn_k='y' & iperiodic=0"
-      call read_wfn(lg,mg,spsi,info,system,k_rd)
+      call read_wfn(lg,mg,spsi,info,system)
     end if
 
     call gram_schmidt(system, mg, info, spsi)
@@ -847,7 +845,7 @@ endif
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then
   if(iperiodic==3) then
-    call write_wfn(lg,mg,spsi,info,system,k_rd)
+    call write_wfn(lg,mg,spsi,info,system)
     
     ! Experimental Implementation of Inner-Product Outputs:
     call write_prod_dk_data(lg, mg, system, info, spsi) 
@@ -859,7 +857,7 @@ end if
 ! output transition moment
 if(out_tm  == 'y') then
   if(iperiodic==3) then
-    call write_k_data(k_rd,system,stencil)
+    call write_k_data(system,stencil)
     call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
   else
     write(*,*) "error: out_tm='y' & iperiodic=0"

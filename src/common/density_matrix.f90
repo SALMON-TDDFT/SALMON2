@@ -231,10 +231,11 @@ contains
     real(8) :: curr(3,nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io
-    real(8) :: wrk(3),wrk2(3)
+    real(8) :: wrk(3),wrk2(3),BT(3,3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
+    BT = transpose(stencil%rmatrix_B)
     if(info%if_divide_rspace) call nonlocal_part_rdivided1(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
 
     do im=info%im_s,info%im_e
@@ -260,7 +261,7 @@ contains
       call comm_summation(wrk2,wrk,3,info%icomm_ko)
 
       call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
-      wrk2 = wrk + wrk2
+      wrk2 = wrk + matmul(BT,wrk2)
 
       call comm_summation(wrk2,wrk,3,info%icomm_r)
 
