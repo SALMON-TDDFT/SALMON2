@@ -88,6 +88,7 @@ contains
       !
       integer :: ix,iy,iz,ii
       zdm = 0d0
+!$omp parallel do collapse(4) private(iz,iy,ix,ii)
       do iz=is(3)-Nd,ie(3)
       do iy=is(2)-Nd,ie(2)
       do ix=is(1)-Nd,ie(1)
@@ -100,6 +101,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       return
     end subroutine calc_dm
   end subroutine calc_density_matrix
@@ -286,6 +288,7 @@ contains
       integer :: ik,io,ix,iy,iz
       real(8) :: tmp
       tmp = 0d0
+!$omp parallel do collapse(3) private(iz,iy,ix) reduction(+:tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
@@ -293,6 +296,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       jw = kAc(:) * tmp
       return
     end subroutine kvec_part
@@ -307,6 +311,7 @@ contains
       integer :: ix,iy,iz
       complex(8) :: tmp(3)
       tmp = 0d0
+!$omp parallel do collapse(3) private(iz,iy,ix) reduction(+:tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
@@ -327,6 +332,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       jw = aimag(tmp)
       return
     end subroutine stencil_current
@@ -342,6 +348,7 @@ contains
       real(8)    :: x,y,z
       complex(8) :: uVpsi,uVpsi_r(3)
       jw = 0d0
+!$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
       do ilma=1,ppg%Nlma
         ia=ppg%ia_tbl(ilma)
         uVpsi = 0d0
@@ -361,6 +368,7 @@ contains
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
         jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
       end do
+!$omp end parallel do
       return
     end subroutine nonlocal_part
 
@@ -376,6 +384,7 @@ contains
       real(8)    :: x,y,z
       complex(8) :: uVpsi,uVpsi_r(3)
       jw = 0d0
+!$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
       do ilma=1,ppg%Nlma
         ia=ppg%ia_tbl(ilma)
         uVpsi_r = 0d0
@@ -393,6 +402,7 @@ contains
         uVpsi = uVpsibox(ilma)
         jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
       end do
+!$omp end parallel do
       return
     end subroutine nonlocal_part_rdivided
 
