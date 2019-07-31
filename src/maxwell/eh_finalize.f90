@@ -32,7 +32,7 @@ subroutine eh_finalize(fs,fw)
   !output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr)
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
     if(iperiodic==0) then
-      !output time-dependent dipole data
+      !output time-dependent matter dipole data
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_p.data'
         open(fw%ifn,file=save_name)
@@ -71,7 +71,7 @@ subroutine eh_finalize(fs,fw)
         close(fw%ifn)
       end if
     elseif(iperiodic==3) then
-      !output time-dependent dipole data
+      !output time-dependent matter current data
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_current.data'
         open(fw%ifn,file=save_name)

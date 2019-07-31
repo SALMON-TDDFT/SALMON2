@@ -19,7 +19,7 @@ subroutine eh_init(fs,fw)
                                   utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                   uenergy_to_au,ulength_to_au,ucharge_to_au,iperiodic,directory,&
                                   imedia_num,shape_file,epsilon,rmu,sigma,type_media,&
-                                  omega_p_d,gamma_d,smooth_d,weight_d,&
+                                  pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
                                   iobs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
                                   source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
                                   phi_cep1,rlaser_int_wcm2_1,amplitude1,&
@@ -33,7 +33,7 @@ subroutine eh_init(fs,fw)
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
-  integer                           :: ii,ij,ix,iy,iz,icount,icount_d,iflag_lr,iflag_pml
+  integer                           :: ii,ij,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml
   real(8)                           :: dt_cfl,diff_cep
   character(1)                      :: dir
   character(128)                    :: save_name
@@ -43,8 +43,8 @@ subroutine eh_init(fs,fw)
   fw%Nd         = 1
   fw%iter_sta   = 1
   fw%iter_end   = nt_em
-  fs%rlsize(:) = al_em(:)
-  fs%hgs(:)    = dl_em(:)
+  fs%rlsize(:)  = al_em(:)
+  fs%hgs(:)     = dl_em(:)
   fw%ifn        = 600
   fw%ipml_l     = 8
   fw%pml_m      = 4.0d0
@@ -121,7 +121,7 @@ subroutine eh_init(fs,fw)
   end if
   call comm_bcast(dt_em,nproc_group_global)
   
-  !fundamental allocation in eh-FDTD
+  !basic allocation in eh-FDTD
   call eh_allocate
   
   !input fdtd shape
@@ -160,73 +160,91 @@ subroutine eh_init(fs,fw)
     if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
   end if
   
-  !prepare Drude
-  fw%inum_d=0
+  !prepare Lorentz-Drude
+  fw%num_ld=0
   do ii=0,imedia_num
     select case(type_media(ii))
-    case('DRUDE','Drude','drude','D','d')
-      fw%inum_d=fw%inum_d+1
+    case('lorentz-drude')
+      fw%num_ld=fw%num_ld+1
     end select
   end do
-  if(fw%inum_d>0) then
-    !set counter and make imedia_d
-    icount_d=1
-    allocate(fw%imedia_d(fw%inum_d))
-    fw%imedia_d(:)=0;
+  if(fw%num_ld>0) then
+    !set counter, make media_ld, make max_pole_num_ld, and check pole_num_ld condition
+    icount_ld=1; fw%max_pole_num_ld=0;
+    allocate(fw%media_ld(fw%num_ld))
+    fw%media_ld(:)=0;
     do ii=0,imedia_num
       select case(type_media(ii))
-      case('DRUDE','Drude','drude','D','d')
-        fw%imedia_d(icount_d)=ii
-        icount_d=icount_d+1;
+      case('lorentz-drude')
+        fw%media_ld(icount_ld)=ii
+        icount_ld=icount_ld+1;
+        if(fw%max_pole_num_ld<pole_num_ld(ii)) fw%max_pole_num_ld=pole_num_ld(ii)
+        if(pole_num_ld(ii)<=0) then
+          if(comm_is_root(nproc_id_global)) &
+            write(*,*) "For type_media = lorentz-drude, pole_num_ld must be equal to or larger than 1."
+          stop
+        end if
       end select
     end do
     
     !reset counter
-    icount_d=1
+    icount_ld=1
     
     !allocate drude variable
-    allocate(fw%idx_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                      fs%ng%is_array(2):fs%ng%ie_array(2),&
-                      fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
-             fw%idy_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                      fs%ng%is_array(2):fs%ng%ie_array(2),&
-                      fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
-             fw%idz_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                      fs%ng%is_array(2):fs%ng%ie_array(2),&
-                      fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d) )
-    fw%idx_d(:,:,:,:)=0; fw%idy_d(:,:,:,:)=0; fw%idz_d(:,:,:,:)=0;
-    allocate( fw%rjx_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+    allocate(fw%idx_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
                        fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
-              fw%rjy_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%num_ld),&
+             fw%idy_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
                        fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
-              fw%rjz_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%num_ld),&
+             fw%idz_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
                        fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d) )
-    fw%rjx_d(:,:,:,:)=0.0d0; fw%rjy_d(:,:,:,:)=0.0d0; fw%rjz_d(:,:,:,:)=0.0d0;
-    allocate( fw%rjx_sum_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%num_ld) )
+    fw%idx_ld(:,:,:,:)=0; fw%idy_ld(:,:,:,:)=0; fw%idz_ld(:,:,:,:)=0;
+    allocate( fw%rjx_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3),fw%max_pole_num_ld,fw%num_ld),&
+              fw%rjy_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3),fw%max_pole_num_ld,fw%num_ld),&
+              fw%rjz_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                        fs%ng%is_array(2):fs%ng%ie_array(2),&
+                        fs%ng%is_array(3):fs%ng%ie_array(3),fw%max_pole_num_ld,fw%num_ld) )
+    fw%rjx_ld(:,:,:,:,:)=0.0d0; fw%rjy_ld(:,:,:,:,:)=0.0d0; fw%rjz_ld(:,:,:,:,:)=0.0d0;
+    allocate( fw%rjx_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                            fs%ng%is_array(2):fs%ng%ie_array(2),&
+                            fs%ng%is_array(3):fs%ng%ie_array(3)),&
+              fw%rjy_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                            fs%ng%is_array(2):fs%ng%ie_array(2),&
+                            fs%ng%is_array(3):fs%ng%ie_array(3)),&
+              fw%rjz_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                            fs%ng%is_array(2):fs%ng%ie_array(2),&
+                            fs%ng%is_array(3):fs%ng%ie_array(3)) )
+    fw%rjx_sum_ld(:,:,:)=0.0d0; fw%rjy_sum_ld(:,:,:)=0.0d0; fw%rjz_sum_ld(:,:,:)=0.0d0;
+    allocate( fw%px_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%max_pole_num_ld,fw%num_ld),&
+              fw%py_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%max_pole_num_ld,fw%num_ld),&
+              fw%pz_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                       fs%ng%is_array(2):fs%ng%ie_array(2),&
+                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%max_pole_num_ld,fw%num_ld) )
+    fw%px_ld(:,:,:,:,:)=0.0d0; fw%py_ld(:,:,:,:,:)=0.0d0; fw%pz_ld(:,:,:,:,:)=0.0d0;
+    allocate( fw%px_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
                            fs%ng%is_array(2):fs%ng%ie_array(2),&
                            fs%ng%is_array(3):fs%ng%ie_array(3)),&
-              fw%rjy_sum_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+              fw%py_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
                            fs%ng%is_array(2):fs%ng%ie_array(2),&
                            fs%ng%is_array(3):fs%ng%ie_array(3)),&
-              fw%rjz_sum_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
+              fw%pz_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
                            fs%ng%is_array(2):fs%ng%ie_array(2),&
                            fs%ng%is_array(3):fs%ng%ie_array(3)) )
-    fw%rjx_sum_d(:,:,:)=0.0d0; fw%rjy_sum_d(:,:,:)=0.0d0; fw%rjz_sum_d(:,:,:)=0.0d0;
-    allocate( fw%wex_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
-              fw%wey_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d),&
-              fw%wez_d(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3),fw%inum_d) )
-    fw%wex_d(:,:,:,:)=0.0d0; fw%wey_d(:,:,:,:)=0.0d0; fw%wez_d(:,:,:,:)=0.0d0;
-    allocate(fw%c1_j_d(fw%inum_d),fw%c2_j_d(fw%inum_d))
-    fw%c1_j_d(:)=0.0d0; fw%c2_j_d(:)=0.0d0;
+    fw%px_sum_ld(:,:,:)=0.0d0; fw%py_sum_ld(:,:,:)=0.0d0; fw%pz_sum_ld(:,:,:)=0.0d0;
+    allocate(fw%c1_j_ld(fw%max_pole_num_ld,fw%num_ld),&
+             fw%c2_j_ld(fw%max_pole_num_ld,fw%num_ld),&
+             fw%c3_j_ld(fw%max_pole_num_ld,fw%num_ld))
+    fw%c1_j_ld(:,:)=0.0d0; fw%c2_j_ld(:,:)=0.0d0; fw%c3_j_ld(:,:)=0.0d0;
   end if
   
   !set fdtd coeffient and write media information
@@ -244,28 +262,46 @@ subroutine eh_init(fs,fw)
       write(*,*) "=========================="
       write(*,'(A,I3,A)')      ' id ',ii, ':'
       select case(type_media(ii))
-      case ('VACUUM','Vacuum','vacuum')
+      case ('vacuum')
         if(epsilon(ii)/=1d0 .or. rmu(ii)/=1d0 .or. sigma(ii)/=0d0) then
-          write(*,'(A)'  )     ' type_media =  constant media'
+          write(*,'(A)'  )     ' type_media  =  constant media'
         else
-          write(*,'(A,A)')       ' type_media =  ', trim(type_media(ii))
+          write(*,'(A,A)')     ' type_media  =  ', trim(type_media(ii))
         end if
-      case('DRUDE','Drude','drude','D','d')
-        write(*,'(A,A)')       ' type_media =  ', trim(type_media(ii))
-        write(*,'(A,ES12.5)')  ' omega_p_d  = ', omega_p_d(ii)*uenergy_from_au
-        write(*,'(A,ES12.5)')  ' gamma_d    = ', gamma_d(ii)*uenergy_from_au
+      case('lorentz-drude')
+        write(*,'(A,A)')       ' type_media  =  ', trim(type_media(ii))
+        write(*,'(A,I6)')      ' pole_num_ld = ', pole_num_ld(ii)
+        write(*,'(A,ES12.5)')  ' omega_p_ld  = ', omega_p_ld(ii)*uenergy_from_au
+        do ij=1,pole_num_ld(ii)
+          if(ij==1) then
+            write(*,'(A,ES12.5)')  ' f_ld        = ', f_ld(ii,ij)
+          else
+            write(*,'(A,ES12.5)')  '               ', f_ld(ii,ij)
+          end if
+        end do
+        do ij=1,pole_num_ld(ii)
+          if(ij==1) then
+            write(*,'(A,ES12.5)')  ' gamma_ld    = ', gamma_ld(ii,ij)*uenergy_from_au
+          else
+            write(*,'(A,ES12.5)')  '               ', gamma_ld(ii,ij)*uenergy_from_au
+          end if
+        end do
+        do ij=1,pole_num_ld(ii)
+          if(ij==1) then
+            write(*,'(A,ES12.5)')  ' omega_ld    = ', omega_ld(ii,ij)*uenergy_from_au
+          else
+            write(*,'(A,ES12.5)')  '               ', omega_ld(ii,ij)*uenergy_from_au
+          end if
+        end do
       case default
-        write(*,'(A,A)')       ' type_media =  ', trim(type_media(ii))
+        write(*,'(A,A)')       ' type_media  =  ', trim(type_media(ii))
       end select
-      write(*,'(A,ES12.5)')    ' epsilon    = ', epsilon(ii)
-      write(*,'(A,ES12.5)')    ' rmu        = ', rmu(ii)
-      write(*,'(A,ES12.5)'   ) ' sigma      = ', sigma(ii)
+      write(*,'(A,ES12.5)')    ' epsilon     = ', epsilon(ii)
+      write(*,'(A,ES12.5)')    ' rmu         = ', rmu(ii)
+      write(*,'(A,ES12.5)'   ) ' sigma       = ', sigma(ii)
     end do
     write(*,*) "**************************"
   end if
-  
-  !apply smoothing
-  call eh_smoothing
   
   !set calculation area
   fw%iex_y_is(:)=fs%ng%is(:); fw%iex_y_ie(:)=fs%ng%ie(:);
@@ -611,14 +647,14 @@ subroutine eh_init(fs,fw)
       if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag_lr=1
       if(ii==0) then
         select case(type_media(ii))
-        case('VACUUM','Vacuum','vacuum')
+        case('vacuum')
           continue
         case default
           iflag_lr=1
         end select
       else
         select case(type_media(ii))
-        case('DRUDE','Drude','drude','D','d')
+        case('lorentz-drude')
           continue
         case default
           iflag_lr=1
@@ -637,44 +673,52 @@ subroutine eh_init(fs,fw)
     end if
     
     !set initial current density
-    if(fw%inum_d>0) then
-      do ii=1,fw%inum_d
+    if(fw%num_ld>0) then
+      do ii=1,fw%num_ld
+      do ij=1,pole_num_ld(fw%media_ld(ii))
         do iz=fs%ng%is(3),fs%ng%ie(3)
         do iy=fs%ng%is(2),fs%ng%ie(2)
         do ix=fs%ng%is(1),fs%ng%ie(1)
-          if(fw%idx_d(ix,iy,iz,ii)==1) then
+          if(fw%idx_ld(ix,iy,iz,ii)==1) then
             if(ae_shape1=='impulse') then
-              fw%rjx_d(ix,iy,iz,ii)=fw%rjx_d(ix,iy,iz,ii) &
-                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(1)+epdir_im1(1))
+              fw%rjx_ld(ix,iy,iz,ij,ii)=fw%rjx_ld(ix,iy,iz,ij,ii) &
+                                       -(f_ld(fw%media_ld(ii),ij)*omega_p_ld(fw%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*e_impulse*(epdir_re1(1)+epdir_im1(1))
             end if
             if(ae_shape2=='impulse') then
-              fw%rjx_d(ix,iy,iz,ii)=fw%rjx_d(ix,iy,iz,ii) &
-                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(1)+epdir_im2(1))
+              fw%rjx_ld(ix,iy,iz,ij,ii)=fw%rjx_ld(ix,iy,iz,ij,ii) &
+                                       -(f_ld(fw%media_ld(ii),ij)*omega_p_ld(fw%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*e_impulse*(epdir_re2(1)+epdir_im2(1))
             end if
           end if
-          if(fw%idy_d(ix,iy,iz,ii)==1) then
+          if(fw%idy_ld(ix,iy,iz,ii)==1) then
             if(ae_shape1=='impulse') then
-              fw%rjy_d(ix,iy,iz,ii)=fw%rjy_d(ix,iy,iz,ii) &
-                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(2)+epdir_im1(2))
+              fw%rjy_ld(ix,iy,iz,ij,ii)=fw%rjy_ld(ix,iy,iz,ij,ii) &
+                                       -(f_ld(fw%media_ld(ii),ij)*omega_p_ld(fw%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*e_impulse*(epdir_re1(2)+epdir_im1(2))
             end if
             if(ae_shape2=='impulse') then
-              fw%rjy_d(ix,iy,iz,ii)=fw%rjy_d(ix,iy,iz,ii) &
-                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(2)+epdir_im2(2))
+              fw%rjy_ld(ix,iy,iz,ij,ii)=fw%rjy_ld(ix,iy,iz,ij,ii) &
+                                       -(f_ld(fw%media_ld(ii),ij)*omega_p_ld(fw%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*e_impulse*(epdir_re2(2)+epdir_im2(2))
             end if
           end if
-          if(fw%idz_d(ix,iy,iz,ii)==1) then
+          if(fw%idz_ld(ix,iy,iz,ii)==1) then
             if(ae_shape1=='impulse') then
-              fw%rjz_d(ix,iy,iz,ii)=fw%rjz_d(ix,iy,iz,ii) &
-                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re1(3)+epdir_im1(3))
+              fw%rjz_ld(ix,iy,iz,ij,ii)=fw%rjz_ld(ix,iy,iz,ij,ii) &
+                                       -(f_ld(fw%media_ld(ii),ij)*omega_p_ld(fw%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*e_impulse*(epdir_re1(3)+epdir_im1(3))
             end if
             if(ae_shape2=='impulse') then
-              fw%rjz_d(ix,iy,iz,ii)=fw%rjz_d(ix,iy,iz,ii) &
-                                    -(omega_p_d(ii)**2.0d0)/(4.0d0*pi)*e_impulse*(epdir_re2(3)+epdir_im2(3))
+              fw%rjz_ld(ix,iy,iz,ij,ii)=fw%rjz_ld(ix,iy,iz,ij,ii) &
+                                       -(f_ld(fw%media_ld(ii),ij)*omega_p_ld(fw%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*e_impulse*(epdir_re2(3)+epdir_im2(3))
             end if
           end if
         end do
         end do
         end do
+      end do
       end do
     end if
     
@@ -684,16 +728,6 @@ subroutine eh_init(fs,fw)
     fw%iter_lr=1
     allocate(fw%fr_lr(0:nenergy,3),fw%fi_lr(0:nenergy,3))
     fw%fr_lr(:,:)=0.0d0; fw%fi_lr(:,:)=0.0d0;
-    allocate(fw%rjx_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)),&
-             fw%rjy_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)),&
-             fw%rjz_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)) )
-    fw%rjx_lr(:,:,:)=0.0d0; fw%rjy_lr(:,:,:)=0.0d0; fw%rjz_lr(:,:,:)=0.0d0;
     if(iperiodic==0) then
       allocate(fw%px_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
                         fs%ng%is_array(2):fs%ng%ie_array(2),&
@@ -708,6 +742,16 @@ subroutine eh_init(fs,fw)
       allocate(fw%dip_lr(nt_em,3))
       fw%dip_lr(:,:)=0.0d0
     elseif(iperiodic==3) then
+      allocate(fw%rjx_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                         fs%ng%is_array(2):fs%ng%ie_array(2),&
+                         fs%ng%is_array(3):fs%ng%ie_array(3)),&
+               fw%rjy_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                         fs%ng%is_array(2):fs%ng%ie_array(2),&
+                         fs%ng%is_array(3):fs%ng%ie_array(3)),&
+               fw%rjz_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
+                         fs%ng%is_array(2):fs%ng%ie_array(2),&
+                         fs%ng%is_array(3):fs%ng%ie_array(3)) )
+      fw%rjx_lr(:,:,:)=0.0d0; fw%rjy_lr(:,:,:)=0.0d0; fw%rjz_lr(:,:,:)=0.0d0;
       allocate(fw%curr_lr(nt_em,3))
       fw%curr_lr(:,:)=0.0d0
     end if
@@ -904,43 +948,43 @@ contains
     
     !check type_media
     select case(type_media(ii))
-    case('PEC','Pec','pec')
+    case('pec')
       c1_e=0.0d0; c2_e_x=0.0d0; c2_e_y=0.0d0; c2_e_z=0.0d0;
-    case('DRUDE','Drude','drude','D','d')
+    case('lorentz-drude')
       do iz=fs%ng%is(3),fs%ng%ie(3)
       do iy=fs%ng%is(2),fs%ng%ie(2)
       do ix=fs%ng%is(1),fs%ng%ie(1)
         if(fs%imedia(ix,iy,iz)==ii) then
           if(fs%imedia(ix+1,iy,iz)==ii) then !x
-            fw%idx_d(ix,iy,iz,icount_d)=1;
+            fw%idx_ld(ix,iy,iz,icount_ld)=1;
           elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)<ii) then
-            fw%idx_d(ix,iy,iz,icount_d)=1;
+            fw%idx_ld(ix,iy,iz,icount_ld)=1;
           elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
-            do ij=1,fw%inum_d
-              if(fw%imedia_d(ij)==fs%imedia(ix+1,iy,iz)) then
-                fw%idx_d(ix,iy,iz,ij)=1;
+            do ij=1,fw%num_ld
+              if(fw%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
+                fw%idx_ld(ix,iy,iz,ij)=1;
               end if
             end do
           end if
           if(fs%imedia(ix,iy+1,iz)==ii) then !y
-            fw%idy_d(ix,iy,iz,icount_d)=1;
+            fw%idy_ld(ix,iy,iz,icount_ld)=1;
           elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)<ii) then
-            fw%idy_d(ix,iy,iz,icount_d)=1;
+            fw%idy_ld(ix,iy,iz,icount_ld)=1;
           elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
-            do ij=1,fw%inum_d
-              if(fw%imedia_d(ij)==fs%imedia(ix,iy+1,iz)) then
-                fw%idy_d(ix,iy,iz,ij)=1;
+            do ij=1,fw%num_ld
+              if(fw%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
+                fw%idy_ld(ix,iy,iz,ij)=1;
               end if
             end do
           end if
           if(fs%imedia(ix,iy,iz+1)==ii) then !z
-            fw%idz_d(ix,iy,iz,icount_d)=1;
+            fw%idz_ld(ix,iy,iz,icount_ld)=1;
           elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)<ii) then
-            fw%idz_d(ix,iy,iz,icount_d)=1;
+            fw%idz_ld(ix,iy,iz,icount_ld)=1;
           elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
-            do ij=1,fw%inum_d
-              if(fw%imedia_d(ij)==fs%imedia(ix,iy,iz+1)) then
-                fw%idz_d(ix,iy,iz,ij)=1;
+            do ij=1,fw%num_ld
+              if(fw%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
+                fw%idz_ld(ix,iy,iz,ij)=1;
               end if
             end do
           end if
@@ -948,9 +992,15 @@ contains
       end do
       end do
       end do
-      fw%c1_j_d(icount_d)=(1.0d0-gamma_d(ii)*dt_em/2.0d0)           / (1.0d0+gamma_d(ii)*dt_em/2.0d0);
-      fw%c2_j_d(icount_d)=((omega_p_d(ii)**2.0d0)*dt_em/(4.0d0*pi)) / (1.0d0+gamma_d(ii)*dt_em/2.0d0);
-      icount_d=icount_d+1
+      do ij=1,pole_num_ld(ii)
+        fw%c1_j_ld(ij,icount_ld)=(1.0d0-gamma_ld(ii,ij)*dt_em/2.0d0) &
+                                 / (1.0d0+gamma_ld(ii,ij)*dt_em/2.0d0);
+        fw%c2_j_ld(ij,icount_ld)=(f_ld(ii,ij)*(omega_p_ld(ii)**2.0d0)*dt_em/(4.0d0*pi)) &
+                                 / (1.0d0+gamma_ld(ii,ij)*dt_em/2.0d0);
+        fw%c3_j_ld(ij,icount_ld)=((omega_ld(ii,ij)**2.0d0)*dt_em) &
+                                 / (1.0d0+gamma_ld(ii,ij)*dt_em/2.0d0);
+      end do
+      icount_ld=icount_ld+1
     end select
     
     !set coefficient
@@ -1140,63 +1190,6 @@ contains
     end if
     
   end subroutine eh_coeff
-  
-  !=========================================================================================
-  != apply smoothing =======================================================================
-  subroutine eh_smoothing
-    implicit none
-    integer :: icomp
-    
-    if(fw%inum_d>0) then
-      fw%wex_d(:,:,:,:)=dble(fw%idx_d(:,:,:,:))
-      fw%wey_d(:,:,:,:)=dble(fw%idy_d(:,:,:,:))
-      fw%wez_d(:,:,:,:)=dble(fw%idz_d(:,:,:,:))
-      if(smooth_d=='y') then
-        allocate(fs%imedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                           fs%ng%is_array(2):fs%ng%ie_array(2),&
-                           fs%ng%is_array(3):fs%ng%ie_array(3)))
-        fs%imedia(:,:,:)=0
-        allocate(fw%rmedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                           fs%ng%is_array(2):fs%ng%ie_array(2),&
-                           fs%ng%is_array(3):fs%ng%ie_array(3)))
-        fw%rmedia(:,:,:)=0.0d0
-        do ii=1,fw%inum_d
-          do icomp=1,3
-            if(icomp==1)     then
-              fw%rmedia(:,:,:)=dble(fw%idx_d(:,:,:,ii))
-            elseif(icomp==2) then
-              fw%rmedia(:,:,:)=dble(fw%idy_d(:,:,:,ii))
-            elseif(icomp==3) then
-              fw%rmedia(:,:,:)=dble(fw%idz_d(:,:,:,ii))
-            end if
-            call eh_sendrecv(fs,fw,'r')
-            fs%imedia(:,:,:)=int(fw%rmedia(:,:,:)+1d-3)
-            do iz=fs%ng%is(3),fs%ng%ie(3)
-            do iy=fs%ng%is(2),fs%ng%ie(2)
-            do ix=fs%ng%is(1),fs%ng%ie(1)
-              if(fs%imedia(ix,iy,iz)==1) then
-                if(fs%imedia(ix+1,iy,iz)==0 .or. fs%imedia(ix-1,iy,iz)==0 .or. &
-                   fs%imedia(ix,iy+1,iz)==0 .or. fs%imedia(ix,iy-1,iz)==0 .or. &
-                   fs%imedia(ix,iy,iz+1)==0 .or. fs%imedia(ix,iy,iz-1)==0)then
-                  if(icomp==1)     then
-                    fw%wex_d(ix,iy,iz,ii)=weight_d
-                  elseif(icomp==2) then
-                    fw%wey_d(ix,iy,iz,ii)=weight_d
-                  elseif(icomp==3) then
-                    fw%wez_d(ix,iy,iz,ii)=weight_d
-                  end if
-                end if
-              end if
-            end do
-            end do
-            end do
-          end do
-        end do
-        deallocate(fs%imedia); deallocate(fw%rmedia);
-      end if
-    end if
-    
-  end subroutine eh_smoothing
   
   !=========================================================================================
   != set pml ===============================================================================
