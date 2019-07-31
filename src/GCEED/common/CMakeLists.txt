@@ -1,10 +1,6 @@
 set(SOURCES
     allocate_sendrecv.f90
     calcELF.f90
-    calc_force_c.f90
-    calc_force.f90
-    calc_gradient_fast_c.f90
-    calc_gradient_fast.f90
     calcJxyz_all.f90
     calcJxyz_all_periodic.f90
     calc_pmax.f90
@@ -25,7 +21,6 @@ set(SOURCES
     psl.f90
     prep_poisson_fft.f90
     read_copy_pot.f90
-    sendrecv_copy.f90
     set_filename.f90
     set_gridcoo.f90
     set_icoo1d.f90

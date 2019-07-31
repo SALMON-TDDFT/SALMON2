@@ -13,7 +13,6 @@ set(SOURCES
     read_pslfile.f90
     scf_data.f90
     sendrecv.f90
-    sendrecv_groupob.f90
     writebox_rt.f90
     persistent_comm.f90
     )
