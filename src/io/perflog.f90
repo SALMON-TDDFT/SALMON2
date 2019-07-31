@@ -189,9 +189,10 @@ contains
     call set( 6, LOG_CALC_EXC_COR         , 'Exc_Cor routine')
     call set( 7, LOG_CALC_VLOCAL          , 'Vhxc')              ! FIXME: wrong name
     call set( 8, LOG_CALC_DP              , 'calculating Dp')
-    call set( 9, LOG_CALC_CURRENT         , 'calculating curr')
-    call set(10, LOG_CALC_TOTAL_ENERGY    , 'calculating Etot')
-    call set(11, LOG_CALC_PROJECTION      , 'calc. projection')
+    call set( 9, LOG_CALC_DENSITY_MATRIX  , 'calculating density matrix')
+    call set(10, LOG_CALC_CURRENT         , 'calculating curr')
+    call set(11, LOG_CALC_TOTAL_ENERGY    , 'calculating Etot')
+    call set(12, LOG_CALC_PROJECTION      , 'calc. projection')
     call set(13, LOG_WRITE_ENERGIES       , 'writing energies')
     call set(14, LOG_CALC_EIGEN_ENERGY    , 'calc_eigen_energy')
     call set(15, LOG_CALC_CURRENT_ION     , 'calc_current_ion')

@@ -260,8 +260,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   case(3)
 
-    call timer_begin(LOG_CALC_CURRENT)
     call calc_density_matrix(nspin,info,mg,srg,spsi_out,dmat)
+
+    call timer_begin(LOG_CALC_CURRENT)
     call calc_current(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
     call calc_emfields(nspin,curr_tmp)
     call timer_end(LOG_CALC_CURRENT)

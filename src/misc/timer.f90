@@ -59,6 +59,7 @@ module timer
   integer,public,parameter :: LOG_HPSI                  = 52
   integer,public,parameter :: LOG_CALC_DP               = 55
   integer,public,parameter :: LOG_CALC_CURRENT          = 56
+  integer,public,parameter :: LOG_CALC_DENSITY_MATRIX   = 57
   integer,public,parameter :: LOG_CALC_VLOCAL           = 58 ! FIXME: wrong name
   integer,public,parameter :: LOG_CALC_PROJECTION       = 59
   integer,public,parameter :: LOG_WRITE_ENERGIES        = 61
