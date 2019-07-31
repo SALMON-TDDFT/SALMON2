@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_calc(fs,fw)
-  use inputoutput,          only: dt_em,iobs_num_em,iobs_samp_em,obs_plane_em,&
+  use inputoutput,          only: dt_em,pole_num_ld,iobs_num_em,iobs_samp_em,obs_plane_em,&
                                   directory,utime_from_au,t1_t2,t1_delay,&
                                   amplitude1,pulse_tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                   amplitude2,pulse_tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
@@ -27,7 +27,7 @@ subroutine eh_calc(fs,fw)
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
-  integer                           :: iter,ii,ix,iy,iz
+  integer                           :: iter,ii,ij,ix,iy,iz
   character(128)                    :: save_name
   
   !time-iteration
@@ -38,9 +38,9 @@ subroutine eh_calc(fs,fw)
       write(*,*) fw%iter_now
     end if
     
-    !update drude
-    if(fw%inum_d>0) then
-      call eh_update_drude
+    !update lorentz-drude
+    if(fw%num_ld>0) then
+      call eh_update_ld
     end if
     
     !calculate linear response
@@ -67,8 +67,8 @@ subroutine eh_calc(fs,fw)
       if(fw%inc_dist2/='none') call eh_add_inc(2,amplitude2,pulse_tw2,omega2,phi_cep2,&
                                                   epdir_re2,epdir_im2,ae_shape2,fw%inc_dist2)
     end if
-    if(fw%inum_d>0) then
-      call eh_add_curr(fw%rjx_sum_d(:,:,:),fw%rjy_sum_d(:,:,:),fw%rjz_sum_d(:,:,:))
+    if(fw%num_ld>0) then
+      call eh_add_curr(fw%rjx_sum_ld(:,:,:),fw%rjy_sum_ld(:,:,:),fw%rjz_sum_ld(:,:,:))
     end if
     call eh_sendrecv(fs,fw,'e')
     
@@ -174,8 +174,8 @@ subroutine eh_calc(fs,fw)
 contains
   
   !=========================================================================================
-  != update drude ==========================================================================
-  subroutine eh_update_drude
+  != update lorentz-drude ==================================================================
+  subroutine eh_update_ld
     implicit none
     
     !initialize
@@ -184,40 +184,68 @@ contains
     do iz=fs%ng%is(3),fs%ng%ie(3)
     do iy=fs%ng%is(2),fs%ng%ie(2)
     do ix=fs%ng%is(1),fs%ng%ie(1)
-      fw%rjx_sum_d(ix,iy,iz)=0.0d0; fw%rjy_sum_d(ix,iy,iz)=0.0d0; fw%rjz_sum_d(ix,iy,iz)=0.0d0;
+      fw%rjx_sum_ld(ix,iy,iz)=0.0d0; fw%rjy_sum_ld(ix,iy,iz)=0.0d0; fw%rjz_sum_ld(ix,iy,iz)=0.0d0;
+      fw%px_sum_ld(ix,iy,iz) =0.0d0; fw%py_sum_ld(ix,iy,iz) =0.0d0; fw%pz_sum_ld(ix,iy,iz) =0.0d0;
     end do
     end do
     end do
 !$omp end do
 !$omp end parallel
     
-    !update drude current
-    do ii=1,fw%inum_d
+    !update ld polarization vector
+    do ii=1,fw%num_ld
+    do ij=1,pole_num_ld(fw%media_ld(ii))
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fs%ng%is(3),fs%ng%ie(3)
       do iy=fs%ng%is(2),fs%ng%ie(2)
       do ix=fs%ng%is(1),fs%ng%ie(1)
-        fw%rjx_d(ix,iy,iz,ii)= fw%c1_j_d(ii)*fw%rjx_d(ix,iy,iz,ii) &
-                               +fw%c2_j_d(ii)*( fw%ex_y(ix,iy,iz)+fw%ex_z(ix,iy,iz) )&
-                               *dble(fw%idx_d(ix,iy,iz,ii))
-        fw%rjy_d(ix,iy,iz,ii)= fw%c1_j_d(ii)*fw%rjy_d(ix,iy,iz,ii) &
-                               +fw%c2_j_d(ii)*( fw%ey_z(ix,iy,iz)+fw%ey_x(ix,iy,iz) )&
-                               *dble(fw%idy_d(ix,iy,iz,ii))
-        fw%rjz_d(ix,iy,iz,ii)= fw%c1_j_d(ii)*fw%rjz_d(ix,iy,iz,ii) &
-                               +fw%c2_j_d(ii)*( fw%ez_x(ix,iy,iz)+fw%ez_y(ix,iy,iz) )&
-                               *dble(fw%idz_d(ix,iy,iz,ii))
-        fw%rjx_sum_d(ix,iy,iz)=fw%rjx_sum_d(ix,iy,iz)+fw%wex_d(ix,iy,iz,ii)*fw%rjx_d(ix,iy,iz,ii)
-        fw%rjy_sum_d(ix,iy,iz)=fw%rjy_sum_d(ix,iy,iz)+fw%wey_d(ix,iy,iz,ii)*fw%rjy_d(ix,iy,iz,ii)
-        fw%rjz_sum_d(ix,iy,iz)=fw%rjz_sum_d(ix,iy,iz)+fw%wez_d(ix,iy,iz,ii)*fw%rjz_d(ix,iy,iz,ii)
+        fw%px_ld(ix,iy,iz,ij,ii)=fw%px_ld(ix,iy,iz,ij,ii)+dt_em*fw%rjx_ld(ix,iy,iz,ij,ii)
+        fw%py_ld(ix,iy,iz,ij,ii)=fw%py_ld(ix,iy,iz,ij,ii)+dt_em*fw%rjy_ld(ix,iy,iz,ij,ii)
+        fw%pz_ld(ix,iy,iz,ij,ii)=fw%pz_ld(ix,iy,iz,ij,ii)+dt_em*fw%rjz_ld(ix,iy,iz,ij,ii)
+        fw%px_sum_ld(ix,iy,iz)=fw%px_sum_ld(ix,iy,iz)+fw%px_ld(ix,iy,iz,ij,ii)
+        fw%py_sum_ld(ix,iy,iz)=fw%py_sum_ld(ix,iy,iz)+fw%py_ld(ix,iy,iz,ij,ii)
+        fw%pz_sum_ld(ix,iy,iz)=fw%pz_sum_ld(ix,iy,iz)+fw%pz_ld(ix,iy,iz,ij,ii)
       end do
       end do
       end do
 !$omp end do
 !$omp end parallel
     end do
+    end do
     
-  end subroutine eh_update_drude
+    !update ld polarization  current
+    do ii=1,fw%num_ld
+    do ij=1,pole_num_ld(fw%media_ld(ii))
+!$omp parallel
+!$omp do private(ix,iy,iz)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
+        fw%rjx_ld(ix,iy,iz,ij,ii)= fw%c1_j_ld(ij,ii)*fw%rjx_ld(ix,iy,iz,ij,ii) &
+                                  +fw%c2_j_ld(ij,ii)*( fw%ex_y(ix,iy,iz)+fw%ex_z(ix,iy,iz) ) &
+                                  *dble(fw%idx_ld(ix,iy,iz,ii)) &
+                                  -fw%c3_j_ld(ij,ii)*fw%px_ld(ix,iy,iz,ij,ii)
+        fw%rjy_ld(ix,iy,iz,ij,ii)= fw%c1_j_ld(ij,ii)*fw%rjy_ld(ix,iy,iz,ij,ii) &
+                                  +fw%c2_j_ld(ij,ii)*( fw%ey_z(ix,iy,iz)+fw%ey_x(ix,iy,iz) ) &
+                                  *dble(fw%idy_ld(ix,iy,iz,ii)) &
+                                  -fw%c3_j_ld(ij,ii)*fw%py_ld(ix,iy,iz,ij,ii)
+        fw%rjz_ld(ix,iy,iz,ij,ii)= fw%c1_j_ld(ij,ii)*fw%rjz_ld(ix,iy,iz,ij,ii) &
+                                  +fw%c2_j_ld(ij,ii)*( fw%ez_x(ix,iy,iz)+fw%ez_y(ix,iy,iz) ) &
+                                  *dble(fw%idz_ld(ix,iy,iz,ii)) &
+                                  -fw%c3_j_ld(ij,ii)*fw%pz_ld(ix,iy,iz,ij,ii)
+        fw%rjx_sum_ld(ix,iy,iz)=fw%rjx_sum_ld(ix,iy,iz)+fw%rjx_ld(ix,iy,iz,ij,ii)
+        fw%rjy_sum_ld(ix,iy,iz)=fw%rjy_sum_ld(ix,iy,iz)+fw%rjy_ld(ix,iy,iz,ij,ii)
+        fw%rjz_sum_ld(ix,iy,iz)=fw%rjz_sum_ld(ix,iy,iz)+fw%rjz_ld(ix,iy,iz,ij,ii)
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+    end do
+    end do
+    
+  end subroutine eh_update_ld
   
   !=========================================================================================
   != calculate linear response =============================================================
@@ -232,51 +260,36 @@ contains
     !update time
     fw%time_lr(fw%iter_lr)=dble(fw%iter_lr)*dt_em
     
-    !initialize current density
-!$omp parallel
-!$omp do private(ix,iy,iz)
-    do iz=fs%ng%is(3),fs%ng%ie(3)
-    do iy=fs%ng%is(2),fs%ng%ie(2)
-    do ix=fs%ng%is(1),fs%ng%ie(1)
-      fw%rjx_lr(ix,iy,iz)=0.0d0; fw%rjy_lr(ix,iy,iz)=0.0d0; fw%rjz_lr(ix,iy,iz)=0.0d0;
-    end do
-    end do
-    end do
-!$omp end do
-!$omp end parallel
-    
-    !add all current density
-    if(fw%inum_d>0) then
-!$omp parallel
-!$omp do private(ix,iy,iz)
-      do iz=fs%ng%is(3),fs%ng%ie(3)
-      do iy=fs%ng%is(2),fs%ng%ie(2)
-      do ix=fs%ng%is(1),fs%ng%ie(1)
-        fw%rjx_lr(ix,iy,iz)=fw%rjx_lr(ix,iy,iz)+fw%rjx_sum_d(ix,iy,iz)
-        fw%rjy_lr(ix,iy,iz)=fw%rjy_lr(ix,iy,iz)+fw%rjy_sum_d(ix,iy,iz)
-        fw%rjz_lr(ix,iy,iz)=fw%rjz_lr(ix,iy,iz)+fw%rjz_sum_d(ix,iy,iz)
-      end do
-      end do
-      end do
-!$omp end do
-!$omp end parallel
-    end if
-    
-    !calculate dip or curr
     if(iperiodic==0) then
+      !initialize polarization vector
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=fs%ng%is(3),fs%ng%ie(3)
       do iy=fs%ng%is(2),fs%ng%ie(2)
       do ix=fs%ng%is(1),fs%ng%ie(1)
-        fw%px_lr(ix,iy,iz)=fw%px_lr(ix,iy,iz)+fw%rjx_lr(ix,iy,iz)*dt_em
-        fw%py_lr(ix,iy,iz)=fw%py_lr(ix,iy,iz)+fw%rjy_lr(ix,iy,iz)*dt_em
-        fw%pz_lr(ix,iy,iz)=fw%pz_lr(ix,iy,iz)+fw%rjz_lr(ix,iy,iz)*dt_em
+        fw%px_lr(ix,iy,iz)=0.0d0; fw%py_lr(ix,iy,iz)=0.0d0; fw%pz_lr(ix,iy,iz)=0.0d0;
       end do
       end do
       end do
 !$omp end do
 !$omp end parallel
+      !add all polarization vector
+      if(fw%num_ld>0) then
+!$omp parallel
+!$omp do private(ix,iy,iz)
+        do iz=fs%ng%is(3),fs%ng%ie(3)
+        do iy=fs%ng%is(2),fs%ng%ie(2)
+        do ix=fs%ng%is(1),fs%ng%ie(1)
+          fw%px_lr(ix,iy,iz)=fw%px_lr(ix,iy,iz)+fw%px_sum_ld(ix,iy,iz);
+          fw%py_lr(ix,iy,iz)=fw%py_lr(ix,iy,iz)+fw%py_sum_ld(ix,iy,iz);
+          fw%pz_lr(ix,iy,iz)=fw%pz_lr(ix,iy,iz)+fw%pz_sum_ld(ix,iy,iz);
+        end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      end if
+      !calculate dip
       sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
@@ -296,6 +309,35 @@ contains
       call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
       fw%dip_lr(fw%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
     elseif(iperiodic==3) then
+      !initialize current density
+!$omp parallel
+!$omp do private(ix,iy,iz)
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
+        fw%rjx_lr(ix,iy,iz)=0.0d0; fw%rjy_lr(ix,iy,iz)=0.0d0; fw%rjz_lr(ix,iy,iz)=0.0d0;
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      !add all current density
+      if(fw%num_ld>0) then
+!$omp parallel
+!$omp do private(ix,iy,iz)
+        do iz=fs%ng%is(3),fs%ng%ie(3)
+        do iy=fs%ng%is(2),fs%ng%ie(2)
+        do ix=fs%ng%is(1),fs%ng%ie(1)
+          fw%rjx_lr(ix,iy,iz)=fw%rjx_lr(ix,iy,iz)+fw%rjx_sum_ld(ix,iy,iz)
+          fw%rjy_lr(ix,iy,iz)=fw%rjy_lr(ix,iy,iz)+fw%rjy_sum_ld(ix,iy,iz)
+          fw%rjz_lr(ix,iy,iz)=fw%rjz_lr(ix,iy,iz)+fw%rjz_sum_ld(ix,iy,iz)
+        end do
+        end do
+        end do
+!$omp end do
+!$omp end parallel
+      end if
+      !calculate curr
       sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
@@ -314,7 +356,7 @@ contains
       sum_lr(1)=sum_lr_x; sum_lr(2)=sum_lr_y; sum_lr(3)=sum_lr_z;
       call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
       fw%curr_lr(fw%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
-                                 /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
+                               /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
     end if
     
     !update time iteration

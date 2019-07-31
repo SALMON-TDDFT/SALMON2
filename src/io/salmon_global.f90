@@ -228,10 +228,11 @@ module salmon_global
   real(8)        :: epsilon(0:200)
   real(8)        :: rmu(0:200)
   real(8)        :: sigma(0:200)
-  real(8)        :: omega_p_d(0:200)
-  real(8)        :: gamma_d(0:200)
-  character(1)   :: smooth_d
-  real(8)        :: weight_d
+  integer        :: pole_num_ld(0:200)
+  real(8)        :: omega_p_ld(0:200)
+  real(8)        :: f_ld(0:200,1:100)
+  real(8)        :: gamma_ld(0:200,1:100)
+  real(8)        :: omega_ld(0:200,1:100)
   character(1)   :: wf_em
   
 !! &analysis

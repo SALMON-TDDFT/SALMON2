@@ -67,17 +67,25 @@ module salmon_maxwell
     integer             :: ihx_y_is(3),ihx_y_ie(3),ihx_z_is(3),ihx_z_ie(3)                                     !h
     integer             :: ihy_z_is(3),ihy_z_ie(3),ihy_x_is(3),ihy_x_ie(3)                                     !h
     integer             :: ihz_x_is(3),ihz_x_ie(3),ihz_y_is(3),ihz_y_ie(3)                                     !h
-    real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)                                        !e for save
-    real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)                                        !h for save
-    real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)       !coeff. for general curr. dens.
-    integer             :: inum_d                                       !Drude: number of media
-    integer,allocatable :: imedia_d(:)                                  !Drude: imedia number for drude model
-    integer,allocatable :: idx_d(:,:,:,:),idy_d(:,:,:,:),idz_d(:,:,:,:) !Drude: id for each component
-    real(8),allocatable :: rjx_d(:,:,:,:),rjy_d(:,:,:,:),rjz_d(:,:,:,:) !Drude: poparization current density
-    real(8),allocatable :: rjx_sum_d(:,:,:),rjy_sum_d(:,:,:),&          !Drude: sum of poparization current density
-                           rjz_sum_d(:,:,:)                             
-    real(8),allocatable :: wex_d(:,:,:,:),wey_d(:,:,:,:),wez_d(:,:,:,:) !Drude: weight function for smoothing
-    real(8),allocatable :: c1_j_d(:),c2_j_d(:)                          !Drude: coefficient for j
+    real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)                   !e for save
+    real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)                   !h for save
+    real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)                !coeff. for general curr. dens.
+    integer             :: num_ld                                                !LD: number of LD media
+    integer             :: max_pole_num_ld                                       !LD: maximum of pole_num_ld
+    integer,allocatable :: media_ld(:)                                           !LD: imedia number for drude model
+                                                                                 !    (media id)
+    integer,allocatable :: idx_ld(:,:,:,:),idy_ld(:,:,:,:),idz_ld(:,:,:,:)       !LD: id for each component
+                                                                                 !    (x,y,z,num_ld)
+    real(8),allocatable :: rjx_ld(:,:,:,:,:),rjy_ld(:,:,:,:,:),rjz_ld(:,:,:,:,:) !LD: poparization current density J
+                                                                                 !    (x,y,z,max_pole_num_ld,num_ld)
+    real(8),allocatable :: rjx_sum_ld(:,:,:),rjy_sum_ld(:,:,:),rjz_sum_ld(:,:,:) !LD: sum of J
+                                                                                 !    (x,y,z)
+    real(8),allocatable :: px_ld(:,:,:,:,:),py_ld(:,:,:,:,:),pz_ld(:,:,:,:,:)    !LD: poparization vector P
+                                                                                 !    (x,y,z,max_pole_num_ld,num_ld)
+    real(8),allocatable :: px_sum_ld(:,:,:),py_sum_ld(:,:,:),pz_sum_ld(:,:,:)    !LD: sum of P
+                                                                                 !    (x,y,z)
+    real(8),allocatable :: c1_j_ld(:,:),c2_j_ld(:,:),c3_j_ld(:,:)                !LD: coefficient for J
+                                                                                 !    (max_pole_num_ld,num_ld)
     real(8),allocatable :: rmedia(:,:,:)                                !Material information for tmp.
     real(8),allocatable :: time_lr(:)                                   !LR: time
     integer             :: iter_lr                                      !LR: time iteration for save

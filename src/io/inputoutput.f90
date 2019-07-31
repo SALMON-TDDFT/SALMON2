@@ -398,10 +398,11 @@ contains
       & epsilon, &
       & rmu, &
       & sigma, &
-      & omega_p_d, &
-      & gamma_d, &
-      & smooth_d, &
-      & weight_d, &
+      & pole_num_ld, &
+      & omega_p_ld, &
+      & f_ld, &
+      & gamma_ld, &
+      & omega_ld, &
       & wf_em
 
     namelist/analysis/ &
@@ -741,10 +742,11 @@ contains
     epsilon(:)       = 1d0
     rmu(:)           = 1d0
     sigma(:)         = 0d0
-    omega_p_d(:)     = 0d0
-    gamma_d(:)       = 0d0
-    smooth_d         = 'n'
-    weight_d         = 0.5d0
+    pole_num_ld(:)   = 1
+    omega_p_ld(:)    = 0d0
+    f_ld(:,:)        = 0d0
+    gamma_ld(:,:)    = 0d0
+    omega_ld(:,:)    = 0d0
     wf_em            = 'y'
 
 !! == default for &analysis
@@ -1170,12 +1172,14 @@ contains
     call comm_bcast(epsilon      ,nproc_group_global)
     call comm_bcast(rmu          ,nproc_group_global)
     call comm_bcast(sigma        ,nproc_group_global)
-    call comm_bcast(omega_p_d    ,nproc_group_global)
-    omega_p_d = omega_p_d * uenergy_to_au
-    call comm_bcast(gamma_d      ,nproc_group_global)
-    gamma_d = gamma_d * uenergy_to_au
-    call comm_bcast(smooth_d     ,nproc_group_global)
-    call comm_bcast(weight_d     ,nproc_group_global)
+    call comm_bcast(pole_num_ld  ,nproc_group_global)
+    call comm_bcast(omega_p_ld   ,nproc_group_global)
+    omega_p_ld = omega_p_ld * uenergy_to_au
+    call comm_bcast(f_ld         ,nproc_group_global)
+    call comm_bcast(gamma_ld     ,nproc_group_global)
+    gamma_ld = gamma_ld * uenergy_to_au
+    call comm_bcast(omega_ld     ,nproc_group_global)
+    omega_ld = omega_ld * uenergy_to_au
     call comm_bcast(wf_em        ,nproc_group_global)
     
 !! == bcast for &analysis
@@ -1545,7 +1549,7 @@ contains
     use salmon_file, only: get_filehandle
     use misc_routines, only: create_directory
     implicit none
-    integer :: i,ierr_nml
+    integer :: i,j,ierr_nml
     ierr_nml = 0
 
     if (comm_is_root(nproc_id_global)) then
@@ -1819,11 +1823,14 @@ contains
         write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'epsilon(',i,')', epsilon(i)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'rmu(',i,')', rmu(i)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'sigma(',i,')', sigma(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'omega_p_d(',i,')', omega_p_d(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'gamma_d(',i,')', gamma_d(i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')     'pole_num_ld(',i,')', pole_num_ld(i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'omega_p_ld(',i,')', omega_p_ld(i)
+        do j = 1,pole_num_ld(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'f_ld(',i,',',j,')', f_ld(i,j)
+          write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'gamma_ld(',i,',',j,')', gamma_ld(i,j)
+          write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'omega_ld(',i,',',j,')', omega_ld(i,j)
+        end do
       end do
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'smooth_d', smooth_d
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'weight_d', weight_d
       write(fh_variables_log, '("#",4X,A,"=",A)')      'wf_em', wf_em
 
       if(inml_analysis >0)ierr_nml = ierr_nml +1
