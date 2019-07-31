@@ -310,63 +310,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   !(MD: part2)
   if(iflag_md==1) call time_evolution_step_md_part2(system,md)
 
-
-  if(circular=='y')then
-    allocate(cmatbox1(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)))
-    allocate(cmatbox2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)))
-    
-!$OMP parallel do private(iz,iy,ix)
-    do iz=lg_sta(3),lg_end(3)
-    do iy=lg_sta(2),lg_end(2)
-    do ix=lg_sta(1),lg_end(1)
-      cmatbox1(ix,iy,iz)=0.d0
-    end do
-    end do
-    end do
-    cbox1=0.d0
-
-    do ik=info%ik_s,info%ik_e
-    do iob=info%io_s,info%io_e
-    do is=1,nspin
-!$OMP parallel do private(iz,iy,ix)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
-        cmatbox1(ix,iy,iz) = spsi_out%zwf(ix,iy,iz,is,iob,ik,1)
-      end do
-      end do
-      end do
-
-      call comm_summation(cmatbox1,cmatbox2,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_korbital)
-      cbox3=0.d0
-      do iz=lg_sta(3),lg_end(3)
-      do ix=1,lg_end(1)
-        cbox3=cbox3+(conjg(cmatbox2(ix,0,iz))*(cmatbox2(ix,1,iz)-cmatbox2(ix,-1,iz))/(2.d0*Hgs(2)) &
-                   -(conjg(cmatbox2(ix,1,iz))-conjg(cmatbox2(ix,-1,iz)))/(2.d0*Hgs(2))*cmatbox2(ix,0,iz))/Hgs(1)/Hgs(2)
-      end do
-      end do
-      cbox1=cbox1+cbox3
-
-      cbox3=0.d0
-      do iz=lg_sta(3),lg_end(3)
-      do iy=1,lg_end(2)
-        cbox3=cbox3-(conjg(cmatbox2(0,iy,iz))*(cmatbox2(1,iy,iz)-cmatbox2(-1,iy,iz))/(2.d0*Hgs(1)) &
-                   +(conjg(cmatbox2(1,iy,iz))-conjg(cmatbox2(-1,iy,iz)))/(2.d0*Hgs(1))*cmatbox2(0,iy,iz))/Hgs(1)/Hgs(2)
-      end do
-      end do
-      cbox1=cbox1+cbox3
-
-    end do
-    end do
-    end do
-
-    call comm_summation(cbox1,cbox2,nproc_group_global)
-
-    cumnum=cumnum+cbox2/zi*dt
-
-    deallocate(cmatbox1,cmatbox2) 
-  end if
-
   ! Output 
   !(Export to SYSname_trj.xyz)
   if( icalcforce==1 .and. mod(itt,out_rvf_rt_step)==0 )then
