@@ -25,7 +25,7 @@ contains
 ! dmat(r,-dr) = conjg(dmat(r-dr,dr))
 ! j(r) = sum occ aimag( conjg(psi(r))* (sum nabt*psi)(r) ) = aimag( sum_dr nabt(dr)* dmat(r,dr) )
 
-  subroutine calc_density_matrix(nspin,info,mg,srg,psi,dmat)
+  subroutine calc_density_matrix(nspin,info,mg,srg,psi,rho,dmat)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
     use salmon_communication, only: comm_summation
@@ -36,20 +36,22 @@ contains
     type(s_rgrid)  ,intent(in) :: mg
     type(s_sendrecv_grid)      :: srg
     type(s_orbital)            :: psi
+    type(s_scalar)             :: rho(nspin,info%im_s:info%im_e)
     type(s_dmatrix)            :: dmat
     !
     integer :: im,ispin,ik,io,is(3),ie(3),nsize
     integer :: iz,iy,ix,ii
     complex(8) :: pocc
-    complex(8),allocatable :: wrk(:,:,:,:,:)
 
     call timer_begin(LOG_CALC_DENSITY_MATRIX)
 
     is = mg%is
     ie = mg%ie
-    nsize = Nd* mg%ndir * (mg%num(1)+Nd) * (mg%num(2)+Nd) * (mg%num(3)+Nd)
+    nsize = (Nd+1) * 3 * (mg%num(1)+Nd) * (mg%num(2)+Nd) * (mg%num(3)+Nd)
 
-    allocate(wrk(Nd,mg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)))
+    if(.not. allocated(dmat%ztmp)) then
+      allocate(dmat%ztmp(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)))
+    end if
 
     if(allocated(psi%rwf)) then
       allocate(psi%zwf(mg%is_array(1):mg%ie_array(1) &
@@ -71,7 +73,7 @@ contains
       do iz=is(3)-Nd,ie(3)
       do iy=is(2)-Nd,ie(2)
       do ix=is(1)-Nd,ie(1)
-        wrk(:,:,ix,iy,iz) = 0d0
+        dmat%ztmp(:,:,ix,iy,iz) = 0d0
       end do
       end do
       end do
@@ -85,14 +87,15 @@ contains
       do iy=is(2)-Nd,ie(2)
       do ix=is(1)-Nd,ie(1)
 
-        ! dir = 1,2,3 = xx,yy,zz (yz,zx,xy)
+        ! dir = 1,2,3 = x,y,z
         pocc = conjg( psi%zwf(ix,iy,iz,ispin,io,ik,im) ) * info%occ(io,ik,ispin,im)
 !dir$ unroll
         do ii=1,Nd
-          wrk(ii,1,ix,iy,iz) = wrk(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
-          wrk(ii,2,ix,iy,iz) = wrk(ii,2,ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
-          wrk(ii,3,ix,iy,iz) = wrk(ii,3,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
+          dmat%ztmp(ii,1,ix,iy,iz) = dmat%ztmp(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
+          dmat%ztmp(ii,2,ix,iy,iz) = dmat%ztmp(ii,2,ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
+          dmat%ztmp(ii,3,ix,iy,iz) = dmat%ztmp(ii,3,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
         end do
+        dmat%ztmp(0,1,ix,iy,iz) = dmat%ztmp(0,1,ix,iy,iz) + psi%zwf(ix,iy,iz,ispin,io,ik,im) * pocc
 
       end do
       end do
@@ -101,13 +104,23 @@ contains
       end do
       end do
 !$omp end parallel
-      call comm_summation(wrk(:,:,:,:,:),dmat%zrho_mat(:,:,:,:,:,ispin,im),nsize,info%icomm_ko)
+
+      call comm_summation(dmat%ztmp(:,:,:,:,:),dmat%zrho_mat(:,:,:,:,:,ispin,im),nsize,info%icomm_ko)
+
+!$omp parallel do private(iz,iy,ix) collapse(2)
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+      do ix=is(1),ie(1)
+        rho(ispin,im)%f(ix,iy,iz) = dble( dmat%zrho_mat(0,1,ix,iy,iz,ispin,im) )
+      end do
+      end do
+      end do
+!$omp end parallel do
+
     end do
     end do
 
     if(allocated(psi%rwf)) deallocate(psi%zwf)
-
-    deallocate(wrk)
 
     call timer_end(LOG_CALC_DENSITY_MATRIX)
   end subroutine calc_density_matrix
@@ -268,7 +281,7 @@ contains
       end do
       end do
 
-      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie)
 
       call comm_summation(wrk3,wrk1,3,info%icomm_ko)
 
@@ -308,11 +321,11 @@ contains
       return
     end subroutine kvec_part
 
-    subroutine stencil_current(jw,zdm,nabt,is,ie,ndir)
+    subroutine stencil_current(jw,zdm,nabt,is,ie)
       implicit none
-      integer   ,intent(in) :: is(3),ie(3),ndir
+      integer   ,intent(in) :: is(3),ie(3)
       real(8)   ,intent(in) :: nabt(Nd,3)
-      complex(8),intent(in) :: zdm(Nd,ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
+      complex(8),intent(in) :: zdm(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
       real(8)               :: jw(3)
       !
       integer :: ix,iy,iz
@@ -454,7 +467,7 @@ contains
       end do
       call comm_summation(wrk2,wrk,nsize,info%icomm_ko)
 
-      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz,mg%ndir)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz)
 
       curr(ispin,im)%v = wrk + wrk2
     end do
@@ -483,12 +496,12 @@ contains
       return
     end subroutine kvec_part
 
-    subroutine stencil_current(jw,zdm,nabt,is,ie,idx,idy,idz,ndir)
+    subroutine stencil_current(jw,zdm,nabt,is,ie,idx,idy,idz)
       implicit none
       integer   ,intent(in) :: is(3),ie(3) &
-                              ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd),ndir
+                              ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd)
       real(8)   ,intent(in) :: nabt(Nd,3)
-      complex(8),intent(in) :: zdm(Nd,ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
+      complex(8),intent(in) :: zdm(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
       integer :: ix,iy,iz

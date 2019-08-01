@@ -182,7 +182,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   call timer_end(LOG_CALC_TIME_PROPAGATION)
 
   call timer_begin(LOG_CALC_RHO)
-  call calc_density(srho_s,spsi_out,info,mg,nspin)
+  select case(iperiodic)
+  case(0)
+    call calc_density(srho_s,spsi_out,info,mg,nspin)
+  case(3)
+    call calc_density_matrix(nspin,info,mg,srg,spsi_out,srho_s,dmat)
+  end select
   
   if(nspin==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -259,8 +264,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
     if(ikind_eext/=0.or.(ikind_eext==0.and.itt==itotNtime)) idip = 1
 
   case(3)
-
-    call calc_density_matrix(nspin,info,mg,srg,spsi_out,dmat)
 
     call timer_begin(LOG_CALC_CURRENT)
     call calc_current(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
