@@ -29,6 +29,7 @@ contains
     use structures
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
     use salmon_communication, only: comm_summation
+    use timer
     implicit none
     integer        ,intent(in) :: nspin
     type(s_orbital_parallel),intent(in) :: info
@@ -38,11 +39,17 @@ contains
     type(s_dmatrix)            :: dmat
     !
     integer :: im,ispin,ik,io,is(3),ie(3),nsize
-    complex(8),allocatable :: wrk(:,:,:,:,:),wrk2(:,:,:,:,:)
+    integer :: iz,iy,ix,ii
+    complex(8) :: pocc
+    complex(8),allocatable :: wrk(:,:,:,:,:)
+
+    call timer_begin(LOG_CALC_DENSITY_MATRIX)
 
     is = mg%is
     ie = mg%ie
     nsize = Nd* mg%ndir * (mg%num(1)+Nd) * (mg%num(2)+Nd) * (mg%num(3)+Nd)
+
+    allocate(wrk(Nd,mg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)))
 
     if(allocated(psi%rwf)) then
       allocate(psi%zwf(mg%is_array(1):mg%ie_array(1) &
@@ -52,9 +59,6 @@ contains
       psi%zwf = cmplx(psi%rwf)
     end if
 
-    allocate( wrk(Nd,mg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) &
-            ,wrk2(Nd,mg%ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)) )
-
   ! overlap region communication
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, psi%zwf)
@@ -62,48 +66,50 @@ contains
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
-      wrk = 0d0
+!$omp parallel private(ik,io,iz,iy,ix,ii,pocc)
+!$omp do collapse(2)
+      do iz=is(3)-Nd,ie(3)
+      do iy=is(2)-Nd,ie(2)
+      do ix=is(1)-Nd,ie(1)
+        wrk(:,:,ix,iy,iz) = 0d0
+      end do
+      end do
+      end do
+!$omp end do
+
+      ! ik and io have a data dependency.
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
-        call calc_dm(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz,mg%ndir)
-        wrk = wrk + wrk2 * info%occ(io,ik,ispin,im)
+!$omp do collapse(2)
+      do iz=is(3)-Nd,ie(3)
+      do iy=is(2)-Nd,ie(2)
+      do ix=is(1)-Nd,ie(1)
+
+        ! dir = 1,2,3 = xx,yy,zz (yz,zx,xy)
+        pocc = conjg( psi%zwf(ix,iy,iz,ispin,io,ik,im) ) * info%occ(io,ik,ispin,im)
+!dir$ unroll
+        do ii=1,Nd
+          wrk(ii,1,ix,iy,iz) = wrk(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
+          wrk(ii,2,ix,iy,iz) = wrk(ii,2,ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
+          wrk(ii,3,ix,iy,iz) = wrk(ii,3,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
+        end do
+
       end do
       end do
-      call comm_summation(wrk,wrk2,nsize,info%icomm_ko)
-      dmat%zrho_mat(:,:,:,:,:,ispin,im) = wrk2(:,:,:,:,:)
+      end do
+!$omp end do
+      end do
+      end do
+!$omp end parallel
+      call comm_summation(wrk(:,:,:,:,:),dmat%zrho_mat(:,:,:,:,:,ispin,im),nsize,info%icomm_ko)
     end do
     end do
 
     if(allocated(psi%rwf)) deallocate(psi%zwf)
-    deallocate(wrk,wrk2)
-    return
 
-  contains
-    subroutine calc_dm(zdm,psi,is_array,ie_array,is,ie,idx,idy,idz,ndir)
-      implicit none
-      integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3) &
-                              ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd),ndir
-      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-      complex(8)            :: zdm(Nd,ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
-      !
-      integer :: ix,iy,iz,ii
-      zdm = 0d0
-!$omp parallel do collapse(4) private(iz,iy,ix,ii)
-      do iz=is(3)-Nd,ie(3)
-      do iy=is(2)-Nd,ie(2)
-      do ix=is(1)-Nd,ie(1)
-        do ii=1,Nd
-        ! dir = 1,2,3 = xx,yy,zz (yz,zx,xy)
-          zdm(ii,1,ix,iy,iz) = psi(idx(ix+ii),iy,iz) * conjg( psi(ix,iy,iz) )
-          zdm(ii,2,ix,iy,iz) = psi(ix,idy(iy+ii),iz) * conjg( psi(ix,iy,iz) )
-          zdm(ii,3,ix,iy,iz) = psi(ix,iy,idz(iz+ii)) * conjg( psi(ix,iy,iz) )
-        end do
-      end do
-      end do
-      end do
-!$omp end parallel do
-      return
-    end subroutine calc_dm
+    deallocate(wrk)
+
+    call timer_end(LOG_CALC_DENSITY_MATRIX)
   end subroutine calc_density_matrix
 
 !===================================================================================================================================
@@ -234,7 +240,7 @@ contains
     real(8) :: curr(3,nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io
-    real(8) :: wrk(3),wrk2(3),BT(3,3)
+    real(8) :: wrk1(3),wrk2(3),wrk3(3),BT(3,3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
@@ -244,31 +250,32 @@ contains
     do im=info%im_s,info%im_e
     do ispin=1,nspin
 
-      wrk2 = 0d0
+      wrk3 = 0d0
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,mg%is,mg%ie)
-        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
+        call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,mg%is,mg%ie)
 
         if(info%if_divide_rspace) then
-          call nonlocal_part_rdivided(wrk,psi%zwf(:,:,:,ispin,io,ik,im) &
-          & ,ppg,mg%is_array,mg%ie_array,ik,uVpsibox2(:,ispin,io,ik,im))
+          call nonlocal_part_rdivided(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
+                                     ,uVpsibox2(:,ispin,io,ik,im))
         else
-          call nonlocal_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          call nonlocal_part         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
-        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
+
+        wrk3 = wrk3 + (wrk1 + wrk2) * info%occ(io,ik,ispin,im)
 
       end do
       end do
-      call comm_summation(wrk2,wrk,3,info%icomm_ko)
 
       call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
-      wrk2 = wrk + matmul(BT,wrk2)
 
-      call comm_summation(wrk2,wrk,3,info%icomm_r)
+      call comm_summation(wrk3,wrk1,3,info%icomm_ko)
 
-      curr(:,ispin,im) = wrk / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      wrk2 = wrk1 + matmul(BT,wrk2)
+      call comm_summation(wrk2,wrk1,3,info%icomm_r)
+
+      curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
     end do
     end do
 
@@ -288,7 +295,7 @@ contains
       integer :: ik,io,ix,iy,iz
       real(8) :: tmp
       tmp = 0d0
-!$omp parallel do collapse(3) private(iz,iy,ix) reduction(+:tmp)
+!$omp parallel do collapse(2) private(iz,iy,ix) reduction(+:tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
@@ -311,29 +318,29 @@ contains
       integer :: ix,iy,iz
       complex(8) :: tmp(3)
       tmp = 0d0
-!$omp parallel do collapse(3) private(iz,iy,ix) reduction(+:tmp)
+!$omp parallel do collapse(2) private(iz,iy,ix) reduction(+:tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
-        tmp(1) = tmp(1) + nabt(1,1) * zdm(1,1,ix,iy,iz) * 2d0 &
-                        + nabt(2,1) * zdm(2,1,ix,iy,iz) * 2d0 &
-                        + nabt(3,1) * zdm(3,1,ix,iy,iz) * 2d0 &
-                        + nabt(4,1) * zdm(4,1,ix,iy,iz) * 2d0
+        tmp(1) = tmp(1) + nabt(1,1) * zdm(1,1,ix,iy,iz) &
+                        + nabt(2,1) * zdm(2,1,ix,iy,iz) &
+                        + nabt(3,1) * zdm(3,1,ix,iy,iz) &
+                        + nabt(4,1) * zdm(4,1,ix,iy,iz)
 
-        tmp(2) = tmp(2) + nabt(1,2) * zdm(1,2,ix,iy,iz) * 2d0 &
-                        + nabt(2,2) * zdm(2,2,ix,iy,iz) * 2d0 &
-                        + nabt(3,2) * zdm(3,2,ix,iy,iz) * 2d0 &
-                        + nabt(4,2) * zdm(4,2,ix,iy,iz) * 2d0
+        tmp(2) = tmp(2) + nabt(1,2) * zdm(1,2,ix,iy,iz) &
+                        + nabt(2,2) * zdm(2,2,ix,iy,iz) &
+                        + nabt(3,2) * zdm(3,2,ix,iy,iz) &
+                        + nabt(4,2) * zdm(4,2,ix,iy,iz)
 
-        tmp(3) = tmp(3) + nabt(1,3) * zdm(1,3,ix,iy,iz) * 2d0 &
-                        + nabt(2,3) * zdm(2,3,ix,iy,iz) * 2d0 &
-                        + nabt(3,3) * zdm(3,3,ix,iy,iz) * 2d0 &
-                        + nabt(4,3) * zdm(4,3,ix,iy,iz) * 2d0
+        tmp(3) = tmp(3) + nabt(1,3) * zdm(1,3,ix,iy,iz) &
+                        + nabt(2,3) * zdm(2,3,ix,iy,iz) &
+                        + nabt(3,3) * zdm(3,3,ix,iy,iz) &
+                        + nabt(4,3) * zdm(4,3,ix,iy,iz)
       end do
       end do
       end do
 !$omp end parallel do
-      jw = aimag(tmp)
+      jw = aimag(tmp * 2d0)
       return
     end subroutine stencil_current
 
@@ -366,9 +373,10 @@ contains
           uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-        jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
+        jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
       end do
 !$omp end parallel do
+      jw = jw * 2d0
       return
     end subroutine nonlocal_part
 
@@ -400,9 +408,10 @@ contains
           uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
         end do
         uVpsi = uVpsibox(ilma)
-        jw = jw + 2d0* aimag(conjg(uVpsi_r)*uVpsi)
+        jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
       end do
 !$omp end parallel do
+      jw = jw * 2d0
       return
     end subroutine nonlocal_part_rdivided
 
