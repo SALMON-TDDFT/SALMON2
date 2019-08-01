@@ -42,15 +42,15 @@ contains
     integer :: im,ispin,ik,io,is(3),ie(3),nsize
     integer :: iz,iy,ix,ii
     complex(8) :: pocc
-    complex(8),allocatable :: wrk(:,:,:,:,:)
+    complex(8),allocatable :: wrk(:,:,:,:)
 
     call timer_begin(LOG_CALC_DENSITY_MATRIX)
 
     is = mg%is
     ie = mg%ie
-    nsize = (Nd+1) * 3 * (mg%num(1)+Nd) * (mg%num(2)+Nd) * (mg%num(3)+Nd)
+    nsize = (3*Nd+1) * (mg%num(1)+Nd) * (mg%num(2)+Nd) * (mg%num(3)+Nd)
 
-    allocate(wrk(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)))
+    allocate(wrk(0:3*Nd,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)))
 
     if(allocated(psi%rwf)) then
       allocate(psi%zwf(mg%is_array(1):mg%ie_array(1) &
@@ -72,7 +72,7 @@ contains
       do iz=is(3)-Nd,ie(3)
       do iy=is(2)-Nd,ie(2)
       do ix=is(1)-Nd,ie(1)
-        wrk(:,:,ix,iy,iz) = 0d0
+        wrk(:,ix,iy,iz) = 0d0
       end do
       end do
       end do
@@ -90,11 +90,11 @@ contains
         pocc = conjg( psi%zwf(ix,iy,iz,ispin,io,ik,im) ) * info%occ(io,ik,ispin,im)
 !dir$ unroll
         do ii=1,Nd
-          wrk(ii,1,ix,iy,iz) = wrk(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
-          wrk(ii,2,ix,iy,iz) = wrk(ii,2,ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
-          wrk(ii,3,ix,iy,iz) = wrk(ii,3,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
+          wrk(ii,     ix,iy,iz) = wrk(ii,     ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
+          wrk(Nd+ii,  ix,iy,iz) = wrk(Nd+ii,  ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
+          wrk(2*Nd+ii,ix,iy,iz) = wrk(2*Nd+ii,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
         end do
-        wrk(0,1,ix,iy,iz) = wrk(0,1,ix,iy,iz) + psi%zwf(ix,iy,iz,ispin,io,ik,im) * pocc
+        wrk(0,ix,iy,iz) = wrk(0,ix,iy,iz) + psi%zwf(ix,iy,iz,ispin,io,ik,im) * pocc
 
       end do
       end do
@@ -104,13 +104,13 @@ contains
       end do
 !$omp end parallel
 
-      call comm_summation(wrk(:,:,:,:,:),dmat%zrho_mat(:,:,:,:,:,ispin,im),nsize,info%icomm_ko)
+      call comm_summation(wrk(:,:,:,:),dmat%zrho_mat(:,:,:,:,ispin,im),nsize,info%icomm_ko)
 
 !$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
-        rho(ispin,im)%f(ix,iy,iz) = dble( dmat%zrho_mat(0,1,ix,iy,iz,ispin,im) )
+        rho(ispin,im)%f(ix,iy,iz) = dble( dmat%zrho_mat(0,ix,iy,iz,ispin,im) )
       end do
       end do
       end do
@@ -281,7 +281,7 @@ contains
       end do
       end do
 
-      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie)
 
       call comm_summation(wrk3,wrk1,3,info%icomm_ko)
 
@@ -325,7 +325,7 @@ contains
       implicit none
       integer   ,intent(in) :: is(3),ie(3)
       real(8)   ,intent(in) :: nabt(Nd,3)
-      complex(8),intent(in) :: zdm(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
+      complex(8),intent(in) :: zdm(0:3*Nd,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
       real(8)               :: jw(3)
       !
       integer :: ix,iy,iz
@@ -335,20 +335,20 @@ contains
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
-        tmp(1) = tmp(1) + nabt(1,1) * zdm(1,1,ix,iy,iz) &
-                        + nabt(2,1) * zdm(2,1,ix,iy,iz) &
-                        + nabt(3,1) * zdm(3,1,ix,iy,iz) &
-                        + nabt(4,1) * zdm(4,1,ix,iy,iz)
+        tmp(1) = tmp(1) + nabt(1,1) * zdm(1,ix,iy,iz) &
+                        + nabt(2,1) * zdm(2,ix,iy,iz) &
+                        + nabt(3,1) * zdm(3,ix,iy,iz) &
+                        + nabt(4,1) * zdm(4,ix,iy,iz)
 
-        tmp(2) = tmp(2) + nabt(1,2) * zdm(1,2,ix,iy,iz) &
-                        + nabt(2,2) * zdm(2,2,ix,iy,iz) &
-                        + nabt(3,2) * zdm(3,2,ix,iy,iz) &
-                        + nabt(4,2) * zdm(4,2,ix,iy,iz)
+        tmp(2) = tmp(2) + nabt(1,2) * zdm(5,ix,iy,iz) &
+                        + nabt(2,2) * zdm(6,ix,iy,iz) &
+                        + nabt(3,2) * zdm(7,ix,iy,iz) &
+                        + nabt(4,2) * zdm(8,ix,iy,iz)
 
-        tmp(3) = tmp(3) + nabt(1,3) * zdm(1,3,ix,iy,iz) &
-                        + nabt(2,3) * zdm(2,3,ix,iy,iz) &
-                        + nabt(3,3) * zdm(3,3,ix,iy,iz) &
-                        + nabt(4,3) * zdm(4,3,ix,iy,iz)
+        tmp(3) = tmp(3) + nabt(1,3) * zdm(9 ,ix,iy,iz) &
+                        + nabt(2,3) * zdm(10,ix,iy,iz) &
+                        + nabt(3,3) * zdm(11,ix,iy,iz) &
+                        + nabt(4,3) * zdm(12,ix,iy,iz)
       end do
       end do
       end do
@@ -467,7 +467,7 @@ contains
       end do
       call comm_summation(wrk2,wrk,nsize,info%icomm_ko)
 
-      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz)
 
       curr(ispin,im)%v = wrk + wrk2
     end do
@@ -501,7 +501,7 @@ contains
       integer   ,intent(in) :: is(3),ie(3) &
                               ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd)
       real(8)   ,intent(in) :: nabt(Nd,3)
-      complex(8),intent(in) :: zdm(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
+      complex(8),intent(in) :: zdm(0:3*Nd,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
       integer :: ix,iy,iz
@@ -509,20 +509,20 @@ contains
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
-        tmp(1) = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,idx(ix-1),iy,iz)) ) & ! dmat(x,-dx)==conjg(dmat(x-dx,dx))
-               + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,idx(ix-2),iy,iz)) ) &
-               + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,idx(ix-3),iy,iz)) ) &
-               + nabt(4,1) * ( zdm(4,1,ix,iy,iz) - conjg(zdm(4,1,idx(ix-4),iy,iz)) )
+        tmp(1) = nabt(1,1) * ( zdm(1,ix,iy,iz) - conjg(zdm(1,idx(ix-1),iy,iz)) ) & ! dmat(x,-dx)==conjg(dmat(x-dx,dx))
+               + nabt(2,1) * ( zdm(2,ix,iy,iz) - conjg(zdm(2,idx(ix-2),iy,iz)) ) &
+               + nabt(3,1) * ( zdm(3,ix,iy,iz) - conjg(zdm(3,idx(ix-3),iy,iz)) ) &
+               + nabt(4,1) * ( zdm(4,ix,iy,iz) - conjg(zdm(4,idx(ix-4),iy,iz)) )
 
-        tmp(2) = nabt(1,2) * ( zdm(1,2,ix,iy,iz) - conjg(zdm(1,2,ix,idy(iy-1),iz)) ) &
-               + nabt(2,2) * ( zdm(2,2,ix,iy,iz) - conjg(zdm(2,2,ix,idy(iy-2),iz)) ) &
-               + nabt(3,2) * ( zdm(3,2,ix,iy,iz) - conjg(zdm(3,2,ix,idy(iy-3),iz)) ) &
-               + nabt(4,2) * ( zdm(4,2,ix,iy,iz) - conjg(zdm(4,2,ix,idy(iy-4),iz)) )
+        tmp(2) = nabt(1,2) * ( zdm(5,ix,iy,iz) - conjg(zdm(5,ix,idy(iy-1),iz)) ) &
+               + nabt(2,2) * ( zdm(6,ix,iy,iz) - conjg(zdm(6,ix,idy(iy-2),iz)) ) &
+               + nabt(3,2) * ( zdm(7,ix,iy,iz) - conjg(zdm(7,ix,idy(iy-3),iz)) ) &
+               + nabt(4,2) * ( zdm(8,ix,iy,iz) - conjg(zdm(8,ix,idy(iy-4),iz)) )
 
-        tmp(3) = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,idz(iz-1))) ) &
-               + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,idz(iz-2))) ) &
-               + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,idz(iz-3))) ) &
-               + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,idz(iz-4))) )
+        tmp(3) = nabt(1,3) * ( zdm(9 ,ix,iy,iz) - conjg(zdm(9 ,ix,iy,idz(iz-1))) ) &
+               + nabt(2,3) * ( zdm(10,ix,iy,iz) - conjg(zdm(10,ix,iy,idz(iz-2))) ) &
+               + nabt(3,3) * ( zdm(11,ix,iy,iz) - conjg(zdm(11,ix,iy,idz(iz-3))) ) &
+               + nabt(4,3) * ( zdm(12,ix,iy,iz) - conjg(zdm(12,ix,iy,idz(iz-4))) )
 
         jw(:,ix,iy,iz) = aimag(tmp)
       end do

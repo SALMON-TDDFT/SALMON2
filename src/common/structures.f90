@@ -29,7 +29,7 @@ module structures
 
 ! density matrix rho(r,r')
   type s_dmatrix
-    complex(8),allocatable :: zrho_mat(:,:,:,:,:,:,:) ! (ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~3
+    complex(8),allocatable :: zrho_mat(:,:,:,:,:,:) ! (ii,x,y,z,ispin,im), ii=0~3*Nd
   end type s_dmatrix
 
   type s_dft_system
@@ -242,7 +242,7 @@ contains
     type(s_rgrid)           ,intent(in) :: mg
     type(s_orbital_parallel),intent(in) :: info
     type(s_dmatrix)                     :: dmat
-    allocate(dmat%zrho_mat(0:mg%Nd,3,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
+    allocate(dmat%zrho_mat(0:3*mg%Nd,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
     & nspin,info%im_s:info%im_e))
     dmat%zrho_mat = 0d0
   end subroutine allocate_dmatrix
