@@ -515,9 +515,6 @@ contains
       & num_dip2, &
       & dip2boundary, &
       & dip2center, &
-      & iflag_fourier_omega, &
-      & num_fourier_omega, &
-      & fourier_omega, &
       & itotntime2, &
       & iwdenoption, &
       & iwdenstep, &
@@ -853,9 +850,6 @@ contains
     num_dip2                   = 1
     dip2boundary(1:100)        = 0.d0*ulength_from_au ! a.u.
     dip2center(1:100)          = 0.d0*ulength_from_au ! a.u.
-    iflag_fourier_omega        = 0
-    num_fourier_omega          = 1
-    fourier_omega(1:200)       = 0.d0*uenergy_from_au ! a.u.
     itotntime2                 = 0
     iwdenoption                = 0
     iwdenstep                  = 0
@@ -1292,10 +1286,6 @@ contains
     dip2boundary  = dip2boundary  * ulength_to_au
     call comm_bcast(dip2center          ,nproc_group_global)
     dip2center    = dip2center    * ulength_to_au
-    call comm_bcast(iflag_fourier_omega ,nproc_group_global)
-    call comm_bcast(num_fourier_omega   ,nproc_group_global)
-    call comm_bcast(fourier_omega       ,nproc_group_global)
-    fourier_omega = fourier_omega * uenergy_to_au
     call comm_bcast(itotntime2          ,nproc_group_global)
     call comm_bcast(iwdenoption         ,nproc_group_global)
     call comm_bcast(iwdenstep           ,nproc_group_global)
@@ -1961,10 +1951,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2boundary(2)', dip2boundary(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2center(1)', dip2center(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2center(2)', dip2center(2)
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_fourier_omega', iflag_fourier_omega
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_fourier_omega', num_fourier_omega
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'fourier_omega(1)', fourier_omega(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'fourier_omega(2)', fourier_omega(2)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'itotntime2', itotntime2
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwdenoption', iwdenoption
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwdenstep', iwdenstep

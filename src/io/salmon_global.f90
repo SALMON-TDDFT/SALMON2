@@ -345,9 +345,6 @@ module salmon_global
   integer        :: num_dip2
   real(8)        :: dip2boundary(100)
   real(8)        :: dip2center(100)
-  integer        :: iflag_fourier_omega
-  integer        :: num_fourier_omega
-  real(8)        :: fourier_omega(200)
   integer        :: itotntime2
   integer        :: iwdenoption
   integer        :: iwdenstep

@@ -19,7 +19,7 @@
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 &   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
   use structures
-  use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_group_h, nproc_group_korbital
+  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_density_matrix, calc_current
   use writefield
@@ -57,15 +57,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_md) :: md
   type(s_ofile) :: ofl
 
-  integer :: ix,iy,iz,i1,mm,jspin,nspin
-  integer :: iob,iatom,iik,ik
-  real(8) :: rbox1
-  complex(8),allocatable :: cmatbox1(:,:,:),cmatbox2(:,:,:)
+  integer :: ix,iy,iz,mm,nspin
+  integer :: iatom,ik
   integer :: idensity, idiffDensity, ielf, idip
   real(8) :: rNe, FionE(3,MI)
   real(8) :: curr_tmp(3,2)
   complex(8),parameter :: zi=(0.d0,1.d0)
-  complex(8) :: cbox1,cbox2,cbox3
   integer :: is
   character(100) :: comment_line
   logical :: rion_update
@@ -341,21 +338,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
      call write_rt_energy_data(itt,ofl,iflag_md,dt,energy,md)
 
   endif
-
-  if(iflag_fourier_omega==1)then
-    do mm=1,num_fourier_omega
-!$OMP parallel do  private(iz,iy,ix)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
-        zalpha2(ix,iy,iz,mm)=zalpha2(ix,iy,iz,mm)   &
-                             +exp(zi*fourier_omega(mm)*(itt*dt))*(srho%f(ix,iy,iz)-rho0(ix,iy,iz)) &
-                             *(1-3*(itt/itotNtime2)**2+2*(itt/itotNtime2)**3)
-      end do
-      end do
-      end do
-    end do
-  end if
 
   if(out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then

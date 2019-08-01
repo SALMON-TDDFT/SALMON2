@@ -15,7 +15,7 @@
 !
 subroutine calcJxyz_all
 use salmon_communication, only: comm_is_root, comm_summation
-use prep_pp_sub, only: calc_mps,init_jxyz,calc_jxyz
+use prep_pp_sub, only: calc_nps,init_jxyz,calc_jxyz
 use scf_data
 use allocate_psl_sub
 implicit none
@@ -59,14 +59,12 @@ integer :: iatom,ix,iy,iz
   end do
   end do
  
-  call calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
+  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                    mmx,mmy,mmz,mg_num(1)*mg_num(2)*mg_num(3),   &
                                    hx,hy,hz)
-  call calc_mps(pp,ppg_all,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
+  call calc_nps(pp,ppg_all,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                        lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                        hx,hy,hz)
-  Mps(1:MI)=ppg%mps(1:MI) 
-  Mps_all(1:MI)=ppg_all%mps(1:MI) 
 
   call init_jxyz(ppg)
   call init_jxyz(ppg_all)
@@ -78,6 +76,9 @@ integer :: iatom,ix,iy,iz
                                     lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                     hx,hy,hz)
   
+  Mps(1:MI)=ppg%mps(1:MI) 
+  Mps_all(1:MI)=ppg_all%mps(1:MI) 
+
   Jxyz=0
   Jxyz_all=0
   Jxxyyzz=0

@@ -21,7 +21,6 @@ contains
 subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iobnum,itotmst,mst,ifmst,  &
                 info_ob,ppg,vlocal)
 
-  use inputoutput, only: ispin
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
@@ -150,7 +149,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iob
       end do
     
       do job=iobsta(is),iobend(is)
-        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst)
         call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
@@ -211,7 +210,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iob
       end do
        
       do job=iobsta(is),iobend(is)
-        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst)
         call check_corrkob(job,1,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)

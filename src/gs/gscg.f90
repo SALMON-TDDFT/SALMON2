@@ -23,7 +23,7 @@ contains
 
 subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg, &
                  info_ob,ppg,vlocal)
-  use inputoutput, only: ncg,ispin
+  use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid,s_cg
   use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
   use salmon_communication, only: comm_summation, comm_bcast
@@ -221,10 +221,10 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
     else
       do is=is_sta,is_end
       do iob=iobsta(is),iobend(is)
-        call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
         call check_corrkob(iob,1,icorr_iob,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         do job=iobsta(is),iob-1
-          call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+          call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst)
           call check_corrkob(job,1,icorr_job,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
           if(icorr_job==1)then
     !$omp parallel do private(iz,iy,ix) collapse(2)

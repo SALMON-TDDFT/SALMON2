@@ -55,7 +55,7 @@ coef_mat=0.d0
 
 do iik=k_sta,k_end
 do iob=1,itotMST0
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
   call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   if(icorr_p==1)then
 !$OMP parallel do private(iz,iy,ix)

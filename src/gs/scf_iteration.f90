@@ -26,7 +26,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotm
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
                iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
-  use inputoutput, only: iperiodic,ispin,amin_routine,gscg
+  use inputoutput, only: iperiodic,amin_routine,gscg
   use structures
   use timer
   use dtcg_sub

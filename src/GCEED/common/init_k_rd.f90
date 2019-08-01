@@ -20,10 +20,7 @@ implicit none
 real(8) :: vec_Ac(3)
 integer :: imode
 !
-integer :: ix,iy,iz
-integer :: ik
 complex(8) :: vecA(3)
-real(8) :: shift_k(3),k(3)
 
 if(iSCFRT==1)then
   vecA=0.d0

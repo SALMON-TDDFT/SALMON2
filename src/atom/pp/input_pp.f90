@@ -386,7 +386,7 @@ end subroutine read_ps_abinitfhi
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   use structures,only : s_pp_info
-  use salmon_global,only : Lmax_ps, nelem
+  use salmon_global,only : nelem
   implicit none
   type(s_pp_info),intent(inout) :: pp
   real(8),intent(out) :: rhor_nlcc(0:pp%nrmax0,0:2)
