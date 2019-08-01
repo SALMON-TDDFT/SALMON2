@@ -23,7 +23,7 @@ Subroutine prep_ps_periodic(property)
   use salmon_communication, only: comm_summation, comm_is_root
   use salmon_math
   use prep_pp_sub, only: calc_uv,set_lma_tbl,init_uv,finalize_uv,   &
-                         set_nlma,calc_jxyz,init_jxyz,finalize_jxyz,calc_mps, &
+                         set_nlma,calc_jxyz,init_jxyz,finalize_jxyz,calc_nps, &
                          calc_vpsl,calc_vloc,init_lma_tbl
   use opt_variables, only: zJxyz,zKxyz,init_for_padding, nprojector,idx_proj,idx_lma,pseudo_start_idx, init_projector
 #ifdef ARTED_LBLK
@@ -82,7 +82,7 @@ Subroutine prep_ps_periodic(property)
     write(*,*) '============nonlocal grid data=============='
   endif
 
-  call calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,lx,ly,lz,nl,hx,hy,hz)
+  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,lx,ly,lz,nl,hx,hy,hz)
 
   nps=ppg%nps
   Mps(1:NI)=ppg%mps(1:NI)

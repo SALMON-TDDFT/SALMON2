@@ -16,7 +16,7 @@
 subroutine calcJxyz_all_periodic(al0,matrix_A0)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation
-  use prep_pp_sub, only: calc_mps,init_jxyz,calc_jxyz
+  use prep_pp_sub, only: calc_nps,init_jxyz,calc_jxyz
   use scf_data
   use read_pslfile_sub
   use allocate_psl_sub
@@ -73,10 +73,10 @@ subroutine calcJxyz_all_periodic(al0,matrix_A0)
   end do
   end do
  
-  call calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
+  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                    mmx,mmy,mmz,mg_num(1)*mg_num(2)*mg_num(3),   &
                                    hx,hy,hz,al0,matrix_A0)
-  call calc_mps(pp,ppg_all,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
+  call calc_nps(pp,ppg_all,alx,aly,alz,lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                        lx,ly,lz,lg_num(1)*lg_num(2)*lg_num(3),   &
                                        hx,hy,hz,al0,matrix_A0)
   Mps(1:MI)=ppg%mps(1:MI) 

@@ -200,7 +200,7 @@ subroutine finalize_jxyz(ppg)
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
+subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
   use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
   use structures,only : s_pp_info,s_pp_grid
   implicit none
@@ -217,6 +217,7 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: x,y,z,r,u,v,w
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
+  integer :: mps_tmp(natom)
 
   matrix_a = 0d0
   matrix_a(1,1) = 1d0
@@ -294,19 +295,19 @@ subroutine calc_mps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 !        y=my(i)*Hy+rshift(2)-tmpy
 !        z=mz(i)*Hz+rshift(3)-tmpz
         r=sqrt(x*x+y*y+z*z)
-        if (r<pp%rps(ik)) j=j+1
+        if (r<pp%rps(ik)+1.d-12) j=j+1
       enddo
     enddo
     enddo
     enddo
-    ppg%mps(a)=j
+    mps_tmp(a)=j
   end do
 !$omp end do
 !$omp end parallel
 
-  ppg%nps=maxval(ppg%mps(:))
+  ppg%nps=maxval(mps_tmp(:))
 
-end subroutine calc_mps
+end subroutine calc_nps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
@@ -424,6 +425,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
     enddo
     enddo
     enddo
+    ppg%mps(a)=j
   end do
 !$omp end do
 !$omp end parallel
