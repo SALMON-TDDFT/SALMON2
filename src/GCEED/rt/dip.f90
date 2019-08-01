@@ -25,13 +25,12 @@ implicit none
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
 integer :: ifunc
-integer :: i1,ix,iy,iz,i2
+integer :: i1,ix,iy,iz
 real(8) :: rNe
 real(8) :: rbox_array(10), rbox_arrayq(3, 3)
 real(8) :: rbox_array2(10), rbox_arrayq2(3, 3)
-real(8) :: rbox1, rbox1q, rbox1q12, rbox1q23, rbox1q31
+real(8) :: rbox1
 real(8) :: fact
-real(8) :: absr2
 
 call timer_begin(LOG_CALC_DP)
 

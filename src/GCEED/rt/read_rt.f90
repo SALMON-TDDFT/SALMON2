@@ -22,7 +22,7 @@ use scf_data
 use writebox_rt_sub
 use allocate_mat_sub
 implicit none
-integer       :: i1,i2,i3,jj,iob,is,it2,kk,iik
+integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer :: ibox
 character(100) :: file_OUT_rt_data
@@ -81,7 +81,7 @@ end if
 
 do iik=1,num_kpoints_rd
 do iob=1,itotMST
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
   call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
 
   cmatbox_l2=0.d0
@@ -263,7 +263,7 @@ use new_world_sub
 use readbox_rt_sub
 use allocate_mat_sub
 implicit none
-integer       :: i1,i2,i3,jj,iob,is,it2,kk,iik
+integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer       :: Ntime
 character(100) :: file_IN_rt_data
@@ -334,7 +334,7 @@ end if
 
 do iik=k_sta,k_end
 do iob=1,itotMST
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
   call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   
   if(num_datafiles_IN==1.or.num_datafiles_IN>nproc_size_global)then

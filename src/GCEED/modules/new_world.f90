@@ -878,7 +878,7 @@ real(8),allocatable :: matbox11(:),matbox12(:)
 integer :: iscnt
 integer,allocatable :: ircnt(:)
 integer,allocatable :: idisp(:)
-integer :: is,is_sta,is_end
+integer :: is
 
 allocate(ircnt(0:nproc_Mxin_mul_s_dm-1))
 allocate(idisp(0:nproc_Mxin_mul_s_dm-1))

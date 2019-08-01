@@ -20,7 +20,7 @@ contains
 
 subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
                   ppg,V_local,zc)
-  use inputoutput, only: iperiodic,n_hamil
+  use inputoutput, only: n_hamil
   use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use hpsi_sub
   use calc_allob_sub

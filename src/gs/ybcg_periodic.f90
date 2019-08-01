@@ -149,7 +149,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     end do
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,1,1)
 
-    call calc_myob(p,p_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+    call calc_myob(p,p_myob,ilsda,nproc_ob,itotmst,mst)
     call check_corrkob(p,ik,icorr_p,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
   
 
@@ -180,7 +180,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
       end do
     else
       do q=pstart(is),p-1
-        call calc_myob(q,q_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_myob(q,q_myob,ilsda,nproc_ob,itotmst,mst)
         call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_q==1)then
   !$omp parallel do
@@ -307,7 +307,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
         end do
       else
         do q=pstart(is),p-1
-          call calc_myob(q,q_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+          call calc_myob(q,q_myob,ilsda,nproc_ob,itotmst,mst)
           call check_corrkob(q,ik,icorr_q,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
           if(icorr_q==1)then
   !$omp parallel do

@@ -18,14 +18,13 @@ module calc_myob_sub
 
 contains
 
-subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+subroutine calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
   use calc_iquotient_sub
   implicit none
   integer,intent(in)  :: iob
   integer,intent(out) :: iob_myob
-  integer,intent(in)  :: ilsda,nproc_ob,itotmst,mst(2),iobnum
+  integer,intent(in)  :: ilsda,nproc_ob,itotmst,mst(2)
   integer :: iquotient,iob_min
-  integer :: iob_tmp
   
   if(ilsda==0)then
     call calc_iquotient(iob,nproc_ob,itotmst,iquotient)

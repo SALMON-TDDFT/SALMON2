@@ -22,7 +22,6 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
                                   iobnum,itotmst,mst,ifmst,   &
                                   info_ob,ppg,vlocal)
 
-  use inputoutput, only: ispin
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_korbital, nproc_group_k, nproc_group_kgrid
   use salmon_communication, only: comm_bcast, comm_summation
@@ -197,7 +196,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
       end do
     
       do jj=iobsta(is),iobend(is)
-        call calc_myob(jj,j_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call calc_myob(jj,j_myob,ilsda,nproc_ob,itotmst,mst)
         call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)
@@ -260,7 +259,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
 
       call timer_begin(LOG_DIAG_UPDATE)
       do jj=iobsta(is),iobend(is)
-        call calc_myob(jj,j_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+        call calc_myob(jj,j_myob,ilsda,nproc_ob,itotmst,mst)
         call check_corrkob(jj,ik,icorr_j,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(icorr_j==1)then
   !$OMP parallel do private(iz,iy,ix)

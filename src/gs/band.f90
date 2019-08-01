@@ -24,7 +24,6 @@ module band
         use structures, only: s_dft_system, s_rgrid, s_orbital_parallel, s_orbital
         use pack_unpack, only: copy_data
         use salmon_communication, only: comm_summation, comm_is_root
-        use salmon_parallel, only: nproc_group_global, nproc_id_global
         use math_constants, only: zI
         implicit none
         type(s_dft_system), intent(in) :: sys
