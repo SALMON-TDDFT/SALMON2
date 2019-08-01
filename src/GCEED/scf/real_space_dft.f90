@@ -133,7 +133,7 @@ call set_filename
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 
-call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob)
+call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)
@@ -159,7 +159,7 @@ if(iopt==1)then
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
-    call init_mesh(lg,mg,itmg)
+    call init_mesh(lg,mg)
     call set_gridcoo
     call init_mesh_s(ng)
     call check_mg(mg)
@@ -1145,7 +1145,7 @@ END subroutine Real_Space_DFT
 !=======================================================================
 !========================================= Grid generation and labelling
 
-SUBROUTINE init_mesh(lg,mg,itmg)
+SUBROUTINE init_mesh(lg,mg)
 use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root
@@ -1154,9 +1154,6 @@ use global_variables_scf
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid),intent(out) :: mg
-integer,intent(in) :: itmg
-integer :: j
-real(8) :: rLsize1(3)
 
 if(comm_is_root(nproc_id_global))      &
     print *,"----------------------------------- init_mesh"
@@ -1164,7 +1161,6 @@ if(comm_is_root(nproc_id_global))      &
 lg_sta(1:3) = lg%is(1:3)
 lg_end(1:3) = lg%ie(1:3)
 lg_num(1:3) = lg%num(1:3)
-!rLsize1(:)=rLsize(:,itmg)
 !call setlg(lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
 !           Hgs,Nd,rLsize1,imesh_oddeven,iperiodic)
 call check_fourier

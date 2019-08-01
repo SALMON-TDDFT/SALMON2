@@ -23,7 +23,7 @@ contains
 
 subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,  &
                 info_ob,ppg,vlocal)
-  use inputoutput, only: ncg,ispin
+  use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
   use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
   use salmon_communication, only: comm_bcast,comm_summation
@@ -126,7 +126,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
     end do
 
   orbital : do iob=iobsta(is),iobend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
     call check_corrkob(iob,1,icorr,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
 
   
@@ -184,7 +184,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   
       do job=iobsta(is),iob-1
         sum0=0.d0
-        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst,system%nspin*info%numo)
+        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst)
         call check_corrkob(job,1,jcorr,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
         if(jcorr==1)then
   !$OMP parallel do reduction(+ : sum0) private(iz,iy,ix) 

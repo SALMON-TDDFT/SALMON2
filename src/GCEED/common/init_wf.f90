@@ -58,7 +58,7 @@ case(0)
   iseed=123
   do is=1,iss
   do iob=pstart(is),pend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
     call check_corrkob(iob,1,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
     call quickrnd_ns ; x1=Xmax*(2.d0*rnd-1.d0)
     call quickrnd_ns ; y1=Ymax*(2.d0*rnd-1.d0)
@@ -86,7 +86,7 @@ case(3)
   do is=1,iss
   do ik=1,num_kpoints_rd
   do iob=pstart(is),pend(is)
-    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+    call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
     call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
     call quickrnd_ns ; x1=Xmax*rnd
     call quickrnd_ns ; y1=Ymax*rnd

@@ -155,7 +155,7 @@ case(0)
   
     do ik=1,num_kpoints_rd
     do iob=1,itotMST
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
       call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   
       matbox_l=0.d0
@@ -194,7 +194,7 @@ case(3)
     do ik=1,num_kpoints_rd
     do iob=1,itotMST
 
-      call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+      call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
       call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
       cmatbox_l=0.d0
       if(icorr_p==1)then
@@ -478,7 +478,6 @@ integer :: icomm
 integer :: ifMST0(2)
 integer :: imesh_oddeven0
 integer :: itmg
-integer :: j
 
 integer :: nspin
 
@@ -751,7 +750,7 @@ if(iSCFRT==2) call make_new_world
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 
-call calc_iobnum(itotMST,nproc_ob,nproc_id_kgrid,iobnum,nproc_ob)
+call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iSCFRT==2)then
   call allocate_mat(cg)
@@ -806,7 +805,7 @@ else if(iSCFRT==2)then
     zpsi_out(:,:,:,:,:) = 0.d0
   end if
   if(iwrite_projection==1)then
-    call calc_iobnum(itotMST0,nproc_ob,nproc_id_kgrid,iobnum0,nproc_ob)
+    call calc_iobnum(itotMST0,nproc_id_kgrid,iobnum0,nproc_ob)
     if(iobnum0.ge.1)then
       allocate(zpsi_t0(mg%is_overlap(1):mg%ie_overlap(1), &
                      & mg%is_overlap(2):mg%ie_overlap(2), &
@@ -985,7 +984,7 @@ do p0=pstart(is),pend(is)
 
 ! read file
   call conv_p0(p0,iob)
-  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst,iobnum)
+  call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
   call check_corrkob(iob,ik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
 
   if(IC<=2)then

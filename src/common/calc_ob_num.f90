@@ -18,10 +18,10 @@ module calc_iobnum_sub
 
 contains
 
-subroutine calc_iobnum(tmst,tproc,trank,tiobnum,nproc_ob)
+subroutine calc_iobnum(tmst,trank,tiobnum,nproc_ob)
   use inputoutput, only : ispin
   implicit none
-  integer :: tmst,tproc,trank,tiobnum
+  integer :: tmst,trank,tiobnum
   integer :: ttmst
   integer :: nproc_ob
   
