@@ -129,14 +129,6 @@ if(comm_is_root(nproc_id_global))then
                           delay*au_time_fs, "[fs]"
       write(*,'(a21,f16.8)') "rcycle                =",rcycle
   end select
-  
-  if(iflag_fourier_omega == 1) then
-    write(*,'(a61)') "===== List of frequencies for fourier transform (in eV) ====="
-    do jj=1,num_fourier_omega  
-      write(*,'(f16.8)') fourier_omega(jj)*au_energy_ev
-    end do
-    write(*,'(a61)') "============================================================="
-  end if
 
 end if
 
@@ -165,9 +157,6 @@ select case (ikind_eext)
     end if
 end select
 
-if(iflag_fourier_omega==1)then
-   fourier_omega(1:num_fourier_omega)=fourier_omega(1:num_fourier_omega) !/2.d0/Ry 
-end if
 call timer_end(LOG_INIT_RT)
 
 
@@ -214,10 +203,6 @@ call timer_end(LOG_READ_LDA_DATA)
 
 
 call timer_begin(LOG_INIT_RT)
-
-if(iflag_fourier_omega==1) then
-   allocate(alpha2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3),num_fourier_omega))
-end if
 
 Eion=0.d0
 do ia=1,MI
@@ -423,32 +408,6 @@ case(0)
     end if 
     close(1)
 
-  end if
-  
-  if(iflag_fourier_omega==1)then
-  
-    call comm_summation(zalpha2,zalpha3,lg_num(1)*lg_num(2)*lg_num(3)*num_fourier_omega,nproc_group_h)
-  
-    if(comm_is_root(nproc_id_global))then
-      alpha2=real(zalpha3,8)*dt/a_B**3/fs2eVinv/2.d0/Ry
-      do jj=1,num_fourier_omega
-        write(fileNumber, '(i8)') jj
-        alpha2OutFile = trim("fourier3d.")//adjustl(fileNumber)
-        open(1,file=alpha2OutFile)
-        do iz=lg_sta(3),lg_end(3),1
-        do iy=lg_sta(2),lg_end(2),1
-        do ix=lg_sta(1),lg_end(1),1
-          if(abs(alpha2(ix,iy,iz,jj))>=1.0d-6) then
-            write(1,'(e20.8)') alpha2(ix,iy,iz,jj)
-          else
-            write(1,'(a1)') "0"
-          end if
-        end do
-        end do
-        end do
-        close(1)
-      end do
-    end if
   end if
   
 case(3)
@@ -936,20 +895,6 @@ if(iflag_comm_rho==2)then
     rhobox1_all(ix,iy,iz) = 0.d0
   end do
   end do
-  end do
-end if
-
-
-if(iflag_fourier_omega==1)then
-  do mm=1,num_fourier_omega
-!$OMP parallel do private(iz,iy,ix)
-    do iz=lg_sta(3),lg_end(3)
-    do iy=lg_sta(2),lg_end(2)
-    do ix=lg_sta(1),lg_end(1)
-      zalpha2(ix,iy,iz,mm)=0.d0
-    end do
-    end do
-    end do
   end do
 end if
 

@@ -152,17 +152,6 @@ else if(iSCFRT==2.and.icalcforce==1)then
                     mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
 end if
 
-if(iSCFRT==2)then
-  iwk_size=2
-  call make_iwksta_iwkend
-
-  if(iflag_fourier_omega==1)then
-    allocate(zalpha2(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3),num_fourier_omega))
-    allocate(zalpha3(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3),num_fourier_omega))
-  end if
-
-end if
-
 if(iSCFRT==1.and.iperiodic==0)then
   allocate (cg%rxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
   allocate (cg%rhxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))

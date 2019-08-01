@@ -44,12 +44,6 @@ if(icalcforce==1) then
   deallocate(rforce)
 end if
 
-if(iSCFRT==2)then
-  if(iflag_fourier_omega==1)then
-    deallocate(zalpha2,zalpha3)
-  end if
-end if
-
 if(iSCFRT==1.and.icalcforce==1)then
   deallocate(rgrad_wk)
 else if(iSCFRT==2.and.icalcforce==1)then

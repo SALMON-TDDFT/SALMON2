@@ -183,7 +183,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   call timer_begin(LOG_CALC_RHO)
   call calc_density(srho_s,spsi_out,info,mg,nspin)
-  
+
   if(nspin==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
@@ -338,21 +338,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
      call write_rt_energy_data(itt,ofl,iflag_md,dt,energy,md)
 
   endif
-
-  if(iflag_fourier_omega==1)then
-    do mm=1,num_fourier_omega
-!$OMP parallel do  private(iz,iy,ix)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
-        zalpha2(ix,iy,iz,mm)=zalpha2(ix,iy,iz,mm)   &
-                             +exp(zi*fourier_omega(mm)*(itt*dt))*(srho%f(ix,iy,iz)-rho0(ix,iy,iz)) &
-                             *(1-3*(itt/itotNtime2)**2+2*(itt/itotNtime2)**3)
-      end do
-      end do
-      end do
-    end do
-  end if
 
   if(out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
