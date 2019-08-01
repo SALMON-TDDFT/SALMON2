@@ -85,13 +85,6 @@ Subroutine prep_ps_periodic(property)
   call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,lx,ly,lz,nl,hx,hy,hz)
 
   nps=ppg%nps
-  Mps(1:NI)=ppg%mps(1:NI)
-
-  if (comm_is_root(nproc_id_global) .and. property == 'initial') then
-     do a=1,NI
-        write(*,*) 'a =',a,'Mps(a) =',Mps(a)
-     end do
-  endif
 
   !(allocate/deallocate with Nps)
   if(property == 'initial') then
@@ -120,6 +113,14 @@ Subroutine prep_ps_periodic(property)
   endif
 
   call calc_jxyz(pp,ppg,aLx,aLy,aLz,Lx,Ly,Lz,NL,Lx,Ly,Lz,NL,Hx,Hy,Hz)
+
+  Mps(1:NI)=ppg%mps(1:NI)
+
+  if (comm_is_root(nproc_id_global) .and. property == 'initial') then
+     do a=1,NI
+        write(*,*) 'a =',a,'Mps(a) =',Mps(a)
+     end do
+  endif
 
   Jxyz(1:Nps,1:NI)=ppg%jxyz(3,1:Nps,1:NI)+1+NLz*ppg%jxyz(2,1:Nps,1:NI)+NLy*NLz*ppg%jxyz(1,1:Nps,1:NI)
   Jxx(:,:) =ppg%jxx(:,:)
