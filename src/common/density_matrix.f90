@@ -42,6 +42,7 @@ contains
     integer :: im,ispin,ik,io,is(3),ie(3),nsize
     integer :: iz,iy,ix,ii
     complex(8) :: pocc
+    complex(8),allocatable :: wrk(:,:,:,:,:)
 
     call timer_begin(LOG_CALC_DENSITY_MATRIX)
 
@@ -49,9 +50,7 @@ contains
     ie = mg%ie
     nsize = (Nd+1) * 3 * (mg%num(1)+Nd) * (mg%num(2)+Nd) * (mg%num(3)+Nd)
 
-    if(.not. allocated(dmat%ztmp)) then
-      allocate(dmat%ztmp(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)))
-    end if
+    allocate(wrk(0:Nd,3,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3)))
 
     if(allocated(psi%rwf)) then
       allocate(psi%zwf(mg%is_array(1):mg%ie_array(1) &
@@ -73,7 +72,7 @@ contains
       do iz=is(3)-Nd,ie(3)
       do iy=is(2)-Nd,ie(2)
       do ix=is(1)-Nd,ie(1)
-        dmat%ztmp(:,:,ix,iy,iz) = 0d0
+        wrk(:,:,ix,iy,iz) = 0d0
       end do
       end do
       end do
@@ -91,11 +90,11 @@ contains
         pocc = conjg( psi%zwf(ix,iy,iz,ispin,io,ik,im) ) * info%occ(io,ik,ispin,im)
 !dir$ unroll
         do ii=1,Nd
-          dmat%ztmp(ii,1,ix,iy,iz) = dmat%ztmp(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
-          dmat%ztmp(ii,2,ix,iy,iz) = dmat%ztmp(ii,2,ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
-          dmat%ztmp(ii,3,ix,iy,iz) = dmat%ztmp(ii,3,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
+          wrk(ii,1,ix,iy,iz) = wrk(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
+          wrk(ii,2,ix,iy,iz) = wrk(ii,2,ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
+          wrk(ii,3,ix,iy,iz) = wrk(ii,3,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
         end do
-        dmat%ztmp(0,1,ix,iy,iz) = dmat%ztmp(0,1,ix,iy,iz) + psi%zwf(ix,iy,iz,ispin,io,ik,im) * pocc
+        wrk(0,1,ix,iy,iz) = wrk(0,1,ix,iy,iz) + psi%zwf(ix,iy,iz,ispin,io,ik,im) * pocc
 
       end do
       end do
@@ -105,7 +104,7 @@ contains
       end do
 !$omp end parallel
 
-      call comm_summation(dmat%ztmp(:,:,:,:,:),dmat%zrho_mat(:,:,:,:,:,ispin,im),nsize,info%icomm_ko)
+      call comm_summation(wrk(:,:,:,:,:),dmat%zrho_mat(:,:,:,:,:,ispin,im),nsize,info%icomm_ko)
 
 !$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=is(3),ie(3)
@@ -120,6 +119,7 @@ contains
     end do
     end do
 
+    deallocate(wrk)
     if(allocated(psi%rwf)) deallocate(psi%zwf)
 
     call timer_end(LOG_CALC_DENSITY_MATRIX)

@@ -30,7 +30,6 @@ module structures
 ! density matrix rho(r,r')
   type s_dmatrix
     complex(8),allocatable :: zrho_mat(:,:,:,:,:,:,:) ! (ii,dir,x,y,z,ispin,im), ii=1~Nd, dir=1~3
-    complex(8),allocatable :: ztmp(:,:,:,:,:)
   end type s_dmatrix
 
   type s_dft_system
@@ -379,7 +378,6 @@ contains
   subroutine deallocate_dmatrix(dm)
     type(s_dmatrix) :: dm
     DEAL(dm%zrho_mat)
-    DEAL(dm%ztmp)
   end subroutine deallocate_dmatrix
 
   subroutine deallocate_reciprocal_grid(fg)
