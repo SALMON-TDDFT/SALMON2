@@ -642,7 +642,7 @@ subroutine eh_init(fs,fw)
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
     !check condition
     iflag_lr=0
-    if(iperiodic==3.and.trans_longi/='tr') iflag_lr=1
+    if(iperiodic==3.and.trans_longi/='lo') iflag_lr=1
     do ii=0,imedia_num
       if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag_lr=1
       if(ii==0) then
@@ -663,11 +663,12 @@ subroutine eh_init(fs,fw)
     end do
     if(iflag_lr==1) then
       if(comm_is_root(nproc_id_global)) then
-        write(*,*) "invalid input keywords:"
+        write(*,*) "Invalid input keywords:"
+        write(*,*) "When you execute linear response calculation by ae_shape1=impulse and/or ae_shape2=impulse,"
         write(*,*) "epsilon and rmu must be 1.0d0."
         write(*,*) "sigma must be 0.0d0."
         write(*,*) "type_media(i) must be drude, where i > 0."
-        if(iperiodic==3) write(*,*) "trans_longi must be tr."
+        if(iperiodic==3) write(*,*) "trans_longi must be lo."
       end if
       stop
     end if
@@ -752,8 +753,10 @@ subroutine eh_init(fs,fw)
                          fs%ng%is_array(2):fs%ng%ie_array(2),&
                          fs%ng%is_array(3):fs%ng%ie_array(3)) )
       fw%rjx_lr(:,:,:)=0.0d0; fw%rjy_lr(:,:,:)=0.0d0; fw%rjz_lr(:,:,:)=0.0d0;
-      allocate(fw%curr_lr(nt_em,3))
-      fw%curr_lr(:,:)=0.0d0
+      allocate(fw%curr_lr(nt_em,3),fw%e_lr(nt_em,3))
+      fw%curr_lr(:,:)=0.0d0; fw%e_lr(:,:)=0.0d0;
+      allocate(fw%er_lr(0:nenergy,3),fw%ei_lr(0:nenergy,3))
+      fw%er_lr(:,:)=0.0d0; fw%ei_lr(:,:)=0.0d0;
     end if
   end if
   

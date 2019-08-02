@@ -289,7 +289,7 @@ contains
 !$omp end do
 !$omp end parallel
       end if
-      !calculate dip
+      !calculate dipolemoment
       sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
@@ -337,7 +337,7 @@ contains
 !$omp end do
 !$omp end parallel
       end if
-      !calculate curr
+      !calculate average current density
       sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
@@ -357,6 +357,26 @@ contains
       call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
       fw%curr_lr(fw%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
                                /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
+      !calculate average electric field
+      sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
+      sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
+!$omp parallel
+!$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
+      do iz=fs%ng%is(3),fs%ng%ie(3)
+      do iy=fs%ng%is(2),fs%ng%ie(2)
+      do ix=fs%ng%is(1),fs%ng%ie(1)
+        sum_lr_x=sum_lr_x+( fw%ex_y(ix,iy,iz)+fw%ex_z(ix,iy,iz) )
+        sum_lr_y=sum_lr_y+( fw%ey_z(ix,iy,iz)+fw%ey_x(ix,iy,iz) )
+        sum_lr_z=sum_lr_z+( fw%ez_x(ix,iy,iz)+fw%ez_y(ix,iy,iz) )
+      end do
+      end do
+      end do
+!$omp end do
+!$omp end parallel
+      sum_lr(1)=sum_lr_x; sum_lr(2)=sum_lr_y; sum_lr(3)=sum_lr_z;
+      call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
+      fw%e_lr(fw%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
+                            /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
     end if
     
     !update time iteration

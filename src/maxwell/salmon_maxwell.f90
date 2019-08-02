@@ -91,10 +91,13 @@ module salmon_maxwell
     integer             :: iter_lr                                      !LR: time iteration for save
     real(8),allocatable :: fr_lr(:,:)                                   !LR: Re[f]
     real(8),allocatable :: fi_lr(:,:)                                   !LR: Im[f]
-    real(8),allocatable :: rjx_lr(:,:,:),rjy_lr(:,:,:),rjz_lr(:,:,:)    !LR: poparization current density
     real(8),allocatable :: px_lr(:,:,:), py_lr(:,:,:), pz_lr(:,:,:)     !LR: poparization vector
-    real(8),allocatable :: curr_lr(:,:)                                 !LR: current
     real(8),allocatable :: dip_lr(:,:)                                  !LR: dipolemoment
+    real(8),allocatable :: rjx_lr(:,:,:),rjy_lr(:,:,:),rjz_lr(:,:,:)    !LR: poparization current density
+    real(8),allocatable :: curr_lr(:,:)                                 !LR: average current density
+    real(8),allocatable :: e_lr(:,:)                                    !LR: average electric field
+    real(8),allocatable :: er_lr(:,:)                                   !LR: Re[e_lr]
+    real(8),allocatable :: ei_lr(:,:)                                   !LR: Im[e_lr]
   end type ls_fdtd_work
   
 end module salmon_maxwell

@@ -22,11 +22,12 @@ subroutine eh_finalize(fs,fw)
   use salmon_communication, only: comm_is_root
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work
-  use math_constants,       only: pi
+  use math_constants,       only: pi,zi
   implicit none
   type(s_fdtd_system),intent(in)    :: fs
   type(ls_fdtd_work), intent(inout) :: fw
   integer                           :: ii
+  complex(8)                        :: z_tmp(3)
   character(128)                    :: save_name
   
   !output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr)
@@ -71,7 +72,7 @@ subroutine eh_finalize(fs,fw)
         close(fw%ifn)
       end if
     elseif(iperiodic==3) then
-      !output time-dependent matter current data
+      !output time-dependent average  matter current density data and average electric field data
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_current.data'
         open(fw%ifn,file=save_name)
@@ -86,12 +87,30 @@ subroutine eh_finalize(fs,fw)
           write(fw%ifn, '(3E16.6e3)',advance="yes") -fw%curr_lr(ii,:)*fw%uAperm_from_au/ulength_from_au
         end do
         close(fw%ifn)
+        
+        save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_e_field.data'
+        open(fw%ifn,file=save_name)
+        select case(unit_system)
+        case('au','a.u.')
+          write(fw%ifn,'(A)') "# time[a.u.],  electric field(x,y,z)[a.u.]" 
+        case('A_eV_fs')
+          write(fw%ifn,'(A)') "# time[fs],    electric field(x,y,z)[V/Ang.]" 
+        end select
+        do ii=1,nt_em
+          write(fw%ifn, '(E13.5)',advance="no")     (fw%time_lr(ii)+0.5d0*dt_em)*utime_from_au
+          write(fw%ifn, '(3E16.6e3)',advance="yes") fw%e_lr(ii,:)*fw%uVperm_from_au/ulength_from_au
+        end do
+        !0.5d0*dt_em is introduced to adjust actual time of electric field
+        close(fw%ifn)
       end if
       
       !output lr data
       call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%curr_lr(:,1),fw%fr_lr(:,1),fw%fi_lr(:,1))
       call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%curr_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
       call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%curr_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr+0.5d0*dt_em,fw%e_lr(:,1),fw%er_lr(:,1),fw%ei_lr(:,1))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr+0.5d0*dt_em,fw%e_lr(:,2),fw%er_lr(:,2),fw%ei_lr(:,2))
+      call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr+0.5d0*dt_em,fw%e_lr(:,3),fw%er_lr(:,3),fw%ei_lr(:,3))
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_lr.data'
         open(fw%ifn,file=save_name)
@@ -102,9 +121,10 @@ subroutine eh_finalize(fs,fw)
           write(fw%ifn,'(A)') "# energy[eV], Re[epsilon](x,y,z), Im[epsilon](x,y,z)"
         end select
         do ii=1,nenergy
+          z_tmp(:)=(fw%fr_lr(ii,:)+zi*fw%fi_lr(ii,:)) / (-e_impulse+fw%er_lr(ii,:)+zi*fw%ei_lr(ii,:))
           write(fw%ifn, '(E13.5)',advance="no")     dble(ii)*de*uenergy_from_au
-          write(fw%ifn, '(3E16.6e3)',advance="no")  1.0d0-4.0d0*pi*fw%fi_lr(ii,:)/(-e_impulse)/(dble(ii)*de)
-          write(fw%ifn, '(3E16.6e3)',advance="yes") 4.0d0*pi*fw%fr_lr(ii,:)/(-e_impulse)/(dble(ii)*de)
+          write(fw%ifn, '(3E16.6e3)',advance="no")  1.0d0-4.0d0*pi*aimag(z_tmp(:))/(dble(ii)*de)
+          write(fw%ifn, '(3E16.6e3)',advance="yes") 4.0d0*pi*real(z_tmp(:))/(dble(ii)*de)
         end do
       end if
     end if
