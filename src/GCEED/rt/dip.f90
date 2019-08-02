@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subdip(ng,srho,rNe,ifunc)
+subroutine subdip(ng,srho,rNe)
 use structures
 use salmon_parallel, only: nproc_group_h, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
@@ -24,7 +24,6 @@ use timer
 implicit none
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
-integer :: ifunc
 integer :: i1,ix,iy,iz
 real(8) :: rNe
 real(8) :: rbox_array(10), rbox_arrayq(3, 3)
@@ -68,32 +67,18 @@ call timer_begin(LOG_CALC_DP)
    call timer_end(LOG_ALLREDUCE_DIPOLE)
 
    rNe=rbox_array2(4)*Hvol               ! Number of electrons
-   if(ifunc==1)then
-     Dp(1:3,itt)=rbox_array2(1:3)*Hgs(1:3)*Hvol-vecDs(1:3)
-     do i1=1,3
-       Qp(1:3,i1,itt)=rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
-     end do
-     rIe(itt)=rNe
-   else if(ifunc==2)then
-     Dp(1:3,itt-1)=rbox_array2(1:3)*Hgs(1:3)*Hvol-vecDs(1:3)
-     do i1=1,3
-       Qp(1:3,i1,itt-1)=rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
-     end do
-     rIe(itt-1)=rNe
-   end if
+   Dp(1:3,itt)=rbox_array2(1:3)*Hgs(1:3)*Hvol-vecDs(1:3)
+   do i1=1,3
+     Qp(1:3,i1,itt)=rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
+   end do
+   rIe(itt)=rNe
 
   if(comm_is_root(nproc_id_global))then
     select case(iperiodic)
     case(0)
-      if(ifunc==1)then
-          write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
-            itt,dble(itt)*dt*2.41888d-2, (Dp(i1,itt)*a_B,i1=1,3), rNe, Etot*2d0*Ry,iterVh
-        tene(itt)=Etot
-      else if(ifunc==2)then
-          write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
-            itt-1,dble(itt-1)*dt*2.41888d-2, (Dp(i1,itt-1)*a_B,i1=1,3), rNe, Etot*2d0*Ry,iterVh
-        tene(itt-1)=Etot
-      end if
+      write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
+          itt,dble(itt)*dt*2.41888d-2, (Dp(i1,itt)*a_B,i1=1,3), rNe, Etot*2d0*Ry,iterVh
+      tene(itt)=Etot
     case(3)
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
         itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
