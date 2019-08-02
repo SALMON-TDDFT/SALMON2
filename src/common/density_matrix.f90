@@ -257,7 +257,7 @@ contains
     do im=info%im_s,info%im_e
     do ispin=1,nspin
 
-      wrk3 = 0d0
+      wrk4 = 0d0
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
@@ -299,6 +299,8 @@ contains
       integer :: ix,iy,iz
       real(8) :: rtmp
       complex(8) :: cpsi,tmp(3)
+      rtmp = 0d0
+      tmp = 0d0
 !$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)

@@ -21,7 +21,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   use structures
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use density_matrix, only: calc_density, calc_density_matrix, calc_current
+  use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat
   use writefield
   use timer
   use inputoutput
