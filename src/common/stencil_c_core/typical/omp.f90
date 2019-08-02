@@ -125,7 +125,9 @@ subroutine stencil_C_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
   end do
 
 #if _OPENMP >= 201307
+#ifndef __ARM_FLANG
 !$omp simd
+#endif
 #endif
   do ix=is(1),ie(1)
     t(1) = tpsi(DZ( 1))
