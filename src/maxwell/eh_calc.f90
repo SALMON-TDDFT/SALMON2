@@ -43,11 +43,6 @@ subroutine eh_calc(fs,fw)
       call eh_update_ld
     end if
     
-    !calculate linear response
-    if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
-      call eh_calc_lr
-    end if
-    
     !update e
     call eh_fd(fw%iex_y_is,fw%iex_y_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ex_y,fw%c2_ex_y,fw%ex_y,fw%hz_x,fw%hz_y,      'e','y') !ex_y
@@ -71,6 +66,11 @@ subroutine eh_calc(fs,fw)
       call eh_add_curr(fw%rjx_sum_ld(:,:,:),fw%rjy_sum_ld(:,:,:),fw%rjz_sum_ld(:,:,:))
     end if
     call eh_sendrecv(fs,fw,'e')
+    
+    !calculate linear response
+    if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
+      call eh_calc_lr
+    end if
     
     !store old h
     if( (iobs_num_em>0).and.(mod(iter,iobs_samp_em)==0) )then
