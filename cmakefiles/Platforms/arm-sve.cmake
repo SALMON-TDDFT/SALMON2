@@ -1,11 +1,10 @@
 ### Arm HPC compiler
-# NOTE: SALMON outputs NaN when compiling with Arm HPC compiler version 19.1, don't use it.
 set(TARGET_SUFFIX               ".cpu")
 
-set(ARCH                        "-mcpu=thunderx2t99")
+set(ARCH                        "-mcpu=generic -march=armv8.1-a+sve")
 set(SIMD_SET                    "")
 set(OPENMP_FLAGS                "-fopenmp")
-set(LAPACK_FLAGS                "-armpl")
+set(LAPACK_FLAGS                "-armpl -fno-simdmath") # NOTE: armpl option enables simdmath library but SVE version does not implemented.
 set(ScaLAPACK_FLAGS             "")
 set(ADDITIONAL_MACRO            "-D__ARM_FLANG")
 set(ADDITIONAL_OPTIMIZE_FLAGS   "-Wall -fstrict-aliasing")
@@ -26,5 +25,5 @@ set(REDUCE_FOR_MANYCORE ON)
 ########
 # Platform-specific variables
 ########
-set(CMAKE_SYSTEM_NAME "Linux" CACHE STRING "Arm HPC compiler for Marvell ThunderX2")
-set(CMAKE_SYSTEM_PROCESSOR "thunderx2")
+set(CMAKE_SYSTEM_NAME "Linux" CACHE STRING "Arm HPC compiler for SVE processor (based Marvell ThunderX2)")
+set(CMAKE_SYSTEM_PROCESSOR "armsve")
