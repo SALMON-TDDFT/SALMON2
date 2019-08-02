@@ -21,7 +21,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   use structures
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use density_matrix, only: calc_density, calc_density_matrix, calc_current
+  use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat
   use writefield
   use timer
   use inputoutput
@@ -65,7 +65,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   complex(8),parameter :: zi=(0.d0,1.d0)
   integer :: is
   character(100) :: comment_line
-  logical :: rion_update
+  logical :: rion_update,if_use_dmat
 
   nspin = system%nspin
 
@@ -75,6 +75,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   idiffDensity=1
   ielf=2
   idip=0
+  if_use_dmat = .false. ! application of the density matrix is not implemented (future work)
 
   ! for calc_total_energy_periodic
   rion_update = check_rion_update() .or. (itt == Miter_rt+1)
@@ -257,10 +258,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   case(3)
 
-    call calc_density_matrix(nspin,info,mg,srg,spsi_out,dmat)
+    if(if_use_dmat) call calc_density_matrix(nspin,info,mg,srg,spsi_out,dmat)
 
     call timer_begin(LOG_CALC_CURRENT)
-    call calc_current(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
+    if(if_use_dmat) then
+      call calc_current_use_dmat(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
+    else
+      call calc_current(nspin,system%ngrid,mg,stencil,info,srg,spsi_out,ppg,curr_tmp(1:3,1:nspin))
+    end if
     call calc_emfields(nspin,curr_tmp)
     call timer_end(LOG_CALC_CURRENT)
 

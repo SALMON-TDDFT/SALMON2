@@ -225,7 +225,115 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_current(nspin,ngrid,mg,stencil,info,psi,ppg,dmat,curr)
+  subroutine calc_current(nspin,ngrid,mg,stencil,info,srg,psi,ppg,curr)
+    use structures
+    use sendrecv_grid, only: update_overlap_complex8
+    use salmon_communication, only: comm_summation
+    use pseudo_pt_sub, only: calc_uVpsi_rdivided
+    implicit none
+    integer        ,intent(in) :: nspin,ngrid
+    type(s_rgrid)  ,intent(in) :: mg
+    type(s_stencil),intent(in) :: stencil
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_sendrecv_grid)      :: srg
+    type(s_orbital)            :: psi
+    type(s_pp_grid),intent(in) :: ppg
+    real(8) :: curr(3,nspin,info%im_s:info%im_e)
+    !
+    integer :: ispin,im,ik,io
+    real(8),dimension(3) :: wrk1,wrk2,wrk3,wrk4
+    real(8) :: BT(3,3)
+    complex(8),allocatable :: uVpsibox (:,:,:,:,:)
+    complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+
+    BT = transpose(stencil%rmatrix_B)
+    if(info%if_divide_rspace) call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+
+  ! overlap region communication
+    if(info%if_divide_rspace) then
+      call update_overlap_complex8(srg, mg, psi%zwf)
+    end if
+
+    do im=info%im_s,info%im_e
+    do ispin=1,nspin
+
+      wrk4 = 0d0
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+
+        call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
+                            ,stencil%vec_kAc(:,ik),psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
+        wrk2 = matmul(BT,wrk2)
+
+        if(info%if_divide_rspace) then
+          call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
+                                             ,uVpsibox2(:,ispin,io,ik,im))
+        else
+          call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+        end if
+
+        wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * info%occ(io,ik,ispin,im)
+
+      end do
+      end do
+
+      call comm_summation(wrk4,wrk1,3,info%icomm_rko)
+
+      curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+    end do
+    end do
+
+    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2)
+
+    return
+
+  contains
+
+    subroutine stencil_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,psi,j1,j2)
+      integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3) &
+                              ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd)
+      real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
+      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+      real(8)               :: j1(3),j2(3)
+      !
+      integer :: ix,iy,iz
+      real(8) :: rtmp
+      complex(8) :: cpsi,tmp(3)
+      rtmp = 0d0
+      tmp = 0d0
+!$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,tmp)
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+      do ix=is(1),ie(1)
+        cpsi = conjg(psi(ix,iy,iz))
+        rtmp = rtmp + abs(psi(ix,iy,iz))**2
+
+        tmp(1) = tmp(1) + nabt(1,1) * cpsi * psi(idx(ix+1),iy,iz) &
+                        + nabt(2,1) * cpsi * psi(idx(ix+2),iy,iz) &
+                        + nabt(3,1) * cpsi * psi(idx(ix+3),iy,iz) &
+                        + nabt(4,1) * cpsi * psi(idx(ix+4),iy,iz)
+
+        tmp(2) = tmp(2) + nabt(1,2) * cpsi * psi(ix,idy(iy+1),iz) &
+                        + nabt(2,2) * cpsi * psi(ix,idy(iy+2),iz) &
+                        + nabt(3,2) * cpsi * psi(ix,idy(iy+3),iz) &
+                        + nabt(4,2) * cpsi * psi(ix,idy(iy+4),iz)
+
+        tmp(3) = tmp(3) + nabt(1,3) * cpsi * psi(ix,iy,idz(iz+1)) &
+                        + nabt(2,3) * cpsi * psi(ix,iy,idz(iz+2)) &
+                        + nabt(3,3) * cpsi * psi(ix,iy,idz(iz+3)) &
+                        + nabt(4,3) * cpsi * psi(ix,iy,idz(iz+4))
+      end do
+      end do
+      end do
+!$omp end parallel do
+      j1 = kAc(:) * rtmp
+      j2 = aimag(tmp * 2d0)
+      return
+    end subroutine stencil_current
+
+  end subroutine calc_current
+
+  subroutine calc_current_use_dmat(nspin,ngrid,mg,stencil,info,psi,ppg,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
     use pseudo_pt_sub, only: calc_uVpsi_rdivided
@@ -257,10 +365,10 @@ contains
         call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,mg%is,mg%ie)
 
         if(info%if_divide_rspace) then
-          call nonlocal_part_rdivided(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
-                                     ,uVpsibox2(:,ispin,io,ik,im))
+          call calc_current_nonlocal_rdivided(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
+                                             ,uVpsibox2(:,ispin,io,ik,im))
         else
-          call nonlocal_part         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
 
         wrk3 = wrk3 + (wrk1 + wrk2) * info%occ(io,ik,ispin,im)
@@ -344,78 +452,80 @@ contains
       return
     end subroutine stencil_current
 
-    subroutine nonlocal_part(jw,psi,ppg,is_array,ie_array,ik)
-      implicit none
-      integer   ,intent(in) :: is_array(3),ie_array(3),ik
-      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-      type(s_pp_grid),intent(in) :: ppg
-      real(8)               :: jw(3)
-      !
-      integer    :: ilma,ia,j,i,ix,iy,iz
-      real(8)    :: x,y,z
-      complex(8) :: uVpsi,uVpsi_r(3)
-      jw = 0d0
-!$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
-      do ilma=1,ppg%Nlma
-        ia=ppg%ia_tbl(ilma)
-        uVpsi = 0d0
-        uVpsi_r = 0d0
-        do j=1,ppg%Mps(ia)
-          x = ppg%Rxyz(1,j,ia)
-          y = ppg%Rxyz(2,j,ia)
-          z = ppg%Rxyz(3,j,ia)
-          ix = ppg%Jxyz(1,j,ia)
-          iy = ppg%Jxyz(2,j,ia)
-          iz = ppg%Jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * psi(ix,iy,iz)
-          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
-          uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
-          uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
-        end do
-        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-        jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
-      end do
-!$omp end parallel do
-      jw = jw * 2d0
-      return
-    end subroutine nonlocal_part
+  end subroutine calc_current_use_dmat
 
-    subroutine nonlocal_part_rdivided(jw,psi,ppg,is_array,ie_array,ik,uVpsibox)
-      implicit none
-      integer   ,intent(in) :: is_array(3),ie_array(3),ik
-      complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-      type(s_pp_grid),intent(in) :: ppg
-      complex(8),intent(in) :: uVpsibox(ppg%Nlma)
-      real(8)               :: jw(3)
-      !
-      integer    :: ilma,ia,j,i,ix,iy,iz
-      real(8)    :: x,y,z
-      complex(8) :: uVpsi,uVpsi_r(3)
-      jw = 0d0
+  subroutine calc_current_nonlocal(jw,psi,ppg,is_array,ie_array,ik)
+    use structures
+    implicit none
+    integer   ,intent(in) :: is_array(3),ie_array(3),ik
+    complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+    type(s_pp_grid),intent(in) :: ppg
+    real(8)               :: jw(3)
+    !
+    integer    :: ilma,ia,j,ix,iy,iz
+    real(8)    :: x,y,z
+    complex(8) :: uVpsi,uVpsi_r(3)
+    jw = 0d0
 !$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
-      do ilma=1,ppg%Nlma
-        ia=ppg%ia_tbl(ilma)
-        uVpsi_r = 0d0
-        do j=1,ppg%Mps(ia)
-          x = ppg%Rxyz(1,j,ia)
-          y = ppg%Rxyz(2,j,ia)
-          z = ppg%Rxyz(3,j,ia)
-          ix = ppg%Jxyz(1,j,ia)
-          iy = ppg%Jxyz(2,j,ia)
-          iz = ppg%Jxyz(3,j,ia)
-          uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
-          uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
-          uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
-        end do
-        uVpsi = uVpsibox(ilma)
-        jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
+    do ilma=1,ppg%Nlma
+      ia=ppg%ia_tbl(ilma)
+      uVpsi = 0d0
+      uVpsi_r = 0d0
+      do j=1,ppg%Mps(ia)
+        x = ppg%Rxyz(1,j,ia)
+        y = ppg%Rxyz(2,j,ia)
+        z = ppg%Rxyz(3,j,ia)
+        ix = ppg%Jxyz(1,j,ia)
+        iy = ppg%Jxyz(2,j,ia)
+        iz = ppg%Jxyz(3,j,ia)
+        uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * psi(ix,iy,iz)
+        uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
+        uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
+        uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
       end do
+      uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+      jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
+    end do
 !$omp end parallel do
-      jw = jw * 2d0
-      return
-    end subroutine nonlocal_part_rdivided
+    jw = jw * 2d0
+    return
+  end subroutine calc_current_nonlocal
 
-  end subroutine calc_current
+  subroutine calc_current_nonlocal_rdivided(jw,psi,ppg,is_array,ie_array,ik,uVpsibox)
+    use structures
+    implicit none
+    integer   ,intent(in) :: is_array(3),ie_array(3),ik
+    complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+    type(s_pp_grid),intent(in) :: ppg
+    complex(8),intent(in) :: uVpsibox(ppg%Nlma)
+    real(8)               :: jw(3)
+    !
+    integer    :: ilma,ia,j,ix,iy,iz
+    real(8)    :: x,y,z
+    complex(8) :: uVpsi,uVpsi_r(3)
+    jw = 0d0
+!$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
+    do ilma=1,ppg%Nlma
+      ia=ppg%ia_tbl(ilma)
+      uVpsi_r = 0d0
+      do j=1,ppg%Mps(ia)
+        x = ppg%Rxyz(1,j,ia)
+        y = ppg%Rxyz(2,j,ia)
+        z = ppg%Rxyz(3,j,ia)
+        ix = ppg%Jxyz(1,j,ia)
+        iy = ppg%Jxyz(2,j,ia)
+        iz = ppg%Jxyz(3,j,ia)
+        uVpsi_r(1) = uVpsi_r(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * x * psi(ix,iy,iz)
+        uVpsi_r(2) = uVpsi_r(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * y * psi(ix,iy,iz)
+        uVpsi_r(3) = uVpsi_r(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * z * psi(ix,iy,iz)
+      end do
+      uVpsi = uVpsibox(ilma)
+      jw = jw + aimag(conjg(uVpsi_r)*uVpsi)
+    end do
+!$omp end parallel do
+    jw = jw * 2d0
+    return
+  end subroutine calc_current_nonlocal_rdivided
 
 !===================================================================================================================================
 
