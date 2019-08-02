@@ -59,7 +59,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   integer :: ix,iy,iz,mm,nspin
   integer :: iatom,ik
-  integer :: idensity, idiffDensity, ielf, idip
+  integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
   real(8) :: curr_tmp(3,2)
   complex(8),parameter :: zi=(0.d0,1.d0)
@@ -74,7 +74,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   idensity=0
   idiffDensity=1
   ielf=2
-  idip=0
   if_use_dmat = .false. ! application of the density matrix is not implemented (future work)
 
   ! for calc_total_energy_periodic
@@ -253,8 +252,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
     call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
     Etot = energy%E_tot
-    if(ikind_eext==0.and.itt>=2) idip = 2
-    if(ikind_eext/=0.or.(ikind_eext==0.and.itt==itotNtime)) idip = 1
 
   case(3)
 
@@ -280,12 +277,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
     Etot = energy%E_tot
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
-    idip = 1
-
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  if(idip/=0) call subdip(ng,srho,rNe,idip)
+  call subdip(ng,srho,rNe)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)
