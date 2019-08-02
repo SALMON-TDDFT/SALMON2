@@ -98,7 +98,7 @@ subroutine eh_finalize(fs,fw)
         end select
         do ii=1,nt_em
           write(fw%ifn, '(E13.5)',advance="no")     (fw%time_lr(ii)+0.5d0*dt_em)*utime_from_au
-          write(fw%ifn, '(3E16.6e3)',advance="yes") fw%e_lr(ii,:)*fw%uVperm_from_au/ulength_from_au
+          write(fw%ifn, '(3E16.6e3)',advance="yes") fw%e_lr(ii,:)*fw%uVperm_from_au
         end do
         !0.5d0*dt_em is introduced to adjust actual time of electric field
         close(fw%ifn)

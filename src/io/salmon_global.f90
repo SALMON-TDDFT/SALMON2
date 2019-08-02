@@ -213,15 +213,6 @@ module salmon_global
   real(8)        :: dt_em
   integer        :: nt_em
   character(8)   :: boundary_em(3,2)
-  character(16)  :: wave_input
-  real(8)        :: ek_dir1(3)
-  real(8)        :: source_loc1(3)
-  real(8)        :: ek_dir2(3)
-  real(8)        :: source_loc2(3)
-  integer        :: iobs_num_em
-  integer        :: iobs_samp_em
-  real(8)        :: obs_loc_em(200,3)
-  character(1)   :: obs_plane_em(200)
   character(256) :: shape_file
   integer        :: imedia_num
   character(16)  :: type_media(0:200)
@@ -233,6 +224,15 @@ module salmon_global
   real(8)        :: f_ld(0:200,1:100)
   real(8)        :: gamma_ld(0:200,1:100)
   real(8)        :: omega_ld(0:200,1:100)
+  character(16)  :: wave_input
+  real(8)        :: ek_dir1(3)
+  real(8)        :: source_loc1(3)
+  real(8)        :: ek_dir2(3)
+  real(8)        :: source_loc2(3)
+  integer        :: iobs_num_em
+  integer        :: iobs_samp_em
+  real(8)        :: obs_loc_em(200,3)
+  character(1)   :: obs_plane_em(200)
   character(1)   :: wf_em
   
 !! &analysis
