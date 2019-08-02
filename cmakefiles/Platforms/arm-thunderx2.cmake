@@ -1,4 +1,5 @@
-### Arm HPC compiler with OpenMPI
+### Arm HPC compiler
+# NOTE: SALMON outputs NaN when compiling with Arm HPC compiler version 19.1, don't use it.
 set(TARGET_SUFFIX               ".cpu")
 
 set(ARCH                        "-mcpu=thunderx2t99")
@@ -12,14 +13,14 @@ set(ADDITIONAL_OPTIMIZE_FLAGS   "-Wall -fstrict-aliasing")
 set(Fortran_FLAGS_General       "-cpp")
 set(C_FLAGS_General             "")
 
-set(CMAKE_Fortran_COMPILER      "mpif90")
+set(CMAKE_Fortran_COMPILER      "armflang")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
 set(CMAKE_Fortran_FLAGS_RELEASE "-Ofast -ffp-contract=fast")
-set(CMAKE_C_COMPILER            "mpicc")
+set(CMAKE_C_COMPILER            "armclang")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-Ofast -ffp-contract=fast")
 
-set(USE_MPI ON)
+set(USE_MPI             OFF)
 set(REDUCE_FOR_MANYCORE ON)
 
 ########
