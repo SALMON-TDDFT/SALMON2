@@ -642,7 +642,7 @@ subroutine eh_init(fs,fw)
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
     !check condition
     iflag_lr=0
-    if(iperiodic==3.and.trans_longi/='lo') iflag_lr=1
+    if(iperiodic==3.and.trans_longi/='tr') iflag_lr=1
     do ii=0,imedia_num
       if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag_lr=1
       if(ii==0) then
@@ -668,7 +668,7 @@ subroutine eh_init(fs,fw)
         write(*,*) "epsilon and rmu must be 1.0d0."
         write(*,*) "sigma must be 0.0d0."
         write(*,*) "type_media(i) must be drude, where i > 0."
-        if(iperiodic==3) write(*,*) "trans_longi must be lo."
+        if(iperiodic==3) write(*,*) "trans_longi must be tr."
       end if
       stop
     end if
