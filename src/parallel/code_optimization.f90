@@ -41,11 +41,18 @@ contains
   end subroutine
 
   subroutine switch_openmp_parallelization(nlens)
-    use salmon_global, only: want_stencil_openmp_parallelization
+    use salmon_global, only: want_stencil_openmp_parallelization, &
+                             force_stencil_openmp_parallelization, &
+                             force_stencil_sequential_computation
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions
-    stencil_is_parallelized_by_omp = (nlens(1)*nlens(2)*nlens(3) >= 32*32*32) &
-    &    .and. (want_stencil_openmp_parallelization == 'y')
+    logical :: ret
+    ret = (want_stencil_openmp_parallelization  == 'y') .and. (nlens(1)*nlens(2)*nlens(3) >= 32*32*32)
+
+    if (force_stencil_openmp_parallelization == 'y') ret = .true.  ! forcible option: use OpenMP parallelized code
+    if (force_stencil_sequential_computation == 'y') ret = .false. ! forcible option: use sequential code
+
+    stencil_is_parallelized_by_omp = ret
   end subroutine
 
   subroutine set_modulo_tables(nlens)
