@@ -26,7 +26,7 @@ module salmon_maxwell
     !coulomb
     integer :: itt
     real(8) :: E_electron,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
-    character(16)       :: file_Ax,file_777,file_excitation
+    character(100) :: file_Ax,file_777,file_excitation
     real(8),allocatable :: vecA(:,:,:,:),vecA_stock(:,:,:,:),Vh_n(:,:,:),curr1_m(:,:,:,:),vecA_m(:,:,:,:,:) &
     & ,vecA_boundary_bottom(:,:,:),vecA_boundary_bottom_old(:,:,:),vecA_boundary_top(:,:,:),vecA_boundary_top_old(:,:,:) &
     & ,integral_poynting(:),Ax_zt(:)

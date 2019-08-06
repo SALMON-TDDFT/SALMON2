@@ -907,7 +907,8 @@ if(iflag_md==1) call init_md(system,md)
 
 ! single-scale Maxwell-TDDFT
 ext%if_microscopic = .false.
-if(ikind_eext==9) then
+if(use_singlescale=='y') then
+  if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
   ext%if_microscopic = .true.
   call allocate_vector(mg,ext%j_e)
   call allocate_scalar(mg,ext%div_Ac)

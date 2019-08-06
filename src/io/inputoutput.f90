@@ -216,7 +216,8 @@ contains
       & use_adiabatic_md, &
       & use_ms_maxwell, &
       & use_geometry_opt, &
-      & use_potential_model   !AY trial
+      & use_potential_model, &   !AY trial
+      & use_singlescale ! temporary
 
     namelist/control/ &
       & restart_option, &
@@ -568,6 +569,7 @@ contains
     use_ms_maxwell      = 'n'
     use_geometry_opt    = 'n'
     use_potential_model = 'n'
+    use_singlescale = 'n'
 !! == default for &control
     restart_option   = 'new'
     backup_frequency = 0
@@ -952,6 +954,7 @@ contains
     call comm_bcast(use_ms_maxwell     ,nproc_group_global)
     call comm_bcast(use_geometry_opt   ,nproc_group_global)
     call comm_bcast(use_potential_model,nproc_group_global)
+    call comm_bcast(use_singlescale    ,nproc_group_global)
 !! == bcast for &control
     call comm_bcast(restart_option  ,nproc_group_global)
     call comm_bcast(backup_frequency,nproc_group_global)
@@ -1555,6 +1558,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'use_adiabatic_md', use_adiabatic_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'use_ms_maxwell', use_ms_maxwell
       write(fh_variables_log, '("#",4X,A,"=",A)') 'use_geometry_opt', use_geometry_opt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_singlescale', use_singlescale
 !     write(fh_variables_log, '("#",4X,A,"=",A)') 'use_potential_model', use_potential_model !AY not open now
 
       if(inml_control >0)ierr_nml = ierr_nml +1
