@@ -361,5 +361,7 @@ character(256),allocatable :: atom_name(:)
 !! &code
   character(1) :: want_stencil_openmp_parallelization
   character(1) :: want_stencil_hand_vectorization
+  character(1) :: force_stencil_openmp_parallelization
+  character(1) :: force_stencil_sequential_computation
 
 end module salmon_global
