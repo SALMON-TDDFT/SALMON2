@@ -539,23 +539,27 @@ contains
     type(s_orbital_parallel),intent(in) :: info
     type(s_orbital),intent(in) :: psi
     type(s_dmatrix),intent(in) :: dmat
-    type(s_vector)             :: curr(nspin,info%im_s:info%im_e)
+    type(s_vector)             :: curr
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
+
+    if(info%im_s/=1 .or. info%im_e/=1) stop "error: im_s, im_e @ calc_microscopic_current"
+    im = 1
+
     is = mg%is
     ie = mg%ie
     allocate(wrk(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)),wrk2(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)))
     nsize = 3* mg%num(1) * mg%num(2) * mg%num(3)
 
-    do im=info%im_s,info%im_e
+    curr%v = 0d0
     do ispin=1,nspin
 
       wrk2 = 0d0
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(wrk,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,is,ie)
+        call kvec_part(mg%is_array,mg%ie_array,is,ie,stencil%vec_kAc(:,ik),psi%zwf(:,:,:,ispin,io,ik,im),wrk)
         wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
 
 !       call nonlocal_part
@@ -566,8 +570,7 @@ contains
 
       call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz,mg%ndir)
 
-      curr(ispin,im)%v = wrk + wrk2
-    end do
+      curr%v = curr%v + wrk + wrk2
     end do
 
     deallocate(wrk,wrk2)
@@ -575,10 +578,10 @@ contains
 
   contains
 
-    subroutine kvec_part(jw,psi,kAc,is_array,ie_array,is,ie)
+    subroutine kvec_part(is_array,ie_array,is,ie,k,psi,jw)
       implicit none
       integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
-      real(8)   ,intent(in) :: kAc(3)
+      real(8)   ,intent(in) :: k(3)
       complex(8),intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
@@ -586,7 +589,7 @@ contains
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
-        jw(:,ix,iy,iz) = kAc(:) * abs(psi(ix,iy,iz))**2
+        jw(:,ix,iy,iz) = k(:) * abs(psi(ix,iy,iz))**2
       end do
       end do
       end do

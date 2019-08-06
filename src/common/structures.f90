@@ -43,15 +43,29 @@ module structures
     real(8),allocatable :: Rion(:,:)     ! (1:3,1:nion), atom position
     real(8),allocatable :: Velocity(:,:) ! (1:3,1:nion), atomic velocity
     real(8),allocatable :: Force(:,:)    ! (1:3,1:nion), force on atom
-
-  ! external field
-    real(8) vec_Ac(3) ! A/c, A: vector potential
   end type s_dft_system
 
   type s_dft_energy
     real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
   end type s_dft_energy
+
+! external fields of DFT system
+  type s_dft_external
+
+  ! length gauge
+    type(s_scalar) :: V_ext
+
+  ! velocity gauge
+    real(8) :: vec_Ac(3) ! A/c (spatially averaged), A: vector potential, c: speed of light
+
+    ! for single-scale maxwell-TDDFT
+    logical :: if_microscopic
+    type(s_vector) :: Ac_micro ! A/c (microscopic)
+    type(s_scalar) :: div_Ac   ! divergence of Ac_micro
+    type(s_vector) :: j_e      ! microscopic electron number current density
+
+  end type s_dft_external
 
   type s_rgrid
     integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
@@ -235,6 +249,14 @@ contains
     allocate(field%f(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
     field%f = 0d0
   end subroutine allocate_scalar
+
+  subroutine allocate_vector(rg,field)
+    implicit none
+    type(s_rgrid),intent(in) :: rg
+    type(s_vector)           :: field
+    allocate(field%v(3,rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
+    field%v = 0d0
+  end subroutine allocate_vector
 
   subroutine allocate_dmatrix(nspin,mg,info,dmat)
     implicit none
