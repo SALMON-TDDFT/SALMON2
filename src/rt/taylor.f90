@@ -19,9 +19,9 @@ module taylor_sub
 contains
 
 subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
-                  ppg,V_local,zc)
+                  ppg,V_local,zc,ext)
   use inputoutput, only: n_hamil
-  use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
+  use structures
   use hpsi_sub
   use calc_allob_sub
   use sendrecv_grid, only: s_sendrecv_grid
@@ -38,6 +38,7 @@ subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: V_local(nspin)
   complex(8),intent(in) :: zc(n_hamil)
+  type(s_dft_external),intent(in) :: ext
   integer :: nn,ix,iy,iz
   integer :: ik,io
   complex(8),parameter :: zi=(0.d0,1.d0)
@@ -60,7 +61,7 @@ subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
 
   do nn=1,n_hamil
     if(mod(nn,2)==1)then
-      call hpsi(tspsi_in,sshtpsi,info,mg,V_local,nspin,stencil,srg,ppg)
+      call hpsi(tspsi_in,sshtpsi,info,mg,V_local,nspin,stencil,srg,ppg,ext=ext)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -77,7 +78,7 @@ subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
       end do
       end do
     else
-      call hpsi(sshtpsi,tspsi_in,info,mg,V_local,nspin,stencil,srg,ppg)
+      call hpsi(sshtpsi,tspsi_in,info,mg,V_local,nspin,stencil,srg,ppg,ext=ext)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e

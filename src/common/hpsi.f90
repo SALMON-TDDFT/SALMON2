@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
+SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi,ext)
   use structures
   use stencil_sub
   use pseudo_pt_sub
@@ -37,10 +37,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   type(s_pp_grid),intent(in) :: ppg
   type(s_orbital)            :: tpsi,htpsi
   type(s_orbital),optional   :: ttpsi
+  type(s_dft_external),intent(in),optional :: ext
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
-  logical :: if_kAc
+  logical :: if_kAc,if_singlescale
 
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -53,6 +54,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
   norb = Nspin* info%numo * info%numk * info%numm
   
   if_kAc = allocated(stencil%vec_kAc)
+  if_singlescale = .false.
+  if(present(ext)) if_singlescale = ext%if_microscopic
 
   if(allocated(tpsi%rwf)) then
 
@@ -92,8 +95,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
 
   ! stencil
     call timer_begin(LOG_UHPSI_STENCIL)
-    if(stencil%if_orthogonal) then
-    ! orthogonal lattice
+    if(stencil%if_orthogonal .and. .not.if_singlescale) then
+    ! orthogonal lattice (general)
       do im=im_s,im_e
       do ik=ik_s,ik_e
         if(if_kAc) then
@@ -115,33 +118,52 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
         end do
       end do
       end do
-    else
-      if(mg%ndir==3) then
-      ! non-orthogonal lattice (general)
-        if(.not.allocated(htpsi%ztmp)) allocate(htpsi%ztmp(mg%is_array(1):mg%ie_array(1) &
-                                                          ,mg%is_array(2):mg%ie_array(2) &
-                                                          ,mg%is_array(3):mg%ie_array(3),2) )
-        do im=im_s,im_e
-        do ik=ik_s,ik_e
-          kAc = 0d0
-          k_lap0 = 0d0
-          if(if_kAc) then
-            kAc(1:3) = stencil%vec_kAc(1:3,ik) ! Cartesian vector
-            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
-            kAc(1:3) = matmul(stencil%rmatrix_B,kAc) ! B* (k+A/c)
-          end if
-          do io=io_s,io_e
-          do ispin=1,Nspin
-            call stencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%ztmp &
-                                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                      ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
-          end do
-          end do
+    else if(stencil%if_orthogonal .and. if_singlescale) then
+    ! orthogonal lattice, sigle-scale Maxwell-TDDFT
+      do im=im_s,im_e
+      do ik=ik_s,ik_e
+        if(if_kAc) then
+          kAc(1:3) = stencil%vec_kAc(1:3,ik)
+          k_lap0 = stencil%coef_lap0
+          k_nabt(:,1) = stencil%coef_nab(:,1)
+          k_nabt(:,2) = stencil%coef_nab(:,2)
+          k_nabt(:,3) = stencil%coef_nab(:,3)
+        else
+          k_lap0 = stencil%coef_lap0
+          k_nabt = 0d0
+        end if
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call stencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                        ,V_local(ispin)%f,ext%Ac_micro%v,ext%div_Ac%f,k_lap0,stencil%coef_lap,k_nabt,kAc)
         end do
         end do
-      else if(mg%ndir > 3) then
-        stop "error: high symmetry nonorthogonal lattice is not implemented"
-      end if
+      end do
+      end do
+    else if(.not.stencil%if_orthogonal) then
+    ! non-orthogonal lattice
+      if(.not.allocated(htpsi%ztmp)) allocate(htpsi%ztmp(mg%is_array(1):mg%ie_array(1) &
+                                                        ,mg%is_array(2):mg%ie_array(2) &
+                                                        ,mg%is_array(3):mg%ie_array(3),2) )
+      do im=im_s,im_e
+      do ik=ik_s,ik_e
+        kAc = 0d0
+        k_lap0 = 0d0
+        if(if_kAc) then
+          kAc(1:3) = stencil%vec_kAc(1:3,ik) ! Cartesian vector k+A/c
+          k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+          kAc(1:3) = matmul(stencil%rmatrix_B,kAc) ! B* (k+A/c)
+        end if
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call stencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%ztmp &
+                                    ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                    ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
+        end do
+        end do
+      end do
+      end do
     end if
     call timer_end(LOG_UHPSI_STENCIL)
 
@@ -211,5 +233,46 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   end do
   return
 end subroutine update_kvector_nonlocalpt
+
+subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,Ac_micro,ppg)
+  use math_constants,only : zi
+  use structures
+  implicit none
+  integer           ,intent(in) :: ik_s,ik_e
+  type(s_dft_system),intent(in) :: system
+  type(s_vector)    ,intent(in) :: Ac_micro
+  type(s_pp_grid)               :: ppg
+  !
+  integer :: ilma,iatom,j,ik,ix,iy,iz,nj
+  real(8) :: r(3),r_i(3),k(3),Ac(3),integral
+  complex(8) :: ekr
+  if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
+  do ik=ik_s,ik_e
+    k = system%vec_k(:,ik)
+    do ilma=1,ppg%nlma
+      iatom = ppg%ia_tbl(ilma)
+      nj = 0
+      Ac = 0d0
+      do j=1,ppg%mps(iatom)
+        nj = nj + 1
+        ix = ppg%jxyz(1,j,iatom)
+        iy = ppg%jxyz(2,j,iatom)
+        iz = ppg%jxyz(3,j,iatom)
+        Ac = Ac + Ac_micro%v(:,ix,iy,iz)
+      end do
+      Ac = Ac/dble(nj) ! Ac averaged in the cutoff radius of the atom "iatom"
+      do j=1,ppg%mps(iatom)
+        r(1) = ppg%rxyz(1,j,iatom)
+        r(2) = ppg%rxyz(2,j,iatom)
+        r(3) = ppg%rxyz(3,j,iatom)
+        r_i = system%rion(:,iatom)
+        integral = Ac(1)*(r(1)-r_i(1)) + Ac(2)*(r(2)-r_i(2)) + Ac(3)*(r(3)-r_i(3))
+        ekr = exp(zi*( k(1)*r(1)+k(2)*r(2)+k(3)*r(3) + integral ))
+        ppg%zekr_uV(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
+      end do
+    end do
+  end do
+  return
+end subroutine update_kvector_nonlocalpt_microAc
 
 end module hpsi_sub

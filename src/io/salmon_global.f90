@@ -44,6 +44,7 @@ module salmon_global
   character(1)   :: use_ms_maxwell
   character(1)   :: use_geometry_opt
   character(16)  :: use_potential_model
+  character(1)   :: use_singlescale ! temporary
 !! &control      
   character(8)   :: restart_option
   integer        :: backup_frequency

@@ -479,6 +479,7 @@ use force_sub, only: calc_force_salmon
 use hpsi_sub, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
 use print_sub, only: write_xyz
+use salmon_maxwell
 implicit none
 
 type(s_rgrid) :: lg,mg,ng
@@ -493,6 +494,8 @@ type(s_reciprocal_grid) :: fg
 type(s_md) :: md
 type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
+type(s_dft_external) :: ext
+type(ls_fdtd_work) :: fdtd_work
 
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik,n,nn
@@ -902,6 +905,19 @@ if(iperiodic==3) call calcAext
 
 if(iflag_md==1) call init_md(system,md)
 
+! single-scale Maxwell-TDDFT
+ext%if_microscopic = .false.
+if(use_singlescale=='y') then
+  if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
+  ext%if_microscopic = .true.
+  call allocate_vector(mg,ext%j_e)
+  call allocate_scalar(mg,ext%div_Ac)
+  call allocate_vector(mg,ext%Ac_micro)
+  do ik=info%ik_s,info%ik_e
+    stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik)
+  end do
+end if
+
 !-------------------------------------------------- Time evolution
 
 !(force at initial step)
@@ -936,10 +952,12 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,stencil &
-     ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
+     & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,ext,fdtd_work)
   else
     call time_evolution_step(lg,mg,ng,system,info,stencil &
-     ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl)
+     & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,ext,fdtd_work)
   end if
 end do TE
 call timer_end(LOG_RT_ITERATION)
