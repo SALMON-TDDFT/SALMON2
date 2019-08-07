@@ -124,10 +124,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi,ext)
       do ik=ik_s,ik_e
         if(if_kAc) then
           kAc(1:3) = stencil%vec_kAc(1:3,ik)
-          k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
-          k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
-          k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
-          k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
+          k_lap0 = stencil%coef_lap0
+          k_nabt(:,1) = stencil%coef_nab(:,1)
+          k_nabt(:,2) = stencil%coef_nab(:,2)
+          k_nabt(:,3) = stencil%coef_nab(:,3)
         else
           k_lap0 = stencil%coef_lap0
           k_nabt = 0d0

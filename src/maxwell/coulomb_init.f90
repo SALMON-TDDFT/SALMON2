@@ -80,6 +80,9 @@ subroutine coulomb_init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
         & ,fw%vecA_ext    (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),0:1,1:3) &
         & ,fw%vecA_ext_old(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),0:1,1:3) )
 
+  fw%grad_Vh = 0d0
+  fw%gradient_V = 0d0
+
   if(comm_is_root(nproc_id_global)) then
     fw%file_777 = trim(sysname)//".777"
     open(777,file=fw%file_777)

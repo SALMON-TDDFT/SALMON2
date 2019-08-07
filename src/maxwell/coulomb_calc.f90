@@ -42,7 +42,7 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2)
   real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk4
 
-  comm = nproc_group_global !?
+  comm = nproc_group_global ! for comm_summation: ng --> lg
 
   krd = 0
   krd(1,1) = 1; krd(2,2) = 1; krd(3,3) = 1
@@ -55,9 +55,12 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   itt = fw%itt
   dt_m = dt / dble(mstep)
 
-  ng_sta = ng%is
-  ng_end = ng%ie
-  ng_num = ng%num
+  ng_sta = lg%is ! temporary 2019/8/7 SY
+  ng_end = lg%ie
+  ng_num = lg%num
+!  ng_sta = ng%is
+!  ng_end = ng%ie
+!  ng_num = ng%num
   mg_sta = mg%is
   mg_end = mg%ie
   mg_num = mg%num
@@ -65,7 +68,16 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   lg_end = lg%ie
   lg_num = lg%num
 
-  if(.not.allocated(fw%vecA)) call coulomb_init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
+  if(.not.allocated(fw%vecA)) then
+    call coulomb_init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
+    do iz=ng_sta(3),ng_end(3)
+    do iy=ng_sta(2),ng_end(2)
+    do ix=ng_sta(1),ng_end(1)
+      fw%Vh_n(ix,iy,iz) = Vh%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -75,13 +87,13 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%box(ix,iy,iz) = ( Vh%f(ix,iy,iz) - fw%Vh_n(ix,iy,iz) ) /dt ! t differential ! Vh = V_H(t), Vh_n = V_H(t-dt)
+!    fw%box(ix,iy,iz) = ( Vh%f(ix,iy,iz) - fw%Vh_n(ix,iy,iz) ) /dt ! t differential ! Vh = V_H(t), Vh_n = V_H(t-dt)
   end do
   end do
   end do
 
-  call update_overlap_real8(srg_ng, ng, fw%box)
-  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh) ! grad_Vh: grad( d(Vh)/dt )
+!  call update_overlap_real8(srg_ng, ng, fw%box)
+!  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh) ! grad_Vh: grad( d(Vh)/dt )
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -91,30 +103,40 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%box(ix,iy,iz) = - Vh%f(ix,iy,iz) ! Vh_wk: scalar potential, Vh: Hartree potential
-    fw%Vh_n(ix,iy,iz) = Vh%f(ix,iy,iz)  ! old hartree potential
+!    fw%box(ix,iy,iz) = - Vh%f(ix,iy,iz) ! Vh_wk: scalar potential, Vh: Hartree potential
+!    fw%Vh_n(ix,iy,iz) = Vh%f(ix,iy,iz)  ! old hartree potential
   end do
   end do
   end do
-  call update_overlap_real8(srg_ng, ng, fw%box)
-  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%gradient_V)
+!  call update_overlap_real8(srg_ng, ng, fw%box)
+!  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%gradient_V)
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
+  fw%vbox = 0d0
   wrk = 0d0
 !$OMP parallel do collapse(2) private(ix,iy,iz) reduction(+:wrk)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    fw%curr1_m(ix,iy,iz,1) = j_e%v(1,ix,iy,iz) + rho%f(ix,iy,iz) * fw%vecA_m(1,ix,iy,iz,1) ! j(t)
-    fw%curr1_m(ix,iy,iz,2) = j_e%v(2,ix,iy,iz) + rho%f(ix,iy,iz) * fw%vecA_m(1,ix,iy,iz,2)
-    fw%curr1_m(ix,iy,iz,3) = j_e%v(3,ix,iy,iz) + rho%f(ix,iy,iz) * fw%vecA_m(1,ix,iy,iz,3)
-    wrk = wrk + fw%curr1_m(ix,iy,iz,1:3)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+!    fw%curr1_m(ix,iy,iz,1:3) = j_e%v(1:3,ix,iy,iz) + rho%f(ix,iy,iz) * fw%vecA_m(1,ix,iy,iz,1:3) ! j(t)
+    fw%vbox(1:3,ix,iy,iz) = j_e%v(1:3,ix,iy,iz) + rho%f(ix,iy,iz) * fw%vecA_m(1,ix,iy,iz,1:3) ! temporary 2019/8/7 SY
+    wrk = wrk + j_e%v(1:3,ix,iy,iz) ! definition of out_curr. j_e%v --> fw%curr1_m ?
   end do
   end do
   end do
   wrk = wrk/dble(lg_num(1)*lg_num(2)*lg_num(3))
   call comm_summation(wrk,out_curr,3,comm)
+
+  call comm_summation(fw%vbox,fw%vecA,3*lg_num(1)*lg_num(2)*lg_num(3),comm) ! temporary 2019/8/7 SY
+  !$OMP parallel do collapse(2) private(ix,iy,iz)
+  do iz=ng_sta(3),ng_end(3)
+  do iy=ng_sta(2),ng_end(2)
+  do ix=ng_sta(1),ng_end(1)
+    fw%curr1_m(ix,iy,iz,1:3) = fw%vecA(1:3,ix,iy,iz) ! temporary 2019/8/7 SY
+  end do
+  end do
+  end do
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -147,7 +169,13 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
       end do
       end do
 
-      call update_overlap_real8(srg_ng, ng, fw%box)
+!      call update_overlap_real8(srg_ng, ng, fw%box)
+      fw%box(ng_sta(1)-1,:,:) = fw%box(ng_end(1),:,:) ! temporary 2019/8/7 SY
+      fw%box(ng_end(1)+1,:,:) = fw%box(ng_sta(1),:,:)
+      fw%box(:,ng_sta(2)-1,:) = fw%box(:,ng_end(2),:)
+      fw%box(:,ng_end(2)+1,:) = fw%box(:,ng_sta(2),:)
+
+
       if(ng_sta(3)==lg_sta(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
         do iy=ng_sta(2),ng_end(2)
@@ -277,12 +305,13 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%vbox(1:3,ix,iy,iz) = ( fw%vecA_m(1,ix,iy,iz,1:3) + fw%vecA_stock(1:3,ix,iy,iz) ) * 0.5d0 ! ( A(t+dt) + A(t) )/2
+!    fw%vbox(1:3,ix,iy,iz) = ( fw%vecA_m(1,ix,iy,iz,1:3) + fw%vecA_stock(1:3,ix,iy,iz) ) * 0.5d0 ! ( A(t+dt) + A(t) )/2
+    fw%vecA(1:3,ix,iy,iz) = ( fw%vecA_m(1,ix,iy,iz,1:3) + fw%vecA_stock(1:3,ix,iy,iz) ) * 0.5d0 ! temporary 2019/8/7 SY
   end do
   end do
   end do
 
-  call comm_summation(fw%vbox,fw%vecA,3*lg_num(1)*lg_num(2)*lg_num(3),comm)
+!  call comm_summation(fw%vbox,fw%vecA,3*lg_num(1)*lg_num(2)*lg_num(3),comm)
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=mg_sta(3),mg_end(3)
@@ -306,18 +335,23 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   end do
   end do
 
-  call comm_summation(fw%lgbox1,fw%lgbox2,lg_num(1)*lg_num(2)*lg_num(3),comm)
+!  call comm_summation(fw%lgbox1,fw%lgbox2,lg_num(1)*lg_num(2)*lg_num(3),comm)
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
   do ix=mg_sta(1),mg_end(1)
-    div_Ac%f(ix,iy,iz) = fw%lgbox2(ix,iy,iz)
+!    div_Ac%f(ix,iy,iz) = fw%lgbox2(ix,iy,iz)
+    div_Ac%f(ix,iy,iz) = fw%lgbox1(ix,iy,iz) ! temporary 2019/8/7 SY
   end do
   end do
   end do
 
 !-----------------------------------------------------------------------------------------------------------------------------------
+
+  ng_sta = ng%is ! temporary 2019/8/7 SY
+  ng_end = ng%ie
+  ng_num = ng%num
 
   ! integral(A) @ z = 0 (bottom boundary)
   wrk = 0d0
@@ -382,7 +416,7 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   ! 10-12: A_tot @ z=a_z
   ! 13-15: A_ext
   ! 16-18: current
-  if(comm_is_root(nproc_id_global)) write(777,'(f14.8, 25e17.8)') &
+  if(comm_is_root(nproc_id_global)) write(777,'(99(1X,E23.15E3))') &
   dble(itt)*dt*2.41888d-2,fw%E_electron,Energy_em,Energy_joule,fw%Energy_poynting,out_Ab1,out_Ab2,out_Aext,out_curr
 
 ! for spatial distribution of excitation energy
@@ -406,6 +440,10 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
+
+  ng_sta = lg%is ! temporary 2019/8/7 SY
+  ng_end = lg%ie
+  ng_num = lg%num
 
   ! stock vecA
 
