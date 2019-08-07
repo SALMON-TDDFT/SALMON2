@@ -145,7 +145,7 @@ if(isequential==1)then
     case(0)
       idw_array(2)=comm_proc_null
     case(3)
-      idw_array(2)=nproc_id_h-nproc_Mxin_mul-1+nproc_Mxin_mul*nproc_Mxin_s_dm(1)+nproc_Mxin(1)
+      idw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm+nproc_Mxin_s_dm(1)-1
     end select
   else if(imrs(1)==0) then
     idw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm+nproc_Mxin_s_dm(1)-1
@@ -154,7 +154,12 @@ if(isequential==1)then
   end if
 else if(isequential==2)then
   if(imr(1)==0.and.imrs(1)==0) then
-    idw_array(2)=comm_proc_null
+    select case(iperiodic)
+    case(0)
+      idw_array(2)=comm_proc_null
+    case(3)
+      idw_array(2)=nproc_id_h-nproc_Mxin_mul-1+nproc_Mxin_mul*nproc_Mxin_s_dm(1)+nproc_Mxin(1)
+    end select
   else if(imrs(1)==0) then
     idw_array(2)=nproc_id_h-nproc_Mxin_mul-1+nproc_Mxin_mul*nproc_Mxin_s_dm(1)
   else
@@ -238,7 +243,13 @@ if(isequential==1)then
   end if
 else if(isequential==2)then
   if(imr(2)==0.and.imrs(2)==0) then
-    jdw_array(2)=comm_proc_null
+    select case(iperiodic)
+    case(0)
+      jdw_array(2)=comm_proc_null
+    case(3)
+      jdw_array(2)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
+            -nproc_Mxin(1)+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)+nproc_Mxin(1)*nproc_Mxin(2)
+    end select
   else if(imrs(2)==0) then
     jdw_array(2)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
               -nproc_Mxin(1)+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
