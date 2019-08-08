@@ -1495,7 +1495,7 @@ subroutine eh_prep_GCEED(fs,fw)
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
   integer                           :: neig_ng_eh(1:3,1:2)
-  integer                           :: id_tmp,ii
+  integer                           :: ii
   
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
@@ -1526,16 +1526,9 @@ subroutine eh_prep_GCEED(fs,fw)
   
   !set sendrecv environment
   call init_updown
-  if (iperiodic==0) then
-    id_tmp=2;
-  elseif (iperiodic==3) then
-    !This process is temporal. 
-    !With bug-fixing init_updown for iperiodic=3 and ob=1, this process will be removed.
-    id_tmp=1;
-  end if
-  neig_ng_eh(1,1)=iup_array(id_tmp); neig_ng_eh(1,2)=idw_array(id_tmp);
-  neig_ng_eh(2,1)=jup_array(id_tmp); neig_ng_eh(2,2)=jdw_array(id_tmp);
-  neig_ng_eh(3,1)=kup_array(id_tmp); neig_ng_eh(3,2)=kdw_array(id_tmp);
+  neig_ng_eh(1,1)=iup_array(2); neig_ng_eh(1,2)=idw_array(2);
+  neig_ng_eh(2,1)=jup_array(2); neig_ng_eh(2,2)=jdw_array(2);
+  neig_ng_eh(3,1)=kup_array(2); neig_ng_eh(3,2)=kdw_array(2);
   !This process about ng is temporal. 
   !With modifying set_ng to be applied to arbitrary Nd, this process will be removed.
   fs%ng%is_overlap(1:3)=fs%ng%is(1:3)-fw%Nd
