@@ -23,6 +23,7 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   use sendrecv_grid, only: update_overlap_real8
   use salmon_parallel, only: nproc_id_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation
+  use inputoutput, only: t_unit_time
   implicit none
   type(s_rgrid) ,intent(in) :: lg,mg,ng
   real(8)       ,intent(in) :: hgs(3)
@@ -377,17 +378,8 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 !  Energy_joule = Energy_joule + dt*e_joule
   fw%Energy_poynting = fw%Energy_poynting + dt*e_poynting
 
-  !     1: time (fs)
-  !     2: Electron total energy
-  !     3: Electro-Magnetic energy
-  !     4: Joule dissipated energy
-  !   5-6: Poynting energy
-  !   7-9: A_tot @ z=0
-  ! 10-12: A_tot @ z=a_z
-  ! 13-15: A_ext
-  ! 16-18: current
-  if(comm_is_root(nproc_id_global)) write(777,'(99(1X,E23.15E3))') &
-  dble(itt)*dt*2.41888d-2,fw%E_electron,Energy_em,Energy_joule,fw%Energy_poynting,out_Ab1,out_Ab2,out_Aext,out_curr
+  if(comm_is_root(nproc_id_global)) write(fw%fh_rt_micro,'(99(1X,E23.15E3))') &
+  dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,out_curr,fw%E_electron,fw%Energy_poynting,Energy_em,Energy_joule
 
 ! for spatial distribution of excitation energy
   coef = Hgs(1)*Hgs(2)
@@ -400,13 +392,13 @@ subroutine coulomb_calc(lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 
 ! for the vector potential Ax(z,t)
   do iz=lg_sta(3),lg_end(3)
-    fw%Ax_zt(iz) = sum( fw%vecA(1,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),iz) )/(lg_num(1)*lg_num(2))
+    fw%Ac_zt(:,iz) = sum( fw%vecA(:,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),iz) )/(lg_num(1)*lg_num(2))
   end do
   if(comm_is_root(nproc_id_global)) then
     do iz=lg_sta(3),lg_end(3)
-      write(333,fmt='(25e17.8)',advance='no') fw%Ax_zt(iz)
+      write(fw%fh_Ac_zt,fmt='(99(1X,E23.15E3))',advance='no') dble(iz)*hgs(3),fw%Ac_zt(1,iz),fw%Ac_zt(2,iz),fw%Ac_zt(3,iz)
     end do
-    write(333,'()')
+    write(fw%fh_Ac_zt,'()')
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------

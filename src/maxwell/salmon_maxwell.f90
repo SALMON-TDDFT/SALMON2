@@ -25,11 +25,11 @@ module salmon_maxwell
     
     !coulomb
     integer :: itt
+    integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
     real(8) :: E_electron,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
-    character(100) :: file_Ax,file_777,file_excitation
     real(8),allocatable :: vecA(:,:,:,:),vecA_stock(:,:,:,:),Vh_n(:,:,:),curr1_m(:,:,:,:),vecA_m(:,:,:,:,:) &
     & ,vecA_boundary_bottom(:,:,:),vecA_boundary_bottom_old(:,:,:),vecA_boundary_top(:,:,:),vecA_boundary_top_old(:,:,:) &
-    & ,integral_poynting(:),Ax_zt(:)
+    & ,integral_poynting(:),Ac_zt(:,:)
     real(8),allocatable :: box(:,:,:),grad_Vh(:,:,:,:),gradient_V(:,:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:),integral_poynting_tmp(:),integral_poynting_tmp2(:) &
     & ,vecA_ext(:,:,:,:),vecA_ext_old(:,:,:,:)
