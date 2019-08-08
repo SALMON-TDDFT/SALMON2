@@ -131,10 +131,6 @@ allocate (lap_wk_s_h(ng_sta(1):ng_end(1),   &
 allocate (wkbound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh) )
 allocate (wk2bound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh) )
 
-if(icalcforce==1)then
-  allocate(rforce(3,MI))
-end if
-
 if(iSCFRT==1.and.icalcforce==1)then
   select case(iperiodic)
   case(0)
