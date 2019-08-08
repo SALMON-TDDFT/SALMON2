@@ -276,7 +276,7 @@ contains
 
         if(info%if_divide_rspace) then
           call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
-                                             ,uVpsibox2(:,ispin,io,ik,im))
+                                             ,uVpsibox2(ispin,io,ik,im,:))
         else
           call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
@@ -379,7 +379,7 @@ contains
 
         if(info%if_divide_rspace) then
           call calc_current_nonlocal_rdivided(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
-                                             ,uVpsibox2(:,ispin,io,ik,im))
+                                             ,uVpsibox2(ispin,io,ik,im,:))
         else
           call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
