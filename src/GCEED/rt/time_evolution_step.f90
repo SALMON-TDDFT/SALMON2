@@ -18,7 +18,7 @@
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 &   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
-&   ext,fdtd_work)
+&   j_e,fdtd_work)
   use structures
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -53,7 +53,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
   type(s_dmatrix),intent(inout) :: dmat
-  type(s_dft_external) :: ext
+  type(s_vector) :: j_e ! microscopic electron number current density
   type(ls_fdtd_work) :: fdtd_work
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
@@ -77,7 +77,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   idensity=0
   idiffDensity=1
   ielf=2
-  if_use_dmat = ext%if_microscopic ! .or. if_metaGGA ! (future work)
+  if_use_dmat = (use_singlescale=='y') ! .or. if_metaGGA ! (future work)
 
   ! for calc_total_energy_periodic
   rion_update = check_rion_update() .or. (itt == Miter_rt+1)
@@ -105,12 +105,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
       end do
     end if
   case(3)
-    call calc_vecAc(ext%vec_Ac,1)
-    if(ext%if_microscopic) then
-      call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ext%Ac_micro,ppg)
+    if(use_singlescale=='y') then
+      call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
     else
+      call calc_vecAc(system%vec_Ac,1)
       do ik=info%ik_s,info%ik_e
-        stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik) + ext%vec_Ac(1:3)
+        stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
       end do
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
     end if
@@ -130,7 +130,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   if(propagator=='etrs')then
     if(iobnum.ge.1)then
     ! spsi_in --> tpsi, (spsi_out = working array)
-      call taylor(mg,nspin,info,stencil,srg,spsi_in,tpsi,spsi_out,ppg,V_local,zc,ext)
+      call taylor(mg,system,info,stencil,srg,spsi_in,tpsi,spsi_out,ppg,V_local,zc)
     end if
 
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
@@ -164,12 +164,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
         end do
       end if
     case(3)
-      call calc_vecAc(ext%vec_Ac,4)
-      if(ext%if_microscopic) then
-        call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ext%Ac_micro,ppg)
+      if(use_singlescale=='y') then
+        call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
       else
+        call calc_vecAc(system%vec_Ac,4)
         do ik=info%ik_s,info%ik_e
-          stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik) + ext%vec_Ac(1:3)
+          stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
         end do
         call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
       end if
@@ -177,14 +177,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
     if(iobnum.ge.1)then
     ! tpsi --> spsi_out (spsi_in = working array)
-      call taylor(mg,nspin,info,stencil,srg,tpsi,spsi_out,spsi_in,ppg,V_local,zc,ext)
+      call taylor(mg,system,info,stencil,srg,tpsi,spsi_out,spsi_in,ppg,V_local,zc)
     end if
 
   else 
 
     if(iobnum.ge.1)then
     ! spsi_in --> spsi_out (tpsi = working array)
-      call taylor(mg,nspin,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,zc,ext)
+      call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,zc)
     end if
     
   end if
@@ -289,11 +289,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
     Etot = energy%E_tot
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
-    if(ext%if_microscopic) then
-      call calc_microscopic_current(nspin,mg,stencil,info,spsi_out,dmat,ext%j_e)
+    if(use_singlescale=='y') then
+      call calc_microscopic_current(nspin,mg,stencil,info,spsi_out,dmat,j_e)
       fdtd_work%itt = itt
       fdtd_work%E_electron = energy%E_tot
-      call coulomb_calc(lg,mg,ng,system%hgs,srho,sVh,ext%j_e,srg_ng,ext%Ac_micro,ext%div_Ac,fdtd_work)
+      call coulomb_calc(lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,fdtd_work)
     end if
 
   end select

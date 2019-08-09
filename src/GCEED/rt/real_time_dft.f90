@@ -494,7 +494,7 @@ type(s_reciprocal_grid) :: fg
 type(s_md) :: md
 type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
-type(s_dft_external) :: ext
+type(s_vector) :: j_e ! microscopic electron number current density
 type(ls_fdtd_work) :: fdtd_work
 
 complex(8),parameter :: zi=(0.d0,1.d0)
@@ -906,13 +906,11 @@ if(iperiodic==3) call calcAext
 if(iflag_md==1) call init_md(system,md)
 
 ! single-scale Maxwell-TDDFT
-ext%if_microscopic = .false.
 if(use_singlescale=='y') then
   if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
-  ext%if_microscopic = .true.
-  call allocate_vector(mg,ext%j_e)
-  call allocate_scalar(mg,ext%div_Ac)
-  call allocate_vector(mg,ext%Ac_micro)
+  call allocate_vector(mg,j_e)
+  call allocate_scalar(mg,system%div_Ac)
+  call allocate_vector(mg,system%Ac_micro)
   do ik=info%ik_s,info%ik_e
     stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik)
   end do
@@ -953,11 +951,11 @@ TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,stencil &
      & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,ext,fdtd_work)
+     & ,j_e,fdtd_work)
   else
     call time_evolution_step(lg,mg,ng,system,info,stencil &
      & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,ext,fdtd_work)
+     & ,j_e,fdtd_work)
   end if
 end do TE
 call timer_end(LOG_RT_ITERATION)

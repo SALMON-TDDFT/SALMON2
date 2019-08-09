@@ -73,6 +73,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
   type(s_orbital)  :: shtpsi
   type(s_scalar),allocatable :: v(:)
   complex(8),parameter :: zi=(0.d0,1.d0)
+  type(s_dft_system) :: system_spin1 ! temporary
   
   call timer_begin(LOG_DIAG_TOTAL)
   
@@ -87,6 +88,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
   allocate(stencil%vec_kAc(3,1:1))
 
   nspin_1=1
+  system_spin1%nspin = 1
   allocate(v(nspin_1))
   allocate(v(nspin_1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   
@@ -183,7 +185,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
           end do
           end do
           end do
-          call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
+          call hpsi(stpsi,shtpsi,info_ob,mg,v,system_spin1,stencil,srg_ob_1,ppg)
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)

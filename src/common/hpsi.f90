@@ -21,25 +21,24 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi,ext)
+SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use structures
   use stencil_sub
   use pseudo_pt_sub
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use timer
   implicit none
-  integer        ,intent(in) :: Nspin
+  type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
-  type(s_scalar) ,intent(in) :: V_local(Nspin)
+  type(s_scalar) ,intent(in) :: V_local(system%Nspin)
   type(s_stencil),intent(in) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg
   type(s_pp_grid),intent(in) :: ppg
   type(s_orbital)            :: tpsi,htpsi
   type(s_orbital),optional   :: ttpsi
-  type(s_dft_external),intent(in),optional :: ext
   !
-  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
+  integer :: nspin,ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
   logical :: if_kAc,if_singlescale
 
@@ -51,11 +50,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi,ext)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
+  nspin = system%nspin
   norb = Nspin* info%numo * info%numk * info%numm
   
   if_kAc = allocated(stencil%vec_kAc)
-  if_singlescale = .false.
-  if(present(ext)) if_singlescale = ext%if_microscopic
+  if_singlescale = allocated(system%Ac_micro%v)
 
   if(allocated(tpsi%rwf)) then
 
@@ -122,23 +121,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi,ext)
     ! orthogonal lattice, sigle-scale Maxwell-TDDFT
       do im=im_s,im_e
       do ik=ik_s,ik_e
-        if(if_kAc) then
-          kAc(1:3) = stencil%vec_kAc(1:3,ik)
-          k_lap0 = stencil%coef_lap0
-          k_nabt(:,1) = stencil%coef_nab(:,1)
-          k_nabt(:,2) = stencil%coef_nab(:,2)
-          k_nabt(:,3) = stencil%coef_nab(:,3)
-        else
-          k_lap0 = stencil%coef_lap0
-          k_nabt = 0d0
-        end if
-        do io=io_s,io_e
-        do ispin=1,Nspin
-          call stencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
-                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                        ,V_local(ispin)%f,ext%Ac_micro%v,ext%div_Ac%f,k_lap0,stencil%coef_lap,k_nabt,kAc)
-        end do
-        end do
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        call stencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                      ,V_local(ispin)%f,system%Ac_micro%v,system%div_Ac%f,stencil%coef_lap0 &
+                      ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
+      end do
+      end do
       end do
       end do
     else if(.not.stencil%if_orthogonal) then
@@ -234,13 +224,12 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   return
 end subroutine update_kvector_nonlocalpt
 
-subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,Ac_micro,ppg)
+subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,ppg)
   use math_constants,only : zi
   use structures
   implicit none
   integer           ,intent(in) :: ik_s,ik_e
   type(s_dft_system),intent(in) :: system
-  type(s_vector)    ,intent(in) :: Ac_micro
   type(s_pp_grid)               :: ppg
   !
   integer :: ilma,iatom,j,ik,ix,iy,iz,nj
@@ -258,7 +247,7 @@ subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,Ac_micro,ppg)
         ix = ppg%jxyz(1,j,iatom)
         iy = ppg%jxyz(2,j,iatom)
         iz = ppg%jxyz(3,j,iatom)
-        Ac = Ac + Ac_micro%v(:,ix,iy,iz)
+        Ac = Ac + system%Ac_micro%v(:,ix,iy,iz)
       end do
       Ac = Ac/dble(nj) ! Ac averaged in the cutoff radius of the atom "iatom"
       do j=1,ppg%mps(iatom)

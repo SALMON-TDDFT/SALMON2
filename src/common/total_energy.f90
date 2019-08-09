@@ -240,7 +240,7 @@ CONTAINS
     nk = system%nk
     allocate(wrk1(no,nk),wrk2(no,nk))
     wrk1 = 0d0
-    call hpsi(tpsi,htpsi,info,mg,V_local,Nspin,stencil,srg,ppg,ttpsi)
+    call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
     if(allocated(tpsi%rwf)) then
 

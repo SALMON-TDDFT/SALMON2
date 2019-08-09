@@ -75,6 +75,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
 
   integer :: mg_xs,mg_xe,mg_ys,mg_ye,mg_zs,mg_ze
   integer :: numo
+  type(s_dft_system) :: system_spin1 ! temporary
 
   mg_xs = mg%is(1) ; mg_xe = mg%ie(1)
   mg_ys = mg%is(2) ; mg_ye = mg%ie(2)
@@ -89,6 +90,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
   nspin_1=1
+  system_spin1%nspin = 1
   allocate(v(nspin_1))
   allocate(v(nspin_1)%f(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze))
 
@@ -550,7 +552,7 @@ subroutine setv(mg,vlocal,v,iob_allob,mst)
 end subroutine
 
 subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
-  use structures, only: s_rgrid,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
+  use structures
   use hpsi_sub, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
@@ -563,8 +565,10 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg
   type(s_stencil) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg_ob_1
   type(s_pp_grid) :: ppg
+  type(s_dft_system) :: system_spin1 ! temporary
+  system_spin1%nspin = nspin_1
 
-  call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
+  call hpsi(stpsi,shtpsi,info_ob,mg,v,system_spin1,stencil,srg_ob_1,ppg)
 
 end subroutine hpsi_test_diis
 
