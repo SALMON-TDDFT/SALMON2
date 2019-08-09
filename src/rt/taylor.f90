@@ -18,8 +18,8 @@ module taylor_sub
 
 contains
 
-subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
-                  ppg,V_local,zc,ext)
+subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
+                  ppg,V_local,zc)
   use inputoutput, only: n_hamil
   use structures
   use hpsi_sub
@@ -28,7 +28,7 @@ subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   implicit none
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
-  integer,intent(in)    :: nspin
+  type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_stencil),intent(in) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg
@@ -36,13 +36,13 @@ subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   type(s_orbital),intent(inout) :: tspsi_out
   type(s_orbital),intent(inout) :: sshtpsi
   type(s_pp_grid),intent(in) :: ppg
-  type(s_scalar) ,intent(in) :: V_local(nspin)
+  type(s_scalar) ,intent(in) :: V_local(system%nspin)
   complex(8),intent(in) :: zc(n_hamil)
-  type(s_dft_external),intent(in) :: ext
   integer :: nn,ix,iy,iz
-  integer :: ik,io
+  integer :: ik,io,nspin
   complex(8),parameter :: zi=(0.d0,1.d0)
   integer :: is
+  nspin = system%nspin
 
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
   do ik=info%ik_s,info%ik_e
@@ -61,7 +61,7 @@ subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
 
   do nn=1,n_hamil
     if(mod(nn,2)==1)then
-      call hpsi(tspsi_in,sshtpsi,info,mg,V_local,nspin,stencil,srg,ppg,ext=ext)
+      call hpsi(tspsi_in,sshtpsi,info,mg,V_local,system,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -78,7 +78,7 @@ subroutine taylor(mg,nspin,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
       end do
       end do
     else
-      call hpsi(sshtpsi,tspsi_in,info,mg,V_local,nspin,stencil,srg,ppg,ext=ext)
+      call hpsi(sshtpsi,tspsi_in,info,mg,V_local,system,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e

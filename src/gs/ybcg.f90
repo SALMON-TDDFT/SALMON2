@@ -69,6 +69,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   integer :: iroot
   integer :: is_sta,is_end
   character(30) :: commname
+  type(s_dft_system) :: system_spin1 ! temporary
 
   commname='nproc_group_korbital'
 
@@ -80,6 +81,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
                       mg%is_array(3):mg%ie_array(3),1,1,1,1))
 
   nspin_1=1
+  system_spin1%nspin = 1
   allocate(v(nspin_1))
   allocate(v(nspin_1)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
@@ -150,7 +152,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
       end do
       end do
  
-      call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
+      call hpsi(stpsi,shtpsi,info_ob,mg,v,system_spin1,stencil,srg_ob_1,ppg)
  
   !$OMP parallel do private(iz,iy,ix) 
       do iz=mg%is(3),mg%ie(3)
@@ -258,7 +260,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
         end do
         end do
 
-        call hpsi(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
+        call hpsi(stpsi,shtpsi,info_ob,mg,v,system_spin1,stencil,srg_ob_1,ppg)
   
   !$OMP parallel do private(iz,iy,ix) 
         do iz=mg%is(3),mg%ie(3)
