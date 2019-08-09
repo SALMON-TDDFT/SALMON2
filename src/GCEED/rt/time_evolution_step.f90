@@ -18,7 +18,7 @@
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 &   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
-&   j_e,fdtd_work)
+&   j_e,singlescale)
   use structures
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -39,7 +39,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
                     update_pseudo_rt
   use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
   use hpsi_sub, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc
-  use salmon_maxwell
+  use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -54,7 +54,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
   type(s_dmatrix),intent(inout) :: dmat
   type(s_vector) :: j_e ! microscopic electron number current density
-  type(ls_fdtd_work) :: fdtd_work
+  type(ls_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
   type(s_md) :: md
@@ -291,9 +291,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
     if(use_singlescale=='y') then
       call calc_microscopic_current(nspin,mg,stencil,info,spsi_out,dmat,j_e)
-      fdtd_work%itt = itt
-      fdtd_work%E_electron = energy%E_tot
-      call coulomb_calc(lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,fdtd_work)
+      singlescale%E_electron = energy%E_tot
+      call fdtd_singlescale(itt,lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
     end if
 
   end select

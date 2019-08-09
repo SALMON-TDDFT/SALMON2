@@ -479,7 +479,7 @@ use force_sub, only: calc_force_salmon
 use hpsi_sub, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
 use print_sub, only: write_xyz
-use salmon_maxwell
+use fdtd_coulomb_gauge, only: ls_singlescale
 implicit none
 
 type(s_rgrid) :: lg,mg,ng
@@ -495,7 +495,7 @@ type(s_md) :: md
 type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
 type(s_vector) :: j_e ! microscopic electron number current density
-type(ls_fdtd_work) :: fdtd_work
+type(ls_singlescale) :: singlescale
 
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik,n,nn
@@ -951,11 +951,11 @@ TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,stencil &
      & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,j_e,fdtd_work)
+     & ,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,stencil &
      & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,j_e,fdtd_work)
+     & ,j_e,singlescale)
   end if
 end do TE
 call timer_end(LOG_RT_ITERATION)
