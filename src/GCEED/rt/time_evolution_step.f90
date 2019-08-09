@@ -51,8 +51,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_pp_nlcc),intent(in)    :: ppn
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
-  type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin)
-  type(s_scalar), intent(in)    :: sVpsl
+  type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
   type(s_dmatrix),intent(inout) :: dmat
   type(s_dft_external) :: ext
   type(ls_fdtd_work) :: fdtd_work
@@ -125,6 +124,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   if(iflag_md==1) then
      call time_evolution_step_md_part1(system,md)
      call update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
+     sVpsl%f = Vpsl ! future work: remove Vpsl
   endif
 
   if(propagator=='etrs')then
