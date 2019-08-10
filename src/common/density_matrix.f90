@@ -539,7 +539,7 @@ contains
     type(s_orbital_parallel),intent(in) :: info
     type(s_orbital),intent(in) :: psi
     type(s_dmatrix),intent(in) :: dmat
-    type(s_vector)             :: curr
+    type(s_vector)             :: curr ! electron number current density (without rho*A/c)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
@@ -586,6 +586,7 @@ contains
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
       integer :: ik,io,ix,iy,iz
+!$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
@@ -593,6 +594,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       return
     end subroutine kvec_part
 
@@ -606,6 +608,7 @@ contains
       !
       integer :: ix,iy,iz
       complex(8) :: tmp(3)
+!$omp parallel do collapse(2) private(iz,iy,ix,tmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
       do ix=is(1),ie(1)
@@ -628,6 +631,7 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
       return
     end subroutine stencil_current
 

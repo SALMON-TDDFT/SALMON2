@@ -4,9 +4,7 @@ set(SOURCES
     weyl_init.f90
     weyl_finalize.f90
     weyl_calc.f90
-    coulomb_init.f90
-    coulomb_finalize.f90
-    coulomb_calc.f90
+    fdtd_coulomb_gauge.f90
     set_coo_em.f90
     find_point_em.f90
     eh_calc.f90
