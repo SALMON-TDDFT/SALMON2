@@ -21,7 +21,8 @@ module fdtd_coulomb_gauge
   type ls_singlescale
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
     real(8) :: E_electron,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
-    real(8),allocatable :: vec_Ac(:,:,:,:),vec_Ac_stock(:,:,:,:),Vh_n(:,:,:),curr1_m(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
+    real(8),allocatable :: vec_Ac(:,:,:,:),vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
+    & ,curr(:,:,:,:),vec_je_old(:,:,:,:),Vh_old(:,:,:) &
     & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:),vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
     & ,integral_poynting(:),Ac_zt(:,:)
     real(8),allocatable :: box(:,:,:),grad_Vh(:,:,:,:),gradient_V(:,:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
@@ -45,7 +46,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   type(s_rgrid) ,intent(in) :: lg,mg,ng
   real(8)       ,intent(in) :: hgs(3)
   type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
-  type(s_vector),intent(in) :: j_e    ! electron number current density
+  type(s_vector),intent(in) :: j_e    ! electron number current density (without rho*A/c)
   type(s_sendrecv_grid)     :: srg_ng
   type(s_vector)            :: Ac     ! A/c, A: vector potential, c: speed of light
   type(s_scalar)            :: div_Ac ! div(A/c)
@@ -58,7 +59,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 
   real(8) :: Hvol,dt_m,tm,coef,lap_A,Energy_em,Energy_joule,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2)
-  real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk4
+  real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk4,vec_je(3)
 
   comm = nproc_group_global ! for comm_summation: ng --> lg
 
@@ -87,7 +88,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
     do iz=ng_sta(3),ng_end(3)
     do iy=ng_sta(2),ng_end(2)
     do ix=ng_sta(1),ng_end(1)
-      fw%Vh_n(ix,iy,iz) = Vh%f(ix,iy,iz)
+      fw%Vh_old(ix,iy,iz) = Vh%f(ix,iy,iz)
     end do
     end do
     end do
@@ -101,7 +102,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%box(ix,iy,iz) = ( Vh%f(ix,iy,iz) - fw%Vh_n(ix,iy,iz) ) /dt ! t differential ! Vh = V_H(t), Vh_n = V_H(t-dt)
+    fw%box(ix,iy,iz) = ( Vh%f(ix,iy,iz) - fw%Vh_old(ix,iy,iz) ) /dt ! t differential ! Vh = V_H(t+dt/2), Vh_old = V_H(t-dt/2)
   end do
   end do
   end do
@@ -117,8 +118,8 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%box(ix,iy,iz) = - Vh%f(ix,iy,iz) ! Vh_wk: scalar potential, Vh: Hartree potential
-    fw%Vh_n(ix,iy,iz) = Vh%f(ix,iy,iz)  ! old hartree potential
+    fw%box(ix,iy,iz)    = - Vh%f(ix,iy,iz) ! box: scalar potential, Vh: Hartree potential
+    fw%Vh_old(ix,iy,iz) =   Vh%f(ix,iy,iz) ! old Hartree potential
   end do
   end do
   end do
@@ -133,8 +134,9 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%curr1_m(ix,iy,iz,1:3) = j_e%v(1:3,ix,iy,iz) + rho%f(ix,iy,iz) * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! j(t)
-    wrk = wrk + j_e%v(1:3,ix,iy,iz) ! definition of out_curr. j_e%v --> fw%curr1_m ?
+    vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(ix,iy,iz,1:3) )*0.5d0           ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
+    fw%curr(ix,iy,iz,1:3) = vec_je + rho%f(ix,iy,iz) * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! electron number current density
+    wrk = wrk + vec_je ! definition of out_curr. j_e%v --> fw%curr1_m ?
   end do
   end do
   end do
@@ -199,7 +201,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
                 + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
           fw%vec_Ac_m(1,ix,iy,iz,i1) = ( cspeed_au * dt_m )**2 * lap_A &
                                     + 2.d0* fw%box(ix,iy,iz) - fw%vec_Ac_m(-1,ix,iy,iz,i1) &
-                                    + dt_m**2 * ( fw%grad_Vh(i1,ix,iy,iz) - 4d0*pi * fw%curr1_m(ix,iy,iz,i1) )
+                                    + dt_m**2 * ( fw%grad_Vh(i1,ix,iy,iz) - 4d0*pi * fw%curr(ix,iy,iz,i1) )
         end do
         end do
         end do
@@ -302,7 +304,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%vbox(1:3,ix,iy,iz) = ( fw%vec_Ac_m(1,ix,iy,iz,1:3) + fw%vec_Ac_stock(1:3,ix,iy,iz) ) * 0.5d0 ! ( A(t+dt) + A(t) )/2
+    fw%vbox(1:3,ix,iy,iz) = ( fw%vec_Ac_m(1,ix,iy,iz,1:3) + fw%vec_Ac_old(1:3,ix,iy,iz) ) * 0.5d0 ! ( A(t+dt) + A(t) )/2
   end do
   end do
   end do
@@ -313,7 +315,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
   do ix=mg_sta(1),mg_end(1)
-    Ac%v(:,ix,iy,iz) = fw%vec_Ac(:,ix,iy,iz)
+    Ac%v(:,ix,iy,iz) = fw%vec_Ac(:,ix,iy,iz) ! Ac(t+dt/2)
   end do
   end do
   end do
@@ -366,7 +368,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    wrk4 = ( fw%vec_Ac_m(1,ix,iy,iz,:) - fw%vec_Ac_stock(:,ix,iy,iz) ) / dt ! (A(t+dt)-A(t))/dt
+    wrk4 = ( fw%vec_Ac_m(1,ix,iy,iz,:) - fw%vec_Ac_old(:,ix,iy,iz) ) / dt ! (A(t+dt)-A(t))/dt
     wrk  = - fw%gradient_V(:,ix,iy,iz) - wrk4    ! E
     wrk2 = cspeed_au * fw%rotation_A(:,ix,iy,iz) ! B
     fw%poynting_vector(:,ix,iy,iz) = coef * ( lcs(:,1,2) * wrk(1) * wrk2(2) + lcs(:,1,3) * wrk(1) * wrk2(3) &
@@ -419,15 +421,14 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
-  ! stock vec_Ac
+  ! stock vec_Ac & j_e
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%vec_Ac_stock(1,ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,1) ! A(t+dt) --> A(t)
-    fw%vec_Ac_stock(2,ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,2)
-    fw%vec_Ac_stock(3,ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,3)
+    fw%vec_Ac_old(1:3,ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,1:3) ! A(t+dt) --> A(t)
+    fw%vec_je_old(ix,iy,iz,1:3) = j_e%v(1:3,ix,iy,iz)
   end do
   end do
   end do
@@ -535,10 +536,11 @@ contains
       end do
     end do
 
-    allocate( fw%vec_Ac(3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )
-    allocate( fw%vec_Ac_stock(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-    allocate( fw%Vh_n      (  ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-    allocate( fw%curr1_m   (  ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),3))
+    allocate( fw%vec_Ac    (3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)))
+    allocate( fw%vec_Ac_old(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
+    allocate( fw%Vh_old      (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
+    allocate( fw%curr        (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),3))
+    allocate( fw%vec_je_old  (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),3))
 
   !1st element: time step (-1->m-1, 0->m, 1->m+1)
   !5th element: components of A vector (1->Ax, 2->Ay, 3->Az)
@@ -552,13 +554,15 @@ contains
     allocate(fw%integral_poynting(lg_sta(3):lg_end(3)))
 
     fw%vec_Ac = 0d0
-    fw%vec_Ac_stock = 0d0
+    fw%vec_Ac_old = 0d0
     fw%vec_Ac_m = 0d0
     fw%vec_Ac_boundary_bottom = 0d0
     fw%vec_Ac_boundary_bottom_old = 0d0
     fw%vec_Ac_boundary_top = 0d0
     fw%vec_Ac_boundary_top_old = 0d0
     fw%integral_poynting = 0d0
+    fw%curr = 0d0
+    fw%vec_je_old = 0d0
 
   ! temporary arrays
     allocate(fw%box(ng_sta(1)-Nd:ng_end(1)+Nd,ng_sta(2)-Nd:ng_end(2)+Nd,ng_sta(3)-Nd:ng_end(3)+Nd) &
