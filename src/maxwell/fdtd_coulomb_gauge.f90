@@ -20,12 +20,13 @@ module fdtd_coulomb_gauge
   implicit none
   type ls_singlescale
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
-    real(8) :: E_electron,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
+    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
     real(8),allocatable :: vec_Ac(:,:,:,:),vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
-    & ,curr(:,:,:,:),vec_je_old(:,:,:,:),Vh_old(:,:,:) &
+    & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
+    & ,grad_dVh_dt(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
     & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:),vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
     & ,integral_poynting(:),Ac_zt(:,:)
-    real(8),allocatable :: box(:,:,:),grad_Vh(:,:,:,:),gradient_V(:,:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
+    real(8),allocatable :: box(:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:),integral_poynting_tmp(:),integral_poynting_tmp2(:) &
     & ,vec_Ac_ext(:,:,:,:),vec_Ac_ext_old(:,:,:,:)
   end type ls_singlescale
@@ -57,9 +58,9 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   integer,dimension(3) :: ng_sta,ng_end,ng_num,mg_sta,mg_end,mg_num,lg_sta,lg_end,lg_num
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3),comm
 
-  real(8) :: Hvol,dt_m,tm,coef,lap_A,Energy_em,Energy_joule,diff_A,coef2 &
-  & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2)
-  real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk4,vec_je(3)
+  real(8) :: Hvol,dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
+  & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
+  real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
 
   comm = nproc_group_global ! for comm_summation: ng --> lg
 
@@ -85,63 +86,53 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 
   if(.not.allocated(fw%vec_Ac)) then
     call init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
+    fw%box = 0d0
+  !$OMP parallel do collapse(2) private(ix,iy,iz)
     do iz=ng_sta(3),ng_end(3)
     do iy=ng_sta(2),ng_end(2)
     do ix=ng_sta(1),ng_end(1)
-      fw%Vh_old(ix,iy,iz) = Vh%f(ix,iy,iz)
+      fw%box(ix,iy,iz) = Vh%f(ix,iy,iz)
+      fw%vec_je_old(1:3,ix,iy,iz) = j_e%v(1:3,ix,iy,iz)
+      fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz)
     end do
     end do
     end do
+    call update_overlap_real8(srg_ng, ng, fw%box)
+    call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh_old)
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
-! calculate grad_Vh: gradient of d(Vh)/dt (Vh: Hartree potential)
-
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    fw%box(ix,iy,iz) = ( Vh%f(ix,iy,iz) - fw%Vh_old(ix,iy,iz) ) /dt ! t differential ! Vh = V_H(t+dt/2), Vh_old = V_H(t-dt/2)
-  end do
-  end do
-  end do
-
-  call update_overlap_real8(srg_ng, ng, fw%box)
-  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh) ! grad_Vh: grad( d(Vh)/dt )
-
-!-----------------------------------------------------------------------------------------------------------------------------------
-
-! for electric field E
-
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    fw%box(ix,iy,iz)    = - Vh%f(ix,iy,iz) ! box: scalar potential, Vh: Hartree potential
-    fw%Vh_old(ix,iy,iz) =   Vh%f(ix,iy,iz) ! old Hartree potential
-  end do
-  end do
-  end do
-  call update_overlap_real8(srg_ng, ng, fw%box)
-  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%gradient_V)
-
-!-----------------------------------------------------------------------------------------------------------------------------------
-
-  fw%vbox = 0d0
+  fw%box = 0d0
   wrk = 0d0
-!$OMP parallel do collapse(2) private(ix,iy,iz) reduction(+:wrk)
+!$OMP parallel do collapse(2) private(ix,iy,iz,vec_je,rho_t) reduction(+:wrk)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(ix,iy,iz,1:3) )*0.5d0           ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
-    fw%curr(ix,iy,iz,1:3) = vec_je + rho%f(ix,iy,iz) * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! electron number current density
-    wrk = wrk + vec_je ! definition of out_curr. j_e%v --> fw%curr1_m ?
+    vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(1:3,ix,iy,iz) )*0.5d0 ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
+    rho_t  = ( rho%f(ix,iy,iz)     + fw%rho_old(ix,iy,iz)        )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
+    fw%curr(ix,iy,iz,1:3) = vec_je + rho_t * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! curr(t): electron number current density
+    wrk = wrk + vec_je ! definition of out_curr?
+
+    fw%box(ix,iy,iz) = Vh%f(ix,iy,iz) ! Vh(t+dt/2)
   end do
   end do
   end do
   wrk = wrk/dble(lg_num(1)*lg_num(2)*lg_num(3))
   call comm_summation(wrk,out_curr,3,comm)
+
+! calculate grad_dVh_dt: gradient of d(Vh)/dt (Vh: Hartree potential)
+  call update_overlap_real8(srg_ng, ng, fw%box)
+  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh) ! grad[Vh(t+dt/2)]
+
+  !$OMP parallel do collapse(2) private(ix,iy,iz)
+  do iz=ng_sta(3),ng_end(3)
+  do iy=ng_sta(2),ng_end(2)
+  do ix=ng_sta(1),ng_end(1)
+    fw%grad_dVh_dt(1:3,ix,iy,iz) = ( fw%grad_Vh(1:3,ix,iy,iz) - fw%grad_Vh_old(1:3,ix,iy,iz) ) /dt ! t differential
+  end do
+  end do
+  end do
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -193,18 +184,18 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
       end if
 
   !$OMP parallel do collapse(2) private(ix,iy,iz,lap_A)
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
-          lap_A = ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix-1,iy,iz) + fw%box(ix+1,iy,iz) ) / Hgs(1)**2 &
-                + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy-1,iz) + fw%box(ix,iy+1,iz) ) / Hgs(2)**2 &
-                + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
-          fw%vec_Ac_m(1,ix,iy,iz,i1) = ( cspeed_au * dt_m )**2 * lap_A &
-                                    + 2.d0* fw%box(ix,iy,iz) - fw%vec_Ac_m(-1,ix,iy,iz,i1) &
-                                    + dt_m**2 * ( fw%grad_Vh(i1,ix,iy,iz) - 4d0*pi * fw%curr(ix,iy,iz,i1) )
-        end do
-        end do
-        end do
+      do iz=ng_sta(3),ng_end(3)
+      do iy=ng_sta(2),ng_end(2)
+      do ix=ng_sta(1),ng_end(1)
+        lap_A = ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix-1,iy,iz) + fw%box(ix+1,iy,iz) ) / Hgs(1)**2 &
+              + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy-1,iz) + fw%box(ix,iy+1,iz) ) / Hgs(2)**2 &
+              + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
+        fw%vec_Ac_m(1,ix,iy,iz,i1) = ( cspeed_au * dt_m )**2 * lap_A &
+                                  + 2.d0* fw%box(ix,iy,iz) - fw%vec_Ac_m(-1,ix,iy,iz,i1) &
+                                  + dt_m**2 * ( fw%grad_dVh_dt(i1,ix,iy,iz) - 4d0*pi * fw%curr(ix,iy,iz,i1) )
+      end do
+      end do
+      end do
 
   !   rotation & divergence of A
       if(ii==mstep/2) then
@@ -231,36 +222,20 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 
   ! external field
     tm = ( dble(itt-1) + dble(ii-1)/dble(mstep) ) *dt
-    call pulse(tm,0d0,wrk)
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
+    call pulse(tm,0d0,   Aext0_old)
+    call pulse(tm,Hgs(3),Aext1_old)
+    call pulse(tm+dt_m,0d0,   Aext0)
+    call pulse(tm+dt_m,Hgs(3),Aext1)
+  !$OMP parallel do collapse(2) private(ix,iy)
     do iy=ng_sta(2),ng_end(2)
     do ix=ng_sta(1),ng_end(1)
-      fw%vec_Ac_ext_old(ix,iy,0,1:3) = wrk
+      fw%vec_Ac_ext_old(ix,iy,0,1:3) = Aext0_old
+      fw%vec_Ac_ext_old(ix,iy,1,1:3) = Aext1_old
+      fw%vec_Ac_ext(ix,iy,0,1:3) = Aext0
+      fw%vec_Ac_ext(ix,iy,1,1:3) = Aext1
     end do
     end do
-    call pulse(tm,Hgs(3),wrk)
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      fw%vec_Ac_ext_old(ix,iy,1,1:3) = wrk
-    end do
-    end do
-    call pulse(tm+dt_m,0d0,wrk)
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      fw%vec_Ac_ext(ix,iy,0,1:3) = wrk
-    end do
-    end do
-    call pulse(tm+dt_m,Hgs(3),wrk)
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      fw%vec_Ac_ext(ix,iy,1,1:3) = wrk
-    end do
-    end do
-
-    out_Aext = wrk
+    out_Aext = Aext1
 
   ! z axis: Mur absorbing boundary condition
     coef = ( cspeed_au * dt_m - Hgs(3) ) / ( cspeed_au * dt_m + Hgs(3) )
@@ -298,48 +273,61 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
+  coef = cspeed_au / (4d0*pi)
+  coef2 = Hvol / (8d0*pi)
+  e_em_wrk = 0d0 ! for Electro-Magnetic energy
+  e_joule_wrk = 0d0 ! for Joule dissipated power
+
+  fw%lgbox1 = 0d0
   fw%vbox = 0d0
 
-!$OMP parallel do collapse(2) private(ix,iy,iz)
+!$OMP parallel do collapse(2) private(ix,iy,iz,wrk,wrk2,wrk3,wrk4) reduction(+:e_em_wrk,e_joule_wrk)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
+
     fw%vbox(1:3,ix,iy,iz) = ( fw%vec_Ac_m(1,ix,iy,iz,1:3) + fw%vec_Ac_old(1:3,ix,iy,iz) ) * 0.5d0 ! ( A(t+dt) + A(t) )/2
+    fw%lgbox1(ix,iy,iz)   = fw%divergence_A(ix,iy,iz)
+
+    wrk4 = ( fw%vec_Ac_m(1,ix,iy,iz,:) - fw%vec_Ac_old(:,ix,iy,iz) ) / dt ! (A(t+dt)-A(t))/dt
+    wrk  = - (-1d0)*fw%grad_Vh(:,ix,iy,iz) - wrk4 ! E
+    wrk2 = cspeed_au * fw%rotation_A(:,ix,iy,iz)  ! B
+    wrk3 = - fw%curr(ix,iy,iz,1:3)                ! j
+    fw%poynting_vector(:,ix,iy,iz) = coef * ( lcs(:,1,2) * wrk(1) * wrk2(2) + lcs(:,1,3) * wrk(1) * wrk2(3) &
+                                            + lcs(:,2,1) * wrk(2) * wrk2(1) + lcs(:,2,3) * wrk(2) * wrk2(3) &
+                                            + lcs(:,3,1) * wrk(3) * wrk2(1) + lcs(:,3,2) * wrk(3) * wrk2(2) ) ! E x B
+    e_em_wrk = e_em_wrk + coef2 * ( sum(wrk**2) + sum(wrk2**2) ) ! ( E^2 + B^2 )/(8*pi)
+    e_joule_wrk = e_joule_wrk + sum(wrk3*wrk) * Hvol ! j*E
+
   end do
   end do
   end do
 
   call comm_summation(fw%vbox,fw%vec_Ac,3*lg_num(1)*lg_num(2)*lg_num(3),comm)
+  call comm_summation(fw%lgbox1,fw%lgbox2,lg_num(1)*lg_num(2)*lg_num(3),comm)
+  call comm_summation(e_em_wrk,e_em,comm)
+  call comm_summation(e_joule_wrk,e_joule,comm)
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
   do ix=mg_sta(1),mg_end(1)
     Ac%v(:,ix,iy,iz) = fw%vec_Ac(:,ix,iy,iz) ! Ac(t+dt/2)
+    div_Ac%f(ix,iy,iz) = fw%lgbox2(ix,iy,iz)
   end do
   end do
   end do
 
-!-----------------------------------------------------------------------------------------------------------------------------------
-
-  fw%lgbox1 = 0d0
+! stock old Ac, grad_Vh, j_e, & rho
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    fw%lgbox1(ix,iy,iz) = fw%divergence_A(ix,iy,iz)
-  end do
-  end do
-  end do
-
-  call comm_summation(fw%lgbox1,fw%lgbox2,lg_num(1)*lg_num(2)*lg_num(3),comm)
-
-!$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
-    div_Ac%f(ix,iy,iz) = fw%lgbox2(ix,iy,iz)
+    fw%vec_Ac_old(:,ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,1:3) ! Ac(t+dt) --> Ac(t) of next step
+    fw%grad_Vh_old(1:3,ix,iy,iz) = fw%grad_Vh(1:3,ix,iy,iz) ! grad[Vh(t-dt/2)] of next step
+    fw%vec_je_old(1:3,ix,iy,iz) = j_e%v(1:3,ix,iy,iz) ! j_e(t-dt/2) of next step
+    fw%rho_old(ix,iy,iz)        = rho%f(ix,iy,iz)     ! rho(t-dt/2) of next step
   end do
   end do
   end do
@@ -360,27 +348,6 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   wrk(3) = sum(fw%vec_Ac(3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_end(3)))
   out_Ab2 = wrk / dble(lg_num(1)*lg_num(2))
 
-  ! Electro-Magnetic energy & Joule dissipated power
-  coef = cspeed_au / (4d0*pi)
-  coef2 = Hvol / (8d0*pi)
-  e_em_wrk = 0d0
-  e_joule_wrk = 0d0
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    wrk4 = ( fw%vec_Ac_m(1,ix,iy,iz,:) - fw%vec_Ac_old(:,ix,iy,iz) ) / dt ! (A(t+dt)-A(t))/dt
-    wrk  = - fw%gradient_V(:,ix,iy,iz) - wrk4    ! E
-    wrk2 = cspeed_au * fw%rotation_A(:,ix,iy,iz) ! B
-    fw%poynting_vector(:,ix,iy,iz) = coef * ( lcs(:,1,2) * wrk(1) * wrk2(2) + lcs(:,1,3) * wrk(1) * wrk2(3) &
-                                            + lcs(:,2,1) * wrk(2) * wrk2(1) + lcs(:,2,3) * wrk(2) * wrk2(3) &
-                                            + lcs(:,3,1) * wrk(3) * wrk2(1) + lcs(:,3,2) * wrk(3) * wrk2(2) ) ! E x B
-    e_em_wrk = e_em_wrk + coef2 * ( sum(wrk**2) + sum(wrk2**2) ) ! ( E^2 + B^2 )/(8*pi)
-  end do
-  end do
-  end do
-  call comm_summation(e_em_wrk,e_em,comm)
-  call comm_summation(e_joule_wrk,e_joule,comm)
-
 ! Surface integral of the poynting vector S
   coef = Hgs(1)*Hgs(2)
   e_poynting_wrk = 0d0
@@ -393,11 +360,11 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   call comm_summation(e_poynting_wrk,e_poynting,2,comm)
 
   Energy_em = e_em
-!  Energy_joule = Energy_joule + dt*e_joule
+  fw%Energy_joule = fw%Energy_joule + dt*e_joule
   fw%Energy_poynting = fw%Energy_poynting + dt*e_poynting
 
   if(comm_is_root(nproc_id_global)) write(fw%fh_rt_micro,'(99(1X,E23.15E3))') &
-  dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,out_curr,fw%E_electron,fw%Energy_poynting,Energy_em,Energy_joule
+  dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,out_curr,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule
 
 ! for spatial distribution of excitation energy
   coef = Hgs(1)*Hgs(2)
@@ -420,18 +387,6 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
-
-  ! stock vec_Ac & j_e
-
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    fw%vec_Ac_old(1:3,ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,1:3) ! A(t+dt) --> A(t)
-    fw%vec_je_old(ix,iy,iz,1:3) = j_e%v(1:3,ix,iy,iz)
-  end do
-  end do
-  end do
 
   return
 
@@ -528,6 +483,7 @@ contains
     lg_num = lg_end - lg_sta + 1
 
     fw%Energy_poynting = 0d0
+    fw%Energy_joule = 0d0
 
     call setbn(fw%bnmat)
     do jj=1,3
@@ -536,11 +492,14 @@ contains
       end do
     end do
 
-    allocate( fw%vec_Ac    (3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)))
-    allocate( fw%vec_Ac_old(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
-    allocate( fw%Vh_old      (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
-    allocate( fw%curr        (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),3))
-    allocate( fw%vec_je_old  (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),3))
+    allocate( fw%vec_Ac     (3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )
+    allocate( fw%vec_Ac_old (3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
+    allocate( fw%curr         (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),3) )
+    allocate( fw%vec_je_old (3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
+    allocate( fw%rho_old      (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
+    allocate( fw%grad_dVh_dt(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
+    allocate( fw%grad_Vh    (3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
+    allocate( fw%grad_Vh_old(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
 
   !1st element: time step (-1->m-1, 0->m, 1->m+1)
   !5th element: components of A vector (1->Ax, 2->Ay, 3->Az)
@@ -553,21 +512,7 @@ contains
 
     allocate(fw%integral_poynting(lg_sta(3):lg_end(3)))
 
-    fw%vec_Ac = 0d0
-    fw%vec_Ac_old = 0d0
-    fw%vec_Ac_m = 0d0
-    fw%vec_Ac_boundary_bottom = 0d0
-    fw%vec_Ac_boundary_bottom_old = 0d0
-    fw%vec_Ac_boundary_top = 0d0
-    fw%vec_Ac_boundary_top_old = 0d0
-    fw%integral_poynting = 0d0
-    fw%curr = 0d0
-    fw%vec_je_old = 0d0
-
-  ! temporary arrays
     allocate(fw%box(ng_sta(1)-Nd:ng_end(1)+Nd,ng_sta(2)-Nd:ng_end(2)+Nd,ng_sta(3)-Nd:ng_end(3)+Nd) &
-          & ,fw%grad_Vh   (3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
-          & ,fw%gradient_V(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
           & ,fw%rotation_A(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
      & ,fw%poynting_vector(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
           & ,fw%divergence_A(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
@@ -579,8 +524,16 @@ contains
           & ,fw%vec_Ac_ext_old(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),0:1,1:3) &
           & ,fw%Ac_zt(3,lg_sta(3):lg_end(3)))
 
-    fw%grad_Vh = 0d0
-    fw%gradient_V = 0d0
+    fw%vec_Ac = 0d0
+    fw%vec_Ac_old = 0d0
+    fw%vec_Ac_m = 0d0
+    fw%vec_Ac_boundary_bottom = 0d0
+    fw%vec_Ac_boundary_bottom_old = 0d0
+    fw%vec_Ac_boundary_top = 0d0
+    fw%vec_Ac_boundary_top_old = 0d0
+    fw%integral_poynting = 0d0
+    fw%curr = 0d0
+    fw%vec_je_old = 0d0
 
     if(comm_is_root(nproc_id_global)) then
       write(filename,"(2A,'_rt_micro.data')") trim(directory),trim(SYSname)
