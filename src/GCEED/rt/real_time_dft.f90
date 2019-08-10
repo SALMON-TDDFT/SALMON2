@@ -914,6 +914,7 @@ if(use_singlescale=='y') then
   do ik=info%ik_s,info%ik_e
     stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik)
   end do
+  call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
 end if
 
 !-------------------------------------------------- Time evolution

@@ -224,43 +224,51 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   return
 end subroutine update_kvector_nonlocalpt
 
-subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,ppg)
+subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,n_max,system,lg,vec_Ac,ppg)
   use math_constants,only : zi
   use structures
+  use fdtd_coulomb_gauge, only: line_integral
   implicit none
-  integer           ,intent(in) :: ik_s,ik_e
+  integer           ,intent(in) :: ik_s,ik_e,n_max
   type(s_dft_system),intent(in) :: system
+  type(s_rgrid)     ,intent(in) :: lg
+  real(8)           ,intent(in) :: vec_Ac(3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   type(s_pp_grid)               :: ppg
   !
-  integer :: ilma,iatom,j,ik,ix,iy,iz,nj
-  real(8) :: r(3),r_i(3),k(3),Ac(3),integral
+  integer :: ilma,iatom,j,ik,ix,iy,iz
+  real(8) :: r1_r0(3),r1(3),r0(3),k(3),Hgs(3),integral,x,y,z
   complex(8) :: ekr
+  integer,allocatable :: index(:)
+  real(8),allocatable :: A_lerp(:,:),line(:,:),wrk(:)
+  Hgs = system%Hgs
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
-  do ik=ik_s,ik_e
-    k = system%vec_k(:,ik)
-    do ilma=1,ppg%nlma
-      iatom = ppg%ia_tbl(ilma)
-      nj = 0
-      Ac = 0d0
-      do j=1,ppg%mps(iatom)
-        nj = nj + 1
-        ix = ppg%jxyz(1,j,iatom)
-        iy = ppg%jxyz(2,j,iatom)
-        iz = ppg%jxyz(3,j,iatom)
-        Ac = Ac + system%Ac_micro%v(:,ix,iy,iz)
-      end do
-      Ac = Ac/dble(nj) ! Ac averaged in the cutoff radius of the atom "iatom"
-      do j=1,ppg%mps(iatom)
-        r(1) = ppg%rxyz(1,j,iatom)
-        r(2) = ppg%rxyz(2,j,iatom)
-        r(3) = ppg%rxyz(3,j,iatom)
-        r_i = system%rion(:,iatom)
-        integral = Ac(1)*(r(1)-r_i(1)) + Ac(2)*(r(2)-r_i(2)) + Ac(3)*(r(3)-r_i(3))
-        ekr = exp(zi*( k(1)*r(1)+k(2)*r(2)+k(3)*r(3) + integral ))
+  allocate(A_lerp(3,n_max),line(3,n_max),wrk(n_max),index(n_max))
+  do ilma=1,ppg%nlma
+    iatom = ppg%ia_tbl(ilma)
+    do j=1,ppg%mps(iatom)
+    ! C. Pickard & F. Mauri, PRL 91, 196401 (2003).
+      ix = ppg%jxyz(1,j,iatom) - lg%is(1) ! lg%is:lg%ie --> 0:ng%num-1
+      iy = ppg%jxyz(2,j,iatom) - lg%is(2)
+      iz = ppg%jxyz(3,j,iatom) - lg%is(3)
+      r1(1) = dble(ix)*hgs(1)
+      r1(2) = dble(iy)*hgs(2)
+      r1(3) = dble(iz)*hgs(3)
+      r1_r0 = ppg%rxyz(1:3,j,iatom) - system%rion(1:3,iatom)
+      r0 = r1 - r1_r0
+      ! path: r0 --> r1 = (ix*hgs(1),iy*hgs(2),iz*hgs(3))
+      call line_integral(integral,r0,vec_Ac,lg%num(1),lg%num(2),lg%num(3),ix,iy,iz,Hgs(1),Hgs(2),Hgs(3) &
+            ,A_lerp,line,wrk,n_max,index)
+      x = ppg%rxyz(1,j,iatom)
+      y = ppg%rxyz(2,j,iatom)
+      z = ppg%rxyz(3,j,iatom)
+      do ik=ik_s,ik_e
+        k = system%vec_k(:,ik)
+        ekr = exp(zi*( k(1)*x+k(2)*y+k(3)*z + integral ))
         ppg%zekr_uV(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
       end do
     end do
   end do
+  deallocate(A_lerp,line,wrk,index)
   return
 end subroutine update_kvector_nonlocalpt_microAc
 

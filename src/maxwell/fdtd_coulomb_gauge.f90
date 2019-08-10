@@ -434,7 +434,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
 
   return
 
-  contains
+contains
 
 # define DX(dt) (ix+(dt)),iy,iz
 # define DY(dt) ix,(iy+(dt)),iz
@@ -613,5 +613,194 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   end subroutine init
 
 end subroutine fdtd_singlescale
+
+! line integral \int_{{\bf r}_0 \rightarrow {\bf r}_1} {\bf A}({\bf r}) \cdot d{\bf x}
+! path: r0 --> r1 = (ix1*Hx,iy1*Hy,iz1*Hz)
+subroutine line_integral(integral,r0,A,nx,ny,nz,ix1,iy1,iz1,Hx,Hy,Hz &
+                        ,A_lerp,line,wrk,n_max,index)
+  implicit none
+  integer,intent(in)  :: nx,ny,nz,ix1,iy1,iz1,n_max
+  real(8),intent(in)  :: r0(3),A(3,0:nx-1,0:ny-1,0:nz-1),Hx,Hy,Hz
+  real(8),intent(out) :: integral
+  integer             :: index(n_max)
+  real(8)             :: A_lerp(3,n_max),line(3,n_max),wrk(n_max)
+  !
+  integer :: ix,iy,iz,ix0,iy0,iz0,i,j,k,n,ixp,iyp,izp
+  real(8) :: r1(3),p(3),q(3),r(3),h(3),l(3),t
+
+# define IMOD(ix,iy,iz) modulo(ix,nx),modulo(iy,ny),modulo(iz,nz)
+
+  r1 = (/ ix1*Hx, iy1*Hy, iz1*Hz /)
+
+  ix0 = floor( r0(1)/Hx )
+  iy0 = floor( r0(2)/Hy )
+  iz0 = floor( r0(3)/Hz )
+
+  h = (/ Hx, Hy, Hz /)
+
+! trilinear interpolation @ r0
+  ix = ix0
+  iy = iy0
+  iz = iz0
+  ixp = ix + 1
+  iyp = iy + 1
+  izp = iz + 1
+  p = (/ ix*Hx, iy*Hy, iz*Hz /)
+  r = ( r0 - p )/h
+  A_lerp(:,1) = A(:,IMOD(ix,iy,iz)) * ( 1d0 - r(1) ) * ( 1d0 - r(2) ) * ( 1d0 - r(3) ) &
+              + A(:,IMOD(ixp,iy,iz)) * r(1) * ( 1d0 - r(2) ) * ( 1d0 - r(3) ) &
+              + A(:,IMOD(ix,iyp,iz)) * ( 1d0 - r(1) ) * r(2) * ( 1d0 - r(3) ) &
+              + A(:,IMOD(ix,iy,izp)) * ( 1d0 - r(1) ) * ( 1d0 - r(2) ) * r(3) &
+              + A(:,IMOD(ix,iyp,izp)) * ( 1d0 - r(1) ) * r(2) * r(3) &
+              + A(:,IMOD(ixp,iy,izp)) * r(1) * ( 1d0 - r(2) ) * r(3) &
+              + A(:,IMOD(ixp,iyp,iz)) * r(1) * r(2) * ( 1d0 - r(3) ) &
+              + A(:,IMOD(ixp,iyp,izp)) * r(1) * r(2) * r(3)
+  line(:,1) = 0d0
+  wrk(1) = 0d0
+
+! bilinear interpolation @ intersections
+  i = 1
+  do ix=min(ix0,ix1),max(ix0,ix1)
+    if(ix0==ix1) cycle
+    t = ( ix*Hx - r0(1) ) / ( r1(1) - r0(1) )
+    if(t<0d0 .or. 1d0<t) cycle
+    l = r0 + t * ( r1 - r0 )
+    iy = floor( l(2)/Hy )
+    iz = floor( l(3)/Hz )
+    iyp = iy + 1
+    izp = iz + 1
+    q = (/ ix*Hx, iy*Hy, iz*Hz /)
+    r = ( l - q )/h
+    i = i + 1
+    if(i>n_max) stop "n_max is too small"
+    A_lerp(:,i) = A(:,IMOD(ix,iy,iz)) * ( 1d0 - r(2) ) * ( 1d0 - r(3) ) &
+                + A(:,IMOD(ix,iyp,iz)) * r(2) * ( 1d0 - r(3) ) &
+                + A(:,IMOD(ix,iy,izp)) * ( 1d0 - r(2) ) * r(3) &
+                + A(:,IMOD(ix,iyp,izp)) * r(2) * r(3)
+    line(:,i) = l - r0
+    wrk(i) = line(1,i)**2 + line(2,i)**2 + line(3,i)**2
+  end do
+  do iy=min(iy0,iy1),max(iy0,iy1)
+    if(iy0==iy1) cycle
+    t = ( iy*Hy - r0(2) ) / ( r1(2) - r0(2) )
+    if(t<0d0 .or. 1d0<t) cycle
+    l = r0 + t * ( r1 - r0 )
+    ix = floor( l(1)/Hx )
+    iz = floor( l(3)/Hz )
+    ixp = ix + 1
+    izp = iz + 1
+    q = (/ ix*Hx, iy*Hy, iz*Hz /)
+    r = ( l - q )/h
+    i = i + 1
+    if(i>n_max) stop "n_max is too small"
+    A_lerp(:,i) = A(:,IMOD(ix,iy,iz)) * ( 1d0 - r(1) ) * ( 1d0 - r(3) ) &
+                + A(:,IMOD(ixp,iy,iz)) * r(1) * ( 1d0 - r(3) ) &
+                + A(:,IMOD(ix,iy,izp)) * ( 1d0 - r(1) ) * r(3) &
+                + A(:,IMOD(ixp,iy,izp)) * r(1) * r(3)
+    line(:,i) = l - r0
+    wrk(i) = line(1,i)**2 + line(2,i)**2 + line(3,i)**2
+  end do
+  do iz=min(iz0,iz1),max(iz0,iz1)
+    if(iz0==iz1) cycle
+    t = ( iz*Hz - r0(3) ) / ( r1(3) - r0(3) )
+    if(t<0d0 .or. 1d0<t) cycle
+    l = r0 + t * ( r1 - r0 )
+    ix = floor( l(1)/Hx )
+    iy = floor( l(2)/Hy )
+    ixp = ix + 1
+    iyp = iy + 1
+    q = (/ ix*Hx, iy*Hy, iz*Hz /)
+    r = ( l - q )/h
+    i = i + 1
+    if(i>n_max) stop "n_max is too small"
+    A_lerp(:,i) = A(:,IMOD(ix,iy,iz)) * ( 1d0 - r(1) ) * ( 1d0 - r(2) ) &
+                + A(:,IMOD(ixp,iy,iz)) * r(1) * ( 1d0 - r(2) ) &
+                + A(:,IMOD(ix,iyp,iz)) * ( 1d0 - r(1) ) * r(2) &
+                + A(:,IMOD(ixp,iyp,iz)) * r(1) * r(2)
+    line(:,i) = l - r0
+    wrk(i) = line(1,i)**2 + line(2,i)**2 + line(3,i)**2
+  end do
+  if(i==1) then
+    i = i + 1
+    if(i>n_max) stop "n_max is too small"
+    A_lerp(:,i) = A(:,IMOD(ix0,iy0,iz0))
+    line(:,i) = p - r0
+    wrk(i) = line(1,i)**2 + line(2,i)**2 + line(3,i)**2
+  end if
+  n = i
+
+  call heapsort(n,wrk,index)
+
+  integral = 0d0
+  do i=2,n
+    j = index(i)
+    k = index(i-1)
+    integral = integral + 0.5d0* ( A_lerp(1,j) + A_lerp(1,k) ) &
+                        * ( line(1,j) - line(1,k) ) &
+                        + 0.5d0* ( A_lerp(2,j) + A_lerp(2,k) ) &
+                        * ( line(2,j) - line(2,k) ) &
+                        + 0.5d0* ( A_lerp(3,j) + A_lerp(3,k) ) &
+                        * ( line(3,j) - line(3,k) )
+  end do
+
+  return
+contains
+
+  subroutine heapsort(n,array,index)
+    implicit none
+    integer,intent(in)    :: n
+    real(8),intent(inout) :: array(n)
+    integer,intent(out)   :: index(n)
+    !
+    integer :: i,k,j,l,m
+    real(8) :: t
+
+    if(n < 2) return
+
+    do i=1,n
+      index(i) = i
+    end do
+
+    l = n/2 + 1
+    k = n
+    do while(k /= 1)
+      if(l > 1)then
+        l = l - 1
+        t = array(l)
+        m = index(l)
+      else
+        t = array(k)
+        m = index(k)
+        array(k) = array(1)
+        index(k) = index(1)
+        k = k - 1
+        if(k == 1) then
+          array(1) = t
+          index(1) = m
+          exit
+        end if
+      end if
+      i = l
+      j = l + l
+      do while(j <= k)
+        if(j < k) then
+          if(array(j) < array(j+1)) j = j + 1
+        endif
+        if (t < array(j))then
+          array(i) = array(j)
+          index(i) = index(j)
+          i = j
+          j = j + j
+        else
+          j = k + 1
+        end if
+      end do
+      array(i) = t
+      index(i) = m
+    end do
+
+    return
+  end subroutine heapsort
+end subroutine line_integral
 
 end module fdtd_coulomb_gauge

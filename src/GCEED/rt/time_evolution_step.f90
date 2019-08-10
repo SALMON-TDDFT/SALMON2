@@ -60,7 +60,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_md) :: md
   type(s_ofile) :: ofl
 
-  integer :: ix,iy,iz,mm,nspin
+  integer :: ix,iy,iz,mm,nspin,n_max
   integer :: iatom,ik
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
@@ -105,9 +105,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
       end do
     end if
   case(3)
-    if(use_singlescale=='y') then
-      call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
-    else
+    if(use_singlescale=='n') then
       call calc_vecAc(system%vec_Ac,1)
       do ik=info%ik_s,info%ik_e
         stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
@@ -165,7 +163,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
       end if
     case(3)
       if(use_singlescale=='y') then
-        call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+        call calc_density_matrix(nspin,info,mg,srg,tpsi,dmat)
+        call calc_microscopic_current(nspin,mg,stencil,info,tpsi,dmat,j_e)
+        singlescale%E_electron = energy%E_tot
+        call fdtd_singlescale(itt+1,lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
+        n_max = int(maxval(pp%rad)/minval(system%hgs))+1
+        call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,n_max,system,lg,singlescale%vec_Ac,ppg)
       else
         call calc_vecAc(system%vec_Ac,4)
         do ik=info%ik_s,info%ik_e
@@ -293,6 +296,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
       call calc_microscopic_current(nspin,mg,stencil,info,spsi_out,dmat,j_e)
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
+      n_max = int(maxval(pp%rad)/minval(system%hgs))+1
+      call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,n_max,system,lg,singlescale%vec_Ac,ppg)
     end if
 
   end select
