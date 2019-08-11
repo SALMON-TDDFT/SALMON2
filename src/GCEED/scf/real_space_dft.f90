@@ -600,7 +600,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
-    call scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+    call scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                        cg,   &
                        info_ob,ppg,V_local,  &
                        iflag_diisjump,energy, &

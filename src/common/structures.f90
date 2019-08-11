@@ -224,6 +224,7 @@ module structures
     complex(8), allocatable :: zpk_ob(:,:,:,:)
     complex(8), allocatable :: zpko_ob(:,:,:,:)
     complex(8), allocatable :: zhwf_ob(:,:,:,:)
+    type(s_orbital) :: xk,hxk,gk,pk,pko,hwf
   end type s_cg
 
 !===================================================================================================================================
