@@ -47,6 +47,9 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
   complex(8),parameter :: zi=(0.d0,1.d0)
 
+  call timer_begin(LOG_GSCG_TOTAL)
+  call timer_begin(LOG_GSCG_INIT)
+
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 
   nspin = system%nspin
@@ -92,6 +95,9 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   call hpsi(cg%xk,cg%hxk,info,mg,vlocal,system,stencil,srg,ppg)
   call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
 
+  call timer_end(LOG_GSCG_INIT)
+
+  call timer_begin(LOG_GSCG_ITERATION)
   Iteration : do iter=1,Ncg
 
     !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
@@ -226,6 +232,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
     end do
 
   end do Iteration
+  call timer_end(LOG_GSCG_ITERATION)
 
   if(iflag.eq.1) then
     iflag=0
@@ -233,6 +240,8 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
 
   deallocate(stencil%vec_kAc) ! future work: remove this line
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV) ! future work: remove this line
+
+  call timer_end(LOG_GSCG_TOTAL)
 
   return
 contains
@@ -276,7 +285,11 @@ subroutine orthogonalization(mg,system,info,psi,gk)
           sum_obmat0(io1,io2) = sum0*system%hvol
         end do
       end do
+
+      call timer_begin(LOG_GSCG_ALLREDUCE)
       call comm_summation(sum_obmat0,sum_obmat1,system%no**2,info%icomm_ro)
+      call timer_end(LOG_GSCG_ALLREDUCE)
+
       do io1=io_s,io_e
         do io2=io_s,io1-1
 !$omp parallel do private(iz,iy,ix) collapse(2)
