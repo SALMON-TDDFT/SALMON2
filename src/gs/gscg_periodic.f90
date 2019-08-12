@@ -21,8 +21,7 @@ contains
 !=======================================================================
 !======================================= Conjugate-Gradient minimization
 
-subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,  &
-                         info_ob,ppg,vlocal)
+subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   use inputoutput, only: ncg
   use structures
   use timer
@@ -30,27 +29,21 @@ subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,
   use salmon_communication, only: comm_summation
   !$ use omp_lib
   implicit none
-  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid)     ,intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel) :: info
-  type(s_orbital),intent(inout) :: spsi
-  type(s_stencil) :: stencil
-  type(s_sendrecv_grid),intent(inout) :: srg, srg_ob_1
-  type(s_pp_grid) :: ppg
-  integer,intent(inout) :: iflag
-  integer,intent(in)    :: itotmst
-  integer,intent(in)    :: mst(2)
-  integer,intent(in)    :: ilsda
-  integer,intent(in)    :: nproc_ob
-  type(s_cg),intent(inout)       :: cg
-  type(s_orbital_parallel)       :: info_ob
-  type(s_scalar),intent(in) :: vlocal(system%nspin)
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_stencil)               :: stencil ! future work: --> intent(in)
+  type(s_pp_grid)               :: ppg ! future work: --> intent(in)
+  type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
+  type(s_orbital)               :: spsi
+  type(s_sendrecv_grid)         :: srg
+  integer                       :: iflag
+  type(s_cg)                    :: cg
+
   !
   integer,parameter :: nd=4
-  integer :: j,nspin,ik,io,io_all,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),io1,io2,ix,iy,iz
+  integer :: j,nspin,ik,io,io_all,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz
   integer :: iter
-  complex(8) :: sum0
-  complex(8) :: sum_obmat0(system%no,system%no),sum_obmat1(system%no,system%no)
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
   complex(8),parameter :: zi=(0.d0,1.d0)
 
@@ -67,10 +60,10 @@ subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,
   allocate(stencil%vec_kAc(3,ik_s:ik_e))
   do ik=ik_s,ik_e
     do j=1,3
-      stencil%vec_kAc(j,ik) = system%vec_k(j,ik)
+      stencil%vec_kAc(j,ik) = system%vec_k(j,ik) ! future work: remove this line
     end do
   end do
-  call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,ik_s,ik_e)
+  call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,ik_s,ik_e) ! future work: remove this line
 
   if(.not. allocated(cg%xk%zwf)) then
     call allocate_orbital_complex(nspin,mg,info,cg%xk)
@@ -81,12 +74,17 @@ subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,
     call allocate_orbital_complex(nspin,mg,info,cg%hwf)
   end if
 
-  !$omp parallel do private(ik,io,ispin) collapse(2)
+  !$omp parallel do private(ik,io,ispin,iz,iy,ix) collapse(6)
   do ik=ik_s,ik_e
   do io=io_s,io_e
   do ispin=1,nspin
-    cg%xk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-    & spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+    cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) = spsi%zwf(ix,iy,iz,ispin,io,ik,1)
+  end do
+  end do
+  end do
   end do
   end do
   end do
@@ -96,106 +94,82 @@ subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,
 
   Iteration : do iter=1,Ncg
 
-    !$omp parallel do private(ik,io,ispin,io_all) collapse(2)
+    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%gk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-      & cg%hxk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) - xkHxk(ispin,io_all,ik)* &
-      & cg%xk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)
+      cg%gk%zwf(ix,iy,iz,ispin,io,ik,1) = &
+      & cg%hxk%zwf(ix,iy,iz,ispin,io,ik,1) - xkHxk(ispin,io_all,ik)* cg%xk%zwf(ix,iy,iz,ispin,io,ik,1)
+    end do
+    end do
+    end do
     end do
     end do
     end do
 
-    if(nproc_ob==1)then
-      do ik=ik_s,ik_e
-      do ispin=1,nspin
-        sum_obmat0(:,:) = 0.d0
-        do io1=io_s,io_e
-          do io2=io_s,io1-1
-            sum0 = 0.d0
-  !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              sum0=sum0+conjg(spsi%zwf(ix,iy,iz,ispin,io2,ik,1))*cg%gk%zwf(ix,iy,iz,ispin,io1,ik,1)
-            end do
-            end do
-            end do
-            sum_obmat0(io1,io2) = sum0*system%hvol
-          end do
-        end do
-        call comm_summation(sum_obmat0,sum_obmat1,system%no**2,info%icomm_ro)
-        do io1=io_s,io_e
-          do io2=io_s,io1-1
-  !$omp parallel do private(iz,iy,ix) collapse(2)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              cg%gk%zwf(ix,iy,iz,ispin,io1,ik,1) = cg%gk%zwf(ix,iy,iz,ispin,io1,ik,1) &
-              & -sum_obmat1(io1,io2) * spsi%zwf(ix,iy,iz,ispin,io2,ik,1)
-            end do
-            end do
-            end do
-          end do
-        end do
-      end do
-      end do
-    else
-      stop "error nproc_ob/=1 @ gscg_periodic"
-    end if
+    call orthogonalization(mg,system,info,spsi,cg%gk)
     call inner_product(mg,system,info,cg%gk,cg%gk,sum)
 
     if(iter==1)then
-      !$omp parallel do private(ik,io,ispin) collapse(2)
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,nspin
-        cg%pk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-        & cg%gk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)
-      end do
-      end do
-      end do
+      uk = 0d0
     else
       uk=sum/gkgk
-      !$omp parallel do private(ik,io,ispin,io_all) collapse(2)
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,nspin
-        io_all = info%io_tbl(io)
-        cg%pk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-        & cg%gk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) &
-        & + uk(ispin,io_all,ik) * cg%pk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)
-      end do
-      end do
-      end do
     end if
+    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+      io_all = info%io_tbl(io)
+      cg%pk%zwf(ix,iy,iz,ispin,io,ik,1) = &
+      & cg%gk%zwf(ix,iy,iz,ispin,io,ik,1) + uk(ispin,io_all,ik) * cg%pk%zwf(ix,iy,iz,ispin,io,ik,1)
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
 
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
-    !$omp parallel do private(ik,io,ispin,io_all) collapse(2)
+    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pko%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-      & cg%pk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) &
-      & - zs(ispin,io_all,ik) *cg%xk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)
+      cg%pko%zwf(ix,iy,iz,ispin,io,ik,1) = &
+      & cg%pk%zwf(ix,iy,iz,ispin,io,ik,1) - zs(ispin,io_all,ik) *cg%xk%zwf(ix,iy,iz,ispin,io,ik,1)
+    end do
+    end do
+    end do
     end do
     end do
     end do
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
-    !$omp parallel do private(ik,io,ispin,io_all) collapse(2)
+    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pko%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-      & cg%pko%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) /sqrt(sum(ispin,io_all,ik))
+      cg%pko%zwf(ix,iy,iz,ispin,io,ik,1) = cg%pko%zwf(ix,iy,iz,ispin,io,ik,1) /sqrt(sum(ispin,io_all,ik))
+    end do
+    end do
+    end do
     end do
     end do
     end do
@@ -211,17 +185,21 @@ subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,
     cp=1.d0/sqrt(1.d0+abs(cx)**2)
     cx=cx*cp
 
-    !$omp parallel do private(ik,io,ispin,io_all) collapse(2)
+    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%xk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-      & cx(ispin,io_all,ik)* cg%xk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) &
-      & + cp(ispin,io_all,ik)* cg%pko%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)
-      cg%hxk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-      & cx(ispin,io_all,ik)* cg%hxk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) &
-      & + cp(ispin,io_all,ik)* cg%hwf%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)
+      cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) = &
+      & cx(ispin,io_all,ik)* cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) + cp(ispin,io_all,ik)* cg%pko%zwf(ix,iy,iz,ispin,io,ik,1)
+      cg%hxk%zwf(ix,iy,iz,ispin,io,ik,1) = &
+      & cx(ispin,io_all,ik)* cg%hxk%zwf(ix,iy,iz,ispin,io,ik,1) + cp(ispin,io_all,ik)* cg%hwf%zwf(ix,iy,iz,ispin,io,ik,1)
+    end do
+    end do
+    end do
     end do
     end do
     end do
@@ -229,15 +207,20 @@ subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
-    !$omp parallel do private(ik,io,ispin,io_all) collapse(2)
+    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
       if(abs(xkxk(ispin,io_all,ik))<=1.d30)then
-        spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) = &
-        & cg%xk%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) /sqrt(xkxk(ispin,io_all,ik))
+        spsi%zwf(ix,iy,iz,ispin,io,ik,1) = cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) /sqrt(xkxk(ispin,io_all,ik))
       end if
+    end do
+    end do
+    end do
     end do
     end do
     end do
@@ -248,11 +231,72 @@ subroutine gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,
     iflag=0
   end if
 
-  deallocate(stencil%vec_kAc)
-  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
+  deallocate(stencil%vec_kAc) ! future work: remove this line
+  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV) ! future work: remove this line
 
   return
 contains
+
+subroutine orthogonalization(mg,system,info,psi,gk)
+  use salmon_global, only: nproc_ob
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_orbital),intent(in) :: psi
+  type(s_orbital)            :: gk
+  !
+  integer :: nspin,ik,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,io1,io2
+  complex(8) :: sum0
+  complex(8) :: sum_obmat0(system%no,system%no),sum_obmat1(system%no,system%no)
+
+  nspin = system%nspin
+  is = mg%is
+  ie = mg%ie
+  ik_s = info%ik_s
+  ik_e = info%ik_e
+  io_s = info%io_s
+  io_e = info%io_e
+
+  if(nproc_ob==1)then
+    do ik=ik_s,ik_e
+    do ispin=1,nspin
+      sum_obmat0(:,:) = 0.d0
+      do io1=io_s,io_e
+        do io2=io_s,io1-1
+          sum0 = 0.d0
+!$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
+          do iz=is(3),ie(3)
+          do iy=is(2),ie(2)
+          do ix=is(1),ie(1)
+            sum0=sum0+conjg(psi%zwf(ix,iy,iz,ispin,io2,ik,1))*gk%zwf(ix,iy,iz,ispin,io1,ik,1)
+          end do
+          end do
+          end do
+          sum_obmat0(io1,io2) = sum0*system%hvol
+        end do
+      end do
+      call comm_summation(sum_obmat0,sum_obmat1,system%no**2,info%icomm_ro)
+      do io1=io_s,io_e
+        do io2=io_s,io1-1
+!$omp parallel do private(iz,iy,ix) collapse(2)
+          do iz=is(3),ie(3)
+          do iy=is(2),ie(2)
+          do ix=is(1),ie(1)
+            gk%zwf(ix,iy,iz,ispin,io1,ik,1) = gk%zwf(ix,iy,iz,ispin,io1,ik,1) &
+            & -sum_obmat1(io1,io2) * psi%zwf(ix,iy,iz,ispin,io2,ik,1)
+          end do
+          end do
+          end do
+        end do
+      end do
+    end do
+    end do
+  else
+    stop "error nproc_ob/=1 @ gscg_periodic"
+  end if
+
+end subroutine orthogonalization
 
 subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   !$ use omp_lib

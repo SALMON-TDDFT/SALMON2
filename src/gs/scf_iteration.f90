@@ -84,8 +84,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,srho_s,iflag,i
     case(3)
       select case(gscg)
       case('y')
-        call gscg_periodic(mg,system,info,stencil,srg,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,   &
-                           info_ob,ppg,vlocal)
+        call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
       case('n')
         call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
                            info_ob,ppg,vlocal)
