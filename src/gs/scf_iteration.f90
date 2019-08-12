@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
@@ -46,7 +46,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotm
   type(s_orbital),       intent(inout) :: spsi
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
-  type(s_sendrecv_grid), intent(inout) :: srg_ob_1
+  type(s_sendrecv_grid), intent(inout) :: srg,srg_ob_1
   type(s_pp_grid),       intent(in)    :: ppg
   integer,               intent(inout) :: iflag
   integer,               intent(in)    :: itotmst
@@ -84,8 +84,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg_ob_1,spsi,srho_s,iflag,itotm
     case(3)
       select case(gscg)
       case('y')
-        call gscg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg,   &
-                           info_ob,ppg,vlocal)
+        call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
       case('n')
         call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
                            info_ob,ppg,vlocal)
