@@ -255,11 +255,13 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   type(s_orbital),intent(in) :: psi
   type(s_orbital)            :: gk
   !
-  integer :: nspin,ik,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,io1,io2
+  integer :: nspin,no,nk,ik,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,io1,io2,io1_all,io2_all
   complex(8) :: sum0
-  complex(8) :: sum_obmat0(system%no,system%no),sum_obmat1(system%no,system%no)
+  complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: sum_obmat0,sum_obmat1
 
   nspin = system%nspin
+  no = system%no
+  nk = system%nk
   is = mg%is
   ie = mg%ie
   ik_s = info%ik_s
@@ -268,13 +270,14 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   io_e = info%io_e
 
   if(nproc_ob==1)then
+    sum_obmat0 = 0.d0
+!$omp parallel do private(ik,ispin,io1,io2,sum0,iz,iy,ix) collapse(3)
     do ik=ik_s,ik_e
     do ispin=1,nspin
-      sum_obmat0(:,:) = 0.d0
       do io1=io_s,io_e
         do io2=io_s,io1-1
           sum0 = 0.d0
-!$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
+! speed? !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
           do iz=is(3),ie(3)
           do iy=is(2),ie(2)
           do ix=is(1),ie(1)
@@ -282,22 +285,25 @@ subroutine orthogonalization(mg,system,info,psi,gk)
           end do
           end do
           end do
-          sum_obmat0(io1,io2) = sum0*system%hvol
+          sum_obmat0(io1,io2,ispin,ik) = sum0*system%hvol
         end do
       end do
-
-      call timer_begin(LOG_GSCG_ALLREDUCE)
-      call comm_summation(sum_obmat0,sum_obmat1,system%no**2,info%icomm_ro)
-      call timer_end(LOG_GSCG_ALLREDUCE)
-
+    end do
+    end do
+    call timer_begin(LOG_GSCG_ALLREDUCE)
+    call comm_summation(sum_obmat0,sum_obmat1,no**2*nspin*nk,info%icomm_rko)
+    call timer_end(LOG_GSCG_ALLREDUCE)
+ !$omp parallel do private(ik,ispin,io1,io2,iz,iy,ix) collapse(3)
+    do ik=ik_s,ik_e
+    do ispin=1,nspin
       do io1=io_s,io_e
         do io2=io_s,io1-1
-!$omp parallel do private(iz,iy,ix) collapse(2)
+! speed? !$omp parallel do private(iz,iy,ix) collapse(2)
           do iz=is(3),ie(3)
           do iy=is(2),ie(2)
           do ix=is(1),ie(1)
             gk%zwf(ix,iy,iz,ispin,io1,ik,1) = gk%zwf(ix,iy,iz,ispin,io1,ik,1) &
-            & -sum_obmat1(io1,io2) * psi%zwf(ix,iy,iz,ispin,io2,ik,1)
+            & -sum_obmat1(io1,io2,ispin,ik) * psi%zwf(ix,iy,iz,ispin,io2,ik,1)
           end do
           end do
           end do
@@ -307,6 +313,46 @@ subroutine orthogonalization(mg,system,info,psi,gk)
     end do
   else
     stop "error nproc_ob/=1 @ gscg_periodic"
+!    do is=is_sta,is_end
+!    do iob=iobsta(is),iobend(is)
+!      call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
+!      call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
+!      do job=iobsta(is),iob-1
+!        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst)
+!        call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
+!        if(icorr_job==1)then
+!   !$omp parallel do private(iz,iy,ix) collapse(2)
+!          do iz=mg%is(3),mg%ie(3)
+!          do iy=mg%is(2),mg%ie(2)
+!          do ix=mg%is(1),mg%ie(1)
+!            zmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,ik,1)
+!          end do
+!          end do
+!          end do
+!        end if
+!        call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
+!        call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
+!        sum0=0.d0
+!    !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
+!        do iz=mg%is(3),mg%ie(3)
+!        do iy=mg%is(2),mg%ie(2)
+!        do ix=mg%is(1),mg%ie(1)
+!          sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*cg%zgk_ob(ix,iy,iz,iob_myob)
+!        end do
+!        end do
+!        end do
+!        sum0=sum0*system%hvol
+!        call comm_summation(sum0,sum1,nproc_group_korbital)
+!        do iz=mg%is(3),mg%ie(3)
+!        do iy=mg%is(2),mg%ie(2)
+!        do ix=mg%is(1),mg%ie(1)
+!          cg%zgk_ob(ix,iy,iz,iob_myob)=cg%zgk_ob(ix,iy,iz,iob_myob)-sum1*zmatbox_m(ix,iy,iz)
+!        end do
+!        end do
+!        end do
+!      end do
+!    end do
+!    end do
   end if
 
 end subroutine orthogonalization
