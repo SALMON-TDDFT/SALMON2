@@ -44,39 +44,42 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   integer :: is
   nspin = system%nspin
 
-!$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
-  do ik=info%ik_s,info%ik_e
-  do io=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is_array(3),mg%ie_array(3)
-      do iy=mg%is_array(2),mg%ie_array(2)
-      do ix=mg%is_array(1),mg%ie_array(1)
-        tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_in%zwf(ix,iy,iz,is,io,ik,1)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-
   do nn=1,n_hamil
     if(mod(nn,2)==1)then
       call hpsi(tspsi_in,sshtpsi,info,mg,V_local,system,stencil,srg,ppg)
+      if (nn==1) then
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-        do is=1,nspin
-          do iz=mg%is_array(3),mg%ie_array(3)
-          do iy=mg%is_array(2),mg%ie_array(2)
-          do ix=mg%is_array(1),mg%ie_array(1)
-            tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_out%zwf(ix,iy,iz,is,io,ik,1)+ &
-                                                 zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
-          end do
-          end do
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          do is=1,nspin
+            do iz=mg%is_array(3),mg%ie_array(3)
+            do iy=mg%is_array(2),mg%ie_array(2)
+            do ix=mg%is_array(1),mg%ie_array(1)
+              tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_in%zwf(ix,iy,iz,is,io,ik,1)+ &
+                                                   zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
+            end do
+            end do
+            end do
           end do
         end do
-      end do
-      end do
+        end do
+      else
+!$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          do is=1,nspin
+            do iz=mg%is_array(3),mg%ie_array(3)
+            do iy=mg%is_array(2),mg%ie_array(2)
+            do ix=mg%is_array(1),mg%ie_array(1)
+              tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_out%zwf(ix,iy,iz,is,io,ik,1)+ &
+                                                   zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
+            end do
+            end do
+            end do
+          end do
+        end do
+        end do
+      end if
     else
       call hpsi(sshtpsi,tspsi_in,info,mg,V_local,system,stencil,srg,ppg)
 !$OMP parallel do collapse(5) private(ik,io,is,iz,iy,ix)
