@@ -86,8 +86,8 @@ else if(isequential==2)then
   end do
 end if
 
-nproc_group_kgrid = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_kgrid, nproc_id_kgrid, nproc_size_kgrid)
+info%icomm_o = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info%icomm_o, nproc_id_kgrid, nproc_size_kgrid)
 
 !new_world for comm_korbital
 if(isequential==1)then

@@ -27,14 +27,15 @@ END INTERFACE
 CONTAINS
 
 !======================================================================
-subroutine R_change_order(tpsi)
-use salmon_parallel, only: nproc_group_kgrid
+subroutine R_change_order(tpsi,info)
+use structures, only: s_orbital_parallel
 use salmon_communication, only: comm_summation
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
 
 real(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
+type(s_orbital_parallel) :: info
 
 integer :: is,iss,iobsta(2),iobend(2)
 integer :: iob,job,iob_myob,iik
@@ -76,11 +77,11 @@ do is=1,iss
       matbox1=0.d0
       call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox1(:,:,:)=tpsi(:,:,:,iob_myob,iik)
-      call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
+      call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
       matbox3=0.d0
       call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox3(:,:,:)=tpsi(:,:,:,imin_myob,iik)
-      call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
+      call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
       call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,iob_myob,iik)=matbox4(:,:,:)
       call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
@@ -96,14 +97,15 @@ return
 
 end subroutine R_change_order
 !======================================================================
-subroutine C_change_order(tpsi)
-use salmon_parallel, only: nproc_group_kgrid
+subroutine C_change_order(tpsi,info)
+use structures, only: s_orbital_parallel
 use salmon_communication, only: comm_summation
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
 
 complex(8) :: tpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end)
+type(s_orbital_parallel) :: info
 
 integer :: is,iss,iobsta(2),iobend(2)
 integer :: iob,job,iob_myob,iik
@@ -145,11 +147,11 @@ do is=1,iss
       matbox1=0.d0
       call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox1(:,:,:)=tpsi(:,:,:,iob_myob,iik)
-      call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
+      call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
       matbox3=0.d0
       call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox3(:,:,:)=tpsi(:,:,:,imin_myob,iik)
-      call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
+      call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
       call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,iob_myob,iik)=matbox4(:,:,:)
       call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)

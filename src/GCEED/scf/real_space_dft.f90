@@ -43,7 +43,7 @@ use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
                            nproc_group_rho, &
-                           nproc_group_kgrid, nproc_group_k, nproc_group_grid
+                           nproc_group_k, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -228,7 +228,6 @@ if(iopt==1)then
 
   info%if_divide_rspace = nproc_mxin_mul.ne.1
   info%icomm_k    = nproc_group_grid
-  info%icomm_o    = nproc_group_kgrid
   info%icomm_ko   = nproc_group_rho
   info%icomm_ro   = nproc_group_k
   info%icomm_rko  = nproc_group_global
@@ -651,7 +650,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_CHANGE_ORDER)
     if(iperiodic==0)then  
-      call change_order(psi)
+      call change_order(psi,info)
     end if
     call timer_end(LOG_CALC_CHANGE_ORDER)
 
@@ -953,7 +952,7 @@ end if
 if(out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
-  call calcELF(srho)
+  call calcELF(info,srho,0)
   call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
   deallocate(elf)
 end if

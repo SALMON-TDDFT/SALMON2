@@ -251,7 +251,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
-    call projection(mg,zpsi_out)
+    call projection(mg,info,zpsi_out)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
@@ -365,7 +365,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   end if
   if(out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calcELF(srho)
+      call calcELF(info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
   end if

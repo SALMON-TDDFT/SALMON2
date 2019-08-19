@@ -23,7 +23,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
                                   info_ob,ppg,vlocal)
 
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_k, nproc_group_kgrid
+  use salmon_parallel, only: nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
   use timer
   use hpsi_sub
@@ -211,7 +211,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
           end do
         end if
         call calc_iroot(jj,iroot,ilsda,nproc_ob,itotmst,mst)
-        call comm_bcast(htpsi,nproc_group_kgrid,iroot)
+        call comm_bcast(htpsi,info%icomm_o,iroot)
         do ii=1,iobnum
           call calc_allob(ii,i_allob,itotmst,mst,iobnum)
           if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then
@@ -274,7 +274,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
           end do
         end if
         call calc_iroot(jj,iroot,ilsda,nproc_ob,itotmst,mst)
-        call comm_bcast(htpsi,nproc_group_kgrid,iroot)
+        call comm_bcast(htpsi,info%icomm_o,iroot)
         do ii=1,iobnum
           call calc_allob(ii,i_allob,itotmst,mst,iobnum)
           if(i_allob>=iobsta(is).and.i_allob<=iobend(is))then

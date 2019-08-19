@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine projection(mg,tzpsi)
-use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_id_global
+subroutine projection(mg,info,tzpsi)
+use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_allob_sub
 use calc_iroot_sub
@@ -23,9 +23,10 @@ use check_corrkob_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
-use structures, only: s_rgrid
+use structures, only: s_rgrid, s_orbital_parallel
 implicit none
 type(s_rgrid),intent(in) :: mg
+type(s_orbital_parallel) :: info
 complex(8) :: tzpsi(mg%is_array(1):mg%ie_array(1) &
 &                  ,mg%is_array(2):mg%ie_array(2) &
 &                  ,mg%is_array(3):mg%ie_array(3), 1:iobnum, k_sta:k_end)
@@ -68,7 +69,7 @@ do iob=1,itotMST0
     end do
   end if
   call calc_iroot(iob,iroot,ilsda,nproc_ob,itotmst,mst)
-  call comm_bcast(cmatbox_m,nproc_group_kgrid,iroot)
+  call comm_bcast(cmatbox_m,info%icomm_o,iroot)
   do job=1,iobmax
     cbox=0.d0
 !$OMP parallel do reduction(+:cbox) private(iz,iy,ix)
