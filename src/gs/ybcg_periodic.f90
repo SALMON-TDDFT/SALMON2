@@ -25,7 +25,6 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
                          info_ob,ppg,vlocal)
   use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_kgrid
   use salmon_communication, only: comm_bcast, comm_summation
   use misc_routines, only: get_wtime
   use hpsi_sub
@@ -195,7 +194,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
           end do
         end if
         call calc_iroot(q,iroot,ilsda,nproc_ob,itotmst,mst)
-        call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
+        call comm_bcast(zmatbox_m,info%icomm_o,iroot)
         sum0=0.d0
         if(icorr_p==1)then
   !$omp parallel do reduction(+ : sum0)
@@ -268,9 +267,9 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
     end if
   
     call calc_iroot(p,iroot,ilsda,nproc_ob,itotmst,mst)
-    call comm_bcast(xk,nproc_group_kgrid,iroot)
-    call comm_bcast(hxk,nproc_group_kgrid,iroot)
-    call comm_bcast(txk,nproc_group_kgrid,iroot)
+    call comm_bcast(xk,info%icomm_o,iroot)
+    call comm_bcast(hxk,info%icomm_o,iroot)
+    call comm_bcast(txk,info%icomm_o,iroot)
   
     call inner_product4(mg,info,xk,hxk,xkhxk,system%hvol)
     call inner_product4(mg,info,xk,txk,xktxk,system%hvol)
@@ -322,7 +321,7 @@ subroutine dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,
             end do
           end if
           call calc_iroot(q,iroot,ilsda,nproc_ob,itotmst,mst)
-          call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
+          call comm_bcast(zmatbox_m,info%icomm_o,iroot)
           sum0=0.d0
   !$omp parallel do reduction(+ : sum0)
           do iz=mg%is(3),mg%ie(3)

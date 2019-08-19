@@ -13,9 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcELF(srho,filename_ELF,ttmp)
+subroutine calcELF(info,srho,ttmp)
 use structures
-use salmon_parallel, only: nproc_group_global,nproc_group_kgrid
+use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
 use calc_allob_sub
@@ -24,8 +24,8 @@ use gradient_sub
 use allocate_mat_sub
 use new_world_sub
 implicit none
+type(s_orbital_parallel),intent(in) :: info
 type(s_scalar),intent(in) :: srho
-
 integer :: iob,ix,iy,iz
 integer :: p_allob
 integer :: ttmp
@@ -63,7 +63,6 @@ real(8) :: elfcuni(mg_sta(1):mg_end(1),   &
 real(8) :: rho_half(mg_sta(1):mg_end(1),   &
                     mg_sta(2):mg_end(2),   &
                     mg_sta(3):mg_end(3))
-character(50) :: filename_ELF
 
 
 
@@ -131,7 +130,7 @@ if(iSCFRT==1)then
 
   end if
 
-  call comm_summation(mrelftau,elftau,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
+  call comm_summation(mrelftau,elftau,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
 
 
   call calc_gradient(rho_half(:,:,:),gradrho(:,:,:,:))
@@ -220,8 +219,8 @@ else
 
 
   
-  call comm_summation(mrelftau,elftau,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
-  call comm_summation(mrcurden,curden,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_kgrid)
+  call comm_summation(mrelftau,elftau,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
+  call comm_summation(mrcurden,curden,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
 
   
 

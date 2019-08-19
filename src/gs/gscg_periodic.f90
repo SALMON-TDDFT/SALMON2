@@ -331,7 +331,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
 !          end do
 !        end if
 !        call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
-!        call comm_bcast(zmatbox_m,nproc_group_kgrid,iroot)
+!        call comm_bcast(zmatbox_m,info%icomm_o,iroot)
 !        sum0=0.d0
 !    !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
 !        do iz=mg%is(3),mg%ie(3)

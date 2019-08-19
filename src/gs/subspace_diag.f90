@@ -22,7 +22,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iob
                 info_ob,ppg,vlocal)
 
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_kgrid, nproc_group_global
+  use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation, comm_bcast
   use hpsi_sub
   use calc_allob_sub
@@ -173,7 +173,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iob
           end do
         end if
         call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
-        call comm_bcast(htpsi,nproc_group_kgrid,iroot)
+        call comm_bcast(htpsi,info%icomm_o,iroot)
         
         do iob=1,iobnum
           call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
@@ -225,7 +225,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iob
           end do
         end if
         call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
-        call comm_bcast(rmatbox_m,nproc_group_kgrid,iroot)
+        call comm_bcast(rmatbox_m,info%icomm_o,iroot)
         do iob=1,iobnum
           call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
           if(iob_allob>=iobsta(is).and.iob_allob<=iobend(is))then
