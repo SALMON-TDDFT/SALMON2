@@ -23,7 +23,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
                                   info_ob,ppg,vlocal)
 
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_korbital, nproc_group_k, nproc_group_kgrid
+  use salmon_parallel, only: nproc_group_k, nproc_group_kgrid
   use salmon_communication, only: comm_bcast, comm_summation
   use timer
   use hpsi_sub
@@ -303,7 +303,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
           end do
           end do
           end do
-          call comm_summation(rbox,rbox1,nproc_group_korbital)
+          call comm_summation(rbox,rbox1,info%icomm_r)
   !$OMP parallel do private(iz,iy,ix) 
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)

@@ -14,13 +14,13 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine inner_product4(mg,zmatbox1,zmatbox2,zbox2,hvol)
-  use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_group_korbital
+subroutine inner_product4(mg,info,zmatbox1,zmatbox2,zbox2,hvol)
+  use structures, only: s_rgrid, s_orbital_parallel
   use salmon_communication, only: comm_summation
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
   complex(8),intent(in)  :: zmatbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8),intent(in)  :: zmatbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8),intent(out) :: zbox2
@@ -38,6 +38,6 @@ subroutine inner_product4(mg,zmatbox1,zmatbox2,zbox2,hvol)
   end do
   end do
   zbox=zbox*hvol
-  call comm_summation(zbox,zbox2,nproc_group_korbital)
+  call comm_summation(zbox,zbox2,info%icomm_r)
   
 end subroutine inner_product4

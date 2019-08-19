@@ -36,12 +36,14 @@ integer :: i11,i12,i13,i14,i15
 CONTAINS
 
 !=======================================================================
-subroutine make_new_world
+subroutine make_new_world(info)
+use structures, only: s_orbital_parallel
 use salmon_parallel
 use salmon_communication, only: comm_create_group, comm_get_groupinfo, &
                                 comm_summation
 use misc_routines, only: get_wtime
 implicit none
+type(s_orbital_parallel),intent(inout) :: info
 integer :: ii
 integer :: i1,i2,i3,i4,i5
 integer :: ix,iy,iz
@@ -122,8 +124,8 @@ else if(isequential==2)then
   end do
 end if
 
-nproc_group_korbital = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_korbital, nproc_id_korbital, nproc_size_korbital)
+info%icomm_r = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info%icomm_r, nproc_id_korbital, nproc_size_korbital)
 
 !new_world for comm_rho
 if(isequential==1)then

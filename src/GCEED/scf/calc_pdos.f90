@@ -13,8 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_pdos
-use salmon_parallel, only: nproc_id_global, nproc_group_grid, nproc_group_korbital
+subroutine calc_pdos(info)
+use structures, only: s_orbital_parallel
+use salmon_parallel, only: nproc_id_global, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: out_dos_start, out_dos_end, out_dos_method, &
                        out_dos_smearing, iout_dos_nenergy, out_dos_fshift, uenergy_from_au
@@ -24,6 +25,7 @@ use scf_data
 use allocate_psl_sub
 use new_world_sub
 implicit none
+type(s_orbital_parallel),intent(in) :: info
 integer :: iob,iobmax,iob_allob,iatom,L,ix,iy,iz,iik
 integer :: ikoa
 integer :: intr
@@ -91,7 +93,7 @@ do iob=1,iobmax
       end do
     end do
   end do
-  call comm_summation(rbox_pdos,rbox_pdos2,25*MI,nproc_group_korbital) 
+  call comm_summation(rbox_pdos,rbox_pdos2,25*MI,info%icomm_r) 
   do iatom=1,MI
     ikoa=Kion(iatom)
     do L=0,Mlps(ikoa)

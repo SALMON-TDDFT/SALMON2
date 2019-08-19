@@ -162,7 +162,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,system,stencil)
+call IN_data(lg,mg,ng,info,system,stencil,cg)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then
@@ -188,7 +188,7 @@ call init_itype
 call init_sendrecv_matrix
 
 call allocate_sendrecv
-call init_persistent_requests
+call init_persistent_requests(info)
 call init_code_optimization
 
 if(ilsda==0)then
@@ -463,7 +463,7 @@ END subroutine Real_Time_DFT
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
-                           nproc_group_h, nproc_group_korbital, nproc_group_rho, &
+                           nproc_group_h, nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k, nproc_size_global, &
                            nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation
@@ -540,7 +540,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
   info%if_divide_orbit = nproc_ob.ne.1
-  info%icomm_r = nproc_group_korbital
   info%icomm_k = nproc_group_grid
   info%icomm_o = nproc_group_kgrid
   info%icomm_ko = nproc_group_rho
@@ -576,8 +575,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   neig(2, 2) = jdw_array(1)
   neig(3, 1) = kup_array(1)
   neig(3, 2) = kdw_array(1)
-  call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-    & nproc_group_korbital, neig)
+  call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
 
   neig_ng(1, 1) = iup_array(2)
   neig_ng(1, 2) = idw_array(2)

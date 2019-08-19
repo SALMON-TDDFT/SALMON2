@@ -25,7 +25,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
                 info_ob,ppg,vlocal)
   use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_grid,nproc_group_korbital
+  use salmon_parallel, only: nproc_group_grid
   use salmon_communication, only: comm_bcast,comm_summation
   use misc_routines, only: get_wtime
   use inner_product_sub
@@ -71,7 +71,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   character(30) :: commname
   type(s_dft_system) :: system_spin1 ! temporary
 
-  commname='nproc_group_korbital'
+  commname='icomm_r'
 
   allocate(stpsi%rwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
@@ -163,7 +163,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
       end do
       end do
   
-      call inner_product(mg,xk,hxk,xkhxk,commname)
+      call inner_product(mg,info,xk,hxk,xkhxk,commname)
   
       xkhxk=xkhxk*system%hvol ; xkxk=1.d0 ; Rk=xkhxk/xkxk
   
@@ -197,7 +197,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
           end do
           end do
           end do
-          call comm_summation(sum0,sum1,nproc_group_korbital)
+          call comm_summation(sum0,sum1,info%icomm_r)
           sum0=sum1*system%hvol
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
@@ -215,7 +215,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   
       if(icorr==1)then
   
-        call inner_product(mg,gk,gk,sum0,commname)
+        call inner_product(mg,info,gk,gk,sum0,commname)
         sum0=sum0*system%hvol
   
         if ( iter==1 ) then
@@ -242,13 +242,13 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
   
         xkpk=0.d0 ; pkpk=0.d0 ; pkhxk=0.d0
   
-        call inner_product(mg,xk,pk,xkpk,commname)
+        call inner_product(mg,info,xk,pk,xkpk,commname)
         xkpk = xkpk*system%hvol
   
-        call inner_product(mg,pk,pk,pkpk,commname)
+        call inner_product(mg,info,pk,pk,pkpk,commname)
         pkpk = pkpk*system%hvol
   
-        call inner_product(mg,pk,hxk,pkhxk,commname)
+        call inner_product(mg,info,pk,hxk,pkhxk,commname)
         pkhxk = pkhxk*system%hvol
   
   !$OMP parallel do private(iz,iy,ix) 
@@ -271,7 +271,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
         end do
         end do
 
-        call inner_product(mg,pk,gk,pkhpk,commname)
+        call inner_product(mg,info,pk,gk,pkhpk,commname)
         pkhpk = pkhpk*system%hvol
   
         ak=pkhpk*xkpk-pkhxk*pkpk
@@ -282,10 +282,10 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
         xk = xk + alpha*pk
         hxk=hxk + alpha*gk
   
-        call inner_product(mg,xk,hxk,xkhxk,commname)
+        call inner_product(mg,info,xk,hxk,xkhxk,commname)
         xkhxk = xkhxk*system%hvol
   
-        call inner_product(mg,xk,xk,xkxk,commname)
+        call inner_product(mg,info,xk,xk,xkxk,commname)
         xkxk = xkxk*system%hvol
       
         Rk=xkhxk/xkxk
@@ -295,7 +295,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
     end do Iteration
   
     if(icorr==1)then
-      call inner_product(mg,xk,xk,sum0,commname)
+      call inner_product(mg,info,xk,xk,sum0,commname)
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)

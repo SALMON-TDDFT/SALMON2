@@ -25,7 +25,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
                  info_ob,ppg,vlocal)
   use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid,s_cg
-  use salmon_parallel, only: nproc_group_grid, nproc_group_global, nproc_group_korbital
+  use salmon_parallel, only: nproc_group_grid, nproc_group_global
   use salmon_communication, only: comm_summation, comm_bcast
   use timer
   use hpsi_sub
@@ -168,7 +168,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
     end do
   end do
   
-  call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rhxk_ob,xkhxk_ob,system%hvol)
+  call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rhxk_ob,xkhxk_ob,system%hvol)
   
   xkxk_ob(:)=1.d0 
   rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
@@ -250,7 +250,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
           end do
           end do
           sum0=sum0*system%hvol
-          call comm_summation(sum0,sum1,nproc_group_korbital)
+          call comm_summation(sum0,sum1,info%icomm_r)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
@@ -262,7 +262,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       end do
       end do
     end if 
-    call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rgk_ob,cg%rgk_ob,sum_ob0,system%hvol)
+    call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rgk_ob,cg%rgk_ob,sum_ob0,system%hvol)
     if ( iter==1 ) then
       do iob=1,system%nspin*info%numo
         call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*info%numo)
@@ -290,9 +290,9 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       end do
     end if 
     gkgk_ob(:)=sum_ob0(:)
-    call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rpk_ob,xkpk_ob,system%hvol)
-    call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rpk_ob,pkpk_ob,system%hvol)
-    call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rhxk_ob,pkhxk_ob,system%hvol)
+    call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rpk_ob,xkpk_ob,system%hvol)
+    call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rpk_ob,pkpk_ob,system%hvol)
+    call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rhxk_ob,pkhxk_ob,system%hvol)
   
     do iob=1,system%nspin*info%numo
       call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*info%numo)
@@ -336,7 +336,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       end do
       end do
     end do
-    call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rgk_ob,pkHpk_ob,system%hvol)
+    call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rpk_ob,cg%rgk_ob,pkHpk_ob,system%hvol)
     do iob=1,system%nspin*info%numo
       call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*info%numo)
       ak=pkHpk_ob(iob_allob)*xkpk_ob(iob_allob)-pkhxk_ob(iob_allob)*pkpk_ob(iob_allob)
@@ -354,15 +354,15 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
       end do
       end do
     end do
-    call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rhxk_ob,xkhxk_ob,system%hvol)
-    call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rxk_ob,xkxk_ob,system%hvol)
+    call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rhxk_ob,xkhxk_ob,system%hvol)
+    call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rxk_ob,xkxk_ob,system%hvol)
     rk_ob(:)=xkhxk_ob(:)/xkxk_ob(:)
   end do Iteration
   call timer_end(LOG_GSCG_ITERATION)
 
 
   call timer_begin(LOG_GSCG_DEINIT)
-  call inner_product7(mg,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rxk_ob,sum_ob0,system%hvol)
+  call inner_product7(mg,info,itotmst,mst,system%nspin*info%numo,cg%rxk_ob,cg%rxk_ob,sum_ob0,system%hvol)
   do iob=1,system%nspin*info%numo
     call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*info%numo)
     if(ilsda==0.or.ilsda==1.and.iob<=info%numo)then

@@ -1,12 +1,12 @@
-subroutine inner_product5(mg,itotmst,mst,iobnum,zmatbox1,zmatbox2,zbox,hvol)
-  use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_group_korbital
+subroutine inner_product5(mg,info,itotmst,mst,iobnum,zmatbox1,zmatbox2,zbox,hvol)
+  use structures, only: s_rgrid, s_orbital_parallel
   use salmon_communication, only: comm_summation
   use timer
   use calc_allob_sub
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
   integer,intent(in)  :: itotmst
   integer,intent(in)  :: mst(2)
   integer,intent(in)  :: iobnum
@@ -35,7 +35,7 @@ subroutine inner_product5(mg,itotmst,mst,iobnum,zmatbox1,zmatbox2,zbox,hvol)
   end do
 
   call timer_begin(LOG_ALLREDUCE_INNER_PRODUCT5)
-  call comm_summation(zbox2,zbox,itotmst,nproc_group_korbital)
+  call comm_summation(zbox2,zbox,itotmst,info%icomm_r)
   call timer_end(LOG_ALLREDUCE_INNER_PRODUCT5)
 
 end subroutine inner_product5

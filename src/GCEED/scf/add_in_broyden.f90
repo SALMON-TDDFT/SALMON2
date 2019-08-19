@@ -1,6 +1,6 @@
-subroutine add_in_broyden(trho,trho_in,tfb,trho_temp)
+subroutine add_in_broyden(trho,trho_in,info,tfb,trho_temp)
   use inputoutput
-  use salmon_parallel, only: nproc_group_korbital
+  use structures, only: s_orbital_parallel
   use salmon_communication, only: comm_summation
   use scf_data
   implicit none
@@ -8,6 +8,7 @@ subroutine add_in_broyden(trho,trho_in,tfb,trho_temp)
   integer :: nn,nn2
   real(8) :: trho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
   real(8) :: trho_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
+  type(s_orbital_parallel),intent(in) :: info
   real(8) :: tfb(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
   real(8) :: trho_temp(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
   
@@ -23,7 +24,7 @@ subroutine add_in_broyden(trho,trho_in,tfb,trho_temp)
   end do
   end do
   end do
-  call comm_summation(nn,nn2,nproc_group_korbital)
+  call comm_summation(nn,nn2,info%icomm_r)
   if(nn2 > 0) then
     trho(:,:,:)=trho_in(:,:,:)+alpha_mb*tfb(:,:,:)
   end if
