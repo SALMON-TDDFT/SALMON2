@@ -228,8 +228,8 @@ else if(isequential==2)then
   end do
 end if
  
-nproc_group_k = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_k, nproc_id_k, nproc_size_k)
+info%icomm_ro = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info%icomm_ro, nproc_id_k, nproc_size_k)
 
 !new_world for comm_grid
 if(isequential==1)then

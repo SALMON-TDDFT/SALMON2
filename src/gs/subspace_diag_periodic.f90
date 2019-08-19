@@ -23,7 +23,6 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
                                   info_ob,ppg,vlocal)
 
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_k
   use salmon_communication, only: comm_bcast, comm_summation
   use timer
   use hpsi_sub
@@ -232,7 +231,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,npr
     
 
       call timer_begin(LOG_DIAG_ALLREDUCE)
-      call comm_summation(amat,amat2,iter*iter,nproc_group_k)
+      call comm_summation(amat,amat2,iter*iter,info%icomm_ro)
       call timer_end(LOG_DIAG_ALLREDUCE)
     
 
