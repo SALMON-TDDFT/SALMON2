@@ -43,7 +43,7 @@ use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
                            nproc_group_rho, &
-                           nproc_group_k, nproc_group_grid
+                           nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -229,7 +229,6 @@ if(iopt==1)then
   info%if_divide_rspace = nproc_mxin_mul.ne.1
   info%icomm_k    = nproc_group_grid
   info%icomm_ko   = nproc_group_rho
-  info%icomm_ro   = nproc_group_k
   info%icomm_rko  = nproc_group_global
   allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
             ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
