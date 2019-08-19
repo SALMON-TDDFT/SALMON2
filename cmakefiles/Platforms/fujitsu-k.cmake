@@ -19,7 +19,7 @@ set(CMAKE_C_COMPILER            "mpifccpx")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-O3 -Kfast")
 
-set(USE_MPI ON)
+set(USE_MPI_DEFAULT ON)
 
 
 ########
