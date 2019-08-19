@@ -342,7 +342,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
 !        end do
 !        end do
 !        sum0=sum0*system%hvol
-!        call comm_summation(sum0,sum1,nproc_group_korbital)
+!        call comm_summation(sum0,sum1,info%icomm_r)
 !        do iz=mg%is(3),mg%ie(3)
 !        do iy=mg%is(2),mg%ie(2)
 !        do ix=mg%is(1),mg%ie(1)

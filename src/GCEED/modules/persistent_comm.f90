@@ -27,22 +27,28 @@ module persistent_comm
 
 private
 contains
-  subroutine init_persistent_requests
+  subroutine init_persistent_requests(info)
+    use structures, only: s_orbital_parallel
     implicit none
+    type(s_orbital_parallel),intent(in) :: info
 
-    call init_comm_korbital
-    call init_comm_groupob
+    call init_comm_korbital(info)
+    call init_comm_groupob(info)
     call init_comm_h
   end subroutine
 
-  subroutine init_comm_korbital
+  subroutine init_comm_korbital(info)
+    use structures, only: s_orbital_parallel
     use init_sendrecv_sub,    only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
-    use salmon_parallel,      only: icomm => nproc_group_korbital
     use salmon_communication, only: comm_send_init, comm_recv_init, comm_proc_null
     use pack_unpack,          only: create_array_shape
     use scf_data
     implicit none
+    type(s_orbital_parallel),intent(in) :: info
+    integer :: icomm
     integer :: iup,idw,jup,jdw,kup,kdw
+
+    icomm=info%icomm_r
 
 #ifdef SALMON_USE_MPI
     iup=iup_array(1)
@@ -94,14 +100,18 @@ contains
     nshape_orbital(3) = create_array_shape(mg_sta(3)-Nd, mg_end(3)+Nd)
   end subroutine
 
-  subroutine init_comm_groupob
+  subroutine init_comm_groupob(info)
+    use structures, only: s_orbital_parallel
     use init_sendrecv_sub,    only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
-    use salmon_parallel,      only: icomm => nproc_group_korbital
     use salmon_communication, only: comm_send_init, comm_recv_init, comm_proc_null
     use pack_unpack,          only: create_array_shape
     use scf_data
     implicit none
+    type(s_orbital_parallel),intent(in) :: info
+    integer :: icomm
     integer :: iup,idw,jup,jdw,kup,kdw
+    
+    icomm=info%icomm_r
 
 #ifdef SALMON_USE_MPI
     iup=iup_array(1)

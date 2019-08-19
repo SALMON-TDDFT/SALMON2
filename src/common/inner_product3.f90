@@ -14,14 +14,14 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine inner_product3(mg,rmatbox1,rmatbox2,rbox2)
-  use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_group_korbital
+subroutine inner_product3(mg,info,rmatbox1,rmatbox2,rbox2)
+  use structures, only: s_rgrid, s_orbital_parallel
   use salmon_communication, only: comm_summation
   use timer
   !$ use omp_lib
   implicit none
   type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
   real(8),intent(in) :: rmatbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8),intent(in) :: rmatbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8),intent(out) :: rbox2
@@ -39,7 +39,7 @@ subroutine inner_product3(mg,rmatbox1,rmatbox2,rbox2)
   end do
   
   call timer_begin(LOG_ALLREDUCE_INNER_PRODUCT3)
-  call comm_summation(rbox,rbox2,nproc_group_korbital)
+  call comm_summation(rbox,rbox2,info%icomm_r)
   call timer_end(LOG_ALLREDUCE_INNER_PRODUCT3)
   
 end subroutine inner_product3

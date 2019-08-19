@@ -416,7 +416,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng,system,stencil,cg)
+SUBROUTINE IN_data(lg,mg,ng,info,system,stencil,cg)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -434,6 +434,7 @@ implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
+type(s_orbital_parallel),intent(inout) :: info
 type(s_dft_system) :: system
 type(s_stencil) :: stencil
 type(s_cg) :: cg
@@ -746,7 +747,7 @@ if(ilsda==1)then
   nproc_ob_spin(2)=nproc_ob/2
 end if
 
-if(iSCFRT==2) call make_new_world
+if(iSCFRT==2) call make_new_world(info)
 
 call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
 

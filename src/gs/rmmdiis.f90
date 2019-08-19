@@ -160,7 +160,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
       call copyv(mg,shtpsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1,1,1,1) &
                    ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze))
 
-      call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,0),htphi(mg_xs,mg_ys,mg_zs),rbox1)
+      call inner_product3(mg,info,phi(mg_xs,mg_ys,mg_zs,0),htphi(mg_xs,mg_ys,mg_zs),rbox1)
   
       call axpyzv(mg,-rbox1*system%hvol &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0) &
@@ -168,14 +168,14 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
                     ,R1(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0))
 
       epsdiis(iob,0)=rbox1*system%hvol
-      call inner_product3(mg,R1(mg_xs,mg_ys,mg_zs,0),R1(mg_xs,mg_ys,mg_zs,0),rbox1)
+      call inner_product3(mg,info,R1(mg_xs,mg_ys,mg_zs,0),R1(mg_xs,mg_ys,mg_zs,0),rbox1)
       Rnorm(iob,0)=rbox1*system%hvol
   
     else
   ! Solve by Lagrange's method of undetermined multipliers, and obtain 
   ! Rbar from previous combinations of phi and R.
       if(iflagdiis(iob) == 1)then
-        call diis_core(mg,itotmst,system%hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
+        call diis_core(mg,info,itotmst,system%hvol,phi,R1,phibar,Rbar,iob,iter,iobcheck)
       end if
     end if
   
@@ -193,7 +193,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
       end if
   
   ! normalization
-      call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,iter),phi(mg_xs,mg_ys,mg_zs,iter),rbox1)
+      call inner_product3(mg,info,phi(mg_xs,mg_ys,mg_zs,iter),phi(mg_xs,mg_ys,mg_zs,iter),rbox1)
 
       call scalev(mg,1.0d0/sqrt(rbox1*system%hvol) &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,iter))
@@ -206,17 +206,17 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
       call copyv(mg,shtpsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1,1,1,1) &
                    ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze))
   
-      call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
+      call inner_product3(mg,info,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
 
       call axpyzv(mg,-rbox1*system%hvol &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,iter) &
                     ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze) &
                     ,R1(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,iter))
 
-      call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
+      call inner_product3(mg,info,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
       epsdiis(iob,iter)=rbox1*system%hvol
   
-      call inner_product3(mg,R1(mg_xs,mg_ys,mg_zs,iter),R1(mg_xs,mg_ys,mg_zs,iter),rbox1)
+      call inner_product3(mg,info,R1(mg_xs,mg_ys,mg_zs,iter),R1(mg_xs,mg_ys,mg_zs,iter),rbox1)
       Rnorm(iob,iter)=rbox1*system%hvol
   
   ! judgement for closing loop.
@@ -252,7 +252,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
       call copyv(mg,shtpsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1,1,1,1) &
                    ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze))
 
-      call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
+      call inner_product3(mg,info,phi(mg_xs,mg_ys,mg_zs,iter),htphi(mg_xs,mg_ys,mg_zs),rbox1)
       
       end if
   
@@ -314,7 +314,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
       call copyv(mg,shtpsi%rwf(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1,1,1,1) &
                    ,htphi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze))
   
-      call inner_product3(mg,phi(mg_xs,mg_ys,mg_zs,0),htphi(mg_xs,mg_ys,mg_zs),rbox1)
+      call inner_product3(mg,info,phi(mg_xs,mg_ys,mg_zs,0),htphi(mg_xs,mg_ys,mg_zs),rbox1)
 
       call axpyzv(mg,-rbox1*system%hvol &
                     ,phi(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,0) &

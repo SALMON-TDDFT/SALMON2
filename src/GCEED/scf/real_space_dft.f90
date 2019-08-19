@@ -42,7 +42,7 @@ subroutine Real_Space_DFT
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
                            nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
-                           nproc_group_korbital, nproc_group_rho, &
+                           nproc_group_rho, &
                            nproc_group_kgrid, nproc_group_k, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
@@ -119,7 +119,7 @@ call setcN(cnmat)
 
 call check_dos_pdos
 
-call convert_input_scf(file_atoms_coo)
+call convert_input_scf(info,file_atoms_coo)
 
 call init_dft(lg,system,stencil)
 if(stencil%if_orthogonal) then
@@ -167,7 +167,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call IN_data(lg,mg,ng,system,stencil,cg)
+    call IN_data(lg,mg,ng,info,system,stencil,cg)
 
   end select
 
@@ -183,7 +183,7 @@ if(iopt==1)then
   call allocate_mat(cg)
   call set_icoo1d
   call allocate_sendrecv
-  call init_persistent_requests
+  call init_persistent_requests(info)
   call init_code_optimization
 
   ! Initialization of s_sendrecv_grid structure (experimental implementation)
@@ -193,12 +193,9 @@ if(iopt==1)then
   neig(2, 2) = jdw_array(1)
   neig(3, 1) = kup_array(1)
   neig(3, 2) = kdw_array(1)
-  call init_sendrecv_grid(srg, mg, iobnum * k_num, &
-    & nproc_group_korbital, neig)
-  call init_sendrecv_grid(srg_ob, mg, nspin, &
-    & nproc_group_korbital, neig)
-  call init_sendrecv_grid(srg_ob_1, mg, 1, &
-    & nproc_group_korbital, neig)
+  call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
+  call init_sendrecv_grid(srg_ob, mg, nspin, info%icomm_r, neig)
+  call init_sendrecv_grid(srg_ob_1, mg, 1, info%icomm_r, neig)
 
   neig_ng(1, 1) = iup_array(2)
   neig_ng(1, 2) = idw_array(2)
@@ -230,7 +227,6 @@ if(iopt==1)then
   info%numo = iobnum/nspin
 
   info%if_divide_rspace = nproc_mxin_mul.ne.1
-  info%icomm_r    = nproc_group_korbital
   info%icomm_k    = nproc_group_grid
   info%icomm_o    = nproc_group_kgrid
   info%icomm_ko   = nproc_group_rho
@@ -271,7 +267,7 @@ if(iopt==1)then
   info_ob%numo = 1
   info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
   info_ob%if_divide_orbit  = nproc_ob.ne.1
-  info_ob%icomm_r    = nproc_group_korbital
+  info_ob%icomm_r    = info%icomm_r
 
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 
@@ -947,7 +943,7 @@ if(out_dos=='y') then
 end if
 
 if(out_pdos=='y') then
-  call calc_pdos
+  call calc_pdos(info)
 end if
 
 if(OC==2)then

@@ -20,15 +20,16 @@ contains
 
 !=======================================================================
 !============================================================== RMM-DIIS
-subroutine diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
+subroutine diis_core(mg,info,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
   use inputoutput, only: ncg
-  use structures, only: s_rgrid
+  use structures, only: s_rgrid, s_orbital_parallel
   use inner_product_sub
   use eigen_sub
   !$ use omp_lib
   implicit none
   
   type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
   integer,intent(in) :: itotmst
   real(8),intent(in) :: hvol
   integer :: ii,jj,iob,iter,ix,iy,iz,ier2
@@ -51,7 +52,7 @@ subroutine diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
                            mg%is(3):mg%ie(3),0:ncg)
   character(30) :: commname
   
-  commname='nproc_group_korbital'
+  commname='icomm_r'
   
   allocate(Rmat(iter,iter))
   allocate(Smat(iter,iter))
@@ -60,10 +61,10 @@ subroutine diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
         
   do ii=0,iter-1
     do jj=0,iter-1
-      call inner_product(mg,R1(:,:,:,ii),R1(:,:,:,jj),rbox,commname)
+      call inner_product(mg,info,R1(:,:,:,ii),R1(:,:,:,jj),rbox,commname)
       Rmat(ii+1,jj+1)=rbox*hvol
   
-      call inner_product(mg,phi(:,:,:,ii),phi(:,:,:,jj),rbox,commname)
+      call inner_product(mg,info,phi(:,:,:,ii),phi(:,:,:,jj),rbox,commname)
       Smat(ii+1,jj+1)=rbox*hvol
     end do
   end do
@@ -107,7 +108,7 @@ subroutine diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
     end do
     end do
       
-    call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
+    call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
     rnorm=sqrt(rbox*hvol)
   !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -134,7 +135,7 @@ subroutine diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
       end do
       end do
       end do
-      call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
+      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
    
       rnorm=sqrt(rbox*hvol)
   !$OMP parallel do private(iz,iy,ix)
@@ -180,7 +181,7 @@ subroutine diis_core(mg,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
         end do
       end do
   
-      call inner_product(mg,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
+      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
       rnorm=sqrt(rbox*hvol)
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)

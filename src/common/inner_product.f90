@@ -26,12 +26,13 @@ module inner_product_sub
   contains
 
 !=======================================================================
-  subroutine r_inner_product(mg,matbox1,matbox2,rbox2,commname)
-    use structures, only: s_rgrid
-    use salmon_parallel, only: nproc_group_korbital, nproc_group_h
+  subroutine r_inner_product(mg,info,matbox1,matbox2,rbox2,commname)
+    use structures, only: s_rgrid, s_orbital_parallel
+    use salmon_parallel, only: nproc_group_h
     use salmon_communication, only: comm_summation
     implicit none
     type(s_rgrid),intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
     real(8),intent(in) :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8),intent(in) :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8),intent(out) :: rbox2
@@ -50,8 +51,8 @@ module inner_product_sub
     end do
 
     select case(commname)    
-    case("nproc_group_korbital")
-      call comm_summation(rbox,rbox2,nproc_group_korbital)
+    case("icomm_r")
+      call comm_summation(rbox,rbox2,info%icomm_r)
     case("nproc_group_h")
       call comm_summation(rbox,rbox2,nproc_group_h)
     end select
@@ -59,12 +60,13 @@ module inner_product_sub
   end subroutine r_inner_product
   
 !=======================================================================
-  subroutine c_inner_product(mg,matbox1,matbox2,cbox2,commname)
-    use structures, only: s_rgrid
-    use salmon_parallel, only: nproc_group_korbital, nproc_group_h
+  subroutine c_inner_product(mg,info,matbox1,matbox2,cbox2,commname)
+    use structures, only: s_rgrid, s_orbital_parallel
+    use salmon_parallel, only: nproc_group_h
     use salmon_communication, only: comm_summation
     implicit none
     type(s_rgrid),intent(in) :: mg
+    type(s_orbital_parallel),intent(in) :: info
     complex(8),intent(in)  :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     complex(8),intent(in)  :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     complex(8),intent(out) :: cbox2
@@ -83,8 +85,8 @@ module inner_product_sub
     end do
     
     select case(commname)    
-    case("nproc_group_korbital")
-      call comm_summation(cbox,cbox2,nproc_group_korbital)
+    case("icomm_r")
+      call comm_summation(cbox,cbox2,info%icomm_r)
     case("nproc_group_h")
       call comm_summation(cbox,cbox2,nproc_group_h)
     end select

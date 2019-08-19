@@ -22,7 +22,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iob
                 info_ob,ppg,vlocal)
 
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_kgrid, nproc_group_global, nproc_group_korbital
+  use salmon_parallel, only: nproc_group_kgrid, nproc_group_global
   use salmon_communication, only: comm_summation, comm_bcast
   use hpsi_sub
   use calc_allob_sub
@@ -255,7 +255,7 @@ subroutine subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iob
           end do
           end do
           end do
-          call comm_summation(rbox,rbox1,nproc_group_korbital)
+          call comm_summation(rbox,rbox1,info%icomm_r)
   !$OMP parallel do private(iz,iy,ix)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
