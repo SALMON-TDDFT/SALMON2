@@ -452,7 +452,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log(nproc_k, nproc_ob, nproc_mxin, nproc_mxin_s)
+    call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
   end if
 end subroutine
 
@@ -538,7 +538,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%io_e=iobnum/nspin
   info%numo=iobnum/nspin
 
-  info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
+  info%if_divide_rspace = nproc_d_o_mul.ne.1   ! moved just after init_lattice
   info%if_divide_orbit = nproc_ob.ne.1
   info%icomm_k = nproc_group_grid
   info%icomm_ko = nproc_group_rho

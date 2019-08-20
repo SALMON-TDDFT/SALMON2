@@ -71,13 +71,14 @@ module salmon_global
   character(16)  :: unit_charge
                  
 !! &parallel
-  character(1)   :: domain_parallel
+  character(1)   :: yn_domain_parallel
   integer        :: nproc_k
   integer        :: nproc_ob
-  integer        :: nproc_domain(3)
-  integer        :: nproc_domain_s(3)
+  integer        :: nproc_domain_orbital(3)
+  integer        :: nproc_domain_general(3)
   integer        :: num_datafiles_in
   integer        :: num_datafiles_out
+  character(1)   :: yn_ffte
 
 !! &system
   integer        :: iperiodic
@@ -301,9 +302,6 @@ module salmon_global
   real(8)        :: thermostat_tau
   real(8)        :: friction
   character(1)   :: stop_system_momt
-
-!! &misc
-  character(4)   :: fourier
 
 !! &group_fundamental
   integer        :: iditerybcg

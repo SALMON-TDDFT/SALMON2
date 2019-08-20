@@ -226,7 +226,7 @@ if(iopt==1)then
   info%io_e = iobnum/nspin
   info%numo = iobnum/nspin
 
-  info%if_divide_rspace = nproc_mxin_mul.ne.1
+  info%if_divide_rspace = nproc_d_o_mul.ne.1
   info%icomm_k    = nproc_group_grid
   info%icomm_ko   = nproc_group_rho
   info%icomm_rko  = nproc_group_global
@@ -263,7 +263,7 @@ if(iopt==1)then
   info_ob%io_s = 1
   info_ob%io_e = 1
   info_ob%numo = 1
-  info_ob%if_divide_rspace = nproc_mxin_mul.ne.1
+  info_ob%if_divide_rspace = nproc_d_o_mul.ne.1
   info_ob%if_divide_orbit  = nproc_ob.ne.1
   info_ob%icomm_r    = info%icomm_r
 
@@ -616,13 +616,13 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
 
     call timer_begin(LOG_CALC_HARTREE)
-    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
+    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
       call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
     end if
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
+    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
       call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
     end if
     call timer_end(LOG_CALC_EXC_COR)
@@ -1130,7 +1130,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log(nproc_k, nproc_ob, nproc_mxin, nproc_mxin_s)
+    call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
   end if
 end subroutine
 
@@ -1163,11 +1163,11 @@ allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
 
 call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
-           lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,iscfrt)
+           lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,isequential,iscfrt)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
 
-if(iperiodic==3 .and. nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)==1) then
+if(iperiodic==3 .and. nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)==1) then
   if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
   mg%is(1:3)=lg%is(1:3)
   mg%ie(1:3)=lg%ie(1:3)

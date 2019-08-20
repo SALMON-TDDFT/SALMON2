@@ -1474,10 +1474,10 @@ end subroutine eh_input_shape
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_prep_GCEED(fs,fw)
-  use inputoutput,       only: nproc_domain,nproc_domain_s,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
+  use inputoutput,       only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
   use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global,nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
-  use scf_data,          only: nproc_Mxin,nproc_Mxin_s,nproc_Mxin_mul,nproc_Mxin_mul_s_dm,nproc_Mxin_s_dm,&
+  use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_o_mul,nproc_d_g_mul_dm,nproc_d_g_dm,&
                                k_sta,k_end,k_num,num_kpoints_3d,num_kpoints_rd,&
                                rLsize,Harray,Hgs,Hvol,imesh_oddeven,&
                                lg_sta,lg_end,lg_num, &
@@ -1501,11 +1501,11 @@ subroutine eh_prep_GCEED(fs,fw)
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
   num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
-  nproc_Mxin=nproc_domain
-  nproc_Mxin_s=nproc_domain_s
-  call set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
-  nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
-  nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+  nproc_d_o=nproc_domain_orbital
+  nproc_d_g=nproc_domain_general
+  call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
+  nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
+  nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   call make_new_world(info)
   call setk(k_sta,k_end,k_num,num_kpoints_rd,nproc_k,nproc_id_orbitalgrid)
   
@@ -1518,11 +1518,11 @@ subroutine eh_prep_GCEED(fs,fw)
   allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1), &
            inum_Mxin(3,0:nproc_size_global-1))
   call setmg(fs%mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
-             lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,1)
+             lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,isequential,1)
   allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
   allocate(inum_Mxin_s(3,0:nproc_size_global-1))
   call setng(fs%ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-             nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
+             nproc_size_global,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin,isequential)
   fw%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment

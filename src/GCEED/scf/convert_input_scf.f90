@@ -175,18 +175,18 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-nproc_Mxin = nproc_domain
-nproc_Mxin_s = nproc_domain_s
+nproc_d_o = nproc_domain_orbital
+nproc_d_g = nproc_domain_general
 
-if(nproc_ob==0.and.nproc_mxin(1)==0.and.nproc_mxin(2)==0.and.nproc_mxin(3)==0.and.  &
-                   nproc_mxin_s(1)==0.and.nproc_mxin_s(2)==0.and.nproc_mxin_s(3)==0) then
-  call set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+if(nproc_ob==0.and.nproc_d_o(1)==0.and.nproc_d_o(2)==0.and.nproc_d_o(3)==0.and.  &
+                   nproc_d_g(1)==0.and.nproc_d_g(2)==0.and.nproc_d_g(3)==0) then
+  call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
 else
-  call check_numcpu(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+  call check_numcpu(nproc_d_o,nproc_d_g,nproc_d_g_dm)
 end if
 
-nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
-nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
+nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
 !===== namelist for group_hartree =====
 if(meo<=0.or.meo>=4)then
@@ -326,13 +326,13 @@ end if
 !  end do
 !end if
 
-nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
-nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+nproc_d_o_mul   = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
+nproc_d_g_mul_dm= nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
-select case(fourier)
-case('ft','FT')
+select case(yn_ffte)
+case('n')
   iflag_hartree=2
-case('ffte','FFTE')
+case('y')
   iflag_hartree=4
 end select
 

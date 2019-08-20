@@ -13,7 +13,7 @@
 /
 
 &parallel
-  domain_parallel='y'
+  yn_domain_parallel='y'
 /
 
 &system

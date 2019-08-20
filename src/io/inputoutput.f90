@@ -51,7 +51,6 @@ module inputoutput
   integer :: inml_ewald
   integer :: inml_opt
   integer :: inml_md
-  integer :: inml_misc
   integer :: inml_group_fundamental
   integer :: inml_group_parallel
   integer :: inml_group_hartree
@@ -242,13 +241,14 @@ contains
       & unit_system
 
     namelist/parallel/ &
-      & domain_parallel, &
+      & yn_domain_parallel, &
       & nproc_k, &
       & nproc_ob, &
-      & nproc_domain, &
-      & nproc_domain_s, &
+      & nproc_domain_orbital, &
+      & nproc_domain_general, &
       & num_datafiles_in, &
-      & num_datafiles_out
+      & num_datafiles_out, &
+      & yn_ffte
 
     namelist/system/ &
       & iperiodic, &
@@ -472,9 +472,6 @@ contains
       & friction, &
       & stop_system_momt
 
-    namelist/misc/ &
-      & fourier
-
     namelist/group_fundamental/ &
       & iditerybcg, &
       & iditer_nosubspace_diag, &
@@ -591,13 +588,14 @@ contains
     write_rt_wfn_k_ms= 'n'
 
 !! == default for &parallel
-    domain_parallel   = 'n'
+    yn_domain_parallel= 'n'
     nproc_k           = 0
     nproc_ob          = 0
-    nproc_domain      = 0
-    nproc_domain_s    = 0
+    nproc_domain_orbital = 0
+    nproc_domain_general = 0
     num_datafiles_in  = 1
     num_datafiles_out = 1
+    yn_ffte           = 'n'
 !! == default for &system
     iperiodic          = 0
     ispin              = 0
@@ -813,8 +811,6 @@ contains
     thermostat_tau        =  41.34d0  !=1fs: just test value
     friction              =  0d0
     stop_system_momt      = 'n'
-!! == default for &misc
-    fourier               = 'ft'
 !! == default for &group_fundamental
     iditerybcg             = 20
     iditer_nosubspace_diag = 10
@@ -925,9 +921,6 @@ contains
       read(fh_namelist, nml=md, iostat=inml_md)
       rewind(fh_namelist)
 
-      read(fh_namelist, nml=misc, iostat=inml_misc)
-      rewind(fh_namelist)
-
       read(fh_namelist, nml=group_fundamental, iostat=inml_group_fundamental)
       rewind(fh_namelist)
 
@@ -948,6 +941,9 @@ contains
 
       close(fh_namelist)
     end if
+
+    ! maybe should call check subroutine of yn_xxxx keyword here
+    ! to correct 'Y' and 'N' to be 'y' and 'n', also error check too
 
 ! Broad cast
 !! == bcast for &calculation
@@ -979,15 +975,15 @@ contains
     call comm_bcast(write_gs_wfn_k_ms,nproc_group_global)
     call comm_bcast(write_rt_wfn_k_ms,nproc_group_global)
 
-
 !! == bcast for &parallel
-    call comm_bcast(domain_parallel  ,nproc_group_global)
-    call comm_bcast(nproc_k          ,nproc_group_global)
-    call comm_bcast(nproc_ob         ,nproc_group_global)
-    call comm_bcast(nproc_domain     ,nproc_group_global)
-    call comm_bcast(nproc_domain_s   ,nproc_group_global)
-    call comm_bcast(num_datafiles_in ,nproc_group_global)
-    call comm_bcast(num_datafiles_out,nproc_group_global)
+    call comm_bcast(yn_domain_parallel  ,nproc_group_global)
+    call comm_bcast(nproc_k             ,nproc_group_global)
+    call comm_bcast(nproc_ob            ,nproc_group_global)
+    call comm_bcast(nproc_domain_orbital,nproc_group_global)
+    call comm_bcast(nproc_domain_general,nproc_group_global)
+    call comm_bcast(num_datafiles_in    ,nproc_group_global)
+    call comm_bcast(num_datafiles_out   ,nproc_group_global)
+    call comm_bcast(yn_ffte             ,nproc_group_global)
 !! == bcast for &system
     call comm_bcast(iperiodic,nproc_group_global)
     call comm_bcast(ispin    ,nproc_group_global)
@@ -1251,8 +1247,6 @@ contains
     thermostat_tau = thermostat_tau * utime_to_au
     call comm_bcast(friction               ,nproc_group_global)
     call comm_bcast(stop_system_momt       ,nproc_group_global)
-!! == bcast for &misc
-    call comm_bcast(fourier                ,nproc_group_global)
 !! == bcast for &group_fundamental
     call comm_bcast(iditerybcg            ,nproc_group_global)
     call comm_bcast(iditer_nosubspace_diag,nproc_group_global)
@@ -1601,17 +1595,18 @@ contains
 
       if(inml_parallel >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'parallel', inml_parallel
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'domain_parallel', domain_parallel
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_domain_parallel', yn_domain_parallel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain(1)', nproc_domain(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain(2)', nproc_domain(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain(3)', nproc_domain(3)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_s(1)', nproc_domain_s(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_s(2)', nproc_domain_s(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_s(3)', nproc_domain_s(3)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_orbital(1)', nproc_domain_orbital(1)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_orbital(2)', nproc_domain_orbital(2)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_orbital(3)', nproc_domain_orbital(3)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(1)', nproc_domain_general(1)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(2)', nproc_domain_general(2)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(3)', nproc_domain_general(3)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_in', num_datafiles_in
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_out', num_datafiles_out
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
 
       if(inml_system >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', inml_system
@@ -1912,10 +1907,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'friction', friction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'stop_system_momt', stop_system_momt
-      
-      if(inml_misc >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'misc', inml_misc
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'fourier', fourier
 
       if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
@@ -2022,7 +2013,7 @@ contains
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
 
-    if(iperiodic==0.or.(iperiodic==3.and.domain_parallel=='y')) then
+    if(iperiodic==0.or.(iperiodic==3.and.yn_domain_parallel=='y')) then
       select case(convergence)
       case('rho_dne')
         continue
@@ -2047,22 +2038,12 @@ contains
         call end_parallel
       end select
 
-    else if(iperiodic==3.and.domain_parallel=='n') then
+    else if(iperiodic==3.and.yn_domain_parallel=='n') then
       if(convergence.ne.'rho_dne') call stop_by_bad_input2('iperiodic','convergence')
       if(abs(t1_delay).ge.1d-10)then
          if(index(ae_shape1,'Acos')==0) call stop_by_bad_input2('t1_delay','ae_shape1')
       endif
     endif
-      
-    select case(fourier)
-    case('ft','FT','ffte','FFTE')
-      continue
-    case default
-      if (comm_is_root(nproc_id_global)) then
-        write(*,*) "keyword 'fourier' must be 'FT' or 'FFTE'"
-      end if
-      call end_parallel
-    end select
 
   end subroutine check_bad_input
 

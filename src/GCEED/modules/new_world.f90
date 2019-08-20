@@ -53,14 +53,14 @@ integer :: icolor,ikey
 
 !new_world for comm_kgrid
 if(isequential==1)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
+      ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
       if(nproc_id_global==ibox)then
-        icolor=i5*nproc_ob+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
+        icolor=i5*nproc_ob+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
         ikey=i4
       end if
     end do
@@ -69,14 +69,14 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))+(i5*nproc_ob+i4)*nproc_Mxin_mul
+      ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
       if(nproc_id_global==ibox)then
-        icolor=i5+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_k
+        icolor=i5+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_k
         ikey=i4
       end if
     end do
@@ -91,15 +91,15 @@ call comm_get_groupinfo(info%icomm_o, nproc_id_kgrid, nproc_size_kgrid)
 
 !new_world for comm_korbital
 if(isequential==1)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
+      ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
       if(nproc_id_global==ibox)then
         icolor=i5*nproc_ob+i4
-        ikey=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+        ikey=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
       end if
     end do
     end do
@@ -107,15 +107,15 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))+(i5*nproc_ob+i4)*nproc_Mxin_mul
+      ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
       if(nproc_id_global==ibox)then
         icolor=i5*nproc_ob+i4
-        ikey=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+        ikey=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
       end if
     end do
     end do
@@ -129,14 +129,14 @@ call comm_get_groupinfo(info%icomm_r, nproc_id_korbital, nproc_size_korbital)
 
 !new_world for comm_rho
 if(isequential==1)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
+      ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
       if(nproc_id_global==ibox)then
-        icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+        icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
         ikey=i5*nproc_ob+i4
       end if
     end do
@@ -145,14 +145,14 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))+(i5*nproc_ob+i4)*nproc_Mxin_mul
+      ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
       if(nproc_id_global==ibox)then
-        icolor=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))
+        icolor=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))
         ikey=i5*nproc_ob+i4
       end if
     end do
@@ -167,27 +167,27 @@ call comm_get_groupinfo(nproc_group_rho, nproc_id_rho, nproc_size_rho)
 
 !new_world for comm_k
 if(isequential==1)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
+      ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
       if(ilsda==0)then
         if(nproc_id_global==ibox)then
           icolor=i5
-          ikey=i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob
+          ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob
         end if
       else
         if(i4<nproc_ob_spin(1))then
           if(nproc_id_global==ibox)then
             icolor=2*i5+0
-            ikey=i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob_spin(1)
+            ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(1)
           end if
         else
           if(nproc_id_global==ibox)then
             icolor=2*i5+1
-            ikey=i4-nproc_ob_spin(1)+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob_spin(2)
+            ikey=i4-nproc_ob_spin(1)+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(2)
           end if
         end if
       end if
@@ -197,27 +197,27 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))+(i5*nproc_ob+i4)*nproc_Mxin_mul
+      ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
       if(ilsda==0)then
         if(nproc_id_global==ibox)then
           icolor=i5
-          ikey=i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob
+          ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob
         end if
       else
         if(i4<nproc_ob_spin(1))then
           if(nproc_id_global==ibox)then
             icolor=2*i5+0
-            ikey=i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob_spin(1)
+            ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(1)
           end if
         else
           if(nproc_id_global==ibox)then
             icolor=2*i5+1
-            ikey=i4-nproc_ob_spin(1)+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob_spin(2)
+            ikey=i4-nproc_ob_spin(1)+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(2)
           end if
         end if
       end if
@@ -233,26 +233,26 @@ call comm_get_groupinfo(info%icomm_ro, nproc_id_k, nproc_size_k)
 
 !new_world for comm_grid
 if(isequential==1)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
+      ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
       if(ilsda==0)then
         if(nproc_id_global==ibox)then
-          icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+          icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
           ikey=i5*nproc_ob+i4
         end if
       else
         if(i4<nproc_ob_spin(1))then
           if(nproc_id_global==ibox)then
-            icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+            icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
             ikey=i5*nproc_ob_spin(1)+i4
           end if
         else
           if(nproc_id_global==ibox)then
-            icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+            icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
             ikey=i5*nproc_ob_spin(2)+i4-nproc_ob_spin(1)
           end if
         end if
@@ -263,26 +263,26 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))+(i5*nproc_ob+i4)*nproc_Mxin_mul
+      ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
       if(ilsda==0)then
         if(nproc_id_global==ibox)then
-          icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+          icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
           ikey=i5*nproc_ob+i4
         end if
       else
         if(i4<nproc_ob_spin(1))then
           if(nproc_id_global==ibox)then
-            icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+            icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
             ikey=i5*nproc_ob_spin(1)+i4
           end if
         else
           if(nproc_id_global==ibox)then
-            icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
+            icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
             ikey=i5*nproc_ob_spin(2)+i4-nproc_ob_spin(1)
           end if
         end if
@@ -299,14 +299,14 @@ call comm_get_groupinfo(nproc_group_grid, nproc_id_grid, nproc_size_grid)
 
 !new_world for comm_orbitalgrid
 if(isequential==1)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
+      ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
       if(nproc_id_global==ibox)then
-        icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)+i4*nproc_Mxin_mul
+        icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)+i4*nproc_d_o_mul
         ikey=i5
       end if
     end do
@@ -315,14 +315,14 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
     do i5=0,nproc_k-1
     do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))+(i5*nproc_ob+i4)*nproc_Mxin_mul
+      ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
       if(nproc_id_global==ibox)then
-        icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)+i4*nproc_Mxin_mul
+        icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)+i4*nproc_d_o_mul
         ikey=i5
       end if
     end do
@@ -337,23 +337,23 @@ call comm_get_groupinfo(nproc_group_orbitalgrid, nproc_id_orbitalgrid, nproc_siz
 
 !new_world for comm_mesh_s
 
-nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
 if(isequential==1)then
-  do i4=0,nproc_size_global/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-  do i3=0,nproc_Mxin_s_dm(3)-1
-  do i2=0,nproc_Mxin_s_dm(2)-1
-  do i1=0,nproc_Mxin_s_dm(1)-1
-    do ii=0,nproc_Mxin_mul-1
-      ibox=i1+i2*nproc_Mxin_s_dm(1)   &
-             +i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-             +i4*nproc_Mxin_mul_s_dm  &
-             +ii*nproc_size_global/nproc_Mxin_mul
+  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
+  do i3=0,nproc_d_g_dm(3)-1
+  do i2=0,nproc_d_g_dm(2)-1
+  do i1=0,nproc_d_g_dm(1)-1
+    do ii=0,nproc_d_o_mul-1
+      ibox=i1+i2*nproc_d_g_dm(1)   &
+             +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+             +i4*nproc_d_g_mul_dm  &
+             +ii*nproc_size_global/nproc_d_o_mul
       if(nproc_id_global==ibox)then
         icolor=i4
-        ikey=i1+i2*nproc_Mxin_s_dm(1)   &
-               +i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-               +ii*nproc_Mxin_mul_s_dm
+        ikey=i1+i2*nproc_d_g_dm(1)   &
+               +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+               +ii*nproc_d_g_mul_dm
       end if
     end do
   end do
@@ -361,18 +361,18 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i4=0,nproc_size_global/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-  do i3=0,nproc_Mxin_s_dm(3)-1
-  do i2=0,nproc_Mxin_s_dm(2)-1
-  do i1=0,nproc_Mxin_s_dm(1)-1
-    do ii=0,nproc_Mxin_mul-1
-      ibox=ii+i1*nproc_Mxin_mul+i2*nproc_Mxin_mul*nproc_Mxin_s_dm(1)   &
-            +i3*nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-            +i4*nproc_Mxin_mul*nproc_Mxin_mul_s_dm
+  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
+  do i3=0,nproc_d_g_dm(3)-1
+  do i2=0,nproc_d_g_dm(2)-1
+  do i1=0,nproc_d_g_dm(1)-1
+    do ii=0,nproc_d_o_mul-1
+      ibox=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
+            +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+            +i4*nproc_d_o_mul*nproc_d_g_mul_dm
       if(nproc_id_global==ibox)then
         icolor=i4
-        ikey=ii+i1*nproc_Mxin_mul+i2*nproc_Mxin_mul*nproc_Mxin_s_dm(1)   &
-              +i3*nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+        ikey=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
+              +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
       end if
     end do
   end do
@@ -385,19 +385,19 @@ nproc_group_h = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(nproc_group_h, nproc_id_h, nproc_size_h)
 
 if(isequential==1)then
-  do iz=0,nproc_Mxin(3)-1
-  do iy=0,nproc_Mxin(2)-1
-  do ix=0,nproc_Mxin(1)-1
-    do i4=0,nproc_size_global/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-    do izs=0,nproc_Mxin_s_dm(3)-1
-    do iys=0,nproc_Mxin_s_dm(2)-1
-    do ixs=0,nproc_Mxin_s_dm(1)-1
-      ibox=ixs+iys*nproc_Mxin_s_dm(1)   &
-              +izs*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)   &
-              +i4*nproc_Mxin_mul_s_dm    &
-              +ix*nproc_size_global/nproc_Mxin_mul    &
-              +iy*nproc_size_global/nproc_Mxin_mul*nproc_Mxin(1)   &
-              +iz*nproc_size_global/nproc_Mxin_mul*nproc_Mxin(1)*nproc_Mxin(2)
+  do iz=0,nproc_d_o(3)-1
+  do iy=0,nproc_d_o(2)-1
+  do ix=0,nproc_d_o(1)-1
+    do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
+    do izs=0,nproc_d_g_dm(3)-1
+    do iys=0,nproc_d_g_dm(2)-1
+    do ixs=0,nproc_d_g_dm(1)-1
+      ibox=ixs+iys*nproc_d_g_dm(1)   &
+              +izs*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
+              +i4*nproc_d_g_mul_dm    &
+              +ix*nproc_size_global/nproc_d_o_mul    &
+              +iy*nproc_size_global/nproc_d_o_mul*nproc_d_o(1)   &
+              +iz*nproc_size_global/nproc_d_o_mul*nproc_d_o(1)*nproc_d_o(2)
       if(nproc_id_global==ibox)then
         imr(1)=ix
         imr(2)=iy
@@ -415,18 +415,18 @@ if(isequential==1)then
   end do
   end do
 else if(isequential==2)then
-  do i4=0,nproc_size_global/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-  do izs=0,nproc_Mxin_s_dm(3)-1
-  do iys=0,nproc_Mxin_s_dm(2)-1
-  do ixs=0,nproc_Mxin_s_dm(1)-1
-    do iz=0,nproc_Mxin(3)-1
-    do iy=0,nproc_Mxin(2)-1
-    do ix=0,nproc_Mxin(1)-1
-      ibox=ix+iy*nproc_Mxin(1)+iz*nproc_Mxin(1)*nproc_Mxin(2)  &
-             +ixs*nproc_Mxin_mul  &
-             +iys*nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-             +izs*nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-             +i4*nproc_Mxin_mul*nproc_Mxin_mul_s_dm
+  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
+  do izs=0,nproc_d_g_dm(3)-1
+  do iys=0,nproc_d_g_dm(2)-1
+  do ixs=0,nproc_d_g_dm(1)-1
+    do iz=0,nproc_d_o(3)-1
+    do iy=0,nproc_d_o(2)-1
+    do ix=0,nproc_d_o(1)-1
+      ibox=ix+iy*nproc_d_o(1)+iz*nproc_d_o(1)*nproc_d_o(2)  &
+             +ixs*nproc_d_o_mul  &
+             +iys*nproc_d_o_mul*nproc_d_g_dm(1)  &
+             +izs*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+             +i4*nproc_d_o_mul*nproc_d_g_mul_dm
       if(nproc_id_global==ibox)then
         imr(1)=ix
         imr(2)=iy
@@ -446,75 +446,75 @@ else if(isequential==2)then
 end if
 
 if(isequential==1)then
-  icolor=imrs(2)+imrs(3)*nproc_Mxin_s_dm(2)   &
-                +igroup*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)   &
-                +imr(2)*nproc_size_global/nproc_Mxin_mul/nproc_Mxin_s_dm(1)   &
-                +imr(3)*nproc_size_global/nproc_Mxin_mul/nproc_Mxin_s_dm(1)*nproc_Mxin(2)
-  ikey=imrs(1)+imr(1)*nproc_Mxin_s_dm(1)
+  icolor=imrs(2)+imrs(3)*nproc_d_g_dm(2)   &
+                +igroup*nproc_d_g_dm(2)*nproc_d_g_dm(3)   &
+                +imr(2)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(1)   &
+                +imr(3)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(1)*nproc_d_o(2)
+  ikey=imrs(1)+imr(1)*nproc_d_g_dm(1)
 else if(isequential==2)then
-  icolor=imr(2)+imr(3)*nproc_Mxin(2)   &
-               +imrs(2)*nproc_Mxin(2)*nproc_Mxin(3)   &
-               +imrs(3)*nproc_Mxin(2)*nproc_Mxin(3)*nproc_Mxin_s_dm(2)  &
-               +nproc_id_global/(nproc_Mxin_mul*nproc_Mxin_mul_s_dm)*nproc_Mxin(2)  &
-               *nproc_Mxin(3)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
-!  ikey=imr(1)+imrs(1)*nproc_Mxin(1)
-  ikey=imrs(1)+imr(1)*nproc_Mxin_s_dm(1)
+  icolor=imr(2)+imr(3)*nproc_d_o(2)   &
+               +imrs(2)*nproc_d_o(2)*nproc_d_o(3)   &
+               +imrs(3)*nproc_d_o(2)*nproc_d_o(3)*nproc_d_g_dm(2)  &
+               +nproc_id_global/(nproc_d_o_mul*nproc_d_g_mul_dm)*nproc_d_o(2)  &
+               *nproc_d_o(3)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
+!  ikey=imr(1)+imrs(1)*nproc_d_o(1)
+  ikey=imrs(1)+imr(1)*nproc_d_g_dm(1)
 end if
 
 nproc_group_bound(1) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(nproc_group_bound(1), nproc_id_bound(1), nproc_size_bound(1))
 
 if(isequential==1)then
-  icolor=imrs(1)+imrs(3)*nproc_Mxin_s_dm(1)   &
-                +igroup*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(3)   &
-                +imr(1)*nproc_size_global/nproc_Mxin_mul/nproc_Mxin_s_dm(2)   &
-                +imr(3)*nproc_size_global/nproc_Mxin_mul/nproc_Mxin_s_dm(2)*nproc_Mxin(1)
-  ikey=imrs(2)+imr(2)*nproc_Mxin_s_dm(2)
+  icolor=imrs(1)+imrs(3)*nproc_d_g_dm(1)   &
+                +igroup*nproc_d_g_dm(1)*nproc_d_g_dm(3)   &
+                +imr(1)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(2)   &
+                +imr(3)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(2)*nproc_d_o(1)
+  ikey=imrs(2)+imr(2)*nproc_d_g_dm(2)
 else if(isequential==2)then
-  icolor=imr(1)+imr(3)*nproc_Mxin(1)   &
-               +imrs(1)*nproc_Mxin(1)*nproc_Mxin(3)   &
-               +imrs(3)*nproc_Mxin(1)*nproc_Mxin(3)*nproc_Mxin_s_dm(1)  &
-               +nproc_id_global/(nproc_Mxin_mul*nproc_Mxin_mul_s_dm)*nproc_Mxin(1)*nproc_Mxin(3)  &
-               *nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(3)
-!  ikey=imr(2)+imrs(2)*nproc_Mxin(2)
-  ikey=imrs(2)+imr(2)*nproc_Mxin_s_dm(2)
+  icolor=imr(1)+imr(3)*nproc_d_o(1)   &
+               +imrs(1)*nproc_d_o(1)*nproc_d_o(3)   &
+               +imrs(3)*nproc_d_o(1)*nproc_d_o(3)*nproc_d_g_dm(1)  &
+               +nproc_id_global/(nproc_d_o_mul*nproc_d_g_mul_dm)*nproc_d_o(1)*nproc_d_o(3)  &
+               *nproc_d_g_dm(1)*nproc_d_g_dm(3)
+!  ikey=imr(2)+imrs(2)*nproc_d_o(2)
+  ikey=imrs(2)+imr(2)*nproc_d_g_dm(2)
 end if
 
 nproc_group_bound(2) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(nproc_group_bound(2), nproc_id_bound(2), nproc_size_bound(2))
 
 if(isequential==1)then
-  icolor=imrs(1)+imrs(2)*nproc_Mxin_s_dm(1)   &
-                +igroup*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)   &
-                +imr(1)*nproc_size_global/nproc_Mxin_mul/nproc_Mxin_s_dm(3)   &
-                +imr(2)*nproc_size_global/nproc_Mxin_mul/nproc_Mxin_s_dm(3)*nproc_Mxin(1)
-  ikey=imrs(3)+imr(3)*nproc_Mxin_s_dm(3)
+  icolor=imrs(1)+imrs(2)*nproc_d_g_dm(1)   &
+                +igroup*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
+                +imr(1)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(3)   &
+                +imr(2)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(3)*nproc_d_o(1)
+  ikey=imrs(3)+imr(3)*nproc_d_g_dm(3)
 else if(isequential==2)then
-  icolor=imr(1)+imr(2)*nproc_Mxin(1)   &
-               +imrs(1)*nproc_Mxin(1)*nproc_Mxin(2)   &
-               +imrs(2)*nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin_s_dm(1)  &
-               +nproc_id_global/(nproc_Mxin_mul*nproc_Mxin_mul_s_dm)*nproc_Mxin(1)*nproc_Mxin(2)  &
-               *nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
-!  ikey=imr(3)+imrs(3)*nproc_Mxin(3)
-  ikey=imrs(3)+imr(3)*nproc_Mxin_s_dm(3)
+  icolor=imr(1)+imr(2)*nproc_d_o(1)   &
+               +imrs(1)*nproc_d_o(1)*nproc_d_o(2)   &
+               +imrs(2)*nproc_d_o(1)*nproc_d_o(2)*nproc_d_g_dm(1)  &
+               +nproc_id_global/(nproc_d_o_mul*nproc_d_g_mul_dm)*nproc_d_o(1)*nproc_d_o(2)  &
+               *nproc_d_g_dm(1)*nproc_d_g_dm(2)
+!  ikey=imr(3)+imrs(3)*nproc_d_o(3)
+  ikey=imrs(3)+imr(3)*nproc_d_g_dm(3)
 end if
 
 nproc_group_bound(3) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(nproc_group_bound(3), nproc_id_bound(3), nproc_size_bound(3))
 
 if(isequential==1)then
-  do ii=0,nproc_Mxin_mul-1
-    do i4=0,nproc_size_global/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-    do i3=0,nproc_Mxin_s_dm(3)-1
-    do i2=0,nproc_Mxin_s_dm(2)-1
-    do i1=0,nproc_Mxin_s_dm(1)-1
-      ibox=i1+i2*nproc_Mxin_s_dm(1)   &
-             +i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)   &
-             +i4*nproc_Mxin_mul_s_dm   &
-             +ii*nproc_size_global/nproc_Mxin_mul
+  do ii=0,nproc_d_o_mul-1
+    do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
+    do i3=0,nproc_d_g_dm(3)-1
+    do i2=0,nproc_d_g_dm(2)-1
+    do i1=0,nproc_d_g_dm(1)-1
+      ibox=i1+i2*nproc_d_g_dm(1)   &
+             +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
+             +i4*nproc_d_g_mul_dm   &
+             +ii*nproc_size_global/nproc_d_o_mul
       if(nproc_id_global==ibox)then
-        icolor=i4+ii*nproc_size_global/nproc_Mxin_mul/nproc_Mxin_mul_s_dm
-        ikey=i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+        icolor=i4+ii*nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm
+        ikey=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
       end if
     end do
     end do
@@ -522,17 +522,17 @@ if(isequential==1)then
     end do
   end do
 else if(isequential==2)then
-  do i4=0,nproc_size_global/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-  do i3=0,nproc_Mxin_s_dm(3)-1
-  do i2=0,nproc_Mxin_s_dm(2)-1
-  do i1=0,nproc_Mxin_s_dm(1)-1
-    do ii=0,nproc_Mxin_mul-1
-      ibox=ii+i1*nproc_Mxin_mul+i2*nproc_Mxin_mul*nproc_Mxin_s_dm(1)   &
-            +i3*nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-            +i4*nproc_Mxin_mul*nproc_Mxin_mul_s_dm
+  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
+  do i3=0,nproc_d_g_dm(3)-1
+  do i2=0,nproc_d_g_dm(2)-1
+  do i1=0,nproc_d_g_dm(1)-1
+    do ii=0,nproc_d_o_mul-1
+      ibox=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
+            +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+            +i4*nproc_d_o_mul*nproc_d_g_mul_dm
       if(nproc_id_global==ibox)then
-        icolor=ii+i4*nproc_Mxin_mul
-        ikey=i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+        icolor=ii+i4*nproc_d_o_mul
+        ikey=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
       end if
     end do
   end do
@@ -551,9 +551,9 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
 !if(iflag_hartree==4)then
 
 ! communicators for FFTE routine
-  NPUW=nproc_Mxin_s_dm(1)*nproc_Mxin(1)
-  NPUY=nproc_Mxin_s_dm(2)*nproc_Mxin(2)
-  NPUZ=nproc_Mxin_s_dm(3)*nproc_Mxin(3)
+  NPUW=nproc_d_g_dm(1)*nproc_d_o(1)
+  NPUY=nproc_d_g_dm(2)*nproc_d_o(2)
+  NPUZ=nproc_d_g_dm(3)*nproc_d_o(3)
 
   icolor=nproc_id_bound(3)+nproc_id_bound(1)*NPUZ
   ikey=nproc_id_bound(2)
@@ -572,15 +572,15 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
 
   iquot=nproc_id_global/(NPUY*NPUZ)
   
-  i11=mod(nproc_id_global,nproc_Mxin(2)*nproc_Mxin(3))
-  i12=i11/nproc_Mxin(2)
-  i13=i12*nproc_Mxin(3)
-  i14=nproc_id_global/(NPUY*nproc_Mxin(3))
+  i11=mod(nproc_id_global,nproc_d_o(2)*nproc_d_o(3))
+  i12=i11/nproc_d_o(2)
+  i13=i12*nproc_d_o(3)
+  i14=nproc_id_global/(NPUY*nproc_d_o(3))
   icolor=i13+i14+iquot*NPUZ
   
-  i11=mod(nproc_id_global,nproc_Mxin(2))
-  i12=nproc_id_global/(nproc_Mxin(2)*nproc_Mxin(3))
-  ikey=i11*NPUY/nproc_Mxin(2)+mod(i12,NPUY/nproc_Mxin(2))
+  i11=mod(nproc_id_global,nproc_d_o(2))
+  i12=nproc_id_global/(nproc_d_o(2)*nproc_d_o(3))
+  ikey=i11*NPUY/nproc_d_o(2)+mod(i12,NPUY/nproc_d_o(2))
   
   nproc_group_icommy_copy = comm_create_group(nproc_group_global, icolor, ikey)
   call comm_get_groupinfo(nproc_group_icommy_copy, nproc_id_icommy_copy, nproc_size_icommy_copy)
@@ -882,27 +882,27 @@ integer,allocatable :: ircnt(:)
 integer,allocatable :: idisp(:)
 integer :: is
 
-allocate(ircnt(0:nproc_Mxin_mul_s_dm-1))
-allocate(idisp(0:nproc_Mxin_mul_s_dm-1))
+allocate(ircnt(0:nproc_d_g_mul_dm-1))
+allocate(idisp(0:nproc_d_g_mul_dm-1))
 
 allocate (matbox11(0:(inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)*inum_Mxin_s(3,nproc_id_global))-1))
 allocate (matbox12(0:(mg_num(1)*mg_num(2)*mg_num(3))-1))
 
 iscnt=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)*inum_Mxin_s(3,nproc_id_global)
 if(isequential==1)then
-  do i=0,nproc_Mxin_mul_s_dm-1
-    ibox=(nproc_id_global/nproc_Mxin_mul_s_dm)*nproc_Mxin_mul_s_dm+i
+  do i=0,nproc_d_g_mul_dm-1
+    ibox=(nproc_id_global/nproc_d_g_mul_dm)*nproc_d_g_mul_dm+i
     ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
   end do
 else if(isequential==2)then
-  do i=0,nproc_Mxin_mul_s_dm-1
-    ibox=mod(nproc_id_global,nproc_Mxin_mul)+i*nproc_Mxin_mul
+  do i=0,nproc_d_g_mul_dm-1
+    ibox=mod(nproc_id_global,nproc_d_o_mul)+i*nproc_d_o_mul
     ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
   end do
 end if
 
 idisp(0)=0
-do i=1,nproc_Mxin_mul_s_dm-1
+do i=1,nproc_d_g_mul_dm-1
   idisp(i)=idisp(i-1)+ircnt(i-1)
 end do
 
@@ -924,12 +924,12 @@ do is=1,nspin
 
   if(isequential==1)then
 !$OMP parallel do private(i1,i2,i3,ibox,ibox2) collapse(3)
-    do i3=0,nproc_Mxin_s_dm(3)-1
-    do i2=0,nproc_Mxin_s_dm(2)-1
-    do i1=0,nproc_Mxin_s_dm(1)-1
-      ibox=(nproc_id_global/nproc_Mxin_mul_s_dm)*nproc_Mxin_mul_s_dm    &
-            +(i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2))
-      ibox2=i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    do i3=0,nproc_d_g_dm(3)-1
+    do i2=0,nproc_d_g_dm(2)-1
+    do i1=0,nproc_d_g_dm(1)-1
+      ibox=(nproc_id_global/nproc_d_g_mul_dm)*nproc_d_g_mul_dm    &
+            +(i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2))
+      ibox2=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
 
       call copyVlocal(matbox12(idisp(ibox2):  &
                       (idisp(ibox2)+inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox))-1),  &
@@ -940,12 +940,12 @@ do is=1,nspin
     end do
   else if(isequential==2)then
 !$OMP parallel do private(i1,i2,i3,ibox,ibox2) collapse(3)
-    do i3=0,nproc_Mxin_s_dm(3)-1
-    do i2=0,nproc_Mxin_s_dm(2)-1
-    do i1=0,nproc_Mxin_s_dm(1)-1
-      ibox=mod(nproc_id_global,nproc_Mxin_mul)    &
-          +(i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2))*nproc_Mxin_mul
-      ibox2=i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    do i3=0,nproc_d_g_dm(3)-1
+    do i2=0,nproc_d_g_dm(2)-1
+    do i1=0,nproc_d_g_dm(1)-1
+      ibox=mod(nproc_id_global,nproc_d_o_mul)    &
+          +(i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2))*nproc_d_o_mul
+      ibox2=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
 
       call copyVlocal(matbox12(idisp(ibox2):  &
                       (idisp(ibox2)+inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox))-1),  &
@@ -1037,19 +1037,19 @@ integer :: iscnt
 integer,allocatable :: ircnt(:)
 integer,allocatable :: idisp(:)
 
-if(nproc_ob/=1.or.nproc_Mxin_mul/=1)then
+if(nproc_ob/=1.or.nproc_d_o_mul/=1)then
 
-  allocate(ircnt(0:nproc_Mxin_mul_s_dm-1))
-  allocate(idisp(0:nproc_Mxin_mul_s_dm-1))
+  allocate(ircnt(0:nproc_d_g_mul_dm-1))
+  allocate(idisp(0:nproc_d_g_mul_dm-1))
 
   iscnt=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)*inum_Mxin_s(3,nproc_id_global)
-  do i=0,nproc_Mxin_mul_s_dm-1
-    ibox=mod(nproc_id_global,nproc_Mxin_mul)+i*nproc_Mxin_mul
+  do i=0,nproc_d_g_mul_dm-1
+    ibox=mod(nproc_id_global,nproc_d_o_mul)+i*nproc_d_o_mul
     ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
   end do
 
   idisp(0)=0
-  do i=1,nproc_Mxin_mul_s_dm-1
+  do i=1,nproc_d_g_mul_dm-1
     idisp(i)=idisp(i-1)+ircnt(i-1)
   end do
 
@@ -1069,12 +1069,12 @@ if(nproc_ob/=1.or.nproc_Mxin_mul/=1)then
 
   call comm_allgatherv(matbox1,matbox2,ircnt,idisp,nproc_group_h)
    
-  do i3=0,nproc_Mxin_s_dm(3)-1
-  do i2=0,nproc_Mxin_s_dm(2)-1
-  do i1=0,nproc_Mxin_s_dm(1)-1
-    ibox=mod(nproc_id_global,nproc_Mxin_mul)    &
-          +(i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2))*nproc_Mxin_mul
-    ibox2=i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+  do i3=0,nproc_d_g_dm(3)-1
+  do i2=0,nproc_d_g_dm(2)-1
+  do i1=0,nproc_d_g_dm(1)-1
+    ibox=mod(nproc_id_global,nproc_d_o_mul)    &
+          +(i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2))*nproc_d_o_mul
+    ibox2=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
 
     if(nproc_id_h/=ibox2)then
 !$OMP parallel do private(ibox3,ix,iy,iz)
