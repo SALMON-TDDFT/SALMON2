@@ -294,8 +294,8 @@ else if(isequential==2)then
   end do
 end if
  
-nproc_group_grid = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_grid, nproc_id_grid, nproc_size_grid)
+info%icomm_ko = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info%icomm_ko, nproc_id_grid, nproc_size_grid)
 
 !new_world for comm_orbitalgrid
 if(isequential==1)then
@@ -862,12 +862,13 @@ end subroutine make_icoobox_bound
 
 !=====================================================================
 !======================================================================
-subroutine allgatherv_vlocal(nspin,Vh,Vpsl,Vxc,Vlocal)
-use structures
-use salmon_parallel, only: nproc_id_global, nproc_group_grid
+subroutine allgatherv_vlocal(info,nspin,Vh,Vpsl,Vxc,Vlocal)
+use structures, only: s_orbital_parallel, s_scalar
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_allgatherv
 use timer
 implicit none
+type(s_orbital_parallel),intent(in) :: info
 integer       ,intent(in) :: nspin
 type(s_scalar),intent(in) :: Vh,Vpsl,Vxc(nspin)
 type(s_scalar)            :: Vlocal(nspin)
@@ -919,7 +920,7 @@ do is=1,nspin
   end do
 
   call timer_begin(LOG_ALLGATHERV_TOTAL)
-  call comm_allgatherv(matbox11,matbox12,ircnt,idisp,nproc_group_grid)
+  call comm_allgatherv(matbox11,matbox12,ircnt,idisp,info%icomm_ko)
   call timer_end(LOG_ALLGATHERV_TOTAL)
 
   if(isequential==1)then
@@ -981,9 +982,10 @@ CONTAINS
   end subroutine copyVlocal
 end subroutine allgatherv_vlocal
 
-subroutine wrapper_allgatherv_vlocal ! --> remove (future works)
+subroutine wrapper_allgatherv_vlocal(info) ! --> remove (future works)
   use structures
   implicit none
+  type(s_orbital_parallel),intent(in) :: info
   type(s_scalar) :: sVh,sVpsl
   type(s_scalar),allocatable :: sVlocal(:),sVxc(:)
   integer :: nspin,jspin
@@ -1007,7 +1009,7 @@ subroutine wrapper_allgatherv_vlocal ! --> remove (future works)
     sVxc(1)%f = Vxc
   end if
 
-  call allgatherv_vlocal(nspin,sVh,sVpsl,sVxc,sVlocal)
+  call allgatherv_vlocal(info,nspin,sVh,sVpsl,sVxc,sVlocal)
 
   do jspin=1,nspin
     Vlocal(:,:,:,jspin) = sVlocal(jspin)%f
