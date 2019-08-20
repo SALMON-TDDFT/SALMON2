@@ -66,6 +66,11 @@ module structures
   type s_pcomm_cache
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
+
+! NOTE: This directive is a compiler hint to stabilize the performance of sendrecv_grid.
+#ifdef __INTEL_COMPILER
+!dir$ attributes align : 2097152 :: dbuf, zbuf
+#endif
   end type s_pcomm_cache
 
   type s_sendrecv_grid
