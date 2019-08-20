@@ -244,7 +244,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   call timer_end(LOG_CALC_EXC_COR)
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
-  call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+  call allgatherv_vlocal(info,system%nspin,sVh,sVpsl,sVxc,V_local)
   call timer_end(LOG_CALC_VLOCAL)
 
 ! result
@@ -371,7 +371,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   end if
   if(out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call calcEstatic(ng, sVh, srg_ng)
+      call calcEstatic(ng, info, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end if
