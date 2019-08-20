@@ -127,44 +127,6 @@ end if
 info%icomm_r = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_r, nproc_id_korbital, nproc_size_korbital)
 
-!new_world for comm_rho
-if(isequential==1)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
-    do i5=0,nproc_k-1
-    do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))*nproc_ob*nproc_k
-      if(nproc_id_global==ibox)then
-        icolor=i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2)
-        ikey=i5*nproc_ob+i4
-      end if
-    end do
-    end do
-  end do
-  end do
-  end do
-else if(isequential==2)then
-  do i3=0,nproc_Mxin(3)-1
-  do i2=0,nproc_Mxin(2)-1
-  do i1=0,nproc_Mxin(1)-1
-    do i5=0,nproc_k-1
-    do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))+(i5*nproc_ob+i4)*nproc_Mxin_mul
-      if(nproc_id_global==ibox)then
-        icolor=(i1+i2*nproc_Mxin(1)+i3*nproc_Mxin(1)*nproc_Mxin(2))
-        ikey=i5*nproc_ob+i4
-      end if
-    end do
-    end do
-  end do
-  end do
-  end do
-end if
- 
-nproc_group_rho = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_rho, nproc_id_rho, nproc_size_rho)
-
 !new_world for comm_k
 if(isequential==1)then
   do i3=0,nproc_Mxin(3)-1
@@ -332,8 +294,8 @@ else if(isequential==2)then
   end do
 end if
  
-nproc_group_orbitalgrid = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_orbitalgrid, nproc_id_orbitalgrid, nproc_size_orbitalgrid)
+info%icomm_k = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info%icomm_k, nproc_id_orbitalgrid, nproc_size_orbitalgrid)
 
 !new_world for comm_mesh_s
 

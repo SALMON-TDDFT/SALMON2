@@ -463,8 +463,7 @@ END subroutine Real_Time_DFT
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
-                           nproc_group_h, nproc_group_rho, &
-                           nproc_size_global
+                           nproc_group_h, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -539,7 +538,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
   info%if_divide_orbit = nproc_ob.ne.1
-  info%icomm_ko = nproc_group_rho
   info%icomm_rko = nproc_group_global
 
   allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
