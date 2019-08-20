@@ -635,7 +635,7 @@ contains
     num_rgrid = 0
 !! == default for &kgrid
     num_kgrid = 1
-    file_kw   =  'none'
+    file_kw   = 'none'
 !! == default for &tgrid
     nt = 0
     dt = 0
@@ -644,10 +644,10 @@ contains
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
 !! == default for &scf
-    method_min  = 'cg'
+    method_min    = 'cg'
     ncg           = 5
-    method_mixing       = 'broyden'
-    mixrate      = 0.5d0
+    method_mixing = 'broyden'
+    mixrate       = 0.5d0
     nmemory_mb    = 8
     alpha_mb      = 0.75d0
     fsset_option  = 'n'
@@ -665,35 +665,35 @@ contains
 !! == default for &emfield
     trans_longi    = 'tr'
     ae_shape1      = 'none'
-    e_impulse = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
+    e_impulse      = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
     E_amplitude1   = 0d0
-    I_wcm2_1 = -1d0
-    tw1      = 0d0
+    I_wcm2_1       = -1d0
+    tw1            = 0d0
     omega1         = 0d0
     epdir_re1      = (/1d0,0d0,0d0/)
     epdir_im1      = 0d0
     phi_cep1       = 0d0
     ae_shape2      = 'none'
     E_amplitude2   = 0d0
-    I_wcm2_2 = -1d0
-    tw2      = 0d0
+    I_wcm2_2       = -1d0
+    tw2            = 0d0
     omega2         = 0d0
     epdir_re2      = (/1d0,0d0,0d0/)
     epdir_im2      = 0d0
     phi_cep2       = 0d0
     t1_t2          = 0d0
     t1_start       = 0d0
-    yn_local_field    = 'n'
+    yn_local_field = 'n'
     rlaserbound_sta(1) = -1.d7*ulength_from_au ! a.u.
     rlaserbound_sta(2) = -1.d7*ulength_from_au ! a.u.
     rlaserbound_sta(3) = -1.d7*ulength_from_au ! a.u.
     rlaserbound_end(1) =  1.d7*ulength_from_au ! a.u.
     rlaserbound_end(2) =  1.d7*ulength_from_au ! a.u.
     rlaserbound_end(3) =  1.d7*ulength_from_au ! a.u.
-    num_dipole_source       = 0
-    vec_dipole_source       = 0d0
-    cood_dipole_source       = 0d0
-    rad_dipole_source = 2d0 ! a.u.
+    num_dipole_source  = 0
+    vec_dipole_source  = 0d0
+    cood_dipole_source = 0d0
+    rad_dipole_source  = 2d0 ! a.u.
     
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -713,7 +713,7 @@ contains
     nz_origin_m = 1
     file_macropoint = ''
     set_ini_coor_vel= 'n'
-    nmacro_write_group=-1
+    nmacro_write_group= -1
 
 !! == default for &maxwell
     al_em(:)         = 0d0
@@ -773,7 +773,7 @@ contains
     out_rvf_rt_step     = 10
     out_tm              = 'n'
     out_projection_step = 100
-    out_ms_step      = 100
+    out_ms_step         = 100
     format3d            = 'cube'
     numfiles_out_3d     = 1
     timer_process       = 'n'
