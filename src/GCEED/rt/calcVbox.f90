@@ -32,7 +32,7 @@ SUBROUTINE calcVbox(itt_t)
 
 
   if(iperiodic==0)then
-    if(alocal_laser=='y')then
+    if(yn_local_field=='y')then
       do jj=1,3
         if(mg_sta(jj)-Nd<ilasbound_sta(jj))then
           ix_sta_Vbox(jj)=mg_sta(jj)-Nd
@@ -79,7 +79,7 @@ SUBROUTINE calcVbox(itt_t)
     if(ae_shape1 == 'impulse')then
       continue
     else
-        if(dt*dble(itt_t) <= pulse_tw1)then
+        if(dt*dble(itt_t) <= tw1)then
           ipulse=1
           call calc_env_trigon(ipulse,env_trigon_1)
         !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -87,17 +87,17 @@ SUBROUTINE calcVbox(itt_t)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
             Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+  &
-                           amplitude1*(epdir_re1(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
+                           E_amplitude1*(epdir_re1(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
                                        epdir_re1(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
                                        epdir_re1(3)*(gridcoo(iz,3)-rlaser_center(3)))*env_trigon_1  &
-                          +amplitude1*(epdir_im1(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
+                          +E_amplitude1*(epdir_im1(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
                                        epdir_im1(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
                                        epdir_im1(3)*(gridcoo(iz,3)-rlaser_center(3)))*env_trigon_1
           end do
           end do
           end do
         end if
-        if(abs(dt*dble(itt_t)-0.5d0*pulse_tw1-t1_t2) < 0.5d0*pulse_tw2)then
+        if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
           ipulse=2
           call calc_env_trigon(ipulse,env_trigon_2)
           !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -105,10 +105,10 @@ SUBROUTINE calcVbox(itt_t)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
             Vbox(ix,iy,iz)=Vbox(ix,iy,iz)   &
-                          +amplitude2*(epdir_re2(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
+                          +E_amplitude2*(epdir_re2(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
                                        epdir_re2(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
                                        epdir_re2(3)*(gridcoo(iz,3)-rlaser_center(3)))*env_trigon_2  &
-                          +amplitude2*(epdir_im2(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
+                          +E_amplitude2*(epdir_im2(1)*(gridcoo(ix,1)-rlaser_center(1))+   &
                                        epdir_im2(2)*(gridcoo(iy,2)-rlaser_center(2))+   &
                                        epdir_im2(3)*(gridcoo(iz,3)-rlaser_center(3)))*env_trigon_2
           end do
@@ -118,8 +118,8 @@ SUBROUTINE calcVbox(itt_t)
     end if
   end if
    
-  if(nump>=1)then
-    if(dt*dble(itt_t) <= pulse_tw1)then
+  if(num_dipole_source>=1)then
+    if(dt*dble(itt_t) <= tw1)then
       ipulse=1
       call calc_env_trigon(ipulse,env_trigon_1)
 !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -131,7 +131,7 @@ SUBROUTINE calcVbox(itt_t)
       end do
       end do
     end if
-    if(abs(dt*dble(itt_t)-0.5d0*pulse_tw1-t1_t2) < 0.5d0*pulse_tw2)then
+    if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
       ipulse=2
       call calc_env_trigon(ipulse,env_trigon_2)
 !$OMP parallel do collapse(2) private(ix,iy,iz)

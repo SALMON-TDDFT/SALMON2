@@ -555,14 +555,9 @@ call timer_end(LOG_INIT_GS_ITERATION)
 
 call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
-  select case(convergence)
-    case('rho_dne')
-      if(sum1<threshold) cycle DFT_Iteration
-    case('norm_rho','norm_rho_dng')
-      if(sum1<threshold_norm_rho) cycle DFT_Iteration
-    case('norm_pot','norm_pot_dng')
-      if(sum1<threshold_norm_pot) cycle DFT_Iteration
-  end select 
+
+
+  if(sum1<threshold) cycle DFT_Iteration
 
   Miter=Miter+1
 
@@ -604,8 +599,8 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_RHO)
 
-    select case(amixing)
-      case ('simple') ; call simple_mixing(system%nspin,1.d0-rmixrate,rmixrate,srho_s)
+    select case(method_mixing)
+      case ('simple') ; call simple_mixing(system%nspin,1.d0-mixrate,mixrate,srho_s)
       case ('broyden'); call buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
     end select
     call timer_end(LOG_CALC_RHO)

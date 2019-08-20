@@ -40,18 +40,18 @@ if(comm_is_root(nproc_id_global))then
 end if
 !===== namelist for group_fundamental =====
 
-select case(amin_routine)
+select case(method_min)
   case('cg','diis','cg-diis')
     continue
   case default
-    stop 'Specify either "cg", "diis", or "cg-diis" for amin_routine.'
+    stop 'Specify either "cg", "diis", or "cg-diis" for method_min.'
 end select
 
-select case(amixing)
+select case(method_mixing)
   case ('simple','broyden')
     continue
   case default
-    stop 'Specify either "simple" or "broyden" for amixing.'
+    stop 'Specify either "simple" or "broyden" for method_mixing.'
 end select
     
 Harray(1:3,1:maxntmg)=0.d0
@@ -122,7 +122,7 @@ else
    iter_opt = 1
 endif
 
-select case(subspace_diagonalization)
+select case(yn_subspace_diagonalization)
 case('y')
   iflag_subspace_diag = 1
 case('n')

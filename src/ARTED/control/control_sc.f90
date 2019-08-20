@@ -30,7 +30,7 @@ subroutine tddft_sc
   use salmon_file, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_current, t_unit_ac,  t_unit_energy, t_unit_elec
   use restart, only: prep_restart_write
-  use Ac_alocal_laser
+  use Ac_yn_local_field
   use const, only: umass, hartree2J, kB
   use md_ground_state
   implicit none
@@ -200,7 +200,7 @@ subroutine tddft_sc
     do ixyz=1,3
       kAc(:,ixyz)=kAc0(:,ixyz)+Ac_tot(iter+1,ixyz)
     enddo
-    if(alocal_laser=='y') call prep_RT_Ac_alocal_laser(iter+1)
+    if(yn_local_field=='y') call prep_RT_Ac_yn_local_field(iter+1)
 
 !$acc update device(kAc,kAc_new)
     call current_RT(zu_t)
@@ -231,7 +231,7 @@ subroutine tddft_sc
     do ia=1,NI
       FionAc(:,ia)=Zps(Kion(ia))*E_tot(iter,:)
     enddo
-    if(alocal_laser=='y') call get_Eelemag_FionAc_alocal_laser(iter)
+    if(yn_local_field=='y') call get_Eelemag_FionAc_yn_local_field(iter)
     force=force+FionAc
 
     if (use_ehrenfest_md == 'y') then

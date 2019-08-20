@@ -103,7 +103,7 @@ contains
 !     dt = dt
 
 !    namelist/pseudo/ &
-!            & PSmask_option, &
+!            & yn_psmask, &
 !            & alpha_mask, &
 !            & gamma_mask, &
 !            & eta_mask
@@ -124,13 +124,13 @@ contains
 !            & Longi_Trans, & ! This variable is replaced by trans_longi
 !     dAc = e_impulse
 !     AE_shape = trim(ae_shape1)
-!     IWcm2_1 = rlaser_int_wcm2_1
-!     tpulsefs_1 = pulse_tw1*au_time_fs
+!     IWcm2_1 = I_wcm2_1
+!     tpulsefs_1 = tw1*au_time_fs
 !     omegaev_1 = omega1*au_energy_ev
 !     phi_CEP_1 = phi_cep1
 !     Epdir_1 = epdir_re1
-!     IWcm2_2 = rlaser_int_wcm2_2
-!     tpulsefs_2 = pulse_tw2*au_time_fs
+!     IWcm2_2 = I_wcm2_2
+!     tpulsefs_2 = tw2*au_time_fs
 !     omegaev_2 = omega2*au_energy_ev
 !     phi_CEP_2 = phi_cep1
 !     Epdir_2 = epdir_re1

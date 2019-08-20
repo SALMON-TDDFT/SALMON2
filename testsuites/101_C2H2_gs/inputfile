@@ -8,7 +8,7 @@
   sysname = 'C2H2'
 /
 &system
-  iperiodic = 0
+  yn_periodic = 'n'
   al = 16d0, 16d0, 16d0
   nstate = 5
   nelem = 2
@@ -18,8 +18,8 @@
 &pseudo
   iZatom(1)=6
   iZatom(2)=1
-  pseudo_file(1)='C_rps.dat'
-  pseudo_file(2)='H_rps.dat'
+  file_pseudo(1)='C_rps.dat'
+  file_pseudo(2)='H_rps.dat'
   Lmax_ps(1)=1
   Lmax_ps(2)=0
   Lloc_ps(1)=1

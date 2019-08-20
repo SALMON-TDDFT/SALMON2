@@ -43,8 +43,8 @@ contains
     use timer
     use salmon_math
     use projector
-    use salmon_global, only: alocal_laser
-    use Ac_alocal_laser
+    use salmon_global, only: yn_local_field
+    use Ac_yn_local_field
     implicit none
     logical,intent(in)       :: Rion_update
     integer,intent(in)       :: zu_NB
@@ -182,8 +182,8 @@ contains
       call total_energy_stencil(lap0_2,lapt,nabt,zutmp(:,ib,ik),tpsum)
       Ekin_l=Ekin_l+occ(ib,ik)*tpsum*Hxyz+occ(ib,ik)*sum(kAc(ik,:)**2)/2.d0
 
-      if(alocal_laser=='y' .and. flag_set_ini_Ac_alocal)then
-         call total_energy_stencil_add_Ac_alocal(Ac2_al(:,ik),Ac1x_al,Ac1y_al,Ac1z_al,nabt_al,zutmp(:,ib,ik),tpsum)
+      if(yn_local_field=='y' .and. flag_set_ini_Ac_local)then
+         call total_energy_stencil_add_Ac_local(Ac2_al(:,ik),Ac1x_al,Ac1y_al,Ac1z_al,nabt_al,zutmp(:,ib,ik),tpsum)
          Ekin_l=Ekin_l+occ(ib,ik)*tpsum*Hxyz
       endif
 

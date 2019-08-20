@@ -148,8 +148,8 @@ contains
        if(functional == 'TBmBJ' .or. functional == 'tbmbj') write(*,*) 'cvalue=',cval
        !yabana
        write(*,*) 'propagator=',propagator
-       write(*,*) 'pseudo_file =',(trim(pseudo_file(i)),i=1,NE)
-       write(*,*) 'PSmask_option =',PSmask_option
+       write(*,*) 'file_pseudo =',(trim(file_pseudo(i)),i=1,NE)
+       write(*,*) 'yn_psmask =',yn_psmask
        write(*,*) 'alpha_mask, gamma_mask, eta_mask =',real(alpha_mask), real(gamma_mask), real(eta_mask)
        write(file_GS,"(2A,'_gs_info.data')") trim(directory),trim(SYSname)
        write(file_epst,"(2A,'_t.data')") trim(directory),trim(SYSname)

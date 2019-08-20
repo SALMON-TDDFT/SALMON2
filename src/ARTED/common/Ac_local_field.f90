@@ -1,4 +1,4 @@
-! This file is for "alocal_laser" option -- just trial version (by AY)
+! This file is for "yn_local_field" option -- just trial version (by AY)
 ! This is an option for applying electric field only at specific domain or atoms.
 ! Usually this is not used but for something specific case, you may want to use
 ! for e.x. local excitation.
@@ -13,21 +13,21 @@
 !  - Non-local pseudopotential term in KS equation
 !  - Current
 !
-module Ac_alocal_laser
+module Ac_yn_local_field
   implicit none
 
 contains
 
   !-----------------------------
-  subroutine init_Ac_alocal
+  subroutine init_Ac_local
   use Global_Variables
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_is_root
   implicit none
   logical :: flag_use_gauss_for_weight_ion
-  integer :: i,j,NI_alocal
+  integer :: i,j,NI_local
   integer :: ix,iy,iz,ia,ia2,iatom(NI)
-  real(8) :: x,y,z,r,tmpx,tmpy,tmpz,tmp1,radi(NI),sgm(NI),ave_weight_Ac_alocal
+  real(8) :: x,y,z,r,tmpx,tmpy,tmpz,tmp1,radi(NI),sgm(NI),ave_weight_Ac_local
   character(10) :: ckeyword
 
   allocate(Ac_ext_al(-1:Nt+1,3),Ac_tot_al(-1:Nt+1,3))
@@ -36,46 +36,46 @@ contains
   Ac_tot    = 0d0
   Ac_ext    = 0d0
 
-  if( read_rt_wfn_k=='y' .and. allocated(weight_Ac_alocal) ) then
+  if( read_rt_wfn_k=='y' .and. allocated(weight_Ac_local) ) then
      if(comm_is_root(nproc_id_global)) &
-     &   write(*,*)"  (alocal_laser data was read from rt_wfn_k)"
+     &   write(*,*)"  (yn_local_field data was read from rt_wfn_k)"
      goto 100
   endif
 
   if(comm_is_root(nproc_id_global))then
-     open(898,file='input_Ac_alocal.dat')
+     open(898,file='input_Ac_local.dat')
 
      read(898,*) ckeyword
      if(ckeyword=="atoms") then
 
-        read(898,*) NI_alocal
-        do i=1,NI_alocal
+        read(898,*) NI_local
+        do i=1,NI_local
            read(898,*) iatom(i),radi(i),sgm(i)   !unit=[au]
         enddo
 
      else if(ckeyword=="grids") then
-        write(*,*) "Error: keyword in input_Ac_alocal.dat is not supported now"
+        write(*,*) "Error: keyword in input_Ac_local.dat is not supported now"
         stop
      else
-        write(*,*) "Error: keyword in input_Ac_alocal.dat is bad"
+        write(*,*) "Error: keyword in input_Ac_local.dat is bad"
         stop
      endif
      close(898)
   end if
 
   call comm_bcast(ckeyword, nproc_group_global)
-  call comm_bcast(NI_alocal,nproc_group_global)
+  call comm_bcast(NI_local,nproc_group_global)
 
-  allocate(weight_Ac_alocal(NL),weight_Ac_alocal_ion(NI),divA_al(NL))
-  weight_Ac_alocal(:)    =0d0
-  weight_Ac_alocal_ion(:)=0d0
+  allocate(weight_Ac_local(NL),weight_Ac_local_ion(NI),divA_al(NL))
+  weight_Ac_local(:)    =0d0
+  weight_Ac_local_ion(:)=0d0
 
   if(ckeyword=="atoms") then
 
      if(comm_is_root(nproc_id_global))then
-        write(*,*) "# input_Ac_alocal.dat was read:"
+        write(*,*) "# input_Ac_local.dat was read:"
         write(*,*) "    ",trim(ckeyword)
-        do i=1,NI_alocal
+        do i=1,NI_local
            write(*,*) "  ",iatom(i),real(radi(i)),real(sgm(i))
         enddo
      endif
@@ -85,7 +85,7 @@ contains
      call comm_bcast(sgm,  nproc_group_global)
 
 !$omp parallel private(j,ia,ix,iy,iz,tmpx,tmpy,tmpz,ia2,x,y,z,r,tmp1)
-     do j=1,NI_alocal
+     do j=1,NI_local
         ia=iatom(j)
         do ix=-2,2
         do iy=-2,2
@@ -100,10 +100,10 @@ contains
               z=Lz(i)*Hz-tmpz
               r=sqrt(x*x+y*y+z*z)
               if(r<radi(j)) then
-                 weight_Ac_alocal(i)=1d0
+                 weight_Ac_local(i)=1d0
               else
                  tmp1 = exp(-(r-radi(j))**2d0/(sgm(j)*sgm(j)))
-                 weight_Ac_alocal(i)= weight_Ac_alocal(i) + tmp1
+                 weight_Ac_local(i)= weight_Ac_local(i) + tmp1
               endif
            enddo
 !$omp end do
@@ -115,10 +115,10 @@ contains
               z=Rion(3,ia2)-tmpz
               r=sqrt(x*x+y*y+z*z)
               if(r<radi(j)) then
-                 weight_Ac_alocal_ion(ia2)=1d0
+                 weight_Ac_local_ion(ia2)=1d0
               else
                  tmp1 = exp(-(r-radi(j))**2d0/(sgm(j)*sgm(j)))
-                 weight_Ac_alocal_ion(ia2)= weight_Ac_alocal_ion(ia2) + tmp1
+                 weight_Ac_local_ion(ia2)= weight_Ac_local_ion(ia2) + tmp1
               endif
            enddo
 !$omp end do
@@ -129,19 +129,19 @@ contains
 !$omp end parallel
 
      do i=1,NL
-        if(weight_Ac_alocal(i).gt.1d0) weight_Ac_alocal(i)=1d0
+        if(weight_Ac_local(i).gt.1d0) weight_Ac_local(i)=1d0
      enddo
      do ia=1,NI
-        if(weight_Ac_alocal_ion(ia).gt.1d0) weight_Ac_alocal_ion(ia)=1d0
+        if(weight_Ac_local_ion(ia).gt.1d0) weight_Ac_local_ion(ia)=1d0
      enddo
 
 !     flag_use_gauss_for_weight_ion=.true.
      flag_use_gauss_for_weight_ion=.false.
      if(.not. flag_use_gauss_for_weight_ion)then
-        weight_Ac_alocal_ion(:)=0d0
-        do j=1,NI_alocal
+        weight_Ac_local_ion(:)=0d0
+        do j=1,NI_local
            ia=iatom(j)
-           weight_Ac_alocal_ion(ia)=1d0
+           weight_Ac_local_ion(ia)=1d0
         enddo
      endif
 
@@ -150,32 +150,32 @@ contains
 100  continue
 
   !log
-  ave_weight_Ac_alocal = sum(weight_Ac_alocal(:))/dble(NL)
+  ave_weight_Ac_local = sum(weight_Ac_local(:))/dble(NL)
   if(comm_is_root(nproc_id_global)) then
-     write(*,*)"  average spatial weight for local_laser=",real(ave_weight_Ac_alocal)
+     write(*,*)"  average spatial weight for local_laser=",real(ave_weight_Ac_local)
      write(*,*)"  weight on atoms for local_laser="
      do ia=1,NI
-        write(*,'(4X,i6,f10.5)') ia,weight_Ac_alocal_ion(ia)
+        write(*,'(4X,i6,f10.5)') ia,weight_Ac_local_ion(ia)
      enddo
-     call write_weight_cube_alocal
+     call write_weight_cube_local
   endif
 
   ! preparation
-  call prep_RT_Ac_alocal_laser(0)
+  call prep_RT_Ac_yn_local_field(0)
 
-  flag_set_ini_Ac_alocal=.true.
+  flag_set_ini_Ac_local=.true.
 
   contains
 
-    subroutine write_weight_cube_alocal
+    subroutine write_weight_cube_local
       implicit none
       integer :: i, j, ix, iy, iz, ifh
       real(8) :: r
-      character(256) :: file_name_alocal
+      character(256) :: file_name_local
 
       ifh= 505
-      file_name_alocal = "weight_alocal.cube"
-      open(ifh,file=trim(file_name_alocal),status="unknown")
+      file_name_local = "weight_local.cube"
+      open(ifh,file=trim(file_name_local),status="unknown")
       
       write(ifh, '(A)') "# SALMON"
       write(ifh, '(A)') "# COMMENT"
@@ -193,7 +193,7 @@ contains
       do ix=0, NLx-1
       do iy=0, NLy-1
       do iz=0, NLz-1
-        r = weight_Ac_alocal(Lxyz(ix,iy,iz))
+        r = weight_Ac_local(Lxyz(ix,iy,iz))
 
         if(mod(i,6)==0) then
            write(ifh,10) r
@@ -208,12 +208,12 @@ contains
 
 10    format(ES12.4)
       return
-    end subroutine write_weight_cube_alocal
+    end subroutine write_weight_cube_local
 
-  end subroutine init_Ac_alocal
+  end subroutine init_Ac_local
 
   !---------------------------------------
-  subroutine prep_RT_Ac_alocal_laser(it)
+  subroutine prep_RT_Ac_yn_local_field(it)
   use Global_Variables
   implicit none
   integer :: ik,it
@@ -225,22 +225,22 @@ contains
   if(.not. allocated(Ac1x_al)) then
      allocate(Ac1x_al(NL),Ac1y_al(NL),Ac1z_al(NL),Ac2_al(NL,NK_s:NK_e))
   endif
-  Ac1x_al(:) = Ac_al_amp(1)*weight_Ac_alocal(:)
-  Ac1y_al(:) = Ac_al_amp(2)*weight_Ac_alocal(:)
-  Ac1z_al(:) = Ac_al_amp(3)*weight_Ac_alocal(:)
+  Ac1x_al(:) = Ac_al_amp(1)*weight_Ac_local(:)
+  Ac1y_al(:) = Ac_al_amp(2)*weight_Ac_local(:)
+  Ac1z_al(:) = Ac_al_amp(3)*weight_Ac_local(:)
   Ac2_al_amp = sum(Ac_al_amp(:)**2d0)
-  tmpAc2(:)  = 0.5d0 * Ac2_al_amp * weight_Ac_alocal(:)**2d0
+  tmpAc2(:)  = 0.5d0 * Ac2_al_amp * weight_Ac_local(:)**2d0
   do ik=NK_s,NK_e
-     Ac2_al(:,ik) = tmpAc2(:) + sum(kAc0(ik,:)*Ac_al_amp(:))*weight_Ac_alocal(:)
+     Ac2_al(:,ik) = tmpAc2(:) + sum(kAc0(ik,:)*Ac_al_amp(:))*weight_Ac_local(:)
   enddo
   nabt_al( 1: 4)= nabx(1:4)
   nabt_al( 5: 8)= naby(1:4)
   nabt_al( 9:12)= nabz(1:4)
 
   deallocate(tmpAc2)
-  end subroutine prep_RT_Ac_alocal_laser
+  end subroutine prep_RT_Ac_yn_local_field
   !----------------------------------------------------------
-  subroutine get_Eelemag_FionAc_alocal_laser(it)
+  subroutine get_Eelemag_FionAc_yn_local_field(it)
     use Global_Variables
     implicit none
     integer :: i,it,ia
@@ -254,7 +254,7 @@ contains
     Eelemag = 0d0
     Etot(:) = -(Ac_tot_al(it+1,:)-Ac_tot_al(it-1,:))/(2d0*dt)
     do i=1,NL
-       E_tot_xyz(:,i)= Etot(:)*weight_Ac_alocal(i)
+       E_tot_xyz(:,i)= Etot(:)*weight_Ac_local(i)
        Eelemag = Eelemag + sum(E_tot_xyz(:,i)**2)
     enddo
    !Eelemag=aLxyz*sum(E_tot(it,:)**2)/(8.d0*Pi)
@@ -263,12 +263,12 @@ contains
 
     !calc force from local field
     do ia=1,NI
-      FionAc(:,ia) = Zps(Kion(ia))*Etot(:)*weight_Ac_alocal_ion(ia)
+      FionAc(:,ia) = Zps(Kion(ia))*Etot(:)*weight_Ac_local_ion(ia)
     enddo
 
-  end subroutine get_Eelemag_FionAc_alocal_laser
+  end subroutine get_Eelemag_FionAc_yn_local_field
   !----------------------------------------------------------
-  subroutine hpsi1_RT_stencil_add_Ac_alocal(B,Cx,Cy,Cz,D,E,F)
+  subroutine hpsi1_RT_stencil_add_Ac_local(B,Cx,Cy,Cz,D,E,F)
   use global_variables, only: NLx,NLy,NLz,zI
 #ifndef SALMON_DOMAIN_POWER_OF_TWO
   use opt_variables, only: modx, mody, modz
@@ -338,10 +338,10 @@ contains
   end do
 
 
-  end subroutine hpsi1_RT_stencil_add_Ac_alocal
+  end subroutine hpsi1_RT_stencil_add_Ac_local
 
   !---------------------------------------------------------------
-  subroutine total_energy_stencil_add_Ac_alocal(B,Cx,Cy,Cz,D,E,F)
+  subroutine total_energy_stencil_add_Ac_local(B,Cx,Cy,Cz,D,E,F)
   use global_variables, only: NLx,NLy,NLz,zI
 #ifndef SALMON_DOMAIN_POWER_OF_TWO
   use opt_variables, only: modx, mody, modz
@@ -414,5 +414,5 @@ contains
   end do
   end do
 
-  end subroutine total_energy_stencil_add_Ac_alocal
-end module Ac_alocal_laser
+  end subroutine total_energy_stencil_add_Ac_local
+end module Ac_yn_local_field

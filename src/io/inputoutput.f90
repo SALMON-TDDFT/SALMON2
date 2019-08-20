@@ -251,7 +251,7 @@ contains
       & yn_ffte
 
     namelist/system/ &
-      & iperiodic, &
+      & yn_periodic, &
       & ispin, &
       & al, &
       & al_vec1,al_vec2,al_vec3, &
@@ -269,11 +269,11 @@ contains
       & file_atom_red_coor
 
     namelist/pseudo/ &
-      & pseudo_file, &
+      & file_pseudo, &
       & lmax_ps, &
       & lloc_ps, &
       & izatom, &
-      & psmask_option, &
+      & yn_psmask, &
       & alpha_mask, &
       & gamma_mask, &
       & eta_mask
@@ -287,9 +287,7 @@ contains
       & alibc, &
       & alibxc, &
 #endif
-      & cval, &
-      & no_update_func
-
+      & cval
 
     namelist/rgrid/ &
       & dl, &
@@ -305,24 +303,23 @@ contains
 
     namelist/propagation/ &
       & n_hamil, &
-      & propagator
+      & propagator, &
+      & yn_fix_func
 
     namelist/scf/ &
-      & amin_routine, &
+      & method_min, &
       & ncg, &
-      & amixing, &
-      & rmixrate, &
+      & method_mixing, &
+      & mixrate, &
       & nmemory_mb, &
       & alpha_mb, &
       & fsset_option, &
       & nfsset_start, &
       & nfsset_every, &
       & nscf, &
-      & subspace_diagonalization, &
+      & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
-      & threshold_norm_rho, &
-      & threshold_norm_pot, &
       & omp_loop, &
       & skip_gsortho, &
       & iditer_notemperature, &
@@ -332,30 +329,30 @@ contains
       & trans_longi, &
       & ae_shape1, &
       & e_impulse, &
-      & amplitude1, &
-      & rlaser_int_wcm2_1, &
-      & pulse_tw1, &
+      & E_amplitude1, &
+      & I_wcm2_1, &
+      & tw1, &
       & omega1, &
       & epdir_re1, &
       & epdir_im1, &
       & phi_cep1, &
       & ae_shape2, &
-      & amplitude2, &
-      & rlaser_int_wcm2_2, &
-      & pulse_tw2, &
+      & E_amplitude2, &
+      & I_wcm2_2, &
+      & tw2, &
       & omega2, &
       & epdir_re2, &
       & epdir_im2, &
       & phi_cep2, &
       & t1_t2, &
-      & t1_delay, &
-      & alocal_laser , &
+      & t1_start, &
+      & yn_local_field , &
       & rlaserbound_sta , &
       & rlaserbound_end , &
-      & nump , &
-      & vecp , &
-      & coop , &
-      & radp_diele
+      & num_dipole_source , &
+      & vec_dipole_source , &
+      & cood_dipole_source , &
+      & rad_dipole_source
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -597,7 +594,7 @@ contains
     num_datafiles_out = 1
     yn_ffte           = 'n'
 !! == default for &system
-    iperiodic          = 0
+    yn_periodic        = 'n'
     ispin              = 0
     al                 = 0d0
     al_vec1            = 0d0
@@ -616,24 +613,23 @@ contains
     file_atom_coor          = 'none'
     file_atom_red_coor          = 'none'
 !! == default for &pseudo
-    pseudo_file     = 'none'
+    file_pseudo     = 'none'
     lmax_ps       = -1
     lloc_ps       = -1
     izatom        = -1
-    psmask_option = 'n'
+    yn_psmask = 'n'
     alpha_mask    = 0.8d0
     gamma_mask    = 1.8d0
     eta_mask      = 15d0
 !! == default for &functional
-    xc   = 'none'
+    xc    = 'none'
     ! xcname = 'PZ'
     xname = 'none'
     cname = 'none'
     alibx = 'none'
     alibc = 'none'
-    alibxc = 'none'
-    cval = -1d0
-    no_update_func = 'n'
+    alibxc= 'none'
+    cval  = -1d0
 !! == default for &rgrid
     dl        = 0d0
     num_rgrid = 0
@@ -645,23 +641,22 @@ contains
     dt = 0
 !! == default for &propagation
     n_hamil = 4
-    propagator = 'middlepoint'
+    propagator  = 'middlepoint'
+    yn_fix_func = 'n'
 !! == default for &scf
-    amin_routine  = 'cg'
+    method_min  = 'cg'
     ncg           = 5
-    amixing       = 'broyden'
-    rmixrate      = 0.5d0
+    method_mixing       = 'broyden'
+    mixrate      = 0.5d0
     nmemory_mb    = 8
     alpha_mb      = 0.75d0
     fsset_option  = 'n'
     nfsset_start  = 75
     nfsset_every  = 25
     nscf          = 0
-    subspace_diagonalization = 'y'
+    yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
-    threshold     = 1d-17
-    threshold_norm_rho = -1d0/ulength_from_au**6                     ! a.u., -1 a.u. = -45.54 AA**(-6)
-    threshold_norm_pot = -1d0/ulength_from_au**6*uenergy_from_au**2  ! a.u., -1 a.u. = -33.72d4 AA**(-6)*eV**2
+    threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
     omp_loop      = 'k'
     skip_gsortho  = 'n'
     iditer_notemperature = 10
@@ -671,34 +666,34 @@ contains
     trans_longi    = 'tr'
     ae_shape1      = 'none'
     e_impulse = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
-    amplitude1     = 0d0
-    rlaser_int_wcm2_1 = -1d0
-    pulse_tw1      = 0d0
+    E_amplitude1   = 0d0
+    I_wcm2_1 = -1d0
+    tw1      = 0d0
     omega1         = 0d0
     epdir_re1      = (/1d0,0d0,0d0/)
     epdir_im1      = 0d0
     phi_cep1       = 0d0
     ae_shape2      = 'none'
-    amplitude2     = 0d0
-    rlaser_int_wcm2_2 = -1d0
-    pulse_tw2      = 0d0
+    E_amplitude2   = 0d0
+    I_wcm2_2 = -1d0
+    tw2      = 0d0
     omega2         = 0d0
     epdir_re2      = (/1d0,0d0,0d0/)
     epdir_im2      = 0d0
     phi_cep2       = 0d0
     t1_t2          = 0d0
-    t1_delay       = 0d0
-    alocal_laser    = 'n'
+    t1_start       = 0d0
+    yn_local_field    = 'n'
     rlaserbound_sta(1) = -1.d7*ulength_from_au ! a.u.
     rlaserbound_sta(2) = -1.d7*ulength_from_au ! a.u.
     rlaserbound_sta(3) = -1.d7*ulength_from_au ! a.u.
     rlaserbound_end(1) =  1.d7*ulength_from_au ! a.u.
     rlaserbound_end(2) =  1.d7*ulength_from_au ! a.u.
     rlaserbound_end(3) =  1.d7*ulength_from_au ! a.u.
-    nump       = 0
-    vecp       = 0d0
-    coop       = 0d0
-    radp_diele = 2d0 ! a.u.
+    num_dipole_source       = 0
+    vec_dipole_source       = 0d0
+    cood_dipole_source       = 0d0
+    rad_dipole_source = 2d0 ! a.u.
     
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -985,9 +980,11 @@ contains
     call comm_bcast(num_datafiles_out   ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
 !! == bcast for &system
-    call comm_bcast(iperiodic,nproc_group_global)
-    call comm_bcast(ispin    ,nproc_group_global)
-    call comm_bcast(al       ,nproc_group_global)
+    call comm_bcast(yn_periodic,nproc_group_global)
+    if(yn_periodic=='y') iperiodic=3
+    if(yn_periodic=='n') iperiodic=0
+    call comm_bcast(ispin      ,nproc_group_global)
+    call comm_bcast(al         ,nproc_group_global)
     al = al * ulength_to_au
     call comm_bcast(al_vec1            ,nproc_group_global)
     call comm_bcast(al_vec2            ,nproc_group_global)
@@ -1008,11 +1005,11 @@ contains
     call comm_bcast(file_atom_coor     ,nproc_group_global)
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
 !! == bcast for &pseudo
-    call comm_bcast(pseudo_file  ,nproc_group_global)
+    call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
     call comm_bcast(lloc_ps      ,nproc_group_global)
     call comm_bcast(izatom       ,nproc_group_global)
-    call comm_bcast(psmask_option,nproc_group_global)
+    call comm_bcast(yn_psmask,nproc_group_global)
     call comm_bcast(alpha_mask   ,nproc_group_global)
     call comm_bcast(gamma_mask   ,nproc_group_global)
     call comm_bcast(eta_mask     ,nproc_group_global)
@@ -1032,7 +1029,6 @@ contains
     call comm_bcast(alibc        ,nproc_group_global)
 #endif
     call comm_bcast(cval         ,nproc_group_global)
-    call comm_bcast(no_update_func,nproc_group_global)
 !! == bcast for &rgrid
     call comm_bcast(dl,nproc_group_global)
     dl = dl * ulength_to_au
@@ -1045,26 +1041,42 @@ contains
     call comm_bcast(dt,nproc_group_global)
     dt = dt * utime_to_au
 !! == bcast for &propagation
-    call comm_bcast(n_hamil   ,nproc_group_global)
-    call comm_bcast(propagator,nproc_group_global)
+    call comm_bcast(n_hamil    ,nproc_group_global)
+    call comm_bcast(propagator ,nproc_group_global)
+    call comm_bcast(yn_fix_func,nproc_group_global)
 !! == bcast for &scf
-    call comm_bcast(amin_routine            ,nproc_group_global)
+    call comm_bcast(method_min            ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
-    call comm_bcast(amixing                 ,nproc_group_global)
-    call comm_bcast(rmixrate                ,nproc_group_global)
+    call comm_bcast(method_mixing                 ,nproc_group_global)
+    call comm_bcast(mixrate                ,nproc_group_global)
     call comm_bcast(nmemory_mb              ,nproc_group_global)
     call comm_bcast(alpha_mb                ,nproc_group_global)
     call comm_bcast(fsset_option            ,nproc_group_global)
     call comm_bcast(nfsset_start            ,nproc_group_global)
     call comm_bcast(nfsset_every            ,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
-    call comm_bcast(subspace_diagonalization,nproc_group_global)
+    call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
     call comm_bcast(threshold               ,nproc_group_global)
-    call comm_bcast(threshold_norm_rho      ,nproc_group_global)
-    threshold_norm_rho = threshold_norm_rho / (ulength_to_au)**6
-    call comm_bcast(threshold_norm_pot      ,nproc_group_global)
-    threshold_norm_pot = threshold_norm_pot * (uenergy_to_au)**2 / (ulength_to_au)**6
+    if(threshold.lt.-0.5d0) then !<-- when not input value
+      select case(convergence)
+      case('rho_dne')
+         threshold = 1d-17  !default (a.u.)
+      case('norm_rho','norm_rho_dng')
+         threshold = -1d0   !default (a.u.)
+      case('norm_pot','norm_pot_dng')
+         threshold = -1d0   !default (a.u.)
+      end select
+    else
+      select case(convergence)
+      case('rho_dne')
+         continue
+      case('norm_rho','norm_rho_dng')
+         threshold = threshold / (ulength_to_au)**6
+      case('norm_pot','norm_pot_dng')
+         threshold = threshold * (uenergy_to_au)**2 / (ulength_to_au)**6
+      end select
+    endif
     call comm_bcast(omp_loop                ,nproc_group_global)
     call comm_bcast(skip_gsortho            ,nproc_group_global)
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
@@ -1074,11 +1086,11 @@ contains
     call comm_bcast(ae_shape1  ,nproc_group_global)
     call comm_bcast(e_impulse,nproc_group_global)
     e_impulse = e_impulse *uenergy_to_au/ulength_to_au*utime_to_au
-    call comm_bcast(amplitude1 ,nproc_group_global)
-    amplitude1 = amplitude1*(uenergy_to_au/ulength_to_au/ucharge_to_au)
-    call comm_bcast(rlaser_int_wcm2_1,nproc_group_global)
-    call comm_bcast(pulse_tw1  ,nproc_group_global)
-    pulse_tw1 = pulse_tw1 * utime_to_au
+    call comm_bcast(E_amplitude1 ,nproc_group_global)
+    E_amplitude1 = E_amplitude1*(uenergy_to_au/ulength_to_au/ucharge_to_au)
+    call comm_bcast(I_wcm2_1,nproc_group_global)
+    call comm_bcast(tw1  ,nproc_group_global)
+    tw1 = tw1 * utime_to_au
     call comm_bcast(omega1,nproc_group_global)
     omega1 = omega1 * uenergy_to_au
     call comm_bcast(epdir_re1 ,nproc_group_global)
@@ -1088,11 +1100,11 @@ contains
     epdir_im1 = epdir_im1 / norm
     call comm_bcast(phi_cep1  ,nproc_group_global)
     call comm_bcast(ae_shape2 ,nproc_group_global)
-    call comm_bcast(amplitude2,nproc_group_global)
-    amplitude2 = amplitude2*(uenergy_to_au/ulength_to_au/ucharge_to_au)
-    call comm_bcast(rlaser_int_wcm2_2,nproc_group_global)
-    call comm_bcast(pulse_tw2  ,nproc_group_global)
-    pulse_tw2 = pulse_tw2 * utime_to_au
+    call comm_bcast(E_amplitude2,nproc_group_global)
+    E_amplitude2 = E_amplitude2*(uenergy_to_au/ulength_to_au/ucharge_to_au)
+    call comm_bcast(I_wcm2_2,nproc_group_global)
+    call comm_bcast(tw2  ,nproc_group_global)
+    tw2 = tw2 * utime_to_au
     call comm_bcast(omega2,nproc_group_global)
     omega2 = omega2 * uenergy_to_au
     call comm_bcast(epdir_re2,nproc_group_global)
@@ -1103,20 +1115,20 @@ contains
     call comm_bcast(phi_cep2 ,nproc_group_global)
     call comm_bcast(t1_t2    ,nproc_group_global)
     t1_t2 = t1_t2 * utime_to_au
-    call comm_bcast(t1_delay ,nproc_group_global)
-    t1_delay = t1_delay * utime_to_au
-    call comm_bcast(alocal_laser  ,nproc_group_global)
+    call comm_bcast(t1_start ,nproc_group_global)
+    t1_start = t1_start * utime_to_au
+    call comm_bcast(yn_local_field  ,nproc_group_global)
     call comm_bcast(rlaserbound_sta,nproc_group_global)
     rlaserbound_sta = rlaserbound_sta * ulength_to_au
     call comm_bcast(rlaserbound_end,nproc_group_global)
     rlaserbound_end = rlaserbound_end * ulength_to_au
-    call comm_bcast(nump,nproc_group_global)
-    call comm_bcast(vecp,nproc_group_global)
-    vecp = vecp * ulength_to_au
-    call comm_bcast(coop,nproc_group_global)
-    coop = coop * ulength_to_au
-    call comm_bcast(radp_diele,nproc_group_global)
-    radp_diele = radp_diele * ulength_to_au
+    call comm_bcast(num_dipole_source,nproc_group_global)
+    call comm_bcast(vec_dipole_source,nproc_group_global)
+    vec_dipole_source = vec_dipole_source * ulength_to_au
+    call comm_bcast(cood_dipole_source,nproc_group_global)
+    cood_dipole_source = cood_dipole_source * ulength_to_au
+    call comm_bcast(rad_dipole_source,nproc_group_global)
+    rad_dipole_source = rad_dipole_source * ulength_to_au
     
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1610,7 +1622,7 @@ contains
 
       if(inml_system >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', inml_system
-      write(fh_variables_log, '("#",4X,A,"=",I1)') 'iperiodic', iperiodic
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_periodic', yn_periodic
       write(fh_variables_log, '("#",4X,A,"=",I1)') 'ispin', ispin
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(1)', al(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(2)', al(2)
@@ -1635,12 +1647,12 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
 
       do i = 1,nelem
-        write(fh_variables_log, '("#",4X,A,I2,A,"=",A)') 'pseudo_file(',i,')', trim(pseudo_file(i))
+        write(fh_variables_log, '("#",4X,A,I2,A,"=",A)') 'file_pseudo(',i,')', trim(file_pseudo(i))
         write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lmax_ps(',i,')', lmax_ps(i)
         write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lloc_ps(',i,')', lloc_ps(i)
         write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'izatom(',i,')', izatom(i)
       end do
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'psmask_option', psmask_option
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_psmask', yn_psmask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
@@ -1656,7 +1668,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibc', trim(alibc)
 #endif
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cval', cval
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'no_update_func', no_update_func
 
       if(inml_rgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'rgrid', inml_rgrid
@@ -1683,24 +1694,23 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'propagation', inml_propagation
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
       write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'amin_routine', amin_routine
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'amixing', amixing
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rmixrate', rmixrate
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing', method_mixing
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'mixrate', mixrate
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_mb', nmemory_mb
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mb', alpha_mb
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fsset_option', fsset_option
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_start', nfsset_start
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_every', nfsset_every
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'subspace_diagonalization', subspace_diagonalization
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_norm_rho', threshold_norm_rho
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_norm_pot', threshold_norm_pot
       write(fh_variables_log, '("#",4X,A,"=",A)') 'omp_loop', omp_loop
       write(fh_variables_log, '("#",4X,A,"=",A)') 'skip_gsortho', skip_gsortho
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
@@ -1711,9 +1721,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'amplitude1', amplitude1
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaser_int_wcm2_1', rlaser_int_wcm2_1
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'pulse_tw1', pulse_tw1
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw1', tw1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega1', omega1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(1)', epdir_re1(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(2)', epdir_re1(2)
@@ -1723,9 +1733,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(3)', epdir_im1(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep1', phi_cep1
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape2', ae_shape2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'amplitude2', amplitude2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaser_int_wcm2_2', rlaser_int_wcm2_2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'pulse_tw2', pulse_tw2
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude2', E_amplitude2
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_2', I_wcm2_2
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw2', tw2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega2', omega2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(1)', epdir_re2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(2)', epdir_re2(2)
@@ -1735,28 +1745,28 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(3)', epdir_im2(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep2', phi_cep2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_t2', t1_t2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_delay', t1_delay
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'alocal_laser', alocal_laser
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_start', t1_start
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_local_field', yn_local_field
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(1)', rlaserbound_sta(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(2)', rlaserbound_sta(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(3)', rlaserbound_sta(3)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(1)', rlaserbound_end(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(2)', rlaserbound_end(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(3)', rlaserbound_end(3)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nump', nump
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vecp(1,1)', vecp(1,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vecp(2,1)', vecp(2,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vecp(3,1)', vecp(3,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vecp(1,2)', vecp(1,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vecp(2,2)', vecp(2,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vecp(3,2)', vecp(3,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'coop(1,1)', coop(1,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'coop(2,1)', coop(2,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'coop(3,1)', coop(3,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'coop(1,2)', coop(1,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'coop(2,2)', coop(2,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'coop(3,2)', coop(3,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'radp_diele', radp_diele
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_dipole_source', num_dipole_source
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,1)', vec_dipole_source(1,1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,1)', vec_dipole_source(2,1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,1)', vec_dipole_source(3,1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,2)', vec_dipole_source(1,2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,2)', vec_dipole_source(2,2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,2)', vec_dipole_source(3,2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,1)', cood_dipole_source(1,1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,1)', cood_dipole_source(2,1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,1)', cood_dipole_source(3,1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,2)', cood_dipole_source(1,2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,2)', cood_dipole_source(2,2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,2)', cood_dipole_source(3,2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rad_dipole_source', rad_dipole_source
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
@@ -2018,16 +2028,16 @@ contains
       case('rho_dne')
         continue
       case('norm_rho','norm_rho_dng')
-        if(threshold_norm_rho<-1.d-12)then
+        if(threshold<-1.d-12)then
           if (comm_is_root(nproc_id_global)) then
-            write(*,*) 'set threshold_norm_rho when convergence is norm_rho or norm_rho_dng.'
+            write(*,*) 'set threshold when convergence is norm_rho or norm_rho_dng.'
           endif
           call end_parallel
         end if
       case('norm_pot','norm_pot_dng')
-        if(threshold_norm_pot<-1.d-12)then
+        if(threshold<-1.d-12)then
           if (comm_is_root(nproc_id_global)) then
-            write(*,*) 'set threshold_norm_pot when convergence is norm_pot or norm_rho_pot.'
+            write(*,*) 'set threshold when convergence is norm_pot or norm_rho_pot.'
           endif
           call end_parallel
         end if
@@ -2040,8 +2050,8 @@ contains
 
     else if(iperiodic==3.and.yn_domain_parallel=='n') then
       if(convergence.ne.'rho_dne') call stop_by_bad_input2('iperiodic','convergence')
-      if(abs(t1_delay).ge.1d-10)then
-         if(index(ae_shape1,'Acos')==0) call stop_by_bad_input2('t1_delay','ae_shape1')
+      if(abs(t1_start).ge.1d-10)then
+         if(index(ae_shape1,'Acos')==0) call stop_by_bad_input2('t1_start','ae_shape1')
       endif
     endif
 

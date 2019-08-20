@@ -145,14 +145,14 @@ if(idensum==0) posplane=posplane/a_B
 
 select case (ikind_eext)
   case(1)
-    if(rlaser_int_wcm2_1>=1.d-12)then
-      amplitude1=sqrt(rlaser_int_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    if(I_wcm2_1>=1.d-12)then
+      E_amplitude1=sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
-    if(rlaser_int_wcm2_2>=1.d-12)then
-      amplitude2=sqrt(rlaser_int_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    if(I_wcm2_2>=1.d-12)then
+      E_amplitude2=sqrt(I_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     else
-      if(abs(amplitude2)<=1.d-12)then
-        amplitude2=0.d0
+      if(abs(E_amplitude2)<=1.d-12)then
+        E_amplitude2=0.d0
       end if
     end if
 end select
@@ -717,7 +717,7 @@ allocate(zc(N_hamil))
 ! External Field Direction
 select case (ikind_eext)
   case(1)
-    if(alocal_laser=='y')then
+    if(yn_local_field=='y')then
       rlaser_center(1:3)=(rlaserbound_sta(1:3)+rlaserbound_end(1:3))/2.d0
       do jj=1,3
         select case(imesh_oddeven(jj))
@@ -778,7 +778,7 @@ end do
 end do
 end do
 
-if(nump>=1)then
+if(num_dipole_source>=1)then
   allocate(vonf_sd(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   allocate(eonf_sd(3,mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   vonf_sd=0.d0

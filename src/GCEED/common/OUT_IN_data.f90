@@ -79,7 +79,7 @@ if(comm_is_root(nproc_id_global))then
     write(97) Kion(:MI)
     write(97) Rion(:,:MI)
     write(97) iZatom(:MKI)
-    write(97) pseudo_file(:MKI) !ipsfileform(:MKI)
+    write(97) file_pseudo(:MKI) !ipsfileform(:MKI)
     write(97) Zps(:MKI),Rps(:MKI)
     write(97) AtomName(:MI) 
     write(97) iAtomicNumber(:MI) 
@@ -724,7 +724,7 @@ if(iflag_ps.eq.1)then
     read(96) Rion(:,:MI_read)
     read(96) iZatom(:MKI)
     if(version_num_box(1)>=34)then
-      read(96) pseudo_file(:MKI) !ipsfileform(:MKI)
+      read(96) file_pseudo(:MKI) !ipsfileform(:MKI)
     else
       stop "This version is already invalid."
     end if
@@ -736,7 +736,7 @@ if(iflag_ps.eq.1)then
   call comm_bcast(Kion,nproc_group_global)
   call comm_bcast(Rion,nproc_group_global)
   call comm_bcast(iZatom,nproc_group_global)
-  call comm_bcast(pseudo_file,nproc_group_global)
+  call comm_bcast(file_pseudo,nproc_group_global)
   call comm_bcast(AtomName,nproc_group_global)
   call comm_bcast(iAtomicNumber,nproc_group_global)
 

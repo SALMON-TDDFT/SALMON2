@@ -98,16 +98,16 @@ contains
   subroutine hpsi_omp_KB_base(ik,tpsi,htpsi,ttpsi)
     use timer
     use Global_Variables, only: NLx,NLy,NLz,kAc,lapx,lapy,lapz,nabx,naby,nabz,Vloc,Mps,iuV,Hxyz,Nlma,zproj, & 
-    & flag_set_ini_Ac_alocal, Ac2_al,Ac1x_al,Ac1y_al,Ac1z_al,nabt_al
+    & flag_set_ini_Ac_local, Ac2_al,Ac1x_al,Ac1y_al,Ac1z_al,nabt_al
     use opt_variables, only: lapt,PNLx,PNLy,PNLz,PNL,spseudo,dpseudo
 #ifdef ARTED_USE_NVTX
     use nvtx
 #endif
     use salmon_parallel, only: get_thread_id
-    use salmon_global, only: alocal_laser
+    use salmon_global, only: yn_local_field
     use stencil_sub, only: stencil_C
     use code_optimization, only: modx,mody,modz
-    use Ac_alocal_laser
+    use Ac_yn_local_field
     implicit none
     integer,intent(in)              :: ik
     complex(8),intent(in)           ::  tpsi(0:PNLz-1,0:PNLy-1,0:PNLx-1)
@@ -151,8 +151,8 @@ contains
       &             ,modx(NLz-4:NLz*2+4),mody(NLy-4:NLy*2+4),modz(NLx-4:NLx*2+4) &
       &             ,tpsi,htpsi,Vloc,k2lap0_2,lapt2,nabt2)
       ! ===
-      if(alocal_laser=='y' .and. flag_set_ini_Ac_alocal)then
-         call hpsi1_RT_stencil_add_Ac_alocal(Ac2_al(:,ik),Ac1x_al,Ac1y_al,Ac1z_al,nabt_al,tpsi,htpsi)
+      if(yn_local_field=='y' .and. flag_set_ini_Ac_local)then
+         call hpsi1_RT_stencil_add_Ac_local(Ac2_al(:,ik),Ac1x_al,Ac1y_al,Ac1z_al,nabt_al,tpsi,htpsi)
       endif
       if (present(ttpsi)) then
         call subtraction(Vloc,tpsi,htpsi,ttpsi)

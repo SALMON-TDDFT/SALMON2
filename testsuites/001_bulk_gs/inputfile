@@ -7,7 +7,7 @@
 /
 
 &system
-  iperiodic = 3
+  yn_periodic = 'y'
   al = 10.26d0, 10.26d0, 10.26d0
   nstate = 32
   nelec = 32
@@ -17,7 +17,7 @@
 
 &pseudo
   izatom(1) = 14
-  pseudo_file(1) = './Si_rps.dat'
+  file_pseudo(1) = './Si_rps.dat'
   lloc_ps(1) = 2
 /
 

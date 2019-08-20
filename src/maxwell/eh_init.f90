@@ -22,9 +22,9 @@ subroutine eh_init(fs,fw)
                                   pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
                                   iobs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
                                   source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
-                                  phi_cep1,rlaser_int_wcm2_1,amplitude1,&
+                                  phi_cep1,I_wcm2_1,E_amplitude1,&
                                   source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
-                                  phi_cep2,rlaser_int_wcm2_2,amplitude2
+                                  phi_cep2,I_wcm2_2,E_amplitude2
   use salmon_parallel,      only: nproc_id_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_bcast
   use structures,           only: s_fdtd_system
@@ -79,7 +79,7 @@ subroutine eh_init(fs,fw)
     fw%uVperm_from_au=1.0d0
     fw%uAperm_from_au=1.0d0
   case('A_eV_fs')
-    !see amplitude1 or amplitude2 in src/io/iunputoutput.f90
+    !see E_amplitude1 or E_amplitude2 in src/io/iunputoutput.f90
     fw%uVperm_from_au=1/(uenergy_to_au/ulength_to_au/ucharge_to_au)
     fw%uAperm_from_au=fw%uVperm_from_au
   end select
@@ -590,8 +590,8 @@ subroutine eh_init(fs,fw)
           "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
         stop
       end if
-      if(rlaser_int_wcm2_1/=-1d0) &
-        amplitude1=sqrt(rlaser_int_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+      if(I_wcm2_1/=-1d0) &
+        E_amplitude1=sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
     if(fw%inc_dist2/='none') then
       ii=2
@@ -611,8 +611,8 @@ subroutine eh_init(fs,fw)
           "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
         stop
       end if
-      if(rlaser_int_wcm2_2/=-1d0) &
-        amplitude2=sqrt(rlaser_int_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+      if(I_wcm2_2/=-1d0) &
+        E_amplitude2=sqrt(I_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
     
     !write information

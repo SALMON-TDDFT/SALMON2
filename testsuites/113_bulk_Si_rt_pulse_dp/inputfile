@@ -15,7 +15,7 @@
 /
 
 &system
-  iperiodic = 3
+  yn_periodic = 'y'
   al = 10.26d0, 10.26d0, 10.26d0
   nstate = 32
   nelec = 32
@@ -25,7 +25,7 @@
 
 &pseudo
   izatom(1) = 14
-  pseudo_file(1) = './Si_rps.dat'
+  file_pseudo(1) = './Si_rps.dat'
   lmax_ps(1) = 2
   lloc_ps(1) = 2
 /
@@ -55,9 +55,9 @@
 
 &emfield
   ae_shape1 = 'Acos2'
-  rlaser_int_wcm2_1 = 1d14
+  I_wcm2_1 = 1d14
   omega1 = 0.05696145187d0
-  pulse_tw1 = 441.195136248d0
+  tw1 = 441.195136248d0
   epdir_re1 = 0., 0., 1.
 /
 

@@ -135,8 +135,8 @@ end if
 
 Fst = e_impulse
 romega = omega1
-pulse_T = pulse_tw1
-rlaser_I = rlaser_int_wcm2_1
+pulse_T = tw1
+rlaser_I = I_wcm2_1
 
 !===== namelist for group_others =====
 

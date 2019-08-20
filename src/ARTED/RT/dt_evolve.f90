@@ -148,7 +148,7 @@ Subroutine dt_evolve_omp_KB(zu)
   call hamiltonian(zu,.false.)
 
   call psi_rho_RT(zu)
-  if(no_update_func=='n')then
+  if(yn_fix_func=='n')then
      call Hartree
      call Exc_Cor(calc_mode_rt,NBoccmax,zu)
   endif
@@ -185,7 +185,7 @@ Subroutine dt_evolve_omp_KB(zu)
   call psi_rho_RT(zu)
   NVTX_END()
 
-  if(no_update_func=='n')then
+  if(yn_fix_func=='n')then
   NVTX_BEG('dt_evolve_omp_KB(): Hartree',5)
   call Hartree
   NVTX_END()
@@ -279,7 +279,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
      call psi_rho_RT(zu)
      NVTX_END()
 
-     if(no_update_func=='n')then
+     if(yn_fix_func=='n')then
      NVTX_BEG('dt_evolve_omp_KB(): Hartree',5)
      call Hartree
      NVTX_END()
@@ -318,7 +318,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
   call psi_rho_RT(zu)
   NVTX_END()
 
-  if(no_update_func=='n')then
+  if(yn_fix_func=='n')then
   NVTX_BEG('dt_evolve_omp_KB(): Hartree',5)
   call Hartree
   NVTX_END()
@@ -391,7 +391,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
   call hamiltonian(zu,.false.)
 
   call psi_rho_RT(zu)
-  if(no_update_func=='n')then
+  if(yn_fix_func=='n')then
      call Hartree
      call Exc_Cor(calc_mode_rt,NBoccmax,zu)
   endif
@@ -427,7 +427,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
   call psi_rho_RT(zu)
   NVTX_END()
 
-  if(no_update_func=='n')then
+  if(yn_fix_func=='n')then
   NVTX_BEG('dt_evolve_omp_KB_MS(): Hartree',5)
   call Hartree
   NVTX_END()
