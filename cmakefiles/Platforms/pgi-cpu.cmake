@@ -19,9 +19,7 @@ set(CMAKE_C_COMPILER            "mpicc")
 set(CMAKE_C_FLAGS_DEBUG         "-pg")
 set(CMAKE_C_FLAGS_RELEASE       "-fastsse")
 
-set(USE_MPI             ON)
-# set(EXPLICIT_VEC        ON)
-# set(REDUCE_FOR_MANYCORE ON)
+set(USE_MPI_DEFAULT             ON)
 
 ########
 # CMake Platform-specific variables
