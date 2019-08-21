@@ -15,7 +15,8 @@
 !
 !=======================================================================
 
-SUBROUTINE OUT_data
+SUBROUTINE OUT_data(mixing)
+use structures, only: s_mixing
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
@@ -26,6 +27,7 @@ use read_pslfile_sub
 use allocate_psl_sub
 use allocate_mat_sub
 implicit none
+type(s_mixing),intent(inout) :: mixing
 integer :: is,iob,jj,ik
 integer :: ix,iy,iz
 real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
@@ -257,14 +259,14 @@ if(comm_is_root(nproc_id_global))then
   write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
 end if
 
-do ii=1,num_rho_stock+1
+do ii=1,mixing%num_rho_stock+1
   matbox2=0.d0
   matbox2(ng_sta(1):ng_end(1),   &
           ng_sta(2):ng_end(2),   &
           ng_sta(3):ng_end(3))   &
-     = rho_in(ng_sta(1):ng_end(1),   &
+     = mixing%srho_in(ii)%f(ng_sta(1):ng_end(1),   &
           ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3),ii)
+          ng_sta(3):ng_end(3))
 
   call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -273,14 +275,14 @@ do ii=1,num_rho_stock+1
   end if
 end do
 
-do ii=1,num_rho_stock
+do ii=1,mixing%num_rho_stock
   matbox2=0.d0
   matbox2(ng_sta(1):ng_end(1),   &
           ng_sta(2):ng_end(2),   &
           ng_sta(3):ng_end(3))   &
-     = rho_out(ng_sta(1):ng_end(1),   &
+     = mixing%srho_out(ii)%f(ng_sta(1):ng_end(1),   &
           ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3),ii)
+          ng_sta(3):ng_end(3))
 
   call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
   if(comm_is_root(nproc_id_global))then
@@ -304,14 +306,14 @@ if(ilsda == 1)then
       write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
     end if
 
-    do ii=1,num_rho_stock+1
+    do ii=1,mixing%num_rho_stock+1
       matbox2=0.d0
       matbox2(ng_sta(1):ng_end(1),   &
               ng_sta(2):ng_end(2),   &
               ng_sta(3):ng_end(3))   &
-        = rho_s_in(ng_sta(1):ng_end(1),   &
+        = mixing%srho_s_in(ii,is)%f(ng_sta(1):ng_end(1),   &
                 ng_sta(2):ng_end(2),   &
-                ng_sta(3):ng_end(3),ii,is)
+                ng_sta(3):ng_end(3))
 
       call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -320,14 +322,14 @@ if(ilsda == 1)then
       end if
     end do
 
-    do ii=1,num_rho_stock
+    do ii=1,mixing%num_rho_stock
       matbox2=0.d0
       matbox2(ng_sta(1):ng_end(1),   &
               ng_sta(2):ng_end(2),   &
               ng_sta(3):ng_end(3))   &
-        = rho_s_out(ng_sta(1):ng_end(1),   &
+        = mixing%srho_s_out(ii,is)%f(ng_sta(1):ng_end(1),   &
                 ng_sta(2):ng_end(2),   &
-                ng_sta(3):ng_end(3),ii,is)
+                ng_sta(3):ng_end(3))
 
       call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -416,7 +418,7 @@ END SUBROUTINE OUT_data
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng,info,info_field,system,stencil,cg)
+SUBROUTINE IN_data(lg,mg,ng,info,info_field,system,stencil,cg,mixing)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
@@ -439,8 +441,9 @@ type(s_field_parallel),intent(inout) :: info_field
 type(s_dft_system) :: system
 type(s_stencil) :: stencil
 type(s_cg) :: cg
+type(s_mixing),intent(inout) :: mixing
 integer :: NI0,Ndv0,Nps0,Nd0
-integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik
+integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik,i,j
 integer :: ix,iy,iz
 real(8),allocatable :: matbox(:,:,:)
 real(8),allocatable :: matbox2(:,:,:)
@@ -820,21 +823,30 @@ end if
 allocate( rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 allocate( rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 allocate( rho_diff(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-if(iSCFRT==1)then
-  allocate( rho_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1))
-  allocate( rho_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1))
-  rho_in=0.d0
-  rho_out=0.d0
-end if
+if(ilsda == 1) allocate( rho_s(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2))
 
-if(ilsda == 0) then
-  continue
-else if(ilsda == 1) then
-  allocate( rho_s(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2))
-  allocate( rho_s_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2))
-  allocate( rho_s_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2))
-  rho_s_in=0.d0
-  rho_s_out=0.d0
+if(iSCFRT==1)then
+  allocate(mixing%srho_in(1:mixing%num_rho_stock+1))
+  allocate(mixing%srho_out(1:mixing%num_rho_stock+1))
+  do i=1,mixing%num_rho_stock+1
+    allocate(mixing%srho_in(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    mixing%srho_in(i)%f(:,:,:)=0.d0
+    mixing%srho_out(i)%f(:,:,:)=0.d0
+  end do
+
+  if(ilsda==1)then
+    allocate(mixing%srho_s_in(1:mixing%num_rho_stock+1,2))
+    allocate(mixing%srho_s_out(1:mixing%num_rho_stock+1,2))
+    do j=1,2
+      do i=1,mixing%num_rho_stock+1
+        allocate(mixing%srho_s_in(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+        allocate(mixing%srho_s_out(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+        mixing%srho_s_in(i,j)%f(:,:,:)=0.d0
+        mixing%srho_s_out(i,j)%f(:,:,:)=0.d0
+      end do
+    end do
+  end if
 end if
 
 if(iSCFRT==1)then
@@ -1116,7 +1128,7 @@ if(IC<=2)then
       do iz=ng_sta(3),ng_end(3)
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
-        rho_in(ix,iy,iz,num_rho_stock+1)=matbox_read(ix,iy,iz)
+        mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
       end do
       end do
       end do
@@ -1130,7 +1142,7 @@ if(IC<=2)then
       do iz=ng_sta(3),ng_end(3)
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
-        rho_out(ix,iy,iz,num_rho_stock)=matbox_read(ix,iy,iz)
+        mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
       end do
       end do
       end do
@@ -1157,7 +1169,7 @@ if(IC<=2)then
         do iz=ng_sta(3),ng_end(3)
         do iy=ng_sta(2),ng_end(2)
         do ix=ng_sta(1),ng_end(1)
-          rho_s_in(ix,iy,iz,num_rho_stock,is)=matbox_read(ix,iy,iz)
+          mixing%srho_s_in(mixing%num_rho_stock,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
         end do
@@ -1169,7 +1181,7 @@ if(IC<=2)then
         do iz=ng_sta(3),ng_end(3)
         do iy=ng_sta(2),ng_end(2)
         do ix=ng_sta(1),ng_end(1)
-          rho_s_out(ix,iy,iz,num_rho_stock,is)=matbox_read(ix,iy,iz)
+          mixing%srho_s_out(mixing%num_rho_stock,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
         end do
@@ -1177,7 +1189,7 @@ if(IC<=2)then
       end do
     end if
   else
-    do ii=1,num_rho_stock+1
+    do ii=1,mixing%num_rho_stock+1
       if(comm_is_root(nproc_id_global))then
         read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
       end if
@@ -1186,14 +1198,14 @@ if(IC<=2)then
         do iz=ng_sta(3),ng_end(3)
         do iy=ng_sta(2),ng_end(2)
         do ix=ng_sta(1),ng_end(1)
-          rho_in(ix,iy,iz,ii)=matbox_read(ix,iy,iz)
+          mixing%srho_in(ii)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
         end do
       end if
     end do
   
-    do ii=1,num_rho_stock
+    do ii=1,mixing%num_rho_stock
       if(comm_is_root(nproc_id_global))then
         read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
       end if
@@ -1202,7 +1214,7 @@ if(IC<=2)then
         do iz=ng_sta(3),ng_end(3)
         do iy=ng_sta(2),ng_end(2)
         do ix=ng_sta(1),ng_end(1)
-          rho_out(ix,iy,iz,ii)=matbox_read(ix,iy,iz)
+          mixing%srho_out(ii)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
         end do
@@ -1223,7 +1235,7 @@ if(IC<=2)then
         end do
         end do
   
-        do ii=1,num_rho_stock+1
+        do ii=1,mixing%num_rho_stock+1
           if(comm_is_root(nproc_id_global))then
             read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
           end if
@@ -1232,14 +1244,14 @@ if(IC<=2)then
             do iz=ng_sta(3),ng_end(3)
             do iy=ng_sta(2),ng_end(2)
             do ix=ng_sta(1),ng_end(1)
-              rho_s_in(ix,iy,iz,ii,is)=matbox_read(ix,iy,iz)
+              mixing%srho_s_in(ii,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
             end do
             end do
             end do
           end if
         end do
     
-        do ii=1,num_rho_stock
+        do ii=1,mixing%num_rho_stock
           if(comm_is_root(nproc_id_global))then
             read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
           end if
@@ -1248,7 +1260,7 @@ if(IC<=2)then
             do iz=ng_sta(3),ng_end(3)
             do iy=ng_sta(2),ng_end(2)
             do ix=ng_sta(1),ng_end(1)
-              rho_s_out(ix,iy,iz,ii,is)=matbox_read(ix,iy,iz)
+              mixing%srho_s_out(ii,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
             end do
             end do
             end do

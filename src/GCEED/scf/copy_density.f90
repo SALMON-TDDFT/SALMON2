@@ -13,12 +13,13 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine copy_density(nspin,srho_s)
-use structures
+subroutine copy_density(nspin,srho_s,mixing)
+use structures, only: s_scalar, s_mixing
 use scf_data
 implicit none
 integer       ,intent(in) :: nspin
 type(s_scalar),intent(in) :: srho_s(nspin)
+type(s_mixing),intent(inout) :: mixing
 integer :: iiter
 integer :: is
 integer :: ix,iy,iz
@@ -28,7 +29,7 @@ if(Miter==1)then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_in(ix,iy,iz,num_rho_stock+1)=srho_s(1)%f(ix,iy,iz)
+    mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
   end do
   end do
   end do
@@ -37,55 +38,55 @@ if(Miter==1)then
     do iz=ng_sta(3),ng_end(3)
     do iy=ng_sta(2),ng_end(2)
     do ix=ng_sta(1),ng_end(1)
-      rho_s_in(ix,iy,iz,num_rho_stock+1,1)=srho_s(1)%f(ix,iy,iz)
-      rho_s_in(ix,iy,iz,num_rho_stock+1,2)=srho_s(2)%f(ix,iy,iz)
+      mixing%srho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+      mixing%srho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz)=srho_s(2)%f(ix,iy,iz)
     end do
     end do
     end do
   end if
 end if
 
-do iiter=1,num_rho_stock
+do iiter=1,mixing%num_rho_stock
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_in(ix,iy,iz,iiter)=rho_in(ix,iy,iz,iiter+1)
+    mixing%srho_in(iiter)%f(ix,iy,iz)=mixing%srho_in(iiter+1)%f(ix,iy,iz)
   end do
   end do
   end do
 end do
-do iiter=1,num_rho_stock-1
+do iiter=1,mixing%num_rho_stock-1
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    rho_out(ix,iy,iz,iiter)=rho_out(ix,iy,iz,iiter+1)
+    mixing%srho_out(iiter)%f(ix,iy,iz)=mixing%srho_out(iiter+1)%f(ix,iy,iz)
   end do
   end do
   end do
 end do
 
 if(ilsda==1)then
-  do iiter=1,num_rho_stock
+  do iiter=1,mixing%num_rho_stock
     do is=1,2
 !$OMP parallel do private(iz,iy,ix)
       do iz=ng_sta(3),ng_end(3)
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
-        rho_s_in(ix,iy,iz,iiter,is)=rho_s_in(ix,iy,iz,iiter+1,is)
+        mixing%srho_s_in(iiter,is)%f(ix,iy,iz)=mixing%srho_s_in(iiter+1,is)%f(ix,iy,iz)
       end do
       end do
       end do
     end do
   end do
-  do iiter=1,num_rho_stock-1
+  do iiter=1,mixing%num_rho_stock-1
     do is=1,2
 !$OMP parallel do private(iz,iy,ix)
       do iz=ng_sta(3),ng_end(3)
       do iy=ng_sta(2),ng_end(2)
       do ix=ng_sta(1),ng_end(1)
-        rho_s_out(ix,iy,iz,iiter,is)=rho_s_out(ix,iy,iz,iiter+1,is)
+        mixing%srho_s_out(iiter,is)%f(ix,iy,iz)=mixing%srho_s_out(iiter+1,is)%f(ix,iy,iz)
       end do
       end do
       end do

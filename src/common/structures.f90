@@ -235,6 +235,11 @@ module structures
     complex(8), allocatable :: zhwf_ob(:,:,:,:)
     type(s_orbital) :: xk,hxk,gk,pk,pko,hwf
   end type s_cg
+  
+  type s_mixing
+    integer :: num_rho_stock
+    type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
+  end type s_mixing
 
 !===================================================================================================================================
 

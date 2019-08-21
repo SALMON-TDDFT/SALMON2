@@ -196,11 +196,6 @@ real(8),allocatable :: zpsi_mesh(:,:,:,:,:)        ! Single particle orbitals
 real(8),allocatable :: psi_old(:,:,:,:,:)
 complex(8),allocatable :: zpsi_old(:,:,:,:,:)
 
-real(8),allocatable :: rho_in(:,:,:,:)
-real(8),allocatable :: rho_out(:,:,:,:)
-real(8),allocatable :: rho_s_in(:,:,:,:,:)
-real(8),allocatable :: rho_s_out(:,:,:,:,:)
-
 real(8),allocatable :: esp(:,:)         ! Single particle energy
 real(8),allocatable :: esp2(:,:)        ! Single particle energy
 real(8),allocatable :: rho(:,:,:)       ! Single particle density
@@ -285,7 +280,6 @@ integer :: imr(3),imrs(3),igroup
 
 real(8),allocatable :: rho_stock(:,:,:,:)
 real(8),allocatable :: Vlocal_stock(:,:,:,:)
-integer,parameter :: num_rho_stock=21
 
 integer :: iflag_subspace_diag
 
