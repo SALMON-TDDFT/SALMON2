@@ -32,8 +32,8 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   type(s_rgrid)     ,intent(in) :: mg
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  type(s_stencil)               :: stencil ! future work: --> intent(in)
-  type(s_pp_grid)               :: ppg ! future work: --> intent(in)
+  type(s_stencil)   ,intent(in) :: stencil
+  type(s_pp_grid)   ,intent(in) :: ppg
   type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
   type(s_orbital)               :: spsi
   type(s_sendrecv_grid)         :: srg
@@ -41,7 +41,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   type(s_cg)                    :: cg
   !
   integer,parameter :: nd=4
-  integer :: j,nspin,ik,io,io_all,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz
+  integer :: nspin,ik,io,io_all,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz
   integer :: iter
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
   complex(8),parameter :: zi=(0.d0,1.d0)
@@ -59,14 +59,6 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-
-  allocate(stencil%vec_kAc(3,ik_s:ik_e))
-  do ik=ik_s,ik_e
-    do j=1,3
-      stencil%vec_kAc(j,ik) = system%vec_k(j,ik) ! future work: remove this line
-    end do
-  end do
-  call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,ik_s,ik_e) ! future work: remove this line
 
   if(.not. allocated(cg%xk%zwf)) then
     call allocate_orbital_complex(nspin,mg,info,cg%xk)
@@ -237,9 +229,6 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   if(iflag.eq.1) then
     iflag=0
   end if
-
-  deallocate(stencil%vec_kAc) ! future work: remove this line
-  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV) ! future work: remove this line
 
   call timer_end(LOG_GSCG_TOTAL)
 

@@ -26,14 +26,14 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
   use eigen_subdiag_periodic_sub
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
-  type(s_rgrid),intent(in) :: mg
-  type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel)     :: info
-  type(s_orbital),intent(inout) :: spsi,shpsi
-  type(s_stencil) :: stencil
-  type(s_pp_grid) :: ppg
-  type(s_scalar),intent(in) :: vlocal(system%nspin)
-  type(s_sendrecv_grid)         :: srg
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_stencil),intent(in) :: stencil
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_scalar) ,intent(in) :: vlocal(system%nspin)
+  type(s_orbital)            :: spsi,shpsi
+  type(s_sendrecv_grid)      :: srg
   !
   integer :: nspin,no,nk,ik,io,io1,io2,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,ierr
   real(8)   ,dimension(system%nspin,system%no,system%nk) :: rbox1,rbox2
@@ -55,12 +55,6 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-
-  allocate(stencil%vec_kAc(3,ik_s:ik_e)) ! future work: remove this line
-  do ik=ik_s,ik_e
-    stencil%vec_kAc(:,ik) = system%vec_k(:,ik) ! future work: remove this line
-  end do
-  call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,ik_s,ik_e) ! future work: remove this line
 
   call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
 
@@ -150,9 +144,6 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
   end do
   end do
   call timer_end(LOG_DIAG_UPDATE)
-
-  deallocate(stencil%vec_kAc) ! future work: remove this line
-  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV) ! future work: remove this line
 
   call timer_end(LOG_DIAG_TOTAL)
 

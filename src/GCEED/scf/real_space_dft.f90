@@ -311,6 +311,12 @@ if(iopt==1)then
   end if
   sVpsl%f = Vpsl
 
+  if(iperiodic==3) then
+    allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
+    stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
+    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+  end if
+
   if(iperiodic==3) call get_fourier_grid_G(fg)
 
   select case( IC )
@@ -415,11 +421,6 @@ if(iopt==1)then
       Vlocal(:,:,:,jspin) = V_local(jspin)%f
     end do
 
-    if(iperiodic==3) then
-      allocate(stencil%vec_kAc(3,k_sta:k_end))
-      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
-      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
-    end if
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
@@ -429,7 +430,6 @@ if(iopt==1)then
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
-    if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 
   case(1,3) ! Continue the previous calculation
 
@@ -631,11 +631,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
-    if(iperiodic==3) then
-      allocate(stencil%vec_kAc(3,k_sta:k_end))
-      stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
-      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
-    end if
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
@@ -644,7 +639,6 @@ DFT_Iteration : do iter=1,iDiter(img)
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
-    if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
 
@@ -829,13 +823,6 @@ case(3)
   end do
 end do
 end select
-
-!(prepare variables for the next analysis)
-if(iperiodic==3) then
-   allocate(stencil%vec_kAc(3,k_sta:k_end))
-   stencil%vec_kAc(1:3,k_sta:k_end) = system%vec_k(1:3,k_sta:k_end)
-   call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,k_sta,k_end)
-endif
 
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then
