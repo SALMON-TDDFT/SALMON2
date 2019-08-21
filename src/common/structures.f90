@@ -99,8 +99,8 @@ module structures
     integer :: icomm_r   ! communicator for r-space
     integer :: icomm_k   ! communicator for k-space
     integer :: icomm_o   ! communicator for orbital
-    integer :: icomm_ro  ! communicator for r-space & orbital
-    integer :: icomm_ko  ! communicator for k-space & orbital
+    integer :: icomm_ro,  id_ro,  isize_ro  ! communicator for r-space & orbital
+    integer :: icomm_ko,  id_ko,  isize_ko  ! communicator for k-space & orbital
     integer :: icomm_rko ! communicator for r-space, k-space & orbital
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
