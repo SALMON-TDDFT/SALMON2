@@ -17,7 +17,6 @@ subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter,mixing)
   use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
   use salmon_parallel, only: nproc_group_global
   use broyden_sub
-  use scf_data, only: rho,rho_s
   implicit none
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
