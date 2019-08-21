@@ -13,8 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_dos
-use salmon_parallel, only: nproc_id_global, nproc_group_grid
+subroutine calc_dos(info)
+use structures, only: s_orbital_parallel
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
                        out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au
@@ -23,6 +24,7 @@ use scf_data
 use allocate_psl_sub
 use new_world_sub
 implicit none
+type(s_orbital_parallel),intent(in) :: info
 !integer :: iob,iobmax,iob_allob
 integer :: iob,iobmax,iob_allob,iik
 real(8) :: dos_l_tmp(1:out_dos_nenergy)
@@ -67,7 +69,7 @@ do iob=1,iobmax
   end select
 end do
 end do
-call comm_summation(dos_l_tmp,dos_l,out_dos_nenergy,nproc_group_grid) 
+call comm_summation(dos_l_tmp,dos_l,out_dos_nenergy,info%icomm_ko) 
 
 if(comm_is_root(nproc_id_global))then
   open(101,file="dos.data")

@@ -15,7 +15,7 @@
 !
 subroutine calc_pdos(info)
 use structures, only: s_orbital_parallel
-use salmon_parallel, only: nproc_id_global, nproc_group_grid
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
                        out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au
@@ -119,7 +119,7 @@ do iob=1,iobmax
   end do
 end do
 end do
-call comm_summation(pdos_l_tmp,pdos_l,out_dos_nenergy*5*MI,nproc_group_grid) 
+call comm_summation(pdos_l_tmp,pdos_l,out_dos_nenergy*5*MI,info%icomm_ko) 
 
 if(comm_is_root(nproc_id_global))then
   do iatom=1,MI

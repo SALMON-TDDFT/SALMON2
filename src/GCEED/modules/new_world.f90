@@ -127,44 +127,6 @@ end if
 info%icomm_r = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_r, nproc_id_korbital, nproc_size_korbital)
 
-!new_world for comm_rho
-if(isequential==1)then
-  do i3=0,nproc_d_o(3)-1
-  do i2=0,nproc_d_o(2)-1
-  do i1=0,nproc_d_o(1)-1
-    do i5=0,nproc_k-1
-    do i4=0,nproc_ob-1
-      ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
-      if(nproc_id_global==ibox)then
-        icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-        ikey=i5*nproc_ob+i4
-      end if
-    end do
-    end do
-  end do
-  end do
-  end do
-else if(isequential==2)then
-  do i3=0,nproc_d_o(3)-1
-  do i2=0,nproc_d_o(2)-1
-  do i1=0,nproc_d_o(1)-1
-    do i5=0,nproc_k-1
-    do i4=0,nproc_ob-1
-      ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
-      if(nproc_id_global==ibox)then
-        icolor=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))
-        ikey=i5*nproc_ob+i4
-      end if
-    end do
-    end do
-  end do
-  end do
-  end do
-end if
- 
-nproc_group_rho = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_rho, nproc_id_rho, nproc_size_rho)
-
 !new_world for comm_k
 if(isequential==1)then
   do i3=0,nproc_d_o(3)-1
@@ -294,8 +256,8 @@ else if(isequential==2)then
   end do
 end if
  
-nproc_group_grid = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_grid, nproc_id_grid, nproc_size_grid)
+info%icomm_ko = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info%icomm_ko, nproc_id_grid, nproc_size_grid)
 
 !new_world for comm_orbitalgrid
 if(isequential==1)then
@@ -332,8 +294,8 @@ else if(isequential==2)then
   end do
 end if
  
-nproc_group_orbitalgrid = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_orbitalgrid, nproc_id_orbitalgrid, nproc_size_orbitalgrid)
+info%icomm_k = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info%icomm_k, nproc_id_orbitalgrid, nproc_size_orbitalgrid)
 
 !new_world for comm_mesh_s
 
@@ -862,12 +824,13 @@ end subroutine make_icoobox_bound
 
 !=====================================================================
 !======================================================================
-subroutine allgatherv_vlocal(nspin,Vh,Vpsl,Vxc,Vlocal)
-use structures
-use salmon_parallel, only: nproc_id_global, nproc_group_grid
+subroutine allgatherv_vlocal(info,nspin,Vh,Vpsl,Vxc,Vlocal)
+use structures, only: s_orbital_parallel, s_scalar
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_allgatherv
 use timer
 implicit none
+type(s_orbital_parallel),intent(in) :: info
 integer       ,intent(in) :: nspin
 type(s_scalar),intent(in) :: Vh,Vpsl,Vxc(nspin)
 type(s_scalar)            :: Vlocal(nspin)
@@ -919,7 +882,7 @@ do is=1,nspin
   end do
 
   call timer_begin(LOG_ALLGATHERV_TOTAL)
-  call comm_allgatherv(matbox11,matbox12,ircnt,idisp,nproc_group_grid)
+  call comm_allgatherv(matbox11,matbox12,ircnt,idisp,info%icomm_ko)
   call timer_end(LOG_ALLGATHERV_TOTAL)
 
   if(isequential==1)then
@@ -981,9 +944,10 @@ CONTAINS
   end subroutine copyVlocal
 end subroutine allgatherv_vlocal
 
-subroutine wrapper_allgatherv_vlocal ! --> remove (future works)
+subroutine wrapper_allgatherv_vlocal(info) ! --> remove (future works)
   use structures
   implicit none
+  type(s_orbital_parallel),intent(in) :: info
   type(s_scalar) :: sVh,sVpsl
   type(s_scalar),allocatable :: sVlocal(:),sVxc(:)
   integer :: nspin,jspin
@@ -1007,7 +971,7 @@ subroutine wrapper_allgatherv_vlocal ! --> remove (future works)
     sVxc(1)%f = Vxc
   end if
 
-  call allgatherv_vlocal(nspin,sVh,sVpsl,sVxc,sVlocal)
+  call allgatherv_vlocal(info,nspin,sVh,sVpsl,sVxc,sVlocal)
 
   do jspin=1,nspin
     Vlocal(:,:,:,jspin) = sVlocal(jspin)%f

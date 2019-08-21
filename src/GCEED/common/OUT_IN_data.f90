@@ -1371,7 +1371,7 @@ if(iSCFRT==2)then
   end do
 end if
 
-call wrapper_allgatherv_vlocal
+call wrapper_allgatherv_vlocal(info)
 
 if(iscfrt==2.and.propagator=='etrs')then
   if(ilsda==0)then

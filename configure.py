@@ -60,7 +60,8 @@ group.add_option('--enable-mpi',        action='store_true',  dest='mpi')
 group.add_option('--disable-mpi',       action='store_false', dest='mpi',       help='enable/disable MPI parallelization.')
 group.add_option('--enable-scalapack',  action='store_true',  dest='scalapack')
 group.add_option('--disable-scalapack', action='store_false', dest='scalapack', help='enable/disable computations with ScaLAPACK library.')
-group.add_option('--enable-libxc',      action='store_true', default=False, dest='libxc', help='enable Libxc library.')
+group.add_option('--enable-libxc',      action='store_true',  dest='libxc')
+group.add_option('--disable-libxc',     action='store_false', dest='libxc', help='enable/disable Libxc library.')
 group.add_option('--with-lapack',       action='store', type=str, default=None, dest='lapack_installdir', help='specify install path to LAPACK/ScaLAPACK')
 group.add_option('--with-libxc',        action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to Libxc package')
 group.add_option('--build-required-packages', action='store_true', default=False, dest='build_required_packages', help='request build and static link of required packages (We support LAPACK and Libxc)')
@@ -85,14 +86,18 @@ group.add_option('--disable-domain-pow2',   action='store_false', dest='domain_t
 parser.add_option_group(group)
 
 group = OptionGroup(parser, 'Debug options')
-group.add_option('-d', '--debug', action='store_true', default=False, dest='debug', help='enable debug build.')
-group.add_option('--hpsi_test',   action='store_true',                dest='hpsi_test',  help='use joint hpsi subroutine (test).')
+group.add_option('-d', '--debug',   action='store_true',  default=False, dest='debug', help='enable debug build.')
+group.add_option('-r', '--release', action='store_false',                dest='debug', help='enable release build.')
+group.add_option('--hpsi_test',     action='store_true',                 dest='hpsi_test',  help='use joint hpsi subroutine (test).')
 parser.add_option_group(group)
 
 
 (options, args) = parser.parse_args()
 
 ### check options
+if (options.libxc_installdir is not None):
+  options.libxc = True
+
 dict = {}
 if options.arch is not None:
   dict['CMAKE_TOOLCHAIN_FILE']     = options.arch.lower()
@@ -106,7 +111,7 @@ add_env(dict, 'LIBXC_INSTALLDIR',  options.libxc_installdir)
 
 add_option(dict, 'USE_MPI',             options.mpi)
 add_option(dict, 'USE_SCALAPACK',       options.scalapack)
-add_option(dict, 'USE_LIBXC',           options.libxc or (options.libxc_installdir is not None))
+add_option(dict, 'USE_LIBXC',           options.libxc)
 
 add_option(dict, 'DOMAIN_IS_POW2',      options.domain_two)
 add_option(dict, 'ARRAY_PADDING',       options.padding)

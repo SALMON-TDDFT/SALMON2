@@ -2,6 +2,8 @@ logical, parameter      :: GIT_FOUND       = .@GIT_FOUND@.
 character(*), parameter :: GIT_BRANCH      = '@GIT_BRANCH@'
 character(*), parameter :: GIT_COMMIT_HASH = '@GIT_COMMIT_HASH@'
 
-integer, parameter :: SALMON_VER_MAJOR = 1
-integer, parameter :: SALMON_VER_MINOR = 1
-integer, parameter :: SALMON_VER_MICRO = 0
+character(*), parameter :: SALMON_VERSION_STRING = '@SALMON_VERSION@'
+
+integer, parameter :: SALMON_VER_MAJOR = @SALMON_VERSION_MAJOR@
+integer, parameter :: SALMON_VER_MINOR = @SALMON_VERSION_MINOR@
+integer, parameter :: SALMON_VER_MICRO = @SALMON_VERSION_PATCH@

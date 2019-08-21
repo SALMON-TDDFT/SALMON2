@@ -25,7 +25,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
                  info_ob,ppg,vlocal)
   use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid,s_cg
-  use salmon_parallel, only: nproc_group_grid, nproc_group_global
+  use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation, comm_bcast
   use timer
   use hpsi_sub
@@ -239,7 +239,7 @@ subroutine sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,np
             end do
           end if
           call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
-          call comm_bcast(rmatbox_m,nproc_group_grid,iroot)
+          call comm_bcast(rmatbox_m,info%icomm_ko,iroot)
           sum0=0.d0
     !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
           do iz=mg%is(3),mg%ie(3)

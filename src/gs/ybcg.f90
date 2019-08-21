@@ -25,7 +25,6 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
                 info_ob,ppg,vlocal)
   use inputoutput, only: ncg
   use structures, only: s_rgrid,s_dft_system,s_orbital_parallel,s_orbital,s_stencil,s_scalar,s_pp_grid
-  use salmon_parallel, only: nproc_group_grid
   use salmon_communication, only: comm_bcast,comm_summation
   use misc_routines, only: get_wtime
   use inner_product_sub
@@ -182,7 +181,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
         end do
       end if
       call calc_iroot(iob,iroot,ilsda,nproc_ob,itotmst,mst)
-      call comm_bcast(gk,nproc_group_grid,iroot)
+      call comm_bcast(gk,info%icomm_ko,iroot)
   
       do job=iobsta(is),iob-1
         sum0=0.d0
@@ -210,7 +209,7 @@ subroutine dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,npr
         end if
   
         call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
-        call comm_bcast(gk,nproc_group_grid,iroot)
+        call comm_bcast(gk,info%icomm_ko,iroot)
       end do
   
       if(icorr==1)then

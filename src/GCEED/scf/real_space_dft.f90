@@ -41,9 +41,7 @@ END MODULE global_variables_scf
 subroutine Real_Space_DFT
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
-                           nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid, &
-                           nproc_group_rho, &
-                           nproc_group_grid
+                           nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -227,8 +225,6 @@ if(iopt==1)then
   info%numo = iobnum/nspin
 
   info%if_divide_rspace = nproc_d_o_mul.ne.1
-  info%icomm_k    = nproc_group_grid
-  info%icomm_ko   = nproc_group_rho
   info%icomm_rko  = nproc_group_global
   allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
             ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
@@ -409,7 +405,7 @@ if(iopt==1)then
 
     call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
 
-    call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(info,system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
       Vlocal(:,:,:,jspin) = V_local(jspin)%f
     end do
@@ -622,7 +618,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_EXC_COR)
 
-    call allgatherv_vlocal(system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(info,system%nspin,sVh,sVpsl,sVxc,V_local)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     if(iperiodic==3) then
@@ -932,7 +928,7 @@ if(yn_out_dns=='y') then
 end if
 
 if(yn_out_dos=='y') then
-  call calc_dos
+  call calc_dos(info)
 end if
 
 if(yn_out_pdos=='y') then
