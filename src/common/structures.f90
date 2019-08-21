@@ -67,8 +67,7 @@ module structures
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
 
-! NOTE: This directive is a compiler hint to stabilize the performance of sendrecv_grid.
-#ifdef __INTEL_COMPILER
+#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: dbuf, zbuf
 #endif
   end type s_pcomm_cache
