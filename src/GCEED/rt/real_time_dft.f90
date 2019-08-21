@@ -559,7 +559,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   do ik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
       do jspin=1,system%nspin
-        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+        jj = info%io_tbl(iob)
         info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,1)*system%wtk(ik)
       end do
     end do
