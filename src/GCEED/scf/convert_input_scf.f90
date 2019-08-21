@@ -13,9 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine convert_input_scf(info,info_field,file_atoms_coo)
+subroutine convert_input_scf(info,info_field,file_atoms_coo,mixing)
 use salmon_global
-use structures, only: s_orbital_parallel, s_field_parallel
+use structures, only: s_orbital_parallel, s_field_parallel, s_mixing
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use check_numcpu_sub
@@ -30,6 +30,7 @@ integer :: ii  !,iatom
 integer :: ibox2
 integer :: icheck1,icheck2
 character(100) :: file_atoms_coo
+type(s_mixing),intent(inout) :: mixing
 real(8) :: dip_spacing
 
 iterVh = 0         ! Iteration counter
@@ -345,6 +346,8 @@ end if
 call make_new_world(info,info_field)
 
 if(comm_is_root(nproc_id_global))close(fh_namelist)
+
+mixing%num_rho_stock=21
 
 return
 

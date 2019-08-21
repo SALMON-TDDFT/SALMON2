@@ -13,55 +13,59 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE simple_mixing(nspin,c1,c2,srho_s)
-use structures
-use scf_data
+SUBROUTINE simple_mixing(ng,system,c1,c2,srho_s,mixing)
+use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing
 implicit none
-integer,intent(in) :: nspin
-real(8),intent(IN) :: c1,c2
-type(s_scalar) :: srho_s(nspin)
+type(s_rgrid),intent(in) :: ng
+type(s_dft_system),intent(in) :: system
+real(8),intent(in) :: c1,c2
+type(s_scalar),intent(inout) :: srho_s(system%nspin)
+type(s_mixing),intent(inout) :: mixing
 
 integer :: ix,iy,iz
 
-if(ilsda == 0)then
+if(system%nspin == 1)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    rho_out(ix,iy,iz,num_rho_stock)=srho_s(1)%f(ix,iy,iz)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
   end do
   end do
   end do
-elseif( ilsda==1 )then
+elseif(system%nspin == 2)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    rho_s_out(ix,iy,iz,num_rho_stock,1)=srho_s(1)%f(ix,iy,iz)
-    rho_s_out(ix,iy,iz,num_rho_stock,2)=srho_s(2)%f(ix,iy,iz)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    mixing%srho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+    mixing%srho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)=srho_s(2)%f(ix,iy,iz)
   end do
   end do
   end do
 end if
 
 !rho = c1*rho + c2*matmul( psi**2, occ )
-if(ilsda == 0)then
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    srho_s(1)%f(ix,iy,iz) = c1*rho_in(ix,iy,iz,num_rho_stock) + c2*rho_out(ix,iy,iz,num_rho_stock)
-    rho_in(ix,iy,iz,num_rho_stock+1) = srho_s(1)%f(ix,iy,iz)
+if(system%nspin == 1)then
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    srho_s(1)%f(ix,iy,iz) = c1*mixing%srho_in(mixing%num_rho_stock)%f(ix,iy,iz) &
+                            + c2*mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)
+    mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz)
   end do
   end do
   end do
-else if(ilsda == 1)then
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    srho_s(1)%f(ix,iy,iz) = c1*rho_s_in(ix,iy,iz,num_rho_stock,1) + c2*rho_s_out(ix,iy,iz,num_rho_stock,1)
-    srho_s(2)%f(ix,iy,iz) = c1*rho_s_in(ix,iy,iz,num_rho_stock,2) + c2*rho_s_out(ix,iy,iz,num_rho_stock,2)
-    rho_s_in(ix,iy,iz,num_rho_stock+1,1) = srho_s(1)%f(ix,iy,iz)
-    rho_s_in(ix,iy,iz,num_rho_stock+1,2) = srho_s(2)%f(ix,iy,iz)
+else if(system%nspin == 2)then
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    srho_s(1)%f(ix,iy,iz) = c1*mixing%srho_s_in(mixing%num_rho_stock,1)%f(ix,iy,iz) &
+                            + c2*mixing%srho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)
+    srho_s(2)%f(ix,iy,iz) = c1*mixing%srho_s_in(mixing%num_rho_stock,2)%f(ix,iy,iz) &
+                            + c2*mixing%srho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)
+    mixing%srho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz)
+    mixing%srho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz) = srho_s(2)%f(ix,iy,iz)
   end do
   end do
   end do

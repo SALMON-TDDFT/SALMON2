@@ -61,6 +61,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_cg) :: cg
+type(s_mixing) :: mixing
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
 real(8),allocatable :: Sf(:)
@@ -90,7 +91,7 @@ posplane=0.d0
 
 inumcpu_check=0
 
-call convert_input_rt(Ntime)
+call convert_input_rt(Ntime,mixing)
 allocate(system%mass(1:nelem))
 
 call set_filename
@@ -163,7 +164,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,info,info_field,system,stencil,cg)
+call IN_data(lg,mg,ng,info,info_field,system,stencil,cg,mixing)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then

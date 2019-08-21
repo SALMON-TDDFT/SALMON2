@@ -13,20 +13,22 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
-  use structures, only: s_rgrid,s_dft_system,s_scalar
+subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter,mixing)
+  use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
   use salmon_parallel, only: nproc_group_global
   use broyden_sub
-  use scf_data, only: num_rho_stock,rho,rho_in,rho_out,  &
-                      rho_s,rho_s_in,rho_s_out
   implicit none
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
   type(s_scalar),intent(inout) :: srho_s(system%nspin)
   integer,intent(in) :: mst(2),ifmst(2)
   integer,intent(in) :: iter
+  type(s_mixing),intent(inout) :: mixing
   integer :: ix,iy,iz,is
+  integer :: i
   real(8) :: vecr(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  real(8) :: vecr_in(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),mixing%num_rho_stock+1)
+  real(8) :: vecr_out(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),mixing%num_rho_stock+1)
 
   if(system%nspin==1)then
 
@@ -38,8 +40,19 @@ subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
     end do
     end do
 
-    call broyden(vecr,rho_in,rho_out,ng%num(1)*ng%num(2)*ng%num(3),  &
-                 iter,num_rho_stock,num_rho_stock,nproc_group_global)
+    do i=1,mixing%num_rho_stock+1
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        vecr_in(ix,iy,iz,i)=mixing%srho_in(i)%f(ix,iy,iz)
+        vecr_out(ix,iy,iz,i)=mixing%srho_out(i)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    end do
+
+    call broyden(vecr,vecr_in,vecr_out,ng%num(1)*ng%num(2)*ng%num(3),  &
+                 iter,mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global)
   
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
@@ -47,6 +60,17 @@ subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
       srho_s(1)%f(ix,iy,iz)= vecr(ix,iy,iz)
     end do
     end do
+    end do
+
+    do i=1,mixing%num_rho_stock+1
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        mixing%srho_in(i)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
+        mixing%srho_out(i)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
+      end do
+      end do
+      end do
     end do
 
   else if(system%nspin==2)then
@@ -61,10 +85,19 @@ subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
         end do
         end do
   
-        call broyden(vecr,rho_s_in(ng%is(1):,ng%is(2):,ng%is(3):,1:,is),  &
-                     rho_s_out(ng%is(1):,ng%is(2):,ng%is(3):,1:,is),  &
-                     ng%num(1)*ng%num(2)*ng%num(3),  &
-                     iter,num_rho_stock,num_rho_stock,nproc_group_global)
+        do i=1,mixing%num_rho_stock+1
+          do iz=ng%is(3),ng%ie(3)
+          do iy=ng%is(2),ng%ie(2)
+          do ix=ng%is(1),ng%ie(1)
+            vecr_in(ix,iy,iz,i)=mixing%srho_s_in(i,is)%f(ix,iy,iz)
+            vecr_out(ix,iy,iz,i)=mixing%srho_s_out(i,is)%f(ix,iy,iz)
+          end do
+          end do
+          end do
+        end do
+
+        call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),  &
+                     iter,mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global)
   
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
@@ -72,6 +105,17 @@ subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
           srho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
         end do
         end do
+        end do
+
+        do i=1,mixing%num_rho_stock+1
+          do iz=ng%is(3),ng%ie(3)
+          do iy=ng%is(2),ng%ie(2)
+          do ix=ng%is(1),ng%ie(1)
+            mixing%srho_s_in(i,is)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
+            mixing%srho_s_out(i,is)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
+          end do
+          end do
+          end do
         end do
       end if
     end do

@@ -13,7 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine convert_input_rt(Ntime)
+subroutine convert_input_rt(Ntime,mixing)
+use structures, only: s_mixing
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use inputoutput
@@ -23,6 +24,7 @@ use scf_data
 use new_world_sub
 implicit none
 integer :: Ntime
+type(s_mixing),intent(inout) :: mixing
 real(8) :: dip_spacing
 
 ilsda=ispin
@@ -170,5 +172,7 @@ if(temperature>=0.d0)then
 end if
 
 if(comm_is_root(nproc_id_global))close(fh_namelist)
+
+mixing%num_rho_stock = 21
 
 end subroutine convert_input_rt
