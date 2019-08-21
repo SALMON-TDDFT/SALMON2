@@ -87,6 +87,8 @@ add_compile_definitions_if(CURRENT_PREPROCESSING ARTED_CURRENT_PREPROCESSING)
 add_compile_definitions_if(REDUCE_FOR_MANYCORE   ARTED_REDUCE_FOR_MANYCORE)
 add_compile_definitions_if(LARGE_BLOCKING        ARTED_LBLK)
 
+include (${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
+
 
 # for third party libraries
 if (LAPACK_INSTALLDIR)
