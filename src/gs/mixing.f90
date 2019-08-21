@@ -13,7 +13,78 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter,mixing)
+module mixing_sub
+  implicit none
+
+contains
+
+!===================================================================================================================================
+subroutine simple_mixing(ng,system,c1,c2,srho_s,mixing)
+  use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing
+  implicit none
+  type(s_rgrid),intent(in) :: ng
+  type(s_dft_system),intent(in) :: system
+  real(8),intent(in) :: c1,c2
+  type(s_scalar),intent(inout) :: srho_s(system%nspin)
+  type(s_mixing),intent(inout) :: mixing
+  
+  integer :: ix,iy,iz
+  
+  if(system%nspin == 1)then
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  elseif(system%nspin == 2)then
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      mixing%srho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+      mixing%srho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)=srho_s(2)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end if
+  
+  !rho = c1*rho + c2*matmul( psi**2, occ )
+  if(system%nspin == 1)then
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      srho_s(1)%f(ix,iy,iz) = c1*mixing%srho_in(mixing%num_rho_stock)%f(ix,iy,iz) &
+                              + c2*mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)
+      mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  else if(system%nspin == 2)then
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      srho_s(1)%f(ix,iy,iz) = c1*mixing%srho_s_in(mixing%num_rho_stock,1)%f(ix,iy,iz) &
+                              + c2*mixing%srho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)
+      srho_s(2)%f(ix,iy,iz) = c1*mixing%srho_s_in(mixing%num_rho_stock,2)%f(ix,iy,iz) &
+                              + c2*mixing%srho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)
+      mixing%srho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz)
+      mixing%srho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz) = srho_s(2)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end if
+  
+  
+  return
+  
+end subroutine simple_mixing
+
+!===================================================================================================================================
+
+subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
   use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
   use salmon_parallel, only: nproc_group_global
   use broyden_sub
@@ -122,4 +193,6 @@ subroutine buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter,mixing)
 
   end if
 
-end subroutine buffer_broyden_ns
+end subroutine wrapper_broyden
+
+end module mixing_sub

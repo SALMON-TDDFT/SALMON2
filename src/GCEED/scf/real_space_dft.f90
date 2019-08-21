@@ -601,26 +601,13 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
-    call scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+    call scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                        cg,   &
                        info_ob,ppg,V_local,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
-
-    call timer_begin(LOG_CALC_RHO)
-
-    select case(method_mixing)
-      case ('simple') ; call simple_mixing(ng,system,1.d0-mixrate,mixrate,srho_s,mixing)
-      case ('broyden'); call buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter,mixing)
-    end select
-    call timer_end(LOG_CALC_RHO)
-
-    srho%f = 0d0
-    do jspin=1,nspin
-      srho%f = srho%f + srho_s(jspin)%f
-    end do
+                       iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,mixing,iter)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then

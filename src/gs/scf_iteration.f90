@@ -19,14 +19,14 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
-               iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
-  use inputoutput, only: iperiodic,method_min,gscg
+               iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,mixing,iter)
+  use inputoutput, only: iperiodic,method_min,gscg,method_mixing,mixrate
   use structures
   use timer
   use dtcg_sub
@@ -38,12 +38,15 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,i
   use subspace_diag_sub
   use subspace_diag_periodic_sub
   use density_matrix, only: calc_density
+  use mixing_sub
   implicit none
 
   type(s_rgrid),         intent(in)    :: mg
+  type(s_rgrid),         intent(in)    :: ng
   type(s_dft_system),    intent(in)    :: system
   type(s_orbital_parallel),intent(in)  :: info
   type(s_orbital),       intent(inout) :: spsi,shpsi
+  type(s_scalar),        intent(inout) :: srho
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg,srg_ob_1
@@ -65,6 +68,9 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,i
   integer,               intent(in)    :: iditer_nosubspace_diag
   integer,               intent(in)    :: iobnum
   integer,               intent(in)    :: ifmst(2)
+  type(s_mixing),        intent(inout) :: mixing
+  integer,               intent(in)    :: iter
+  integer                              :: j
 
 ! solve Kohn-Sham equation by minimization techniques
   call timer_begin(LOG_CALC_MINIMIZATION)
@@ -125,7 +131,16 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,i
 
   call calc_density(srho_s,spsi,info,mg,system%nspin)
 
+  select case(method_mixing)
+    case ('simple') ; call simple_mixing(ng,system,1.d0-mixrate,mixrate,srho_s,mixing)
+    case ('broyden'); call wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
+  end select
   call timer_end(LOG_CALC_RHO)
+
+  srho%f = 0d0
+  do j=1,system%nspin
+    srho%f = srho%f + srho_s(j)%f
+  end do
 
 end subroutine scf_iteration
 
