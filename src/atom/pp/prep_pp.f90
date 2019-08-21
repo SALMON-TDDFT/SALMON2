@@ -840,12 +840,14 @@ end subroutine bisection
 subroutine init_uvpsi_summation(ppg,icomm_r)
   use structures,    only: s_pp_grid
   use salmon_global, only: natom
+#ifdef SALMON_ENABLE_MPI3
   use mpi,           only: MPI_LOGICAL
+#endif
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
   integer,intent(in) :: icomm_r
 
-#ifdef SALMON_USE_MPI
+#ifdef SALMON_ENABLE_MPI3
 ! FIXME: This subroutine uses MPI functions directly...
   integer :: ilma,ia,ierr
   integer :: igroup_r,igroup_ia,icomm_ia
@@ -935,7 +937,8 @@ contains
     end if
   end subroutine
 #else
-  stop 'init_uvpsi_summation: require MPI'
+  ! no operation.
+  ! this routine requires MPI version 3.
 #endif
 end subroutine init_uvpsi_summation
 
@@ -944,7 +947,7 @@ subroutine finalize_uvpsi_summation(ppg)
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
 
-#ifdef SALMON_USE_MPI
+#ifdef SALMON_ENABLE_MPI3
   if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
   if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
   if (allocated(ppg%icomm_atom)    ) deallocate(ppg%icomm_atom)

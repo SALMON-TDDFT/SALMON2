@@ -109,8 +109,9 @@ set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
 
 if (USE_MPI)
   find_package(MPI REQUIRED)
-  if ("${MPI_Fortran_VERSION_MAJOR}" VERSION_LESS "3")
-    message(FATAL_ERROR "SALMON requires MPI version 3 for nonblocking collectives.")
+  if ("${MPI_Fortran_VERSION_MAJOR}" VERSION_GREATER_EQUAL "3")
+    add_compile_definitions(SALMON_ENABLE_MPI3)
+    message(STATUS "SALMON will uses the optimization by MPI version 3.")
   endif ()
 endif ()
 

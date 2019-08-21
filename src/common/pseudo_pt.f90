@@ -268,10 +268,10 @@ end subroutine pseudo_C
 
 subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
-  use salmon_communication, only: comm_wait_all
   use salmon_global, only: natom
   use timer
-#ifdef SALMON_USE_MPI
+#ifdef SALMON_ENABLE_MPI3
+  use salmon_communication, only: comm_wait_all
   use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
 #endif
   implicit none
@@ -281,9 +281,6 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   type(s_orbital),intent(in) :: tpsi
   complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
   complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
-
-#ifdef SALMON_USE_MPI
-! FIXME: This subroutine uses MPI functions directly...
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns
   complex(8) :: uVpsi
@@ -333,6 +330,8 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   call timer_end(LOG_UHPSI_PSEUDO)
 
   call timer_begin(LOG_UHPSI_PSEUDO_COMM)
+#ifdef SALMON_ENABLE_MPI3
+! FIXME: This subroutine uses MPI functions directly...
   nreq = 0
   do ia=1,natom
     if (ppg%ireferred_atom(ia)) then
@@ -350,10 +349,10 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
     end if
   end do
   call comm_wait_all(ireqs(1:nreq))
-  call timer_end(LOG_UHPSI_PSEUDO_COMM)
 #else
-  stop 'calc_uVpsi_rdivided: require MPI'
+  call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
 #endif
+  call timer_end(LOG_UHPSI_PSEUDO_COMM)
 
   return
 end subroutine calc_uVpsi_rdivided
