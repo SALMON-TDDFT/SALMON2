@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
@@ -43,7 +43,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,srho_s,iflag,i
   type(s_rgrid),         intent(in)    :: mg
   type(s_dft_system),    intent(in)    :: system
   type(s_orbital_parallel),intent(in)  :: info
-  type(s_orbital),       intent(inout) :: spsi
+  type(s_orbital),       intent(inout) :: spsi,shpsi
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg,srg_ob_1
@@ -115,9 +115,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,srho_s,iflag,i
                            mst,ifmst,info_ob,ppg,vlocal)
 
       case(3)
-        call subspace_diag_periodic(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,  &
-                                    iobnum,itotmst,mst,ifmst,   &
-                                    info_ob,ppg,vlocal)
+        call subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
       end select
     end if
   end if
