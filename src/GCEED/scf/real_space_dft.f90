@@ -69,7 +69,7 @@ use read_gs
 use code_optimization
 use salmon_initialization
 implicit none
-integer :: ix,iy,iz,ik,ikoa, is
+integer :: ix,iy,iz,ik,ikoa,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
@@ -96,6 +96,7 @@ type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_cg)  :: cg
+type(s_mixing) :: mixing
 
 logical :: rion_update
 
@@ -118,7 +119,7 @@ call setcN(cnmat)
 
 call check_dos_pdos
 
-call convert_input_scf(info,info_field,file_atoms_coo)
+call convert_input_scf(info,info_field,file_atoms_coo,mixing)
 
 call init_dft(lg,system,stencil)
 if(stencil%if_orthogonal) then
@@ -166,7 +167,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call IN_data(lg,mg,ng,info,info_field,system,stencil,cg)
+    call IN_data(lg,mg,ng,info,info_field,system,stencil,cg,mixing)
 
   end select
 
@@ -368,17 +369,30 @@ if(iopt==1)then
     call gram_schmidt(system, mg, info, spsi)
 
     allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-    allocate( rho_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) )
-    allocate( rho_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1) )
-    rho_in =0d0
-    rho_out=0d0
-
     if(ilsda == 1)then
       allocate( rho_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
-      allocate( rho_s_in(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2) )
-      allocate( rho_s_out(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:num_rho_stock+1,2) )
-      rho_s_in =0d0
-      rho_s_out=0d0
+    end if
+
+    allocate(mixing%srho_in(1:mixing%num_rho_stock+1))
+    allocate(mixing%srho_out(1:mixing%num_rho_stock+1))
+    do i=1,mixing%num_rho_stock+1
+      allocate(mixing%srho_in(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+      allocate(mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+      mixing%srho_in(i)%f(:,:,:)=0.d0
+      mixing%srho_out(i)%f(:,:,:)=0.d0
+    end do
+
+    if(ilsda==1)then
+      allocate(mixing%srho_s_in(1:mixing%num_rho_stock+1,2))
+      allocate(mixing%srho_s_out(1:mixing%num_rho_stock+1,2))
+      do j=1,2
+        do i=1,mixing%num_rho_stock+1
+          allocate(mixing%srho_s_in(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+          allocate(mixing%srho_s_out(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+          mixing%srho_s_in(i,j)%f(:,:,:)=0.d0
+          mixing%srho_s_out(i,j)%f(:,:,:)=0.d0
+        end do
+      end do
     end if
 
     if(read_gs_dns_cube == 'n') then
@@ -583,30 +597,17 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
   end do
 
-  call copy_density(system%nspin,srho_s)
+  call copy_density(system%nspin,srho_s,mixing)
 
   if(iscf_order==1)then
 
-    call scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+    call scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                        cg,   &
                        info_ob,ppg,V_local,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
-
-    call timer_begin(LOG_CALC_RHO)
-
-    select case(method_mixing)
-      case ('simple') ; call simple_mixing(system%nspin,1.d0-mixrate,mixrate,srho_s)
-      case ('broyden'); call buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter)
-    end select
-    call timer_end(LOG_CALC_RHO)
-
-    srho%f = 0d0
-    do jspin=1,nspin
-      srho%f = srho%f + srho_s(jspin)%f
-    end do
+                       iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,mixing,iter)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
@@ -942,7 +943,7 @@ call timer_begin(LOG_WRITE_LDA_DATA)
 ! LDA data
 ! subroutines in scf_data.f90
 if ( OC==1.or.OC==2.or.OC==3 ) then
-  call OUT_data
+  call OUT_data(mixing)
 end if
 call timer_end(LOG_WRITE_LDA_DATA)
 
