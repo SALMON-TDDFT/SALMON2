@@ -126,7 +126,7 @@ else if(isequential==2)then
 end if
 
 info%icomm_r = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info%icomm_r, nproc_id_korbital, nproc_size_korbital)
+call comm_get_groupinfo(info%icomm_r, info%id_r, info%isize_r)
 
 !new_world for comm_k
 if(isequential==1)then
@@ -296,7 +296,7 @@ else if(isequential==2)then
 end if
  
 info%icomm_k = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info%icomm_k, nproc_id_orbitalgrid, nproc_size_orbitalgrid)
+call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
 
 !new_world for comm_mesh_s
 

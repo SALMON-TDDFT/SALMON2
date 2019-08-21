@@ -32,8 +32,8 @@ module salmon_parallel
   integer, public :: nproc_size_kgrid
 
   integer, public :: nproc_group_korbital
-  integer, public :: nproc_id_korbital
-  integer, public :: nproc_size_korbital
+! integer, public :: nproc_id_korbital
+! integer, public :: nproc_size_korbital
 
   integer, public :: nproc_group_rho
   integer, public :: nproc_id_rho
@@ -48,8 +48,8 @@ module salmon_parallel
   integer, public :: nproc_size_grid
 
   integer, public :: nproc_group_orbitalgrid
-  integer, public :: nproc_id_orbitalgrid
-  integer, public :: nproc_size_orbitalgrid
+!  integer, public :: nproc_id_orbitalgrid
+!  integer, public :: nproc_size_orbitalgrid
 
   integer, public :: nproc_group_h
   integer, public :: nproc_id_h
@@ -60,8 +60,8 @@ module salmon_parallel
   integer, public :: nproc_size_korbital_vhxc
 
   integer, public :: nproc_group_bound(3)
-  integer, public :: nproc_id_bound(3)
-  integer, public :: nproc_size_bound(3)
+! integer, public :: nproc_id_bound(3)
+! integer, public :: nproc_size_bound(3)
 
   ! FFTE
   integer, public :: nproc_group_icommy
