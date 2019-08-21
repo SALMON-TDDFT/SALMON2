@@ -45,12 +45,8 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
   type(s_rgrid),         intent(in)    :: ng
   type(s_dft_system),    intent(in)    :: system
   type(s_orbital_parallel),intent(in)  :: info
-<<<<<<< HEAD
-  type(s_orbital),       intent(inout) :: spsi
-  type(s_scalar),        intent(inout) :: srho
-=======
   type(s_orbital),       intent(inout) :: spsi,shpsi
->>>>>>> develop-2.0.0
+  type(s_scalar),        intent(inout) :: srho
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg,srg_ob_1
