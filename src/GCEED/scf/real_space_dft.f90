@@ -242,7 +242,7 @@ if(iopt==1)then
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+        jj = info%io_tbl(iob)
         info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
       end do
     end do
