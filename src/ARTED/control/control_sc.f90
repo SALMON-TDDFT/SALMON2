@@ -26,11 +26,11 @@ subroutine tddft_sc
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
   use misc_routines, only: get_wtime
-  use salmon_global, only: format3d, out_dns, out_dns_rt, out_dns_rt_step
+  use salmon_global, only: format_voxel_data, yn_out_dns, yn_out_dns_rt, out_dns_rt_step
   use salmon_file, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_current, t_unit_ac,  t_unit_energy, t_unit_elec
   use restart, only: prep_restart_write
-  use Ac_alocal_laser
+  use Ac_yn_local_field
   use const, only: umass, hartree2J, kB
   use md_ground_state
   implicit none
@@ -84,10 +84,10 @@ subroutine tddft_sc
   rho_gs(:)=rho(:)
 
   ! Export electronic density
-  if (out_dns == 'y') call write_density(iter,'gs')
+  if (yn_out_dns == 'y') call write_density(iter,'gs')
 
   ! Export transition electronic density at specified energy
-  if (out_dns_trans == 'y') call analysis_dns_trans(iter)
+  if (yn_out_dns_trans== 'y') call analysis_dns_trans(iter)
 
   if (comm_is_root(nproc_id_global)) then
     ! open(7,file=file_epst,    position = position_option) !! TODO: remove output of "_t.out" file future
@@ -106,7 +106,7 @@ subroutine tddft_sc
   call comm_sync_all
 
   ! Export to file_trj (initial step)
-  if (out_rvf_rt=='y')then
+  if (yn_out_rvf_rt=='y')then
        call Ion_Force_omp(Rion_update_rt,calc_mode_rt)
        write(comment_line,110) -1, 0.0d0
        if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
@@ -122,7 +122,7 @@ subroutine tddft_sc
      Enh_gkTlns = 0d0
      Enh        = 0d0
      if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
-        gkT = 3d0*NI * kB/hartree2J*temperature0_ion
+        gkT = 3d0*NI * kB/hartree2J*temperature0_ion_k
         Qnh = gkT * thermostat_tau**2d0
      endif
   endif
@@ -200,7 +200,7 @@ subroutine tddft_sc
     do ixyz=1,3
       kAc(:,ixyz)=kAc0(:,ixyz)+Ac_tot(iter+1,ixyz)
     enddo
-    if(alocal_laser=='y') call prep_RT_Ac_alocal_laser(iter+1)
+    if(yn_local_field=='y') call prep_RT_Ac_yn_local_field(iter+1)
 
 !$acc update device(kAc,kAc_new)
     call current_RT(zu_t)
@@ -231,7 +231,7 @@ subroutine tddft_sc
     do ia=1,NI
       FionAc(:,ia)=Zps(Kion(ia))*E_tot(iter,:)
     enddo
-    if(alocal_laser=='y') call get_Eelemag_FionAc_alocal_laser(iter)
+    if(yn_local_field=='y') call get_Eelemag_FionAc_yn_local_field(iter)
     force=force+FionAc
 
     if (use_ehrenfest_md == 'y') then
@@ -250,7 +250,7 @@ subroutine tddft_sc
           call apply_nose_hoover_velocity(dt_h)
        endif
 
-       if (stop_system_momt=='y') call remove_system_momentum(0)
+       if (yn_stop_system_momt=='y') call remove_system_momentum(0)
        call cal_Tion_Temperature_ion(Tion,Temperature_ion,velocity)
 
     else
@@ -298,7 +298,7 @@ subroutine tddft_sc
     endif
 
     ! Export to file_trj
-    if (out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
+    if (yn_out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
        if(use_ehrenfest_md=='n') &
        &  call Ion_Force_omp(Rion_update_rt,calc_mode_rt)
        write(comment_line,110) iter, iter*dt
@@ -324,12 +324,12 @@ subroutine tddft_sc
     end if
     
     ! Export electronic density (cube or vtk)
-    if(out_dns_rt=='y' .and. mod(iter,out_dns_rt_step)==0) then
+    if(yn_out_dns_rt=='y' .and. mod(iter,out_dns_rt_step)==0) then
        call write_density(iter,'rt')
     end if
 
     ! Export transition electronic density at specified energy
-    if (out_dns_trans == 'y') call analysis_dns_trans(iter)
+    if (yn_out_dns_trans== 'y') call analysis_dns_trans(iter)
 
     ! Export analysis data(Adiabatic evolution) to file_ovlp,file_nex
     if(projection_option /='no' .and. mod(iter,out_projection_step)==0)then

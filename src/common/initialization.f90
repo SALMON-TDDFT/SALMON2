@@ -25,7 +25,7 @@ subroutine init_dft(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
-  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain,rion
+  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -84,7 +84,7 @@ subroutine init_dft(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_domain(1)*nproc_domain(2)*nproc_domain(3)/=1) stop "error: nonorthogonal lattice and r-space parallelization"
+    if(nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3)/=1) stop "error: nonorthogonal lattice and r-space parallelization"
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
@@ -100,7 +100,7 @@ end subroutine init_dft
 
 subroutine init_grid_whole(rsize,hgs,lg)
   use structures
-  use salmon_global, only: nproc_domain,iperiodic,dl,num_rgrid
+  use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid
   implicit none
   real(8),intent(in) :: rsize(3),hgs(3)
   type(s_rgrid) :: lg
@@ -139,7 +139,7 @@ subroutine init_grid_whole(rsize,hgs,lg)
           ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
           ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
 
-  if(iperiodic==3 .and. nproc_domain(1)*nproc_domain(2)*nproc_domain(3)==1) then
+  if(iperiodic==3 .and. nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3)==1) then
     lg%is_array(1:3) = lg_sta(1:3)
     lg%ie_array(1:3) = lg_end(1:3)
     do j=lg%is_overlap(1),lg%ie_overlap(1)

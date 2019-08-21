@@ -18,7 +18,7 @@ Subroutine init_Ac
   use Global_Variables
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_is_root
-  use Ac_alocal_laser
+  use Ac_yn_local_field
   implicit none
   integer :: iter, npower
   real(8) :: tt
@@ -28,15 +28,15 @@ Subroutine init_Ac
   Ac_ind = 0d0
 
 
-  if(rlaser_int_wcm2_1 < 0d0)then
-    f0_1 = amplitude1
+  if(I_wcm2_1 < 0d0)then
+    f0_1 = E_amplitude1
   else
-    f0_1=5.338d-9*sqrt(rlaser_int_wcm2_1)      ! electric field in a.u.
+    f0_1=5.338d-9*sqrt(I_wcm2_1)      ! electric field in a.u.
   end if
-  if(rlaser_int_wcm2_2 < 0d0)then
-    f0_2 = amplitude2
+  if(I_wcm2_2 < 0d0)then
+    f0_2 = E_amplitude2
   else
-    f0_2=5.338d-9*sqrt(rlaser_int_wcm2_2)      ! electric field in a.u.
+    f0_2=5.338d-9*sqrt(I_wcm2_2)      ! electric field in a.u.
   end if
 
 
@@ -70,45 +70,45 @@ Subroutine init_Ac
     end select
 
    !do iter=0,Nt+1
-     !tt=iter*dt - 0.5d0*pulse_tw1
+     !tt=iter*dt - 0.5d0*tw1
     do iter=-1,Nt+1
-      if(iter==-1 .and. t1_delay.ge.0d0) cycle !only for restart of field using rt_wfn_k
-      tt=iter*dt - 0.5d0*pulse_tw1 - t1_delay
-      if (abs(tt)<0.5d0*pulse_tw1) then
-        Ac_ext(iter,:)=-f0_1/omega1*(cos(pi*tt/pulse_tw1))**npower &
+      if(iter==-1 .and. t1_start.ge.0d0) cycle !only for restart of field using rt_wfn_k
+      tt=iter*dt - 0.5d0*tw1 - t1_start
+      if (abs(tt)<0.5d0*tw1) then
+        Ac_ext(iter,:)=-f0_1/omega1*(cos(pi*tt/tw1))**npower &
           *aimag( (epdir_re1(:) + zI*epdir_im1(:)) &
           *exp(zI*(omega1*tt+phi_CEP1*2d0*pi))  &
           )
       end if
     enddo
-    T1_T2 = T1_T2 + t1_delay
+    T1_T2 = T1_T2 + t1_start
 
   case('Ecos2')
     if(phi_CEP1 /= 0.75d0)then
       call Err_finalize("Error: phi_cep1 should be 0.75 when ae_shape1 is 'Ecos2'.")
     end if
     do iter=0,Nt+1
-      tt=iter*dt - 0.5d0*pulse_tw1
-      if (abs(tt)<0.5d0*pulse_tw1) then
-        Ac_ext(iter,:)=-epdir_re1(:)*f0_1/(8d0*pi**2*omega1 - 2d0*pulse_tw1**2*omega1**3) &
+      tt=iter*dt - 0.5d0*tw1
+      if (abs(tt)<0.5d0*tw1) then
+        Ac_ext(iter,:)=-epdir_re1(:)*f0_1/(8d0*pi**2*omega1 - 2d0*tw1**2*omega1**3) &
           *( &
-          (-4d0*pi**2+pulse_tw1**2*omega1**2 + pulse_tw1**2*omega1**2*cos(2d0*pi*tt/pulse_tw1))*cos(omega1*tt) &
-          +2d0*pi*(2d0*pi*cos(pulse_tw1*omega1/2d0) &
-          +pulse_tw1*omega1*sin(2d0*pi*tt/pulse_tw1)*sin(omega1*tt)))
+          (-4d0*pi**2+tw1**2*omega1**2 + tw1**2*omega1**2*cos(2d0*pi*tt/tw1))*cos(omega1*tt) &
+          +2d0*pi*(2d0*pi*cos(tw1*omega1/2d0) &
+          +tw1*omega1*sin(2d0*pi*tt/tw1)*sin(omega1*tt)))
       end if
     enddo
 
   case('Esin2sin')
     do iter=0,Nt+1
       tt=iter*dt
-      if (tt<pulse_tw1) then
+      if (tt<tw1) then
         Ac_ext(iter,:)=epdir_re1(:)*f0_1*(&
           &-(cos(omega1*tt+phi_CEP1*2d0*pi)-cos(phi_CEP1*2d0*pi))/(2*omega1)&
-          &+(cos((omega1+2*Pi/pulse_tw1)*tt+phi_CEP1*2d0*pi)-cos(phi_CEP1*2d0*pi))/(4*(omega1+2*Pi/pulse_tw1))&
-          &+(cos((omega1-2*Pi/pulse_tw1)*tt+phi_CEP1*2d0*pi)-cos(phi_CEP1*2d0*pi))/(4*(omega1-2*Pi/pulse_tw1))&
-          &-0.5*(cos(omega1*pulse_tw1+phi_CEP1*2d0*pi)-cos(phi_CEP1*2d0*pi))&
-          &/(omega1*((omega1*pulse_tw1/(2*pi))**2-1.d0))&
-          &*(3.d0*(tt/pulse_tw1)**2-2.d0*(tt/pulse_tw1)**3)&
+          &+(cos((omega1+2*Pi/tw1)*tt+phi_CEP1*2d0*pi)-cos(phi_CEP1*2d0*pi))/(4*(omega1+2*Pi/tw1))&
+          &+(cos((omega1-2*Pi/tw1)*tt+phi_CEP1*2d0*pi)-cos(phi_CEP1*2d0*pi))/(4*(omega1-2*Pi/tw1))&
+          &-0.5*(cos(omega1*tw1+phi_CEP1*2d0*pi)-cos(phi_CEP1*2d0*pi))&
+          &/(omega1*((omega1*tw1/(2*pi))**2-1.d0))&
+          &*(3.d0*(tt/tw1)**2-2.d0*(tt/tw1)**3)&
           &)
       else
         Ac_ext(iter,:)=Ac_ext(iter-1,:)
@@ -120,8 +120,8 @@ Subroutine init_Ac
     ! pump laser
     do iter=0,Nt+1
       tt=iter*dt
-      if (tt<pulse_tw1) then
-        Ac_ext(iter,:)=-epdir_re1(:)*f0_1/omega1*(sin(pi*tt/pulse_tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
+      if (tt<tw1) then
+        Ac_ext(iter,:)=-epdir_re1(:)*f0_1/omega1*(sin(pi*tt/tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
       end if
     enddo
     
@@ -141,8 +141,8 @@ Subroutine init_Ac
     ! pump laser
     do iter=0,Nt+1
       tt=iter*dt
-      if (tt<pulse_tw1*0.5d0) then
-        Ac_ext(iter,:)=-Epdir_re1(:)*f0_1/omega1*(sin(pi*tt/pulse_tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
+      if (tt<tw1*0.5d0) then
+        Ac_ext(iter,:)=-Epdir_re1(:)*f0_1/omega1*(sin(pi*tt/tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
       else
         Ac_ext(iter,:)=-Epdir_re1(:)*f0_1/omega1*cos(omega1*tt+phi_CEP1*2d0*pi)
       end if
@@ -177,10 +177,10 @@ Subroutine init_Ac
     end select
 
     do iter=0,Nt+1
-      tt=iter*dt - 0.5d0*pulse_tw1 - T1_T2
-      if (abs(tt)<0.5d0*pulse_tw2) then
+      tt=iter*dt - 0.5d0*tw1 - T1_T2
+      if (abs(tt)<0.5d0*tw2) then
         Ac_ext(iter,:)=Ac_ext(iter,:) &
-          -f0_2/omega2*(cos(pi*tt/pulse_tw2))**npower &
+          -f0_2/omega2*(cos(pi*tt/tw2))**npower &
           *aimag( (epdir_re2(:) + zI*epdir_im2(:)) &
           *exp(zI*(omega2*tt+phi_CEP2*2d0*pi))  &
           )
@@ -192,14 +192,14 @@ Subroutine init_Ac
       call Err_finalize("Error: phi_cep2 should be 0.75 when ae_shape2 is 'Ecos2'.")
     end if
     do iter=0,Nt+1
-      tt=iter*dt - 0.5d0*pulse_tw1 - T1_T2
-      if (abs(tt)<0.5d0*pulse_tw2) then
+      tt=iter*dt - 0.5d0*tw1 - T1_T2
+      if (abs(tt)<0.5d0*tw2) then
         Ac_ext(iter,:)=Ac_ext(iter,:) &
-          -epdir_re2(:)*f0_2/(8d0*pi**2*omega2 - 2d0*pulse_tw2**2*omega2**3) &
+          -epdir_re2(:)*f0_2/(8d0*pi**2*omega2 - 2d0*tw2**2*omega2**3) &
           *( &
-          (-4d0*pi**2+pulse_tw2**2*omega2**2 + pulse_tw2**2*omega2**2*cos(2d0*pi*tt/pulse_tw2))*cos(omega2*tt) &
-          +2d0*pi*(2d0*pi*cos(pulse_tw2*omega2/2d0) &
-          +pulse_tw2*omega2*sin(2d0*pi*tt/pulse_tw2)*sin(omega2*tt)))
+          (-4d0*pi**2+tw2**2*omega2**2 + tw2**2*omega2**2*cos(2d0*pi*tt/tw2))*cos(omega2*tt) &
+          +2d0*pi*(2d0*pi*cos(tw2*omega2/2d0) &
+          +tw2*omega2*sin(2d0*pi*tt/tw2)*sin(omega2*tt)))
       end if
     enddo
 
@@ -209,15 +209,15 @@ Subroutine init_Ac
       tt=iter*dt
       if(tt-T1_T2 <= 0d0)then
         
-      else if ( (tt-T1_T2>0d0) .and. (tt-T1_T2<pulse_tw2) ) then
+      else if ( (tt-T1_T2>0d0) .and. (tt-T1_T2<tw2) ) then
         Ac_ext(iter,:)=Ac_ext(iter,:)+Epdir_re2(:)*f0_2*(&
           &-(cos(omega2*(tt-T1_T2)+phi_CEP2*2d0*pi)-cos(phi_CEP2*2d0*pi))/(2*omega2)&
-          &+(cos((omega2+2*Pi/pulse_tw2)*(tt-T1_T2)+phi_CEP2*2d0*pi)-cos(phi_CEP2*2d0*pi))&
-          &/(4*(omega2+2*Pi/pulse_tw2))&
-          &+(cos((omega2-2*Pi/pulse_tw2)*(tt-T1_T2)+phi_CEP2*2d0*pi)-cos(phi_CEP2*2d0*pi))&
-          /(4*(omega2-2*Pi/pulse_tw2))&
-          &-0.5*(cos(omega2*pulse_tw2+phi_CEP2*2d0*pi)-cos(phi_CEP2*2d0*pi))/(omega2*((omega2*pulse_tw2/(2*pi))**2-1.d0))&
-          &*(3.d0*((tt-T1_T2)/pulse_tw2)**2-2.d0*((tt-T1_T2)/pulse_tw2)**3)&
+          &+(cos((omega2+2*Pi/tw2)*(tt-T1_T2)+phi_CEP2*2d0*pi)-cos(phi_CEP2*2d0*pi))&
+          &/(4*(omega2+2*Pi/tw2))&
+          &+(cos((omega2-2*Pi/tw2)*(tt-T1_T2)+phi_CEP2*2d0*pi)-cos(phi_CEP2*2d0*pi))&
+          /(4*(omega2-2*Pi/tw2))&
+          &-0.5*(cos(omega2*tw2+phi_CEP2*2d0*pi)-cos(phi_CEP2*2d0*pi))/(omega2*((omega2*tw2/(2*pi))**2-1.d0))&
+          &*(3.d0*((tt-T1_T2)/tw2)**2-2.d0*((tt-T1_T2)/tw2)**3)&
           &)
       else
         Ac_ext(iter,:)=Ac_ext(iter-1,:)
@@ -229,9 +229,9 @@ Subroutine init_Ac
     ! probe laser
     do iter=0,Nt+1
       tt=iter*dt
-      if ( (tt-T1_T2>0d0) .and. (tt-T1_T2<pulse_tw2) ) then
+      if ( (tt-T1_T2>0d0) .and. (tt-T1_T2<tw2) ) then
         Ac_ext(iter,:)=Ac_ext(iter,:) &
-          &-Epdir_re2(:)*f0_2/omega2*(sin(pi*(tt-T1_T2)/pulse_tw2))**2*cos(omega2*(tt-T1_T2)+phi_CEP2*2d0*pi)
+          &-Epdir_re2(:)*f0_2/omega2*(sin(pi*(tt-T1_T2)/tw2))**2*cos(omega2*(tt-T1_T2)+phi_CEP2*2d0*pi)
       endif
     enddo
   case('input')
@@ -247,7 +247,7 @@ Subroutine init_Ac
   Ac_tot=Ac_ind+Ac_ext
 
   !hidden option (AY)
-  if(alocal_laser=='y') call init_Ac_alocal
+  if(yn_local_field=='y') call init_Ac_local
 
   return
 End Subroutine init_Ac

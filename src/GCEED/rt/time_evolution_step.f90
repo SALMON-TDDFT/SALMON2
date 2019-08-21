@@ -239,7 +239,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_end(LOG_CALC_HARTREE)
 
   call timer_begin(LOG_CALC_EXC_COR)
-  if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_Mxin_mul*nproc_Mxin_mul_s_dm))then
+  if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
     call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
   end if
   call timer_end(LOG_CALC_EXC_COR)
@@ -359,18 +359,18 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
   endif
 
-  if(out_dns_rt=='y')then
+  if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
       call writedns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
   end if
-  if(out_elf_rt=='y')then
+  if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call calcELF(info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
   end if
-  if(out_estatic_rt=='y')then
+  if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
       call calcEstatic(ng, info, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)

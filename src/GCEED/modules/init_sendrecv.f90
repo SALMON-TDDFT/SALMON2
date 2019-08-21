@@ -46,96 +46,98 @@ CONTAINS
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE init_updown
+SUBROUTINE init_updown(info)
 use inputoutput, only: iperiodic
 use salmon_parallel
 use salmon_communication, only: comm_proc_null
 use new_world_sub
+use structures, only: s_orbital_parallel
 
 implicit none
+type(s_orbital_parallel),intent(in) :: info
 
-iup_array(1)=nproc_id_korbital+1
-idw_array(1)=nproc_id_korbital-1
+iup_array(1)=info%id_r+1
+idw_array(1)=info%id_r-1
 select case(iperiodic)
 case(0)
-  if(imr(1)==nproc_Mxin(1)-1) iup_array(1)=comm_proc_null
+  if(imr(1)==nproc_d_o(1)-1) iup_array(1)=comm_proc_null
   if(imr(1)==0) idw_array(1)=comm_proc_null
 case(3)
-  if(imr(1)==nproc_Mxin(1)-1) then
-    iup_array(1)=nproc_id_korbital-(nproc_Mxin(1)-1)
+  if(imr(1)==nproc_d_o(1)-1) then
+    iup_array(1)=info%id_r-(nproc_d_o(1)-1)
   end if
   if(imr(1)==0) then
-    idw_array(1)=nproc_id_korbital+(nproc_Mxin(1)-1)
+    idw_array(1)=info%id_r+(nproc_d_o(1)-1)
   end if
 end select
 
-jup_array(1)=nproc_id_korbital+nproc_Mxin(1)
-jdw_array(1)=nproc_id_korbital-nproc_Mxin(1)
+jup_array(1)=info%id_r+nproc_d_o(1)
+jdw_array(1)=info%id_r-nproc_d_o(1)
 select case(iperiodic)
 case(0)
-  if(imr(2)==nproc_Mxin(2)-1) jup_array(1)=comm_proc_null
+  if(imr(2)==nproc_d_o(2)-1) jup_array(1)=comm_proc_null
   if(imr(2)==0) jdw_array(1)=comm_proc_null
 case(3)
-  if(imr(2)==nproc_Mxin(2)-1) then
-    jup_array(1)=nproc_id_korbital-(nproc_Mxin(2)-1)*nproc_Mxin(1)
+  if(imr(2)==nproc_d_o(2)-1) then
+    jup_array(1)=info%id_r-(nproc_d_o(2)-1)*nproc_d_o(1)
   end if
   if(imr(2)==0) then
-    jdw_array(1)=nproc_id_korbital+(nproc_Mxin(2)-1)*nproc_Mxin(1)
+    jdw_array(1)=info%id_r+(nproc_d_o(2)-1)*nproc_d_o(1)
   end if
 end select
 
-kup_array(1)=nproc_id_korbital+nproc_Mxin(1)*nproc_Mxin(2)
-kdw_array(1)=nproc_id_korbital-nproc_Mxin(1)*nproc_Mxin(2)
+kup_array(1)=info%id_r+nproc_d_o(1)*nproc_d_o(2)
+kdw_array(1)=info%id_r-nproc_d_o(1)*nproc_d_o(2)
 select case(iperiodic)
 case(0)
-  if(imr(3)==nproc_Mxin(3)-1) kup_array(1)=comm_proc_null
+  if(imr(3)==nproc_d_o(3)-1) kup_array(1)=comm_proc_null
   if(imr(3)==0) kdw_array(1)=comm_proc_null
 case(3)
-  if(imr(3)==nproc_Mxin(3)-1) then
-    kup_array(1)=nproc_id_korbital-(nproc_Mxin(3)-1)*nproc_Mxin(1)*nproc_Mxin(2)
+  if(imr(3)==nproc_d_o(3)-1) then
+    kup_array(1)=info%id_r-(nproc_d_o(3)-1)*nproc_d_o(1)*nproc_d_o(2)
   end if
   if(imr(3)==0) then
-    kdw_array(1)=nproc_id_korbital+(nproc_Mxin(3)-1)*nproc_Mxin(1)*nproc_Mxin(2)
+    kdw_array(1)=info%id_r+(nproc_d_o(3)-1)*nproc_d_o(1)*nproc_d_o(2)
   end if
 end select
 
 if(isequential==1)then
-  if(imr(1)==nproc_Mxin(1)-1.and.imrs(1)==nproc_Mxin_s_dm(1)-1) then
+  if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
     select case(iperiodic)
     case(0)
       iup_array(2)=comm_proc_null
     case(3)
-      iup_array(2)=nproc_id_h+nproc_Mxin_mul_s_dm-nproc_Mxin_s_dm(1)+1-nproc_Mxin_mul_s_dm*nproc_Mxin(1)
+      iup_array(2)=nproc_id_h+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1-nproc_d_g_mul_dm*nproc_d_o(1)
     end select
-  else if(imrs(1)==nproc_Mxin_s_dm(1)-1) then
-    iup_array(2)=nproc_id_h+nproc_Mxin_mul_s_dm-nproc_Mxin_s_dm(1)+1
+  else if(imrs(1)==nproc_d_g_dm(1)-1) then
+    iup_array(2)=nproc_id_h+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1
   else
     iup_array(2)=nproc_id_h+1
   end if
 else if(isequential==2)then
-  if(imr(1)==nproc_Mxin(1)-1.and.imrs(1)==nproc_Mxin_s_dm(1)-1) then
+  if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
     select case(iperiodic)
     case(0)
       iup_array(2)=comm_proc_null
     case(3)
-      iup_array(2)=nproc_id_h+nproc_Mxin_mul+1-nproc_Mxin_mul*nproc_Mxin_s_dm(1)-nproc_Mxin(1)
+      iup_array(2)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)-nproc_d_o(1)
     end select
-  else if(imrs(1)==nproc_Mxin_s_dm(1)-1) then
-    iup_array(2)=nproc_id_h+nproc_Mxin_mul+1-nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+  else if(imrs(1)==nproc_d_g_dm(1)-1) then
+    iup_array(2)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    iup_array(2)=nproc_id_h+nproc_Mxin_mul
+    iup_array(2)=nproc_id_h+nproc_d_o_mul
   end if
 end if
 
 if(isequential==2)then
-  if(nproc_Mxin(1)==1.and.nproc_Mxin_s_dm(1)==1)then
+  if(nproc_d_o(1)==1.and.nproc_d_g_dm(1)==1)then
     iup_array(4)=comm_proc_null
-  else if(imr(1)==nproc_Mxin(1)-1.and.imrs(1)==nproc_Mxin_s_dm(1)-1) then
-    iup_array(4)=nproc_id_h+nproc_Mxin_mul+1-nproc_Mxin_mul*nproc_Mxin_s_dm(1)-nproc_Mxin(1)
-  else if(imrs(1)==nproc_Mxin_s_dm(1)-1) then
-    iup_array(4)=nproc_id_h+nproc_Mxin_mul+1-nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+  else if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
+    iup_array(4)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)-nproc_d_o(1)
+  else if(imrs(1)==nproc_d_g_dm(1)-1) then
+    iup_array(4)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    iup_array(4)=nproc_id_h+nproc_Mxin_mul
+    iup_array(4)=nproc_id_h+nproc_d_o_mul
   end if
 end if
 
@@ -145,10 +147,10 @@ if(isequential==1)then
     case(0)
       idw_array(2)=comm_proc_null
     case(3)
-      idw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm+nproc_Mxin_s_dm(1)-1+nproc_Mxin_mul_s_dm*nproc_Mxin(1)
+      idw_array(2)=nproc_id_h-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1+nproc_d_g_mul_dm*nproc_d_o(1)
     end select
   else if(imrs(1)==0) then
-    idw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm+nproc_Mxin_s_dm(1)-1
+    idw_array(2)=nproc_id_h-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1
   else
     idw_array(2)=nproc_id_h-1
   end if
@@ -158,71 +160,71 @@ else if(isequential==2)then
     case(0)
       idw_array(2)=comm_proc_null
     case(3)
-      idw_array(2)=nproc_id_h-nproc_Mxin_mul-1+nproc_Mxin_mul*nproc_Mxin_s_dm(1)+nproc_Mxin(1)
+      idw_array(2)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)+nproc_d_o(1)
     end select
   else if(imrs(1)==0) then
-    idw_array(2)=nproc_id_h-nproc_Mxin_mul-1+nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+    idw_array(2)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    idw_array(2)=nproc_id_h-nproc_Mxin_mul
+    idw_array(2)=nproc_id_h-nproc_d_o_mul
   end if
 end if
 
 if(isequential==2)then
-  if(nproc_Mxin(1)==1.and.nproc_Mxin_s_dm(1)==1)then
+  if(nproc_d_o(1)==1.and.nproc_d_g_dm(1)==1)then
     idw_array(4)=comm_proc_null
   else if(imr(1)==0.and.imrs(1)==0) then
-    idw_array(4)=nproc_id_h-nproc_Mxin_mul-1+nproc_Mxin_mul*nproc_Mxin_s_dm(1)+nproc_Mxin(1)
+    idw_array(4)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)+nproc_d_o(1)
   else if(imrs(1)==0) then
-    idw_array(4)=nproc_id_h-nproc_Mxin_mul-1+nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+    idw_array(4)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    idw_array(4)=nproc_id_h-nproc_Mxin_mul
+    idw_array(4)=nproc_id_h-nproc_d_o_mul
   end if
 end if
 
 if(isequential==1)then
-  if(imr(2)==nproc_Mxin(2)-1.and.imrs(2)==nproc_Mxin_s_dm(2)-1) then
+  if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
     select case(iperiodic)
     case(0)
       jup_array(2)=comm_proc_null
     case(3)
-      jup_array(2)=nproc_id_h+nproc_Mxin_mul_s_dm*nproc_Mxin(1)    &
-                                    -(nproc_Mxin_s_dm(2)-1)*nproc_Mxin_s_dm(1)-nproc_Mxin_mul_s_dm*nproc_Mxin(1)*nproc_Mxin(2)
+      jup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)    &
+                                    -(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)
     end select 
-  else if(imrs(2)==nproc_Mxin_s_dm(2)-1) then
-    jup_array(2)=nproc_id_h+nproc_Mxin_mul_s_dm*nproc_Mxin(1)    &
-                                    -(nproc_Mxin_s_dm(2)-1)*nproc_Mxin_s_dm(1)
+  else if(imrs(2)==nproc_d_g_dm(2)-1) then
+    jup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)    &
+                                    -(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)
   else
-    jup_array(2)=nproc_id_h+nproc_Mxin_s_dm(1)
+    jup_array(2)=nproc_id_h+nproc_d_g_dm(1)
   end if
 else if(isequential==2)then
-  if(imr(2)==nproc_Mxin(2)-1.and.imrs(2)==nproc_Mxin_s_dm(2)-1) then
+  if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
     select case(iperiodic)
     case(0)
       jup_array(2)=comm_proc_null
     case(3)
-      jup_array(2)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-            +nproc_Mxin(1)-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)-nproc_Mxin(1)*nproc_Mxin(2)
+      jup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+            +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)-nproc_d_o(1)*nproc_d_o(2)
     end select
-  else if(imrs(2)==nproc_Mxin_s_dm(2)-1) then
-    jup_array(2)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-            +nproc_Mxin(1)-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+  else if(imrs(2)==nproc_d_g_dm(2)-1) then
+    jup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+            +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jup_array(2)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+    jup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
 if(isequential==2)then
-  if(nproc_Mxin(2)==1.and.nproc_Mxin_s_dm(2)==1)then
+  if(nproc_d_o(2)==1.and.nproc_d_g_dm(2)==1)then
     jup_array(4)=comm_proc_null
-  else if(imr(2)==nproc_Mxin(2)-1.and.imrs(2)==nproc_Mxin_s_dm(2)-1) then
-    jup_array(4)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-            +nproc_Mxin(1)-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-            -nproc_Mxin(1)*nproc_Mxin(2)
-  else if(imrs(2)==nproc_Mxin_s_dm(2)-1) then
-    jup_array(4)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-            +nproc_Mxin(1)-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+  else if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
+    jup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+            +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+            -nproc_d_o(1)*nproc_d_o(2)
+  else if(imrs(2)==nproc_d_g_dm(2)-1) then
+    jup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+            +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jup_array(4)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+    jup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
@@ -232,14 +234,14 @@ if(isequential==1)then
     case(0)
       jdw_array(2)=comm_proc_null
     case(3)
-      jdw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm*nproc_Mxin(1)    &
-                                    +(nproc_Mxin_s_dm(2)-1)*nproc_Mxin_s_dm(1)+nproc_Mxin_mul_s_dm*nproc_Mxin(1)*nproc_Mxin(2)
+      jdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)    &
+                                    +(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)
     end select
   else if(imrs(2)==0) then
-    jdw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm*nproc_Mxin(1)    &
-                                    +(nproc_Mxin_s_dm(2)-1)*nproc_Mxin_s_dm(1)
+    jdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)    &
+                                    +(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)
   else
-    jdw_array(2)=nproc_id_h-nproc_Mxin_s_dm(1)
+    jdw_array(2)=nproc_id_h-nproc_d_g_dm(1)
   end if
 else if(isequential==2)then
   if(imr(2)==0.and.imrs(2)==0) then
@@ -247,82 +249,82 @@ else if(isequential==2)then
     case(0)
       jdw_array(2)=comm_proc_null
     case(3)
-      jdw_array(2)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-            -nproc_Mxin(1)+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)+nproc_Mxin(1)*nproc_Mxin(2)
+      jdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+            -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)+nproc_d_o(1)*nproc_d_o(2)
     end select
   else if(imrs(2)==0) then
-    jdw_array(2)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-              -nproc_Mxin(1)+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    jdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+              -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jdw_array(2)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+    jdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
 if(isequential==2)then
-  if(nproc_Mxin(2)==1.and.nproc_Mxin_s_dm(2)==1)then
+  if(nproc_d_o(2)==1.and.nproc_d_g_dm(2)==1)then
     jdw_array(4)=comm_proc_null
   else if(imr(2)==0.and.imrs(2)==0) then
-    jdw_array(4)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-              -nproc_Mxin(1)+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-              +nproc_Mxin(1)*nproc_Mxin(2)
+    jdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+              -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+              +nproc_d_o(1)*nproc_d_o(2)
   else if(imrs(2)==0) then
-    jdw_array(4)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)  &
-              -nproc_Mxin(1)+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    jdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+              -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jdw_array(4)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)
+    jdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
 
 if(isequential==1)then
-  if(imr(3)==nproc_Mxin(3)-1.and.imrs(3)==nproc_Mxin_s_dm(3)-1) then
+  if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
     select case(iperiodic)
     case(0)
       kup_array(2)=comm_proc_null
     case(3)
-      kup_array(2)=nproc_id_h+nproc_Mxin_mul_s_dm*nproc_Mxin(1)*nproc_Mxin(2) &
-                                    -(nproc_Mxin_s_dm(3)-1)*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2) &
-                                    -nproc_Mxin_mul_s_dm*nproc_Mxin_mul
+      kup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
+                                    -(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
+                                    -nproc_d_g_mul_dm*nproc_d_o_mul
     end select
-  else if(imrs(3)==nproc_Mxin_s_dm(3)-1) then
-    kup_array(2)=nproc_id_h+nproc_Mxin_mul_s_dm*nproc_Mxin(1)*nproc_Mxin(2)   &
-                                    -(nproc_Mxin_s_dm(3)-1)*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+  else if(imrs(3)==nproc_d_g_dm(3)-1) then
+    kup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
+                                    -(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    kup_array(2)=nproc_id_h+nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    kup_array(2)=nproc_id_h+nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 else if(isequential==2)then
-  if(imr(3)==nproc_Mxin(3)-1.and.imrs(3)==nproc_Mxin_s_dm(3)-1) then
+  if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
     select case(iperiodic)
     case(0)
       kup_array(2)=comm_proc_null
     case(3)
-      kup_array(2)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2) &
-              +nproc_Mxin(1)*nproc_Mxin(2)   &
-              -nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)-nproc_Mxin_mul
+      kup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
+              +nproc_d_o(1)*nproc_d_o(2)   &
+              -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)-nproc_d_o_mul
     end select
-  else if(imrs(3)==nproc_Mxin_s_dm(3)-1) then
-    kup_array(2)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-              +nproc_Mxin(1)*nproc_Mxin(2)   &
-              -nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+  else if(imrs(3)==nproc_d_g_dm(3)-1) then
+    kup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+              +nproc_d_o(1)*nproc_d_o(2)   &
+              -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kup_array(2)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    kup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 
 if(isequential==2)then
-  if(nproc_Mxin(3)==1.and.nproc_Mxin_s_dm(3)==1)then
+  if(nproc_d_o(3)==1.and.nproc_d_g_dm(3)==1)then
     kup_array(4)=comm_proc_null
-  else if(imr(3)==nproc_Mxin(3)-1.and.imrs(3)==nproc_Mxin_s_dm(3)-1) then
-    kup_array(4)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-              +nproc_Mxin(1)*nproc_Mxin(2)   &
-              -nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)  &
-              -nproc_Mxin_mul
-  else if(imrs(3)==nproc_Mxin_s_dm(3)-1) then
-    kup_array(4)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-              +nproc_Mxin(1)*nproc_Mxin(2)   &
-              -nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+  else if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
+    kup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+              +nproc_d_o(1)*nproc_d_o(2)   &
+              -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)  &
+              -nproc_d_o_mul
+  else if(imrs(3)==nproc_d_g_dm(3)-1) then
+    kup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+              +nproc_d_o(1)*nproc_d_o(2)   &
+              -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kup_array(4)=nproc_id_h+nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    kup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 
@@ -332,15 +334,15 @@ if(isequential==1)then
     case(0)
       kdw_array(2)=comm_proc_null
     case(3)
-      kdw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm*nproc_Mxin(1)*nproc_Mxin(2) &
-                                    +(nproc_Mxin_s_dm(3)-1)*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2) &
-                                    +nproc_Mxin_mul_s_dm*nproc_Mxin_mul
+      kdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
+                                    +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
+                                    +nproc_d_g_mul_dm*nproc_d_o_mul
     end select
   else if(imrs(3)==0) then
-    kdw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm*nproc_Mxin(1)*nproc_Mxin(2)   &
-                                    +(nproc_Mxin_s_dm(3)-1)*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    kdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
+                                    +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    kdw_array(2)=nproc_id_h-nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    kdw_array(2)=nproc_id_h-nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 else if(isequential==2)then
   if(imr(3)==0.and.imrs(3)==0) then
@@ -348,33 +350,33 @@ else if(isequential==2)then
     case(0)
       kdw_array(2)=comm_proc_null
     case(3)
-      kdw_array(2)=nproc_id_h-nproc_Mxin_mul_s_dm*nproc_Mxin(1)*nproc_Mxin(2) &
-                                    +(nproc_Mxin_s_dm(3)-1)*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2) &
-                                    +nproc_Mxin_mul_s_dm*nproc_Mxin_mul
+      kdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
+                                    +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
+                                    +nproc_d_g_mul_dm*nproc_d_o_mul
     end select
   else if(imrs(3)==0) then
-    kdw_array(2)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-              -nproc_Mxin(1)*nproc_Mxin(2)   &
-              +nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+    kdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+              -nproc_d_o(1)*nproc_d_o(2)   &
+              +nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kdw_array(2)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    kdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 
 if(isequential==2)then
-  if(nproc_Mxin(3)==1.and.nproc_Mxin_s_dm(3)==1)then
+  if(nproc_d_o(3)==1.and.nproc_d_g_dm(3)==1)then
     kdw_array(4)=comm_proc_null
   else if(imr(3)==0.and.imrs(3)==0) then
-    kdw_array(4)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-              -nproc_Mxin(1)*nproc_Mxin(2)   &
-              +nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)  &
-              +nproc_Mxin_mul
+    kdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+              -nproc_d_o(1)*nproc_d_o(2)   &
+              +nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)  &
+              +nproc_d_o_mul
   else if(imrs(3)==0) then
-    kdw_array(4)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)  &
-              -nproc_Mxin(1)*nproc_Mxin(2)   &
-              +nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+    kdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+              -nproc_d_o(1)*nproc_d_o(2)   &
+              +nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kdw_array(4)=nproc_id_h-nproc_Mxin_mul*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)
+    kdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 

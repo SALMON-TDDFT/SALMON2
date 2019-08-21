@@ -114,10 +114,10 @@ integer :: inumcpu_check
 
 integer,allocatable :: ob_sta_all_kgrid(:),ob_end_all_kgrid(:),iobnum_all_kgrid(:)
 
-integer :: nproc_Mxin(3),nproc_Mxin_mul
+integer :: nproc_d_o(3),nproc_d_o_mul
 integer :: nproc_ob_spin(2)
-integer :: nproc_Mxin_s(3), nproc_Mxin_mul_s
-integer :: nproc_Mxin_s_dm(3), nproc_Mxin_mul_s_dm
+integer :: nproc_d_g(3), nproc_d_o_mul_s
+integer :: nproc_d_g_dm(3), nproc_d_g_mul_dm
 
 integer :: ista_Mx_ori(3),iend_Mx_ori(3),inum_Mx_ori(3)
 integer,allocatable :: ista_Mxin(:,:),iend_Mxin(:,:),inum_Mxin(:,:)
@@ -476,25 +476,25 @@ use salmon_parallel, only: nproc_size_global
 implicit none
 integer :: i,ibox,ipow
 
-nproc_Mxin_mul=nproc_size_global/nproc_ob
+nproc_d_o_mul=nproc_size_global/nproc_ob
 
 ibox=1
 ipow=0
 do i=1,29
-  if(ibox<nproc_Mxin_mul)then
+  if(ibox<nproc_d_o_mul)then
     ipow=ipow+1
     ibox=ibox*2
   end if
 end do
 
-nproc_Mxin(1:3)=1
+nproc_d_o(1:3)=1
 do i=1,ipow
   if(mod(i,3)==1)then
-    nproc_Mxin(3)=nproc_Mxin(3)*2
+    nproc_d_o(3)=nproc_d_o(3)*2
   else if(mod(i,3)==2)then
-    nproc_Mxin(2)=nproc_Mxin(2)*2
+    nproc_d_o(2)=nproc_d_o(2)*2
   else
-    nproc_Mxin(1)=nproc_Mxin(1)*2
+    nproc_d_o(1)=nproc_d_o(1)*2
   end if
 end do
 
@@ -507,14 +507,14 @@ do i=1,29
   end if
 end do
 
-nproc_Mxin_s(1:3)=1
+nproc_d_g(1:3)=1
 do i=1,ipow
   if(mod(i,3)==1)then
-    nproc_Mxin_s(3)=nproc_Mxin_s(3)*2
+    nproc_d_g(3)=nproc_d_g(3)*2
   else if(mod(i,3)==2)then
-    nproc_Mxin_s(2)=nproc_Mxin_s(2)*2
+    nproc_d_g(2)=nproc_d_g(2)*2
   else
-    nproc_Mxin_s(1)=nproc_Mxin_s(1)*2
+    nproc_d_g(1)=nproc_d_g(1)*2
   end if
 end do
 
@@ -527,13 +527,13 @@ use structures, only: s_rgrid
 implicit none
 type(s_rgrid),intent(out) :: ng
 
-nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
 allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
 allocate(inum_Mxin_s(3,0:nproc_size_global-1))
 
 call setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-           nproc_size_global,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
+           nproc_size_global,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin,isequential)
 
 end subroutine init_mesh_s
 

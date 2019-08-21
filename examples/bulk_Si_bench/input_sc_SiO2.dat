@@ -41,8 +41,8 @@
 	eta_mask=1.500000d+01
 	gamma_mask=1.800000d+00
 	iZatom=14,8
-	pseudo_file='Si_rps.dat','O_rps.dat'
-	psmask_option='n'
+	file_pseudo='Si_rps.dat','O_rps.dat'
+	yn_psmask='n'
 /
 &rgrid
 	num_rgrid=20,36,52
@@ -59,7 +59,7 @@
 &system
 	al=9.284900d+00,1.608192d+01,1.021426d+01
 	crystal_structure='diamond'
-	iperiodic=3
+	yn_periodic = 'y'
 	isym=1
 	natom=18
 	nelec=96

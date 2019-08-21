@@ -286,7 +286,7 @@ module io_rt_wfn_k
   integer,parameter :: iflag_read_rt = 0
   integer,parameter :: iflag_write_rt= 1
 
-  character(1) :: alocal_laser_tmp
+  character(1) :: yn_local_field_tmp
 
 contains
   subroutine read_write_rt_wfn_k(iflag_read_write)
@@ -322,47 +322,47 @@ contains
       open(nfile_ae,file=trim(ae_file),form='unformatted')
       select case(iflag_read_write)
       case(iflag_write_rt)
-         t1_delay = t1_delay - Nt*dt
-         write(nfile_ae) t1_delay, &
+         t1_start = t1_start - Nt*dt
+         write(nfile_ae) t1_start, &
                          trans_longi, &
                          e_impulse, &
                          ae_shape1, ae_shape2, &
-                         amplitude1,amplitude2, &
-                         pulse_tw1, pulse_tw2, &
+                         E_amplitude1,E_amplitude2, &
+                         tw1, tw2, &
                          omega1,    omega2, &
                          epdir_re1, epdir_im1, & 
                          phi_cep1,  phi_cep2, &
                          epdir_re2, epdir_im2, &
-                         rlaser_int_wcm2_1, rlaser_int_wcm2_2, &
+                         I_wcm2_1, I_wcm2_2, &
                          t1_t2, &
                          rlaserbound_sta, rlaserbound_end, &
-                         alocal_laser
+                         yn_local_field
       case(iflag_read_rt )
-         read(nfile_ae)  t1_delay, &
+         read(nfile_ae)  t1_start, &
                          trans_longi, &
                          e_impulse, &
                          ae_shape1, ae_shape2, &
-                         amplitude1,amplitude2, &
-                         pulse_tw1, pulse_tw2, &
+                         E_amplitude1,E_amplitude2, &
+                         tw1, tw2, &
                          omega1,    omega2, &
                          epdir_re1, epdir_im1, &
                          phi_cep1,  phi_cep2, &
                          epdir_re2, epdir_im2, &
-                         rlaser_int_wcm2_1, rlaser_int_wcm2_2, &
+                         I_wcm2_1, I_wcm2_2, &
                          t1_t2, &
                          rlaserbound_sta, rlaserbound_end, &
-                         alocal_laser_tmp
+                         yn_local_field_tmp
       end select
       close(nfile_ae)
 
-      if(alocal_laser=='y') then
-         al_file = trim(rt_wfn_directory)//'alocal_laser_w'
+      if(yn_local_field=='y') then
+         al_file = trim(rt_wfn_directory)//'yn_local_field_w'
          open(nfile_al,file=trim(al_file),form='unformatted')
-         if(.not. allocated(weight_Ac_alocal)) &
-         & allocate(weight_Ac_alocal(NL),weight_Ac_alocal_ion(NI), divA_al(NL))
+         if(.not. allocated(weight_Ac_local)) &
+         & allocate(weight_Ac_local(NL),weight_Ac_local_ion(NI), divA_al(NL))
          select case(iflag_read_write)
-         case(iflag_write_rt);write(nfile_al)weight_Ac_alocal,weight_Ac_alocal_ion,divA_al
-         case(iflag_read_rt );read(nfile_al )weight_Ac_alocal,weight_Ac_alocal_ion,divA_al
+         case(iflag_write_rt);write(nfile_al)weight_Ac_local,weight_Ac_local_ion,divA_al
+         case(iflag_read_rt );read(nfile_al )weight_Ac_local,weight_Ac_local_ion,divA_al
          end select
          close(nfile_al)
       endif
@@ -375,15 +375,15 @@ contains
       call comm_bcast(Rion,    nproc_group_global)
       call comm_bcast(velocity,nproc_group_global)
 
-      call comm_bcast(t1_delay,          nproc_group_global)
+      call comm_bcast(t1_start,          nproc_group_global)
       call comm_bcast(trans_longi,       nproc_group_global)
       call comm_bcast(e_impulse,         nproc_group_global)
       call comm_bcast(ae_shape1,         nproc_group_global)
       call comm_bcast(ae_shape2,         nproc_group_global)
-      call comm_bcast(amplitude1,        nproc_group_global)
-      call comm_bcast(amplitude2,        nproc_group_global)
-      call comm_bcast(pulse_tw1,         nproc_group_global)
-      call comm_bcast(pulse_tw2,         nproc_group_global)
+      call comm_bcast(E_amplitude1,        nproc_group_global)
+      call comm_bcast(E_amplitude2,        nproc_group_global)
+      call comm_bcast(tw1,         nproc_group_global)
+      call comm_bcast(tw2,         nproc_group_global)
       call comm_bcast(omega1,            nproc_group_global)
       call comm_bcast(omega2,            nproc_group_global)
       call comm_bcast(epdir_re1,         nproc_group_global)
@@ -392,19 +392,19 @@ contains
       call comm_bcast(phi_cep2,          nproc_group_global)
       call comm_bcast(epdir_re2,         nproc_group_global)
       call comm_bcast(epdir_im2,         nproc_group_global)
-      call comm_bcast(rlaser_int_wcm2_1, nproc_group_global)
-      call comm_bcast(rlaser_int_wcm2_2, nproc_group_global)
+      call comm_bcast(I_wcm2_1, nproc_group_global)
+      call comm_bcast(I_wcm2_2, nproc_group_global)
       call comm_bcast(t1_t2,             nproc_group_global)
       call comm_bcast(rlaserbound_sta,   nproc_group_global)
       call comm_bcast(rlaserbound_end,   nproc_group_global)
-      call comm_bcast(alocal_laser,      nproc_group_global)
+      call comm_bcast(yn_local_field,      nproc_group_global)
 
-      if(alocal_laser=='y') then
-         if(.not. allocated(weight_Ac_alocal)) then
-            allocate(weight_Ac_alocal(NL), weight_Ac_alocal_ion(NI), divA_al(NL))
+      if(yn_local_field=='y') then
+         if(.not. allocated(weight_Ac_local)) then
+            allocate(weight_Ac_local(NL), weight_Ac_local_ion(NI), divA_al(NL))
          endif
-         call comm_bcast(weight_Ac_alocal,     nproc_group_global)
-         call comm_bcast(weight_Ac_alocal_ion, nproc_group_global)
+         call comm_bcast(weight_Ac_local,     nproc_group_global)
+         call comm_bcast(weight_Ac_local_ion, nproc_group_global)
          call comm_bcast(divA_al,              nproc_group_global)
       endif
 

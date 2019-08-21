@@ -20,7 +20,7 @@ module writefield
 contains
 
 subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
-  use inputoutput, only: format3d,au_length_aa
+  use inputoutput, only: format_voxel_data,au_length_aa
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
@@ -63,7 +63,7 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
   end do
   end do
 
-  if(format3d=='avs')then
+  if(format_voxel_data=='avs')then
     !$OMP parallel do collapse(2) private(iz,iy,ix)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
@@ -83,12 +83,12 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
     suffix = "dns_"//adjustl(filenum)
   end if
   phys_quantity = "dns"
-  if(format3d=='avs')then
+  if(format_voxel_data=='avs')then
     header_unit='A**(-3)'
     call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
-  else if(format3d=='cube')then
+  else if(format_voxel_data=='cube')then
     call writecube(lg,103,suffix,phys_quantity,rmat2,hgs,igc_is,igc_ie,gridcoo)
-  else if(format3d=='vtk')then
+  else if(format_voxel_data=='vtk')then
     call writevtk(lg,103,suffix,rmat2,hgs,igc_is,igc_ie,gridcoo)
   end if
 
@@ -111,7 +111,7 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
     end do
     end do
   
-    if(format3d=='avs')then
+    if(format_voxel_data=='avs')then
       !$OMP parallel do collapse(2) private(iz,iy,ix)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
@@ -127,12 +127,12 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
     write(filenum, '(i6.6)') itt
     suffix = "dnsdiff_"//adjustl(filenum)
     phys_quantity = "dnsdiff"
-    if(format3d=='avs')then
+    if(format_voxel_data=='avs')then
       header_unit='A**(-3)'
       call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
-    else if(format3d=='cube')then
+    else if(format_voxel_data=='cube')then
       call writecube(lg,103,suffix,phys_quantity,rmat2,hgs,igc_is,igc_ie,gridcoo)
-    else if(format3d=='vtk')then
+    else if(format_voxel_data=='vtk')then
       call writevtk(lg,103,suffix,rmat2,hgs,igc_is,igc_ie,gridcoo)
     end if
   end if
@@ -141,7 +141,7 @@ end subroutine writedns
 
 !======================================================================
 subroutine writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
-  use inputoutput, only: format3d
+  use inputoutput, only: format_voxel_data
   use structures, only: s_rgrid
   use writefile3d
   implicit none
@@ -165,12 +165,12 @@ subroutine writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     suffix = "elf_"//adjustl(filenum)
   end if
   phys_quantity = "elf"
-  if(format3d=='avs')then
+  if(format_voxel_data=='avs')then
     header_unit = "none"
     call writeavs(lg,103,suffix,header_unit,elf,icoo1d)
-  else if(format3d=='cube')then
+  else if(format_voxel_data=='cube')then
     call writecube(lg,103,suffix,phys_quantity,elf,hgs,igc_is,igc_ie,gridcoo)
-  else if(format3d=='vtk')then
+  else if(format_voxel_data=='vtk')then
     call writevtk(lg,103,suffix,elf,hgs,igc_is,igc_ie,gridcoo)
   end if
   
@@ -179,7 +179,7 @@ end subroutine writeelf
 !======================================================================
 
 subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
-  use inputoutput, only: format3d
+  use inputoutput, only: format_voxel_data
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
@@ -242,7 +242,7 @@ subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d
       end do
     end if
    
-    if(format3d=='avs')then
+    if(format_voxel_data=='avs')then
       !$OMP parallel do collapse(2) private(iz,iy,ix)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
@@ -267,12 +267,12 @@ subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d
       phys_quantity = "ezsta"
     end if
 
-    if(format3d=='avs')then
+    if(format_voxel_data=='avs')then
       header_unit = "V/A"
       call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
-    else if(format3d=='cube')then
+    else if(format_voxel_data=='cube')then
       call writecube(lg,103,suffix,phys_quantity,rmat2,hgs,igc_is,igc_ie,gridcoo)
-    else if(format3d=='vtk')then
+    else if(format_voxel_data=='vtk')then
       call writevtk(lg,103,suffix,rmat2,hgs,igc_is,igc_ie,gridcoo)
     end if
 

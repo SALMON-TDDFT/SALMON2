@@ -42,18 +42,18 @@ if(comm_is_root(nproc_id_global))then
 end if
 !===== namelist for group_fundamental =====
 
-select case(amin_routine)
+select case(method_min)
   case('cg','diis','cg-diis')
     continue
   case default
-    stop 'Specify either "cg", "diis", or "cg-diis" for amin_routine.'
+    stop 'Specify either "cg", "diis", or "cg-diis" for method_min.'
 end select
 
-select case(amixing)
+select case(method_mixing)
   case ('simple','broyden')
     continue
   case default
-    stop 'Specify either "simple" or "broyden" for amixing.'
+    stop 'Specify either "simple" or "broyden" for method_mixing.'
 end select
     
 Harray(1:3,1:maxntmg)=0.d0
@@ -124,7 +124,7 @@ else
    iter_opt = 1
 endif
 
-select case(subspace_diagonalization)
+select case(yn_subspace_diagonalization)
 case('y')
   iflag_subspace_diag = 1
 case('n')
@@ -177,35 +177,35 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-nproc_Mxin = nproc_domain
-nproc_Mxin_s = nproc_domain_s
+nproc_d_o = nproc_domain_orbital
+nproc_d_g = nproc_domain_general
 
-if(nproc_ob==0.and.nproc_mxin(1)==0.and.nproc_mxin(2)==0.and.nproc_mxin(3)==0.and.  &
-                   nproc_mxin_s(1)==0.and.nproc_mxin_s(2)==0.and.nproc_mxin_s(3)==0) then
-  call set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+if(nproc_ob==0.and.nproc_d_o(1)==0.and.nproc_d_o(2)==0.and.nproc_d_o(3)==0.and.  &
+                   nproc_d_g(1)==0.and.nproc_d_g(2)==0.and.nproc_d_g(3)==0) then
+  call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
 else
-  call check_numcpu(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+  call check_numcpu(nproc_d_o,nproc_d_g,nproc_d_g_dm)
 end if
 
-nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
-nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
+nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
 !===== namelist for group_hartree =====
-if(meo<=0.or.meo>=4)then
-  stop "meo must be equal to 1 or 2 or 3."
-else if(meo==3)then
-  if(num_pole_xyz(1)==0.and.num_pole_xyz(2)==0.and.num_pole_xyz(3)==0)then
+if(layout_multipole<=0.or.layout_multipole>=4)then
+  stop "layout_multipole must be equal to 1 or 2 or 3."
+else if(layout_multipole==3)then
+  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
     continue
-  else if(num_pole_xyz(1)<=0.or.num_pole_xyz(2)<=0.or.num_pole_xyz(3)<=0)then
-    stop "num_pole_xyz must be largar than 0 when they are not default values."
+  else if(num_multipole_xyz(1)<=0.or.num_multipole_xyz(2)<=0.or.num_multipole_xyz(3)<=0)then
+    stop "num_multipole_xyz must be largar than 0 when they are not default values."
   end if
-  if(num_pole_xyz(1)==0.and.num_pole_xyz(2)==0.and.num_pole_xyz(3)==0)then
+  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
     dip_spacing = 8.d0/au_length_aa  ! approximate spacing of multipoles 
-    num_pole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
+    num_multipole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
   end if
 end if
 
-num_pole=num_pole_xyz(1)*num_pole_xyz(2)*num_pole_xyz(3)
+num_pole=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
 
 !===== namelist for group_file =====
 if(comm_is_root(nproc_id_global))then
@@ -267,7 +267,7 @@ iAtomicNumber(:)=0 ! dummy
 !call comm_bcast(iAtomicNumber, nproc_group_global)
 
 
-select case(out_psi)
+select case(yn_out_psi)
 case('y')
   iflag_writepsi=1
 case('n')
@@ -276,7 +276,7 @@ case default
   stop 'invalid iflag_writepsi'
 end select
 
-select case(out_elf_rt)
+select case(yn_out_elf_rt)
 case('y')
   iflag_ELF=1
 case('n')
@@ -285,7 +285,7 @@ case default
   stop 'invalid iflag_ELF'
 end select
 
-select case(out_dos)
+select case(yn_out_dos)
 case('y')
   iflag_dos=1
 case('n')
@@ -294,7 +294,7 @@ case default
   stop 'invalid iflag_dos'
 end select
 
-select case(out_pdos)
+select case(yn_out_pdos)
 case('y')
   iflag_pdos=1
 case('n')
@@ -328,13 +328,13 @@ end if
 !  end do
 !end if
 
-nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
-nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+nproc_d_o_mul   = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
+nproc_d_g_mul_dm= nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
-select case(fourier)
-case('ft','FT')
+select case(yn_ffte)
+case('n')
   iflag_hartree=2
-case('ffte','FFTE')
+case('y')
   iflag_hartree=4
 end select
 

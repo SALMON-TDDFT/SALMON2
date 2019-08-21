@@ -201,7 +201,7 @@ end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
-  use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
+  use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
   use structures,only : s_pp_info,s_pp_grid
   implicit none
   type(s_pp_info) :: pp
@@ -254,7 +254,7 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
       rshift(3)=-0.5d0*Hz
     end if
   else if(iperiodic==3)then
-    if(domain_parallel=='y')then
+    if(yn_domain_parallel=='y')then
       rshift(1)=-Hx
       rshift(2)=-Hy
       rshift(3)=-Hz
@@ -311,7 +311,7 @@ end subroutine calc_nps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
-  use salmon_global,only : natom,kion,rion,iperiodic,domain_parallel
+  use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
   use structures,only : s_pp_info,s_pp_grid
   implicit none
   type(s_pp_info) :: pp
@@ -364,7 +364,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
       rshift(3)=-0.5d0*Hz
     end if
   else if(iperiodic==3)then 
-    if(domain_parallel=='y')then
+    if(yn_domain_parallel=='y')then
       rshift(1)=-Hx
       rshift(2)=-Hy
       rshift(3)=-Hz
@@ -539,7 +539,7 @@ end subroutine set_lma_tbl
 subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                    lx,ly,lz,nl,hx,hy,hz,  &
                    flag_use_grad_wf_on_force,property,hvol0)
-  use salmon_global,only : natom,kion,iperiodic,domain_parallel
+  use salmon_global,only : natom,kion,iperiodic,yn_domain_parallel
   use math_constants,only : pi
   use structures,only : s_pp_info,s_pp_grid
   implicit none
@@ -587,7 +587,7 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
       rshift(3)=-0.5d0*Hz
     end if
   else if(iperiodic==3)then 
-    if(domain_parallel=='y')then
+    if(yn_domain_parallel=='y')then
       rshift(1)=-Hx
       rshift(2)=-Hy
       rshift(3)=-Hz

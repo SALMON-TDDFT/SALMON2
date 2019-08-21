@@ -14,7 +14,7 @@
 /
 
 &system
-  iperiodic = 3
+  yn_periodic = 'y'
   al = 5.0d0, 5.0d0, 5.0d0
   isym = 1
   nstate = 8
@@ -26,10 +26,10 @@
 
 &pseudo
   iZatom(1)=1
-  pseudo_file(1) = './H_rps.dat'
+  file_pseudo(1) = './H_rps.dat'
   Lloc_ps(1)=1
   iZatom(2)=8
-  pseudo_file(2) = './O_rps.dat'
+  file_pseudo(2) = './O_rps.dat'
   Lloc_ps(2)=1
 /
 
@@ -64,8 +64,8 @@
 
 &md
   ensemble = "NVE"
-  set_ini_velocity='y'
-  temperature0_ion=300.0d0
+  yn_set_ini_velocity='y'
+  temperature0_ion_k=300.0d0
   step_update_ps=       50
   step_update_ps2=     200
 /

@@ -18,48 +18,48 @@ module check_numcpu_sub
 
 contains
 
-subroutine check_numcpu(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+subroutine check_numcpu(nproc_d_o,nproc_d_g,nproc_d_g_dm)
   use inputoutput, only: nproc_k,nproc_ob
   use salmon_parallel, only: nproc_size_global
   implicit none
-  integer,intent(in) :: nproc_mxin(3)
-  integer,intent(in) :: nproc_mxin_s(3)
-  integer,intent(out) :: nproc_mxin_s_dm(3)
+  integer,intent(in) :: nproc_d_o(3)
+  integer,intent(in) :: nproc_d_g(3)
+  integer,intent(out) :: nproc_d_g_dm(3)
   integer :: j
   
-  if(nproc_k*nproc_ob*nproc_mxin(1)*nproc_mxin(2)*nproc_mxin(3)/=nproc_size_global)then
+  if(nproc_k*nproc_ob*nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)/=nproc_size_global)then
     write(*,*) "inumcpu_check error!"
     write(*,*) "number of cpu is not correct!"
     stop
   end if
   do j=1,3
-    if(nproc_mxin_s(j)<nproc_mxin(j))then
+    if(nproc_d_g(j)<nproc_d_o(j))then
       write(*,*) "inumcpu_check error!"
-      write(*,*) "nproc_domain_s is smaller than nproc_domain."
+      write(*,*) "nproc_domain_general is smaller than nproc_domain_orbital."
       stop
     end if
   end do
-  if(nproc_mxin_s(1)*nproc_mxin_s(2)*nproc_mxin_s(3)>nproc_size_global)then
+  if(nproc_d_g(1)*nproc_d_g(2)*nproc_d_g(3)>nproc_size_global)then
     write(*,*) "inumcpu_check error!"
-    write(*,*) "product of nproc_domain_s is larger than nproc."
+    write(*,*) "product of nproc_domain_general is larger than nproc."
     stop
   end if
-  if(mod(nproc_mxin_s(1),nproc_mxin(1))/=0)then
+  if(mod(nproc_d_g(1),nproc_d_o(1))/=0)then
     write(*,*) "inumcpu_check error!"
-    write(*,*) "nproc_domain_s(1) is not mutiple of nproc_domain(1)."
+    write(*,*) "nproc_domain_general(1) is not mutiple of nproc_domain_orbital(1)."
     stop
   end if
-  if(mod(nproc_mxin_s(2),nproc_mxin(2))/=0)then
+  if(mod(nproc_d_g(2),nproc_d_o(2))/=0)then
     write(*,*) "inumcpu_check error!"
-    write(*,*) "nproc_domain_s(2) is not mutiple of nproc_domain(2)."
+    write(*,*) "nproc_domain_general(2) is not mutiple of nproc_domain_orbital(2)."
     stop
   end if
-  if(mod(nproc_mxin_s(3),nproc_mxin(3))/=0)then
+  if(mod(nproc_d_g(3),nproc_d_o(3))/=0)then
     write(*,*) "inumcpu_check error!"
-    write(*,*) "nproc_domain_s(3) is not mutiple of nproc_domain(3)."
+    write(*,*) "nproc_domain_general(3) is not mutiple of nproc_domain_orbital(3)."
     stop
   end if
-  nproc_mxin_s_dm(1:3)=nproc_mxin_s(1:3)/nproc_mxin(1:3)
+  nproc_d_g_dm(1:3)=nproc_d_g(1:3)/nproc_d_o(1:3)
   
 end subroutine check_numcpu
 

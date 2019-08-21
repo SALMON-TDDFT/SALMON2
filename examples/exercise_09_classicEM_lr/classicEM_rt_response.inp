@@ -12,7 +12,7 @@
 /
 
 &system
-  iperiodic = 0
+  yn_periodic = 'n'
 /
 
 &emfield

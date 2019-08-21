@@ -34,7 +34,7 @@ real(8) function sin2cos(t, tw, omega, cep)
 end function sin2cos
 !===============================================================
 subroutine incident_bessel_beam()
-  use Global_Variables, only: amplitude1, rlaser_int_wcm2_1, omega1, pulse_tw1, &
+  use Global_Variables, only: E_amplitude1, I_wcm2_1, omega1, tw1, &
                             & Epdir_re1, phi_CEP1, &
                             & nx_m, ny_m, &
                             & nx1_m, nx2_m, ny1_m, ny2_m, nz_origin_m, &
@@ -52,14 +52,14 @@ subroutine incident_bessel_beam()
   iz_m = nz_origin_m
   
   ! First pulse
-  if(rlaser_int_wcm2_1 < 0d0)then
-    f0_1 = amplitude1
+  if(I_wcm2_1 < 0d0)then
+    f0_1 = E_amplitude1
   else
-    f0_1=5.338d-9*sqrt(rlaser_int_wcm2_1)      ! electric field in a.u.
+    f0_1=5.338d-9*sqrt(I_wcm2_1)      ! electric field in a.u.
   end if
 !  omega_1 = omegaeV_1 / (2d0*13.6058d0)  ! frequency in a.u.
 !  tpulse_1 = tpulsefs_1 / 0.02418d0 ! pulse_duration in a.u.
-  wpulse_1 = 2*pi/pulse_tw1
+  wpulse_1 = 2*pi/tw1
 
   lx = NX_m * HX_m
   ly = NY_m * HY_m
@@ -84,10 +84,10 @@ subroutine incident_bessel_beam()
        x = ix_m * HX_m
        ! Ac_new_ms
        tau = - x / vx
-       Ac_new_ms(:,ix_m,iy_m,iz_m) = f * sin2cos(tau, pulse_tw1, omega1, phi_CEP1)
+       Ac_new_ms(:,ix_m,iy_m,iz_m) = f * sin2cos(tau, tw1, omega1, phi_CEP1)
        ! Ac_ms (previous time-step)
        tau = - x / vx - dt
-       Ac_ms(:,ix_m,iy_m,iz_m) =  f * sin2cos(tau, pulse_tw1, omega1, phi_CEP1)
+       Ac_ms(:,ix_m,iy_m,iz_m) =  f * sin2cos(tau, tw1, omega1, phi_CEP1)
      end do
   end do
   

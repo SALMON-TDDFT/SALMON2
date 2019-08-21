@@ -15,7 +15,7 @@
 !
 !=======================================================================
 subroutine check_fourier
-  use salmon_global, only: fourier
+  use salmon_global, only: yn_ffte
   use salmon_parallel, only: nproc_id_global, end_parallel
   use salmon_communication, only: comm_is_root
   use scf_data
