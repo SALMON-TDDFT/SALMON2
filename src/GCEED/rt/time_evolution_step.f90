@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
+SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng, &
 &   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
 &   j_e,singlescale)
   use structures
@@ -46,6 +46,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
   type(s_rgrid),intent(in) :: ng
   type(s_dft_system),intent(inout) :: system
   type(s_orbital_parallel),intent(in) :: info
+  type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
   type(s_pp_nlcc),intent(in)    :: ppn
@@ -227,7 +228,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,stencil,srg,srg_ng, &
       sVh%f = Vh_stock1
     end if
   end if
-  call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
+  call Hartree_ns(lg,mg,ng,system%primitive_b,info_field,srg_ng,stencil,srho,sVh,fg)
   if(iperiodic==0 .and. itt/=1)then
     if(mod(itt,2)==1)then
       Vh_stock2 = sVh%f

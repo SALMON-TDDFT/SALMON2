@@ -130,6 +130,12 @@ contains
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
+
+! NOTE: This directive is a compiler hint to stabilize the performance of summation
+#ifdef __INTEL_COMPILER
+!dir$ attributes align : 2097152 :: wrk
+#endif
+
     is = mg%is
     ie = mg%ie
     nsize = mg%num(1) * mg%num(2) * mg%num(3)
@@ -246,6 +252,11 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
+! NOTE: This directive is a compiler hint to stabilize the performance of summation
+#ifdef __INTEL_COMPILER
+!dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
+#endif
+
     BT = transpose(stencil%rmatrix_B)
     if(info%if_divide_rspace) call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
 
@@ -351,6 +362,11 @@ contains
     real(8) :: wrk1(3),wrk2(3),wrk3(3),BT(3,3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+
+! NOTE: This directive is a compiler hint to stabilize the performance of summation
+#ifdef __INTEL_COMPILER
+!dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
+#endif
 
     BT = transpose(stencil%rmatrix_B)
     if(info%if_divide_rspace) call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)

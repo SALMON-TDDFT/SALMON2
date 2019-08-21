@@ -19,17 +19,18 @@ module hartree_periodic_sub
 
 contains
 
-subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
+subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
                  ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
                  egx,egxc,egy,egyc,egz,egzc,Brl)
-  use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_group_global, nproc_group_bound
+  use structures, only: s_rgrid, s_field_parallel
+  use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use math_constants, only : pi
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
   real(8),intent(in)  :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8),intent(out) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8),intent(in)  :: hgs(3)
@@ -91,7 +92,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
   end do
   end do
 
-  call comm_summation(trho2z,trho3z,ng%num(1)*ng%num(2)*lg%num(3),nproc_group_bound(3))
+  call comm_summation(trho2z,trho3z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
   
 !$OMP parallel do private(ix,kx)
   do ix=lg%is(1),lg%ie(1)
@@ -132,7 +133,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
   end do
   end do
   end do
-  call comm_summation(ff1y,ff2y,ng%num(1)*lg%num(2)*ng%num(3),nproc_group_bound(2))
+  call comm_summation(ff1y,ff2y,ng%num(1)*lg%num(2)*ng%num(3),info_field%icomm(2))
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
@@ -152,7 +153,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
   end do
   end do
 
-  call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),nproc_group_bound(1))
+  call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),info_field%icomm(1))
 
 !$OMP parallel do private(kz,ky,kx)
   do kz = ng%is(3),ng%ie(3)
@@ -163,7 +164,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
   end do
   end do
 
-  call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),nproc_group_bound(1))
+  call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),info_field%icomm(1))
 
   blx=2.d0*Pi/(Hgs(1)*dble(lg%num(1))) !??????
   bly=2.d0*Pi/(Hgs(2)*dble(lg%num(2)))
@@ -213,7 +214,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
   end do
 
   call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
-  call comm_summation(ff1z,ff2z,ng%num(1)*ng%num(2)*lg%num(3),nproc_group_bound(3))
+  call comm_summation(ff1z,ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
 
 !$OMP parallel do private(iz,ky,kx)
   do iz = ng%is(3),ng%ie(3)
@@ -223,7 +224,7 @@ subroutine hartree_periodic(lg,mg,ng,trho,tvh,hgs,  &
   end do
   end do
   end do
-  call comm_summation(ff1y,ff2y,ng%num(1)*lg%num(2)*ng%num(3),nproc_group_bound(2))
+  call comm_summation(ff1y,ff2y,ng%num(1)*lg%num(2)*ng%num(3),info_field%icomm(2))
 
 !$OMP parallel do private(iz,iy,kx)
   do iz = ng%is(3),ng%ie(3)

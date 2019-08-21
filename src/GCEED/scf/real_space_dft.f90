@@ -84,6 +84,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_orbital_parallel) :: info_ob
 type(s_orbital_parallel) :: info
+type(s_field_parallel) :: info_field
 type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
@@ -117,7 +118,7 @@ call setcN(cnmat)
 
 call check_dos_pdos
 
-call convert_input_scf(info,file_atoms_coo)
+call convert_input_scf(info,info_field,file_atoms_coo)
 
 call init_dft(lg,system,stencil)
 if(stencil%if_orthogonal) then
@@ -165,7 +166,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call IN_data(lg,mg,ng,info,system,stencil,cg)
+    call IN_data(lg,mg,ng,info,info_field,system,stencil,cg)
 
   end select
 
@@ -393,7 +394,7 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
+    call Hartree_ns(lg,mg,ng,system%primitive_b,info_field,srg_ng,stencil,srho,sVh,fg)
     Vh = sVh%f
 
     if(ilsda == 0) then
@@ -608,7 +609,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
-      call Hartree_ns(lg,mg,ng,system%primitive_b,srg_ng,stencil,srho,sVh,fg)
+      call Hartree_ns(lg,mg,ng,system%primitive_b,info_field,srg_ng,stencil,srho,sVh,fg)
     end if
     call timer_end(LOG_CALC_HARTREE)
 

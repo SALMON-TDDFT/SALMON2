@@ -21,14 +21,14 @@ contains
 
 !============================ Hartree potential (Solve Poisson equation)
 
-subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
+subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,   &
                             layout_multipole,lmax_lmp,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                             ibox_icoobox_bound,icoobox_bound)
   use inputoutput, only: natom,rion
-  use structures, only: s_rgrid
+  use structures, only: s_rgrid,s_field_parallel
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h, &
-                             nproc_id_bound, nproc_size_bound, nproc_group_bound
+                             nproc_id_bound, nproc_size_bound
   use salmon_communication, only: comm_summation
   use timer
   
@@ -40,6 +40,7 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
   real(8) :: trho(mg%is(1):mg%ie(1),    &
                  mg%is(2):mg%ie(2),      &
                  mg%is(3):mg%ie(3))
@@ -444,9 +445,9 @@ subroutine hartree_boundary(lg,mg,ng,trho,wk2,wkbound_h,wk2bound_h,   &
     else
       call timer_begin(LOG_ALLREDUCE_HARTREE)
       call comm_summation( &
-        wk2bound_h,              wkbound_h,              icount/2, nproc_group_bound(k), 0                    )
+        wk2bound_h,              wkbound_h,              icount/2, info_field%icomm(k), 0                    )
       call comm_summation( &
-        wk2bound_h(icount/2+1:), wkbound_h(icount/2+1:), icount/2, nproc_group_bound(k), nproc_size_bound(k)-1)
+        wk2bound_h(icount/2+1:), wkbound_h(icount/2+1:), icount/2, info_field%icomm(k), nproc_size_bound(k)-1)
       call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
