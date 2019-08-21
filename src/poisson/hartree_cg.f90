@@ -20,11 +20,11 @@ module hartree_cg_sub
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,  &
+subroutine hartree_cg(lg,mg,ng,info_field,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,  &
                       meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                       iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                       ibox_icoobox_bound,icoobox_bound)
-  use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
+  use structures, only: s_rgrid,s_field_parallel,s_sendrecv_grid,s_stencil
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_is_root, comm_summation
   use math_constants, only : pi
@@ -37,6 +37,7 @@ subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
   real(8) :: trho(mg%is(1):mg%ie(1),    &
                   mg%is(2):mg%ie(2),      &
                   mg%is(3):mg%ie(3))
@@ -82,7 +83,7 @@ subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk
                 ng%is_array(2):ng%ie_array(2),   &
                 ng%is_array(3):ng%ie_array(3))
   
-  call hartree_boundary(lg,mg,ng,trho,pk,wkbound_h,wk2bound_h,   &
+  call hartree_boundary(lg,mg,ng,info_field,trho,pk,wkbound_h,wk2bound_h,   &
                         meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                         iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                         ibox_icoobox_bound,icoobox_bound)

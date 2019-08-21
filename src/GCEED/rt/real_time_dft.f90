@@ -54,6 +54,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system)  :: system
 type(s_orbital_parallel) :: info
+type(s_field_parallel) :: info_field
 type(s_stencil) :: stencil
 type(s_reciprocal_grid) :: fg
 type(s_dft_energy) :: energy
@@ -162,7 +163,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,info,system,stencil,cg)
+call IN_data(lg,mg,ng,info,info_field,system,stencil,cg)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then
@@ -333,7 +334,7 @@ endif
 
 
 ! Go into Time-Evolution
-call Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
+call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -460,7 +461,7 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
                            nproc_group_h, nproc_size_global
@@ -483,6 +484,7 @@ implicit none
 type(s_rgrid) :: lg,mg,ng
 type(s_dft_system) :: system
 type(s_orbital_parallel) :: info
+type(s_field_parallel) :: info_field
 type(s_stencil) :: stencil
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
@@ -942,11 +944,11 @@ call timer_end(LOG_INIT_RT)
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
-    call time_evolution_step(lg,mg,ng,system,info,stencil &
+    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,j_e,singlescale)
   else
-    call time_evolution_step(lg,mg,ng,system,info,stencil &
+    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,j_e,singlescale)
   end if
