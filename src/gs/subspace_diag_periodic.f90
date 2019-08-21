@@ -90,13 +90,9 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
     call timer_end(LOG_DIAG_EIGEN)
   end do
   end do
-    
-!$omp workshare
-  shpsi%zwf = spsi%zwf ! copy psi
-!$omp end workshare
 
 !$omp workshare
-  spsi%zwf = 0d0
+  shpsi%zwf = 0d0
 !$omp end workshare
 
   call timer_begin(LOG_DIAG_UPDATE)
@@ -105,7 +101,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
   do ispin=1,nspin
   do io1=io_s,io_e
   do io2=io_s,io_e
-    spsi%zwf(:,:,:,ispin,io1,ik,1) = spsi%zwf(:,:,:,ispin,io1,ik,1) + evec(io2,io1,ispin,ik) * shpsi%zwf(:,:,:,ispin,io2,ik,1)
+    shpsi%zwf(:,:,:,ispin,io1,ik,1) = shpsi%zwf(:,:,:,ispin,io1,ik,1) + evec(io2,io1,ispin,ik) * spsi%zwf(:,:,:,ispin,io2,ik,1)
   end do
   end do
   end do
@@ -120,7 +116,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
     do ix=is(1),ie(1)
-      rbox1(ispin,io,ik) = rbox1(ispin,io,ik) + abs(spsi%zwf(ix,iy,iz,ispin,io,ik,1))**2
+      rbox1(ispin,io,ik) = rbox1(ispin,io,ik) + abs(shpsi%zwf(ix,iy,iz,ispin,io,ik,1))**2
     end do
     end do
     end do
@@ -136,7 +132,7 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
     do ix=is(1),ie(1)
-      spsi%zwf(ix,iy,iz,ispin,io,ik,1) = spsi%zwf(ix,iy,iz,ispin,io,ik,1) / sqrt(rbox2(ispin,io,ik)*system%hvol)
+      spsi%zwf(ix,iy,iz,ispin,io,ik,1) = shpsi%zwf(ix,iy,iz,ispin,io,ik,1) / sqrt(rbox2(ispin,io,ik)*system%hvol)
     end do
     end do
     end do
