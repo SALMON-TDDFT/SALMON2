@@ -108,8 +108,6 @@ module structures
 
   type s_field_parallel
     integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
-                         ! Inside the FFTE kernel, x-direction is redundant and 
-                         ! yz-direction is parallel. 
   end type s_field_parallel
 
   type s_orbital
