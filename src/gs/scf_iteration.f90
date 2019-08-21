@@ -32,9 +32,9 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
   use gscg_sub
   use gscg_periodic_sub
   use rmmdiis_sub
-  use gram_schmidt_orth, only: gram_schmidt 
-  use subspace_diag_sub
-  use subspace_diag_periodic_sub
+  use gram_schmidt_orth, only: gram_schmidt
+  use Conjugate_Gradient
+  use subspace_diagonalization
   use density_matrix, only: calc_density
   use mixing_sub
   implicit none
@@ -77,8 +77,7 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
     ( method_min == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
     select case(iperiodic)
     case(0)
-      call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg, &
-                 info_ob,ppg,vlocal)
+      call sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
     case(3)
       call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
     end select
@@ -103,8 +102,7 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      
-        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iobnum,itotmst,   &
-                           mst,ifmst,info_ob,ppg,vlocal)
+        call subspace_diag(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
       case(3)
         call subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)

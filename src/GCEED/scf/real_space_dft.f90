@@ -52,8 +52,6 @@ use scf_iteration_sub
 use gscg_sub
 use gscg_periodic_sub
 use rmmdiis_sub
-use subspace_diag_sub
-use subspace_diag_periodic_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
@@ -241,7 +239,7 @@ if(iopt==1)then
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+        jj = info%io_tbl(iob)
         info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
       end do
     end do
