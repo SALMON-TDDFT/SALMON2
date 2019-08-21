@@ -23,10 +23,10 @@ contains
 
 subroutine input_pp(pp,hx,hy,hz)
   use structures,only : s_pp_info
-  use salmon_global,only : pseudo_file
+  use salmon_global,only : file_pseudo
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,directory, &
-    & psmask_option
+    & yn_psmask
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
@@ -52,7 +52,7 @@ subroutine input_pp(pp,hx,hy,hz)
 
     do ik=1,nelem
          
-      ps_file = trim(pseudo_file(ik))
+      ps_file = trim(file_pseudo(ik))
 
       select case (ps_format(ik))
       case('KY')
@@ -130,24 +130,24 @@ subroutine input_pp(pp,hx,hy,hz)
       write(*,*) 'flag_nlcc_element(ik) =',flag_nlcc_element(ik)
       write(*,*) '=========================================================='
 
-      if (PSmask_option == 'y') then
+      if (yn_psmask == 'y') then
         call making_ps_with_masking(pp,hx,hy,hz,ik, &
                                     rhor_nlcc,flag_nlcc_element)
         write(*,*) 'Following quantities are modified by masking procedure'
         write(*,*) 'Rps(ik), NRps(ik) =',pp%rps(ik), pp%nrps(ik)
         write(*,*) 'anorm(ik,l) =',(pp%anorm(l,ik),l=0,pp%mlps(ik))
         write(*,*) 'inorm(ik,l) =',(pp%inorm(l,ik),l=0,pp%mlps(ik))
-      else if (PSmask_option == 'n') then
+      else if (yn_psmask == 'n') then
         call making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
 
       else
-        stop 'Wrong PSmask_option at input_pseudopotential_YS'
+        stop 'Wrong yn_psmask at input_pseudopotential_YS'
       end if
 
       pp%upp_f(:,:,ik)=pp%upp(:,:)
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
-      open(4,file=trim(directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//"_"//trim(PSmask_option)//".dat")
+      open(4,file=trim(directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//"_"//trim(yn_psmask)//".dat")
       write(4,*) "# Mr=",pp%mr(ik)
       write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
       write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)

@@ -21,10 +21,10 @@
 	omega2=5.696144d-02
 	phi_cep1=9.998705d-01
 	phi_cep2=9.983067d-01
-	pulse_tw1=4.411952d+02
-	pulse_tw2=6.614621d+02
-	rlaser_int_wcm2_1=1.000000d+14
-	rlaser_int_wcm2_2=0.000000d+00
+	tw1=4.411952d+02
+	tw2=6.614621d+02
+	I_wcm2_1=1.000000d+14
+	I_wcm2_2=0.000000d+00
 	t1_t2=7.854862d+02
 	trans_longi='tr'
 /
@@ -48,8 +48,8 @@
 	eta_mask=1.500000d+01
 	gamma_mask=1.800000d+00
 	iZatom=14
-	pseudo_file='Si_rps.dat'
-	psmask_option='n'
+	file_pseudo='Si_rps.dat'
+	yn_psmask='n'
 /
 &rgrid
 	num_rgrid=16,16,16
@@ -66,7 +66,7 @@
 &system
 	al=1.026000d+01,1.026000d+01,1.026000d+01
 	crystal_structure='diamond'
-	iperiodic=3
+	yn_periodic = 'y'
 	isym=8
 	natom=8
 	nelec=32

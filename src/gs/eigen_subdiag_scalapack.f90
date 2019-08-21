@@ -65,7 +65,7 @@ end subroutine eigen_subdiag
 !     pasted directly into matlab.
 !
 !     .. Parameters ..
-      use inputoutput, only: nproc_domain
+      use inputoutput, only: nproc_domain_orbital
       use salmon_parallel, only: nproc_size_global
       integer :: iter
       real(8) :: Rmat(iter,iter)
@@ -113,12 +113,12 @@ end subroutine eigen_subdiag
       NB = 1
 !      NPROW = 2
 !      NPCOL = 2
-      if(nproc_domain(1)>1)then
-        NPROW = nproc_domain(1)
-      else if(nproc_domain(2)>1)then
-        NPROW = nproc_domain(2)
+      if(nproc_domain_orbital(1)>1)then
+        NPROW = nproc_domain_orbital(1)
+      else if(nproc_domain_orbital(2)>1)then
+        NPROW = nproc_domain_orbital(2)
       else
-        NPROW = nproc_domain(3)
+        NPROW = nproc_domain_orbital(3)
       end if
       NPCOL = nproc_size_global/NPROW
       LDA = iter

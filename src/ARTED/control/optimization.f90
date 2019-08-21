@@ -30,7 +30,7 @@ subroutine calc_opt_ground_state
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
   use misc_routines, only: get_wtime
-  use salmon_global, only: format3d, out_dns, out_dns_rt, out_dns_rt_step
+  use salmon_global, only: format_voxel_data, yn_out_dns, yn_out_dns_rt, out_dns_rt_step
   use ground_state
   use io_gs_wfn_k
   use md_ground_state, only: write_xyz

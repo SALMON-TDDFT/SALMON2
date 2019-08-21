@@ -16,9 +16,9 @@
 !-----------------------------------------------------------------------------------------
 subroutine eh_calc(fs,fw)
   use inputoutput,          only: dt_em,pole_num_ld,iobs_num_em,iobs_samp_em,obs_plane_em,&
-                                  directory,utime_from_au,t1_t2,t1_delay,&
-                                  amplitude1,pulse_tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
-                                  amplitude2,pulse_tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
+                                  directory,utime_from_au,t1_t2,t1_start,&
+                                  E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
+                                  E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
   use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_summation
   use structures,           only: s_fdtd_system
@@ -57,9 +57,9 @@ subroutine eh_calc(fs,fw)
     call eh_fd(fw%iez_y_is,fw%iez_y_ie,      fs%ng%is,fs%ng%ie,fw%Nd,&
                fw%c1_ez_y,fw%c2_ez_y,fw%ez_y,fw%hx_y,fw%hx_z,      'e','y') !ez_y
     if(fw%inc_num>0) then                                !add incident current source
-      if(fw%inc_dist1/='none') call eh_add_inc(1,amplitude1,pulse_tw1,omega1,phi_cep1,&
+      if(fw%inc_dist1/='none') call eh_add_inc(1,E_amplitude1,tw1,omega1,phi_cep1,&
                                                   epdir_re1,epdir_im1,ae_shape1,fw%inc_dist1)
-      if(fw%inc_dist2/='none') call eh_add_inc(2,amplitude2,pulse_tw2,omega2,phi_cep2,&
+      if(fw%inc_dist2/='none') call eh_add_inc(2,E_amplitude2,tw2,omega2,phi_cep2,&
                                                   epdir_re2,epdir_im2,ae_shape2,fw%inc_dist2)
     end if
     if(fw%num_ld>0) then
@@ -397,9 +397,9 @@ contains
     
     !calculate time factor and adding current
     if(iord==1) then
-      t_sta=t1_delay
+      t_sta=t1_start
     elseif(iord==2) then
-      t_sta=t1_delay+t1_t2
+      t_sta=t1_start+t1_t2
     end if
     t=(dble(iter)-0.5d0)*dt_em-t_sta
     theta1=pi/tw*(t-0.5d0*tw)                         !for cos(theta1)**2
@@ -421,7 +421,7 @@ contains
       tf_i=-(-alpha*sin(2.d0*theta1)*cos(theta2_i)   &
              -beta*cos(theta1)**2*sin(theta2_i))*gamma
     end if
-!    tf_r=exp(-0.5d0*(( ((dble(iter)-0.5d0)*dt_em-10.0d0*pulse_tw1)/pulse_tw1 )**2.0d0) ) !test time factor
+!    tf_r=exp(-0.5d0*(( ((dble(iter)-0.5d0)*dt_em-10.0d0*tw1)/tw1 )**2.0d0) ) !test time factor
     add_inc(:)=amp*(tf_r*ep_r(:)+tf_i*ep_i(:))
     
     if(typ=='point') then

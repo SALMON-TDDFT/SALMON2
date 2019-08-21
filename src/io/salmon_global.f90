@@ -71,16 +71,18 @@ module salmon_global
   character(16)  :: unit_charge
                  
 !! &parallel
-  character(1)   :: domain_parallel
+  character(1)   :: yn_domain_parallel
   integer        :: nproc_k
   integer        :: nproc_ob
-  integer        :: nproc_domain(3)
-  integer        :: nproc_domain_s(3)
+  integer        :: nproc_domain_orbital(3)
+  integer        :: nproc_domain_general(3)
   integer        :: num_datafiles_in
   integer        :: num_datafiles_out
+  character(1)   :: yn_ffte
 
 !! &system
-  integer        :: iperiodic
+  integer        :: iperiodic  !this is old keyword but still defined here
+  character(1)   :: yn_periodic
   integer        :: ispin
   real(8)        :: al(3)
   real(8)        :: al_vec1(3),al_vec2(3),al_vec3(3)
@@ -98,11 +100,11 @@ module salmon_global
   character(256) :: file_atom_red_coor
 
 !! &pseudo
-  character(256) :: pseudo_file(maxmki)
+  character(256) :: file_pseudo(maxmki)
   integer        :: lmax_ps(maxmki)
   integer        :: lloc_ps(maxmki)
   integer        :: izatom(maxmki)
-  character(1)   :: psmask_option
+  character(1)   :: yn_psmask
   real(8)        :: alpha_mask
   real(8)        :: gamma_mask
   real(8)        :: eta_mask
@@ -115,7 +117,6 @@ module salmon_global
   character(64)  :: alibc
   character(64)  :: alibxc
   real(8)        :: cval
-  character(1)   :: no_update_func
 
 !! &rgrid
   real(8)        :: dl(3)
@@ -132,23 +133,22 @@ module salmon_global
 !! &propagation
   integer        :: n_hamil
   character(16)  :: propagator
+  character(1)   :: yn_fix_func
 
 !! &scf
-  character(8)   :: amin_routine
+  character(8)   :: method_min
   integer        :: ncg
-  character(8)   :: amixing
-  real(8)        :: rmixrate
+  character(8)   :: method_mixing
+  real(8)        :: mixrate
   integer        :: nmemory_mb
   real(8)        :: alpha_mb
   character(1)   :: fsset_option
   integer        :: nfsset_start
   integer        :: nfsset_every
   integer        :: nscf
-  character(1)   :: subspace_diagonalization
+  character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
-  real(8)        :: threshold_norm_rho
-  real(8)        :: threshold_norm_pot
   character(1)   :: omp_loop
   character(1)   :: skip_gsortho
   integer        :: iditer_notemperature
@@ -158,30 +158,30 @@ module salmon_global
   character(2)   :: trans_longi
   character(16)  :: ae_shape1
   real(8)        :: e_impulse
-  real(8)        :: amplitude1
-  real(8)        :: rlaser_int_wcm2_1
-  real(8)        :: pulse_tw1
+  real(8)        :: E_amplitude1
+  real(8)        :: I_wcm2_1
+  real(8)        :: tw1
   real(8)        :: omega1
   real(8)        :: epdir_re1(3)
   real(8)        :: epdir_im1(3)
   real(8)        :: phi_cep1
   character(16)  :: ae_shape2
-  real(8)        :: amplitude2
-  real(8)        :: rlaser_int_wcm2_2
-  real(8)        :: pulse_tw2
+  real(8)        :: E_amplitude2
+  real(8)        :: I_wcm2_2
+  real(8)        :: tw2
   real(8)        :: omega2
   real(8)        :: epdir_re2(3)
   real(8)        :: epdir_im2(3)
   real(8)        :: phi_cep2
   real(8)        :: t1_t2
-  real(8)        :: t1_delay
-  character(1)   :: alocal_laser
+  real(8)        :: t1_start
+  character(1)   :: yn_local_field
   real(8)        :: rlaserbound_sta(3)
   real(8)        :: rlaserbound_end(3)
-  integer        :: nump
-  real(8)        :: vecp(3,2)
-  real(8)        :: coop(3,2)
-  real(8)        :: radp_diele
+  integer        :: num_dipole_source
+  real(8)        :: vec_dipole_source(3,2)
+  real(8)        :: cood_dipole_source(3,2)
+  real(8)        :: rad_dipole_source
 
 !! &multiscale
   character(16)  :: fdtddim
@@ -241,38 +241,38 @@ module salmon_global
   character(4)   :: projection_decomp
   integer        :: nenergy
   real(8)        :: de
-  character(1)   :: out_psi
-  character(1)   :: out_dos
+  character(1)   :: yn_out_psi
+  character(1)   :: yn_out_dos
+  character(1)   :: yn_out_dos_set_fe_origin
   real(8)        :: out_dos_start
   real(8)        :: out_dos_end
-  integer        :: iout_dos_nenergy
-  real(8)        :: out_dos_smearing
-  character(16)  :: out_dos_method
-  character(1)   :: out_dos_fshift
-  character(1)   :: out_pdos
-  character(1)   :: out_dns
-  character(1)   :: out_old_dns
-  character(1)   :: out_dns_rt
+  integer        :: out_dos_nenergy
+  real(8)        :: out_dos_width
+  character(16)  :: out_dos_function
+  character(1)   :: yn_out_pdos
+  character(1)   :: yn_out_dns
+  character(1)   :: yn_out_dns_rt
   integer        :: out_dns_rt_step
-  character(1)   :: out_dns_trans
+  character(1)   :: out_old_dns
+  character(1)   :: yn_out_dns_trans
   real(8)        :: out_dns_trans_energy
-  character(1)   :: out_elf
-  character(1)   :: out_elf_rt
+  character(1)   :: yn_out_elf
+  character(1)   :: yn_out_elf_rt
   integer        :: out_elf_rt_step
-  character(1)   :: out_estatic_rt
+  character(1)   :: yn_out_estatic_rt
   integer        :: out_estatic_rt_step
-  character(1)   :: out_rvf_rt
+  character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
-  character(1)   :: out_tm
+  character(1)   :: yn_out_tm
   integer        :: out_projection_step
   integer        :: out_ms_step
-  character(16)  :: format3d
-  integer        :: numfiles_out_3d
+  character(16)  :: format_voxel_data
+  integer        :: nsplit_voxel_data
   character(1)   :: timer_process
 
-!! &hartree
-  integer        :: meo
-  integer        :: num_pole_xyz(3)
+!! &poisson
+  integer        :: layout_multipole
+  integer        :: num_multipole_xyz(3)
 
 !! &ewald
   integer        :: newald
@@ -294,16 +294,12 @@ module salmon_global
   integer        :: step_velocity_scaling
   integer        :: step_update_ps
   integer        :: step_update_ps2
-  real(8)        :: temperature0_ion
-  character(1)   :: set_ini_velocity
+  real(8)        :: temperature0_ion_k
+  character(1)   :: yn_set_ini_velocity
   character(256) :: file_ini_velocity
-  character(256) :: file_set_shake
   real(8)        :: thermostat_tau
   real(8)        :: friction
-  character(1)   :: stop_system_momt
-
-!! &misc
-  character(4)   :: fourier
+  character(1)   :: yn_stop_system_momt
 
 !! &group_fundamental
   integer        :: iditerybcg
@@ -322,7 +318,7 @@ module salmon_global
 
 !! &group_hartree
   real(8)        :: hconv
-  integer        :: lmax_meo
+  integer        :: lmax_lmp
 
 !! &group_file
   integer        :: ic

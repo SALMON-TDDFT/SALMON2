@@ -35,50 +35,50 @@ subroutine set_vonf_sd
   vonf_sd=0.d0
   eonf_sd=0.d0
 
-  do i=1,nump
+  do i=1,num_dipole_source
     do iiz=-max_icell,max_icell
     do iiy=-max_icell,max_icell
     do iix=-max_icell,max_icell
       do iz=mg_sta(3),mg_end(3)
       do iy=mg_sta(2),mg_end(2)
       do ix=mg_sta(1),mg_end(1)
-        rr=sqrt((gridcoo(ix,1)-(coop(1,i)+dble(iix*lg_num(1))*Hgs(1)))**2 &
-               +(gridcoo(iy,2)-(coop(2,i)+dble(iiy*lg_num(2))*Hgs(2)))**2 &
-               +(gridcoo(iz,3)-(coop(3,i)+dble(iiz*lg_num(3))*Hgs(3)))**2)
-        if(rr>radp_diele)then
+        rr=sqrt((gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1)))**2 &
+               +(gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2)))**2 &
+               +(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3)))**2)
+        if(rr>rad_dipole_source)then
           vonf_sd(ix,iy,iz)=vonf_sd(ix,iy,iz)  &
-                        -(vecp(1,i)*(gridcoo(ix,1)-(coop(1,i)+dble(iix*lg_num(1))*Hgs(1))) &
-                         +vecp(2,i)*(gridcoo(iy,2)-(coop(2,i)+dble(iiy*lg_num(2))*Hgs(2))) &
-                         +vecp(3,i)*(gridcoo(iz,3)-(coop(3,i)+dble(iiz*lg_num(3))*Hgs(3))))/rr**3
+                        -(vec_dipole_source(1,i)*(gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1))) &
+                         +vec_dipole_source(2,i)*(gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2))) &
+                         +vec_dipole_source(3,i)*(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3))))/rr**3
           eonf_sd(1,ix,iy,iz)=eonf_sd(1,ix,iy,iz)  &
-                          +(3.d0*(vecp(1,i)*(gridcoo(ix,1)-(coop(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
-                                 +vecp(2,i)*(gridcoo(iy,2)-(coop(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
-                                 +vecp(3,i)*(gridcoo(iz,3)-(coop(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr)* &
-                              (gridcoo(ix,1)-(coop(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
-                        -vecp(1,i)) /rr**3
+                          +(3.d0*(vec_dipole_source(1,i)*(gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
+                                 +vec_dipole_source(2,i)*(gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
+                                 +vec_dipole_source(3,i)*(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr)* &
+                              (gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
+                        -vec_dipole_source(1,i)) /rr**3
           eonf_sd(2,ix,iy,iz)=eonf_sd(2,ix,iy,iz)  &
-                          +(3.d0*(vecp(1,i)*(gridcoo(ix,1)-(coop(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
-                                 +vecp(2,i)*(gridcoo(iy,2)-(coop(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
-                                 +vecp(3,i)*(gridcoo(iz,3)-(coop(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr)* &
-                              (gridcoo(iy,2)-(coop(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
-                        -vecp(2,i)) /rr**3
+                          +(3.d0*(vec_dipole_source(1,i)*(gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
+                                 +vec_dipole_source(2,i)*(gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
+                                 +vec_dipole_source(3,i)*(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr)* &
+                              (gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
+                        -vec_dipole_source(2,i)) /rr**3
           eonf_sd(3,ix,iy,iz)=eonf_sd(3,ix,iy,iz)  &
-                          +(3.d0*(vecp(1,i)*(gridcoo(ix,1)-(coop(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
-                                 +vecp(2,i)*(gridcoo(iy,2)-(coop(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
-                                 +vecp(3,i)*(gridcoo(iz,3)-(coop(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr)* &
-                              (gridcoo(iz,3)-(coop(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr &
-                          -vecp(3,i)) /rr**3
+                          +(3.d0*(vec_dipole_source(1,i)*(gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1)))/rr &
+                                 +vec_dipole_source(2,i)*(gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2)))/rr &
+                                 +vec_dipole_source(3,i)*(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr)* &
+                              (gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3)))/rr &
+                          -vec_dipole_source(3,i)) /rr**3
         else
           vonf_sd(ix,iy,iz)=vonf_sd(ix,iy,iz)  &
-                        -(vecp(1,i)*(gridcoo(ix,1)-(coop(1,i)+dble(iix*lg_num(1))*Hgs(1))) &
-                         +vecp(2,i)*(gridcoo(iy,2)-(coop(2,i)+dble(iiy*lg_num(2))*Hgs(2))) &
-                         +vecp(3,i)*(gridcoo(iz,3)-(coop(3,i)+dble(iiz*lg_num(3))*Hgs(3))))/radp_diele**3
+                        -(vec_dipole_source(1,i)*(gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1))) &
+                         +vec_dipole_source(2,i)*(gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2))) &
+                         +vec_dipole_source(3,i)*(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3))))/rad_dipole_source**3
           eonf_sd(1,ix,iy,iz)=eonf_sd(1,ix,iy,iz)  &
-                         +vecp(1,i)/radp_diele**3
+                         +vec_dipole_source(1,i)/rad_dipole_source**3
           eonf_sd(2,ix,iy,iz)=eonf_sd(2,ix,iy,iz)  &
-                         +vecp(2,i)/radp_diele**3
+                         +vec_dipole_source(2,i)/rad_dipole_source**3
           eonf_sd(3,ix,iy,iz)=eonf_sd(3,ix,iy,iz)  &
-                         +vecp(3,i)/radp_diele**3
+                         +vec_dipole_source(3,i)/rad_dipole_source**3
         end if
       end do
       end do

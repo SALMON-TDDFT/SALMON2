@@ -146,14 +146,14 @@ if(idensum==0) posplane=posplane/a_B
 
 select case (ikind_eext)
   case(1)
-    if(rlaser_int_wcm2_1>=1.d-12)then
-      amplitude1=sqrt(rlaser_int_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    if(I_wcm2_1>=1.d-12)then
+      E_amplitude1=sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
-    if(rlaser_int_wcm2_2>=1.d-12)then
-      amplitude2=sqrt(rlaser_int_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    if(I_wcm2_2>=1.d-12)then
+      E_amplitude2=sqrt(I_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     else
-      if(abs(amplitude2)<=1.d-12)then
-        amplitude2=0.d0
+      if(abs(E_amplitude2)<=1.d-12)then
+        E_amplitude2=0.d0
       end if
     end if
 end select
@@ -198,7 +198,7 @@ else if(ilsda==1)then
   numspin=2
 end if
 
-if(MEO==2.or.MEO==3) call make_corr_pole
+if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole
 call make_icoobox_bound
 call timer_end(LOG_READ_LDA_DATA)
 
@@ -453,7 +453,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log(nproc_k, nproc_ob, nproc_mxin, nproc_mxin_s)
+    call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
   end if
 end subroutine
 
@@ -538,7 +538,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%io_e=iobnum/nspin
   info%numo=iobnum/nspin
 
-  info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
+  info%if_divide_rspace = nproc_d_o_mul.ne.1   ! moved just after init_lattice
   info%if_divide_orbit = nproc_ob.ne.1
   info%icomm_rko = nproc_group_global
 
@@ -715,7 +715,7 @@ allocate(zc(N_hamil))
 ! External Field Direction
 select case (ikind_eext)
   case(1)
-    if(alocal_laser=='y')then
+    if(yn_local_field=='y')then
       rlaser_center(1:3)=(rlaserbound_sta(1:3)+rlaserbound_end(1:3))/2.d0
       do jj=1,3
         select case(imesh_oddeven(jj))
@@ -776,7 +776,7 @@ end do
 end do
 end do
 
-if(nump>=1)then
+if(num_dipole_source>=1)then
   allocate(vonf_sd(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   allocate(eonf_sd(3,mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   vonf_sd=0.d0
@@ -869,14 +869,14 @@ end do
 end do
 
   do itt=0,0
-    if(out_dns_rt=='y')then
+    if(yn_out_dns_rt=='y')then
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
-    if(out_elf_rt=='y')then
+    if(yn_out_elf_rt=='y')then
       call calcELF(info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
-    if(out_estatic_rt=='y')then
+    if(yn_out_estatic_rt=='y')then
       call calcEstatic(ng, info, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if

@@ -143,7 +143,7 @@ contains
       nreqs_rgroupob(10) = comm_recv_init(srmatbox2_z_5d,kdw,7,icomm)
       nreqs_rgroupob(11) = comm_send_init(srmatbox3_z_5d,kdw,8,icomm)
       nreqs_rgroupob(12) = comm_recv_init(srmatbox4_z_5d,kup,8,icomm)
-    else if(iSCFRT==2.and.nproc_Mxin_mul/=1)then
+    else if(iSCFRT==2.and.nproc_d_o_mul/=1)then
       allocate(nreqs_cgroupob(12))
       nreqs_cgroupob( 1) = comm_send_init(scmatbox1_x_5d,iup,3,icomm)
       nreqs_cgroupob( 2) = comm_recv_init(scmatbox2_x_5d,idw,3,icomm)
