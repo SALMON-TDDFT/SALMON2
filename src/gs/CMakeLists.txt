@@ -7,8 +7,6 @@ set(SOURCES
     rmmdiis_eigen_lapack.f90
     rmmdiis.f90
     subspace_diagonalization.f90
-    ybcg.f90
-    ybcg_periodic.f90
     gram_schmidt_orth.f90
     scf_iteration.f90
     structure_opt.f90

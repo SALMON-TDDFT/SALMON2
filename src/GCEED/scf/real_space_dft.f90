@@ -49,8 +49,6 @@ use calc_iobnum_sub
 use check_mg_sub
 use check_ng_sub
 use scf_iteration_sub
-use dtcg_sub
-use dtcg_periodic_sub
 use rmmdiis_sub
 use density_matrix, only: calc_density
 use writefield

@@ -26,11 +26,9 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
                iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,mixing,iter)
-  use inputoutput, only: iperiodic,method_min,gscg,method_mixing,mixrate
+  use inputoutput, only: iperiodic,method_min,method_mixing,mixrate
   use structures
   use timer
-  use dtcg_sub
-  use dtcg_periodic_sub
   use rmmdiis_sub
   use gram_schmidt_orth, only: gram_schmidt
   use Conjugate_Gradient
@@ -77,21 +75,9 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
     ( method_min == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
     select case(iperiodic)
     case(0)
-      select case(gscg)
-      case('y')
-        call sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
-      case('n')
-        call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
-                  info_ob,ppg,vlocal)
-      end select
+      call sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
     case(3)
-      select case(gscg)
-      case('y')
-        call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
-      case('n')
-        call dtcg_periodic(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
-                           info_ob,ppg,vlocal)
-      end select
+      call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
     end select
   else if( method_min  == 'diis' .or. method_min == 'cg-diis' ) then
     select case(iperiodic)
