@@ -50,12 +50,8 @@ use check_mg_sub
 use check_ng_sub
 use scf_iteration_sub
 use dtcg_sub
-use gscg_sub
 use dtcg_periodic_sub
-use gscg_periodic_sub
 use rmmdiis_sub
-use subspace_diag_sub
-use subspace_diag_periodic_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
