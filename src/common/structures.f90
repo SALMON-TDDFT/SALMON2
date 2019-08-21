@@ -106,6 +106,12 @@ module structures
     real(8),allocatable :: occ(:,:,:,:) ! (io,ik,ispin,im), occ = rocc*wk, occupation numbers
   end type s_orbital_parallel
 
+  type s_field_parallel
+    integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
+                         ! Inside the FFTE kernel, x-direction is redundant and 
+                         ! yz-direction is parallel. 
+  end type s_field_parallel
+
   type s_orbital
   ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)

@@ -36,14 +36,15 @@ integer :: i11,i12,i13,i14,i15
 CONTAINS
 
 !=======================================================================
-subroutine make_new_world(info)
-use structures, only: s_orbital_parallel
+subroutine make_new_world(info,info_field)
+use structures, only: s_orbital_parallel, s_field_parallel
 use salmon_parallel
 use salmon_communication, only: comm_create_group, comm_get_groupinfo, &
                                 comm_summation
 use misc_routines, only: get_wtime
 implicit none
 type(s_orbital_parallel),intent(inout) :: info
+type(s_field_parallel),intent(inout) :: info_field
 integer :: ii
 integer :: i1,i2,i3,i4,i5
 integer :: ix,iy,iz
@@ -423,8 +424,8 @@ else if(isequential==2)then
   ikey=imrs(1)+imr(1)*nproc_Mxin_s_dm(1)
 end if
 
-nproc_group_bound(1) = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_bound(1), nproc_id_bound(1), nproc_size_bound(1))
+info_field%icomm(1) = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info_field%icomm(1), nproc_id_bound(1), nproc_size_bound(1))
 
 if(isequential==1)then
   icolor=imrs(1)+imrs(3)*nproc_Mxin_s_dm(1)   &
@@ -442,8 +443,8 @@ else if(isequential==2)then
   ikey=imrs(2)+imr(2)*nproc_Mxin_s_dm(2)
 end if
 
-nproc_group_bound(2) = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_bound(2), nproc_id_bound(2), nproc_size_bound(2))
+info_field%icomm(2) = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info_field%icomm(2), nproc_id_bound(2), nproc_size_bound(2))
 
 if(isequential==1)then
   icolor=imrs(1)+imrs(2)*nproc_Mxin_s_dm(1)   &
@@ -461,8 +462,8 @@ else if(isequential==2)then
   ikey=imrs(3)+imr(3)*nproc_Mxin_s_dm(3)
 end if
 
-nproc_group_bound(3) = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_bound(3), nproc_id_bound(3), nproc_size_bound(3))
+info_field%icomm(3) = comm_create_group(nproc_group_global, icolor, ikey)
+call comm_get_groupinfo(info_field%icomm(3), nproc_id_bound(3), nproc_size_bound(3))
 
 if(isequential==1)then
   do ii=0,nproc_Mxin_mul-1

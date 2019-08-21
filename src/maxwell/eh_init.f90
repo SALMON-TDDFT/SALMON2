@@ -1489,14 +1489,15 @@ subroutine eh_prep_GCEED(fs,fw)
   use new_world_sub,     only: make_new_world
   use init_sendrecv_sub, only: init_updown,iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
   use sendrecv_grid,     only: init_sendrecv_grid
-  use structures,        only: s_fdtd_system, s_orbital_parallel
+  use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
   use salmon_maxwell,    only: ls_fdtd_work
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
+  type(s_orbital_parallel)          :: info
+  type(s_field_parallel)            :: info_field
   integer                           :: neig_ng_eh(1:3,1:2)
   integer                           :: ii
-  type(s_orbital_parallel)          :: info
   
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
@@ -1506,7 +1507,7 @@ subroutine eh_prep_GCEED(fs,fw)
   call set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
   nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
   nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
-  call make_new_world(info)
+  call make_new_world(info,info_field)
   call setk(k_sta,k_end,k_num,num_kpoints_rd,nproc_k,nproc_id_orbitalgrid)
   
   !set grid and odd or even grid paterns
