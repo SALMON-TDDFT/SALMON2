@@ -131,8 +131,7 @@ contains
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
 
-! NOTE: This directive is a compiler hint to stabilize the performance of summation
-#ifdef __INTEL_COMPILER
+#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: wrk
 #endif
 
@@ -252,8 +251,7 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
-! NOTE: This directive is a compiler hint to stabilize the performance of summation
-#ifdef __INTEL_COMPILER
+#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
@@ -363,8 +361,7 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
-! NOTE: This directive is a compiler hint to stabilize the performance of summation
-#ifdef __INTEL_COMPILER
+#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
