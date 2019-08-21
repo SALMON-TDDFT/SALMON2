@@ -16,13 +16,13 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 Subroutine write_GS_data
   use Global_Variables
-  use salmon_global, only: out_dos, &
+  use salmon_global, only: yn_out_dos, &
                          & out_dos_start, &
                          & out_dos_end, &
-                         & iout_dos_nenergy, &
-                         & out_dos_smearing, &
-                         & out_dos_method, &
-                         & out_dos_fshift
+                         & out_dos_nenergy, &
+                         & out_dos_width, &
+                         & out_dos_function, &
+                         & yn_out_dos_set_fe_origin
   use inputoutput, only: unit_length, t_unit_energy_inv, t_unit_energy
   use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_tdks
   use salmon_communication, only: comm_is_root,comm_summation, comm_bcast, comm_sync_all
@@ -110,11 +110,11 @@ Subroutine write_GS_data
   end if
 
   
-  if(out_dos == 'y') call write_dos_data
-  if(out_psi == 'y') call write_psi_data
+  if(yn_out_dos == 'y') call write_dos_data
+  if(yn_out_psi == 'y') call write_psi_data
   call write_k_data
   call write_eigen_data
-  if(out_tm  == 'y') call write_tm_data
+  if(yn_out_tm  == 'y') call write_tm_data
 
   return
 
@@ -126,7 +126,7 @@ Subroutine write_GS_data
       real(8) :: vbmax, cbmin, emax, emin, efermi, eshift
       real(8) :: ww, fk, dw
       integer :: iw
-      real(8) :: dos(iout_dos_nenergy), dos_l(iout_dos_nenergy)  
+      real(8) :: dos(out_dos_nenergy), dos_l(out_dos_nenergy)  
     
       if (comm_is_root(nproc_id_global)) then
 
@@ -135,7 +135,7 @@ Subroutine write_GS_data
         cbmin = minval(esp_cb_min(:))
         vbmax = maxval(esp_vb_max(:))
       
-        if (out_dos_fshift == 'y') then
+        if (yn_out_dos_set_fe_origin == 'y') then
           efermi = (vbmax + cbmin) * 0.5d0
           eshift = efermi
         else
@@ -150,17 +150,17 @@ Subroutine write_GS_data
       out_dos_end = min(out_dos_end, emax + 0.25d0 * (emax - emin))
       
       dos_l = 0d0
-      dw = (out_dos_end - out_dos_start) / (iout_dos_nenergy - 1)
+      dw = (out_dos_end - out_dos_start) / (out_dos_nenergy - 1)
       
-      select case (out_dos_method)
+      select case (out_dos_function)
       case('lorentzian')
         !$omp parallel do private(ik,ib,fk,iw,ww) reduction(+:dos_l) collapse(2)
         do ik = NK_s,NK_e
           do ib = 1,NB
-            fk = 2.d0/(NKxyz)*wk(ik)*(out_dos_smearing/pi)          
-            do iw = 1, iout_dos_nenergy
+            fk = 2.d0/(NKxyz)*wk(ik)*(out_dos_width/pi)          
+            do iw = 1, out_dos_nenergy
               ww =  out_dos_start + (iw-1) * dw + eshift - esp(ib,ik) 
-              dos_l(iw) = dos_l(iw) + fk/(ww**2 + out_dos_smearing**2)
+              dos_l(iw) = dos_l(iw) + fk/(ww**2 + out_dos_width**2)
             end do
           end do
         end do
@@ -169,16 +169,16 @@ Subroutine write_GS_data
         !$omp parallel do private(ik,ib,fk,iw,ww) reduction(+:dos_l) collapse(2)
         do ik = NK_s,NK_e
           do ib = 1,NB
-            fk = (2.d0 / (NKxyz * sqrt(2.d0*pi) * out_dos_smearing)) * wk(ik)
-            do iw = 1, iout_dos_nenergy
+            fk = (2.d0 / (NKxyz * sqrt(2.d0*pi) * out_dos_width)) * wk(ik)
+            do iw = 1, out_dos_nenergy
               ww =  out_dos_start + (iw-1) * dw + eshift - esp(ib,ik) 
-              dos_l(iw) = dos_l(iw) + fk * exp(-(0.5/out_dos_smearing**2)*ww**2)
+              dos_l(iw) = dos_l(iw) + fk * exp(-(0.5/out_dos_width**2)*ww**2)
             end do
           end do
         end do
       end select
       
-      call comm_summation(dos_l,dos,iout_dos_nenergy,nproc_group_tdks)
+      call comm_summation(dos_l,dos,out_dos_nenergy,nproc_group_tdks)
 
       if (comm_is_root(nproc_id_global)) then
         fh_dos = open_filehandle(file_dos)
@@ -190,7 +190,7 @@ Subroutine write_GS_data
         write(fh_dos, '("#",99(1X,I0,":",A,"[",A,"]"))') &
           & 1, "Energy", trim(t_unit_energy%name), &
           & 2, "DoS", trim(t_unit_energy_inv%name)
-        do iw = 1, iout_dos_nenergy
+        do iw = 1, out_dos_nenergy
           ww =  out_dos_start + (iw-1) * dw 
           write(fh_dos,'(F16.8,99(1X,E23.15E3))') &
             & ww * t_unit_energy%conv, &
@@ -214,7 +214,7 @@ Subroutine write_GS_data
 
       fh_psi=502
 
-      select case(format3d)
+      select case(format_voxel_data)
       case ('cube')
          write(gs_wfn_k_cube_vtk_dir,'(A,A)') trim(directory),'/gs_wfn_cube/'
          call create_directory(gs_wfn_k_cube_vtk_dir)

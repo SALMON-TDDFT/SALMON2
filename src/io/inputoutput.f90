@@ -47,7 +47,7 @@ module inputoutput
   integer :: inml_multiscale
   integer :: inml_maxwell
   integer :: inml_analysis
-  integer :: inml_hartree
+  integer :: inml_poisson
   integer :: inml_ewald
   integer :: inml_opt
   integer :: inml_md
@@ -408,38 +408,38 @@ contains
       & projection_decomp, &
       & nenergy, &
       & de, &
-      & out_psi, &
-      & out_dos, &
-      & out_pdos, &
-      & out_dns, &
+      & yn_out_psi, &
+      & yn_out_dos, &
+      & yn_out_dos_set_fe_origin, &
       & out_dos_start, &
       & out_dos_end, &
-      & iout_dos_nenergy, &
-      & out_dos_smearing, &
-      & out_dos_method, &
-      & out_dos_fshift, &
-      & out_old_dns, &
-      & out_dns_rt, &
+      & out_dos_nenergy, &
+      & out_dos_width, &
+      & out_dos_function, &
+      & yn_out_pdos, &
+      & yn_out_dns, &
+      & yn_out_dns_rt, &
       & out_dns_rt_step, &
-      & out_dns_trans, &
+      & out_old_dns, &
+      & yn_out_dns_trans, &
       & out_dns_trans_energy, &
-      & out_elf, &
-      & out_elf_rt, &
+      & yn_out_elf, &
+      & yn_out_elf_rt, &
       & out_elf_rt_step, &
-      & out_estatic_rt, &
+      & yn_out_estatic_rt, &
       & out_estatic_rt_step, &
-      & out_rvf_rt, &
+      & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
-      & out_tm, &
+      & yn_out_tm, &
       & out_projection_step, &
       & out_ms_step, &
-      & format3d, &
-      & numfiles_out_3d, &
+      & format_voxel_data, &
+      & nsplit_voxel_data, &
       & timer_process
 
-    namelist/hartree/ &
+    namelist/poisson/ &
       & meo, &
-      & num_pole_xyz
+      & num_multipole_xyz
 
     namelist/ewald/ &
       & newald, &
@@ -748,39 +748,39 @@ contains
     projection_decomp   = 'n'
     nenergy             = 1000
     de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
-    out_psi             = 'n'
-    out_dos             = 'n'
+    yn_out_psi          = 'n'
+    yn_out_dos          = 'n'
+    yn_out_dos_set_fe_origin = 'n'
     out_dos_start       = -1.d10 / au_energy_ev * uenergy_from_au
     out_dos_end         = +1.d10 / au_energy_ev * uenergy_from_au
-    iout_dos_nenergy    = 601
-    out_dos_smearing    = 0.1d0 / au_energy_ev * uenergy_from_au
-    out_dos_method      = 'gaussian'
-    out_dos_fshift      = 'n'
-    out_pdos            = 'n'
-    out_dns             = 'n'
-    out_old_dns         = 'n'
-    out_dns_rt          = 'n'
+    out_dos_nenergy     = 601
+    out_dos_width       = 0.1d0 / au_energy_ev * uenergy_from_au
+    out_dos_function    = 'gaussian'
+    yn_out_pdos         = 'n'
+    yn_out_dns          = 'n'
+    yn_out_dns_rt       = 'n'
     out_dns_rt_step     = 50
-    out_dns_trans       = 'n'
+    out_old_dns         = 'n'
+    yn_out_dns_trans    = 'n'
     out_dns_trans_energy= 1.55d0 / au_energy_ev * uenergy_from_au  ! eV
 
-    out_elf             = 'n'
-    out_elf_rt          = 'n'
+    yn_out_elf          = 'n'
+    yn_out_elf_rt       = 'n'
     out_elf_rt_step     = 50
-    out_estatic_rt      = 'n'
+    yn_out_estatic_rt   = 'n'
     out_estatic_rt_step = 50
-    out_rvf_rt          = 'n'
+    yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
-    out_tm              = 'n'
+    yn_out_tm           = 'n'
     out_projection_step = 100
     out_ms_step         = 100
-    format3d            = 'cube'
-    numfiles_out_3d     = 1
+    format_voxel_data   = 'cube'
+    nsplit_voxel_data   = 1
     timer_process       = 'n'
 
-!! == default for &hartree
-    meo          = 3
-    num_pole_xyz = 0
+!! == default for &poissno
+    meo               = 3
+    num_multipole_xyz = 0
 !! == default for &ewald
     newald = 4
     aewald = 0.5d0
@@ -904,7 +904,7 @@ contains
       read(fh_namelist, nml=analysis, iostat=inml_analysis)
       rewind(fh_namelist)
 
-      read(fh_namelist, nml=hartree, iostat=inml_hartree)
+      read(fh_namelist, nml=poisson, iostat=inml_poisson)
       rewind(fh_namelist)
 
       read(fh_namelist, nml=ewald, iostat=inml_ewald)
@@ -1192,47 +1192,47 @@ contains
     call comm_bcast(obs_plane_em ,nproc_group_global)
     
 !! == bcast for &analysis
-    call comm_bcast(projection_option,nproc_group_global)
-    call comm_bcast(projection_decomp,nproc_group_global)
-    call comm_bcast(nenergy          ,nproc_group_global)
-    call comm_bcast(de               ,nproc_group_global)
+    call comm_bcast(projection_option   ,nproc_group_global)
+    call comm_bcast(projection_decomp   ,nproc_group_global)
+    call comm_bcast(nenergy             ,nproc_group_global)
+    call comm_bcast(de                  ,nproc_group_global)
     de = de * uenergy_to_au
-    call comm_bcast(out_psi             ,nproc_group_global)
-    call comm_bcast(out_dos             ,nproc_group_global)
+    call comm_bcast(yn_out_psi          ,nproc_group_global)
+    call comm_bcast(yn_out_dos          ,nproc_group_global)
+    call comm_bcast(yn_out_dos_set_fe_origin ,nproc_group_global)
     call comm_bcast(out_dos_start       ,nproc_group_global)
     out_dos_start = out_dos_start * uenergy_to_au
     call comm_bcast(out_dos_end         ,nproc_group_global)
     out_dos_end = out_dos_end * uenergy_to_au
-    call comm_bcast(iout_dos_nenergy    ,nproc_group_global)
-    call comm_bcast(out_dos_smearing    ,nproc_group_global)
-    out_dos_smearing = out_dos_smearing * uenergy_to_au
-    call comm_bcast(out_dos_method      ,nproc_group_global)
-    call comm_bcast(out_dos_fshift      ,nproc_group_global)
-    call comm_bcast(out_pdos            ,nproc_group_global)
-    call comm_bcast(out_dns             ,nproc_group_global)
-    call comm_bcast(out_old_dns         ,nproc_group_global)
-    call comm_bcast(out_dns_rt          ,nproc_group_global)
+    call comm_bcast(out_dos_nenergy     ,nproc_group_global)
+    call comm_bcast(out_dos_width       ,nproc_group_global)
+    out_dos_width = out_dos_width * uenergy_to_au
+    call comm_bcast(out_dos_function    ,nproc_group_global)
+    call comm_bcast(yn_out_pdos         ,nproc_group_global)
+    call comm_bcast(yn_out_dns          ,nproc_group_global)
+    call comm_bcast(yn_out_dns_rt       ,nproc_group_global)
     call comm_bcast(out_dns_rt_step     ,nproc_group_global)
-    call comm_bcast(out_dns_trans       ,nproc_group_global)
+    call comm_bcast(out_old_dns         ,nproc_group_global)
+    call comm_bcast(yn_out_dns_trans    ,nproc_group_global)
     call comm_bcast(out_dns_trans_energy,nproc_group_global)
     out_dns_trans_energy = out_dns_trans_energy * uenergy_to_au
-    call comm_bcast(out_elf            ,nproc_group_global)
-    call comm_bcast(out_elf_rt         ,nproc_group_global)
-    call comm_bcast(out_elf_rt_step    ,nproc_group_global)
-    call comm_bcast(out_estatic_rt     ,nproc_group_global)
-    call comm_bcast(out_estatic_rt_step,nproc_group_global)
-    call comm_bcast(out_rvf_rt         ,nproc_group_global)
-    call comm_bcast(out_rvf_rt_step    ,nproc_group_global)
-    call comm_bcast(out_tm             ,nproc_group_global)
-    call comm_bcast(out_projection_step,nproc_group_global)
-    call comm_bcast(out_ms_step     ,nproc_group_global)
-    call comm_bcast(format3d           ,nproc_group_global)
-    call comm_bcast(numfiles_out_3d    ,nproc_group_global)
-    call comm_bcast(timer_process      ,nproc_group_global)
+    call comm_bcast(yn_out_elf          ,nproc_group_global)
+    call comm_bcast(yn_out_elf_rt       ,nproc_group_global)
+    call comm_bcast(out_elf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_estatic_rt   ,nproc_group_global)
+    call comm_bcast(out_estatic_rt_step ,nproc_group_global)
+    call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
+    call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_tm           ,nproc_group_global)
+    call comm_bcast(out_projection_step ,nproc_group_global)
+    call comm_bcast(out_ms_step         ,nproc_group_global)
+    call comm_bcast(format_voxel_data   ,nproc_group_global)
+    call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
+    call comm_bcast(timer_process       ,nproc_group_global)
 
-!! == bcast for &hartree
-    call comm_bcast(meo         ,nproc_group_global)
-    call comm_bcast(num_pole_xyz,nproc_group_global)
+!! == bcast for &poisson
+    call comm_bcast(meo               ,nproc_group_global)
+    call comm_bcast(num_multipole_xyz ,nproc_group_global)
 !! == bcast for &ewald
     call comm_bcast(newald,nproc_group_global)
     call comm_bcast(aewald,nproc_group_global)
@@ -1852,41 +1852,41 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_decomp', projection_decomp
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_psi', out_psi
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dos', out_dos
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_start', out_dos_start
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_end', out_dos_end
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iout_dos_nenergy', iout_dos_nenergy
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_smearing', out_dos_smearing
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dos_method', out_dos_method
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dos_fshift', out_dos_fshift
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_pdos', out_pdos
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dns', out_dns
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dns_rt', out_dns_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dos_nenergy', out_dos_nenergy
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_width', out_dos_width
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dos_function', out_dos_function
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos', yn_out_pdos
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_rt_step', out_dns_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dns_trans', out_dns_trans
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_trans', yn_out_dns_trans
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dns_trans_energy', out_dns_trans_energy
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_elf', out_elf
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_elf_rt', out_elf_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf', yn_out_elf
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf_rt', yn_out_elf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_elf_rt_step', out_elf_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_estatic_rt', out_estatic_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_estatic_rt', yn_out_estatic_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_rvf_rt', out_rvf_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_tm', out_tm
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'format3d', format3d
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'numfiles_out_3d', numfiles_out_3d
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",A)') 'timer_process', timer_process
 
-      if(inml_hartree >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'hartree', inml_hartree
+      if(inml_poisson >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', inml_poisson
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'meo', meo
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_pole_xyz(1)', num_pole_xyz(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_pole_xyz(2)', num_pole_xyz(2)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_pole_xyz(3)', num_pole_xyz(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
 
       if(inml_ewald >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', inml_ewald

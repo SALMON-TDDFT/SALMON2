@@ -844,12 +844,12 @@ if(write_gs_wfn_k == 'y') then
 end if
 
 ! output transition moment
-if(out_tm  == 'y') then
+if(yn_out_tm  == 'y') then
   if(iperiodic==3) then
     call write_k_data(system,stencil)
     call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
   else
-    write(*,*) "error: out_tm='y' & iperiodic=0"
+    write(*,*) "error: yn_out_tm='y' & iperiodic=0"
   end if
 end if
 
@@ -923,19 +923,19 @@ call band_information
 
 call write_eigen
 
-if(out_psi=='y') then
+if(yn_out_psi=='y') then
   call writepsi(lg)
 end if
 
-if(out_dns=='y') then
+if(yn_out_dns=='y') then
   call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
 end if
 
-if(out_dos=='y') then
+if(yn_out_dos=='y') then
   call calc_dos
 end if
 
-if(out_pdos=='y') then
+if(yn_out_pdos=='y') then
   call calc_pdos(info)
 end if
 
@@ -943,7 +943,7 @@ if(OC==2)then
   call prep_ini
 end if
 
-if(out_elf=='y')then
+if(yn_out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
   call calcELF(info,srho,0)

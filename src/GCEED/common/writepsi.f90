@@ -58,7 +58,7 @@ subroutine writepsi(lg)
         end do
       end if
 
-      if(format3d=='avs')then
+      if(format_voxel_data=='avs')then
   !OMP parallel do private(iz,iy,ix)
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
@@ -74,10 +74,10 @@ subroutine writepsi(lg)
       write(filenum, '(i5)') p0
       suffix = "psi"//trim(adjustl(filenum))
       phys_quantity = "psi"
-      if(format3d=='avs')then
+      if(format_voxel_data=='avs')then
         header_unit = "A**(-3/2)"
         call writeavs(lg,103,suffix,header_unit,matbox_l2,icoo1d)
-      else if(format3d=='cube')then
+      else if(format_voxel_data=='cube')then
         call writecube(lg,103,suffix,phys_quantity,matbox_l2,hgs,igc_is,igc_ie,gridcoo)
       end if
     end do

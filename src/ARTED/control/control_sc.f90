@@ -26,7 +26,7 @@ subroutine tddft_sc
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
   use misc_routines, only: get_wtime
-  use salmon_global, only: format3d, out_dns, out_dns_rt, out_dns_rt_step
+  use salmon_global, only: format_voxel_data, yn_out_dns, yn_out_dns_rt, out_dns_rt_step
   use salmon_file, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_current, t_unit_ac,  t_unit_energy, t_unit_elec
   use restart, only: prep_restart_write
@@ -84,10 +84,10 @@ subroutine tddft_sc
   rho_gs(:)=rho(:)
 
   ! Export electronic density
-  if (out_dns == 'y') call write_density(iter,'gs')
+  if (yn_out_dns == 'y') call write_density(iter,'gs')
 
   ! Export transition electronic density at specified energy
-  if (out_dns_trans == 'y') call analysis_dns_trans(iter)
+  if (yn_out_dns_trans== 'y') call analysis_dns_trans(iter)
 
   if (comm_is_root(nproc_id_global)) then
     ! open(7,file=file_epst,    position = position_option) !! TODO: remove output of "_t.out" file future
@@ -106,7 +106,7 @@ subroutine tddft_sc
   call comm_sync_all
 
   ! Export to file_trj (initial step)
-  if (out_rvf_rt=='y')then
+  if (yn_out_rvf_rt=='y')then
        call Ion_Force_omp(Rion_update_rt,calc_mode_rt)
        write(comment_line,110) -1, 0.0d0
        if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
@@ -298,7 +298,7 @@ subroutine tddft_sc
     endif
 
     ! Export to file_trj
-    if (out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
+    if (yn_out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
        if(use_ehrenfest_md=='n') &
        &  call Ion_Force_omp(Rion_update_rt,calc_mode_rt)
        write(comment_line,110) iter, iter*dt
@@ -324,12 +324,12 @@ subroutine tddft_sc
     end if
     
     ! Export electronic density (cube or vtk)
-    if(out_dns_rt=='y' .and. mod(iter,out_dns_rt_step)==0) then
+    if(yn_out_dns_rt=='y' .and. mod(iter,out_dns_rt_step)==0) then
        call write_density(iter,'rt')
     end if
 
     ! Export transition electronic density at specified energy
-    if (out_dns_trans == 'y') call analysis_dns_trans(iter)
+    if (yn_out_dns_trans== 'y') call analysis_dns_trans(iter)
 
     ! Export analysis data(Adiabatic evolution) to file_ovlp,file_nex
     if(projection_option /='no' .and. mod(iter,out_projection_step)==0)then

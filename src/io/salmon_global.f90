@@ -241,38 +241,38 @@ module salmon_global
   character(4)   :: projection_decomp
   integer        :: nenergy
   real(8)        :: de
-  character(1)   :: out_psi
-  character(1)   :: out_dos
+  character(1)   :: yn_out_psi
+  character(1)   :: yn_out_dos
+  character(1)   :: yn_out_dos_set_fe_origin
   real(8)        :: out_dos_start
   real(8)        :: out_dos_end
-  integer        :: iout_dos_nenergy
-  real(8)        :: out_dos_smearing
-  character(16)  :: out_dos_method
-  character(1)   :: out_dos_fshift
-  character(1)   :: out_pdos
-  character(1)   :: out_dns
-  character(1)   :: out_old_dns
-  character(1)   :: out_dns_rt
+  integer        :: out_dos_nenergy
+  real(8)        :: out_dos_width
+  character(16)  :: out_dos_function
+  character(1)   :: yn_out_pdos
+  character(1)   :: yn_out_dns
+  character(1)   :: yn_out_dns_rt
   integer        :: out_dns_rt_step
-  character(1)   :: out_dns_trans
+  character(1)   :: out_old_dns
+  character(1)   :: yn_out_dns_trans
   real(8)        :: out_dns_trans_energy
-  character(1)   :: out_elf
-  character(1)   :: out_elf_rt
+  character(1)   :: yn_out_elf
+  character(1)   :: yn_out_elf_rt
   integer        :: out_elf_rt_step
-  character(1)   :: out_estatic_rt
+  character(1)   :: yn_out_estatic_rt
   integer        :: out_estatic_rt_step
-  character(1)   :: out_rvf_rt
+  character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
-  character(1)   :: out_tm
+  character(1)   :: yn_out_tm
   integer        :: out_projection_step
   integer        :: out_ms_step
-  character(16)  :: format3d
-  integer        :: numfiles_out_3d
+  character(16)  :: format_voxel_data
+  integer        :: nsplit_voxel_data
   character(1)   :: timer_process
 
-!! &hartree
+!! &poisson
   integer        :: meo
-  integer        :: num_pole_xyz(3)
+  integer        :: num_multipole_xyz(3)
 
 !! &ewald
   integer        :: newald

@@ -20,17 +20,17 @@ contains
 
 subroutine init_md(system,md)
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: MI,out_rvf_rt, ensemble, thermostat,set_ini_velocity,step_velocity_scaling
+  use salmon_global, only: MI,yn_out_rvf_rt, ensemble, thermostat,set_ini_velocity,step_velocity_scaling
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   implicit none    
   type(s_dft_system) :: system
   type(s_md) :: md
 
-  if(out_rvf_rt=='n') then
+  if(yn_out_rvf_rt=='n') then
      if (comm_is_root(nproc_id_global)) &
-          write(*,*)" out_rvf_rt --> y : changed for md option"
-     out_rvf_rt='y'
+          write(*,*)" yn_out_rvf_rt --> y : changed for md option"
+     yn_out_rvf_rt='y'
   endif
 
   allocate(md%Rion_last(3,MI))

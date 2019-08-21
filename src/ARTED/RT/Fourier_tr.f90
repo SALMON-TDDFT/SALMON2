@@ -190,7 +190,7 @@ subroutine analysis_dns_trans(it)
       fh_dns_trans2 = 504
       if (comm_is_root(nproc_id_global)) then
 
-      select case(format3d)
+      select case(format_voxel_data)
       case ('cube')
          file_dns_trans1 = "out_dns_trans_Re.cube"
          file_dns_trans2 = "out_dns_trans_Im.cube"

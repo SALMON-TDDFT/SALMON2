@@ -32,7 +32,7 @@ subroutine calc_md_ground_state
   use timer
   use opt_variables
   use misc_routines, only: get_wtime
-  use salmon_global, only: format3d, out_dns, out_dns_rt, out_dns_rt_step
+  use salmon_global, only: format_voxel_data, yn_out_dns, yn_out_dns_rt, out_dns_rt_step
   use ground_state
   use io_gs_wfn_k
   implicit none
@@ -51,10 +51,10 @@ subroutine calc_md_ground_state
   Rion_update_rt = rion_update_on
 
   ! Export electronic density
-  if(out_dns == 'y') call write_density(it,'gs')
+  if(yn_out_dns == 'y') call write_density(it,'gs')
 
   ! Export to file_trj (initial step)
-  if (out_rvf_rt=='y')then
+  if (yn_out_rvf_rt=='y')then
        call Ion_Force_omp(Rion_update_rt,calc_mode_gs)
        write(comment_line,110) -1, 0.0d0
        if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
@@ -163,7 +163,7 @@ subroutine calc_md_ground_state
      endif
 
      ! Export to file_trj
-     if (out_rvf_rt=='y' .and. mod(it,out_rvf_rt_step)==0)then
+     if (yn_out_rvf_rt=='y' .and. mod(it,out_rvf_rt_step)==0)then
         write(comment_line,110) it, it*dt
 110     format("#md-gs  step=",i8,"   time",e16.6)
         if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
@@ -173,7 +173,7 @@ subroutine calc_md_ground_state
      endif
 
      ! Export electronic density (cube or vtk)
-     if(out_dns_rt=='y' .and. mod(it,out_dns_rt_step)==0) then
+     if(yn_out_dns_rt=='y' .and. mod(it,out_dns_rt_step)==0) then
         call write_density(it,'rt')
      end if
 

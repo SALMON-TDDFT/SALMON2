@@ -871,14 +871,14 @@ end do
 end do
 
   do itt=0,0
-    if(out_dns_rt=='y')then
+    if(yn_out_dns_rt=='y')then
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
-    if(out_elf_rt=='y')then
+    if(yn_out_elf_rt=='y')then
       call calcELF(info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
-    if(out_estatic_rt=='y')then
+    if(yn_out_estatic_rt=='y')then
       call calcEstatic(ng, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if

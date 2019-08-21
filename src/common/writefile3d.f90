@@ -21,7 +21,7 @@ module writefile3d
 contains
 
 subroutine writeavs(lg,fp,suffix,header_unit,rmat,icoo1d)
-  use inputoutput, only: numfiles_out_3d
+  use inputoutput, only: nsplit_voxel_data
   use salmon_parallel, only: nproc_id_global
   use structures, only: s_rgrid
   use salmon_communication, only: comm_is_root
@@ -39,16 +39,16 @@ subroutine writeavs(lg,fp,suffix,header_unit,rmat,icoo1d)
   integer::jsta,jend
   character(8)  :: filenumber_data
 
-  if(numfiles_out_3d>=2)then
-    if(nproc_id_global<numfiles_out_3d)then
+  if(nsplit_voxel_data>=2)then
+    if(nproc_id_global<nsplit_voxel_data)then
       write(filenumber_data, '(i8)') nproc_id_global
       filename = trim(suffix)//"."//adjustl(filenumber_data)
       open(fp,file=filename)
       if(comm_is_root(nproc_id_global))then
         write(fp,'("# unit is ",a)') header_unit
       end if
-      jsta=nproc_id_global*(lg%num(1)*lg%num(2)*lg%num(3))/numfiles_out_3d+1
-      jend=(nproc_id_global+1)*(lg%num(1)*lg%num(2)*lg%num(3))/numfiles_out_3d
+      jsta=nproc_id_global*(lg%num(1)*lg%num(2)*lg%num(3))/nsplit_voxel_data+1
+      jend=(nproc_id_global+1)*(lg%num(1)*lg%num(2)*lg%num(3))/nsplit_voxel_data
       do jj=jsta,jend
         if(abs(rmat(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj)))>=1.0d-10)then
           write(fp,'(e20.8)') rmat(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj))

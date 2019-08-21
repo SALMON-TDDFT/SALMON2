@@ -41,7 +41,7 @@ else if(sum(abs(num_rgrid)) == 0d0 .and. sum(abs(dl)) /= 0d0)then
 end if
 
 !===== namelist for group_fundamental =====
-select case(out_rvf_rt)
+select case(yn_out_rvf_rt)
 case('y')
   icalcforce = 1
 end select
@@ -101,18 +101,18 @@ end if
 if(meo<=0.or.meo>=4)then
   stop "meo must be equal to 1 or 2 or 3."
 else if(meo==3)then
-  if(num_pole_xyz(1)==0.and.num_pole_xyz(2)==0.and.num_pole_xyz(3)==0)then
+  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
     continue
-  else if(num_pole_xyz(1)<=0.or.num_pole_xyz(2)<=0.or.num_pole_xyz(3)<=0)then
-    stop "num_pole_xyz must be largar than 0 when they are not default values."
+  else if(num_multipole_xyz(1)<=0.or.num_multipole_xyz(2)<=0.or.num_multipole_xyz(3)<=0)then
+    stop "num_multipole_xyz must be largar than 0 when they are not default values."
   end if
-  if(num_pole_xyz(1)==0.and.num_pole_xyz(2)==0.and.num_pole_xyz(3)==0)then
+  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
     dip_spacing = 8.d0/au_length_aa  ! approximate spacing of multipoles 
-    num_pole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
+    num_multipole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
   end if
 end if
 
-num_pole=num_pole_xyz(1)*num_pole_xyz(2)*num_pole_xyz(3)
+num_pole=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
 
 !===== namelist for group_file =====
 if(ic==0)then

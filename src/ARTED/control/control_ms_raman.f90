@@ -268,7 +268,7 @@ subroutine raman_maxwell_ms
   call create_dir_ms
 
   ! Export to file_trj (initial step)
-  if (out_rvf_rt=='y')then
+  if (yn_out_rvf_rt=='y')then
       write(comment_line,110) -1, 0.0d0
      !if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
      !&  write(comment_line,112) trim(comment_line), xi_nh
@@ -546,7 +546,7 @@ subroutine raman_maxwell_ms
          call dt_evolve_MD_2_MS(aforce,iter,imacro)
       endif
       !(for exporting to file_trj later)
-!xx      if (out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
+!xx      if (yn_out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
 !xx         if(use_ehrenfest_md=='n') &
 !xx         &  call Ion_Force_omp(Rion_update_rt,calc_mode_rt,imacro)
 !xx      endif
@@ -604,7 +604,7 @@ subroutine raman_maxwell_ms
     !===========================================================================
 
     ! Export to file_trj
-    if (out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
+    if (yn_out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
        write(comment_line,110) iter, iter*dt
 110    format("#rt   step=",i8,"   time",e16.6)
        !if(ensemble=="NVT" .and. thermostat=="nose-hoover") &

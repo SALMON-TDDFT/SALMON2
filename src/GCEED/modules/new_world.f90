@@ -685,16 +685,16 @@ else if(MEO==3)then
   allocate(inum_Mxin_pole(3,0:num_pole-1))
   allocate(iflag_pole(1:num_pole))
 
-  do j3=0,num_pole_xyz(3)-1
-  do j2=0,num_pole_xyz(2)-1
-  do j1=0,num_pole_xyz(1)-1
-    ibox = j1 + num_pole_xyz(1)*j2 + num_pole_xyz(1)*num_pole_xyz(2)*j3 
-    ista_Mxin_pole(1,ibox)=j1*lg_num(1)/num_pole_xyz(1)+lg_sta(1)
-    iend_Mxin_pole(1,ibox)=(j1+1)*lg_num(1)/num_pole_xyz(1)+lg_sta(1)-1
-    ista_Mxin_pole(2,ibox)=j2*lg_num(2)/num_pole_xyz(2)+lg_sta(2)
-    iend_Mxin_pole(2,ibox)=(j2+1)*lg_num(2)/num_pole_xyz(2)+lg_sta(2)-1
-    ista_Mxin_pole(3,ibox)=j3*lg_num(3)/num_pole_xyz(3)+lg_sta(3)
-    iend_Mxin_pole(3,ibox)=(j3+1)*lg_num(3)/num_pole_xyz(3)+lg_sta(3)-1
+  do j3=0,num_multipole_xyz(3)-1
+  do j2=0,num_multipole_xyz(2)-1
+  do j1=0,num_multipole_xyz(1)-1
+    ibox = j1 + num_multipole_xyz(1)*j2 + num_multipole_xyz(1)*num_multipole_xyz(2)*j3 
+    ista_Mxin_pole(1,ibox)=j1*lg_num(1)/num_multipole_xyz(1)+lg_sta(1)
+    iend_Mxin_pole(1,ibox)=(j1+1)*lg_num(1)/num_multipole_xyz(1)+lg_sta(1)-1
+    ista_Mxin_pole(2,ibox)=j2*lg_num(2)/num_multipole_xyz(2)+lg_sta(2)
+    iend_Mxin_pole(2,ibox)=(j2+1)*lg_num(2)/num_multipole_xyz(2)+lg_sta(2)-1
+    ista_Mxin_pole(3,ibox)=j3*lg_num(3)/num_multipole_xyz(3)+lg_sta(3)
+    iend_Mxin_pole(3,ibox)=(j3+1)*lg_num(3)/num_multipole_xyz(3)+lg_sta(3)-1
   end do
   end do
   end do

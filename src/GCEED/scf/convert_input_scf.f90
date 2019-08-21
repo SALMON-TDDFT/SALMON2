@@ -192,18 +192,18 @@ nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 if(meo<=0.or.meo>=4)then
   stop "meo must be equal to 1 or 2 or 3."
 else if(meo==3)then
-  if(num_pole_xyz(1)==0.and.num_pole_xyz(2)==0.and.num_pole_xyz(3)==0)then
+  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
     continue
-  else if(num_pole_xyz(1)<=0.or.num_pole_xyz(2)<=0.or.num_pole_xyz(3)<=0)then
-    stop "num_pole_xyz must be largar than 0 when they are not default values."
+  else if(num_multipole_xyz(1)<=0.or.num_multipole_xyz(2)<=0.or.num_multipole_xyz(3)<=0)then
+    stop "num_multipole_xyz must be largar than 0 when they are not default values."
   end if
-  if(num_pole_xyz(1)==0.and.num_pole_xyz(2)==0.and.num_pole_xyz(3)==0)then
+  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
     dip_spacing = 8.d0/au_length_aa  ! approximate spacing of multipoles 
-    num_pole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
+    num_multipole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
   end if
 end if
 
-num_pole=num_pole_xyz(1)*num_pole_xyz(2)*num_pole_xyz(3)
+num_pole=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
 
 !===== namelist for group_file =====
 if(comm_is_root(nproc_id_global))then
@@ -265,7 +265,7 @@ iAtomicNumber(:)=0 ! dummy
 !call comm_bcast(iAtomicNumber, nproc_group_global)
 
 
-select case(out_psi)
+select case(yn_out_psi)
 case('y')
   iflag_writepsi=1
 case('n')
@@ -274,7 +274,7 @@ case default
   stop 'invalid iflag_writepsi'
 end select
 
-select case(out_elf_rt)
+select case(yn_out_elf_rt)
 case('y')
   iflag_ELF=1
 case('n')
@@ -283,7 +283,7 @@ case default
   stop 'invalid iflag_ELF'
 end select
 
-select case(out_dos)
+select case(yn_out_dos)
 case('y')
   iflag_dos=1
 case('n')
@@ -292,7 +292,7 @@ case default
   stop 'invalid iflag_dos'
 end select
 
-select case(out_pdos)
+select case(yn_out_pdos)
 case('y')
   iflag_pdos=1
 case('n')

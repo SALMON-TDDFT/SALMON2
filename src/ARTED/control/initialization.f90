@@ -554,10 +554,10 @@ contains
     use salmon_parallel
     implicit none    
 
-    if(out_rvf_rt=='n') then
+    if(yn_out_rvf_rt=='n') then
        if (comm_is_root(nproc_id_global)) &
-       write(*,*)" out_rvf_rt --> y : changed for md option"
-       out_rvf_rt='y'
+       write(*,*)" yn_out_rvf_rt --> y : changed for md option"
+       yn_out_rvf_rt='y'
     endif
 
     if(ensemble=="NVT" .and. thermostat=="nose-hoover")then

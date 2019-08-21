@@ -17,8 +17,8 @@ subroutine calc_pdos(info)
 use structures, only: s_orbital_parallel
 use salmon_parallel, only: nproc_id_global, nproc_group_grid
 use salmon_communication, only: comm_is_root, comm_summation
-use inputoutput, only: out_dos_start, out_dos_end, out_dos_method, &
-                       out_dos_smearing, iout_dos_nenergy, out_dos_fshift, uenergy_from_au
+use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
+                       out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au
 use prep_pp_sub, only: bisection
 use calc_allob_sub
 use scf_data
@@ -37,8 +37,8 @@ real(8) :: Ylm
 integer :: lm
 real(8) :: rbox_pdos(25,MI)
 real(8) :: rbox_pdos2(25,MI)
-real(8) :: pdos_l_tmp(iout_dos_nenergy,0:4,MI)
-real(8) :: pdos_l(iout_dos_nenergy,0:4,MI)
+real(8) :: pdos_l_tmp(out_dos_nenergy,0:4,MI)
+real(8) :: pdos_l(out_dos_nenergy,0:4,MI)
 character(100) :: Outfile
 real(8) :: fk,ww,dw
 integer :: iw
@@ -53,7 +53,7 @@ call calc_pmax(iobmax)
 
 ene_min = minval(esp(:,:))
 ene_max = maxval(esp(:,:))
-if(out_dos_fshift=='y'.and.nstate>nelec/2) then 
+if(yn_out_dos_set_fe_origin=='y'.and.nstate>nelec/2) then 
   ene_homo = esp(nelec/2,1)
   ene_lumo = esp(nelec/2+1,1)
   efermi = (ene_homo+ene_lumo)*0.5d0 
@@ -63,7 +63,7 @@ else
 endif 
 out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min))
 out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min))
-dw=(out_dos_end-out_dos_start)/dble(iout_dos_nenergy-1) 
+dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1) 
 
 pdos_l_tmp=0.d0
 
@@ -98,20 +98,20 @@ do iob=1,iobmax
     ikoa=Kion(iatom)
     do L=0,Mlps(ikoa)
       do lm=L**2+1,(L+1)**2
-        select case (out_dos_method)
+        select case (out_dos_function)
         case('lorentzian') 
-          fk=2.d0*out_dos_smearing/pi
-          do iw=1,iout_dos_nenergy 
+          fk=2.d0*out_dos_width/pi
+          do iw=1,out_dos_nenergy 
             ww=out_dos_start+dble(iw-1)*dw+eshift-esp(iob_allob,iik)  
             pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-              +abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_smearing**2) 
+              +abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_width**2) 
           end do 
         case('gaussian')
-          fk=2.d0/(sqrt(2.d0*pi)*out_dos_smearing)
-          do iw=1,iout_dos_nenergy 
+          fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
+          do iw=1,out_dos_nenergy 
             ww=out_dos_start+dble(iw-1)*dw+eshift-esp(iob_allob,iik)  
             pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-              +abs(rbox_pdos2(lm,iatom))**2*fk*exp(-(0.5d0/out_dos_smearing**2)*ww**2) 
+              +abs(rbox_pdos2(lm,iatom))**2*fk*exp(-(0.5d0/out_dos_width**2)*ww**2) 
           end do
         end select
       end do
@@ -119,7 +119,7 @@ do iob=1,iobmax
   end do
 end do
 end do
-call comm_summation(pdos_l_tmp,pdos_l,iout_dos_nenergy*5*MI,nproc_group_grid) 
+call comm_summation(pdos_l_tmp,pdos_l,out_dos_nenergy*5*MI,nproc_group_grid) 
 
 if(comm_is_root(nproc_id_global))then
   do iatom=1,MI
@@ -152,22 +152,22 @@ if(comm_is_root(nproc_id_global))then
     end select
     write(101,'("#-----------------------")') 
     if(Mlps(ikoa)==0)then
-      do iw=1,iout_dos_nenergy 
+      do iw=1,out_dos_nenergy 
         ww=out_dos_start+dble(iw-1)*dw+eshift
         write(101,'(f10.5,f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,Mlps(ikoa))
       end do
     else if(Mlps(ikoa)==1)then
-      do iw=1,iout_dos_nenergy 
+      do iw=1,out_dos_nenergy 
         ww=out_dos_start+dble(iw-1)*dw+eshift
         write(101,'(f10.5,2f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,Mlps(ikoa))
       end do
     else if(Mlps(ikoa)==2)then
-      do iw=1,iout_dos_nenergy 
+      do iw=1,out_dos_nenergy 
         ww=out_dos_start+dble(iw-1)*dw+eshift
         write(101,'(f10.5,3f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,Mlps(ikoa))
       end do
     else if(Mlps(ikoa)==3)then
-      do iw=1,iout_dos_nenergy 
+      do iw=1,out_dos_nenergy 
         ww=out_dos_start+dble(iw-1)*dw+eshift
         write(101,'(f10.5,4f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,Mlps(ikoa))
       end do
