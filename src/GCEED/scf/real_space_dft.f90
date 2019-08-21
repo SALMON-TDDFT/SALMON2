@@ -227,6 +227,7 @@ if(iopt==1)then
   info%numo = iobnum/nspin
 
   info%if_divide_rspace = nproc_mxin_mul.ne.1
+  info%if_divide_orbit  = nproc_ob.ne.1
   info%icomm_k    = nproc_group_grid
   info%icomm_ko   = nproc_group_rho
   info%icomm_rko  = nproc_group_global
@@ -584,7 +585,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)+(jspin-1)*mst(1)
+        jj = info%io_tbl(iob)
         info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
       end do
     end do
@@ -594,7 +595,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
-    call scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+    call scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
                        cg,   &
                        info_ob,ppg,V_local,  &
                        iflag_diisjump,energy, &

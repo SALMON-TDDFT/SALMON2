@@ -39,7 +39,6 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   type(s_sendrecv_grid)         :: srg
   integer                       :: iflag
   type(s_cg)                    :: cg
-
   !
   integer,parameter :: nd=4
   integer :: j,nspin,ik,io,io_all,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz
@@ -51,6 +50,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   call timer_begin(LOG_GSCG_INIT)
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
+  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ gscg"
 
   nspin = system%nspin
   is = mg%is
@@ -247,7 +247,6 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
 contains
 
 subroutine orthogonalization(mg,system,info,psi,gk)
-  use salmon_global, only: nproc_ob
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
@@ -269,91 +268,47 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   io_s = info%io_s
   io_e = info%io_e
 
-  if(nproc_ob==1)then
-    sum_obmat0 = 0.d0
+  sum_obmat0 = 0.d0
 !$omp parallel do private(ik,ispin,io1,io2,sum0,iz,iy,ix) collapse(3)
-    do ik=ik_s,ik_e
-    do ispin=1,nspin
-      do io1=io_s,io_e
-        do io2=io_s,io1-1
-          sum0 = 0.d0
+  do ik=ik_s,ik_e
+  do ispin=1,nspin
+    do io1=io_s,io_e
+      do io2=io_s,io1-1
+        sum0 = 0.d0
 ! speed? !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
-          do iz=is(3),ie(3)
-          do iy=is(2),ie(2)
-          do ix=is(1),ie(1)
-            sum0=sum0+conjg(psi%zwf(ix,iy,iz,ispin,io2,ik,1))*gk%zwf(ix,iy,iz,ispin,io1,ik,1)
-          end do
-          end do
-          end do
-          sum_obmat0(io1,io2,ispin,ik) = sum0*system%hvol
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          sum0=sum0+conjg(psi%zwf(ix,iy,iz,ispin,io2,ik,1))*gk%zwf(ix,iy,iz,ispin,io1,ik,1)
         end do
+        end do
+        end do
+        sum_obmat0(io1,io2,ispin,ik) = sum0*system%hvol
       end do
     end do
-    end do
-    call timer_begin(LOG_GSCG_ALLREDUCE)
-    call comm_summation(sum_obmat0,sum_obmat1,no**2*nspin*nk,info%icomm_rko)
-    call timer_end(LOG_GSCG_ALLREDUCE)
- !$omp parallel do private(ik,ispin,io1,io2,iz,iy,ix) collapse(3)
-    do ik=ik_s,ik_e
-    do ispin=1,nspin
-      do io1=io_s,io_e
-        do io2=io_s,io1-1
+  end do
+  end do
+  call timer_begin(LOG_GSCG_ALLREDUCE)
+  call comm_summation(sum_obmat0,sum_obmat1,no**2*nspin*nk,info%icomm_rko)
+  call timer_end(LOG_GSCG_ALLREDUCE)
+!$omp parallel do private(ik,ispin,io1,io2,iz,iy,ix) collapse(3)
+  do ik=ik_s,ik_e
+  do ispin=1,nspin
+    do io1=io_s,io_e
+      do io2=io_s,io1-1
 ! speed? !$omp parallel do private(iz,iy,ix) collapse(2)
-          do iz=is(3),ie(3)
-          do iy=is(2),ie(2)
-          do ix=is(1),ie(1)
-            gk%zwf(ix,iy,iz,ispin,io1,ik,1) = gk%zwf(ix,iy,iz,ispin,io1,ik,1) &
-            & -sum_obmat1(io1,io2,ispin,ik) * psi%zwf(ix,iy,iz,ispin,io2,ik,1)
-          end do
-          end do
-          end do
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          gk%zwf(ix,iy,iz,ispin,io1,ik,1) = gk%zwf(ix,iy,iz,ispin,io1,ik,1) &
+          & -sum_obmat1(io1,io2,ispin,ik) * psi%zwf(ix,iy,iz,ispin,io2,ik,1)
+        end do
+        end do
         end do
       end do
     end do
-    end do
-  else
-    stop "error nproc_ob/=1 @ gscg_periodic"
-!    do is=is_sta,is_end
-!    do iob=iobsta(is),iobend(is)
-!      call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-!      call check_corrkob(iob,ik,icorr_iob,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
-!      do job=iobsta(is),iob-1
-!        call calc_myob(job,job_myob,ilsda,nproc_ob,itotmst,mst)
-!        call check_corrkob(job,ik,icorr_job,ilsda,nproc_ob,info%ik_s,info%ik_e,mst)
-!        if(icorr_job==1)then
-!   !$omp parallel do private(iz,iy,ix) collapse(2)
-!          do iz=mg%is(3),mg%ie(3)
-!          do iy=mg%is(2),mg%ie(2)
-!          do ix=mg%is(1),mg%ie(1)
-!            zmatbox_m(ix,iy,iz)=spsi%zwf(ix,iy,iz,is,job_myob-(is-1)*info%numo,ik,1)
-!          end do
-!          end do
-!          end do
-!        end if
-!        call calc_iroot(job,iroot,ilsda,nproc_ob,itotmst,mst)
-!        call comm_bcast(zmatbox_m,info%icomm_o,iroot)
-!        sum0=0.d0
-!    !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+ : sum0)
-!        do iz=mg%is(3),mg%ie(3)
-!        do iy=mg%is(2),mg%ie(2)
-!        do ix=mg%is(1),mg%ie(1)
-!          sum0=sum0+conjg(zmatbox_m(ix,iy,iz))*cg%zgk_ob(ix,iy,iz,iob_myob)
-!        end do
-!        end do
-!        end do
-!        sum0=sum0*system%hvol
-!        call comm_summation(sum0,sum1,info%icomm_r)
-!        do iz=mg%is(3),mg%ie(3)
-!        do iy=mg%is(2),mg%ie(2)
-!        do ix=mg%is(1),mg%ie(1)
-!          cg%zgk_ob(ix,iy,iz,iob_myob)=cg%zgk_ob(ix,iy,iz,iob_myob)-sum1*zmatbox_m(ix,iy,iz)
-!        end do
-!        end do
-!        end do
-!      end do
-!    end do
-!    end do
-  end if
+  end do
+  end do
 
 end subroutine orthogonalization
 
