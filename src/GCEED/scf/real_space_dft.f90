@@ -41,7 +41,7 @@ END MODULE global_variables_scf
 subroutine Real_Space_DFT
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
-                           nproc_group_h, nproc_id_kgrid, nproc_id_orbitalgrid
+                           nproc_group_h, nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -130,7 +130,7 @@ allocate(system%mass(1:nelem))
 
 call set_filename
 
-call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
+call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
 
 call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
@@ -170,7 +170,7 @@ if(iopt==1)then
 
   end select
 
-  call init_updown
+  call init_updown(info)
   call init_itype
   call init_sendrecv_matrix
   select case(iperiodic)

@@ -126,7 +126,7 @@ else if(isequential==2)then
 end if
 
 info%icomm_r = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info%icomm_r, nproc_id_korbital, nproc_size_korbital)
+call comm_get_groupinfo(info%icomm_r, info%id_r, info%isize_r)
 
 !new_world for comm_k
 if(isequential==1)then
@@ -296,7 +296,7 @@ else if(isequential==2)then
 end if
  
 info%icomm_k = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info%icomm_k, nproc_id_orbitalgrid, nproc_size_orbitalgrid)
+call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
 
 !new_world for comm_mesh_s
 
@@ -425,7 +425,7 @@ else if(isequential==2)then
 end if
 
 info_field%icomm(1) = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info_field%icomm(1), nproc_id_bound(1), nproc_size_bound(1))
+call comm_get_groupinfo(info_field%icomm(1), info_field%id(1), info_field%isize(1))
 
 if(isequential==1)then
   icolor=imrs(1)+imrs(3)*nproc_d_g_dm(1)   &
@@ -444,7 +444,7 @@ else if(isequential==2)then
 end if
 
 info_field%icomm(2) = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info_field%icomm(2), nproc_id_bound(2), nproc_size_bound(2))
+call comm_get_groupinfo(info_field%icomm(2), info_field%id(2), info_field%isize(2))
 
 if(isequential==1)then
   icolor=imrs(1)+imrs(2)*nproc_d_g_dm(1)   &
@@ -463,7 +463,7 @@ else if(isequential==2)then
 end if
 
 info_field%icomm(3) = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info_field%icomm(3), nproc_id_bound(3), nproc_size_bound(3))
+call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
 
 if(isequential==1)then
   do ii=0,nproc_d_o_mul-1
@@ -518,18 +518,18 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
   NPUY=nproc_d_g_dm(2)*nproc_d_o(2)
   NPUZ=nproc_d_g_dm(3)*nproc_d_o(3)
 
-  icolor=nproc_id_bound(3)+nproc_id_bound(1)*NPUZ
-  ikey=nproc_id_bound(2)
+  icolor=info_field%id(3)+info_field%id(1)*NPUZ
+  ikey=info_field%id(2)
   nproc_group_icommy = comm_create_group(nproc_group_global, icolor, ikey)
   call comm_get_groupinfo(nproc_group_icommy, nproc_id_icommy, nproc_size_icommy)
 
-  icolor=nproc_id_bound(2)+nproc_id_bound(1)*NPUY
-  ikey=nproc_id_bound(3)
+  icolor=info_field%id(2)+info_field%id(1)*NPUY
+  ikey=info_field%id(3)
   nproc_group_icommz = comm_create_group(nproc_group_global, icolor, ikey)
   call comm_get_groupinfo(nproc_group_icommz, nproc_id_icommz, nproc_size_icommz)
 
-  icolor=nproc_id_bound(2)+nproc_id_bound(3)*NPUY
-  ikey=nproc_id_bound(1)
+  icolor=info_field%id(2)+info_field%id(3)*NPUY
+  ikey=info_field%id(1)
   nproc_group_icommw = comm_create_group(nproc_group_global, icolor, ikey)
   call comm_get_groupinfo(nproc_group_icommw, nproc_id_icommw, nproc_size_icommw)
 

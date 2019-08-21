@@ -27,8 +27,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,  
                             ibox_icoobox_bound,icoobox_bound)
   use inputoutput, only: natom,rion
   use structures, only: s_rgrid,s_field_parallel
-  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h, &
-                             nproc_id_bound, nproc_size_bound
+  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_summation
   use timer
   
@@ -358,9 +357,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,  
     icount=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)  &
            *inum_Mxin_s(3,nproc_id_global)/inum_Mxin_s(k,nproc_id_global)*2*ndh
   !$OMP parallel do
-    do ii=0,nproc_size_bound(k)-1
-      istart(ii)=ii*icount/nproc_size_bound(k)+1
-      iend(ii)=(ii+1)*icount/nproc_size_bound(k)
+    do ii=0,info_field%isize(k)-1
+      istart(ii)=ii*icount/info_field%isize(k)+1
+      iend(ii)=(ii+1)*icount/info_field%isize(k)
     end do
           
     do ll=0,lmax_lmp
@@ -371,7 +370,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,  
   
   !$OMP parallel do &
   !$OMP private(xx,yy,zz,rr,xxxx,yyyy,zzzz,lm,ll,sum1,ylm2,rrrr,xp2,yp2,zp2,xy,yz,xz,rinv,rbox,deno,icen)
-    do jj=istart(nproc_id_bound(k)),iend(nproc_id_bound(k))
+    do jj=istart(info_field%id(k)),iend(info_field%id(k))
       do icen=1,num_center
         if(itrho(icen)==1)then
           xx=gridcoo(icoobox_bound(1,jj,k),1)-center_trho(1,icen)
@@ -447,17 +446,17 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,  
       call comm_summation( &
         wk2bound_h,              wkbound_h,              icount/2, info_field%icomm(k), 0                    )
       call comm_summation( &
-        wk2bound_h(icount/2+1:), wkbound_h(icount/2+1:), icount/2, info_field%icomm(k), nproc_size_bound(k)-1)
+        wk2bound_h(icount/2+1:), wkbound_h(icount/2+1:), icount/2, info_field%icomm(k), info_field%isize(k)-1)
       call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
-    if(nproc_id_bound(k)==0) then
+    if(info_field%id(k)==0) then
   !$OMP parallel do
       do jj=1,icount/2
         wk2(icoobox_bound(1,jj,k),icoobox_bound(2,jj,k),icoobox_bound(3,jj,k))=wkbound_h(jj)
       end do
     end if
-    if(nproc_id_bound(k)==nproc_size_bound(k)-1) then
+    if(info_field%id(k)==info_field%isize(k)-1) then
   !$OMP parallel do
       do jj=icount/2+1,icount
         wk2(icoobox_bound(1,jj,k),icoobox_bound(2,jj,k),icoobox_bound(3,jj,k))=wkbound_h(jj)

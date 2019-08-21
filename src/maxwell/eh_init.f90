@@ -1475,7 +1475,7 @@ end subroutine eh_input_shape
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_prep_GCEED(fs,fw)
   use inputoutput,       only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
-  use salmon_parallel,   only: nproc_id_orbitalgrid,nproc_id_global,nproc_size_global,nproc_group_global
+  use salmon_parallel,   only: nproc_id_global,nproc_size_global,nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_o_mul,nproc_d_g_mul_dm,nproc_d_g_dm,&
                                k_sta,k_end,k_num,num_kpoints_3d,num_kpoints_rd,&
@@ -1508,7 +1508,7 @@ subroutine eh_prep_GCEED(fs,fw)
   nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
   nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   call make_new_world(info,info_field)
-  call setk(k_sta,k_end,k_num,num_kpoints_rd,nproc_k,nproc_id_orbitalgrid)
+  call setk(k_sta,k_end,k_num,num_kpoints_rd,nproc_k,info%id_k)
   
   !set grid and odd or even grid paterns
   rLsize(:,1)=fs%rlsize(:); Harray(:,1)=fs%hgs(:);
@@ -1527,7 +1527,7 @@ subroutine eh_prep_GCEED(fs,fw)
   fw%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment
-  call init_updown
+  call init_updown(info)
   neig_ng_eh(1,1)=iup_array(2); neig_ng_eh(1,2)=idw_array(2);
   neig_ng_eh(2,1)=jup_array(2); neig_ng_eh(2,2)=jdw_array(2);
   neig_ng_eh(3,1)=kup_array(2); neig_ng_eh(3,2)=kdw_array(2);

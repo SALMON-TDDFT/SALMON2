@@ -96,9 +96,9 @@ module structures
   type s_orbital_parallel
     logical :: if_divide_rspace
     logical :: if_divide_orbit
-    integer :: icomm_r   ! communicator for r-space
-    integer :: icomm_k   ! communicator for k-space
-    integer :: icomm_o   ! communicator for orbital
+    integer :: icomm_r,   id_r,   isize_r   ! communicator for r-space
+    integer :: icomm_k,   id_k,   isize_k   ! communicator for k-space
+    integer :: icomm_o,   id_o,   isize_o   ! communicator for orbital
     integer :: icomm_ro,  id_ro,  isize_ro  ! communicator for r-space & orbital
     integer :: icomm_ko,  id_ko,  isize_ko  ! communicator for k-space & orbital
     integer :: icomm_rko ! communicator for r-space, k-space & orbital
@@ -113,6 +113,7 @@ module structures
 
   type s_field_parallel
     integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
+    integer :: id(3), isize(3)
   end type s_field_parallel
 
   type s_orbital

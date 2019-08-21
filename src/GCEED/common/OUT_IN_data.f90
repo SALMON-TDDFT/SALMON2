@@ -419,7 +419,7 @@ END SUBROUTINE OUT_data
 SUBROUTINE IN_data(lg,mg,ng,info,info_field,system,stencil,cg)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
-use salmon_parallel, only: nproc_id_orbitalgrid, nproc_id_kgrid
+use salmon_parallel, only: nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_iobnum_sub
 use calc_myob_sub
@@ -750,7 +750,7 @@ end if
 
 if(iSCFRT==2) call make_new_world(info,info_field)
 
-call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, nproc_id_orbitalgrid)
+call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
 
 call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
