@@ -21,7 +21,9 @@ contains
 subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   use salmon_parallel, only: nproc_id_kgrid
   use calc_iquotient_sub
+!  use structures, only: s_orbital_parallel
   implicit none
+!  type(s_orbital_parallel),intent(in) :: info
   integer,intent(in)  :: iob,ik
   integer,intent(out) :: icorr_p
   integer,intent(in)  :: ilsda,nproc_ob,k_sta,k_end,mst(2)

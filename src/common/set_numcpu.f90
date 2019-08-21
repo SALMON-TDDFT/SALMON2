@@ -18,16 +18,16 @@ module set_numcpu
 
 contains
 
-subroutine set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+subroutine set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
   use inputoutput, only: nproc_k,nproc_ob
   use salmon_parallel, only: nproc_size_global
   implicit none
-  integer,intent(out) :: nproc_mxin(3)
-  integer,intent(out) :: nproc_mxin_s(3)
-  integer,intent(out) :: nproc_mxin_s_dm(3)
+  integer,intent(out) :: nproc_d_o(3)
+  integer,intent(out) :: nproc_d_g(3)
+  integer,intent(out) :: nproc_d_g_dm(3)
   integer :: ii
   integer :: nproc_size_global_tmp
-  integer :: nproc_mxin_tmp(3)
+  integer :: nproc_d_o_tmp(3)
   
   integer :: num_factor2
   integer :: num_factor3
@@ -67,65 +67,65 @@ subroutine set_numcpu_gs(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
     stop "In automatic process assignment, prime factors for number of processes must be combination of 2, 3 or 5."
   end if
 
-  nproc_mxin_tmp(1:3)=1
+  nproc_d_o_tmp(1:3)=1
  
   icount=0
 
   do ii=1,num_factor5
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_mxin_tmp(3)=nproc_mxin_tmp(3)*5
+      nproc_d_o_tmp(3)=nproc_d_o_tmp(3)*5
     else if(mod(icount,3)==2)then
-      nproc_mxin_tmp(2)=nproc_mxin_tmp(2)*5
+      nproc_d_o_tmp(2)=nproc_d_o_tmp(2)*5
     else
-      nproc_mxin_tmp(1)=nproc_mxin_tmp(1)*5
+      nproc_d_o_tmp(1)=nproc_d_o_tmp(1)*5
     end if
   end do
 
   do ii=1,num_factor3
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_mxin_tmp(3)=nproc_mxin_tmp(3)*3
+      nproc_d_o_tmp(3)=nproc_d_o_tmp(3)*3
     else if(mod(icount,3)==2)then
-      nproc_mxin_tmp(2)=nproc_mxin_tmp(2)*3
+      nproc_d_o_tmp(2)=nproc_d_o_tmp(2)*3
     else
-      nproc_mxin_tmp(1)=nproc_mxin_tmp(1)*3
+      nproc_d_o_tmp(1)=nproc_d_o_tmp(1)*3
     end if
   end do
 
   do ii=1,num_factor2
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_mxin_tmp(3)=nproc_mxin_tmp(3)*2
+      nproc_d_o_tmp(3)=nproc_d_o_tmp(3)*2
     else if(mod(icount,3)==2)then
-      nproc_mxin_tmp(2)=nproc_mxin_tmp(2)*2
+      nproc_d_o_tmp(2)=nproc_d_o_tmp(2)*2
     else
-      nproc_mxin_tmp(1)=nproc_mxin_tmp(1)*2
+      nproc_d_o_tmp(1)=nproc_d_o_tmp(1)*2
     end if
   end do
 
   nproc_k=1
   nproc_ob=1
-  nproc_mxin(1:3)=nproc_mxin_tmp(1:3)
-  nproc_mxin_s(1:3)=nproc_mxin_tmp(1:3)
-  nproc_mxin_s_dm(1:3)=nproc_mxin_s(1:3)/nproc_mxin(1:3)
+  nproc_d_o(1:3)=nproc_d_o_tmp(1:3)
+  nproc_d_g(1:3)=nproc_d_o_tmp(1:3)
+  nproc_d_g_dm(1:3)=nproc_d_g(1:3)/nproc_d_o(1:3)
   
 end subroutine set_numcpu_gs
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine set_numcpu_rt(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
+subroutine set_numcpu_rt(nproc_d_o,nproc_d_g,nproc_d_g_dm)
   use inputoutput, only: nproc_k,nproc_ob
   use salmon_parallel, only: nproc_size_global
   implicit none
-  integer,intent(out) :: nproc_mxin(3)
-  integer,intent(out) :: nproc_mxin_s(3)
-  integer,intent(out) :: nproc_mxin_s_dm(3)
+  integer,intent(out) :: nproc_d_o(3)
+  integer,intent(out) :: nproc_d_g(3)
+  integer,intent(out) :: nproc_d_g_dm(3)
   integer :: ii
   integer :: nproc_size_global_tmp
   integer :: nproc_ob_tmp
-  integer :: nproc_mxin_tmp(3)
-  integer :: nproc_mxin_s_tmp(3)
+  integer :: nproc_d_o_tmp(3)
+  integer :: nproc_d_g_tmp(3)
   
   integer :: num_factor2
   integer :: ir_num_factor2  ! ir means ireduced
@@ -169,74 +169,74 @@ subroutine set_numcpu_rt(nproc_mxin,nproc_mxin_s,nproc_mxin_s_dm)
 
   if(num_factor2>=3)then
     nproc_ob_tmp=nproc_size_global/8
-    nproc_mxin_tmp(1)=2 
-    nproc_mxin_tmp(2)=2 
-    nproc_mxin_tmp(3)=2 
+    nproc_d_o_tmp(1)=2 
+    nproc_d_o_tmp(2)=2 
+    nproc_d_o_tmp(3)=2 
     icount=0
     ir_num_factor2=num_factor2-3
   else if(num_factor2==2)then
     nproc_ob_tmp=nproc_size_global/4
-    nproc_mxin_tmp(1)=1 
-    nproc_mxin_tmp(2)=2 
-    nproc_mxin_tmp(3)=2 
+    nproc_d_o_tmp(1)=1 
+    nproc_d_o_tmp(2)=2 
+    nproc_d_o_tmp(3)=2 
     icount=2
     ir_num_factor2=num_factor2-2
   else if(num_factor2==1)then
     nproc_ob_tmp=nproc_size_global/2
-    nproc_mxin_tmp(1)=1 
-    nproc_mxin_tmp(2)=1 
-    nproc_mxin_tmp(3)=2 
+    nproc_d_o_tmp(1)=1 
+    nproc_d_o_tmp(2)=1 
+    nproc_d_o_tmp(3)=2 
     icount=1
     ir_num_factor2=num_factor2-1
   else
     nproc_ob_tmp=nproc_size_global
-    nproc_mxin_tmp(1)=1 
-    nproc_mxin_tmp(2)=1 
-    nproc_mxin_tmp(3)=1 
+    nproc_d_o_tmp(1)=1 
+    nproc_d_o_tmp(2)=1 
+    nproc_d_o_tmp(3)=1 
     icount=0
     ir_num_factor2=num_factor2
   end if
 
-  nproc_mxin_s_tmp(1:3)=nproc_mxin_tmp(1:3)
+  nproc_d_g_tmp(1:3)=nproc_d_o_tmp(1:3)
 
   do ii=1,num_factor5
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_mxin_s_tmp(3)=nproc_mxin_s_tmp(3)*5
+      nproc_d_g_tmp(3)=nproc_d_g_tmp(3)*5
     else if(mod(icount,3)==2)then
-      nproc_mxin_s_tmp(2)=nproc_mxin_s_tmp(2)*5
+      nproc_d_g_tmp(2)=nproc_d_g_tmp(2)*5
     else
-      nproc_mxin_s_tmp(1)=nproc_mxin_s_tmp(1)*5
+      nproc_d_g_tmp(1)=nproc_d_g_tmp(1)*5
     end if
   end do
 
   do ii=1,num_factor3
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_mxin_s_tmp(3)=nproc_mxin_s_tmp(3)*3
+      nproc_d_g_tmp(3)=nproc_d_g_tmp(3)*3
     else if(mod(icount,3)==2)then
-      nproc_mxin_s_tmp(2)=nproc_mxin_s_tmp(2)*3
+      nproc_d_g_tmp(2)=nproc_d_g_tmp(2)*3
     else
-      nproc_mxin_s_tmp(1)=nproc_mxin_s_tmp(1)*3
+      nproc_d_g_tmp(1)=nproc_d_g_tmp(1)*3
     end if
   end do
 
   do ii=1,ir_num_factor2
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_mxin_s_tmp(3)=nproc_mxin_s_tmp(3)*2
+      nproc_d_g_tmp(3)=nproc_d_g_tmp(3)*2
     else if(mod(icount,3)==2)then
-      nproc_mxin_s_tmp(2)=nproc_mxin_s_tmp(2)*2
+      nproc_d_g_tmp(2)=nproc_d_g_tmp(2)*2
     else
-      nproc_mxin_s_tmp(1)=nproc_mxin_s_tmp(1)*2
+      nproc_d_g_tmp(1)=nproc_d_g_tmp(1)*2
     end if
   end do
 
   nproc_k=1
   nproc_ob=nproc_ob_tmp
-  nproc_mxin(1:3)=nproc_mxin_tmp(1:3)
-  nproc_mxin_s(1:3)=nproc_mxin_s_tmp(1:3)
-  nproc_mxin_s_dm(1:3)=nproc_mxin_s(1:3)/nproc_mxin(1:3)
+  nproc_d_o(1:3)=nproc_d_o_tmp(1:3)
+  nproc_d_g(1:3)=nproc_d_g_tmp(1:3)
+  nproc_d_g_dm(1:3)=nproc_d_g(1:3)/nproc_d_o(1:3)
 
 end subroutine set_numcpu_rt
 

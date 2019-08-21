@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
-                 lg_sta,lg_num,nproc,nproc_id_global,nproc_Mxin,nproc_k,nproc_ob,isequential,iscfrt)
+                 lg_sta,lg_num,nproc,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,isequential,iscfrt)
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(out) :: mg
@@ -22,31 +22,31 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
   integer :: ibox
   integer :: isequential
   integer :: nproc,nproc_id_global
-  integer :: nproc_Mxin(3)
+  integer :: nproc_d_o(3)
   integer :: nproc_k
   integer :: nproc_ob
   integer :: mg_sta(3),mg_end(3),mg_num(3)
   integer :: lg_sta(3),lg_num(3)
   integer,intent(in) :: iscfrt
   integer :: mg_sta_all(3,0:nproc-1),mg_end_all(3,0:nproc-1),mg_num_all(3,0:nproc-1)
-  integer :: nproc_Mxin_mul
+  integer :: nproc_d_o_mul
   integer :: j
   integer,parameter :: nd=4
   
-  nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
+  nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
   if(isequential==1)then
-    do j3=0,nproc_Mxin(3)-1
-    do j2=0,nproc_Mxin(2)-1
-    do j1=0,nproc_Mxin(1)-1
+    do j3=0,nproc_d_o(3)-1
+    do j2=0,nproc_d_o(2)-1
+    do j1=0,nproc_d_o(1)-1
       do i2=0,nproc_k-1
       do i1=0,nproc_ob-1
-        ibox = nproc_ob*i2 + i1 + nproc_k*nproc_ob*( j1 + nproc_Mxin(1)*j2 + nproc_Mxin(1)*nproc_Mxin(2)*j3 )
-        mg_sta_all(1,ibox)=j1*lg_num(1)/nproc_Mxin(1)+lg_sta(1)
-        mg_end_all(1,ibox)=(j1+1)*lg_num(1)/nproc_Mxin(1)+lg_sta(1)-1
-        mg_sta_all(2,ibox)=j2*lg_num(2)/nproc_Mxin(2)+lg_sta(2)
-        mg_end_all(2,ibox)=(j2+1)*lg_num(2)/nproc_Mxin(2)+lg_sta(2)-1
-        mg_sta_all(3,ibox)=j3*lg_num(3)/nproc_Mxin(3)+lg_sta(3)
-        mg_end_all(3,ibox)=(j3+1)*lg_num(3)/nproc_Mxin(3)+lg_sta(3)-1
+        ibox = nproc_ob*i2 + i1 + nproc_k*nproc_ob*( j1 + nproc_d_o(1)*j2 + nproc_d_o(1)*nproc_d_o(2)*j3 )
+        mg_sta_all(1,ibox)=j1*lg_num(1)/nproc_d_o(1)+lg_sta(1)
+        mg_end_all(1,ibox)=(j1+1)*lg_num(1)/nproc_d_o(1)+lg_sta(1)-1
+        mg_sta_all(2,ibox)=j2*lg_num(2)/nproc_d_o(2)+lg_sta(2)
+        mg_end_all(2,ibox)=(j2+1)*lg_num(2)/nproc_d_o(2)+lg_sta(2)-1
+        mg_sta_all(3,ibox)=j3*lg_num(3)/nproc_d_o(3)+lg_sta(3)
+        mg_end_all(3,ibox)=(j3+1)*lg_num(3)/nproc_d_o(3)+lg_sta(3)-1
       end do
       end do
     end do
@@ -55,16 +55,16 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
   else if(isequential==2)then
     do i2=0,nproc_k-1
     do i1=0,nproc_ob-1
-      do j3=0,nproc_Mxin(3)-1
-      do j2=0,nproc_Mxin(2)-1
-      do j1=0,nproc_Mxin(1)-1
-        ibox = j1 + nproc_Mxin(1)*j2 + nproc_Mxin(1)*nproc_Mxin(2)*j3 + (nproc_ob*i2 + i1)*nproc_Mxin_mul
-        mg_sta_all(1,ibox)=j1*lg_num(1)/nproc_Mxin(1)+lg_sta(1)
-        mg_end_all(1,ibox)=(j1+1)*lg_num(1)/nproc_Mxin(1)+lg_sta(1)-1
-        mg_sta_all(2,ibox)=j2*lg_num(2)/nproc_Mxin(2)+lg_sta(2)
-        mg_end_all(2,ibox)=(j2+1)*lg_num(2)/nproc_Mxin(2)+lg_sta(2)-1
-        mg_sta_all(3,ibox)=j3*lg_num(3)/nproc_Mxin(3)+lg_sta(3)
-        mg_end_all(3,ibox)=(j3+1)*lg_num(3)/nproc_Mxin(3)+lg_sta(3)-1
+      do j3=0,nproc_d_o(3)-1
+      do j2=0,nproc_d_o(2)-1
+      do j1=0,nproc_d_o(1)-1
+        ibox = j1 + nproc_d_o(1)*j2 + nproc_d_o(1)*nproc_d_o(2)*j3 + (nproc_ob*i2 + i1)*nproc_d_o_mul
+        mg_sta_all(1,ibox)=j1*lg_num(1)/nproc_d_o(1)+lg_sta(1)
+        mg_end_all(1,ibox)=(j1+1)*lg_num(1)/nproc_d_o(1)+lg_sta(1)-1
+        mg_sta_all(2,ibox)=j2*lg_num(2)/nproc_d_o(2)+lg_sta(2)
+        mg_end_all(2,ibox)=(j2+1)*lg_num(2)/nproc_d_o(2)+lg_sta(2)-1
+        mg_sta_all(3,ibox)=j3*lg_num(3)/nproc_d_o(3)+lg_sta(3)
+        mg_end_all(3,ibox)=(j3+1)*lg_num(3)/nproc_d_o(3)+lg_sta(3)-1
       end do
       end do
       end do

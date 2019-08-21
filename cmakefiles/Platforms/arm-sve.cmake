@@ -19,8 +19,8 @@ set(CMAKE_C_COMPILER            "armclang")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-O3 -ffp-contract=fast")
 
-set(USE_MPI             OFF)
-set(REDUCE_FOR_MANYCORE ON)
+set(USE_MPI_DEFAULT             OFF)
+set(REDUCE_FOR_MANYCORE_DEFAULT ON)
 
 ########
 # Platform-specific variables

@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine write_density(it,action)
-  use salmon_global, only: format3d
+  use salmon_global, only: format_voxel_data
   use Global_Variables
   use salmon_file, only: open_filehandle
   use salmon_parallel, only: nproc_id_global
@@ -26,7 +26,7 @@ subroutine write_density(it,action)
 
   if(action=='gs') then
      if (comm_is_root(nproc_id_global)) then
-     select case(format3d)
+     select case(format_voxel_data)
      case ('cube')
         write(file_dns_gs,'(2A,"_dns_gs.cube")') trim(directory),trim(SYSname)
         fh = open_filehandle(file_dns_gs)
@@ -47,7 +47,7 @@ subroutine write_density(it,action)
      &   call analysis_RT_using_GS(Rion_update_rt,Nscf,zu_t,it,"get_dns_gs")
 
      if (comm_is_root(nproc_id_global)) then
-     select case(format3d)
+     select case(format_voxel_data)
      case ('cube')
         write(file_dns_rt,200) trim(directory),trim(SYSname),"_dns_rt_", it,".cube"
         write(file_dns_dlt,200)trim(directory),trim(SYSname),"_dns_dlt_",it,".cube"

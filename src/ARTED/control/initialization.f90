@@ -96,7 +96,7 @@ contains
 ! initialize for optimization.
     call opt_vars_initialize_p2
     if (comm_is_root(nproc_id_global)) then
-      call optimization_log(nproc_k, nproc_ob, nproc_domain, nproc_domain_s)
+      call optimization_log(nproc_k, nproc_ob, nproc_domain_orbital, nproc_domain_general)
     end if
 
     if(use_ehrenfest_md=='y' .or. use_adiabatic_md=='y') then
@@ -148,8 +148,8 @@ contains
        if(functional == 'TBmBJ' .or. functional == 'tbmbj') write(*,*) 'cvalue=',cval
        !yabana
        write(*,*) 'propagator=',propagator
-       write(*,*) 'pseudo_file =',(trim(pseudo_file(i)),i=1,NE)
-       write(*,*) 'PSmask_option =',PSmask_option
+       write(*,*) 'file_pseudo =',(trim(file_pseudo(i)),i=1,NE)
+       write(*,*) 'yn_psmask =',yn_psmask
        write(*,*) 'alpha_mask, gamma_mask, eta_mask =',real(alpha_mask), real(gamma_mask), real(eta_mask)
        write(file_GS,"(2A,'_gs_info.data')") trim(directory),trim(SYSname)
        write(file_epst,"(2A,'_t.data')") trim(directory),trim(SYSname)
@@ -554,10 +554,10 @@ contains
     use salmon_parallel
     implicit none    
 
-    if(out_rvf_rt=='n') then
+    if(yn_out_rvf_rt=='n') then
        if (comm_is_root(nproc_id_global)) &
-       write(*,*)" out_rvf_rt --> y : changed for md option"
-       out_rvf_rt='y'
+       write(*,*)" yn_out_rvf_rt --> y : changed for md option"
+       yn_out_rvf_rt='y'
     endif
 
     if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
@@ -565,9 +565,9 @@ contains
     endif
 
     if(restart_option == 'new') then
-       if(set_ini_velocity=='y' .or. step_velocity_scaling>=1) &
+       if(yn_set_ini_velocity=='y' .or. step_velocity_scaling>=1) &
        call set_initial_velocity
-       if(set_ini_velocity=='r') call read_initial_velocity
+       if(yn_set_ini_velocity=='r') call read_initial_velocity
 
        if (use_ms_maxwell == 'y' .and. use_potential_model=='n') then
           if(nproc_size_global.lt.nmacro)then
@@ -598,7 +598,7 @@ contains
 
     if (comm_is_root(nproc_id_global)) then
     write(*,*) "  Initial velocities with maxwell-boltzmann distribution was set"
-    write(*,*) "  Set temperature is ", real(temperature0_ion)
+    write(*,*) "  Set temperature is ", real(temperature0_ion_k)
     endif
 
     kB_au = kB/hartree2J   ![au/K]
@@ -606,7 +606,7 @@ contains
     iseed= 123
     do ia=1,NI
        mass_au = umass*Mass(Kion(ia))
-       sqrt_kT_im = sqrt( kB_au * temperature0_ion / mass_au )
+       sqrt_kT_im = sqrt( kB_au * temperature0_ion_k / mass_au )
 
        do ixyz=1,3
           call quickrnd(iseed,rnd1)
@@ -637,8 +637,8 @@ contains
     Temperature_ion = Tion * 2d0 / (3d0*NI) / kB_au
     !write(*,*)"    Temperature: befor-scaling",real(Temperature_ion)
 
-    scale_v = sqrt(temperature0_ion/Temperature_ion)
-    if(temperature0_ion==0d0) scale_v=0d0
+    scale_v = sqrt(temperature0_ion_k/Temperature_ion)
+    if(temperature0_ion_k==0d0) scale_v=0d0
     velocity(:,:) = velocity(:,:) * scale_v
 
     !(check)

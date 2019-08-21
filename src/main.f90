@@ -23,13 +23,13 @@ program main
     case(0)
       call gceed
     case(3)
-      select case(domain_parallel)
+      select case(yn_domain_parallel)
       case('y')
         call gceed
       case('n')
         call arted
       case default
-        stop 'invalid domain_parallel'
+        stop 'invalid yn_domain_parallel'
       end select
     case default
       stop 'invalid iperiodic'

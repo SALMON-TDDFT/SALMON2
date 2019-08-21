@@ -22,7 +22,7 @@ module salmon_pp
   subroutine init_pp(pp,nrmax,lmax,flag_nlcc)
     use structures, only: s_pp_info
     use salmon_global,only : nelem,lloc_ps
-    use salmon_global,only : pseudo_file
+    use salmon_global,only : file_pseudo
     use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat, &
                              n_ABINITFHI_psformat,n_FHI_psformat, &
                              ps_format,izatom,nelem
@@ -45,7 +45,7 @@ module salmon_pp
   
       do ik=1,nelem
          
-        ps_file = trim(pseudo_file(ik))
+        ps_file = trim(file_pseudo(ik))
         nlen_psf = len_trim(ps_file)
 
         if(ps_file(max(1,nlen_psf+1-8):nlen_psf) == '_rps.dat')then

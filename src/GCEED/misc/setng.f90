@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   &
-                 nproc,nproc_id_global,nproc_Mxin,nproc_Mxin_s_dm,ista_Mxin,iend_Mxin,isequential)
+                 nproc,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin,isequential)
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(out) :: ng
@@ -24,49 +24,49 @@ subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   
   integer :: ng_sta(3),ng_end(3),ng_num(3)
   integer :: ista_Mxin_s(3,0:nproc-1),iend_Mxin_s(3,0:nproc-1),inum_Mxin_s(3,0:nproc-1)
   integer :: ista_Mxin(3,0:nproc-1),iend_Mxin(3,0:nproc-1)
-  integer :: nproc_Mxin_mul,nproc_Mxin_mul_s_dm
+  integer :: nproc_d_o_mul,nproc_d_g_mul_dm
   integer :: isequential
-  integer :: nproc_Mxin(3),nproc_Mxin_s_dm(3)
+  integer :: nproc_d_o(3),nproc_d_g_dm(3)
   integer :: j
   integer,parameter :: nd=4
   
-  nproc_Mxin_mul=nproc_Mxin(1)*nproc_Mxin(2)*nproc_Mxin(3)
-  nproc_Mxin_mul_s_dm=nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)*nproc_Mxin_s_dm(3)
+  nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
+  nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   
   if(isequential==1)then
-    do ii=0,nproc_Mxin_mul-1
-      do i4=0,nproc/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-      do i3=0,nproc_Mxin_s_dm(3)-1
-      do i2=0,nproc_Mxin_s_dm(2)-1
-      do i1=0,nproc_Mxin_s_dm(1)-1
-        ibox= i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2)       &
-                +i4*nproc_Mxin_mul_s_dm   &
-                +ii*nproc/nproc_Mxin_mul
-        ista_Mxin_s(1,ibox)=i1*(iend_Mxin(1,ibox)-ista_Mxin(1,ibox)+1)/nproc_Mxin_s_dm(1)+ista_Mxin(1,ibox)
-        iend_Mxin_s(1,ibox)=(i1+1)*(iend_Mxin(1,ibox)-ista_Mxin(1,ibox)+1)/nproc_Mxin_s_dm(1)+ista_Mxin(1,ibox)-1
-        ista_Mxin_s(2,ibox)=i2*(iend_Mxin(2,ibox)-ista_Mxin(2,ibox)+1)/nproc_Mxin_s_dm(2)+ista_Mxin(2,ibox)
-        iend_Mxin_s(2,ibox)=(i2+1)*(iend_Mxin(2,ibox)-ista_Mxin(2,ibox)+1)/nproc_Mxin_s_dm(2)+ista_Mxin(2,ibox)-1
-        ista_Mxin_s(3,ibox)=i3*(iend_Mxin(3,ibox)-ista_Mxin(3,ibox)+1)/nproc_Mxin_s_dm(3)+ista_Mxin(3,ibox)
-        iend_Mxin_s(3,ibox)=(i3+1)*(iend_Mxin(3,ibox)-ista_Mxin(3,ibox)+1)/nproc_Mxin_s_dm(3)+ista_Mxin(3,ibox)-1
+    do ii=0,nproc_d_o_mul-1
+      do i4=0,nproc/nproc_d_o_mul/nproc_d_g_mul_dm-1
+      do i3=0,nproc_d_g_dm(3)-1
+      do i2=0,nproc_d_g_dm(2)-1
+      do i1=0,nproc_d_g_dm(1)-1
+        ibox= i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)       &
+                +i4*nproc_d_g_mul_dm   &
+                +ii*nproc/nproc_d_o_mul
+        ista_Mxin_s(1,ibox)=i1*(iend_Mxin(1,ibox)-ista_Mxin(1,ibox)+1)/nproc_d_g_dm(1)+ista_Mxin(1,ibox)
+        iend_Mxin_s(1,ibox)=(i1+1)*(iend_Mxin(1,ibox)-ista_Mxin(1,ibox)+1)/nproc_d_g_dm(1)+ista_Mxin(1,ibox)-1
+        ista_Mxin_s(2,ibox)=i2*(iend_Mxin(2,ibox)-ista_Mxin(2,ibox)+1)/nproc_d_g_dm(2)+ista_Mxin(2,ibox)
+        iend_Mxin_s(2,ibox)=(i2+1)*(iend_Mxin(2,ibox)-ista_Mxin(2,ibox)+1)/nproc_d_g_dm(2)+ista_Mxin(2,ibox)-1
+        ista_Mxin_s(3,ibox)=i3*(iend_Mxin(3,ibox)-ista_Mxin(3,ibox)+1)/nproc_d_g_dm(3)+ista_Mxin(3,ibox)
+        iend_Mxin_s(3,ibox)=(i3+1)*(iend_Mxin(3,ibox)-ista_Mxin(3,ibox)+1)/nproc_d_g_dm(3)+ista_Mxin(3,ibox)-1
       end do
       end do
       end do
       end do
     end do
   else if(isequential==2)then
-    do i4=0,nproc/nproc_Mxin_mul/nproc_Mxin_mul_s_dm-1
-    do i3=0,nproc_Mxin_s_dm(3)-1
-    do i2=0,nproc_Mxin_s_dm(2)-1
-    do i1=0,nproc_Mxin_s_dm(1)-1
-      do ii=0,nproc_Mxin_mul-1
-        ibox=ii+(i1+i2*nproc_Mxin_s_dm(1)+i3*nproc_Mxin_s_dm(1)*nproc_Mxin_s_dm(2))*nproc_Mxin_mul   &
-              +i4*nproc_Mxin_mul*nproc_Mxin_mul_s_dm
-        ista_Mxin_s(1,ibox)=i1*(iend_Mxin(1,ii)-ista_Mxin(1,ii)+1)/nproc_Mxin_s_dm(1)+ista_Mxin(1,ii)
-        iend_Mxin_s(1,ibox)=(i1+1)*(iend_Mxin(1,ii)-ista_Mxin(1,ii)+1)/nproc_Mxin_s_dm(1)+ista_Mxin(1,ii)-1
-        ista_Mxin_s(2,ibox)=i2*(iend_Mxin(2,ii)-ista_Mxin(2,ii)+1)/nproc_Mxin_s_dm(2)+ista_Mxin(2,ii)
-        iend_Mxin_s(2,ibox)=(i2+1)*(iend_Mxin(2,ii)-ista_Mxin(2,ii)+1)/nproc_Mxin_s_dm(2)+ista_Mxin(2,ii)-1
-        ista_Mxin_s(3,ibox)=i3*(iend_Mxin(3,ii)-ista_Mxin(3,ii)+1)/nproc_Mxin_s_dm(3)+ista_Mxin(3,ii)
-        iend_Mxin_s(3,ibox)=(i3+1)*(iend_Mxin(3,ii)-ista_Mxin(3,ii)+1)/nproc_Mxin_s_dm(3)+ista_Mxin(3,ii)-1
+    do i4=0,nproc/nproc_d_o_mul/nproc_d_g_mul_dm-1
+    do i3=0,nproc_d_g_dm(3)-1
+    do i2=0,nproc_d_g_dm(2)-1
+    do i1=0,nproc_d_g_dm(1)-1
+      do ii=0,nproc_d_o_mul-1
+        ibox=ii+(i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2))*nproc_d_o_mul   &
+              +i4*nproc_d_o_mul*nproc_d_g_mul_dm
+        ista_Mxin_s(1,ibox)=i1*(iend_Mxin(1,ii)-ista_Mxin(1,ii)+1)/nproc_d_g_dm(1)+ista_Mxin(1,ii)
+        iend_Mxin_s(1,ibox)=(i1+1)*(iend_Mxin(1,ii)-ista_Mxin(1,ii)+1)/nproc_d_g_dm(1)+ista_Mxin(1,ii)-1
+        ista_Mxin_s(2,ibox)=i2*(iend_Mxin(2,ii)-ista_Mxin(2,ii)+1)/nproc_d_g_dm(2)+ista_Mxin(2,ii)
+        iend_Mxin_s(2,ibox)=(i2+1)*(iend_Mxin(2,ii)-ista_Mxin(2,ii)+1)/nproc_d_g_dm(2)+ista_Mxin(2,ii)-1
+        ista_Mxin_s(3,ibox)=i3*(iend_Mxin(3,ii)-ista_Mxin(3,ii)+1)/nproc_d_g_dm(3)+ista_Mxin(3,ii)
+        iend_Mxin_s(3,ibox)=(i3+1)*(iend_Mxin(3,ii)-ista_Mxin(3,ii)+1)/nproc_d_g_dm(3)+ista_Mxin(3,ii)-1
       end do
     end do
     end do

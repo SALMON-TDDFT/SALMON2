@@ -66,6 +66,11 @@ module structures
   type s_pcomm_cache
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
+
+! NOTE: This directive is a compiler hint to stabilize the performance of sendrecv_grid.
+#ifdef __INTEL_COMPILER
+!dir$ attributes align : 2097152 :: dbuf, zbuf
+#endif
   end type s_pcomm_cache
 
   type s_sendrecv_grid
@@ -91,11 +96,11 @@ module structures
   type s_orbital_parallel
     logical :: if_divide_rspace
     logical :: if_divide_orbit
-    integer :: icomm_r   ! communicator for r-space
-    integer :: icomm_k   ! communicator for k-space
-    integer :: icomm_o   ! communicator for orbital
-    integer :: icomm_ro  ! communicator for r-space & orbital
-    integer :: icomm_ko  ! communicator for k-space & orbital
+    integer :: icomm_r,   id_r,   isize_r   ! communicator for r-space
+    integer :: icomm_k,   id_k,   isize_k   ! communicator for k-space
+    integer :: icomm_o,   id_o,   isize_o   ! communicator for orbital
+    integer :: icomm_ro,  id_ro,  isize_ro  ! communicator for r-space & orbital
+    integer :: icomm_ko,  id_ko,  isize_ko  ! communicator for k-space & orbital
     integer :: icomm_rko ! communicator for r-space, k-space & orbital
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
@@ -105,6 +110,11 @@ module structures
     integer,allocatable :: irank_jo(:) ! MPI rank of the orbital index #jo
     real(8),allocatable :: occ(:,:,:,:) ! (io,ik,ispin,im), occ = rocc*wk, occupation numbers
   end type s_orbital_parallel
+
+  type s_field_parallel
+    integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
+    integer :: id(3), isize(3)
+  end type s_field_parallel
 
   type s_orbital
   ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e

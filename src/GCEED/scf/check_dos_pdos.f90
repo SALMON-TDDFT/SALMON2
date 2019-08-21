@@ -14,14 +14,14 @@
 !  limitations under the License.
 !
 subroutine check_dos_pdos
-  use inputoutput, only: ispin, out_dos, out_pdos, out_dos_method
+  use inputoutput, only: ispin, yn_out_dos, yn_out_pdos, out_dos_function
   implicit none
 
-  if(out_dos=='y'.or.out_pdos=='y')then
+  if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
     if(ispin==1)then
-      stop "Sorry, out_dos is not implemented for ispin=1."
+      stop "Sorry, yn_out_dos is not implemented for ispin=1."
     end if
-    select case(out_dos_method)
+    select case(out_dos_function)
     case("gaussian","lorentzian")
       continue
     case default

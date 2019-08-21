@@ -253,7 +253,8 @@ end if
 END SUBROUTINE OUT_data_rt
 
 !---------------------------------------------------------------------------
-SUBROUTINE IN_data_rt(Ntime)
+SUBROUTINE IN_data_rt(info,Ntime)
+use structures, only: s_orbital_parallel
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
@@ -263,6 +264,7 @@ use new_world_sub
 use readbox_rt_sub
 use allocate_mat_sub
 implicit none
+type(s_orbital_parallel),intent(in) :: info
 integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer       :: Ntime
@@ -471,7 +473,7 @@ end do
 end do
 
 itt=Miter_rt
-call wrapper_allgatherv_vlocal
+call wrapper_allgatherv_vlocal(info)
 
 if(comm_is_root(nproc_id_global))then
   read(98) (vecDs(jj),jj=1,3)

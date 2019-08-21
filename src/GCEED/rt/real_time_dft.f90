@@ -54,6 +54,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system)  :: system
 type(s_orbital_parallel) :: info
+type(s_field_parallel) :: info_field
 type(s_stencil) :: stencil
 type(s_reciprocal_grid) :: fg
 type(s_dft_energy) :: energy
@@ -145,14 +146,14 @@ if(idensum==0) posplane=posplane/a_B
 
 select case (ikind_eext)
   case(1)
-    if(rlaser_int_wcm2_1>=1.d-12)then
-      amplitude1=sqrt(rlaser_int_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    if(I_wcm2_1>=1.d-12)then
+      E_amplitude1=sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     end if
-    if(rlaser_int_wcm2_2>=1.d-12)then
-      amplitude2=sqrt(rlaser_int_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    if(I_wcm2_2>=1.d-12)then
+      E_amplitude2=sqrt(I_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
     else
-      if(abs(amplitude2)<=1.d-12)then
-        amplitude2=0.d0
+      if(abs(E_amplitude2)<=1.d-12)then
+        E_amplitude2=0.d0
       end if
     end if
 end select
@@ -162,7 +163,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_READ_LDA_DATA)
 ! Read SCF data
-call IN_data(lg,mg,ng,info,system,stencil,cg)
+call IN_data(lg,mg,ng,info,info_field,system,stencil,cg)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then
@@ -183,7 +184,7 @@ call read_pslfile(system)
 call allocate_psl
 call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
 
-call init_updown
+call init_updown(info)
 call init_itype
 call init_sendrecv_matrix
 
@@ -197,7 +198,7 @@ else if(ilsda==1)then
   numspin=2
 end if
 
-if(MEO==2.or.MEO==3) call make_corr_pole
+if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole
 call make_icoobox_bound
 call timer_end(LOG_READ_LDA_DATA)
 
@@ -253,7 +254,7 @@ if(IC_rt==0) then
   itotNtime=Ntime
   Miter_rt=0
 else if(IC_rt==1) then
-  call IN_data_rt(Ntime)
+  call IN_data_rt(info,Ntime)
 end if
 call timer_end(LOG_READ_RT_DATA)
 
@@ -333,7 +334,7 @@ endif
 
 
 ! Go into Time-Evolution
-call Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
+call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -452,7 +453,7 @@ subroutine init_code_optimization
   call set_modulo_tables(mg%num + (nd*2))
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log(nproc_k, nproc_ob, nproc_mxin, nproc_mxin_s)
+    call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
   end if
 end subroutine
 
@@ -460,12 +461,10 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,stencil,fg,energy,md,ofl)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
-                           nproc_group_h, nproc_group_rho, &
-                           nproc_size_global, &
-                           nproc_group_grid
+                           nproc_group_h, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -485,6 +484,7 @@ implicit none
 type(s_rgrid) :: lg,mg,ng
 type(s_dft_system) :: system
 type(s_orbital_parallel) :: info
+type(s_field_parallel) :: info_field
 type(s_stencil) :: stencil
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
@@ -538,10 +538,8 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   info%io_e=iobnum/nspin
   info%numo=iobnum/nspin
 
-  info%if_divide_rspace = nproc_mxin_mul.ne.1   ! moved just after init_lattice
+  info%if_divide_rspace = nproc_d_o_mul.ne.1   ! moved just after init_lattice
   info%if_divide_orbit = nproc_ob.ne.1
-  info%icomm_k = nproc_group_grid
-  info%icomm_ko = nproc_group_rho
   info%icomm_rko = nproc_group_global
 
   allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
@@ -717,7 +715,7 @@ allocate(zc(N_hamil))
 ! External Field Direction
 select case (ikind_eext)
   case(1)
-    if(alocal_laser=='y')then
+    if(yn_local_field=='y')then
       rlaser_center(1:3)=(rlaserbound_sta(1:3)+rlaserbound_end(1:3))/2.d0
       do jj=1,3
         select case(imesh_oddeven(jj))
@@ -778,7 +776,7 @@ end do
 end do
 end do
 
-if(nump>=1)then
+if(num_dipole_source>=1)then
   allocate(vonf_sd(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   allocate(eonf_sd(3,mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   vonf_sd=0.d0
@@ -871,15 +869,15 @@ end do
 end do
 
   do itt=0,0
-    if(out_dns_rt=='y')then
+    if(yn_out_dns_rt=='y')then
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
-    if(out_elf_rt=='y')then
+    if(yn_out_elf_rt=='y')then
       call calcELF(info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
-    if(out_estatic_rt=='y')then
-      call calcEstatic(ng, sVh, srg_ng)
+    if(yn_out_estatic_rt=='y')then
+      call calcEstatic(ng, info, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
     end if
   end do
@@ -946,11 +944,11 @@ call timer_end(LOG_INIT_RT)
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
-    call time_evolution_step(lg,mg,ng,system,info,stencil &
+    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,j_e,singlescale)
   else
-    call time_evolution_step(lg,mg,ng,system,info,stencil &
+    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,j_e,singlescale)
   end if

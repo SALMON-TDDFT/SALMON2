@@ -26,7 +26,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,i
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
                iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst)
-  use inputoutput, only: iperiodic,amin_routine,gscg
+  use inputoutput, only: iperiodic,method_min,gscg
   use structures
   use timer
   use dtcg_sub
@@ -69,8 +69,8 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,i
 ! solve Kohn-Sham equation by minimization techniques
   call timer_begin(LOG_CALC_MINIMIZATION)
 
-  if( amin_routine == 'cg' .or.       &
-    ( amin_routine == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
+  if( method_min == 'cg' .or.       &
+    ( method_min == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
     select case(iperiodic)
     case(0)
       select case(gscg)
@@ -90,7 +90,7 @@ subroutine scf_iteration(mg,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho_s,i
                            info_ob,ppg,vlocal)
       end select
     end select
-  else if( amin_routine  == 'diis' .or. amin_routine == 'cg-diis' ) then
+  else if( method_min  == 'diis' .or. method_min == 'cg-diis' ) then
     select case(iperiodic)
     case(0)
       call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,   &

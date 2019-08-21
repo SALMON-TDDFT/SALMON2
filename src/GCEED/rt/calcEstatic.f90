@@ -13,15 +13,15 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcEstatic(ng, sVh, srg_ng)
-use salmon_parallel, only: nproc_group_grid
+subroutine calcEstatic(ng, info, sVh, srg_ng)
 use salmon_communication, only: comm_summation
 use scf_data
 use new_world_sub
-use structures
+use structures, only: s_rgrid, s_orbital_parallel, s_scalar, s_sendrecv_grid
 use sendrecv_grid, only: update_overlap_real8
 implicit none
 type(s_rgrid),intent(in) :: ng
+type(s_orbital_parallel),intent(in) :: info
 type(s_scalar),intent(in) :: sVh
 type(s_sendrecv_grid),intent(inout) :: srg_ng
 
@@ -150,9 +150,9 @@ end do
 end do
 end do
 
-call comm_summation(Ex_static2,Ex_static,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_grid)
-call comm_summation(Ey_static2,Ey_static,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_grid)
-call comm_summation(Ez_static2,Ez_static,mg_num(1)*mg_num(2)*mg_num(3),nproc_group_grid)
+call comm_summation(Ex_static2,Ex_static,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_ko)
+call comm_summation(Ey_static2,Ey_static,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_ko)
+call comm_summation(Ez_static2,Ez_static,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_ko)
 
 end subroutine calcEstatic
 
