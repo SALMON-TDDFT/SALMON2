@@ -64,8 +64,8 @@
 
 &md
   ensemble = "NVE"
-  set_ini_velocity='y'
-  temperature0_ion=300.0d0
+  yn_set_ini_velocity='y'
+  temperature0_ion_k=300.0d0
   step_update_ps=       50
   step_update_ps2=     200
 /

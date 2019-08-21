@@ -69,7 +69,7 @@ if(comm_is_root(nproc_id_global))then
   write(97) (Hgs(jj),jj=1,3)
   write(97) (rLsize(jj,ntmg),jj=1,3)
   write(97) Miter
-  write(97) MEO
+  write(97) layout_multipole
   
   if(iflag_ps.eq.1)then
     write(97) Jxyz_all(1:3,1:maxMps,1:MI),Mps_all(1:MI)

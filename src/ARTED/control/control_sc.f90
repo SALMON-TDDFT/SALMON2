@@ -122,7 +122,7 @@ subroutine tddft_sc
      Enh_gkTlns = 0d0
      Enh        = 0d0
      if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
-        gkT = 3d0*NI * kB/hartree2J*temperature0_ion
+        gkT = 3d0*NI * kB/hartree2J*temperature0_ion_k
         Qnh = gkT * thermostat_tau**2d0
      endif
   endif
@@ -250,7 +250,7 @@ subroutine tddft_sc
           call apply_nose_hoover_velocity(dt_h)
        endif
 
-       if (stop_system_momt=='y') call remove_system_momentum(0)
+       if (yn_stop_system_momt=='y') call remove_system_momentum(0)
        call cal_Tion_Temperature_ion(Tion,Temperature_ion,velocity)
 
     else

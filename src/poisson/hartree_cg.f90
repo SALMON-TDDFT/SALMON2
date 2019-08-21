@@ -21,7 +21,7 @@ contains
 
 !============================ Hartree potential (Solve Poisson equation)
 subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk2bound_h,  &
-                      meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
+                      layout_multipole,lmax_lmp,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                       iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                       ibox_icoobox_bound,icoobox_bound)
   use structures, only: s_rgrid,s_sendrecv_grid,s_stencil
@@ -49,8 +49,8 @@ subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk
   integer,intent(out) :: itervh
   real(8),intent(out) :: wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
   real(8),intent(out) :: wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
-  integer,intent(in) :: meo
-  integer,intent(in) :: lmax_meo
+  integer,intent(in) :: layout_multipole
+  integer,intent(in) :: lmax_lmp
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
@@ -83,7 +83,7 @@ subroutine hartree_cg(lg,mg,ng,trho,tVh,srg_ng,stencil,hconv,itervh,wkbound_h,wk
                 ng%is_array(3):ng%ie_array(3))
   
   call hartree_boundary(lg,mg,ng,trho,pk,wkbound_h,wk2bound_h,   &
-                        meo,lmax_meo,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
+                        layout_multipole,lmax_lmp,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                         iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                         ibox_icoobox_bound,icoobox_bound)
   

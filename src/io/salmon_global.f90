@@ -271,7 +271,7 @@ module salmon_global
   character(1)   :: timer_process
 
 !! &poisson
-  integer        :: meo
+  integer        :: layout_multipole
   integer        :: num_multipole_xyz(3)
 
 !! &ewald
@@ -294,13 +294,12 @@ module salmon_global
   integer        :: step_velocity_scaling
   integer        :: step_update_ps
   integer        :: step_update_ps2
-  real(8)        :: temperature0_ion
-  character(1)   :: set_ini_velocity
+  real(8)        :: temperature0_ion_k
+  character(1)   :: yn_set_ini_velocity
   character(256) :: file_ini_velocity
-  character(256) :: file_set_shake
   real(8)        :: thermostat_tau
   real(8)        :: friction
-  character(1)   :: stop_system_momt
+  character(1)   :: yn_stop_system_momt
 
 !! &group_fundamental
   integer        :: iditerybcg
@@ -319,7 +318,7 @@ module salmon_global
 
 !! &group_hartree
   real(8)        :: hconv
-  integer        :: lmax_meo
+  integer        :: lmax_lmp
 
 !! &group_file
   integer        :: ic

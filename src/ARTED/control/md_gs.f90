@@ -71,7 +71,7 @@ subroutine calc_md_ground_state
   Enh        = 0d0
 
   if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
-     gkT = 3d0*NI * kB/hartree2J*temperature0_ion
+     gkT = 3d0*NI * kB/hartree2J*temperature0_ion_k
      Qnh = gkT * thermostat_tau**2d0
   endif
 
@@ -142,7 +142,7 @@ subroutine calc_md_ground_state
      endif
 
      !remove system momentum
-     if(stop_system_momt=='y') call remove_system_momentum(0)
+     if(yn_stop_system_momt=='y') call remove_system_momentum(0)
 
 
      call cal_Tion_Temperature_ion(Tion,Temperature_ion,velocity)
@@ -203,7 +203,7 @@ end subroutine calc_md_ground_state
     implicit none
     real(8) :: Temp_ion,dt_f 
 
-    xi_nh = xi_nh + (Temp_ion/temperature0_ion-1d0)/(thermostat_tau**2d0)*dt_f 
+    xi_nh = xi_nh + (Temp_ion/temperature0_ion_k-1d0)/(thermostat_tau**2d0)*dt_f 
 
     return
   end subroutine apply_nose_hoover_thermostat
@@ -279,7 +279,7 @@ end subroutine calc_md_ground_state
      implicit none
      real(8) :: Temp_ion, vel(3,NI), fac_vscaling
 
-     fac_vscaling = sqrt(temperature0_ion/Temp_ion)
+     fac_vscaling = sqrt(temperature0_ion_k/Temp_ion)
      vel(:,:) = vel(:,:) * fac_vscaling
 
      return
@@ -323,7 +323,7 @@ end subroutine calc_md_ground_state
 
        write(*,*) 
        write(*,9000) "# Velocity (atoms, thermostat if nose-hoover ooption) in [au]"
-       write(*,9000) "# Copy to separated file used in file_ini_vel option with set_ini_velocity='r'"
+       write(*,9000) "# Copy to separated file used in file_ini_vel option with yn_set_ini_velocity='r'"
        do ia = 1,NI      
           write(*,8000) velocity(1:3,ia)
        enddo

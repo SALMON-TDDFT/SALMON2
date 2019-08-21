@@ -611,7 +611,7 @@ real(8),allocatable :: Rion2(:,:)
 integer,allocatable :: nearatomnum(:,:,:)
 integer,allocatable :: inv_icorr_polenum(:)
 
-if(MEO==2)then
+if(layout_multipole==2)then
 
   if(iflag_ps==1)then
     amax=MI
@@ -678,7 +678,7 @@ if(MEO==2)then
   deallocate(nearatomnum)
   deallocate(inv_icorr_polenum)
 
-else if(MEO==3)then
+else if(layout_multipole==3)then
 
   allocate(ista_Mxin_pole(3,0:num_pole-1))
   allocate(iend_Mxin_pole(3,0:num_pole-1))

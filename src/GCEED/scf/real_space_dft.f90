@@ -176,7 +176,7 @@ if(iopt==1)then
   call init_sendrecv_matrix
   select case(iperiodic)
   case(0)
-    if(MEO==2.or.MEO==3) call make_corr_pole
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole
   end select
   call make_icoobox_bound
 

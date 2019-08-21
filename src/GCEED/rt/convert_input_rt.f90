@@ -98,9 +98,9 @@ if(Ntime==0)then
 end if
 
 !===== namelist for group_hartree =====
-if(meo<=0.or.meo>=4)then
-  stop "meo must be equal to 1 or 2 or 3."
-else if(meo==3)then
+if(layout_multipole<=0.or.layout_multipole>=4)then
+  stop "layout_multipole must be equal to 1 or 2 or 3."
+else if(layout_multipole==3)then
   if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
     continue
   else if(num_multipole_xyz(1)<=0.or.num_multipole_xyz(2)<=0.or.num_multipole_xyz(3)<=0)then

@@ -20,7 +20,7 @@ contains
 
 subroutine init_md(system,md)
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: MI,yn_out_rvf_rt, ensemble, thermostat,set_ini_velocity,step_velocity_scaling
+  use salmon_global, only: MI,yn_out_rvf_rt, ensemble, thermostat,yn_set_ini_velocity,step_velocity_scaling
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   implicit none    
@@ -39,9 +39,9 @@ subroutine init_md(system,md)
   md%E_work = 0d0
 
   if(ensemble=="NVT" .and. thermostat=="nose-hoover") md%xi_nh=0d0
-  if(set_ini_velocity=='y' .or. step_velocity_scaling>=1) &
+  if(yn_set_ini_velocity=='y' .or. step_velocity_scaling>=1) &
        call set_initial_velocity(system,md)
-  if(set_ini_velocity=='r') call read_initial_velocity(system,md)
+  if(yn_set_ini_velocity=='r') call read_initial_velocity(system,md)
 
   !if(use_ms_maxwell == 'y' .and. use_potential_model=='n') then
   !   if(nproc_size_global.lt.nmacro) then
@@ -57,7 +57,7 @@ end subroutine init_md
 
 subroutine set_initial_velocity(system,md)
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: MI,Kion,temperature0_ion
+  use salmon_global, only: MI,Kion,temperature0_ion_k
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_bcast
   use math_constants, only: Pi
@@ -71,7 +71,7 @@ subroutine set_initial_velocity(system,md)
   
   if (comm_is_root(nproc_id_global)) then
      write(*,*) "  Initial velocities with maxwell-boltzmann distribution was set"
-     write(*,*) "  Set temperature is ", real(temperature0_ion)
+     write(*,*) "  Set temperature is ", real(temperature0_ion_k)
   endif
 
   kB_au = kB/hartree2J  ![au/K]
@@ -79,7 +79,7 @@ subroutine set_initial_velocity(system,md)
   iseed= 123
   do ia=1,MI
      mass_au = umass * system%Mass(Kion(ia))
-     sqrt_kT_im = sqrt( kB_au * temperature0_ion / mass_au )
+     sqrt_kT_im = sqrt( kB_au * temperature0_ion_k / mass_au )
 
      do ixyz=1,3
         call quickrnd(iseed,rnd1)
@@ -109,8 +109,8 @@ subroutine set_initial_velocity(system,md)
   Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
   !write(*,*)"    Temperature: befor-scaling",real(Temperature_ion)
  
-  scale_v = sqrt(temperature0_ion/Temperature_ion)
-  if(temperature0_ion==0d0) scale_v=0d0
+  scale_v = sqrt(temperature0_ion_k/Temperature_ion)
+  if(temperature0_ion_k==0d0) scale_v=0d0
   system%Velocity(:,:) = system%Velocity(:,:) * scale_v
  
   !(check)
@@ -290,7 +290,7 @@ end subroutine
 
 subroutine time_evolution_step_md_part2(system,md)
   use structures, only: s_dft_system, s_md
-  use salmon_global, only: MI,Kion,dt,stop_system_momt
+  use salmon_global, only: MI,Kion,dt,yn_stop_system_momt
   use const, only: umass,hartree2J,kB
   implicit none
   type(s_dft_system) :: system
@@ -310,7 +310,7 @@ subroutine time_evolution_step_md_part2(system,md)
   enddo
 
 
-  if (stop_system_momt=='y') call remove_system_momentum(0,system)
+  if (yn_stop_system_momt=='y') call remove_system_momentum(0,system)
   call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
 
 end subroutine 

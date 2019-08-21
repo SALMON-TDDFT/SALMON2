@@ -197,7 +197,7 @@ else if(ilsda==1)then
   numspin=2
 end if
 
-if(MEO==2.or.MEO==3) call make_corr_pole
+if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole
 call make_icoobox_bound
 call timer_end(LOG_READ_LDA_DATA)
 

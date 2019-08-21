@@ -438,7 +438,7 @@ contains
       & timer_process
 
     namelist/poisson/ &
-      & meo, &
+      & layout_multipole, &
       & num_multipole_xyz
 
     namelist/ewald/ &
@@ -461,13 +461,12 @@ contains
       & step_velocity_scaling, &
       & step_update_ps, &
       & step_update_ps2,&
-      & temperature0_ion, &
-      & set_ini_velocity, &
+      & temperature0_ion_k, &
+      & yn_set_ini_velocity, &
       & file_ini_velocity, &
-      & file_set_shake, &
       & thermostat_tau, &
       & friction, &
-      & stop_system_momt
+      & yn_stop_system_momt
 
     namelist/group_fundamental/ &
       & iditerybcg, &
@@ -486,7 +485,7 @@ contains
 
     namelist/group_hartree/ &
       & hconv, &
-      & lmax_meo
+      & lmax_lmp
 
     namelist/group_file/ &
       & ic, &
@@ -779,7 +778,7 @@ contains
     timer_process       = 'n'
 
 !! == default for &poissno
-    meo               = 3
+    layout_multipole  = 3
     num_multipole_xyz = 0
 !! == default for &ewald
     newald = 4
@@ -799,13 +798,12 @@ contains
     step_velocity_scaling = -1
     step_update_ps        = 10
     step_update_ps2       = 1
-    temperature0_ion      = 298.15d0
-    set_ini_velocity      = 'n'
+    temperature0_ion_k    = 298.15d0
+    yn_set_ini_velocity   = 'n'
     file_ini_velocity     = 'none'
-    file_set_shake        = 'none'
     thermostat_tau        =  41.34d0  !=1fs: just test value
     friction              =  0d0
-    stop_system_momt      = 'n'
+    yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
     iditerybcg             = 20
     iditer_nosubspace_diag = 10
@@ -821,7 +819,7 @@ contains
     iflag_comm_rho = 1
 !! == default for &group_hartree
     hconv    = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
-    lmax_meo = 4
+    lmax_lmp = 4
 !! == default for &group_file
     ic    = 0
     oc    = 1
@@ -1231,7 +1229,7 @@ contains
     call comm_bcast(timer_process       ,nproc_group_global)
 
 !! == bcast for &poisson
-    call comm_bcast(meo               ,nproc_group_global)
+    call comm_bcast(layout_multipole  ,nproc_group_global)
     call comm_bcast(num_multipole_xyz ,nproc_group_global)
 !! == bcast for &ewald
     call comm_bcast(newald,nproc_group_global)
@@ -1251,14 +1249,13 @@ contains
     call comm_bcast(step_velocity_scaling  ,nproc_group_global)
     call comm_bcast(step_update_ps         ,nproc_group_global)
     call comm_bcast(step_update_ps2        ,nproc_group_global)
-    call comm_bcast(temperature0_ion       ,nproc_group_global)
-    call comm_bcast(set_ini_velocity       ,nproc_group_global)
+    call comm_bcast(temperature0_ion_k     ,nproc_group_global)
+    call comm_bcast(yn_set_ini_velocity    ,nproc_group_global)
     call comm_bcast(file_ini_velocity      ,nproc_group_global)
-    call comm_bcast(file_set_shake         ,nproc_group_global)
     call comm_bcast(thermostat_tau         ,nproc_group_global)
     thermostat_tau = thermostat_tau * utime_to_au
     call comm_bcast(friction               ,nproc_group_global)
-    call comm_bcast(stop_system_momt       ,nproc_group_global)
+    call comm_bcast(yn_stop_system_momt    ,nproc_group_global)
 !! == bcast for &group_fundamental
     call comm_bcast(iditerybcg            ,nproc_group_global)
     call comm_bcast(iditer_nosubspace_diag,nproc_group_global)
@@ -1275,7 +1272,7 @@ contains
 !! == bcast for &group_hartree
     call comm_bcast(hconv   ,nproc_group_global)
     hconv = hconv * (uenergy_to_au)**2 * (ulength_to_au)**3 
-    call comm_bcast(lmax_meo,nproc_group_global)
+    call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_file
     call comm_bcast(ic   ,nproc_group_global)
     call comm_bcast(oc   ,nproc_group_global)
@@ -1883,7 +1880,7 @@ contains
 
       if(inml_poisson >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', inml_poisson
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'meo', meo
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'layout_multipole', layout_multipole
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
@@ -1910,13 +1907,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_velocity_scaling', step_velocity_scaling
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps', step_update_ps
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps2', step_update_ps2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature0_ion', temperature0_ion
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_velocity', set_ini_velocity
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature0_ion_k', temperature0_ion_k
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_set_ini_velocity', yn_set_ini_velocity
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_ini_velocity', trim(file_ini_velocity)
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_set_shake', trim(file_set_shake)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'friction', friction
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'stop_system_momt', stop_system_momt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
 
       if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
@@ -1939,7 +1935,7 @@ contains
       if(inml_group_hartree >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_hartree', inml_group_hartree
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hconv', hconv
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_meo', lmax_meo
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_lmp', lmax_lmp
 
       if(inml_group_file >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_file', inml_group_file
