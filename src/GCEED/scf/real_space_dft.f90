@@ -56,6 +56,7 @@ use gscg_periodic_sub
 use rmmdiis_sub
 use subspace_diag_sub
 use subspace_diag_periodic_sub
+use mixing_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
@@ -612,7 +613,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     select case(method_mixing)
       case ('simple') ; call simple_mixing(ng,system,1.d0-mixrate,mixrate,srho_s,mixing)
-      case ('broyden'); call buffer_broyden_ns(ng,system,srho_s,mst,ifmst,iter,mixing)
+      case ('broyden'); call wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
     end select
     call timer_end(LOG_CALC_RHO)
 
