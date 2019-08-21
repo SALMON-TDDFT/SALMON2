@@ -30,13 +30,11 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
   use structures
   use timer
   use dtcg_sub
-  use gscg_sub
   use dtcg_periodic_sub
-  use gscg_periodic_sub
   use rmmdiis_sub
-  use gram_schmidt_orth, only: gram_schmidt 
-  use subspace_diag_sub
-  use subspace_diag_periodic_sub
+  use gram_schmidt_orth, only: gram_schmidt
+  use Conjugate_Gradient
+  use subspace_diagonalization
   use density_matrix, only: calc_density
   use mixing_sub
   implicit none
@@ -81,8 +79,7 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
     case(0)
       select case(gscg)
       case('y')
-        call sgscg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,cg, &
-                   info_ob,ppg,vlocal)
+        call sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
       case('n')
         call dtcg(mg,system,info,stencil,srg_ob_1,spsi,iflag,itotmst,mst,ilsda,nproc_ob,   &
                   info_ob,ppg,vlocal)
@@ -117,8 +114,7 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      
-        call subspace_diag(mg,system,info,stencil,srg_ob_1,spsi,ilsda,nproc_ob,iobnum,itotmst,   &
-                           mst,ifmst,info_ob,ppg,vlocal)
+        call subspace_diag(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
       case(3)
         call subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
