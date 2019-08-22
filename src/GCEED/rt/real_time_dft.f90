@@ -1002,7 +1002,11 @@ do iene=0,Nenergy
     if(ikind_eext==0.or.ikind_eext==10)then
       zalpha=zalpha/Fst*dt
       if(iflag_indA==0)then
-        zalpha(1:3)=1.d0+4.d0*Pi*zi*zalpha(1:3)/hw
+        if (iene == 0) then ! WARNING: zero divide happens when iene is 0
+          zalpha(1:3)=0
+        else
+          zalpha(1:3)=1.d0+4.d0*Pi*zi*zalpha(1:3)/hw
+        end if
       else if(iflag_indA==1)then
         zalpha(1:3)=1.d0/(1.d0-zi*hw*zalpha(1:3))
       end if
