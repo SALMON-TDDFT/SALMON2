@@ -19,9 +19,8 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,srho_s,iflag,itotmst,mst, &
-               cg,   &
-               info_ob,ppg,vlocal,  &
+subroutine scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,itotmst,mst, &
+               cg,ppg,vlocal,  &
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
@@ -31,8 +30,8 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
   use timer
   use rmmdiis_sub
   use gram_schmidt_orth, only: gram_schmidt
-  use Conjugate_Gradient
-  use subspace_diagonalization
+  use Conjugate_Gradient, only: gscg_isolated,gscg_periodic
+  use subspace_diagonalization, only: ssdg_isolated,ssdg_periodic
   use density_matrix, only: calc_density
   use mixing_sub
   implicit none
@@ -45,13 +44,11 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
   type(s_scalar),        intent(inout) :: srho
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
-  type(s_sendrecv_grid), intent(inout) :: srg,srg_ob_1
+  type(s_sendrecv_grid), intent(inout) :: srg
   type(s_pp_grid),       intent(in)    :: ppg
-  integer,               intent(inout) :: iflag
   integer,               intent(in)    :: itotmst
   integer,               intent(in)    :: mst(2)
   type(s_cg),            intent(inout) :: cg
-  type(s_orbital_parallel),intent(in)  :: info_ob
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
   integer,               intent(inout) :: iflag_diisjump
   type(s_dft_energy),    intent(inout) :: energy
@@ -72,16 +69,17 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
     ( method_min == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
     select case(iperiodic)
     case(0)
-      call sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
+      call gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     case(3)
-      call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
+      call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end select
   else if( method_min  == 'diis' .or. method_min == 'cg-diis' ) then
     select case(iperiodic)
     case(0)
-      call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,   &
-                   iflag_diisjump, &
-                   norm_diff_psi_stock,info_ob,ppg,vlocal)
+      stop "rmmdiis method is not implemented."
+!      call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,   &
+!                   iflag_diisjump, &
+!                   norm_diff_psi_stock,info_ob,ppg,vlocal)
     case(3)
       stop "rmmdiis method is not implemented for periodic systems."
     end select
@@ -97,10 +95,10 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      
-        call subspace_diag(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+        call ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
       case(3)
-        call subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+        call ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
       end select
     end if
   end if

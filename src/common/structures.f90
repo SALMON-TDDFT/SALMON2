@@ -116,7 +116,7 @@ module structures
   end type s_field_parallel
 
   type s_orbital
-  ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e
+  ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e (cf. s_orbital_parallel)
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: ztmp(:,:,:,:)
@@ -133,6 +133,7 @@ module structures
     type(s_sendrecv_grid) :: srg
   end type s_stencil
 
+! pseudopotential
   type s_pp_info
     real(8) :: zion
     integer :: lmax,lmax0
@@ -167,6 +168,7 @@ module structures
     real(8),allocatable :: dvpp(:,:)
   end type s_pp_info
 
+! pseudopotential on r-space grid
   type s_pp_grid
     integer :: nps
     integer,allocatable :: mps(:)
@@ -222,17 +224,9 @@ module structures
      character(256) :: file_rt_data, file_rt_energy_data
   end type s_ofile
 
+! for DFT ground state calculations
+
   type s_cg
-    real(8), allocatable :: rxk_ob(:,:,:,:)
-    real(8), allocatable :: rhxk_ob(:,:,:,:)
-    real(8), allocatable :: rgk_ob(:,:,:,:)
-    real(8), allocatable :: rpk_ob(:,:,:,:)
-    complex(8), allocatable :: zxk_ob(:,:,:,:)
-    complex(8), allocatable :: zhxk_ob(:,:,:,:)
-    complex(8), allocatable :: zgk_ob(:,:,:,:)
-    complex(8), allocatable :: zpk_ob(:,:,:,:)
-    complex(8), allocatable :: zpko_ob(:,:,:,:)
-    complex(8), allocatable :: zhwf_ob(:,:,:,:)
     type(s_orbital) :: xk,hxk,gk,pk,pko,hwf
   end type s_cg
   
