@@ -14,7 +14,8 @@
 !  limitations under the License.
 !
 subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   &
-                 nproc,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin,isequential)
+                 nproc,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin)
+  use inputoutput, only: process_allocation
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(out) :: ng
@@ -25,7 +26,6 @@ subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   
   integer :: ista_Mxin_s(3,0:nproc-1),iend_Mxin_s(3,0:nproc-1),inum_Mxin_s(3,0:nproc-1)
   integer :: ista_Mxin(3,0:nproc-1),iend_Mxin(3,0:nproc-1)
   integer :: nproc_d_o_mul,nproc_d_g_mul_dm
-  integer :: isequential
   integer :: nproc_d_o(3),nproc_d_g_dm(3)
   integer :: j
   integer,parameter :: nd=4
@@ -33,7 +33,7 @@ subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   
   nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
   nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   
-  if(isequential==1)then
+  if(process_allocation=='orbital_sequential')then
     do ii=0,nproc_d_o_mul-1
       do i4=0,nproc/nproc_d_o_mul/nproc_d_g_mul_dm-1
       do i3=0,nproc_d_g_dm(3)-1
@@ -53,7 +53,7 @@ subroutine setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s,   
       end do
       end do
     end do
-  else if(isequential==2)then
+  else if(process_allocation=='grid_sequential')then
     do i4=0,nproc/nproc_d_o_mul/nproc_d_g_mul_dm-1
     do i3=0,nproc_d_g_dm(3)-1
     do i2=0,nproc_d_g_dm(2)-1

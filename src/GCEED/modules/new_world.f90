@@ -37,6 +37,7 @@ CONTAINS
 
 !=======================================================================
 subroutine make_new_world(info,info_field)
+use inputoutput, only: process_allocation
 use structures, only: s_orbital_parallel, s_field_parallel
 use salmon_parallel
 use salmon_communication, only: comm_create_group, comm_get_groupinfo, &
@@ -53,7 +54,7 @@ integer :: ibox
 integer :: icolor,ikey
 
 !new_world for comm_kgrid
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -69,7 +70,7 @@ if(isequential==1)then
   end do
   end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -91,7 +92,7 @@ info%icomm_o = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_o, nproc_id_kgrid, nproc_size_kgrid)
 
 !new_world for comm_korbital
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -107,7 +108,7 @@ if(isequential==1)then
   end do
   end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -129,7 +130,7 @@ info%icomm_r = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_r, info%id_r, info%isize_r)
 
 !new_world for comm_k
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -159,7 +160,7 @@ if(isequential==1)then
   end do
   end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -195,7 +196,7 @@ info%icomm_ro = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_ro, info%id_ro, info%isize_ro)
 
 !new_world for comm_grid
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -225,7 +226,7 @@ if(isequential==1)then
   end do
   end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -261,7 +262,7 @@ info%icomm_ko = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_ko, info%id_ko, info%isize_ko)
 
 !new_world for comm_orbitalgrid
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -277,7 +278,7 @@ if(isequential==1)then
   end do
   end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i3=0,nproc_d_o(3)-1
   do i2=0,nproc_d_o(2)-1
   do i1=0,nproc_d_o(1)-1
@@ -302,7 +303,7 @@ call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
 
 nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
   do i3=0,nproc_d_g_dm(3)-1
   do i2=0,nproc_d_g_dm(2)-1
@@ -323,7 +324,7 @@ if(isequential==1)then
   end do
   end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
   do i3=0,nproc_d_g_dm(3)-1
   do i2=0,nproc_d_g_dm(2)-1
@@ -347,7 +348,7 @@ end if
 nproc_group_h = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(nproc_group_h, nproc_id_h, nproc_size_h)
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do iz=0,nproc_d_o(3)-1
   do iy=0,nproc_d_o(2)-1
   do ix=0,nproc_d_o(1)-1
@@ -377,7 +378,7 @@ if(isequential==1)then
   end do 
   end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
   do izs=0,nproc_d_g_dm(3)-1
   do iys=0,nproc_d_g_dm(2)-1
@@ -408,13 +409,13 @@ else if(isequential==2)then
   end do
 end if
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   icolor=imrs(2)+imrs(3)*nproc_d_g_dm(2)   &
                 +igroup*nproc_d_g_dm(2)*nproc_d_g_dm(3)   &
                 +imr(2)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(1)   &
                 +imr(3)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(1)*nproc_d_o(2)
   ikey=imrs(1)+imr(1)*nproc_d_g_dm(1)
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   icolor=imr(2)+imr(3)*nproc_d_o(2)   &
                +imrs(2)*nproc_d_o(2)*nproc_d_o(3)   &
                +imrs(3)*nproc_d_o(2)*nproc_d_o(3)*nproc_d_g_dm(2)  &
@@ -427,13 +428,13 @@ end if
 info_field%icomm(1) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info_field%icomm(1), info_field%id(1), info_field%isize(1))
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   icolor=imrs(1)+imrs(3)*nproc_d_g_dm(1)   &
                 +igroup*nproc_d_g_dm(1)*nproc_d_g_dm(3)   &
                 +imr(1)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(2)   &
                 +imr(3)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(2)*nproc_d_o(1)
   ikey=imrs(2)+imr(2)*nproc_d_g_dm(2)
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   icolor=imr(1)+imr(3)*nproc_d_o(1)   &
                +imrs(1)*nproc_d_o(1)*nproc_d_o(3)   &
                +imrs(3)*nproc_d_o(1)*nproc_d_o(3)*nproc_d_g_dm(1)  &
@@ -446,13 +447,13 @@ end if
 info_field%icomm(2) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info_field%icomm(2), info_field%id(2), info_field%isize(2))
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   icolor=imrs(1)+imrs(2)*nproc_d_g_dm(1)   &
                 +igroup*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
                 +imr(1)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(3)   &
                 +imr(2)*nproc_size_global/nproc_d_o_mul/nproc_d_g_dm(3)*nproc_d_o(1)
   ikey=imrs(3)+imr(3)*nproc_d_g_dm(3)
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   icolor=imr(1)+imr(2)*nproc_d_o(1)   &
                +imrs(1)*nproc_d_o(1)*nproc_d_o(2)   &
                +imrs(2)*nproc_d_o(1)*nproc_d_o(2)*nproc_d_g_dm(1)  &
@@ -465,7 +466,7 @@ end if
 info_field%icomm(3) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do ii=0,nproc_d_o_mul-1
     do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
     do i3=0,nproc_d_g_dm(3)-1
@@ -484,7 +485,7 @@ if(isequential==1)then
     end do
     end do
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
   do i3=0,nproc_d_g_dm(3)-1
   do i2=0,nproc_d_g_dm(2)-1
@@ -853,12 +854,12 @@ allocate (matbox11(0:(inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_glob
 allocate (matbox12(0:(mg_num(1)*mg_num(2)*mg_num(3))-1))
 
 iscnt=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)*inum_Mxin_s(3,nproc_id_global)
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   do i=0,nproc_d_g_mul_dm-1
     ibox=(nproc_id_global/nproc_d_g_mul_dm)*nproc_d_g_mul_dm+i
     ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
   end do
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   do i=0,nproc_d_g_mul_dm-1
     ibox=mod(nproc_id_global,nproc_d_o_mul)+i*nproc_d_o_mul
     ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
@@ -886,7 +887,7 @@ do is=1,nspin
   call comm_allgatherv(matbox11,matbox12,ircnt,idisp,info%icomm_ko)
   call timer_end(LOG_ALLGATHERV_TOTAL)
 
-  if(isequential==1)then
+  if(process_allocation=='orbital_sequential')then
 !$OMP parallel do private(i1,i2,i3,ibox,ibox2) collapse(3)
     do i3=0,nproc_d_g_dm(3)-1
     do i2=0,nproc_d_g_dm(2)-1
@@ -902,7 +903,7 @@ do is=1,nspin
     end do
     end do
     end do
-  else if(isequential==2)then
+  else if(process_allocation=='grid_sequential')then
 !$OMP parallel do private(i1,i2,i3,ibox,ibox2) collapse(3)
     do i3=0,nproc_d_g_dm(3)-1
     do i2=0,nproc_d_g_dm(2)-1
