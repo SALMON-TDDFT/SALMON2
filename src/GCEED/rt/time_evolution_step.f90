@@ -228,7 +228,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
       sVh%f = Vh_stock1
     end if
   end if
-  call Hartree_ns(lg,mg,ng,system%primitive_b,info_field,srg_ng,stencil,srho,sVh,fg)
+  call Hartree_ns(lg,mg,ng,system,info_field,srg_ng,stencil,srho,sVh,fg)
   if(iperiodic==0 .and. itt/=1)then
     if(mod(itt,2)==1)then
       Vh_stock2 = sVh%f
