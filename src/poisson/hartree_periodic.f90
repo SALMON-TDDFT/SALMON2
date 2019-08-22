@@ -19,10 +19,9 @@ module hartree_periodic_sub
 
 contains
 
-subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
-                 ff1,ff1x,ff1y,ff1z,ff2,ff2x,ff2y,ff2z,rhoe_g_tmp,rhoe_g,trho2z,trho3z, &
-                 egx,egxc,egy,egyc,egz,egzc,Brl)
-  use structures, only: s_rgrid, s_field_parallel
+subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
+  use structures, only: s_rgrid, s_field_parallel, s_dft_system, &
+                        s_scalar, s_reciprocal_grid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use math_constants, only : pi
@@ -31,35 +30,55 @@ subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
-  real(8),intent(in)  :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(out) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(in)  :: hgs(3)
-  complex(8),intent(out) :: ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-  complex(8),intent(out) :: ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  complex(8),intent(out) :: ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3))
-  complex(8),intent(out) :: ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
-  complex(8),intent(out) :: ff2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-  complex(8),intent(out) :: ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  complex(8),intent(out) :: ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3))
-  complex(8),intent(out) :: ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
-  complex(8),intent(out) :: rhoe_g_tmp(lg%num(1)*lg%num(2)*lg%num(3))
-  complex(8),intent(out) :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
-  real(8),intent(out)    :: trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
-  real(8),intent(out)    :: trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3))
-  complex(8),intent(out) :: egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1))
-  complex(8),intent(out) :: egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1))
-  complex(8),intent(out) :: egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2))
-  complex(8),intent(out) :: egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2))
-  complex(8),intent(out) :: egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3))
-  complex(8),intent(out) :: egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3))
-  real(8),intent(in),optional :: Brl(3,3)
+  type(s_dft_system),intent(in) :: system
+  type(s_scalar),intent(in)    :: srho
+  type(s_scalar),intent(inout) :: sVh
+  type(s_reciprocal_grid),intent(inout)  :: fg
 
   integer :: ix,iy,iz,kx,ky,kz,kkx,kky,kkz
   real(8) :: gx,gy,gz
   complex(8),parameter :: zI=(0.d0,1.d0)
   real(8) :: g2
-  real(8) :: blx,bly,blz,B(3,3)
+  real(8) :: B(3,3)
   integer :: n
+
+  complex(8),allocatable :: ff1(:,:,:)
+  complex(8),allocatable :: ff1x(:,:,:)
+  complex(8),allocatable :: ff1y(:,:,:)
+  complex(8),allocatable :: ff1z(:,:,:)
+  complex(8),allocatable :: ff2(:,:,:)
+  complex(8),allocatable :: ff2x(:,:,:)
+  complex(8),allocatable :: ff2y(:,:,:)
+  complex(8),allocatable :: ff2z(:,:,:)
+  complex(8),allocatable :: rhoe_g_tmp(:)
+  real(8),allocatable    :: trho2z(:,:,:)
+  real(8),allocatable    :: trho3z(:,:,:)
+  complex(8),allocatable :: egx(:,:)
+  complex(8),allocatable :: egxc(:,:)
+  complex(8),allocatable :: egy(:,:)
+  complex(8),allocatable :: egyc(:,:)
+  complex(8),allocatable :: egz(:,:)
+  complex(8),allocatable :: egzc(:,:)
+
+  if(.not.allocated(ff1))then
+    allocate(ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
+    allocate(ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(ff2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
+    allocate(ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+    allocate(egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+    allocate(rhoe_g_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
+    allocate(trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+  end if
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=lg%is(3),lg%ie(3)
@@ -87,7 +106,7 @@ subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    trho2z(ix,iy,iz)=trho(ix,iy,iz)
+    trho2z(ix,iy,iz)=srho%f(ix,iy,iz)
   end do
   end do
   end do
@@ -166,14 +185,7 @@ subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
 
   call comm_summation(ff1x,ff2x,lg%num(1)*ng%num(2)*ng%num(3),info_field%icomm(1))
 
-  blx=2.d0*Pi/(Hgs(1)*dble(lg%num(1))) !??????
-  bly=2.d0*Pi/(Hgs(2)*dble(lg%num(2)))
-  blz=2.d0*Pi/(Hgs(3)*dble(lg%num(3)))
-  B = 0d0
-  B(1,1) = blx
-  B(2,2) = bly
-  B(3,3) = blz
-  if(present(Brl)) B = Brl
+  B = system%primitive_b
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=lg%is(3),lg%ie(3)
@@ -189,18 +201,12 @@ subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
   do ky = ng%is(2),ng%ie(2)
   do kx = ng%is(1),ng%ie(1)
     n=(kz-lg%is(3))*lg%num(2)*lg%num(1)+(ky-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
-!    gx=2.d0*Pi*kx/lg%num(1)
-!    gy=2.d0*Pi*ky/lg%num(2)
-!    gz=2.d0*Pi*kz/lg%num(3)
     kkx=kx-1-lg%num(1)*(1+sign(1,(kx-1-lg%num(1)/2)))/2
     kky=ky-1-lg%num(2)*(1+sign(1,(ky-1-lg%num(2)/2)))/2
     kkz=kz-1-lg%num(3)*(1+sign(1,(kz-1-lg%num(3)/2)))/2
     gx = kkx*B(1,1) + kky*B(1,2) + kkz*B(1,3)
     gy = kkx*B(2,1) + kky*B(2,2) + kkz*B(2,3)
     gz = kkx*B(3,1) + kky*B(3,2) + kkz*B(3,3)
-!    gx=kkx*blx
-!    gy=kky*bly
-!    gz=kkz*blz
     g2=gx**2+gy**2+gz**2
     if(kx-1==0.and.ky-1==0.and.kz-1==0)then
       rhoe_G_tmp(n)=ff2x(kx,ky,kz) ! iwata
@@ -213,7 +219,7 @@ subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
   end do
   end do
 
-  call comm_summation(rhoe_G_tmp,rhoe_G,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+  call comm_summation(rhoe_G_tmp,fg%zrhoG_ele,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
   call comm_summation(ff1z,ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
 
 !$OMP parallel do private(iz,ky,kx)
@@ -240,7 +246,7 @@ subroutine hartree_periodic(lg,mg,ng,info_field,trho,tvh,hgs,  &
   do iz = mg%is(3),mg%ie(3)
   do iy = mg%is(2),mg%ie(2)
   do ix = mg%is(1),mg%ie(1)
-    tvh(ix,iy,iz)=sum(egx(:,ix)*ff2(:,iy,iz))
+    sVh%f(ix,iy,iz)=sum(egx(:,ix)*ff2(:,iy,iz))
   end do
   end do
   end do
