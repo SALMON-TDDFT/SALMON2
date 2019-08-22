@@ -18,7 +18,7 @@ module Conjugate_Gradient
 
 contains
 
-subroutine sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
+subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use inputoutput, only: ncg
   use structures
   use timer
@@ -34,7 +34,6 @@ subroutine sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
   type(s_orbital)               :: spsi
   type(s_sendrecv_grid)         :: srg
-  integer                       :: iflag
   type(s_cg)                    :: cg
   !
   integer,parameter :: nd=4
@@ -206,10 +205,6 @@ subroutine sgscg(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   end do Iteration
   call timer_end(LOG_GSCG_ITERATION)
 
-  if(iflag.eq.1) then
-    iflag=0
-  end if
-
   call timer_end(LOG_GSCG_TOTAL)
 
   return
@@ -310,11 +305,11 @@ subroutine inner_product(mg,system,info,psi1,psi2,rbox)
 
 end subroutine inner_product
 
-end subroutine sgscg
+end subroutine gscg_isolated
 
 !===================================================================================================================================
 
-subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
+subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use inputoutput, only: ncg
   use structures
   use timer
@@ -330,7 +325,6 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
   type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
   type(s_orbital)               :: spsi
   type(s_sendrecv_grid)         :: srg
-  integer                       :: iflag
   type(s_cg)                    :: cg
   !
   integer,parameter :: nd=4
@@ -517,10 +511,6 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,iflag,cg)
 
   end do Iteration
   call timer_end(LOG_GSCG_ITERATION)
-
-  if(iflag.eq.1) then
-    iflag=0
-  end if
 
   call timer_end(LOG_GSCG_TOTAL)
 

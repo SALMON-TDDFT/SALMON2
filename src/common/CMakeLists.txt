@@ -13,9 +13,6 @@ set(SOURCES
    hpsi.f90
    inner_product.f90
    inner_product3.f90
-   inner_product4.f90
-   inner_product5.f90
-   inner_product7.f90
    set_isstaend.f90
    stencil.f90
    pseudo_pt.f90

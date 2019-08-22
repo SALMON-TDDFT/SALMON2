@@ -77,11 +77,8 @@ CONTAINS
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE allocate_mat(cg)
-
-  use structures, only: s_cg
+SUBROUTINE allocate_mat
   implicit none
-  type(s_cg),intent(inout) :: cg
 
 allocate (vecR(3,lg_sta(1):lg_end(1),    &
              lg_sta(2):lg_end(2),      &
@@ -146,22 +143,6 @@ else if(iSCFRT==2.and.icalcforce==1)then
   allocate(cgrad_wk(mg_sta(1):mg_end(1)+1,   &
                     mg_sta(2):mg_end(2),     &
                     mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
-end if
-
-if(iSCFRT==1.and.iperiodic==0)then
-  allocate (cg%rxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%rhxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%rgk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%rpk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-end if
-
-if(iSCFRT==1.and.iperiodic==3)then
-  allocate (cg%zxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%zhxk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%zgk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%zpk_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%zpko_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
-  allocate (cg%zhwf_ob(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum))
 end if
 
 allocate (rho_tmp(ng_num(1), ng_num(2), ng_num(3)))

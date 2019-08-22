@@ -76,10 +76,9 @@ integer :: neig_ng(1:3, 1:2)
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
-type(s_orbital_parallel) :: info_ob
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
-type(s_sendrecv_grid) :: srg, srg_ob_1, srg_ob, srg_ng
+type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_stencil) :: stencil
@@ -161,7 +160,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call IN_data(lg,mg,ng,info,info_field,system,stencil,cg,mixing)
+    call IN_data(lg,mg,ng,info,info_field,system,stencil,mixing)
 
   end select
 
@@ -174,7 +173,7 @@ if(iopt==1)then
   end select
   call make_icoobox_bound
 
-  call allocate_mat(cg)
+  call allocate_mat
   call set_icoo1d
   call allocate_sendrecv
   call init_persistent_requests(info)
@@ -188,8 +187,6 @@ if(iopt==1)then
   neig(3, 1) = kup_array(1)
   neig(3, 2) = kdw_array(1)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
-  call init_sendrecv_grid(srg_ob, mg, nspin, info%icomm_r, neig)
-  call init_sendrecv_grid(srg_ob_1, mg, 1, info%icomm_r, neig)
 
   neig_ng(1, 1) = iup_array(2)
   neig_ng(1, 2) = idw_array(2)
@@ -246,19 +243,6 @@ if(iopt==1)then
   do jj=1, system%no
     call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
   end do
-
-  info_ob%im_s = 1
-  info_ob%im_e = 1
-  info_ob%numm = 1
-  info_ob%ik_s = 1
-  info_ob%ik_e = 1
-  info_ob%numk = 1
-  info_ob%io_s = 1
-  info_ob%io_e = 1
-  info_ob%numo = 1
-  info_ob%if_divide_rspace = nproc_d_o_mul.ne.1
-  info_ob%if_divide_orbit  = nproc_ob.ne.1
-  info_ob%icomm_r    = info%icomm_r
 
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 
@@ -595,13 +579,12 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
-    call scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
-                       cg,   &
-                       info_ob,ppg,V_local,  &
+    call scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,itotmst,mst, &
+                       cg,ppg,V_local,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,mixing,iter)
+                       iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then

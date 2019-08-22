@@ -18,7 +18,7 @@ module subspace_diagonalization
 
 contains
 
-subroutine subspace_diag(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use salmon_communication, only: comm_summation
   use timer
@@ -130,11 +130,11 @@ subroutine subspace_diag(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
   call timer_end(LOG_DIAG_TOTAL)
 
-end subroutine subspace_diag
+end subroutine ssdg_isolated
 
 !===================================================================================================================================
 
-subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use salmon_communication, only: comm_summation
   use timer
@@ -258,6 +258,6 @@ subroutine subspace_diag_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,s
 
   call timer_end(LOG_DIAG_TOTAL)
 
-end subroutine subspace_diag_periodic
+end subroutine ssdg_periodic
 
 end module subspace_diagonalization
