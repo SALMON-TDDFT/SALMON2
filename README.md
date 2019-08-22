@@ -5,7 +5,7 @@ to describe optical responses and electron dynamics in matters induced by light 
 
 SALMON has been tested and optimized to run in the following supercomputer platforms:
 
-- K-computer
+- K-computer (It is scheduled to be permanently shut down at the end of August, 2019)
 - Fujitsu FX100 supercomputer system
 - Linux PC Cluster with Intel Xeon Phi (Knights Landing architecture)
 - Linux PC Cluster with x86-64 CPU
