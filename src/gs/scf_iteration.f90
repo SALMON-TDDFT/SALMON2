@@ -19,13 +19,13 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,srho_s,iflag,itotmst,mst,ilsda,nproc_ob, &
+subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,srho_s,iflag,itotmst,mst, &
                cg,   &
                info_ob,ppg,vlocal,  &
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
-               iflag_subspace_diag,iditer_nosubspace_diag,iobnum,ifmst,mixing,iter)
+               iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter)
   use inputoutput, only: iperiodic,method_min,method_mixing,mixrate
   use structures
   use timer
@@ -50,8 +50,6 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
   integer,               intent(inout) :: iflag
   integer,               intent(in)    :: itotmst
   integer,               intent(in)    :: mst(2)
-  integer,               intent(in)    :: ilsda
-  integer,               intent(in)    :: nproc_ob
   type(s_cg),            intent(inout) :: cg
   type(s_orbital_parallel),intent(in)  :: info_ob
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
@@ -62,7 +60,6 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,srg_ob_1,spsi,shpsi,srho,
   integer,               intent(in)    :: iditerybcg
   integer,               intent(in)    :: iflag_subspace_diag
   integer,               intent(in)    :: iditer_nosubspace_diag
-  integer,               intent(in)    :: iobnum
   integer,               intent(in)    :: ifmst(2)
   type(s_mixing),        intent(inout) :: mixing
   integer,               intent(in)    :: iter

@@ -303,12 +303,12 @@ module salmon_pp
     type(s_pp_info), intent(in) :: pp
     type(s_pp_nlcc), intent(inout) :: ppn
   
-    integer :: a, ik, ir
+    integer :: a, ik, ir, intr
     integer :: i, i1, i2, i3, j1, j2, j3
     integer :: irepr_min, irepr_max
     real(8) :: rion_repr(3)
     real(8) :: r, rc, r1, r2, r3
-    real(8) :: ratio1, ratio2, intr
+    real(8) :: ratio1, ratio2
   
     ! Allocate
     allocate(ppn%rho_nlcc( &
