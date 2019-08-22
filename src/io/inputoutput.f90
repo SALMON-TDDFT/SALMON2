@@ -1972,12 +1972,12 @@ contains
       case(ntype_atom_coor_cartesian)
         write(fh_variables_log, '("#namelist: ",A)') 'atom_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I2,A,"=",3ES14.5)') 'rion(',i,')', rion(1:3,i)
+          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'rion(',i,')', rion(1:3,i)
         end do
       case(ntype_atom_coor_reduced)
         write(fh_variables_log, '("#namelist: ",A)') 'atom_red_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I2,A,"=",3ES14.5)') 'rion_red(',i,')', rion_red(1:3,i)
+          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'rion_red(',i,')', rion_red(1:3,i)
         end do
       case default
       end select
