@@ -72,7 +72,8 @@ subroutine set_vonf_sd
           vonf_sd(ix,iy,iz)=vonf_sd(ix,iy,iz)  &
                         -(vec_dipole_source(1,i)*(gridcoo(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg_num(1))*Hgs(1))) &
                          +vec_dipole_source(2,i)*(gridcoo(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg_num(2))*Hgs(2))) &
-                         +vec_dipole_source(3,i)*(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3))))/rad_dipole_source**3
+                         +vec_dipole_source(3,i)*(gridcoo(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg_num(3))*Hgs(3))))&
+                                                                                                        /rad_dipole_source**3
           eonf_sd(1,ix,iy,iz)=eonf_sd(1,ix,iy,iz)  &
                          +vec_dipole_source(1,i)/rad_dipole_source**3
           eonf_sd(2,ix,iy,iz)=eonf_sd(2,ix,iy,iz)  &

@@ -40,7 +40,7 @@ END MODULE global_variables_rt
 
 subroutine Real_Time_DFT
 use structures
-use salmon_parallel, only: nproc_id_global, nproc_group_h, nproc_group_global
+use salmon_parallel, only: nproc_id_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -67,7 +67,7 @@ real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
 real(8),allocatable :: Sf(:)
 integer :: jj,nn
 integer :: iene,nntime,ix,iy,iz
-character(100):: alpha2OutFile, comment_line
+character(100):: comment_line
 integer :: ia,ib
 real(8) :: rab
 real(8),allocatable :: tfourier_integrand(:,:)
@@ -499,7 +499,7 @@ type(s_vector) :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 
 complex(8),parameter :: zi=(0.d0,1.d0)
-integer :: iob,i1,i2,i3,ix,iy,iz,jj,mm,ik,iik,n,nn
+integer :: iob,i1,i2,i3,ix,iy,iz,jj,ik,iik,n,nn
 integer :: nspin
 real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
