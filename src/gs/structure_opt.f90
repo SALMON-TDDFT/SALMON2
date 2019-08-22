@@ -86,7 +86,6 @@ contains
   subroutine structure_opt(natom,iopt,system)
     use structures, only: s_dft_system
     use salmon_global, only: flag_opt_atom
-    use salmon_parallel, only: nproc_group_global
     use salmon_communication, only: comm_bcast
     implicit none
     type(s_dft_system),intent(inout) :: system

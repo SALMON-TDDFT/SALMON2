@@ -61,7 +61,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_md) :: md
   type(s_ofile) :: ofl
 
-  integer :: ix,iy,iz,mm,nspin
+  integer :: ix,iy,iz,nspin
   integer :: iatom,ik
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
