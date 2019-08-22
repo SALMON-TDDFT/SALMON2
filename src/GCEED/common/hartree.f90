@@ -50,6 +50,9 @@ SUBROUTINE Hartree_ns(lg,mg,ng,system,info_field,srg_ng,stencil,srho,sVh,fg)
     case(4)
       call Hartree_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,npuw,npuy,npuz,   &
                         a_ffte,b_ffte,rhoe_g,coef_poisson)
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(iz,iy,ix,n,nn) &
+!$omp             shared(lg,ng,fg,rhoe_G,NPUZ,NPUY)
       do iz=1,lg%num(3)/NPUZ
       do iy=1,lg%num(2)/NPUY
       do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
@@ -59,6 +62,7 @@ SUBROUTINE Hartree_ns(lg,mg,ng,system,info_field,srg_ng,stencil,srho,sVh,fg)
       enddo
       enddo
       enddo
+!$omp end parallel do
     end select
   end select
 
