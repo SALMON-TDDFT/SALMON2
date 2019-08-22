@@ -1121,7 +1121,7 @@ allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
 
 call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
-           lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,isequential,iscfrt)
+           lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,iscfrt)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "Mx     =", iend_Mx_ori
 

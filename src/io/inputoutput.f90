@@ -248,7 +248,8 @@ contains
       & nproc_domain_general, &
       & num_datafiles_in, &
       & num_datafiles_out, &
-      & yn_ffte
+      & yn_ffte, &
+      & process_allocation
 
     namelist/system/ &
       & yn_periodic, &
@@ -478,7 +479,6 @@ contains
       & itcalc_ene 
 
     namelist/group_parallel/ &
-      & isequential, &
       & imesh_s_all, &
       & iflag_comm_rho
 
@@ -591,6 +591,7 @@ contains
     num_datafiles_in  = 1
     num_datafiles_out = 1
     yn_ffte           = 'n'
+    process_allocation  = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
     ispin              = 0
@@ -812,7 +813,6 @@ contains
     iwrite_projnum         = 0
     itcalc_ene             = 1
 !! == default for &group_parallel
-    isequential    = 2
     imesh_s_all    = 1
     iflag_comm_rho = 1
 !! == default for &group_hartree
@@ -975,6 +975,7 @@ contains
     call comm_bcast(num_datafiles_in    ,nproc_group_global)
     call comm_bcast(num_datafiles_out   ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
+    call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
     call comm_bcast(yn_periodic,nproc_group_global)
     if(yn_periodic=='y') iperiodic=3
@@ -1263,7 +1264,6 @@ contains
     call comm_bcast(iwrite_projnum        ,nproc_group_global)
     call comm_bcast(itcalc_ene            ,nproc_group_global)
 !! == bcast for &group_parallel
-    call comm_bcast(isequential   ,nproc_group_global)
     call comm_bcast(imesh_s_all   ,nproc_group_global)
     call comm_bcast(iflag_comm_rho,nproc_group_global)
 !! == bcast for &group_hartree
@@ -1613,6 +1613,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_in', num_datafiles_in
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_out', num_datafiles_out
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 
       if(inml_system >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', inml_system
@@ -1924,7 +1925,6 @@ contains
 
       if(inml_group_parallel >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_parallel', inml_group_parallel
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'isequential', isequential
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'imesh_s_all', imesh_s_all
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_comm_rho', iflag_comm_rho
 
@@ -2046,6 +2046,13 @@ contains
          if(index(ae_shape1,'Acos')==0) call stop_by_bad_input2('t1_start','ae_shape1')
       endif
     endif
+
+    select case(process_allocation)
+    case('orbital_sequential','grid_sequential')
+      continue
+    case default
+      stop "process_allocation must be specified as 'orbital_sequential' or 'grid_sequential'."
+    end select
 
   end subroutine check_bad_input
 

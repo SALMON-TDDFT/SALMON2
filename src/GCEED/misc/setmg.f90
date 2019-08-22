@@ -14,13 +14,13 @@
 !  limitations under the License.
 !
 subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
-                 lg_sta,lg_num,nproc,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,isequential,iscfrt)
+                 lg_sta,lg_num,nproc,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,iscfrt)
+  use inputoutput, only: process_allocation
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(out) :: mg
   integer :: i1,i2,j1,j2,j3
   integer :: ibox
-  integer :: isequential
   integer :: nproc,nproc_id_global
   integer :: nproc_d_o(3)
   integer :: nproc_k
@@ -34,7 +34,7 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
   integer,parameter :: nd=4
   
   nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
-  if(isequential==1)then
+  if(process_allocation=='orbital_sequential')then
     do j3=0,nproc_d_o(3)-1
     do j2=0,nproc_d_o(2)-1
     do j1=0,nproc_d_o(1)-1
@@ -52,7 +52,7 @@ subroutine setmg(mg,mg_sta,mg_end,mg_num,mg_sta_all,mg_end_all,mg_num_all,  &
     end do
     end do
     end do
-  else if(isequential==2)then
+  else if(process_allocation=='grid_sequential')then
     do i2=0,nproc_k-1
     do i1=0,nproc_ob-1
       do j3=0,nproc_d_o(3)-1

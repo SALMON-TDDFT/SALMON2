@@ -47,7 +47,7 @@ CONTAINS
 !=======================================================================
 
 SUBROUTINE init_updown(info)
-use inputoutput, only: iperiodic
+use inputoutput, only: iperiodic, process_allocation
 use salmon_parallel
 use salmon_communication, only: comm_proc_null
 use new_world_sub
@@ -101,7 +101,7 @@ case(3)
   end if
 end select
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
     select case(iperiodic)
     case(0)
@@ -114,7 +114,7 @@ if(isequential==1)then
   else
     iup_array(2)=nproc_id_h+1
   end if
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
     select case(iperiodic)
     case(0)
@@ -129,7 +129,7 @@ else if(isequential==2)then
   end if
 end if
 
-if(isequential==2)then
+if(process_allocation=='grid_sequential')then
   if(nproc_d_o(1)==1.and.nproc_d_g_dm(1)==1)then
     iup_array(4)=comm_proc_null
   else if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
@@ -141,7 +141,7 @@ if(isequential==2)then
   end if
 end if
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   if(imr(1)==0.and.imrs(1)==0) then
     select case(iperiodic)
     case(0)
@@ -154,7 +154,7 @@ if(isequential==1)then
   else
     idw_array(2)=nproc_id_h-1
   end if
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   if(imr(1)==0.and.imrs(1)==0) then
     select case(iperiodic)
     case(0)
@@ -169,7 +169,7 @@ else if(isequential==2)then
   end if
 end if
 
-if(isequential==2)then
+if(process_allocation=='grid_sequential')then
   if(nproc_d_o(1)==1.and.nproc_d_g_dm(1)==1)then
     idw_array(4)=comm_proc_null
   else if(imr(1)==0.and.imrs(1)==0) then
@@ -181,7 +181,7 @@ if(isequential==2)then
   end if
 end if
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
     select case(iperiodic)
     case(0)
@@ -196,7 +196,7 @@ if(isequential==1)then
   else
     jup_array(2)=nproc_id_h+nproc_d_g_dm(1)
   end if
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
     select case(iperiodic)
     case(0)
@@ -213,7 +213,7 @@ else if(isequential==2)then
   end if
 end if
 
-if(isequential==2)then
+if(process_allocation=='grid_sequential')then
   if(nproc_d_o(2)==1.and.nproc_d_g_dm(2)==1)then
     jup_array(4)=comm_proc_null
   else if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
@@ -228,7 +228,7 @@ if(isequential==2)then
   end if
 end if
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   if(imr(2)==0.and.imrs(2)==0) then
     select case(iperiodic)
     case(0)
@@ -243,7 +243,7 @@ if(isequential==1)then
   else
     jdw_array(2)=nproc_id_h-nproc_d_g_dm(1)
   end if
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   if(imr(2)==0.and.imrs(2)==0) then
     select case(iperiodic)
     case(0)
@@ -260,7 +260,7 @@ else if(isequential==2)then
   end if
 end if
 
-if(isequential==2)then
+if(process_allocation=='grid_sequential')then
   if(nproc_d_o(2)==1.and.nproc_d_g_dm(2)==1)then
     jdw_array(4)=comm_proc_null
   else if(imr(2)==0.and.imrs(2)==0) then
@@ -276,7 +276,7 @@ if(isequential==2)then
 end if
 
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
     select case(iperiodic)
     case(0)
@@ -292,7 +292,7 @@ if(isequential==1)then
   else
     kup_array(2)=nproc_id_h+nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
     select case(iperiodic)
     case(0)
@@ -311,7 +311,7 @@ else if(isequential==2)then
   end if
 end if
 
-if(isequential==2)then
+if(process_allocation=='grid_sequential')then
   if(nproc_d_o(3)==1.and.nproc_d_g_dm(3)==1)then
     kup_array(4)=comm_proc_null
   else if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
@@ -328,7 +328,7 @@ if(isequential==2)then
   end if
 end if
 
-if(isequential==1)then
+if(process_allocation=='orbital_sequential')then
   if(imr(3)==0.and.imrs(3)==0) then
     select case(iperiodic)
     case(0)
@@ -344,7 +344,7 @@ if(isequential==1)then
   else
     kdw_array(2)=nproc_id_h-nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
-else if(isequential==2)then
+else if(process_allocation=='grid_sequential')then
   if(imr(3)==0.and.imrs(3)==0) then
     select case(iperiodic)
     case(0)
@@ -363,7 +363,7 @@ else if(isequential==2)then
   end if
 end if
 
-if(isequential==2)then
+if(process_allocation=='grid_sequential')then
   if(nproc_d_o(3)==1.and.nproc_d_g_dm(3)==1)then
     kdw_array(4)=comm_proc_null
   else if(imr(3)==0.and.imrs(3)==0) then

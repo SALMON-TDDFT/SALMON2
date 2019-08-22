@@ -79,6 +79,7 @@ module salmon_global
   integer        :: num_datafiles_in
   integer        :: num_datafiles_out
   character(1)   :: yn_ffte
+  character(32)  :: process_allocation
 
 !! &system
   integer        :: iperiodic  !this is old keyword but still defined here
@@ -311,7 +312,6 @@ module salmon_global
   integer        :: itcalc_ene
 
 !! &group_parallel
-  integer        :: isequential
   integer        :: imesh_s_all
   integer        :: iflag_comm_rho
 

@@ -69,12 +69,6 @@ if(iwrite_projection==1.and.itwproj==-1)then
   stop
 end if
 
-!===== namelist for group_parallel =====
-if(isequential<=0.or.isequential>=3)then
-  write(*,*) "isequential must be equal to 1 or 2."
-  stop
-end if
-
 nproc_d_o = nproc_domain_orbital
 nproc_d_g = nproc_domain_general
 

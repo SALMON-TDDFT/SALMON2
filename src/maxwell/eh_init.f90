@@ -1474,7 +1474,7 @@ end subroutine eh_input_shape
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_prep_GCEED(fs,fw)
-  use inputoutput,       only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,isequential,iperiodic
+  use inputoutput,       only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,iperiodic
   use salmon_parallel,   only: nproc_id_global,nproc_size_global,nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_o_mul,nproc_d_g_mul_dm,nproc_d_g_dm,&
@@ -1519,11 +1519,11 @@ subroutine eh_prep_GCEED(fs,fw)
   allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1), &
            inum_Mxin(3,0:nproc_size_global-1))
   call setmg(fs%mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
-             lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,isequential,1)
+             lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,1)
   allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
   allocate(inum_Mxin_s(3,0:nproc_size_global-1))
   call setng(fs%ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-             nproc_size_global,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin,isequential)
+             nproc_size_global,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin)
   fw%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment
