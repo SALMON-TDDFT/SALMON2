@@ -177,12 +177,12 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 if(iperiodic==3 .and. iflag_hartree==4)then
-  call prep_poisson_fft
+  call prep_poisson_fft(ng)
 end if
 
 call read_pslfile(system)
 call allocate_psl
-call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+call init_ps(ng,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
 call init_updown(info)
 call init_itype
@@ -198,8 +198,8 @@ else if(ilsda==1)then
   numspin=2
 end if
 
-if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole
-call make_icoobox_bound
+if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng)
+call make_icoobox_bound(ng)
 call timer_end(LOG_READ_LDA_DATA)
 
 
@@ -254,7 +254,7 @@ if(IC_rt==0) then
   itotNtime=Ntime
   Miter_rt=0
 else if(IC_rt==1) then
-  call IN_data_rt(info,Ntime)
+  call IN_data_rt(ng,info,Ntime)
 end if
 call timer_end(LOG_READ_RT_DATA)
 
@@ -338,7 +338,7 @@ call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
-if(OC_rt==1) call OUT_data_rt
+if(OC_rt==1) call OUT_data_rt(ng)
 call timer_end(LOG_WRITE_RT_DATA)
 
 
@@ -787,18 +787,18 @@ end if
 if(IC_rt==0)then
   rbox_array=0.d0
   do i1=1,3
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
       rbox_array(i1)=rbox_array(i1)+vecR(i1,ix,iy,iz)*rho(ix,iy,iz)
     end do
     end do
     end do
   end do
   
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     rbox_array(4)=rbox_array(4)+rho(ix,iy,iz)
   end do
   end do
@@ -873,7 +873,7 @@ end do
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
-      call calcELF(info,srho,itt)
+      call calcELF(ng,info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
     if(yn_out_estatic_rt=='y')then

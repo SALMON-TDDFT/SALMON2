@@ -23,7 +23,6 @@ use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
 use init_sendrecv_sub
-use copy_psi_mesh_sub
 use change_order_sub
 use read_pslfile_sub
 use allocate_psl_sub
@@ -169,11 +168,11 @@ if(iopt==1)then
   call init_sendrecv_matrix
   select case(iperiodic)
   case(0)
-    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng)
   end select
-  call make_icoobox_bound
+  call make_icoobox_bound(ng)
 
-  call allocate_mat
+  call allocate_mat(ng)
   call set_icoo1d
   call allocate_sendrecv
   call init_persistent_requests(info)
@@ -273,7 +272,7 @@ if(iopt==1)then
   end if
 
   if(iperiodic==3 .and. iflag_hartree==4)then
-    call prep_poisson_fft
+    call prep_poisson_fft(ng)
   end if
 
   if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -283,7 +282,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl
-    call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(ng,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -310,9 +309,9 @@ if(iopt==1)then
     if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
       select case(iperiodic)
       case(0)
-        allocate( psi_mesh(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:itotMST,1) )
+        allocate( psi_mesh(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:itotMST,1) )
       case(3)
-        allocate( zpsi_mesh(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:itotMST,num_kpoints_rd) )
+        allocate( zpsi_mesh(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:itotMST,num_kpoints_rd) )
       end select
     end if
 
@@ -405,7 +404,7 @@ if(iopt==1)then
 
     call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
 
-    call allgatherv_vlocal(info,system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
       Vlocal(:,:,:,jspin) = V_local(jspin)%f
     end do
@@ -460,7 +459,7 @@ else if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     call dealloc_init_ps(ppg,ppg_all,ppn)
-    call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(ng,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
     if(iperiodic==3) call get_fourier_grid_G(fg)
 
   end if
@@ -506,27 +505,27 @@ if(img==1.and.iopt==1) allocate(norm_diff_psi_stock(itotMST,1))
 norm_diff_psi_stock=1.0d9
 
 if(img>=2.or.iopt>=2) deallocate(rho_stock,Vlocal_stock)
-allocate(rho_stock(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1))
+allocate(rho_stock(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1))
 if(ilsda==0)then
-  allocate(Vlocal_stock(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1))
+  allocate(Vlocal_stock(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1))
 else
-  allocate(Vlocal_stock(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:2))
+  allocate(Vlocal_stock(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:2))
 end if
 
 if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     rho_stock(ix,iy,iz,1)=rho(ix,iy,iz)
     Vlocal_stock(ix,iy,iz,1)=Vlocal(ix,iy,iz,1)
   end do
   end do
   end do
 else
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     rho_stock(ix,iy,iz,1)=rho(ix,iy,iz)
     Vlocal_stock(ix,iy,iz,1:2)=Vlocal(ix,iy,iz,1:2)
   end do
@@ -575,7 +574,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
   end do
 
-  call copy_density(system%nspin,srho_s,mixing)
+  call copy_density(system%nspin,ng,srho_s,mixing)
 
   if(iscf_order==1)then
 
@@ -598,7 +597,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     end if
     call timer_end(LOG_CALC_EXC_COR)
 
-    call allgatherv_vlocal(info,system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
@@ -626,9 +625,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     case('rho_dne')
       sum0=0.d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=ng_sta(3),ng_end(3) 
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iz=ng%is(3),ng%ie(3) 
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
         sum0=sum0+abs(srho%f(ix,iy,iz)-rho_stock(ix,iy,iz,1))
       end do
       end do
@@ -642,9 +641,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     case('norm_rho','norm_rho_dng')
       sum0=0.d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=ng_sta(3),ng_end(3) 
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iz=ng%is(3),ng%ie(3) 
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
         sum0=sum0+(srho%f(ix,iy,iz)-rho_stock(ix,iy,iz,1))**2
       end do
       end do
@@ -656,9 +655,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     case('norm_pot','norm_pot_dng')
       sum0=0.d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=ng_sta(3),ng_end(3) 
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iz=ng%is(3),ng%ie(3) 
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
         sum0=sum0+(V_local(1)%f(ix,iy,iz)-Vlocal_stock(ix,iy,iz,1))**2
       end do
       end do
@@ -709,9 +708,9 @@ DFT_Iteration : do iter=1,iDiter(img)
   end if 
   rNebox1=0.d0 
 !$OMP parallel do reduction(+:rNebox1) private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     rNebox1=rNebox1+srho%f(ix,iy,iz)
   end do
   end do
@@ -725,9 +724,9 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     rho_stock(ix,iy,iz,1)=srho%f(ix,iy,iz)
     Vlocal_stock(ix,iy,iz,1)=V_local(1)%f(ix,iy,iz)
   end do
@@ -735,9 +734,9 @@ if(ilsda==0)then
   end do
 else if(ilsda==1)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     rho_stock(ix,iy,iz,1)=srho%f(ix,iy,iz)
     Vlocal_stock(ix,iy,iz,1)=V_local(1)%f(ix,iy,iz)
     Vlocal_stock(ix,iy,iz,2)=V_local(2)%f(ix,iy,iz)
@@ -914,7 +913,7 @@ end if
 if(yn_out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
-  call calcELF(info,srho,0)
+  call calcELF(ng,info,srho,0)
   call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
   deallocate(elf)
 end if
@@ -925,7 +924,7 @@ call timer_begin(LOG_WRITE_LDA_DATA)
 ! LDA data
 ! subroutines in scf_data.f90
 if ( OC==1.or.OC==2.or.OC==3 ) then
-  call OUT_data(mixing)
+  call OUT_data(ng,mixing)
 end if
 call timer_end(LOG_WRITE_LDA_DATA)
 
@@ -998,6 +997,7 @@ if(comm_is_root(nproc_id_global)) then
   close(1)
 
 end if
+
 call timer_end(LOG_WRITE_LDA_INFOS)
 
 deallocate(Vlocal)
