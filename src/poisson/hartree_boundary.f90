@@ -22,10 +22,10 @@ contains
 !============================ Hartree potential (Solve Poisson equation)
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
-                            layout_multipole,igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
+                            igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                             ibox_icoobox_bound,icoobox_bound)
-  use inputoutput, only: natom,rion,lmax_lmp
+  use inputoutput, only: natom,rion,lmax_lmp,layout_multipole
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_summation
@@ -48,7 +48,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   real(8) :: wk2(ng%is(1)-ndh:ng%ie(1)+ndh,    &
                  ng%is(2)-ndh:ng%ie(2)+ndh,      &
                  ng%is(3)-ndh:ng%ie(3)+ndh)
-  integer,intent(in) :: layout_multipole
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)

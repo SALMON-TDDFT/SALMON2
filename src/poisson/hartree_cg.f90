@@ -21,7 +21,7 @@ contains
 
 !============================ Hartree potential (Solve Poisson equation)
 subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,hconv,itervh,  &
-                      layout_multipole,igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
+                      igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
                       iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                       ibox_icoobox_bound,icoobox_bound)
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg,s_sendrecv_grid,s_stencil
@@ -50,7 +50,6 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   type(s_stencil),intent(in) :: stencil
   real(8),intent(in) :: hconv
   integer,intent(out) :: itervh
-  integer,intent(in) :: layout_multipole
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
@@ -81,7 +80,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                 ng%is_array(3):ng%ie_array(3))
   
   call hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,pk,   &
-                        layout_multipole,igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
+                        igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
                         iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                         ibox_icoobox_bound,icoobox_bound)
   

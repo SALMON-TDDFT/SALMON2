@@ -42,7 +42,7 @@ SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,
   select case(iperiodic)
   case(0)
     call Hartree_cg(lg,mg,ng,info_field,system,poisson_cg,srho%f,sVh%f,srg_ng,stencil,hconv,itervh,   &
-                    layout_multipole,igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
+                    igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
                     iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole, &
                     ibox_icoobox_bound,icoobox_bound)
   case(3)
