@@ -21,7 +21,6 @@ implicit none
 
 integer,allocatable :: icorr_polenum(:)
 integer :: iamax
-integer :: maxval_pole
 
 ! FFTE routine
 integer :: iquot
@@ -569,6 +568,7 @@ real(8) :: rmin,r
 real(8),allocatable :: Rion2(:,:)
 integer,allocatable :: nearatomnum(:,:,:)
 integer,allocatable :: inv_icorr_polenum(:)
+integer :: maxval_ig_num
 
 if(layout_multipole==2)then
 
@@ -614,7 +614,7 @@ if(layout_multipole==2)then
   end do
   poisson_cg%npole_partial=ibox
 
-  maxval_pole=maxval(poisson_cg%ig_num(:)) 
+  maxval_ig_num=maxval(poisson_cg%ig_num(:)) 
   allocate(poisson_cg%ig(3,maxval(poisson_cg%ig_num(:)),poisson_cg%npole_partial))
 
   poisson_cg%ig_num(:)=0
@@ -709,7 +709,7 @@ else if(layout_multipole==3)then
   end do
   end do
 
-  maxval_pole=maxval(poisson_cg%ig_num(:)) 
+  maxval_ig_num=maxval(poisson_cg%ig_num(:)) 
   allocate(poisson_cg%ig(3,maxval(poisson_cg%ig_num(:)),poisson_cg%npole_partial))
  
   poisson_cg%ig_num=0

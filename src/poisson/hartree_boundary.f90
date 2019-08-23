@@ -23,7 +23,7 @@ contains
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
                             igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                            iamax,maxval_pole,icorr_polenum)
+                            iamax,icorr_polenum)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -53,7 +53,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: iflag_ps
   integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
   integer,intent(in) :: iamax
-  integer,intent(in) :: maxval_pole
   integer,intent(in) :: icorr_polenum(iamax)
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
@@ -83,12 +82,15 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   real(8),allocatable :: wk2bound_h(:)
   real(8) :: hvol
   integer :: ig_num(iamax)
-  integer :: ig(3,maxval_pole,poisson_cg%npole_partial)
+  integer,allocatable :: ig(:,:,:)
   
   !------------------------- Boundary condition (multipole expansion)
 
   hvol=system%hvol
   if(allocated(poisson_cg%ig_num)) ig_num=poisson_cg%ig_num
+  if(.not.allocated(ig))then
+    allocate(ig(3,maxval(poisson_cg%ig_num(:)),poisson_cg%npole_partial))
+  end if
   ig=poisson_cg%ig
  
   if(.not.allocated(wkbound_h))then
