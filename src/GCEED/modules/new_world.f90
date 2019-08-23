@@ -551,7 +551,7 @@ end subroutine make_new_world
 
 !=====================================================================
 subroutine make_corr_pole(ng,poisson_cg)
-use structures, only: s_grid,s_poisson_cg
+use structures, only: s_rgrid,s_poisson_cg
 implicit none
 type(s_rgrid), intent(in) :: ng
 type(s_poisson_cg),intent(inout) :: poisson_cg
