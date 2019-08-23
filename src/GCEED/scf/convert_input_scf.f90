@@ -205,7 +205,7 @@ else if(layout_multipole==3)then
   end if
 end if
 
-poisson_cg%npole=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
+poisson_cg%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
 
 !===== namelist for group_file =====
 if(comm_is_root(nproc_id_global))then

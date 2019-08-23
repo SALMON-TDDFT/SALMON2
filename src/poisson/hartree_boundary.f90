@@ -23,7 +23,7 @@ contains
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
                             igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                            iamax,maxval_pole,num_pole_myrank,icorr_polenum)
+                            iamax,maxval_pole,icorr_polenum)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -54,7 +54,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
   integer,intent(in) :: iamax
   integer,intent(in) :: maxval_pole
-  integer,intent(in) :: num_pole_myrank
   integer,intent(in) :: icorr_polenum(iamax)
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
@@ -84,7 +83,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   real(8),allocatable :: wk2bound_h(:)
   real(8) :: hvol
   integer :: ig_num(iamax)
-  integer :: ig(3,maxval_pole,num_pole_myrank)
+  integer :: ig(3,maxval_pole,poisson_cg%npole_partial)
   
   !------------------------- Boundary condition (multipole expansion)
 
@@ -161,7 +160,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     itrho(icen)=1
   end do
   
-  do icen=1,num_pole_myrank
+  do icen=1,poisson_cg%npole_partial
     do ll=0,lmax_lmp
     do lm=ll**2+1,(ll+1)**2
       rholm2box=0.d0
@@ -185,7 +184,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
   case(3)
   
-  num_center=poisson_cg%npole
+  num_center=poisson_cg%npole_total
   
   allocate (rholm((lmax_lmp+1)**2,num_center))
   allocate (rholm2((lmax_lmp+1)**2,num_center))
@@ -205,7 +204,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     end do
   end do
   
-  do ii=1,num_pole_myrank
+  do ii=1,poisson_cg%npole_partial
     sum1=0.d0
     sumbox1=0.d0
     sumbox2=0.d0
@@ -231,10 +230,10 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   end do
   
   call timer_begin(LOG_ALLREDUCE_HARTREE)
-  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson_cg%npole,nproc_group_h)
+  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson_cg%npole_total,nproc_group_h)
   call timer_end(LOG_ALLREDUCE_HARTREE)
   
-  do ii=1,poisson_cg%npole
+  do ii=1,poisson_cg%npole_total
     if(center_trho_nume_deno(4,ii)*hvol>=1.d-12)then
       itrho(ii)=1
       center_trho(1:3,ii)=center_trho_nume_deno(1:3,ii)/center_trho_nume_deno(4,ii)
@@ -253,7 +252,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
     rholm2=0.d0
     rholm3=0.d0
-    do ii=1,num_pole_myrank
+    do ii=1,poisson_cg%npole_partial
       pl=icorr_polenum(ii)
       cl=ig_num(ii)
       if(itrho(pl)==1)then
@@ -301,7 +300,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     deallocate(rholm3)
   else
     rholm2=0.d0
-    do ii=1,num_pole_myrank
+    do ii=1,poisson_cg%npole_partial
       if(itrho(icorr_polenum(ii))==1)then
         rholm=0.d0
         do ll=0,lmax_lmp

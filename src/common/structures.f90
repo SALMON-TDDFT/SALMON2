@@ -225,7 +225,8 @@ module structures
   end type s_ofile
 
   type s_poisson_cg
-    integer :: npole                          ! number of multipoles
+    integer :: npole_partial                  ! number of multipoles calculated in each node
+    integer :: npole_total                    ! total number of multipoles
     integer,allocatable :: ig_num(:)          ! number of grids for domains to which each multipole belongs
     integer,allocatable :: ig(:,:,:)          ! grid table for domains to which each multipole belongs
     integer,allocatable :: ig_bound(:,:,:)    ! grid table for boundaries
