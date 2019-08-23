@@ -21,7 +21,7 @@ contains
 
 !============================ Hartree potential (Solve Poisson equation)
 
-subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,   &
+subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
                             layout_multipole,lmax_lmp,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                             ibox_icoobox_bound,icoobox_bound)
@@ -46,8 +46,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,  
   real(8) :: wk2(ng%is(1)-ndh:ng%ie(1)+ndh,    &
                  ng%is(2)-ndh:ng%ie(2)+ndh,      &
                  ng%is(3)-ndh:ng%ie(3)+ndh)
-  real(8),intent(out) :: wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
-  real(8),intent(out) :: wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh)
   integer,intent(in) :: layout_multipole
   integer,intent(in) :: lmax_lmp
   integer,intent(in) :: igc_is
@@ -89,9 +87,16 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,wkbound_h,wk2bound_h,  
   real(8) :: rinv
   real(8) :: rbox
   real(8),allocatable :: rion2(:,:)
+  real(8),allocatable :: wkbound_h(:)
+  real(8),allocatable :: wk2bound_h(:)
   
   !------------------------- Boundary condition (multipole expansion)
-  
+ 
+  if(.not.allocated(wkbound_h))then
+    allocate(wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
+    allocate(wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
+  end if
+ 
   select case( layout_multipole )
   
   case(1)
