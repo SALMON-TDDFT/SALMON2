@@ -558,9 +558,10 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
 end subroutine make_new_world
 
 !=====================================================================
-subroutine make_corr_pole
+subroutine make_corr_pole(poisson_cg)
+use structures, only: s_poisson_cg
 implicit none
-
+type(s_poisson_cg),intent(in) :: poisson_cg
 integer :: a,i
 integer :: ix,iy,iz
 integer :: ibox
@@ -644,10 +645,10 @@ if(layout_multipole==2)then
 
 else if(layout_multipole==3)then
 
-  allocate(ista_Mxin_pole(3,0:num_pole-1))
-  allocate(iend_Mxin_pole(3,0:num_pole-1))
-  allocate(inum_Mxin_pole(3,0:num_pole-1))
-  allocate(iflag_pole(1:num_pole))
+  allocate(ista_Mxin_pole(3,0:poisson_cg%npole-1))
+  allocate(iend_Mxin_pole(3,0:poisson_cg%npole-1))
+  allocate(inum_Mxin_pole(3,0:poisson_cg%npole-1))
+  allocate(iflag_pole(1:poisson_cg%npole))
 
   do j3=0,num_multipole_xyz(3)-1
   do j2=0,num_multipole_xyz(2)-1
@@ -668,7 +669,7 @@ else if(layout_multipole==3)then
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
-    do i=1,num_pole
+    do i=1,poisson_cg%npole
       if(ista_Mxin_pole(3,i-1)<=iz.and.iend_Mxin_pole(3,i-1)>=iz.and.   &
          ista_Mxin_pole(2,i-1)<=iy.and.iend_Mxin_pole(2,i-1)>=iy.and.   &
          ista_Mxin_pole(1,i-1)<=ix.and.iend_Mxin_pole(1,i-1)>=ix)then
@@ -680,7 +681,7 @@ else if(layout_multipole==3)then
   end do
 
   num_pole_myrank=0
-  do i=1,num_pole
+  do i=1,poisson_cg%npole
     if(iflag_pole(i)==1)then
       num_pole_myrank=num_pole_myrank+1
     end if
@@ -691,7 +692,7 @@ else if(layout_multipole==3)then
   allocate(icount_pole(1:num_pole_myrank))
 
   ibox=1
-  do i=1,num_pole
+  do i=1,poisson_cg%npole
     if(iflag_pole(i)==1)then
       icorr_polenum(ibox)=i
       ibox=ibox+1

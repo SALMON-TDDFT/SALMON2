@@ -224,6 +224,10 @@ module structures
      character(256) :: file_rt_data, file_rt_energy_data
   end type s_ofile
 
+  type s_poisson_cg
+    integer :: npole    ! number of multipoles
+  end type s_poisson_cg
+
 ! for DFT ground state calculations
 
   type s_cg

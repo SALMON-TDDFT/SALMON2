@@ -15,8 +15,9 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_ns(lg,mg,ng,system,info_field,srg_ng,stencil,srho,sVh,fg)
-  use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
+SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,sVh,fg)
+  use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_poisson_cg,  &
+                        s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
   use hartree_cg_sub
   use hartree_periodic_sub
   use hartree_ffte_sub
@@ -27,8 +28,9 @@ SUBROUTINE Hartree_ns(lg,mg,ng,system,info_field,srg_ng,stencil,srho,sVh,fg)
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  type(s_dft_system),intent(in) :: system
   type(s_field_parallel),intent(in) :: info_field
+  type(s_dft_system),intent(in) :: system
+  type(s_poisson_cg),intent(in) :: poisson_cg
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
   type(s_scalar) ,intent(in) :: srho
@@ -39,8 +41,8 @@ SUBROUTINE Hartree_ns(lg,mg,ng,system,info_field,srg_ng,stencil,srho,sVh,fg)
 
   select case(iperiodic)
   case(0)
-    call Hartree_cg(lg,mg,ng,info_field,system,srho%f,sVh%f,srg_ng,stencil,hconv,itervh,   &
-                    layout_multipole,lmax_lmp,igc_is,igc_ie,gridcoo,iflag_ps,num_pole,inum_mxin_s,   &
+    call Hartree_cg(lg,mg,ng,info_field,system,poisson_cg,srho%f,sVh%f,srg_ng,stencil,hconv,itervh,   &
+                    layout_multipole,igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
                     iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole, &
                     ibox_icoobox_bound,icoobox_bound)
   case(3)

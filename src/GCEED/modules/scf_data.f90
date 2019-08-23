@@ -240,8 +240,6 @@ real(8),allocatable :: vecDs2(:,:)
 real(8) :: vecQs(3,3)
 real(8),allocatable :: vecQs2(:,:,:)
 
-integer :: num_pole
-
 integer :: itotNtime
 
 integer :: num_datafiles_OUT2
