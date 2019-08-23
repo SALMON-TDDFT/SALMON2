@@ -22,10 +22,10 @@ contains
 !============================ Hartree potential (Solve Poisson equation)
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
-                            igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s)
+                            igc_is,igc_ie,gridcoo,iflag_ps)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
-  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
+  use salmon_parallel, only: nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_summation
   use timer
   
@@ -50,7 +50,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
   integer,intent(in) :: iflag_ps
-  integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
@@ -366,8 +365,8 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
       wk2bound_h(jj)=0.d0
     end do
   
-    icount=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)  &
-           *inum_Mxin_s(3,nproc_id_global)/inum_Mxin_s(k,nproc_id_global)*2*ndh
+    icount=ng%num(1)*ng%num(2)*ng%num(3)/ng%num(k)*2*ndh
+
   !$OMP parallel do
     do ii=0,info_field%isize(k)-1
       istart(ii)=ii*icount/info_field%isize(k)+1
