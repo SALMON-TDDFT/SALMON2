@@ -23,7 +23,7 @@ contains
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
                             igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                            iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole)
+                            iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -57,7 +57,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: num_pole_myrank
   integer,intent(in) :: icorr_polenum(iamax)
   integer,intent(in) :: icount_pole(iamax)
-  integer,intent(in) :: icorr_xyz_pole(3,maxval_pole,num_pole_myrank)
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
@@ -85,10 +84,12 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   real(8),allocatable :: wkbound_h(:)
   real(8),allocatable :: wk2bound_h(:)
   real(8) :: hvol
+  integer :: ig(3,maxval_pole,num_pole_myrank)
   
   !------------------------- Boundary condition (multipole expansion)
 
   hvol=system%hvol
+  ig=poisson_cg%ig
  
   if(.not.allocated(wkbound_h))then
     allocate(wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
@@ -166,9 +167,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   !$OMP parallel do reduction ( + : rholm2box)&
   !$OMP private(jj,ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,ylm)
       do jj=1,icount_pole(icen)
-        ix=icorr_xyz_pole(1,jj,icen)
-        iy=icorr_xyz_pole(2,jj,icen)
-        iz=icorr_xyz_pole(3,jj,icen)
+        ix=ig(1,jj,icen)
+        iy=ig(2,jj,icen)
+        iz=ig(3,jj,icen)
         xx=gridcoo(ix,1)-rion2(1,icorr_polenum(icen))
         yy=gridcoo(iy,2)-rion2(2,icorr_polenum(icen))
         zz=gridcoo(iz,3)-rion2(3,icorr_polenum(icen))
@@ -211,9 +212,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   !$OMP parallel do reduction (+ : sumbox1, sumbox2, sumbox3, sum1) &
   !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz)
     do jj=1,icount_pole(ii)
-      ixbox=icorr_xyz_pole(1,jj,ii)
-      iybox=icorr_xyz_pole(2,jj,ii)
-      izbox=icorr_xyz_pole(3,jj,ii)
+      ixbox=ig(1,jj,ii)
+      iybox=ig(2,jj,ii)
+      izbox=ig(3,jj,ii)
       xx=gridcoo(ixbox,1)
       yy=gridcoo(iybox,2)
       zz=gridcoo(izbox,3)
@@ -256,7 +257,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
       cl=icount_pole(ii)
       if(itrho(pl)==1)then
   !$omp parallel default(none) &
-  !$omp          shared(icorr_xyz_pole,gridcoo,center_trho,trho,rholm3) &
+  !$omp          shared(ig,gridcoo,center_trho,trho,rholm3) &
   !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz,ylm) &
   !$omp          firstprivate(ii,pl,cl,lmax_lmp,hvol)
         tid=omp_get_thread_num()
@@ -264,9 +265,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
   !$omp do
         do jj=1,cl
-          ixbox=icorr_xyz_pole(1,jj,ii)
-          iybox=icorr_xyz_pole(2,jj,ii)
-          izbox=icorr_xyz_pole(3,jj,ii)
+          ixbox=ig(1,jj,ii)
+          iybox=ig(2,jj,ii)
+          izbox=ig(3,jj,ii)
           xx=gridcoo(ixbox,1)-center_trho(1,pl)
           yy=gridcoo(iybox,2)-center_trho(2,pl)
           zz=gridcoo(izbox,3)-center_trho(3,pl)
@@ -308,9 +309,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   !$OMP parallel do reduction ( + : rholm2box)&
   !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz,ylm)
           do jj=1,icount_pole(ii)
-            ixbox=icorr_xyz_pole(1,jj,ii)
-            iybox=icorr_xyz_pole(2,jj,ii)
-            izbox=icorr_xyz_pole(3,jj,ii)
+            ixbox=ig(1,jj,ii)
+            iybox=ig(2,jj,ii)
+            izbox=ig(3,jj,ii)
             xx=gridcoo(ixbox,1)-center_trho(1,icorr_polenum(ii))
             yy=gridcoo(iybox,2)-center_trho(2,icorr_polenum(ii))
             zz=gridcoo(izbox,3)-center_trho(3,icorr_polenum(ii))

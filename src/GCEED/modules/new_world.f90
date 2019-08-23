@@ -22,12 +22,8 @@ implicit none
 integer :: num_pole_myrank
 integer,allocatable :: icorr_polenum(:)
 integer,allocatable :: icount_pole(:)
-integer,allocatable :: icorr_xyz_pole(:,:,:)
 integer :: iamax
 integer :: maxval_pole
-
-integer,allocatable :: icoobox_bound(:,:,:)
-integer :: ibox_icoobox_bound
 
 ! FFTE routine
 integer :: iquot
@@ -561,7 +557,7 @@ end subroutine make_new_world
 subroutine make_corr_pole(poisson_cg)
 use structures, only: s_poisson_cg
 implicit none
-type(s_poisson_cg),intent(in) :: poisson_cg
+type(s_poisson_cg),intent(inout) :: poisson_cg
 integer :: a,i
 integer :: ix,iy,iz
 integer :: ibox
@@ -621,7 +617,7 @@ if(layout_multipole==2)then
   num_pole_myrank=ibox
 
   maxval_pole=maxval(icount_pole(:)) 
-  allocate(icorr_xyz_pole(3,maxval(icount_pole(:)),num_pole_myrank))
+  allocate(poisson_cg%ig(3,maxval(icount_pole(:)),num_pole_myrank))
 
   icount_pole(:)=0
 
@@ -630,9 +626,9 @@ if(layout_multipole==2)then
   do ix=ng_sta(1),ng_end(1)
     ibox=inv_icorr_polenum(nearatomnum(ix,iy,iz))
     icount_pole(ibox)=icount_pole(ibox)+1
-    icorr_xyz_pole(1,icount_pole(ibox),ibox)=ix
-    icorr_xyz_pole(2,icount_pole(ibox),ibox)=iy
-    icorr_xyz_pole(3,icount_pole(ibox),ibox)=iz
+    poisson_cg%ig(1,icount_pole(ibox),ibox)=ix
+    poisson_cg%ig(2,icount_pole(ibox),ibox)=iy
+    poisson_cg%ig(3,icount_pole(ibox),ibox)=iz
   end do
   end do
   end do
@@ -716,7 +712,7 @@ else if(layout_multipole==3)then
   end do
 
   maxval_pole=maxval(icount_pole(:)) 
-  allocate(icorr_xyz_pole(3,maxval(icount_pole(:)),num_pole_myrank))
+  allocate(poisson_cg%ig(3,maxval(icount_pole(:)),num_pole_myrank))
  
   icount_pole=0
 
@@ -728,9 +724,9 @@ else if(layout_multipole==3)then
          ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
          ista_Mxin_pole(1,icorr_polenum(i)-1)<=ix.and.iend_Mxin_pole(1,icorr_polenum(i)-1)>=ix)then
         icount_pole(i)=icount_pole(i)+1
-        icorr_xyz_pole(1,icount_pole(i),i)=ix
-        icorr_xyz_pole(2,icount_pole(i),i)=iy
-        icorr_xyz_pole(3,icount_pole(i),i)=iz
+        poisson_cg%ig(1,icount_pole(i),i)=ix
+        poisson_cg%ig(2,icount_pole(i),i)=iy
+        poisson_cg%ig(3,icount_pole(i),i)=iz
       end if
     end do
   end do
