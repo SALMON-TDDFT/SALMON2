@@ -23,7 +23,6 @@ real(8), allocatable :: vecR(:,:,:,:)
 real(8), allocatable :: vecR_tmp(:,:,:,:)
 
 real(8), allocatable :: wk_s_h(:,:,:),wk2_s_h(:,:,:),lap_wk_s_h(:,:,:)
-real(8), allocatable :: wkbound_h(:),wk2bound_h(:)
 
 real(8), allocatable :: matbox_m(:,:,:),matbox_m2(:,:,:)
 complex(8), allocatable :: cmatbox_m(:,:,:),cmatbox_m2(:,:,:)
@@ -108,9 +107,6 @@ allocate (wk2_s_h(ng%is(1):ng%ie(1),   &
 allocate (lap_wk_s_h(ng%is(1):ng%ie(1),   &
                  ng%is(2):ng%ie(2),   &
                  ng%is(3):ng%ie(3)))
-
-allocate (wkbound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh) )
-allocate (wk2bound_h(lg_num(1)*lg_num(2)*lg_num(3)/minval(lg_num(1:3))*6*Ndh) )
 
 if(iSCFRT==1.and.icalcforce==1)then
   select case(iperiodic)

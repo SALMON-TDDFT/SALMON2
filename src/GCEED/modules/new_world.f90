@@ -19,15 +19,7 @@ use scf_data
 
 implicit none
 
-integer :: num_pole_myrank
 integer,allocatable :: icorr_polenum(:)
-integer,allocatable :: icount_pole(:)
-integer,allocatable :: icorr_xyz_pole(:,:,:)
-integer :: iamax
-integer :: maxval_pole
-
-integer,allocatable :: icoobox_bound(:,:,:)
-integer :: ibox_icoobox_bound
 
 ! FFTE routine
 integer :: iquot
@@ -558,11 +550,11 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
 end subroutine make_new_world
 
 !=====================================================================
-subroutine make_corr_pole(ng)
-use structures, only: s_rgrid
+subroutine make_corr_pole(ng,poisson_cg)
+use structures, only: s_rgrid,s_poisson_cg
 implicit none
-
 type(s_rgrid), intent(in) :: ng
+type(s_poisson_cg),intent(inout) :: poisson_cg
 integer :: a,i
 integer :: ix,iy,iz
 integer :: ibox
@@ -576,6 +568,7 @@ real(8) :: rmin,r
 real(8),allocatable :: Rion2(:,:)
 integer,allocatable :: nearatomnum(:,:,:)
 integer,allocatable :: inv_icorr_polenum(:)
+integer :: maxval_ig_num
 
 if(layout_multipole==2)then
 
@@ -585,10 +578,9 @@ if(layout_multipole==2)then
     Rion2(:,:)=Rion(:,:)
   end if
 
-  iamax=amax
-  allocate(icount_pole(1:amax))
+  allocate(poisson_cg%ig_num(1:amax))
   allocate(nearatomnum(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-  icount_pole=0
+  poisson_cg%ig_num=0
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
@@ -601,39 +593,39 @@ if(layout_multipole==2)then
         rmin=r ; amin=a
       end if
     end do
-    icount_pole(amin)=icount_pole(amin)+1
+    poisson_cg%ig_num(amin)=poisson_cg%ig_num(amin)+1
     nearatomnum(ix,iy,iz)=amin
   end do
   end do
   end do
 
-  allocate(icorr_polenum(1:amax))
+  allocate(poisson_cg%ipole_tbl(1:amax))
   allocate(inv_icorr_polenum(1:amax))
-  icorr_polenum=0
+  poisson_cg%ipole_tbl=0
   inv_icorr_polenum=0
   ibox=0
   do a=1,amax
-    if(icount_pole(a)>=1)then
+    if(poisson_cg%ig_num(a)>=1)then
       ibox=ibox+1
-      icorr_polenum(ibox)=a
+      poisson_cg%ipole_tbl(ibox)=a
       inv_icorr_polenum(a)=ibox
     end if
   end do
-  num_pole_myrank=ibox
+  poisson_cg%npole_partial=ibox
 
-  maxval_pole=maxval(icount_pole(:)) 
-  allocate(icorr_xyz_pole(3,maxval(icount_pole(:)),num_pole_myrank))
+  maxval_ig_num=maxval(poisson_cg%ig_num(:)) 
+  allocate(poisson_cg%ig(3,maxval(poisson_cg%ig_num(:)),poisson_cg%npole_partial))
 
-  icount_pole(:)=0
+  poisson_cg%ig_num(:)=0
 
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
     ibox=inv_icorr_polenum(nearatomnum(ix,iy,iz))
-    icount_pole(ibox)=icount_pole(ibox)+1
-    icorr_xyz_pole(1,icount_pole(ibox),ibox)=ix
-    icorr_xyz_pole(2,icount_pole(ibox),ibox)=iy
-    icorr_xyz_pole(3,icount_pole(ibox),ibox)=iz
+    poisson_cg%ig_num(ibox)=poisson_cg%ig_num(ibox)+1
+    poisson_cg%ig(1,poisson_cg%ig_num(ibox),ibox)=ix
+    poisson_cg%ig(2,poisson_cg%ig_num(ibox),ibox)=iy
+    poisson_cg%ig(3,poisson_cg%ig_num(ibox),ibox)=iz
   end do
   end do
   end do
@@ -646,10 +638,10 @@ if(layout_multipole==2)then
 
 else if(layout_multipole==3)then
 
-  allocate(ista_Mxin_pole(3,0:num_pole-1))
-  allocate(iend_Mxin_pole(3,0:num_pole-1))
-  allocate(inum_Mxin_pole(3,0:num_pole-1))
-  allocate(iflag_pole(1:num_pole))
+  allocate(ista_Mxin_pole(3,0:poisson_cg%npole_total-1))
+  allocate(iend_Mxin_pole(3,0:poisson_cg%npole_total-1))
+  allocate(inum_Mxin_pole(3,0:poisson_cg%npole_total-1))
+  allocate(iflag_pole(1:poisson_cg%npole_total))
 
   do j3=0,num_multipole_xyz(3)-1
   do j2=0,num_multipole_xyz(2)-1
@@ -670,7 +662,7 @@ else if(layout_multipole==3)then
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    do i=1,num_pole
+    do i=1,poisson_cg%npole_total
       if(ista_Mxin_pole(3,i-1)<=iz.and.iend_Mxin_pole(3,i-1)>=iz.and.   &
          ista_Mxin_pole(2,i-1)<=iy.and.iend_Mxin_pole(2,i-1)>=iy.and.   &
          ista_Mxin_pole(1,i-1)<=ix.and.iend_Mxin_pole(1,i-1)>=ix)then
@@ -681,57 +673,56 @@ else if(layout_multipole==3)then
   end do
   end do
 
-  num_pole_myrank=0
-  do i=1,num_pole
+  poisson_cg%npole_partial=0
+  do i=1,poisson_cg%npole_total
     if(iflag_pole(i)==1)then
-      num_pole_myrank=num_pole_myrank+1
+      poisson_cg%npole_partial=poisson_cg%npole_partial+1
     end if
   end do
 
-  iamax=num_pole_myrank
-  allocate(icorr_polenum(1:num_pole_myrank))
-  allocate(icount_pole(1:num_pole_myrank))
+  allocate(poisson_cg%ipole_tbl(1:poisson_cg%npole_partial))
+  allocate(poisson_cg%ig_num(1:poisson_cg%npole_partial))
 
   ibox=1
-  do i=1,num_pole
+  do i=1,poisson_cg%npole_total
     if(iflag_pole(i)==1)then
-      icorr_polenum(ibox)=i
+      poisson_cg%ipole_tbl(ibox)=i
       ibox=ibox+1
     end if
   end do
 
-  icount_pole=0
+  poisson_cg%ig_num=0
 
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    do i=1,num_pole_myrank
-      if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
-         ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
-         ista_Mxin_pole(1,icorr_polenum(i)-1)<=ix.and.iend_Mxin_pole(1,icorr_polenum(i)-1)>=ix)then
-        icount_pole(i)=icount_pole(i)+1
+    do i=1,poisson_cg%npole_partial
+      if(ista_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)<=iz.and.iend_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)>=iz.and.   &
+         ista_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)<=iy.and.iend_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)>=iy.and.   &
+         ista_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)<=ix.and.iend_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)>=ix)then
+        poisson_cg%ig_num(i)=poisson_cg%ig_num(i)+1
       end if
     end do
   end do
   end do
   end do
 
-  maxval_pole=maxval(icount_pole(:)) 
-  allocate(icorr_xyz_pole(3,maxval(icount_pole(:)),num_pole_myrank))
+  maxval_ig_num=maxval(poisson_cg%ig_num(:)) 
+  allocate(poisson_cg%ig(3,maxval(poisson_cg%ig_num(:)),poisson_cg%npole_partial))
  
-  icount_pole=0
+  poisson_cg%ig_num=0
 
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    do i=1,num_pole_myrank
-      if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
-         ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
-         ista_Mxin_pole(1,icorr_polenum(i)-1)<=ix.and.iend_Mxin_pole(1,icorr_polenum(i)-1)>=ix)then
-        icount_pole(i)=icount_pole(i)+1
-        icorr_xyz_pole(1,icount_pole(i),i)=ix
-        icorr_xyz_pole(2,icount_pole(i),i)=iy
-        icorr_xyz_pole(3,icount_pole(i),i)=iz
+    do i=1,poisson_cg%npole_partial
+      if(ista_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)<=iz.and.iend_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)>=iz.and.   &
+         ista_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)<=iy.and.iend_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)>=iy.and.   &
+         ista_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)<=ix.and.iend_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)>=ix)then
+        poisson_cg%ig_num(i)=poisson_cg%ig_num(i)+1
+        poisson_cg%ig(1,poisson_cg%ig_num(i),i)=ix
+        poisson_cg%ig(2,poisson_cg%ig_num(i),i)=iy
+        poisson_cg%ig(3,poisson_cg%ig_num(i),i)=iz
       end if
     end do
   end do
@@ -746,11 +737,12 @@ end if
 end subroutine make_corr_pole
 
 !=====================================================================
-subroutine make_icoobox_bound(ng)
+subroutine set_ig_bound(ng,poisson_cg)
+use structures, only: s_rgrid,s_poisson_cg
 use salmon_parallel
-use structures, only: s_rgrid
 implicit none
 type(s_rgrid), intent(in) :: ng
+type(s_poisson_cg),intent(inout) :: poisson_cg
 integer :: ix,iy,iz
 integer :: ibox
 integer :: icount
@@ -758,17 +750,16 @@ integer :: icount
 ibox=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)  &
      *inum_Mxin_s(3,nproc_id_global)/minval(inum_Mxin_s(1:3,nproc_id_global))*2*Ndh
 
-ibox_icoobox_bound=ibox
-allocate( icoobox_bound(3,ibox,3) )
+allocate( poisson_cg%ig_bound(3,ibox,3) )
 
 icount=0
 do iz=ng%is(3),ng%ie(3)
 do iy=ng%is(2),ng%ie(2)
 do ix=lg_sta(1)-Ndh,lg_sta(1)-1
   icount=icount+1
-  icoobox_bound(1,icount,1)=ix
-  icoobox_bound(2,icount,1)=iy
-  icoobox_bound(3,icount,1)=iz
+  poisson_cg%ig_bound(1,icount,1)=ix
+  poisson_cg%ig_bound(2,icount,1)=iy
+  poisson_cg%ig_bound(3,icount,1)=iz
 end do
 end do
 end do
@@ -776,9 +767,9 @@ do iz=ng%is(3),ng%ie(3)
 do iy=ng%is(2),ng%ie(2)
 do ix=lg_end(1)+1,lg_end(1)+Ndh
   icount=icount+1
-  icoobox_bound(1,icount,1)=ix
-  icoobox_bound(2,icount,1)=iy
-  icoobox_bound(3,icount,1)=iz
+  poisson_cg%ig_bound(1,icount,1)=ix
+  poisson_cg%ig_bound(2,icount,1)=iy
+  poisson_cg%ig_bound(3,icount,1)=iz
 end do
 end do
 end do
@@ -787,9 +778,9 @@ do iz=ng%is(3),ng%ie(3)
 do iy=lg_sta(2)-Ndh,lg_sta(2)-1
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
-  icoobox_bound(1,icount,2)=ix
-  icoobox_bound(2,icount,2)=iy
-  icoobox_bound(3,icount,2)=iz
+  poisson_cg%ig_bound(1,icount,2)=ix
+  poisson_cg%ig_bound(2,icount,2)=iy
+  poisson_cg%ig_bound(3,icount,2)=iz
 end do
 end do
 end do
@@ -797,9 +788,9 @@ do iz=ng%is(3),ng%ie(3)
 do iy=lg_end(2)+1,lg_end(2)+Ndh
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
-  icoobox_bound(1,icount,2)=ix
-  icoobox_bound(2,icount,2)=iy
-  icoobox_bound(3,icount,2)=iz
+  poisson_cg%ig_bound(1,icount,2)=ix
+  poisson_cg%ig_bound(2,icount,2)=iy
+  poisson_cg%ig_bound(3,icount,2)=iz
 end do
 end do
 end do
@@ -808,9 +799,9 @@ do iz=lg_sta(3)-Ndh,lg_sta(3)-1
 do iy=ng%is(2),ng%ie(2)
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
-  icoobox_bound(1,icount,3)=ix
-  icoobox_bound(2,icount,3)=iy
-  icoobox_bound(3,icount,3)=iz
+  poisson_cg%ig_bound(1,icount,3)=ix
+  poisson_cg%ig_bound(2,icount,3)=iy
+  poisson_cg%ig_bound(3,icount,3)=iz
 end do
 end do
 end do
@@ -818,15 +809,15 @@ do iz=lg_end(3)+1,lg_end(3)+Ndh
 do iy=ng%is(2),ng%ie(2)
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
-  icoobox_bound(1,icount,3)=ix
-  icoobox_bound(2,icount,3)=iy
-  icoobox_bound(3,icount,3)=iz
+  poisson_cg%ig_bound(1,icount,3)=ix
+  poisson_cg%ig_bound(2,icount,3)=iy
+  poisson_cg%ig_bound(3,icount,3)=iz
 end do
 end do
 end do
 
 return
-end subroutine make_icoobox_bound
+end subroutine set_ig_bound
 
 !=====================================================================
 !======================================================================

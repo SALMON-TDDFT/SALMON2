@@ -230,6 +230,15 @@ module structures
      character(256) :: file_rt_data, file_rt_energy_data
   end type s_ofile
 
+  type s_poisson_cg
+    integer :: npole_partial                  ! number of multipoles calculated in each node
+    integer :: npole_total                    ! total number of multipoles
+    integer,allocatable :: ipole_tbl(:)       ! table for multipoles
+    integer,allocatable :: ig_num(:)          ! number of grids for domains to which each multipole belongs
+    integer,allocatable :: ig(:,:,:)          ! grid table for domains to which each multipole belongs
+    integer,allocatable :: ig_bound(:,:,:)    ! grid table for boundaries
+  end type s_poisson_cg
+
 ! for DFT ground state calculations
 
   type s_cg

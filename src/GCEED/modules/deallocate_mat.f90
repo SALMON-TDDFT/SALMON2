@@ -35,7 +35,6 @@ deallocate (cmatbox_m,cmatbox_m2)
 deallocate (cmatbox_l,cmatbox_l2)
 
 deallocate (wk_s_h,wk2_s_h,lap_wk_s_h)
-deallocate (wkbound_h,wk2bound_h)
 
 if(icalcforce==1) then
   deallocate(rforce)
