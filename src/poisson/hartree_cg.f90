@@ -22,7 +22,7 @@ contains
 !============================ Hartree potential (Solve Poisson equation)
 subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,hconv,itervh,  &
                       igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                      iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole)
+                      iamax,maxval_pole,num_pole_myrank,icorr_polenum)
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg,s_sendrecv_grid,s_stencil
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_is_root, comm_summation
@@ -58,7 +58,6 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   integer,intent(in) :: maxval_pole
   integer,intent(in) :: num_pole_myrank
   integer,intent(in) :: icorr_polenum(iamax)
-  integer,intent(in) :: icount_pole(iamax)
   
   integer,parameter :: maxiter=1000
   integer :: ix,iy,iz,iter
@@ -77,7 +76,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   
   call hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,pk,   &
                         igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                        iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole)
+                        iamax,maxval_pole,num_pole_myrank,icorr_polenum)
   
 !------------------------- C-G minimization
   

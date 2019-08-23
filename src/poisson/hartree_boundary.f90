@@ -23,7 +23,7 @@ contains
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
                             igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                            iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole)
+                            iamax,maxval_pole,num_pole_myrank,icorr_polenum)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -56,7 +56,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: maxval_pole
   integer,intent(in) :: num_pole_myrank
   integer,intent(in) :: icorr_polenum(iamax)
-  integer,intent(in) :: icount_pole(iamax)
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
@@ -84,11 +83,13 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   real(8),allocatable :: wkbound_h(:)
   real(8),allocatable :: wk2bound_h(:)
   real(8) :: hvol
+  integer :: ig_num(iamax)
   integer :: ig(3,maxval_pole,num_pole_myrank)
   
   !------------------------- Boundary condition (multipole expansion)
 
   hvol=system%hvol
+  if(allocated(poisson_cg%ig_num)) ig_num=poisson_cg%ig_num
   ig=poisson_cg%ig
  
   if(.not.allocated(wkbound_h))then
@@ -166,7 +167,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
       rholm2box=0.d0
   !$OMP parallel do reduction ( + : rholm2box)&
   !$OMP private(jj,ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,ylm)
-      do jj=1,icount_pole(icen)
+      do jj=1,ig_num(icen)
         ix=ig(1,jj,icen)
         iy=ig(2,jj,icen)
         iz=ig(3,jj,icen)
@@ -211,7 +212,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     sumbox3=0.d0
   !$OMP parallel do reduction (+ : sumbox1, sumbox2, sumbox3, sum1) &
   !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz)
-    do jj=1,icount_pole(ii)
+    do jj=1,ig_num(ii)
       ixbox=ig(1,jj,ii)
       iybox=ig(2,jj,ii)
       izbox=ig(3,jj,ii)
@@ -254,7 +255,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     rholm3=0.d0
     do ii=1,num_pole_myrank
       pl=icorr_polenum(ii)
-      cl=icount_pole(ii)
+      cl=ig_num(ii)
       if(itrho(pl)==1)then
   !$omp parallel default(none) &
   !$omp          shared(ig,gridcoo,center_trho,trho,rholm3) &
@@ -308,7 +309,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
           rholm2box=0.d0
   !$OMP parallel do reduction ( + : rholm2box)&
   !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz,ylm)
-          do jj=1,icount_pole(ii)
+          do jj=1,ig_num(ii)
             ixbox=ig(1,jj,ii)
             iybox=ig(2,jj,ii)
             izbox=ig(3,jj,ii)

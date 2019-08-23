@@ -21,7 +21,6 @@ implicit none
 
 integer :: num_pole_myrank
 integer,allocatable :: icorr_polenum(:)
-integer,allocatable :: icount_pole(:)
 integer :: iamax
 integer :: maxval_pole
 
@@ -581,9 +580,9 @@ if(layout_multipole==2)then
   end if
 
   iamax=amax
-  allocate(icount_pole(1:amax))
+  allocate(poisson_cg%ig_num(1:amax))
   allocate(nearatomnum(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
-  icount_pole=0
+  poisson_cg%ig_num=0
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
@@ -596,7 +595,7 @@ if(layout_multipole==2)then
         rmin=r ; amin=a
       end if
     end do
-    icount_pole(amin)=icount_pole(amin)+1
+    poisson_cg%ig_num(amin)=poisson_cg%ig_num(amin)+1
     nearatomnum(ix,iy,iz)=amin
   end do
   end do
@@ -608,7 +607,7 @@ if(layout_multipole==2)then
   inv_icorr_polenum=0
   ibox=0
   do a=1,amax
-    if(icount_pole(a)>=1)then
+    if(poisson_cg%ig_num(a)>=1)then
       ibox=ibox+1
       icorr_polenum(ibox)=a
       inv_icorr_polenum(a)=ibox
@@ -616,19 +615,19 @@ if(layout_multipole==2)then
   end do
   num_pole_myrank=ibox
 
-  maxval_pole=maxval(icount_pole(:)) 
-  allocate(poisson_cg%ig(3,maxval(icount_pole(:)),num_pole_myrank))
+  maxval_pole=maxval(poisson_cg%ig_num(:)) 
+  allocate(poisson_cg%ig(3,maxval(poisson_cg%ig_num(:)),num_pole_myrank))
 
-  icount_pole(:)=0
+  poisson_cg%ig_num(:)=0
 
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
     ibox=inv_icorr_polenum(nearatomnum(ix,iy,iz))
-    icount_pole(ibox)=icount_pole(ibox)+1
-    poisson_cg%ig(1,icount_pole(ibox),ibox)=ix
-    poisson_cg%ig(2,icount_pole(ibox),ibox)=iy
-    poisson_cg%ig(3,icount_pole(ibox),ibox)=iz
+    poisson_cg%ig_num(ibox)=poisson_cg%ig_num(ibox)+1
+    poisson_cg%ig(1,poisson_cg%ig_num(ibox),ibox)=ix
+    poisson_cg%ig(2,poisson_cg%ig_num(ibox),ibox)=iy
+    poisson_cg%ig(3,poisson_cg%ig_num(ibox),ibox)=iz
   end do
   end do
   end do
@@ -685,7 +684,7 @@ else if(layout_multipole==3)then
 
   iamax=num_pole_myrank
   allocate(icorr_polenum(1:num_pole_myrank))
-  allocate(icount_pole(1:num_pole_myrank))
+  allocate(poisson_cg%ig_num(1:num_pole_myrank))
 
   ibox=1
   do i=1,poisson_cg%npole
@@ -695,7 +694,7 @@ else if(layout_multipole==3)then
     end if
   end do
 
-  icount_pole=0
+  poisson_cg%ig_num=0
 
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
@@ -704,17 +703,17 @@ else if(layout_multipole==3)then
       if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
          ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
          ista_Mxin_pole(1,icorr_polenum(i)-1)<=ix.and.iend_Mxin_pole(1,icorr_polenum(i)-1)>=ix)then
-        icount_pole(i)=icount_pole(i)+1
+        poisson_cg%ig_num(i)=poisson_cg%ig_num(i)+1
       end if
     end do
   end do
   end do
   end do
 
-  maxval_pole=maxval(icount_pole(:)) 
-  allocate(poisson_cg%ig(3,maxval(icount_pole(:)),num_pole_myrank))
+  maxval_pole=maxval(poisson_cg%ig_num(:)) 
+  allocate(poisson_cg%ig(3,maxval(poisson_cg%ig_num(:)),num_pole_myrank))
  
-  icount_pole=0
+  poisson_cg%ig_num=0
 
   do iz=ng_sta(3),ng_end(3)
   do iy=ng_sta(2),ng_end(2)
@@ -723,10 +722,10 @@ else if(layout_multipole==3)then
       if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
          ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
          ista_Mxin_pole(1,icorr_polenum(i)-1)<=ix.and.iend_Mxin_pole(1,icorr_polenum(i)-1)>=ix)then
-        icount_pole(i)=icount_pole(i)+1
-        poisson_cg%ig(1,icount_pole(i),i)=ix
-        poisson_cg%ig(2,icount_pole(i),i)=iy
-        poisson_cg%ig(3,icount_pole(i),i)=iz
+        poisson_cg%ig_num(i)=poisson_cg%ig_num(i)+1
+        poisson_cg%ig(1,poisson_cg%ig_num(i),i)=ix
+        poisson_cg%ig(2,poisson_cg%ig_num(i),i)=iy
+        poisson_cg%ig(3,poisson_cg%ig_num(i),i)=iz
       end if
     end do
   end do
