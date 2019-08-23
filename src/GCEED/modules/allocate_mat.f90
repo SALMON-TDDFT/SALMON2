@@ -58,8 +58,10 @@ CONTAINS
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE allocate_mat
+SUBROUTINE allocate_mat(ng)
+  use structures, only: s_rgrid
   implicit none
+  type(s_rgrid),intent(in) :: ng
 
 allocate (vecR(3,lg_sta(1):lg_end(1),    &
              lg_sta(2):lg_end(2),      &
@@ -96,15 +98,15 @@ allocate (cmatbox_l2(lg_sta(1):lg_end(1),    &
              lg_sta(2):lg_end(2),      &
              lg_sta(3):lg_end(3)) )
 
-allocate (wk_s_h(ng_sta(1)-Ndh:ng_end(1)+Ndh,   &
-             ng_sta(2)-Ndh:ng_end(2)+Ndh,   &
-             ng_sta(3)-Ndh:ng_end(3)+Ndh))
-allocate (wk2_s_h(ng_sta(1):ng_end(1),   &
-              ng_sta(2):ng_end(2),   &
-              ng_sta(3):ng_end(3)))
-allocate (lap_wk_s_h(ng_sta(1):ng_end(1),   &
-                 ng_sta(2):ng_end(2),   &
-                 ng_sta(3):ng_end(3)))
+allocate (wk_s_h(ng%is(1)-Ndh:ng%ie(1)+Ndh,   &
+             ng%is(2)-Ndh:ng%ie(2)+Ndh,   &
+             ng%is(3)-Ndh:ng%ie(3)+Ndh))
+allocate (wk2_s_h(ng%is(1):ng%ie(1),   &
+              ng%is(2):ng%ie(2),   &
+              ng%is(3):ng%ie(3)))
+allocate (lap_wk_s_h(ng%is(1):ng%ie(1),   &
+                 ng%is(2):ng%ie(2),   &
+                 ng%is(3):ng%ie(3)))
 
 if(iSCFRT==1.and.icalcforce==1)then
   select case(iperiodic)
@@ -123,14 +125,14 @@ else if(iSCFRT==2.and.icalcforce==1)then
                     mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
 end if
 
-allocate (rho_tmp(ng_num(1), ng_num(2), ng_num(3)))
-allocate (rho_s_tmp(ng_num(1), ng_num(2), ng_num(3), 2))
-allocate (vxc_tmp(ng_num(1), ng_num(2), ng_num(3)))
-allocate (vxc_s_tmp(ng_num(1), ng_num(2), ng_num(3), 2))
-allocate (eexc_tmp(ng_num(1), ng_num(2), ng_num(3)))
-allocate (exc_dummy(ng_num(1), ng_num(2), ng_num(3)))
-allocate (exc_dummy2(ng_num(1), ng_num(2), ng_num(3),2))
-allocate (exc_dummy3(ng_num(1), ng_num(2), ng_num(3),3))
+allocate (rho_tmp(ng%num(1), ng%num(2), ng%num(3)))
+allocate (rho_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2))
+allocate (vxc_tmp(ng%num(1), ng%num(2), ng%num(3)))
+allocate (vxc_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2))
+allocate (eexc_tmp(ng%num(1), ng%num(2), ng%num(3)))
+allocate (exc_dummy(ng%num(1), ng%num(2), ng%num(3)))
+allocate (exc_dummy2(ng%num(1), ng%num(2), ng%num(3),2))
+allocate (exc_dummy3(ng%num(1), ng%num(2), ng%num(3),3))
 
 select case(iperiodic)
 case(3)

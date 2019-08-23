@@ -39,7 +39,7 @@ contains
     type(s_dmatrix)            :: dmat
     !
     integer :: im,ispin,ik,io,is(3),ie(3),nsize
-    integer :: iz,iy,ix,ii
+    integer :: iz,iy,ix,ii,ix1,iy1,iz1
     complex(8) :: pocc
     complex(8),allocatable :: wrk(:,:,:,:,:)
 
@@ -66,7 +66,7 @@ contains
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
-!$omp parallel private(ik,io,iz,iy,ix,ii,pocc)
+!$omp parallel private(ik,io,iz,iy,ix,ii,pocc,ix1,iy1,iz1)
 !$omp do collapse(2)
       do iz=is(3)-Nd,ie(3)
       do iy=is(2)-Nd,ie(2)
@@ -84,14 +84,17 @@ contains
       do iz=is(3)-Nd,ie(3)
       do iy=is(2)-Nd,ie(2)
       do ix=is(1)-Nd,ie(1)
+        ix1 = mg%idx(ix)
+        iy1 = mg%idy(iy)
+        iz1 = mg%idz(iz)
 
         ! dir = 1,2,3 = xx,yy,zz (yz,zx,xy)
-        pocc = conjg( psi%zwf(ix,iy,iz,ispin,io,ik,im) ) * info%occ(io,ik,ispin,im)
+        pocc = conjg( psi%zwf(ix1,iy1,iz1,ispin,io,ik,im) ) * info%occ(io,ik,ispin,im)
 !dir$ unroll
         do ii=1,Nd
-          wrk(ii,1,ix,iy,iz) = wrk(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy,iz,ispin,io,ik,im) * pocc
-          wrk(ii,2,ix,iy,iz) = wrk(ii,2,ix,iy,iz) + psi%zwf(ix,mg%idy(iy+ii),iz,ispin,io,ik,im) * pocc
-          wrk(ii,3,ix,iy,iz) = wrk(ii,3,ix,iy,iz) + psi%zwf(ix,iy,mg%idz(iz+ii),ispin,io,ik,im) * pocc
+          wrk(ii,1,ix,iy,iz) = wrk(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy1,iz1,ispin,io,ik,im) * pocc
+          wrk(ii,2,ix,iy,iz) = wrk(ii,2,ix,iy,iz) + psi%zwf(ix1,mg%idy(iy+ii),iz1,ispin,io,ik,im) * pocc
+          wrk(ii,3,ix,iy,iz) = wrk(ii,3,ix,iy,iz) + psi%zwf(ix1,iy1,mg%idz(iz+ii),ispin,io,ik,im) * pocc
         end do
 
       end do
@@ -276,7 +279,7 @@ contains
 
         if(info%if_divide_rspace) then
           call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
-                                             ,uVpsibox2(:,ispin,io,ik,im))
+                                             ,uVpsibox2(ispin,io,ik,im,:))
         else
           call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
@@ -379,7 +382,7 @@ contains
 
         if(info%if_divide_rspace) then
           call calc_current_nonlocal_rdivided(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
-                                             ,uVpsibox2(:,ispin,io,ik,im))
+                                             ,uVpsibox2(ispin,io,ik,im,:))
         else
           call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if

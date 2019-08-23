@@ -174,6 +174,11 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
+! NOTE: This directive is a compiler hint to stabilize the performance of summation
+#ifdef __INTEL_COMPILER
+!dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
+#endif
+
   call timer_begin(LOG_UHPSI_PSEUDO)
 
   im_s = info%im_s
@@ -202,7 +207,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
 
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
-        uVpsi = uVpsibox2(ilma,ispin,io,ik,im)
+        uVpsi = uVpsibox2(ispin,io,ik,im,ilma)
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
@@ -263,8 +268,12 @@ end subroutine pseudo_C
 
 subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
-  use salmon_communication, only: comm_summation
+  use salmon_global, only: natom
   use timer
+#ifdef SALMON_ENABLE_MPI3
+  use salmon_communication, only: comm_wait_all
+  use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
+#endif
   implicit none
   integer        ,intent(in) :: nspin
   type(s_orbital_parallel),intent(in) :: info
@@ -272,10 +281,10 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   type(s_orbital),intent(in) :: tpsi
   complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
   complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
-  !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  integer :: ilma,ia,j,ix,iy,iz,Nlma
+  integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns
   complex(8) :: uVpsi
+  integer :: ireqs(natom), nreq
 
   call timer_begin(LOG_UHPSI_PSEUDO)
 
@@ -289,8 +298,8 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
   Nlma = ppg%Nlma
 
-  allocate(uVpsibox (Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
-  allocate(uVpsibox2(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+  allocate(uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+  allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
 
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
@@ -309,7 +318,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
         uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
       end do
       uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-      uVpsibox(ilma,ispin,io,ik,im) = uVpsi
+      uVpsibox(ispin,io,ik,im,ilma) = uVpsi
     end do
 
   end do
@@ -321,7 +330,28 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   call timer_end(LOG_UHPSI_PSEUDO)
 
   call timer_begin(LOG_UHPSI_PSEUDO_COMM)
+#ifdef SALMON_ENABLE_MPI3
+! FIXME: This subroutine uses MPI functions directly...
+  nreq = 0
+  do ia=1,natom
+    if (ppg%ireferred_atom(ia)) then
+      is = ppg%irange_atom(1,ia)
+      ie = ppg%irange_atom(2,ia)
+      ns = ie - is + 1
+      nreq = nreq + 1
+      call MPI_Iallreduce( uvpsibox (Nspin,io_s,ik_s,im_s,is) &
+                         , uvpsibox2(Nspin,io_s,ik_s,im_s,is) &
+                         , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
+                         , ireqs(nreq), ierr )
+    !else
+      ! uvpsibox2(:,:,:,:,ppg%irange_ia(1:2,ia)) does not use in this process...
+      ! We can skip self copy.
+    end if
+  end do
+  call comm_wait_all(ireqs(1:nreq))
+#else
   call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
+#endif
   call timer_end(LOG_UHPSI_PSEUDO_COMM)
 
   return

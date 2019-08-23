@@ -13,13 +13,17 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE init_ps(alat,brl,matrix_A)
+SUBROUTINE init_ps(ng,alat,brl,matrix_A,icomm_r)
+use structures,      only: s_rgrid
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root
 use scf_data
 use allocate_psl_sub
+use prep_pp_sub, only: init_uvpsi_summation
 implicit none
+type(s_rgrid),intent(in) :: ng
 real(8),intent(in) :: alat(3,3),brl(3,3),matrix_A(3,3)
+integer,intent(in) :: icomm_r
 
 if(iSCFRT==1)then
   if(comm_is_root(nproc_id_global))then
@@ -42,11 +46,13 @@ case(3)
   case(2)
     call calcVpsl_periodic(matrix_A,brl)
   case(4)
-    call calcVpsl_periodic_FFTE
+    call calcVpsl_periodic_FFTE(ng)
   end select
   call calcJxyz_all_periodic(alat,matrix_A)
   call calcuV
 end select
+
+call init_uvpsi_summation(ppg,icomm_r)
 
 return
 
@@ -55,6 +61,7 @@ END SUBROUTINE init_ps
 SUBROUTINE dealloc_init_ps(ppg,ppg_all,ppn)
   use structures, only: s_pp_grid, s_pp_nlcc
   use salmon_global
+  use prep_pp_sub, only: finalize_uvpsi_summation
   implicit none
   type(s_pp_grid) :: ppg,ppg_all
   type(s_pp_nlcc) :: ppn
@@ -72,4 +79,6 @@ SUBROUTINE dealloc_init_ps(ppg,ppg_all,ppn)
 
   if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc)
   if(allocated(ppn%tau_nlcc)) deallocate(ppn%tau_nlcc)
+
+  call finalize_uvpsi_summation(ppg)
 END SUBROUTINE dealloc_init_ps

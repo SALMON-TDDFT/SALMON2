@@ -8,7 +8,6 @@ set(SOURCES
     deallocate_sendrecv.f90
     prep_ini.f90
     real_space_dft.f90
-    subdgemm_lapack.f90
     write_eigen.f90
     )
 

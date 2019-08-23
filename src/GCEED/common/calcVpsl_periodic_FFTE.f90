@@ -13,7 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic_FFTE
+subroutine calcVpsl_periodic_FFTE(ng)
+  use structures,      only: s_rgrid
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_parallel, only: nproc_id_icommy, nproc_id_icommz
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
@@ -22,6 +23,7 @@ subroutine calcVpsl_periodic_FFTE
   use allocate_psl_sub
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: ng
   
   integer :: ii,ix,iy,iz,ak
   integer :: iix,iiy,iiz
@@ -181,7 +183,7 @@ subroutine calcVpsl_periodic_FFTE
       iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
       do iy=iy_sta,iy_end
         iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
-        do iix=ng_sta(1),ng_end(1)
+        do iix=ng%is(1),ng%ie(1)
           ix=iix-lg_sta(1)+1
           matbox_l(iix,iiy,iiz)=A_FFTE(ix,iy,iz)
         end do

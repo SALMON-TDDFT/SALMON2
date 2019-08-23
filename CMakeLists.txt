@@ -107,6 +107,14 @@ endif ()
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
 set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
 
+if (USE_MPI)
+  find_package(MPI REQUIRED)
+  if ("${MPI_Fortran_VERSION_MAJOR}" VERSION_GREATER_EQUAL "3")
+    add_compile_definitions(SALMON_ENABLE_MPI3)
+    message(STATUS "SALMON will uses the optimization by MPI version 3.")
+  endif ()
+endif ()
+
 
 # Generate configure header
 configure_file(
