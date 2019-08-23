@@ -20,7 +20,6 @@ use scf_data
 implicit none
 
 integer,allocatable :: icorr_polenum(:)
-integer :: iamax
 
 ! FFTE routine
 integer :: iquot
@@ -578,7 +577,6 @@ if(layout_multipole==2)then
     Rion2(:,:)=Rion(:,:)
   end if
 
-  iamax=amax
   allocate(poisson_cg%ig_num(1:amax))
   allocate(nearatomnum(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
   poisson_cg%ig_num=0
@@ -681,7 +679,6 @@ else if(layout_multipole==3)then
     end if
   end do
 
-  iamax=poisson_cg%npole_partial
   allocate(poisson_cg%ipole_tbl(1:poisson_cg%npole_partial))
   allocate(poisson_cg%ig_num(1:poisson_cg%npole_partial))
 
