@@ -37,7 +37,7 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   type(s_cg)                    :: cg
   !
   integer,parameter :: nd=4
-  integer :: nspin,io,io_all,ispin,io_s,io_e,is(3),ie(3),ix,iy,iz
+  integer :: nspin,io,io_all,ispin,io_s,io_e,is(3),ie(3),iy,iz
   integer :: iter
   real(8),dimension(system%nspin,system%no) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
@@ -62,14 +62,12 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_real(nspin,mg,info,cg%hwf)
   end if
 
-  !$omp parallel do private(io,ispin,iz,iy,ix) collapse(5)
+!$omp parallel do private(io,ispin,iz,iy) collapse(4)
   do io=io_s,io_e
   do ispin=1,nspin
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
-  do ix=is(1),ie(1)
-    cg%xk%rwf(ix,iy,iz,ispin,io,1,1) = spsi%rwf(ix,iy,iz,ispin,io,1,1)
-  end do
+    cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
   end do
   end do
   end do
@@ -83,16 +81,15 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   call timer_begin(LOG_GSCG_ITERATION)
   Iteration : do iter=1,Ncg
 
-    !$omp parallel do private(io,ispin,iz,iy,ix,io_all) collapse(5)
+!$omp parallel do private(io,ispin,iz,iy,io_all) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%gk%rwf(ix,iy,iz,ispin,io,1,1) = &
-      & cg%hxk%rwf(ix,iy,iz,ispin,io,1,1) - xkHxk(ispin,io_all)* cg%xk%rwf(ix,iy,iz,ispin,io,1,1)
-    end do
+      cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+      & cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      & - xkHxk(ispin,io_all) * cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
     end do
     end do
     end do
@@ -106,16 +103,15 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     else
       uk=sum/gkgk
     end if
-    !$omp parallel do private(io,ispin,iz,iy,ix,io_all) collapse(5)
+!$omp parallel do private(io,ispin,iz,iy,io_all) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pk%rwf(ix,iy,iz,ispin,io,1,1) = &
-      & cg%gk%rwf(ix,iy,iz,ispin,io,1,1) + uk(ispin,io_all) * cg%pk%rwf(ix,iy,iz,ispin,io,1,1)
-    end do
+      cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+      & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      & + uk(ispin,io_all) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
     end do
     end do
     end do
@@ -124,16 +120,15 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
-    !$omp parallel do private(io,ispin,iz,iy,ix,io_all) collapse(5)
+!$omp parallel do private(io,ispin,iz,iy,io_all) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pko%rwf(ix,iy,iz,ispin,io,1,1) = &
-      & cg%pk%rwf(ix,iy,iz,ispin,io,1,1) - zs(ispin,io_all) *cg%xk%rwf(ix,iy,iz,ispin,io,1,1)
-    end do
+      cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+      & cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      & - zs(ispin,io_all) * cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
     end do
     end do
     end do
@@ -141,15 +136,14 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
-    !$omp parallel do private(io,ispin,iz,iy,ix,io_all) collapse(5)
+!$omp parallel do private(io,ispin,iz,iy,io_all) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pko%rwf(ix,iy,iz,ispin,io,1,1) = cg%pko%rwf(ix,iy,iz,ispin,io,1,1) /sqrt(sum(ispin,io_all))
-    end do
+      cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+      & cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(sum(ispin,io_all))
     end do
     end do
     end do
@@ -166,18 +160,18 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     cp=1.d0/sqrt(1.d0+abs(cx)**2)
     cx=cx*cp
 
-    !$omp parallel do private(io,ispin,iz,iy,ix,io_all) collapse(5)
+!$omp parallel do private(io,ispin,iz,iy,io_all) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%xk%rwf(ix,iy,iz,ispin,io,1,1) = &
-      & cx(ispin,io_all)* cg%xk%rwf(ix,iy,iz,ispin,io,1,1) + cp(ispin,io_all)* cg%pko%rwf(ix,iy,iz,ispin,io,1,1)
-      cg%hxk%rwf(ix,iy,iz,ispin,io,1,1) = &
-      & cx(ispin,io_all)* cg%hxk%rwf(ix,iy,iz,ispin,io,1,1) + cp(ispin,io_all)* cg%hwf%rwf(ix,iy,iz,ispin,io,1,1)
-    end do
+      cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+      & cx(ispin,io_all)* cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      & + cp(ispin,io_all) * cg%pko%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+      & cx(ispin,io_all)* cg%hxk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      & + cp(ispin,io_all) * cg%hwf%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
     end do
     end do
     end do
@@ -186,17 +180,16 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
-    !$omp parallel do private(io,ispin,iz,iy,ix,io_all) collapse(5)
+!$omp parallel do private(io,ispin,iz,iy,io_all) collapse(4)
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
       if(abs(xkxk(ispin,io_all))<=1.d30)then
-        spsi%rwf(ix,iy,iz,ispin,io,1,1) = cg%xk%rwf(ix,iy,iz,ispin,io,1,1) /sqrt(xkxk(ispin,io_all))
+        spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        & cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(xkxk(ispin,io_all))
       end if
-    end do
     end do
     end do
     end do
@@ -328,7 +321,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   type(s_cg)                    :: cg
   !
   integer,parameter :: nd=4
-  integer :: nspin,ik,io,io_all,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz
+  integer :: nspin,ik,io,io_all,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),iy,iz
   integer :: iter
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
@@ -355,15 +348,13 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call allocate_orbital_complex(nspin,mg,info,cg%hwf)
   end if
 
-  !$omp parallel do private(ik,io,ispin,iz,iy,ix) collapse(6)
+!$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
   do ik=ik_s,ik_e
   do io=io_s,io_e
   do ispin=1,nspin
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
-  do ix=is(1),ie(1)
-    cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) = spsi%zwf(ix,iy,iz,ispin,io,ik,1)
-  end do
+    cg%xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
   end do
   end do
   end do
@@ -378,17 +369,16 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   call timer_begin(LOG_GSCG_ITERATION)
   Iteration : do iter=1,Ncg
 
-    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
+!$omp parallel do private(ik,io,ispin,iz,iy,io_all) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%gk%zwf(ix,iy,iz,ispin,io,ik,1) = &
-      & cg%hxk%zwf(ix,iy,iz,ispin,io,ik,1) - xkHxk(ispin,io_all,ik)* cg%xk%zwf(ix,iy,iz,ispin,io,ik,1)
-    end do
+      cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      & cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & - xkHxk(ispin,io_all,ik) * cg%xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
     end do
     end do
     end do
@@ -403,17 +393,16 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     else
       uk=sum/gkgk
     end if
-    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
+!$omp parallel do private(ik,io,ispin,iz,iy,io_all) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pk%zwf(ix,iy,iz,ispin,io,ik,1) = &
-      & cg%gk%zwf(ix,iy,iz,ispin,io,ik,1) + uk(ispin,io_all,ik) * cg%pk%zwf(ix,iy,iz,ispin,io,ik,1)
-    end do
+      cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & + uk(ispin,io_all,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
     end do
     end do
     end do
@@ -423,17 +412,16 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
 
-    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
+!$omp parallel do private(ik,io,ispin,iz,iy,io_all) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pko%zwf(ix,iy,iz,ispin,io,ik,1) = &
-      & cg%pk%zwf(ix,iy,iz,ispin,io,ik,1) - zs(ispin,io_all,ik) *cg%xk%zwf(ix,iy,iz,ispin,io,ik,1)
-    end do
+      cg%pko%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      & cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & - zs(ispin,io_all,ik) *cg%xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
     end do
     end do
     end do
@@ -442,16 +430,15 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
 
     call inner_product(mg,system,info,cg%pko,cg%pko,sum)
 
-    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
+!$omp parallel do private(ik,io,ispin,iz,iy,io_all) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%pko%zwf(ix,iy,iz,ispin,io,ik,1) = cg%pko%zwf(ix,iy,iz,ispin,io,ik,1) /sqrt(sum(ispin,io_all,ik))
-    end do
+      cg%pko%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      & cg%pko%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) / sqrt(sum(ispin,io_all,ik))
     end do
     end do
     end do
@@ -469,19 +456,19 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     cp=1.d0/sqrt(1.d0+abs(cx)**2)
     cx=cx*cp
 
-    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
+!$omp parallel do private(ik,io,ispin,iz,iy,io_all) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
-      cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) = &
-      & cx(ispin,io_all,ik)* cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) + cp(ispin,io_all,ik)* cg%pko%zwf(ix,iy,iz,ispin,io,ik,1)
-      cg%hxk%zwf(ix,iy,iz,ispin,io,ik,1) = &
-      & cx(ispin,io_all,ik)* cg%hxk%zwf(ix,iy,iz,ispin,io,ik,1) + cp(ispin,io_all,ik)* cg%hwf%zwf(ix,iy,iz,ispin,io,ik,1)
-    end do
+      cg%xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      & cx(ispin,io_all,ik) * cg%xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & + cp(ispin,io_all,ik) * cg%pko%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+      cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      & cx(ispin,io_all,ik) * cg%hxk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & + cp(ispin,io_all,ik) * cg%hwf%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
     end do
     end do
     end do
@@ -491,18 +478,17 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
     call inner_product(mg,system,info,cg%xk,cg%xk,xkxk)
 
-    !$omp parallel do private(ik,io,ispin,iz,iy,ix,io_all) collapse(6)
+!$omp parallel do private(ik,io,ispin,iz,iy,io_all) collapse(5)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
       io_all = info%io_tbl(io)
       if(abs(xkxk(ispin,io_all,ik))<=1.d30)then
-        spsi%zwf(ix,iy,iz,ispin,io,ik,1) = cg%xk%zwf(ix,iy,iz,ispin,io,ik,1) /sqrt(xkxk(ispin,io_all,ik))
+        spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+        & cg%xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) / sqrt(xkxk(ispin,io_all,ik))
       end if
-    end do
     end do
     end do
     end do
