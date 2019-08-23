@@ -818,6 +818,10 @@ end if
 
 ! force
 !if(iflag_opt==1) then
+if (iperiodic == 3 .and. iflag_hartree == 4) then
+  ! NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
+  ! does not allocate.
+else
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
@@ -830,6 +834,7 @@ end if
          end select
       end do
    end if
+end if
 !end if
 
 if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
