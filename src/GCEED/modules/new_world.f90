@@ -600,15 +600,15 @@ if(layout_multipole==2)then
   end do
   end do
 
-  allocate(icorr_polenum(1:amax))
+  allocate(poisson_cg%ipole_tbl(1:amax))
   allocate(inv_icorr_polenum(1:amax))
-  icorr_polenum=0
+  poisson_cg%ipole_tbl=0
   inv_icorr_polenum=0
   ibox=0
   do a=1,amax
     if(poisson_cg%ig_num(a)>=1)then
       ibox=ibox+1
-      icorr_polenum(ibox)=a
+      poisson_cg%ipole_tbl(ibox)=a
       inv_icorr_polenum(a)=ibox
     end if
   end do
@@ -682,13 +682,13 @@ else if(layout_multipole==3)then
   end do
 
   iamax=poisson_cg%npole_partial
-  allocate(icorr_polenum(1:poisson_cg%npole_partial))
+  allocate(poisson_cg%ipole_tbl(1:poisson_cg%npole_partial))
   allocate(poisson_cg%ig_num(1:poisson_cg%npole_partial))
 
   ibox=1
   do i=1,poisson_cg%npole_total
     if(iflag_pole(i)==1)then
-      icorr_polenum(ibox)=i
+      poisson_cg%ipole_tbl(ibox)=i
       ibox=ibox+1
     end if
   end do
@@ -699,9 +699,9 @@ else if(layout_multipole==3)then
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
     do i=1,poisson_cg%npole_partial
-      if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
-         ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
-         ista_Mxin_pole(1,icorr_polenum(i)-1)<=ix.and.iend_Mxin_pole(1,icorr_polenum(i)-1)>=ix)then
+      if(ista_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)<=iz.and.iend_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)>=iz.and.   &
+         ista_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)<=iy.and.iend_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)>=iy.and.   &
+         ista_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)<=ix.and.iend_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)>=ix)then
         poisson_cg%ig_num(i)=poisson_cg%ig_num(i)+1
       end if
     end do
@@ -718,9 +718,9 @@ else if(layout_multipole==3)then
   do iy=ng_sta(2),ng_end(2)
   do ix=ng_sta(1),ng_end(1)
     do i=1,poisson_cg%npole_partial
-      if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
-         ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
-         ista_Mxin_pole(1,icorr_polenum(i)-1)<=ix.and.iend_Mxin_pole(1,icorr_polenum(i)-1)>=ix)then
+      if(ista_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)<=iz.and.iend_Mxin_pole(3,poisson_cg%ipole_tbl(i)-1)>=iz.and.   &
+         ista_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)<=iy.and.iend_Mxin_pole(2,poisson_cg%ipole_tbl(i)-1)>=iy.and.   &
+         ista_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)<=ix.and.iend_Mxin_pole(1,poisson_cg%ipole_tbl(i)-1)>=ix)then
         poisson_cg%ig_num(i)=poisson_cg%ig_num(i)+1
         poisson_cg%ig(1,poisson_cg%ig_num(i),i)=ix
         poisson_cg%ig(2,poisson_cg%ig_num(i),i)=iy

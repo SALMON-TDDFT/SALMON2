@@ -23,7 +23,7 @@ contains
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
                             igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                            iamax,icorr_polenum)
+                            iamax)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -53,7 +53,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: iflag_ps
   integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
   integer,intent(in) :: iamax
-  integer,intent(in) :: icorr_polenum(iamax)
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
@@ -172,14 +171,14 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
         ix=ig(1,jj,icen)
         iy=ig(2,jj,icen)
         iz=ig(3,jj,icen)
-        xx=gridcoo(ix,1)-rion2(1,icorr_polenum(icen))
-        yy=gridcoo(iy,2)-rion2(2,icorr_polenum(icen))
-        zz=gridcoo(iz,3)-rion2(3,icorr_polenum(icen))
+        xx=gridcoo(ix,1)-rion2(1,poisson_cg%ipole_tbl(icen))
+        yy=gridcoo(iy,2)-rion2(2,poisson_cg%ipole_tbl(icen))
+        zz=gridcoo(iz,3)-rion2(3,poisson_cg%ipole_tbl(icen))
         rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
         call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
         rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*hvol
       end do
-      rholm2(lm,icorr_polenum(icen))=rholm2box
+      rholm2(lm,poisson_cg%ipole_tbl(icen))=rholm2box
     end do
     end do
   end do
@@ -225,10 +224,10 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
       sumbox3=sumbox3+trho(ixbox,iybox,izbox)*zz
       sum1=sum1+trho(ixbox,iybox,izbox)
     end do
-    center_trho_nume_deno2(1,icorr_polenum(ii))=sumbox1
-    center_trho_nume_deno2(2,icorr_polenum(ii))=sumbox2
-    center_trho_nume_deno2(3,icorr_polenum(ii))=sumbox3
-    center_trho_nume_deno2(4,icorr_polenum(ii))=sum1
+    center_trho_nume_deno2(1,poisson_cg%ipole_tbl(ii))=sumbox1
+    center_trho_nume_deno2(2,poisson_cg%ipole_tbl(ii))=sumbox2
+    center_trho_nume_deno2(3,poisson_cg%ipole_tbl(ii))=sumbox3
+    center_trho_nume_deno2(4,poisson_cg%ipole_tbl(ii))=sum1
   end do
   
   call timer_begin(LOG_ALLREDUCE_HARTREE)
@@ -255,7 +254,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     rholm2=0.d0
     rholm3=0.d0
     do ii=1,poisson_cg%npole_partial
-      pl=icorr_polenum(ii)
+      pl=poisson_cg%ipole_tbl(ii)
       cl=ig_num(ii)
       if(itrho(pl)==1)then
   !$omp parallel default(none) &
@@ -303,7 +302,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   else
     rholm2=0.d0
     do ii=1,poisson_cg%npole_partial
-      if(itrho(icorr_polenum(ii))==1)then
+      if(itrho(poisson_cg%ipole_tbl(ii))==1)then
         rholm=0.d0
         do ll=0,lmax_lmp
         do lm=ll**2+1,(ll+1)**2
@@ -314,14 +313,14 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
             ixbox=ig(1,jj,ii)
             iybox=ig(2,jj,ii)
             izbox=ig(3,jj,ii)
-            xx=gridcoo(ixbox,1)-center_trho(1,icorr_polenum(ii))
-            yy=gridcoo(iybox,2)-center_trho(2,icorr_polenum(ii))
-            zz=gridcoo(izbox,3)-center_trho(3,icorr_polenum(ii))
+            xx=gridcoo(ixbox,1)-center_trho(1,poisson_cg%ipole_tbl(ii))
+            yy=gridcoo(iybox,2)-center_trho(2,poisson_cg%ipole_tbl(ii))
+            zz=gridcoo(izbox,3)-center_trho(3,poisson_cg%ipole_tbl(ii))
             rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
             call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
             rholm2box=rholm2box+rr**ll*ylm*trho(ixbox,iybox,izbox)*hvol
           end do
-          rholm2(lm,icorr_polenum(ii))=rholm2box
+          rholm2(lm,poisson_cg%ipole_tbl(ii))=rholm2box
         end do
         end do
       end if
