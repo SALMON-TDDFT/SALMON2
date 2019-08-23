@@ -1089,9 +1089,17 @@ end subroutine get_fourier_grid_G
 
 subroutine init_code_optimization
   implicit none
+  integer :: ignum(3)
+
   call switch_stencil_optimization(mg%num)
   call switch_openmp_parallelization(mg%num)
-  call set_modulo_tables(mg%num + (nd*2))
+
+  if(iperiodic==3 .and. nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)==1) then
+    ignum = mg%num
+  else
+    ignum = mg%num + (nd*2)
+  end if
+  call set_modulo_tables(ignum)
 
   if (comm_is_root(nproc_id_global)) then
     call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
