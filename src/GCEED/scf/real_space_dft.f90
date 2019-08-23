@@ -283,7 +283,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl
-    call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
+    call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -460,7 +460,7 @@ else if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     call dealloc_init_ps(ppg,ppg_all,ppn)
-    call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
+    call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
     if(iperiodic==3) call get_fourier_grid_G(fg)
 
   end if

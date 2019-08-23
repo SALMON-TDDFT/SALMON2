@@ -836,4 +836,122 @@ subroutine bisection(xx,inode,iak,nr,rad_psl)
 
 end subroutine bisection
 
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine init_uvpsi_summation(ppg,icomm_r)
+  use structures,    only: s_pp_grid
+  use salmon_global, only: natom
+#ifdef SALMON_ENABLE_MPI3
+  use mpi,           only: MPI_LOGICAL
+#endif
+  implicit none
+  type(s_pp_grid),intent(inout) :: ppg
+  integer,intent(in) :: icomm_r
+
+#ifdef SALMON_ENABLE_MPI3
+! FIXME: This subroutine uses MPI functions directly...
+  integer :: ilma,ia,ierr
+  integer :: igroup_r,igroup_ia,icomm_ia
+  integer :: irank_r,isize_r,n,i
+  integer :: nlma
+  logical,allocatable :: ireferred_atom_comm_r(:,:)
+  integer,allocatable :: iranklist(:)
+
+  call MPI_Comm_rank(icomm_r, irank_r, ierr)
+  call error_check(ierr)
+  call MPI_Comm_size(icomm_r, isize_r, ierr)
+  call error_check(ierr)
+
+  nlma = ppg%Nlma
+
+  allocate(iranklist(isize_r))
+  allocate(ireferred_atom_comm_r(natom,isize_r))
+  allocate(ppg%ireferred_atom(natom))
+  allocate(ppg%icomm_atom(natom))
+  allocate(ppg%irange_atom(2,natom))
+
+  ppg%ireferred_atom = .false.
+  do ilma=1,nlma
+    ia = ppg%ia_tbl(ilma)
+    ppg%ireferred_atom(ia) = ppg%ireferred_atom(ia) .or. (ppg%mps(ia) > 0)
+  end do
+  call MPI_Allgather(ppg%ireferred_atom,    natom, MPI_LOGICAL &
+                    ,ireferred_atom_comm_r, natom, MPI_LOGICAL &
+                    ,icomm_r, ierr)
+  call error_check(ierr)
+
+  ppg%irange_atom(1,:) = 1
+  ppg%irange_atom(2,:) = 0
+  do ia=1,natom
+    ! forward search
+    do ilma=1,nlma
+      if (ppg%ia_tbl(ilma) == ia) then
+        ppg%irange_atom(1,ia) = ilma
+        exit
+      end if
+    end do
+
+    ! backward search
+    do ilma=nlma,1,-1
+      if (ppg%ia_tbl(ilma) == ia) then
+        ppg%irange_atom(2,ia) = ilma
+        exit
+      end if
+    end do
+  end do
+
+  do ia=1,natom
+    n = 0
+    do i=1,isize_r
+      if (ireferred_atom_comm_r(ia,i)) then
+        n = n + 1
+        iranklist(n) = i - 1
+      end if
+    end do
+
+    call MPI_Comm_group(icomm_r, igroup_r, ierr)
+    call error_check(ierr)
+
+    call MPI_Group_incl(igroup_r, n, iranklist, igroup_ia, ierr)
+    call error_check(ierr)
+
+    call MPI_Comm_create(icomm_r, igroup_ia, icomm_ia, ierr)
+    call error_check(ierr)
+
+    call MPI_Group_free(igroup_ia,ierr)
+    call error_check(ierr)
+
+    ppg%icomm_atom(ia) = icomm_ia
+  end do
+
+contains
+  subroutine error_check(errcode)
+    use mpi, only: MPI_MAX_ERROR_STRING, MPI_SUCCESS
+    implicit none
+    integer, intent(in) :: errcode
+    character(MPI_MAX_ERROR_STRING) :: errstr
+    integer                         :: retlen, ierr
+    if (errcode /= MPI_SUCCESS) then
+      call MPI_Error_string(errcode, errstr, retlen, ierr)
+      print *, 'MPI Error:', errstr
+      call MPI_Finalize(ierr)
+    end if
+  end subroutine
+#else
+  ! no operation.
+  ! this routine requires MPI version 3.
+#endif
+end subroutine init_uvpsi_summation
+
+subroutine finalize_uvpsi_summation(ppg)
+  use structures,    only: s_pp_grid
+  implicit none
+  type(s_pp_grid),intent(inout) :: ppg
+
+#ifdef SALMON_ENABLE_MPI3
+  if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
+  if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
+  if (allocated(ppg%icomm_atom)    ) deallocate(ppg%icomm_atom)
+#endif
+end subroutine
+
 end module prep_pp_sub

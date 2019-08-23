@@ -258,11 +258,13 @@ subroutine time_evolution_step_md_part1(system,md)
 
 end subroutine 
 
-subroutine update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
-  use structures, only: s_dft_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_reciprocal_grid
+subroutine update_pseudo_rt(itt,info,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
+  use structures, only: s_dft_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_reciprocal_grid, &
+    s_orbital_parallel
   use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
   implicit none
+  type(s_orbital_parallel) :: info
   type(s_dft_system) :: system
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
@@ -278,12 +280,12 @@ subroutine update_pseudo_rt(itt,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
   if (mod(itt,step_update_ps)==0 ) then
      !xxxx call prep_ps_periodic('update_all       ')
      call dealloc_init_ps(ppg,ppg_all,ppn)
-     call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
+     call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   else if (mod(itt,step_update_ps2)==0 ) then
      !xxxx call prep_ps_periodic('update_wo_realloc')
      !xxxxxxx this option is not yet made xxxxxx
      call dealloc_init_ps(ppg,ppg_all,ppn)
-     call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
+     call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   endif
 
 end subroutine 

@@ -182,7 +182,7 @@ end if
 
 call read_pslfile(system)
 call allocate_psl
-call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A)
+call init_ps(system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
 call init_updown(info)
 call init_itype
