@@ -172,7 +172,7 @@ if(iopt==1)then
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(poisson_cg)
   end select
-  call make_icoobox_bound
+  call set_ig_bound(poisson_cg)
 
   call allocate_mat
   call set_icoo1d

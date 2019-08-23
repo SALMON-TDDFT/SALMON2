@@ -225,7 +225,8 @@ module structures
   end type s_ofile
 
   type s_poisson_cg
-    integer :: npole    ! number of multipoles
+    integer :: npole                          ! number of multipoles
+    integer,allocatable :: ig_bound(:,:,:)    ! grid table for boundaries
   end type s_poisson_cg
 
 ! for DFT ground state calculations

@@ -23,8 +23,7 @@ contains
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
                             igc_is,igc_ie,gridcoo,iflag_ps,inum_mxin_s,   &
-                            iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
-                            ibox_icoobox_bound,icoobox_bound)
+                            iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -59,8 +58,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: icorr_polenum(iamax)
   integer,intent(in) :: icount_pole(iamax)
   integer,intent(in) :: icorr_xyz_pole(3,maxval_pole,num_pole_myrank)
-  integer,intent(in) :: ibox_icoobox_bound
-  integer,intent(in) :: icoobox_bound(3,ibox_icoobox_bound,3)
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
@@ -379,9 +376,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     do jj=istart(info_field%id(k)),iend(info_field%id(k))
       do icen=1,num_center
         if(itrho(icen)==1)then
-          xx=gridcoo(icoobox_bound(1,jj,k),1)-center_trho(1,icen)
-          yy=gridcoo(icoobox_bound(2,jj,k),2)-center_trho(2,icen)
-          zz=gridcoo(icoobox_bound(3,jj,k),3)-center_trho(3,icen)
+          xx=gridcoo(poisson_cg%ig_bound(1,jj,k),1)-center_trho(1,icen)
+          yy=gridcoo(poisson_cg%ig_bound(2,jj,k),2)-center_trho(2,icen)
+          zz=gridcoo(poisson_cg%ig_bound(3,jj,k),3)-center_trho(3,icen)
           rr=sqrt(xx**2+yy**2+zz**2)+1.d-50 
           rinv=1.d0/rr
   !        xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
@@ -459,13 +456,13 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     if(info_field%id(k)==0) then
   !$OMP parallel do
       do jj=1,icount/2
-        wk2(icoobox_bound(1,jj,k),icoobox_bound(2,jj,k),icoobox_bound(3,jj,k))=wkbound_h(jj)
+        wk2(poisson_cg%ig_bound(1,jj,k),poisson_cg%ig_bound(2,jj,k),poisson_cg%ig_bound(3,jj,k))=wkbound_h(jj)
       end do
     end if
     if(info_field%id(k)==info_field%isize(k)-1) then
   !$OMP parallel do
       do jj=icount/2+1,icount
-        wk2(icoobox_bound(1,jj,k),icoobox_bound(2,jj,k),icoobox_bound(3,jj,k))=wkbound_h(jj)
+        wk2(poisson_cg%ig_bound(1,jj,k),poisson_cg%ig_bound(2,jj,k),poisson_cg%ig_bound(3,jj,k))=wkbound_h(jj)
       end do
     end if
   

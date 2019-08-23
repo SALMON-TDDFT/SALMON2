@@ -745,9 +745,11 @@ end if
 end subroutine make_corr_pole
 
 !=====================================================================
-subroutine make_icoobox_bound
+subroutine set_ig_bound(poisson_cg)
+use structures, only: s_poisson_cg
 use salmon_parallel
 implicit none
+type(s_poisson_cg),intent(inout) :: poisson_cg
 integer :: ix,iy,iz
 integer :: ibox
 integer :: icount
@@ -755,17 +757,16 @@ integer :: icount
 ibox=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)  &
      *inum_Mxin_s(3,nproc_id_global)/minval(inum_Mxin_s(1:3,nproc_id_global))*2*Ndh
 
-ibox_icoobox_bound=ibox
-allocate( icoobox_bound(3,ibox,3) )
+allocate( poisson_cg%ig_bound(3,ibox,3) )
 
 icount=0
 do iz=ng_sta(3),ng_end(3)
 do iy=ng_sta(2),ng_end(2)
 do ix=lg_sta(1)-Ndh,lg_sta(1)-1
   icount=icount+1
-  icoobox_bound(1,icount,1)=ix
-  icoobox_bound(2,icount,1)=iy
-  icoobox_bound(3,icount,1)=iz
+  poisson_cg%ig_bound(1,icount,1)=ix
+  poisson_cg%ig_bound(2,icount,1)=iy
+  poisson_cg%ig_bound(3,icount,1)=iz
 end do
 end do
 end do
@@ -773,9 +774,9 @@ do iz=ng_sta(3),ng_end(3)
 do iy=ng_sta(2),ng_end(2)
 do ix=lg_end(1)+1,lg_end(1)+Ndh
   icount=icount+1
-  icoobox_bound(1,icount,1)=ix
-  icoobox_bound(2,icount,1)=iy
-  icoobox_bound(3,icount,1)=iz
+  poisson_cg%ig_bound(1,icount,1)=ix
+  poisson_cg%ig_bound(2,icount,1)=iy
+  poisson_cg%ig_bound(3,icount,1)=iz
 end do
 end do
 end do
@@ -784,9 +785,9 @@ do iz=ng_sta(3),ng_end(3)
 do iy=lg_sta(2)-Ndh,lg_sta(2)-1
 do ix=ng_sta(1),ng_end(1)
   icount=icount+1
-  icoobox_bound(1,icount,2)=ix
-  icoobox_bound(2,icount,2)=iy
-  icoobox_bound(3,icount,2)=iz
+  poisson_cg%ig_bound(1,icount,2)=ix
+  poisson_cg%ig_bound(2,icount,2)=iy
+  poisson_cg%ig_bound(3,icount,2)=iz
 end do
 end do
 end do
@@ -794,9 +795,9 @@ do iz=ng_sta(3),ng_end(3)
 do iy=lg_end(2)+1,lg_end(2)+Ndh
 do ix=ng_sta(1),ng_end(1)
   icount=icount+1
-  icoobox_bound(1,icount,2)=ix
-  icoobox_bound(2,icount,2)=iy
-  icoobox_bound(3,icount,2)=iz
+  poisson_cg%ig_bound(1,icount,2)=ix
+  poisson_cg%ig_bound(2,icount,2)=iy
+  poisson_cg%ig_bound(3,icount,2)=iz
 end do
 end do
 end do
@@ -805,9 +806,9 @@ do iz=lg_sta(3)-Ndh,lg_sta(3)-1
 do iy=ng_sta(2),ng_end(2)
 do ix=ng_sta(1),ng_end(1)
   icount=icount+1
-  icoobox_bound(1,icount,3)=ix
-  icoobox_bound(2,icount,3)=iy
-  icoobox_bound(3,icount,3)=iz
+  poisson_cg%ig_bound(1,icount,3)=ix
+  poisson_cg%ig_bound(2,icount,3)=iy
+  poisson_cg%ig_bound(3,icount,3)=iz
 end do
 end do
 end do
@@ -815,15 +816,15 @@ do iz=lg_end(3)+1,lg_end(3)+Ndh
 do iy=ng_sta(2),ng_end(2)
 do ix=ng_sta(1),ng_end(1)
   icount=icount+1
-  icoobox_bound(1,icount,3)=ix
-  icoobox_bound(2,icount,3)=iy
-  icoobox_bound(3,icount,3)=iz
+  poisson_cg%ig_bound(1,icount,3)=ix
+  poisson_cg%ig_bound(2,icount,3)=iy
+  poisson_cg%ig_bound(3,icount,3)=iz
 end do
 end do
 end do
 
 return
-end subroutine make_icoobox_bound
+end subroutine set_ig_bound
 
 !=====================================================================
 !======================================================================

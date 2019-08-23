@@ -200,7 +200,7 @@ else if(ilsda==1)then
 end if
 
 if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(poisson_cg)
-call make_icoobox_bound
+call set_ig_bound(poisson_cg)
 call timer_end(LOG_READ_LDA_DATA)
 
 
