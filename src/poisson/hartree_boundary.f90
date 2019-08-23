@@ -21,12 +21,12 @@ contains
 
 !============================ Hartree potential (Solve Poisson equation)
 
-subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
-                            layout_multipole,lmax_lmp,igc_is,igc_ie,gridcoo,hvol,iflag_ps,num_pole,inum_mxin_s,   &
+subroutine hartree_boundary(lg,mg,ng,info_field,system,trho,wk2,   &
+                            layout_multipole,lmax_lmp,igc_is,igc_ie,gridcoo,iflag_ps,num_pole,inum_mxin_s,   &
                             iamax,maxval_pole,num_pole_myrank,icorr_polenum,icount_pole,icorr_xyz_pole,   &
                             ibox_icoobox_bound,icoobox_bound)
   use inputoutput, only: natom,rion
-  use structures, only: s_rgrid,s_field_parallel
+  use structures, only: s_rgrid,s_field_parallel,s_dft_system
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_summation
   use timer
@@ -40,6 +40,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
+  type(s_dft_system),intent(in) :: system
   real(8) :: trho(mg%is(1):mg%ie(1),    &
                  mg%is(2):mg%ie(2),      &
                  mg%is(3):mg%ie(3))
@@ -51,7 +52,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
-  real(8),intent(in) :: hvol
   integer,intent(in) :: iflag_ps
   integer,intent(in) :: num_pole
   integer,intent(in) :: inum_mxin_s(3,0:nproc_size_global-1)
@@ -89,8 +89,11 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
   real(8),allocatable :: rion2(:,:)
   real(8),allocatable :: wkbound_h(:)
   real(8),allocatable :: wk2bound_h(:)
+  real(8) :: hvol
   
   !------------------------- Boundary condition (multipole expansion)
+
+  hvol=system%hvol
  
   if(.not.allocated(wkbound_h))then
     allocate(wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
@@ -129,7 +132,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
       zz=gridcoo(iz,3)-center_trho(3,1)
       rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
       call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-      rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*Hvol
+      rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*hvol
     end do
     end do
     end do
@@ -176,7 +179,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
         zz=gridcoo(iz,3)-rion2(3,icorr_polenum(icen))
         rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
         call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-        rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*Hvol
+        rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*hvol
       end do
       rholm2(lm,icorr_polenum(icen))=rholm2box
     end do
@@ -235,7 +238,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
   call timer_end(LOG_ALLREDUCE_HARTREE)
   
   do ii=1,num_pole
-    if(center_trho_nume_deno(4,ii)*Hvol>=1.d-12)then
+    if(center_trho_nume_deno(4,ii)*hvol>=1.d-12)then
       itrho(ii)=1
       center_trho(1:3,ii)=center_trho_nume_deno(1:3,ii)/center_trho_nume_deno(4,ii)
     else
@@ -260,7 +263,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
   !$omp parallel default(none) &
   !$omp          shared(icorr_xyz_pole,gridcoo,center_trho,trho,rholm3) &
   !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz,ylm) &
-  !$omp          firstprivate(ii,pl,cl,lmax_lmp,Hvol)
+  !$omp          firstprivate(ii,pl,cl,lmax_lmp,hvol)
         tid=omp_get_thread_num()
         rholm3(:,tid)=0.d0
   
@@ -280,7 +283,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
           do ll=0,lmax_lmp
           do lm=ll**2+1,(ll+1)**2
             call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-            rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm*trho(ixbox,iybox,izbox)*Hvol
+            rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm*trho(ixbox,iybox,izbox)*hvol
           end do
           end do
         end do
@@ -318,7 +321,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,trho,wk2,   &
             zz=gridcoo(izbox,3)-center_trho(3,icorr_polenum(ii))
             rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
             call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-            rholm2box=rholm2box+rr**ll*ylm*trho(ixbox,iybox,izbox)*Hvol
+            rholm2box=rholm2box+rr**ll*ylm*trho(ixbox,iybox,izbox)*hvol
           end do
           rholm2(lm,icorr_polenum(ii))=rholm2box
         end do
