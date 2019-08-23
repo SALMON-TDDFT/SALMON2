@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcELF(info,srho,ttmp)
+subroutine calcELF(ng,info,srho,ttmp)
 use structures
 use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
@@ -24,6 +24,7 @@ use gradient_sub
 use allocate_mat_sub
 use new_world_sub
 implicit none
+type(s_rgrid),intent(in)            :: ng
 type(s_orbital_parallel),intent(in) :: info
 type(s_scalar),intent(in) :: srho
 integer :: iob,ix,iy,iz
@@ -134,9 +135,9 @@ if(iSCFRT==1)then
 
 
   call calc_gradient(rho_half(:,:,:),gradrho(:,:,:,:))
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2      &
           +gradrho(2,ix,iy,iz)**2      &
           +gradrho(3,ix,iy,iz)**2
@@ -230,9 +231,9 @@ else
 
 
 
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2      &
           +gradrho(2,ix,iy,iz)**2      &
           +gradrho(3,ix,iy,iz)**2
@@ -249,9 +250,9 @@ end if
 
 ! matbox_l stores ELF
 matbox_l=0.d0
-do iz=ng_sta(3),ng_end(3)
-do iy=ng_sta(2),ng_end(2)
-do ix=ng_sta(1),ng_end(1)
+do iz=ng%is(3),ng%ie(3)
+do iy=ng%is(2),ng%ie(2)
+do ix=ng%is(1),ng%ie(1)
   elfcuni(ix,iy,iz)=3.d0/5.d0*(6.d0*Pi**2)**(2.d0/3.d0)      &
             *rho_half(ix,iy,iz)**(5.d0/3.d0)
   matbox_l(ix,iy,iz)=1.d0/(1.d0+elfc(ix,iy,iz)**2/elfcuni(ix,iy,iz)**2)

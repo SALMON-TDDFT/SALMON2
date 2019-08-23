@@ -15,8 +15,8 @@
 !
 !=======================================================================
 
-SUBROUTINE OUT_data(mixing)
-use structures, only: s_mixing
+SUBROUTINE OUT_data(ng,mixing)
+use structures, only: s_rgrid, s_mixing
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, nproc_group_h
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
@@ -27,6 +27,7 @@ use read_pslfile_sub
 use allocate_psl_sub
 use allocate_mat_sub
 implicit none
+type(s_rgrid), intent(in)    :: ng
 type(s_mixing),intent(inout) :: mixing
 integer :: is,iob,jj,ik
 integer :: ix,iy,iz
@@ -246,12 +247,12 @@ else if(OC==3)then
 end if
 
 matbox2=0.d0
-matbox2(ng_sta(1):ng_end(1),   &
-        ng_sta(2):ng_end(2),   &
-        ng_sta(3):ng_end(3))   &
-   = rho(ng_sta(1):ng_end(1),   &
-        ng_sta(2):ng_end(2),   &
-        ng_sta(3):ng_end(3))
+matbox2(ng%is(1):ng%ie(1),   &
+        ng%is(2):ng%ie(2),   &
+        ng%is(3):ng%ie(3))   &
+   = rho(ng%is(1):ng%ie(1),   &
+        ng%is(2):ng%ie(2),   &
+        ng%is(3):ng%ie(3))
 
 call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -261,12 +262,12 @@ end if
 
 do ii=1,mixing%num_rho_stock+1
   matbox2=0.d0
-  matbox2(ng_sta(1):ng_end(1),   &
-          ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3))   &
-     = mixing%srho_in(ii)%f(ng_sta(1):ng_end(1),   &
-          ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3))
+  matbox2(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))   &
+     = mixing%srho_in(ii)%f(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -277,12 +278,12 @@ end do
 
 do ii=1,mixing%num_rho_stock
   matbox2=0.d0
-  matbox2(ng_sta(1):ng_end(1),   &
-          ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3))   &
-     = mixing%srho_out(ii)%f(ng_sta(1):ng_end(1),   &
-          ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3))
+  matbox2(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))   &
+     = mixing%srho_out(ii)%f(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
   if(comm_is_root(nproc_id_global))then
@@ -293,12 +294,12 @@ end do
 if(ilsda == 1)then
   do is=1,2
     matbox2=0.d0
-    matbox2(ng_sta(1):ng_end(1),   &
-            ng_sta(2):ng_end(2),   &
-            ng_sta(3):ng_end(3))   &
-      = rho_s(ng_sta(1):ng_end(1),   &
-              ng_sta(2):ng_end(2),   &
-              ng_sta(3):ng_end(3),is)
+    matbox2(ng%is(1):ng%ie(1),   &
+            ng%is(2):ng%ie(2),   &
+            ng%is(3):ng%ie(3))   &
+      = rho_s(ng%is(1):ng%ie(1),   &
+              ng%is(2):ng%ie(2),   &
+              ng%is(3):ng%ie(3),is)
 
     call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -308,12 +309,12 @@ if(ilsda == 1)then
 
     do ii=1,mixing%num_rho_stock+1
       matbox2=0.d0
-      matbox2(ng_sta(1):ng_end(1),   &
-              ng_sta(2):ng_end(2),   &
-              ng_sta(3):ng_end(3))   &
-        = mixing%srho_s_in(ii,is)%f(ng_sta(1):ng_end(1),   &
-                ng_sta(2):ng_end(2),   &
-                ng_sta(3):ng_end(3))
+      matbox2(ng%is(1):ng%ie(1),   &
+              ng%is(2):ng%ie(2),   &
+              ng%is(3):ng%ie(3))   &
+        = mixing%srho_s_in(ii,is)%f(ng%is(1):ng%ie(1),   &
+                ng%is(2):ng%ie(2),   &
+                ng%is(3):ng%ie(3))
 
       call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -324,12 +325,12 @@ if(ilsda == 1)then
 
     do ii=1,mixing%num_rho_stock
       matbox2=0.d0
-      matbox2(ng_sta(1):ng_end(1),   &
-              ng_sta(2):ng_end(2),   &
-              ng_sta(3):ng_end(3))   &
-        = mixing%srho_s_out(ii,is)%f(ng_sta(1):ng_end(1),   &
-                ng_sta(2):ng_end(2),   &
-                ng_sta(3):ng_end(3))
+      matbox2(ng%is(1):ng%ie(1),   &
+              ng%is(2):ng%ie(2),   &
+              ng%is(3):ng%ie(3))   &
+        = mixing%srho_s_out(ii,is)%f(ng%is(1):ng%ie(1),   &
+                ng%is(2):ng%ie(2),   &
+                ng%is(3):ng%ie(3))
 
       call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -347,12 +348,12 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 matbox2=0.d0
-matbox2(ng_sta(1):ng_end(1),   &
-        ng_sta(2):ng_end(2),   &
-        ng_sta(3):ng_end(3))   &
-   = Vh(ng_sta(1):ng_end(1),   &
-        ng_sta(2):ng_end(2),   &
-        ng_sta(3):ng_end(3))
+matbox2(ng%is(1):ng%ie(1),   &
+        ng%is(2):ng%ie(2),   &
+        ng%is(3):ng%ie(3))   &
+   = Vh(ng%is(1):ng%ie(1),   &
+        ng%is(2):ng%ie(2),   &
+        ng%is(3):ng%ie(3))
 
 call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -362,12 +363,12 @@ end if
 
 if(ilsda == 0)then
   matbox2=0.d0
-  matbox2(ng_sta(1):ng_end(1),   &
-          ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3))   &
-     = Vxc(ng_sta(1):ng_end(1),   &
-          ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3))
+  matbox2(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))   &
+     = Vxc(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -377,12 +378,12 @@ if(ilsda == 0)then
 else if(ilsda == 1) then
   do is=1,2
     matbox2=0.d0
-    matbox2(ng_sta(1):ng_end(1),   &
-            ng_sta(2):ng_end(2),   &
-            ng_sta(3):ng_end(3))   &
-     = Vxc_s(ng_sta(1):ng_end(1),   &
-            ng_sta(2):ng_end(2),   &
-            ng_sta(3):ng_end(3),is)
+    matbox2(ng%is(1):ng%ie(1),   &
+            ng%is(2):ng%ie(2),   &
+            ng%is(3):ng%ie(3))   &
+     = Vxc_s(ng%is(1):ng%ie(1),   &
+            ng%is(2):ng%ie(2),   &
+            ng%is(3):ng%ie(3),is)
 
     call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -394,12 +395,12 @@ end if
 
 
 matbox2=0.d0
-matbox2(ng_sta(1):ng_end(1),   &
-        ng_sta(2):ng_end(2),   &
-        ng_sta(3):ng_end(3))   &
-   = Vpsl(ng_sta(1):ng_end(1),   &
-          ng_sta(2):ng_end(2),   &
-          ng_sta(3):ng_end(3))
+matbox2(ng%is(1):ng%ie(1),   &
+        ng%is(2):ng%ie(2),   &
+        ng%is(3):ng%ie(3))   &
+   = Vpsl(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
 
@@ -757,7 +758,7 @@ call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
 call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iSCFRT==2)then
-  call allocate_mat
+  call allocate_mat(ng)
   call set_icoo1d
 end if
 
@@ -779,9 +780,9 @@ if(iSCFRT==1)then
 &                   1:iobnum,k_sta:k_end) )
     end if
     if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
-      allocate( psi_mesh(ng_sta(1):ng_end(1),  &
-                       ng_sta(2):ng_end(2),   &
-                       ng_sta(3):ng_end(3), &
+      allocate( psi_mesh(ng%is(1):ng%ie(1),  &
+                       ng%is(2):ng%ie(2),   &
+                       ng%is(3):ng%ie(3), &
                        1:itotMST,num_kpoints_rd) )
     end if
   case(3)
@@ -791,9 +792,9 @@ if(iSCFRT==1)then
       &                    1:iobnum,k_sta:k_end) )
     end if
     if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
-      allocate( zpsi_mesh(ng_sta(1):ng_end(1),  &
-                          ng_sta(2):ng_end(2),   &
-                          ng_sta(3):ng_end(3), &
+      allocate( zpsi_mesh(ng%is(1):ng%ie(1),  &
+                          ng%is(2):ng%ie(2),   &
+                          ng%is(3):ng%ie(3), &
                           1:itotMST,num_kpoints_rd) )
     end if
   end select
@@ -1124,9 +1125,9 @@ if(IC<=2)then
     end if
     if(iSCFRT==1)then
       call comm_bcast(matbox_read,nproc_group_global)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
         mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
       end do
       end do
@@ -1138,9 +1139,9 @@ if(IC<=2)then
     end if
     if(iSCFRT==1)then
       call comm_bcast(matbox_read,nproc_group_global)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
         mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
       end do
       end do
@@ -1165,9 +1166,9 @@ if(IC<=2)then
           read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
           mixing%srho_s_in(mixing%num_rho_stock,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1177,9 +1178,9 @@ if(IC<=2)then
           read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
           mixing%srho_s_out(mixing%num_rho_stock,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1194,9 +1195,9 @@ if(IC<=2)then
       end if
       if(iSCFRT==1)then
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
           mixing%srho_in(ii)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1210,9 +1211,9 @@ if(IC<=2)then
       end if
       if(iSCFRT==1)then
         call comm_bcast(matbox_read,nproc_group_global)
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
           mixing%srho_out(ii)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
         end do
         end do
@@ -1240,9 +1241,9 @@ if(IC<=2)then
           end if
           if(iSCFRT==1)then
             call comm_bcast(matbox_read,nproc_group_global)
-            do iz=ng_sta(3),ng_end(3)
-            do iy=ng_sta(2),ng_end(2)
-            do ix=ng_sta(1),ng_end(1)
+            do iz=ng%is(3),ng%ie(3)
+            do iy=ng%is(2),ng%ie(2)
+            do ix=ng%is(1),ng%ie(1)
               mixing%srho_s_in(ii,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
             end do
             end do
@@ -1256,9 +1257,9 @@ if(IC<=2)then
           end if
           if(iSCFRT==1)then
             call comm_bcast(matbox_read,nproc_group_global)
-            do iz=ng_sta(3),ng_end(3)
-            do iy=ng_sta(2),ng_end(2)
-            do ix=ng_sta(1),ng_end(1)
+            do iz=ng%is(3),ng%ie(3)
+            do iy=ng%is(2),ng%ie(2)
+            do ix=ng%is(1),ng%ie(1)
               mixing%srho_s_out(ii,is)%f(ix,iy,iz)=matbox_read(ix,iy,iz)
             end do
             end do
@@ -1383,7 +1384,7 @@ if(iSCFRT==2)then
   end do
 end if
 
-call wrapper_allgatherv_vlocal(info)
+call wrapper_allgatherv_vlocal(ng,info)
 
 if(iscfrt==2.and.propagator=='etrs')then
   if(ilsda==0)then

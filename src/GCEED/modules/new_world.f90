@@ -558,9 +558,11 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
 end subroutine make_new_world
 
 !=====================================================================
-subroutine make_corr_pole
+subroutine make_corr_pole(ng)
+use structures, only: s_rgrid
 implicit none
 
+type(s_rgrid), intent(in) :: ng
 integer :: a,i
 integer :: ix,iy,iz
 integer :: ibox
@@ -585,11 +587,11 @@ if(layout_multipole==2)then
 
   iamax=amax
   allocate(icount_pole(1:amax))
-  allocate(nearatomnum(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)))
+  allocate(nearatomnum(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
   icount_pole=0
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     rmin=1.d6
     do a=1,amax
       r=sqrt( (gridcoo(ix,1)-Rion2(1,a))**2      &
@@ -624,9 +626,9 @@ if(layout_multipole==2)then
 
   icount_pole(:)=0
 
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     ibox=inv_icorr_polenum(nearatomnum(ix,iy,iz))
     icount_pole(ibox)=icount_pole(ibox)+1
     icorr_xyz_pole(1,icount_pole(ibox),ibox)=ix
@@ -665,9 +667,9 @@ else if(layout_multipole==3)then
 
   iflag_pole=0
 
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     do i=1,num_pole
       if(ista_Mxin_pole(3,i-1)<=iz.and.iend_Mxin_pole(3,i-1)>=iz.and.   &
          ista_Mxin_pole(2,i-1)<=iy.and.iend_Mxin_pole(2,i-1)>=iy.and.   &
@@ -700,9 +702,9 @@ else if(layout_multipole==3)then
 
   icount_pole=0
 
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     do i=1,num_pole_myrank
       if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
          ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
@@ -719,9 +721,9 @@ else if(layout_multipole==3)then
  
   icount_pole=0
 
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     do i=1,num_pole_myrank
       if(ista_Mxin_pole(3,icorr_polenum(i)-1)<=iz.and.iend_Mxin_pole(3,icorr_polenum(i)-1)>=iz.and.   &
          ista_Mxin_pole(2,icorr_polenum(i)-1)<=iy.and.iend_Mxin_pole(2,icorr_polenum(i)-1)>=iy.and.   &
@@ -744,9 +746,11 @@ end if
 end subroutine make_corr_pole
 
 !=====================================================================
-subroutine make_icoobox_bound
+subroutine make_icoobox_bound(ng)
 use salmon_parallel
+use structures, only: s_rgrid
 implicit none
+type(s_rgrid), intent(in) :: ng
 integer :: ix,iy,iz
 integer :: ibox
 integer :: icount
@@ -758,8 +762,8 @@ ibox_icoobox_bound=ibox
 allocate( icoobox_bound(3,ibox,3) )
 
 icount=0
-do iz=ng_sta(3),ng_end(3)
-do iy=ng_sta(2),ng_end(2)
+do iz=ng%is(3),ng%ie(3)
+do iy=ng%is(2),ng%ie(2)
 do ix=lg_sta(1)-Ndh,lg_sta(1)-1
   icount=icount+1
   icoobox_bound(1,icount,1)=ix
@@ -768,8 +772,8 @@ do ix=lg_sta(1)-Ndh,lg_sta(1)-1
 end do
 end do
 end do
-do iz=ng_sta(3),ng_end(3)
-do iy=ng_sta(2),ng_end(2)
+do iz=ng%is(3),ng%ie(3)
+do iy=ng%is(2),ng%ie(2)
 do ix=lg_end(1)+1,lg_end(1)+Ndh
   icount=icount+1
   icoobox_bound(1,icount,1)=ix
@@ -779,9 +783,9 @@ end do
 end do
 end do
 icount=0
-do iz=ng_sta(3),ng_end(3)
+do iz=ng%is(3),ng%ie(3)
 do iy=lg_sta(2)-Ndh,lg_sta(2)-1
-do ix=ng_sta(1),ng_end(1)
+do ix=ng%is(1),ng%ie(1)
   icount=icount+1
   icoobox_bound(1,icount,2)=ix
   icoobox_bound(2,icount,2)=iy
@@ -789,9 +793,9 @@ do ix=ng_sta(1),ng_end(1)
 end do
 end do
 end do
-do iz=ng_sta(3),ng_end(3)
+do iz=ng%is(3),ng%ie(3)
 do iy=lg_end(2)+1,lg_end(2)+Ndh
-do ix=ng_sta(1),ng_end(1)
+do ix=ng%is(1),ng%ie(1)
   icount=icount+1
   icoobox_bound(1,icount,2)=ix
   icoobox_bound(2,icount,2)=iy
@@ -801,8 +805,8 @@ end do
 end do
 icount=0
 do iz=lg_sta(3)-Ndh,lg_sta(3)-1
-do iy=ng_sta(2),ng_end(2)
-do ix=ng_sta(1),ng_end(1)
+do iy=ng%is(2),ng%ie(2)
+do ix=ng%is(1),ng%ie(1)
   icount=icount+1
   icoobox_bound(1,icount,3)=ix
   icoobox_bound(2,icount,3)=iy
@@ -811,8 +815,8 @@ end do
 end do
 end do
 do iz=lg_end(3)+1,lg_end(3)+Ndh
-do iy=ng_sta(2),ng_end(2)
-do ix=ng_sta(1),ng_end(1)
+do iy=ng%is(2),ng%ie(2)
+do ix=ng%is(1),ng%ie(1)
   icount=icount+1
   icoobox_bound(1,icount,3)=ix
   icoobox_bound(2,icount,3)=iy
@@ -826,12 +830,13 @@ end subroutine make_icoobox_bound
 
 !=====================================================================
 !======================================================================
-subroutine allgatherv_vlocal(info,nspin,Vh,Vpsl,Vxc,Vlocal)
-use structures, only: s_orbital_parallel, s_scalar
+subroutine allgatherv_vlocal(ng,info,nspin,Vh,Vpsl,Vxc,Vlocal)
+use structures, only: s_rgrid, s_orbital_parallel, s_scalar
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_allgatherv
 use timer
 implicit none
+type(s_rgrid),           intent(in) :: ng
 type(s_orbital_parallel),intent(in) :: info
 integer       ,intent(in) :: nspin
 type(s_scalar),intent(in) :: Vh,Vpsl,Vxc(nspin)
@@ -873,11 +878,11 @@ end do
 
 do is=1,nspin
 !$OMP parallel do private(ibox3,ix,iy,iz)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
-                  +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    ibox3=ix-ng%is(1)+(iy-ng%is(2))*inum_Mxin_s(1,nproc_id_global)   &
+                  +(iz-ng%is(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
     matbox11(ibox3) = Vpsl%f(ix,iy,iz) + Vh%f(ix,iy,iz) + Vxc(is)%f(ix,iy,iz)
   end do
   end do
@@ -946,9 +951,10 @@ CONTAINS
   end subroutine copyVlocal
 end subroutine allgatherv_vlocal
 
-subroutine wrapper_allgatherv_vlocal(info) ! --> remove (future works)
+subroutine wrapper_allgatherv_vlocal(ng,info) ! --> remove (future works)
   use structures
   implicit none
+  type(s_rgrid),           intent(in) :: ng
   type(s_orbital_parallel),intent(in) :: info
   type(s_scalar) :: sVh,sVpsl
   type(s_scalar),allocatable :: sVlocal(:),sVxc(:)
@@ -973,7 +979,7 @@ subroutine wrapper_allgatherv_vlocal(info) ! --> remove (future works)
     sVxc(1)%f = Vxc
   end if
 
-  call allgatherv_vlocal(info,nspin,sVh,sVpsl,sVxc,sVlocal)
+  call allgatherv_vlocal(ng,info,nspin,sVh,sVpsl,sVxc,sVlocal)
 
   do jspin=1,nspin
     Vlocal(:,:,:,jspin) = sVlocal(jspin)%f
@@ -984,87 +990,6 @@ subroutine wrapper_allgatherv_vlocal(info) ! --> remove (future works)
   call deallocate_scalar(sVpsl)
   return
 end subroutine wrapper_allgatherv_vlocal
-
-!======================================================================
-subroutine mpibcast_mesh_s_kxc(Vbox)
-use salmon_parallel, only: nproc_id_global, nproc_group_h, nproc_id_h
-use salmon_communication, only: comm_allgatherv
-
-implicit none
-integer :: i
-integer :: i1,i2,i3
-integer :: ix,iy,iz
-integer :: ibox,ibox2,ibox3
-real(8),allocatable :: matbox1(:),matbox2(:)
-real(8) :: Vbox(mg_sta(1):mg_end(1),  &
-                mg_sta(2):mg_end(2),  &
-                mg_sta(3):mg_end(3))
-integer :: iscnt
-integer,allocatable :: ircnt(:)
-integer,allocatable :: idisp(:)
-
-if(nproc_ob/=1.or.nproc_d_o_mul/=1)then
-
-  allocate(ircnt(0:nproc_d_g_mul_dm-1))
-  allocate(idisp(0:nproc_d_g_mul_dm-1))
-
-  iscnt=inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)*inum_Mxin_s(3,nproc_id_global)
-  do i=0,nproc_d_g_mul_dm-1
-    ibox=mod(nproc_id_global,nproc_d_o_mul)+i*nproc_d_o_mul
-    ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
-  end do
-
-  idisp(0)=0
-  do i=1,nproc_d_g_mul_dm-1
-    idisp(i)=idisp(i-1)+ircnt(i-1)
-  end do
-
-  allocate (matbox1(0:(inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)*inum_Mxin_s(3,nproc_id_global))-1))
-  allocate (matbox2(0:(mg_num(1)*mg_num(2)*mg_num(3))-1))
-  
-!$OMP parallel do private(ibox3,ix,iy,iz)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
-    ibox3=ix-ng_sta(1)+(iy-ng_sta(2))*inum_Mxin_s(1,nproc_id_global)   &
-                  +(iz-ng_sta(3))*inum_Mxin_s(1,nproc_id_global)*inum_Mxin_s(2,nproc_id_global)
-    matbox1(ibox3) = Vbox(ix,iy,iz)
-  end do
-  end do
-  end do
-
-  call comm_allgatherv(matbox1,matbox2,ircnt,idisp,nproc_group_h)
-   
-  do i3=0,nproc_d_g_dm(3)-1
-  do i2=0,nproc_d_g_dm(2)-1
-  do i1=0,nproc_d_g_dm(1)-1
-    ibox=mod(nproc_id_global,nproc_d_o_mul)    &
-          +(i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2))*nproc_d_o_mul
-    ibox2=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-
-    if(nproc_id_h/=ibox2)then
-!$OMP parallel do private(ibox3,ix,iy,iz)
-      do iz=ista_Mxin_s(3,ibox),iend_Mxin_s(3,ibox)
-      do iy=ista_Mxin_s(2,ibox),iend_Mxin_s(2,ibox)
-      do ix=ista_Mxin_s(1,ibox),iend_Mxin_s(1,ibox)
-        ibox3=idisp(ibox2)+ix-ista_Mxin_s(1,ibox)+(iy-ista_Mxin_s(2,ibox))*inum_Mxin_s(1,ibox)   &
-                      +(iz-ista_Mxin_s(3,ibox))*inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)
-        Vbox(ix,iy,iz) = matbox2(ibox3) 
-      end do
-      end do
-      end do
-    end if
-  end do
-  end do
-  end do
-
-  deallocate (ircnt,idisp)
-  deallocate (matbox1)
-  deallocate (matbox2)
-
-end if
-
-end subroutine mpibcast_mesh_s_kxc
 
 END MODULE new_world_sub
 

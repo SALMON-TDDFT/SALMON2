@@ -13,13 +13,15 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE init_ps(alat,brl,matrix_A,icomm_r)
+SUBROUTINE init_ps(ng,alat,brl,matrix_A,icomm_r)
+use structures,      only: s_rgrid
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root
 use scf_data
 use allocate_psl_sub
 use prep_pp_sub, only: init_uvpsi_summation
 implicit none
+type(s_rgrid),intent(in) :: ng
 real(8),intent(in) :: alat(3,3),brl(3,3),matrix_A(3,3)
 integer,intent(in) :: icomm_r
 
@@ -44,7 +46,7 @@ case(3)
   case(2)
     call calcVpsl_periodic(matrix_A,brl)
   case(4)
-    call calcVpsl_periodic_FFTE
+    call calcVpsl_periodic_FFTE(ng)
   end select
   call calcJxyz_all_periodic(alat,matrix_A)
   call calcuV

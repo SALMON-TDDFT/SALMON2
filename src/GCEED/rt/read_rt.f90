@@ -13,15 +13,16 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE OUT_data_rt
+SUBROUTINE OUT_data_rt(ng)
+use structures,      only: s_rgrid
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
 use check_corrkob_sub
 use scf_data
-use writebox_rt_sub
 use allocate_mat_sub
 implicit none
+type(s_rgrid), intent(in) :: ng
 integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer :: ibox
@@ -131,9 +132,9 @@ if(num_datafiles_OUT>=2.and.num_datafiles_OUT<=nproc_size_global)then
 end if
 
 matbox_l=0.d0
-do i3=ng_sta(3),ng_end(3)
-do i2=ng_sta(2),ng_end(2)
-do i1=ng_sta(1),ng_end(1)
+do i3=ng%is(3),ng%ie(3)
+do i2=ng%is(2),ng%ie(2)
+do i1=ng%is(1),ng%ie(1)
    matbox_l(i1,i2,i3)=rho(i1,i2,i3)
 end do
 end do
@@ -148,9 +149,9 @@ if(ilsda == 1)then
   do is=1,2
 
     matbox_l=0.d0
-    do i3=ng_sta(3),ng_end(3)
-    do i2=ng_sta(2),ng_end(2)
-    do i1=ng_sta(1),ng_end(1)
+    do i3=ng%is(3),ng%ie(3)
+    do i2=ng%is(2),ng%ie(2)
+    do i1=ng%is(1),ng%ie(1)
       matbox_l(i1,i2,i3)=rho_s(i1,i2,i3,is)
     end do
     end do
@@ -165,9 +166,9 @@ end if
 
 
 matbox_l=0.d0
-do i3=ng_sta(3),ng_end(3)
-do i2=ng_sta(2),ng_end(2)
-do i1=ng_sta(1),ng_end(1)
+do i3=ng%is(3),ng%ie(3)
+do i2=ng%is(2),ng%ie(2)
+do i1=ng%is(1),ng%ie(1)
    matbox_l(i1,i2,i3)=Vh(i1,i2,i3)
 end do
 end do
@@ -179,9 +180,9 @@ end if
 
 if(ilsda == 0)then
   matbox_l=0.d0
-  do i3=ng_sta(3),ng_end(3)
-  do i2=ng_sta(2),ng_end(2)
-  do i1=ng_sta(1),ng_end(1)
+  do i3=ng%is(3),ng%ie(3)
+  do i2=ng%is(2),ng%ie(2)
+  do i1=ng%is(1),ng%ie(1)
     matbox_l(i1,i2,i3)=Vxc(i1,i2,i3)
   end do
   end do
@@ -194,9 +195,9 @@ else if(ilsda == 1)then
   do is=1,2
 
     matbox_l=0.d0
-    do i3=ng_sta(3),ng_end(3)
-    do i2=ng_sta(2),ng_end(2)
-    do i1=ng_sta(1),ng_end(1)
+    do i3=ng%is(3),ng%ie(3)
+    do i2=ng%is(2),ng%ie(2)
+    do i1=ng%is(1),ng%ie(1)
       matbox_l(i1,i2,i3)=Vxc_s(i1,i2,i3,is)
     end do
     end do
@@ -211,9 +212,9 @@ end if
 
 
 matbox_l=0.d0
-do i3=ng_sta(3),ng_end(3)
-do i2=ng_sta(2),ng_end(2)
-do i1=ng_sta(1),ng_end(1)
+do i3=ng%is(3),ng%ie(3)
+do i2=ng%is(2),ng%ie(2)
+do i1=ng%is(1),ng%ie(1)
    matbox_l(i1,i2,i3)=Vh_stock1(i1,i2,i3)
 end do
 end do
@@ -223,9 +224,9 @@ if(comm_is_root(nproc_id_global))then
   write(99) ((( matbox_l2(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
 end if
 matbox_l=0.d0
-do i3=ng_sta(3),ng_end(3)
-do i2=ng_sta(2),ng_end(2)
-do i1=ng_sta(1),ng_end(1)
+do i3=ng%is(3),ng%ie(3)
+do i2=ng%is(2),ng%ie(2)
+do i1=ng%is(1),ng%ie(1)
    matbox_l(i1,i2,i3)=Vh_stock2(i1,i2,i3)
 end do
 end do
@@ -253,8 +254,8 @@ end if
 END SUBROUTINE OUT_data_rt
 
 !---------------------------------------------------------------------------
-SUBROUTINE IN_data_rt(info,Ntime)
-use structures, only: s_orbital_parallel
+SUBROUTINE IN_data_rt(ng,info,Ntime)
+use structures, only: s_rgrid, s_orbital_parallel
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
@@ -264,6 +265,7 @@ use new_world_sub
 use readbox_rt_sub
 use allocate_mat_sub
 implicit none
+type(s_rgrid),           intent(in) :: ng
 type(s_orbital_parallel),intent(in) :: info
 integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
@@ -473,7 +475,7 @@ end do
 end do
 
 itt=Miter_rt
-call wrapper_allgatherv_vlocal(info)
+call wrapper_allgatherv_vlocal(ng,info)
 
 if(comm_is_root(nproc_id_global))then
   read(98) (vecDs(jj),jj=1,3)

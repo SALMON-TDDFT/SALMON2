@@ -13,13 +13,15 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine prep_poisson_fft
+subroutine prep_poisson_fft(ng)
+  use structures,      only: s_rgrid
   use salmon_parallel, only: nproc_id_icommy
   use salmon_parallel, only: nproc_id_icommz
   use scf_data
   use new_world_sub
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: ng
   integer :: ng_sta_2(3),ng_end_2(3),ng_num_2(3)
   integer :: lg_sta_2(3),lg_end_2(3),lg_num_2(3)
   real(8) :: Gx,Gy,Gz
@@ -38,9 +40,9 @@ subroutine prep_poisson_fft
   lg_end_2(1:3)=lg_end(1:3)
   lg_num_2(1:3)=lg_num(1:3)
   
-  ng_sta_2(1:3)=ng_sta(1:3)
-  ng_end_2(1:3)=ng_end(1:3)
-  ng_num_2(1:3)=ng_num(1:3)
+  ng_sta_2(1:3)=ng%is(1:3)
+  ng_end_2(1:3)=ng%ie(1:3)
+  ng_num_2(1:3)=ng%num(1:3)
 
   bLx=2.d0*Pi/(Hgs(1)*dble(lg_num_2(1)))
   bLy=2.d0*Pi/(Hgs(2)*dble(lg_num_2(2)))

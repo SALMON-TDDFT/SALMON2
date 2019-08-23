@@ -245,7 +245,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_end(LOG_CALC_EXC_COR)
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
-  call allgatherv_vlocal(info,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
   call timer_end(LOG_CALC_VLOCAL)
 
 ! result
@@ -366,7 +366,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calcELF(info,srho,itt)
+      call calcELF(ng,info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
   end if
