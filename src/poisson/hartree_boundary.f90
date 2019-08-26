@@ -22,7 +22,7 @@ contains
 !============================ Hartree potential (Solve Poisson equation)
 
 subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
-                            igc_is,igc_ie,gridcoo,iflag_ps)
+                            igc_is,igc_ie,gridcoo)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
   use salmon_parallel, only: nproc_size_global, nproc_group_h
@@ -49,7 +49,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
-  integer,intent(in) :: iflag_ps
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
@@ -145,15 +144,13 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
   case(2)
   
-  if(iflag_ps==1)then
-    num_center=natom
-    allocate (rholm((lmax_lmp+1)**2,natom))
-    allocate (rholm2((lmax_lmp+1)**2,natom))
-    allocate(itrho(natom))
-    allocate(center_trho(3,natom))
-    allocate(rion2(3,natom))
-    rion2(:,:)=rion(:,:)
-  end if
+  num_center=natom
+  allocate (rholm((lmax_lmp+1)**2,natom))
+  allocate (rholm2((lmax_lmp+1)**2,natom))
+  allocate(itrho(natom))
+  allocate(center_trho(3,natom))
+  allocate(rion2(3,natom))
+  rion2(:,:)=rion(:,:)
   
   !$OMP parallel do private(icen, lm, jj)
   do icen=1,num_center
