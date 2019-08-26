@@ -74,7 +74,7 @@ SUBROUTINE dealloc_init_ps(ppg,ppg_all,ppn)
   deallocate(ppg_all%lma_tbl, ppg_all%ia_tbl)
   deallocate(ppg_all%rinv_uvu,ppg_all%uv,ppg_all%duv)
 
-  deallocate(ppg%Vpsl_atom)
+  if(allocated(ppg%Vpsl_atom)) deallocate(ppg%Vpsl_atom)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc)
