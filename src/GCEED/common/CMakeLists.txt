@@ -13,7 +13,6 @@ set(SOURCES
     conv_p0.f90
     conv_p.f90
     exc_cor_ns.f90
-    hartree.f90
     init_wf.f90
     init_k_rd.f90
     laplacianh.f90
