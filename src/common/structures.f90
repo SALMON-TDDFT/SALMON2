@@ -231,7 +231,7 @@ module structures
      character(256) :: file_rt_data, file_rt_energy_data
   end type s_ofile
 
-  type s_poisson_cg
+  type s_poisson
     integer :: iterVh                              ! iteration number for poisson_cg
     integer :: npole_partial                       ! number of multipoles calculated in each node
     integer :: npole_total                         ! total number of multipoles
@@ -240,7 +240,7 @@ module structures
     integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
     integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
     real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
-  end type s_poisson_cg
+  end type s_poisson
 
 ! for DFT ground state calculations
 

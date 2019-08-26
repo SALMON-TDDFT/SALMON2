@@ -18,7 +18,7 @@
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng, &
 &   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
-&   poisson_cg,j_e,singlescale)
+&   poisson,j_e,singlescale)
   use structures
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -54,7 +54,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
   type(s_dmatrix),intent(inout) :: dmat
-  type(s_poisson_cg),intent(in) :: poisson_cg
+  type(s_poisson),intent(in) :: poisson
   type(s_vector) :: j_e ! microscopic electron number current density
   type(ls_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
@@ -229,7 +229,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
       sVh%f = Vh_stock1
     end if
   end if
-  call Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,sVh,fg)
+  call hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   if(iperiodic==0 .and. itt/=1)then
     if(mod(itt,2)==1)then
       Vh_stock2 = sVh%f
@@ -304,7 +304,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(ng,srho,rNe,poisson_cg)
+  call subdip(ng,srho,rNe,poisson)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)

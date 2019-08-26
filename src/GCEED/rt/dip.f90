@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subdip(ng,srho,rNe,poisson_cg)
-use structures, only: s_rgrid,s_scalar,s_poisson_cg
+subroutine subdip(ng,srho,rNe,poisson)
+use structures, only: s_rgrid,s_scalar,s_poisson
 use salmon_parallel, only: nproc_group_h, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
@@ -25,7 +25,7 @@ implicit none
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
 real(8),intent(out)       :: rNe
-type(s_poisson_cg),intent(in) :: poisson_cg
+type(s_poisson),intent(in) :: poisson
 integer :: i1,ix,iy,iz
 real(8) :: rbox_array(10), rbox_arrayq(3, 3)
 real(8) :: rbox_array2(10), rbox_arrayq2(3, 3)
@@ -78,7 +78,7 @@ call timer_begin(LOG_CALC_DP)
     select case(iperiodic)
     case(0)
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
-          itt,dble(itt)*dt*2.41888d-2, (Dp(i1,itt)*a_B,i1=1,3), rNe, Etot*2d0*Ry,poisson_cg%iterVh
+          itt,dble(itt)*dt*2.41888d-2, (Dp(i1,itt)*a_B,i1=1,3), rNe, Etot*2d0*Ry,poisson%iterVh
       tene(itt)=Etot
     case(3)
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &

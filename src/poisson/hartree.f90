@@ -15,13 +15,12 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,sVh,fg)
-  use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_poisson_cg,  &
+subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
-  use hartree_cg_sub
-  use hartree_periodic_sub
-  use hartree_ffte_sub
-  use scf_data
+  use poisson_cg_sub
+  use poisson_periodic_sub
+  use poisson_ffte_sub
   use new_world_sub
   use allocate_mat_sub
   implicit none
@@ -30,7 +29,7 @@ SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system),intent(in) :: system
-  type(s_poisson_cg),intent(inout) :: poisson_cg
+  type(s_poisson),intent(inout) :: poisson
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
   type(s_scalar) ,intent(in) :: srho
@@ -41,13 +40,13 @@ SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,
 
   select case(iperiodic)
   case(0)
-    call Hartree_cg(lg,mg,ng,info_field,system,poisson_cg,srho%f,sVh%f,srg_ng,stencil)
+    call poisson_cg(lg,mg,ng,info_field,system,poisson,srho%f,sVh%f,srg_ng,stencil)
   case(3)
     select case(iflag_hartree)
     case(2)
-      call Hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
+      call poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
     case(4)
-      call Hartree_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,npuw,npuy,npuz,   &
+      call poisson_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,npuw,npuy,npuz,   &
                         a_ffte,b_ffte,rhoe_g,coef_poisson)
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,n,nn) &
@@ -67,4 +66,4 @@ SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,
 
 return
 
-END SUBROUTINE Hartree_ns
+end subroutine hartree_ns
