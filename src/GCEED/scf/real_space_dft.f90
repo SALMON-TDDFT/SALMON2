@@ -581,18 +581,13 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
-    call scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,itotmst,mst, &
+    call scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,itotmst,mst, &
                        cg,ppg,V_local,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter)
-
-    call timer_begin(LOG_CALC_HARTREE)
-    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
-      call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
-    end if
-    call timer_end(LOG_CALC_HARTREE)
+                       iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter,    &
+                       poisson,fg,sVh)
 
     call timer_begin(LOG_CALC_EXC_COR)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
