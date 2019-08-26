@@ -77,7 +77,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
-type(s_sendrecv_grid) :: srg, srg_ng
+type(s_sendrecv_grid) :: srg, srg_ng, srg_ob_1
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson_cg) :: poisson_cg
@@ -187,6 +187,7 @@ if(iopt==1)then
   neig(3, 1) = kup_array(1)
   neig(3, 2) = kdw_array(1)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
+  call init_sendrecv_grid(srg_ob_1, mg, 1, info%icomm_r, neig)
 
   neig_ng(1, 1) = iup_array(2)
   neig_ng(1, 2) = idw_array(2)
@@ -914,7 +915,7 @@ end if
 if(yn_out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
-  call calcELF(ng,info,srho,0)
+  call calcELF(mg,ng,info,srho,0,srg_ob_1)
   call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
   deallocate(elf)
 end if

@@ -17,7 +17,11 @@ MODULE gradient_sub
 
 use scf_data
 use gradient2_sub
-use sendrecv_sub
+use structures, only: s_rgrid, s_sendrecv_grid
+use sendrecv_grid, only: update_overlap_complex8, update_overlap_real8
+use pack_unpack, only: copy_data
+
+
 implicit none 
 INTERFACE calc_gradient
 
@@ -30,36 +34,56 @@ CONTAINS
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE R_calc_gradient(wk,grad_wk)
+SUBROUTINE R_calc_gradient(mg, srg, is_array_wk, ie_array_wk, wk, grad_wk)
 !$ use omp_lib
 
 implicit none
-real(8) :: wk(iwksta(1):iwkend(1),iwksta(2):iwkend(2),iwksta(3):iwkend(3))
-real(8) :: wk2(iwk2sta(1):iwk2end(1),iwk2sta(2):iwk2end(2),iwk2sta(3):iwk2end(3))
-real(8) :: grad_wk(3,iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3))
+type(s_rgrid), intent(in) :: mg
+type(s_sendrecv_grid), intent(inout) :: srg
+integer, intent(in) :: is_array_wk(1:3)
+integer, intent(in) :: ie_array_wk(1:3)
+real(8), intent(in) :: wk( &
+  & is_array_wk(1):ie_array_wk(1), &
+  & is_array_wk(2):ie_array_wk(2), &
+  & is_array_wk(3):ie_array_wk(3))
+real(8), intent(out) :: grad_wk(3,  &
+  & is_array_wk(1):ie_array_wk(1), &
+  & is_array_wk(2):ie_array_wk(2), &
+  & is_array_wk(3):ie_array_wk(3))
+
+real(8) :: tmp( &
+  & mg%is_array(1):mg%ie_array(1), &
+  & mg%is_array(2):mg%ie_array(2), &
+  & mg%is_array(3):mg%ie_array(3))
+real(8) :: grad_tmp(3, &
+  & mg%is_array(1):mg%ie_array(1), &
+  & mg%is_array(2):mg%ie_array(2), &
+  & mg%is_array(3):mg%ie_array(3))
 
 integer :: ix,iy,iz
 
-if(iwk_size==1.or.iwk_size==11)then
-  wk2=0.d0
-!$OMP parallel do private(iz,iy,ix) 
-  do iz=iwksta(3),iwkend(3)
-  do iy=iwksta(2),iwkend(2)
-  do ix=iwksta(1),iwkend(1)
-    wk2(ix,iy,iz)=wk(ix,iy,iz)
-  end do
-  end do
-  end do
-
-  call sendrecv(wk2)
-  call calc_gradient2(wk2,grad_wk)
-
-else if(iwk_size==2.or.iwk_size==12)then
+call copy_data( &
+  & wk( &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)), &
+  & tmp( &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)))
   
-  call sendrecv(wk)
-  call calc_gradient2(wk,grad_wk)
+call update_overlap_real8(srg, mg, tmp)
+call calc_gradient2(tmp, grad_tmp)
 
-end if
+call copy_data( &
+  & grad_tmp(1:3, &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)), &
+  & grad_wk(1:3, &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)))
 
 return
 
@@ -67,36 +91,54 @@ END SUBROUTINE R_calc_gradient
 
 !=======================================================================
 
-SUBROUTINE C_calc_gradient(wk,grad_wk)
+SUBROUTINE C_calc_gradient(mg, srg, is_array_wk, ie_array_wk, wk, grad_wk)
 !$ use omp_lib
 
 implicit none
-complex(8) :: wk(iwksta(1):iwkend(1),iwksta(2):iwkend(2),iwksta(3):iwkend(3))
-complex(8) :: wk2(iwk2sta(1):iwk2end(1),iwk2sta(2):iwk2end(2),iwk2sta(3):iwk2end(3))
-complex(8) :: grad_wk(3,iwk3sta(1):iwk3end(1),iwk3sta(2):iwk3end(2),iwk3sta(3):iwk3end(3))
+type(s_rgrid), intent(in) :: mg
+type(s_sendrecv_grid), intent(inout) :: srg
+integer, intent(in) :: is_array_wk(1:3)
+integer, intent(in) :: ie_array_wk(1:3)
+complex(8), intent(in) :: wk( &
+  & is_array_wk(1):ie_array_wk(1), &
+  & is_array_wk(2):ie_array_wk(2), &
+  & is_array_wk(3):ie_array_wk(3))
+complex(8), intent(out) :: grad_wk(3,  &
+  & is_array_wk(1):ie_array_wk(1), &
+  & is_array_wk(2):ie_array_wk(2), &
+  & is_array_wk(3):ie_array_wk(3))
+complex(8) :: tmp( &
+  & mg%is_array(1):mg%ie_array(1), &
+  & mg%is_array(2):mg%ie_array(2), &
+  & mg%is_array(3):mg%ie_array(3))
+complex(8) :: grad_tmp(1:3, &
+  & mg%is_array(1):mg%ie_array(1), &
+  & mg%is_array(2):mg%ie_array(2), &
+  & mg%is_array(3):mg%ie_array(3))
 
-integer :: ix,iy,iz
-
-if(iwk_size==1.or.iwk_size==11)then
-  wk2=0.d0
-!$OMP parallel do private(iz,iy,ix) 
-  do iz=iwksta(3),iwkend(3)
-  do iy=iwksta(2),iwkend(2)
-  do ix=iwksta(1),iwkend(1)
-    wk2(ix,iy,iz)=wk(ix,iy,iz)
-  end do
-  end do
-  end do
-
-  call sendrecv(wk2)
-  call calc_gradient2(wk2,grad_wk)
-
-else if(iwk_size==2.or.iwk_size==12)then
   
-  call sendrecv(wk)
-  call calc_gradient2(wk,grad_wk)
+  call copy_data( &
+  & wk( &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)), &
+  & tmp( &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)))
+  
+call update_overlap_complex8(srg, mg, tmp)
+call calc_gradient2(tmp, grad_tmp)
 
-end if
+call copy_data( &
+  & grad_tmp(1:3, &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)), &
+  & grad_wk(1:3, &
+    & is_array_wk(1):ie_array_wk(1), &
+    & is_array_wk(2):ie_array_wk(2), &
+    & is_array_wk(3):ie_array_wk(3)))
 
 return
 

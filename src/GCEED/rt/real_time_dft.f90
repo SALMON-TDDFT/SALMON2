@@ -498,7 +498,7 @@ type(s_field_parallel) :: info_field
 type(s_stencil) :: stencil
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
-type(s_sendrecv_grid) :: srg,srg_ng
+type(s_sendrecv_grid) :: srg,srg_ob_1,srg_ng
 type(s_pp_nlcc) :: ppn
 type(s_reciprocal_grid) :: fg
 type(s_md) :: md
@@ -583,6 +583,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   neig(3, 1) = kup_array(1)
   neig(3, 2) = kdw_array(1)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
+  call init_sendrecv_grid(srg_ob_1, mg, 1, info%icomm_r, neig)
 
   neig_ng(1, 1) = iup_array(2)
   neig_ng(1, 2) = idw_array(2)
@@ -884,7 +885,7 @@ end do
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
-      call calcELF(ng,info,srho,itt)
+      call calcELF(mg,ng,info,srho,itt,srg_ob_1)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
     if(yn_out_estatic_rt=='y')then
@@ -956,11 +957,11 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,srg_ob_1,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson_cg,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,srg_ob_1,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson_cg,j_e,singlescale)
   end if
 end do TE

@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng, &
+SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,srg_ob_1, &
 &   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
 &   poisson_cg,j_e,singlescale)
   use structures
@@ -48,7 +48,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
-  type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
+  type(s_sendrecv_grid),intent(inout) :: srg,srg_ng,srg_ob_1
   type(s_pp_nlcc),intent(in)    :: ppn
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
@@ -367,7 +367,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calcELF(ng,info,srho,itt)
+      call calcELF(mg,ng,info,srho,itt,srg_ob_1)
       call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     end if
   end if
