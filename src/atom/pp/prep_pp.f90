@@ -943,6 +943,9 @@ contains
 end subroutine init_uvpsi_summation
 
 subroutine finalize_uvpsi_summation(ppg)
+#ifdef SALMON_ENABLE_MPI3
+  use mpi, only: MPI_COMM_NULL
+#endif
   use structures,    only: s_pp_grid
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
@@ -954,7 +957,9 @@ subroutine finalize_uvpsi_summation(ppg)
   if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
   if (allocated(ppg%icomm_atom)) then
     do ia=1,size(ppg%icomm_atom)
-      call MPI_Comm_free(ppg%icomm_atom(ia),ierr)
+      if (ppg%icomm_atom(ia) /= MPI_COMM_NULL) then
+        call MPI_Comm_free(ppg%icomm_atom(ia),ierr)
+      end if
     end do
     deallocate(ppg%icomm_atom)
   end if
