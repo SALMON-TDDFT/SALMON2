@@ -20,8 +20,9 @@ module hartree_cg_sub
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,hconv,itervh,  &
+subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,itervh,  &
                       igc_is,igc_ie,gridcoo,iflag_ps)
+  use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg,s_sendrecv_grid,s_stencil
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_is_root, comm_summation
@@ -46,7 +47,6 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                  mg%is(3):mg%ie(3))
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
-  real(8),intent(in) :: hconv
   integer,intent(out) :: itervh
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
@@ -186,7 +186,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   
     sum2=tottmp*system%hvol
   
-    if ( abs(sum2) < hconv*dble(lg%num(1)*lg%num(2)*lg%num(3)) ) exit
+    if ( abs(sum2) < threshold_cg*dble(lg%num(1)*lg%num(2)*lg%num(3)) ) exit
   
     ck=sum2/sum1 ; sum1=sum2
   

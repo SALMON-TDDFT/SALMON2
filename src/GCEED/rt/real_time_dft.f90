@@ -270,7 +270,6 @@ allocate( alphaq_R(3,3,0:Nenergy), &
 ntmg=1
 ! 'Hartree' parameter
 
-Hconv  = Hconv !/(2d0*Ry)**2d0/a_B**3   ! Convergence criterion
 iterVh = 0        ! Iteration counter
 
 
