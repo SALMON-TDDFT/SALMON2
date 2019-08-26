@@ -45,7 +45,6 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   call timer_begin(LOG_GSCG_INIT)
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
-  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ gscg"
 
   nspin = system%nspin
   is = mg%is
@@ -95,7 +94,7 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
-    call orthogonalization(mg,system,info,spsi,cg%gk)
+!    call orthogonalization(mg,system,info,spsi,cg%gk)
     call inner_product(mg,system,info,cg%gk,cg%gk,sum)
 
     if(iter==1)then
@@ -215,6 +214,8 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   complex(8) :: sum0
   complex(8),dimension(system%no,system%no,system%nspin) :: sum_obmat0,sum_obmat1
 
+  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ gscg"
+
   nspin = system%nspin
   no = system%no
   is = mg%is
@@ -329,7 +330,6 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   call timer_begin(LOG_GSCG_INIT)
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
-  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ gscg"
 
   nspin = system%nspin
   is = mg%is
@@ -385,7 +385,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
 
-    call orthogonalization(mg,system,info,spsi,cg%gk)
+!    call orthogonalization(mg,system,info,spsi,cg%gk)
     call inner_product(mg,system,info,cg%gk,cg%gk,sum)
 
     if(iter==1)then
@@ -514,6 +514,8 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   integer :: nspin,no,nk,ik,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,io1,io2,io1_all,io2_all
   complex(8) :: sum0
   complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: sum_obmat0,sum_obmat1
+
+  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ gscg"
 
   nspin = system%nspin
   no = system%no
