@@ -183,7 +183,7 @@ end if
 
 call read_pslfile(system)
 call allocate_psl
-call init_ps(ng,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
 call init_updown(info)
 call init_itype

@@ -47,10 +47,6 @@ real(8), allocatable :: exc_dummy3(:,:,:,:)
 complex(8),allocatable :: rhoe_G(:)
 complex(8),allocatable :: rhoe_G_tmp(:)
 
-! FFTE routine
-complex(8),allocatable :: A_FFTE(:,:,:), B_FFTE(:,:,:)
-real(8),allocatable :: A_FFTE_copy(:,:,:), A_FFTE_copy2(:,:,:)
-
 CONTAINS
 
 !=======================================================================
@@ -139,13 +135,6 @@ case(3)
   else
     allocate(rhoe_G(lg_num(1)*lg_num(2)*lg_num(3)))
     allocate(rhoe_G_tmp(lg_num(1)*lg_num(2)*lg_num(3)))
-  end if
-
-  if(iflag_hartree==4)then
-    allocate(A_FFTE(lg_num(1),lg_num(2)/NPUY,lg_num(3)/NPUZ))
-    allocate(B_FFTE(lg_num(1),lg_num(2)/NPUY,lg_num(3)/NPUZ))
-    allocate(A_FFTE_copy(lg_num(1),lg_num(2),lg_num(3)/NPUZ))
-    allocate(A_FFTE_copy2(lg_num(1),lg_num(2),lg_num(3)/NPUZ))
   end if
 end select
 
