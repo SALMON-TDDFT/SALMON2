@@ -114,7 +114,6 @@ module structures
   type s_field_parallel
     integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
     integer :: id(3), isize(3)
-    integer :: isize_ffte(3)
   end type s_field_parallel
 
   type s_orbital

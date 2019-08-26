@@ -511,10 +511,6 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
   NPUY=nproc_d_g_dm(2)*nproc_d_o(2)
   NPUZ=nproc_d_g_dm(3)*nproc_d_o(3)
 
-  info_field%isize_ffte(1)=NPUW
-  info_field%isize_ffte(2)=NPUY
-  info_field%isize_ffte(3)=NPUZ
-
   icolor=info_field%id(3)+info_field%id(1)*NPUZ
   ikey=info_field%id(2)
   nproc_group_icommy = comm_create_group(nproc_group_global, icolor, ikey)
