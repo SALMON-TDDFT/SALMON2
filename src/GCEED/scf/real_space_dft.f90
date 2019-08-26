@@ -153,7 +153,7 @@ if(iopt==1)then
     itmg=img
     call set_imesh_oddeven(itmg)
     call init_mesh(lg,mg)
-    call set_gridcoo
+    call set_gridcoo(lg)
     call init_mesh_s(ng)
     call check_mg(mg)
     call check_ng(ng)
