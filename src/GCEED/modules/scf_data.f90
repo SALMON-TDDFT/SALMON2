@@ -291,9 +291,6 @@ real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
 
-! use for hartree routine
-integer :: iterVh
-
 real(8),allocatable :: rhobox(:,:,:)
 real(8),allocatable :: rhobox_s(:,:,:,:)
 

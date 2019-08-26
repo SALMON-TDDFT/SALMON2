@@ -20,7 +20,7 @@ module hartree_cg_sub
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,itervh,  &
+subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,  &
                       igc_is,igc_ie,gridcoo,iflag_ps)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg,s_sendrecv_grid,s_stencil
@@ -38,7 +38,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system),intent(in) :: system
-  type(s_poisson_cg),intent(in) :: poisson_cg
+  type(s_poisson_cg),intent(inout) :: poisson_cg
   real(8) :: trho(mg%is(1):mg%ie(1),    &
                   mg%is(2):mg%ie(2),      &
                   mg%is(3):mg%ie(3))
@@ -47,7 +47,6 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                  mg%is(3):mg%ie(3))
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
-  integer,intent(out) :: itervh
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
@@ -201,8 +200,8 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
      
   end do iteration
   
-  iterVh=iter
-  if ( iterVh>maxiter .and. comm_is_root(nproc_id_global)) then
+  poisson_cg%iterVh=iter
+  if ( poisson_cg%iterVh>maxiter .and. comm_is_root(nproc_id_global)) then
      write(*,*) "Warning:Vh iteration is not converged"
      write(*,'("||tVh(i)-tVh(i-1)||**2/(# of grids) = ",e15.8)') &
                                 sum2/dble(lg%num(1)*lg%num(2)*lg%num(3))

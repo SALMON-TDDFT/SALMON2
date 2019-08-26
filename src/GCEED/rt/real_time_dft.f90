@@ -270,7 +270,7 @@ allocate( alphaq_R(3,3,0:Nenergy), &
 ntmg=1
 ! 'Hartree' parameter
 
-iterVh = 0        ! Iteration counter
+poisson_cg%iterVh = 0        ! Iteration counter
 
 
 if(comm_is_root(nproc_id_global))then

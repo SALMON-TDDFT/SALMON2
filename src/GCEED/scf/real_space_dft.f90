@@ -472,7 +472,8 @@ if(comm_is_root(nproc_id_global)) then
   write(*,*) '-----------------------------------------------'
   select case(iperiodic)
   case(0)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,iterVh
+    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,  &
+                                                                                 poisson_cg%iterVh
   case(3)
     write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
   end select
@@ -494,7 +495,7 @@ end if
 
 call timer_begin(LOG_INIT_GS_ITERATION)
 iflag=1
-iterVh=1000
+poisson_cg%iterVh=1000
 sum1=1.0d9
 
 iflag_diisjump=0
@@ -676,7 +677,8 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(iflag_diisjump == 1) then
         write(*,'("Diisjump occured. Steepest descent was used.")')
       end if
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,iterVh
+      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,   &
+                                                                                   poisson_cg%iterVh
     case(3)
       write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,energy%E_tot*2d0*Ry
     end select

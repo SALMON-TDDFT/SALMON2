@@ -30,7 +30,7 @@ SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system),intent(in) :: system
-  type(s_poisson_cg),intent(in) :: poisson_cg
+  type(s_poisson_cg),intent(inout) :: poisson_cg
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
   type(s_scalar) ,intent(in) :: srho
@@ -41,7 +41,7 @@ SUBROUTINE Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,
 
   select case(iperiodic)
   case(0)
-    call Hartree_cg(lg,mg,ng,info_field,system,poisson_cg,srho%f,sVh%f,srg_ng,stencil,itervh,   &
+    call Hartree_cg(lg,mg,ng,info_field,system,poisson_cg,srho%f,sVh%f,srg_ng,stencil,   &
                     igc_is,igc_ie,gridcoo,iflag_ps)
   case(3)
     select case(iflag_hartree)
