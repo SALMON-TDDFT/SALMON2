@@ -13,14 +13,16 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+! NOTE: this is a dummy for single node only application
 module salmon_communication
-  use mpi, only: MPI_COMM_NULL,MPI_PROC_NULL
-
   implicit none
 
-  integer, public, parameter :: COMM_GROUP_NULL = MPI_COMM_NULL
-  integer, public, parameter :: ROOT_PROCID     = 0
-  integer, public, parameter :: COMM_PROC_NULL  = MPI_PROC_NULL
+  integer, private, parameter :: DEAD_BEEF       = int(z'DEADBEEF')
+  integer, private, parameter :: COMM_WORLD_ID   = int(z'7FFFFFFF')
+
+  integer, public, parameter  :: COMM_GROUP_NULL = DEAD_BEEF
+  integer, public, parameter  :: ROOT_PROCID     = 0
+  integer, public, parameter  :: COMM_PROC_NULL  = DEAD_BEEF
 
   ! call once
   public :: comm_init
@@ -206,7 +208,7 @@ module salmon_communication
     module procedure comm_bcast_array5d_dcomplex
   end interface
 
-  interface comm_allgather
+  interface comm_allgatherv
     ! 1-D array
     module procedure comm_allgather_array1d_logical
   end interface
@@ -241,28 +243,24 @@ module salmon_communication
 
   private :: get_rank, error_check, abort_show_message
 
-#define MPI_ERROR_CHECK(x) x; call error_check(ierr)
 #define ABORT_MESSAGE(target,msg) if(target/=COMM_PROC_NULL) call abort_show_message(msg)
 #define UNUSED_VARIABLE(VAR)      if(.false.) call salmon_unusedvar(VAR)
 
 contains
   subroutine comm_init
     implicit none
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Init(ierr))
+    ! no operation
   end subroutine
 
   subroutine comm_finalize
     implicit none
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Finalize(ierr))
+    ! no operation
   end subroutine
 
   subroutine comm_get_globalinfo(ngid, npid, nprocs)
-    use mpi, only: MPI_COMM_WORLD
     implicit none
     integer, intent(out) :: ngid, npid, nprocs
-    ngid = MPI_COMM_WORLD
+    ngid = COMM_WORLD_ID
     call get_rank(ngid, npid, nprocs)
   end subroutine
 
@@ -276,29 +274,26 @@ contains
   function comm_create_group(ngid, nprocs, key) result(ngid_dst)
     implicit none
     integer, intent(in) :: ngid, nprocs, key
-    integer :: ngid_dst, ierr
-    MPI_ERROR_CHECK(call MPI_Comm_split(ngid, nprocs, key, ngid_dst, ierr))
+    integer :: ngid_dst
+    UNUSED_VARIABLE(key)
+    UNUSED_VARIABLE(nprocs)
+    ngid_dst = ngid
   end function
 
   function comm_create_group_byid(iparent, idlists) result(ichild)
     implicit none
     integer, intent(in) :: iparent    ! parent communicator
     integer, intent(in) :: idlists(:) ! include ranks in new communicator
-    integer :: ichild,ierr
-    integer :: igroup_parent,igroup_child
-    MPI_ERROR_CHECK(call MPI_Comm_group(iparent, igroup_parent, ierr))
-    MPI_ERROR_CHECK(call MPI_Group_incl(igroup_parent, size(idlists), idlists, igroup_child, ierr))
-    MPI_ERROR_CHECK(call MPI_Comm_create(iparent, igroup_child, ichild, ierr))
-    MPI_ERROR_CHECK(call MPI_Group_free(igroup_child, ierr))
+    integer :: ichild
+    UNUSED_VARIABLE(idlists)
+    ichild = iparent
   end function
 
   subroutine comm_free_group(igroup)
     implicit none
     integer, intent(in) :: igroup
-    integer :: ierr
-    if (igroup /= MPI_COMM_NULL) then
-      MPI_ERROR_CHECK(call MPI_Comm_free(igroup, ierr))
-    end if
+    UNUSED_VARIABLE(igroup)
+    ! no operation
   end subroutine
 
   function comm_is_root(npid)
@@ -309,902 +304,800 @@ contains
   end function
 
   subroutine comm_sync_all(ngid)
-    use mpi, only: MPI_COMM_WORLD
     implicit none
     integer, intent(in), optional :: ngid
-    integer :: ierr
-    if (present(ngid)) then
-      MPI_ERROR_CHECK(call MPI_Barrier(ngid, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Barrier(MPI_COMM_WORLD, ierr))
-    end if
+    UNUSED_VARIABLE(ngid)
+    ! no operation
   end subroutine
 
 
   subroutine comm_send_array5d_double(invalue, ndest, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
     implicit none
     real(8), intent(in) :: invalue(:,:,:,:,:)
     integer, intent(in) :: ndest, ntag, ngroup
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Send(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, ierr))
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_array5d_double")
   end subroutine
 
   subroutine comm_send_array5d_dcomplex(invalue, ndest, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_SIZE
     implicit none
     complex(8), intent(in) :: invalue(:,:,:,:,:)
     integer, intent(in)    :: ndest, ntag, ngroup
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Send(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, ierr))
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_array5d_dcomplex")
   end subroutine
 
   subroutine comm_recv_array5d_double(outvalue, nsrc, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
     implicit none
     real(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)  :: nsrc, ntag, ngroup
-    integer :: ierr,istatus(MPI_STATUS_SIZE)
-    MPI_ERROR_CHECK(call MPI_Recv(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, istatus, ierr))
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_array5d_double")
   end subroutine
 
   subroutine comm_recv_array5d_dcomplex(outvalue, nsrc, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_SIZE
     implicit none
     complex(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)     :: nsrc, ntag, ngroup
-    integer :: ierr,istatus(MPI_STATUS_SIZE)
-    MPI_ERROR_CHECK(call MPI_Recv(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, istatus, ierr))
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_array5d_dcomplex")
   end subroutine
 
 
   subroutine comm_exchange_array3d_double(invalue, ndest, outvalue, nsrc, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
     implicit none
     real(8), intent(in)  :: invalue(:,:,:)
     real(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)  :: nsrc, ndest, ntag, ngroup
-    integer :: ierr,istatus(MPI_STATUS_SIZE)
-    call MPI_Sendrecv(invalue,  size(invalue),  MPI_DOUBLE_PRECISION, ndest, ntag, &
-                      outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc,  ntag, &
-                      ngroup, istatus, ierr)
-    call error_check(ierr)
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(nsrc)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_exchange_array3d_double")
   end subroutine
 
   subroutine comm_exchange_array3d_dcomplex(invalue, ndest, outvalue, nsrc, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_SIZE
     implicit none
     complex(8), intent(in)  :: invalue(:,:,:)
     complex(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)     :: nsrc, ndest, ntag, ngroup
-    integer :: ierr,istatus(MPI_STATUS_SIZE)
-    call MPI_Sendrecv(invalue,  size(invalue),  MPI_DOUBLE_COMPLEX, ndest, ntag, &
-                      outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc,  ntag, &
-                      ngroup, istatus, ierr)
-    call error_check(ierr)
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(nsrc)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_exchange_array3d_dcomplex")
   end subroutine
 
   subroutine comm_exchange_array5d_double(invalue, ndest, outvalue, nsrc, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
     implicit none
     real(8), intent(in)  :: invalue(:,:,:,:,:)
     real(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)  :: nsrc, ndest, ntag, ngroup
-    integer :: ierr,istatus(MPI_STATUS_SIZE)
-    call MPI_Sendrecv(invalue,  size(invalue),  MPI_DOUBLE_PRECISION, ndest, ntag, &
-                      outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc,  ntag, &
-                      ngroup, istatus, ierr)
-    call error_check(ierr)
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(nsrc)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_exchange_array5d_double")
   end subroutine
 
   subroutine comm_exchange_array5d_dcomplex(invalue, ndest, outvalue, nsrc, ntag, ngroup)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_SIZE
     implicit none
     complex(8), intent(in)  :: invalue(:,:,:,:,:)
     complex(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)     :: nsrc, ndest, ntag, ngroup
-    integer :: ierr,istatus(MPI_STATUS_SIZE)
-    call MPI_Sendrecv(invalue,  size(invalue),  MPI_DOUBLE_COMPLEX, ndest, ntag, &
-                      outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc,  ntag, &
-                      ngroup, istatus, ierr)
-    call error_check(ierr)
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(nsrc)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_exchange_array5d_dcomplex")
   end subroutine
 
 
   function comm_isend_array3d_double(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_IGNORE
     implicit none
     real(8), intent(in) :: invalue(:,:,:)
     integer, intent(in) :: ndest, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Isend(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_isend_array3d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_isend_array3d_dcomplex(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_IGNORE
     implicit none
     complex(8), intent(in) :: invalue(:,:,:)
     integer, intent(in)    :: ndest, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Isend(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_isend_array3d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_isend_array5d_double(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_IGNORE
     implicit none
     real(8), intent(in) :: invalue(:,:,:,:,:)
     integer, intent(in) :: ndest, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Isend(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_isend_array5d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_isend_array5d_dcomplex(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_IGNORE
     implicit none
     complex(8), intent(in) :: invalue(:,:,:,:,:)
     integer, intent(in)    :: ndest, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Isend(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_isend_array5d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_irecv_array3d_double(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_IGNORE
     implicit none
     real(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)  :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Irecv(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_irecv_array3d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_irecv_array3d_dcomplex(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_IGNORE
     implicit none
     complex(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)     :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Irecv(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_irecv_array3d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_irecv_array5d_double(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_IGNORE
     implicit none
     real(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)  :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Irecv(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_irecv_array5d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_irecv_array5d_dcomplex(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_IGNORE
     implicit none
     complex(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)     :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    logical :: flag
-    MPI_ERROR_CHECK(call MPI_Irecv(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
-    MPI_ERROR_CHECK(call MPI_Test(req, flag, MPI_STATUS_IGNORE, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_irecv_array5d_dcomplex")
+    req = DEAD_BEEF
   end function
 
 
   subroutine comm_wait(req)
-    use mpi, only: MPI_STATUS_IGNORE
     implicit none
     integer, intent(in) :: req
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Wait(req, MPI_STATUS_IGNORE, ierr))
+    ABORT_MESSAGE(req,"comm_wait")
   end subroutine
 
   subroutine comm_wait_all(reqs)
-    use mpi, only: MPI_STATUSES_IGNORE
     implicit none
     integer, intent(in) :: reqs(:)
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Waitall(size(reqs), reqs, MPI_STATUSES_IGNORE, ierr))
+    UNUSED_VARIABLE(reqs)
+    ! do nothing
   end subroutine
 
   function comm_send_init_array3d_double(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(in) :: invalue(:,:,:)
     integer, intent(in) :: ndest, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array3d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_send_init_array3d_dcomplex(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(in) :: invalue(:,:,:)
     integer, intent(in)    :: ndest, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array3d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_send_init_array4d_double(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(in) :: invalue(:,:,:,:)
     integer, intent(in) :: ndest, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array4d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_send_init_array4d_dcomplex(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(in) :: invalue(:,:,:,:)
     integer, intent(in)    :: ndest, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array4d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_send_init_array5d_double(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(in) :: invalue(:,:,:,:,:)
     integer, intent(in) :: ndest, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array5d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_send_init_array5d_dcomplex(invalue, ndest, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(in) :: invalue(:,:,:,:,:)
     integer, intent(in)    :: ndest, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Send_init(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(invalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(ndest,"comm_send_init_array5d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_recv_init_array3d_double(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)  :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array3d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_recv_init_array3d_dcomplex(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)     :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array3d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_recv_init_array4d_double(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(out) :: outvalue(:,:,:,:)
     integer, intent(in)  :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array4d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_recv_init_array4d_dcomplex(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(out) :: outvalue(:,:,:,:)
     integer, intent(in)     :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array4d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   function comm_recv_init_array5d_double(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)  :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array5d_double")
+    req = DEAD_BEEF
   end function
 
   function comm_recv_init_array5d_dcomplex(outvalue, nsrc, ntag, ngroup) result(req)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)     :: nsrc, ntag, ngroup
-    integer :: ierr, req
-    MPI_ERROR_CHECK(call MPI_Recv_init(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, req, ierr))
+    integer :: req
+    UNUSED_VARIABLE(outvalue)
+    UNUSED_VARIABLE(ntag)
+    UNUSED_VARIABLE(ngroup)
+    ABORT_MESSAGE(nsrc,"comm_recv_init_array5d_dcomplex")
+    req = DEAD_BEEF
   end function
 
   subroutine comm_start_all(reqs)
     implicit none
     integer, intent(in) :: reqs(:)
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Startall(size(reqs), reqs, ierr))
+    UNUSED_VARIABLE(reqs)
+    ! do nothing
   end subroutine
 
   subroutine comm_free_reqs(reqs)
     implicit none
     integer, intent(in) :: reqs(:)
-    integer :: ierr
-    integer :: i
-    do i = lbound(reqs, 1), ubound(reqs, 1)
-      MPI_ERROR_CHECK(call MPI_REQUEST_FREE(reqs(i), ierr))
-    end do
+    UNUSED_VARIABLE(reqs)
+    ! do nothing
   end subroutine
 
   subroutine comm_summation_integer(invalue, outvalue, ngroup, dest)
-    use mpi, only: MPI_INTEGER, MPI_SUM
     implicit none
     integer, intent(in)  :: invalue
     integer, intent(out) :: outvalue
     integer, intent(in)  :: ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, 1, MPI_INTEGER, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_INTEGER, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_integer")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_double(invalue, outvalue, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
     implicit none
     real(8), intent(in)  :: invalue
     real(8), intent(out) :: outvalue
     integer, intent(in)  :: ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, 1, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_dcomplex(invalue, outvalue, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
     implicit none
     complex(8), intent(in)  :: invalue
     complex(8), intent(out) :: outvalue
     integer, intent(in)     :: ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_dcomplex")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array1d_integer(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_INTEGER, MPI_SUM
     implicit none
     integer, intent(in)  :: invalue(:)
     integer, intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array1d_integer")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array1d_double(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
     implicit none
     real(8), intent(in)  :: invalue(:)
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array1d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array1d_dcomplex(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
     implicit none
     complex(8), intent(in)  :: invalue(:)
     complex(8), intent(out) :: outvalue(:)
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array1d_dcomplex")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array2d_integer(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_INTEGER, MPI_SUM
     implicit none
     integer, intent(in)  :: invalue(:,:)
     integer, intent(out) :: outvalue(:,:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array2d_integer")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array2d_double(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
     implicit none
     real(8), intent(in)  :: invalue(:,:)
     real(8), intent(out) :: outvalue(:,:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array2d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array2d_dcomplex(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
     implicit none
     complex(8), intent(in)  :: invalue(:,:)
     complex(8), intent(out) :: outvalue(:,:)
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array2d_dcomplex")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array3d_integer(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_INTEGER, MPI_SUM
     implicit none
     integer, intent(in)  :: invalue(:,:,:)
     integer, intent(out) :: outvalue(:,:,:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_INTEGER, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array3d_integer")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array3d_double(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
     implicit none
     real(8), intent(in)  :: invalue(:,:,:)
     real(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array3d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array3d_dcomplex(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
     implicit none
     complex(8), intent(in)  :: invalue(:,:,:)
     complex(8), intent(out) :: outvalue(:,:,:)
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array3d_dcomplex")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array4d_double(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
     implicit none
     real(8), intent(in)  :: invalue(:,:,:,:)
     real(8), intent(out) :: outvalue(:,:,:,:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array4d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array4d_dcomplex(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
     implicit none
     complex(8), intent(in)  :: invalue(:,:,:,:)
     complex(8), intent(out) :: outvalue(:,:,:,:)
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array4d_dcomplex")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array5d_double(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
     implicit none
     real(8), intent(in)  :: invalue(:,:,:,:,:)
     real(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array5d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array5d_dcomplex(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
     implicit none
     complex(8), intent(in)  :: invalue(:,:,:,:,:)
     complex(8), intent(out) :: outvalue(:,:,:,:,:)
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array5d_dcomplex")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array6d_double(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM
     implicit none
     real(8), intent(in)  :: invalue(:,:,:,:,:,:)
     real(8), intent(out) :: outvalue(:,:,:,:,:,:)
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array6d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_summation_array6d_dcomplex(invalue, outvalue, N, ngroup, dest)
-    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM
     implicit none
     complex(8), intent(in)  :: invalue(:,:,:,:,:,:)
     complex(8), intent(out) :: outvalue(:,:,:,:,:,:)
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
-    integer :: ierr
-    if (present(dest)) then
-      MPI_ERROR_CHECK(call MPI_Reduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, dest, ngroup, ierr))
-    else
-      MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
-    end if
+    UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(dest)
+    ABORT_MESSAGE(ngroup,"comm_summation_array6d_dcomplex")
+    outvalue = invalue
   end subroutine
 
 
   subroutine comm_bcast_integer(val, ngroup, root)
-    use mpi, only: MPI_INTEGER
     implicit none
     integer, intent(inout)        :: val
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, 1, MPI_INTEGER, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_integer")
   end subroutine
 
   subroutine comm_bcast_double(val, ngroup, root)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(inout)        :: val
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, 1, MPI_DOUBLE_PRECISION, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_double")
   end subroutine
 
   subroutine comm_bcast_character(val, ngroup, root)
-    use mpi, only: MPI_CHARACTER
     implicit none
     character(*), intent(inout)        :: val
     integer,      intent(in)           :: ngroup
     integer,      intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, len(val), MPI_CHARACTER, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_character")
   end subroutine
 
   subroutine comm_bcast_logical(val, ngroup, root)
-    use mpi, only: MPI_LOGICAL
     implicit none
     logical, intent(inout)        :: val
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, 1, MPI_LOGICAL, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_logical")
   end subroutine
 
   subroutine comm_bcast_array1d_integer(val, ngroup, root)
-    use mpi, only: MPI_INTEGER
     implicit none
     integer, intent(inout)        :: val(:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_INTEGER, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array1d_integer")
   end subroutine
 
   subroutine comm_bcast_array1d_double(val, ngroup, root)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(inout)        :: val(:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_PRECISION, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array1d_double")
   end subroutine
 
   subroutine comm_bcast_array2d_integer(val, ngroup, root)
-    use mpi, only: MPI_INTEGER
     implicit none
     integer, intent(inout)        :: val(:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_INTEGER, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array2d_integer")
   end subroutine
 
   subroutine comm_bcast_array2d_double(val, ngroup, root)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(inout)        :: val(:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_PRECISION, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array2d_double")
   end subroutine
 
   subroutine comm_bcast_array3d_double(val, ngroup, root)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(inout)        :: val(:,:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_PRECISION, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array3d_double")
   end subroutine
   
   subroutine comm_bcast_array4d_double(val, ngroup, root)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(inout)        :: val(:,:,:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_PRECISION, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array4d_double")
   end subroutine
 
   subroutine comm_bcast_array3d_dcomplex(val, ngroup, root)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(inout)     :: val(:,:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_COMPLEX, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
   end subroutine
 
   subroutine comm_bcast_array5d_dcomplex(val, ngroup, root)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(inout)     :: val(:,:,:,:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_COMPLEX, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
   end subroutine
 
   subroutine comm_bcast_array1d_character(val, ngroup, root)
-    use mpi, only: MPI_CHARACTER
     implicit none
     character(*), intent(inout)        :: val(:)
     integer,      intent(in)           :: ngroup
     integer,      intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val)*len(val), MPI_CHARACTER, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array1d_character")
   end subroutine
 
   subroutine comm_bcast_array2d_character(val, ngroup, root)
-    use mpi, only: MPI_CHARACTER
     implicit none
     character(*), intent(inout)        :: val(:,:)
     integer,      intent(in)           :: ngroup
     integer,      intent(in), optional :: root
-    integer :: rank, ierr
-    if (present(root)) then
-      rank = root
-    else
-      rank = 0
-    end if
-    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val)*len(val), MPI_CHARACTER, rank, ngroup, ierr))
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(root)
+    ABORT_MESSAGE(ngroup,"comm_bcast_array2d_character")
   end subroutine
 
 
   subroutine comm_allgather_array1d_logical(invalue, outvalue, ngroup)
-    use mpi, only: MPI_LOGICAL
     implicit none
     logical, intent(in)  :: invalue(:)
     logical, intent(out) :: outvalue(:,:)
     integer, intent(in)  :: ngroup
-    integer :: ierr
-    call MPI_Allgather(invalue,  size(invalue), MPI_LOGICAL, &
-                       outvalue, size(invalue), MPI_LOGICAL, &
-                       ngroup, ierr)
-    call error_check(ierr)
+    UNUSED_VARIABLE(ngroup)
+    outvalue(:) = invalue(:)
   end subroutine
 
 
   subroutine comm_allgatherv_array1d_double(invalue, outvalue, ncounts, displs, ngroup)
-    use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(in)  :: invalue(:)
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: ncounts(:)
     integer, intent(in)  :: displs(:)
     integer, intent(in)  :: ngroup
-    integer :: ierr
-    call MPI_Allgatherv(invalue,  size(invalue),   MPI_DOUBLE_PRECISION, &
-                        outvalue, ncounts, displs, MPI_DOUBLE_PRECISION, &
-                        ngroup, ierr)
-    call error_check(ierr)
+    ABORT_MESSAGE(ngroup,"comm_allgatherv_array1d_double")
+    outvalue(displs(1)+1:displs(1)+ncounts(1)-1) = invalue(1:ncounts(1)-1)
   end subroutine
 
 
   subroutine comm_alltoall_array1d_complex(invalue, outvalue, ngroup, ncount)
-    use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(in)  :: invalue(:)
     complex(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: ngroup
     integer, intent(in)  :: ncount
-    integer :: ierr
-    call MPI_Alltoall(invalue,  ncount,          MPI_DOUBLE_COMPLEX, &
-                      outvalue, ncount,          MPI_DOUBLE_COMPLEX, &
-                      ngroup, ierr)
-    call error_check(ierr)
+    UNUSED_VARIABLE(ncount)
+    ABORT_MESSAGE(ngroup,"comm_alltoall_array1d_complex")
+    outvalue = invalue
   end subroutine
  
  
   subroutine comm_get_min_array1d_double(invalue, outvalue, N, ngroup)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_MIN
     implicit none
     real(8), intent(in)  :: invalue(:)
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_MIN, ngroup, ierr))
+    UNUSED_VARIABLE(N)
+    ABORT_MESSAGE(ngroup,"comm_get_min_array1d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_get_max_array1d_double(invalue, outvalue, N, ngroup)
-    use mpi, only: MPI_DOUBLE_PRECISION, MPI_MAX
     implicit none
     real(8), intent(in)  :: invalue(:)
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_MAX, ngroup, ierr))
+    UNUSED_VARIABLE(N)
+    ABORT_MESSAGE(ngroup,"comm_get_max_array1d_double")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_get_maxloc(invalue, outvalue, ngroup)
-    use mpi, only: MPI_DOUBLE_INT, MPI_MAXLOC
+    implicit none
     type(comm_maxloc_type), intent(in)  :: invalue
     type(comm_maxloc_type), intent(out) :: outvalue
     integer, intent(in)                 :: ngroup
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_DOUBLE_INT, MPI_MAXLOC, ngroup, ierr))
+    ABORT_MESSAGE(ngroup,"comm_get_maxloc")
+    outvalue = invalue
   end subroutine
 
   subroutine comm_logical_and_scalar(invalue, outvalue, ngroup)
-    use mpi, only: MPI_LOGICAL, MPI_LAND
     implicit none
     logical, intent(in)  :: invalue
     logical, intent(out) :: outvalue
     integer, intent(in)  :: ngroup
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_LOGICAL, MPI_LAND, ngroup, ierr))
+    ABORT_MESSAGE(ngroup,"comm_logical_and_scalar")
+    outvalue = invalue
   end subroutine
 
 
@@ -1212,22 +1105,16 @@ contains
     implicit none
     integer, intent(in)  :: comm
     integer, intent(out) :: npid, nprocs
-    integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Comm_rank(comm,   npid, ierr))
-    MPI_ERROR_CHECK(call MPI_Comm_size(comm, nprocs, ierr))
+    UNUSED_VARIABLE(comm)
+    npid   = 0
+    nprocs = 1
   end subroutine
 
   subroutine error_check(errcode)
-    use mpi, only: MPI_MAX_ERROR_STRING, MPI_SUCCESS
     implicit none
     integer, intent(in) :: errcode
-    character(MPI_MAX_ERROR_STRING) :: errstr
-    integer                         :: retlen, ierr
-    if (errcode /= MPI_SUCCESS) then
-      call MPI_Error_string(errcode, errstr, retlen, ierr)
-      print *, 'MPI Error:', errstr
-      call comm_finalize
-    end if
+    UNUSED_VARIABLE(errcode)
+    call abort_show_message('error_check')
   end subroutine
 
   subroutine abort_show_message(msg)

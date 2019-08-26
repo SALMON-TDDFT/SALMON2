@@ -186,11 +186,10 @@ module structures
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
 
-#ifdef SALMON_ENABLE_MPI3
+    ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process
     integer,allocatable :: icomm_atom(:)     ! communicator for uVpsi(n:m)
-#endif
   end type s_pp_grid
 
   type s_pp_nlcc
