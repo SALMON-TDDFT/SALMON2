@@ -55,7 +55,7 @@ type(s_rgrid) :: ng
 type(s_dft_system)  :: system
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
-type(s_poisson_cg) :: poisson_cg
+type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_reciprocal_grid) :: fg
 type(s_dft_energy) :: energy
@@ -91,7 +91,7 @@ posplane=0.d0
 
 inumcpu_check=0
 
-call convert_input_rt(Ntime,mixing,poisson_cg)
+call convert_input_rt(Ntime,mixing,poisson)
 allocate(system%mass(1:nelem))
 
 call set_filename
@@ -199,8 +199,8 @@ else if(ilsda==1)then
   numspin=2
 end if
 
-if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson_cg)
-call set_ig_bound(ng,poisson_cg)
+if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson)
+call set_ig_bound(ng,poisson)
 
 call timer_end(LOG_READ_LDA_DATA)
 
@@ -270,7 +270,7 @@ allocate( alphaq_R(3,3,0:Nenergy), &
 ntmg=1
 ! 'Hartree' parameter
 
-poisson_cg%iterVh = 0        ! Iteration counter
+poisson%iterVh = 0        ! Iteration counter
 
 
 if(comm_is_root(nproc_id_global))then
@@ -335,7 +335,7 @@ endif
 
 
 ! Go into Time-Evolution
-call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson_cg)
+call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -470,7 +470,7 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson_cg)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
                            nproc_group_h, nproc_size_global
@@ -503,7 +503,7 @@ type(s_reciprocal_grid) :: fg
 type(s_md) :: md
 type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
-type(s_poisson_cg) :: poisson_cg
+type(s_poisson) :: poisson
 type(s_vector) :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 
@@ -956,11 +956,11 @@ TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson_cg,j_e,singlescale)
+     & ,poisson,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson_cg,j_e,singlescale)
+     & ,poisson,j_e,singlescale)
   end if
 end do TE
 call timer_end(LOG_RT_ITERATION)

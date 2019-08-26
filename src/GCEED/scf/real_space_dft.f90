@@ -80,7 +80,7 @@ type(s_field_parallel) :: info_field
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
-type(s_poisson_cg) :: poisson_cg
+type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_scalar) :: srho
 type(s_scalar) :: sVh,sVpsl
@@ -112,7 +112,7 @@ call setcN(cnmat)
 
 call check_dos_pdos
 
-call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson_cg)
+call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 
 call init_dft(lg,system,stencil)
 if(stencil%if_orthogonal) then
@@ -169,9 +169,9 @@ if(iopt==1)then
   call init_sendrecv_matrix
   select case(iperiodic)
   case(0)
-    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson_cg)
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson)
   end select
-  call set_ig_bound(ng,poisson_cg)
+  call set_ig_bound(ng,poisson)
 
   call allocate_mat(ng)
   call set_icoo1d
@@ -393,7 +393,7 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,sVh,fg)
+    call hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
     Vh = sVh%f
 
     if(ilsda == 0) then
@@ -473,7 +473,7 @@ if(comm_is_root(nproc_id_global)) then
   select case(iperiodic)
   case(0)
     write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,  &
-                                                                                 poisson_cg%iterVh
+                                                                                 poisson%iterVh
   case(3)
     write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
   end select
@@ -495,7 +495,7 @@ end if
 
 call timer_begin(LOG_INIT_GS_ITERATION)
 iflag=1
-poisson_cg%iterVh=1000
+poisson%iterVh=1000
 sum1=1.0d9
 
 iflag_diisjump=0
@@ -589,7 +589,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     call timer_begin(LOG_CALC_HARTREE)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
-      call Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,sVh,fg)
+      call hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
     end if
     call timer_end(LOG_CALC_HARTREE)
 
@@ -678,7 +678,7 @@ DFT_Iteration : do iter=1,iDiter(img)
         write(*,'("Diisjump occured. Steepest descent was used.")')
       end if
       write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,   &
-                                                                                   poisson_cg%iterVh
+                                                                                   poisson%iterVh
     case(3)
       write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,energy%E_tot*2d0*Ry
     end select
