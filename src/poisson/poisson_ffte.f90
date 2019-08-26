@@ -14,12 +14,12 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-module hartree_ffte_sub
+module poisson_ffte_sub
   implicit none
 
 contains
 
-subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
+subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
                         a_ffte,b_ffte,rhoe_g,coef_poisson)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_id_icommy
@@ -131,7 +131,7 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
   end if
 
   return
-end subroutine hartree_ffte
+end subroutine poisson_ffte
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
 
-end module hartree_ffte_sub
+end module poisson_ffte_sub
