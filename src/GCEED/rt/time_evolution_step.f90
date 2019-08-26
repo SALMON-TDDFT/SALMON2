@@ -54,7 +54,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
   type(s_dmatrix),intent(inout) :: dmat
-  type(s_poisson),intent(in) :: poisson
+  type(s_poisson),intent(inout) :: poisson
   type(s_vector) :: j_e ! microscopic electron number current density
   type(ls_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
@@ -123,7 +123,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   !(MD:part1 & update of pseudopotential)
   if(iflag_md==1) then
      call time_evolution_step_md_part1(system,md)
-     call update_pseudo_rt(itt,info,system,stencil,lg,ng,fg,ppg,ppg_all,ppn)
+     call update_pseudo_rt(itt,info,system,stencil,lg,ng,poisson,fg,ppg,ppg_all,ppn)
      sVpsl%f = Vpsl ! future work: remove Vpsl
   endif
 

@@ -47,7 +47,7 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
       call poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
     case(4)
       call poisson_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,npuw,npuy,npuz,poisson,   &
-                        a_ffte,b_ffte,rhoe_g)
+                        rhoe_g)
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,n,nn) &
 !$omp             shared(lg,ng,fg,rhoe_G,NPUZ,NPUY)

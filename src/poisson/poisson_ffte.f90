@@ -20,7 +20,7 @@ module poisson_ffte_sub
 contains
 
 subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
-                        a_ffte,b_ffte,rhoe_g)
+                        rhoe_g)
   use structures, only: s_rgrid,s_poisson
   use salmon_parallel, only: nproc_id_icommy
   use salmon_parallel, only: nproc_id_icommz
@@ -35,9 +35,7 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
   type(s_rgrid),intent(in) :: ng
   real(8),intent(in)       :: hgs(3)
   integer,intent(in)       :: npuw,npuy,npuz
-  type(s_poisson),intent(in) :: poisson
-  complex(8),intent(out)   :: a_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
-  complex(8),intent(out)   :: b_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
+  type(s_poisson),intent(inout) :: poisson
   complex(8),intent(out)   :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
   integer :: ix,iy,iz
   integer :: iix,iiy,iiz
@@ -48,7 +46,14 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
   complex(8),parameter :: zI=(0.d0,1.d0)
   integer :: n
   real(8) :: bLx,bLy,bLz
-  complex(8) :: a_ffte_tmp(1:lg%num(1),1:lg%num(2)/npuy,1:lg%num(3)/npuz)
+
+  if(.not.allocated(poisson%a_ffte))then
+    allocate(poisson%a_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+    allocate(poisson%b_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+  end if
+  if(.not.allocated(poisson%a_ffte_tmp))then
+    allocate(poisson%a_ffte_tmp(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+  end if
 
   bLx=2.d0*Pi/(Hgs(1)*dble(lg%num(1)))
   bLy=2.d0*Pi/(Hgs(2)*dble(lg%num(2)))
@@ -69,11 +74,11 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
       iiz=iz+nproc_id_icommz*lg%num(3)/npuz
       do iy=iy_sta,iy_end
         iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-        a_ffte(1:lg%ie(1),iy,iz)=trho(1:lg%ie(1),iiy,iiz)
+        poisson%a_ffte(1:lg%ie(1),iy,iz)=trho(1:lg%ie(1),iiy,iiz)
       end do
     end do
   else
-    a_ffte_tmp=0.d0
+    poisson%a_ffte_tmp=0.d0
 !$OMP parallel do private(iiz,iiy,ix)
     do iz=iz_sta,iz_end
       iiz=iz+nproc_id_icommz*lg%num(3)/npuz
@@ -81,23 +86,23 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
         iiy=iy+nproc_id_icommy*lg%num(2)/npuy
         do iix=ng%is(1),ng%ie(1)
           ix=iix-lg%is(1)+1
-          a_ffte_tmp(ix,iy,iz)=trho(iix,iiy,iiz)
+          poisson%a_ffte_tmp(ix,iy,iz)=trho(iix,iiy,iiz)
         end do
       end do
     end do
-    call comm_summation(a_ffte_tmp,a_ffte,lg%num(1)*lg%num(2)/npuy*lg%num(3)/npuz,nproc_group_icommw)
+    call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,lg%num(1)*lg%num(2)/npuy*lg%num(3)/npuz,nproc_group_icommw)
   end if
 
-  CALL PZFFT3DV_MOD(a_ffte,b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0) 
-  CALL PZFFT3DV_MOD(a_ffte,b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,-1) 
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0) 
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,-1) 
 
 !$OMP parallel do private(n)
   do iz=iz_sta,iz_end
     do iy=iy_sta,iy_end
       do ix=1,lg%num(1)
         n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-        rhoe_G(n)=b_ffte(ix,iy,iz)*inv_lgnum3
-        b_ffte(ix,iy,iz)=b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
+        rhoe_G(n)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
+        poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
       end do
     end do
   end do
@@ -105,7 +110,7 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
     rhoe_G(1)=0.d0
   end if
 
-  CALL PZFFT3DV_MOD(b_ffte,a_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,1)
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,1)
 
   if(npuw==1)then
 !$OMP parallel do private(iiz,iiy)
@@ -113,7 +118,7 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
       iiz=iz+nproc_id_icommz*lg%num(3)/npuz
       do iy=iy_sta,iy_end
         iiy=iy+nproc_id_icommy*lg%num(2)/npuy
-        tvh(1:lg%ie(1),iiy,iiz)=a_ffte(1:lg%ie(1),iy,iz)
+        tvh(1:lg%ie(1),iiy,iiz)=poisson%a_ffte(1:lg%ie(1),iy,iz)
       end do
     end do
   else
@@ -124,7 +129,7 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
         iiy=iy+nproc_id_icommy*lg%num(2)/npuy
         do iix=ng%is(1),ng%ie(1)
           ix=iix-lg%is(1)+1
-          tvh(iix,iiy,iiz)=a_ffte(ix,iy,iz)
+          tvh(iix,iiy,iiz)=poisson%a_ffte(ix,iy,iz)
         end do
       end do
     end do

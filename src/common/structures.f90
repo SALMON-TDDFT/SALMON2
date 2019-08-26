@@ -243,6 +243,9 @@ module structures
     real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
 ! for Fourier transformation routines
     real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
+    complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
+    complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
+    complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
   end type s_poisson
 
 ! for DFT ground state calculations
