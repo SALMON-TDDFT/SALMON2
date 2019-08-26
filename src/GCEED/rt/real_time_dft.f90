@@ -602,7 +602,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
 !????????? get_fourier_grid_G @ real_space_dft.f90
     if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
-    if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
+    if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
     jj = system%ngrid/nproc_size_global
     fg%ig_s = nproc_id_global*jj+1
     fg%ig_e = (nproc_id_global+1)*jj
@@ -610,7 +610,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     fg%icomm_G = nproc_group_global
     fg%ng = system%ngrid
     allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-    allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
+    allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
     if(iflag_hartree==2)then
        fg%iGzero = nGzero
        fg%Gx = Gx
