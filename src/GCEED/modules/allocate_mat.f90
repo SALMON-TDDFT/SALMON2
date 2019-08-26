@@ -44,9 +44,6 @@ real(8), allocatable :: exc_dummy(:,:,:)
 real(8), allocatable :: exc_dummy2(:,:,:,:)
 real(8), allocatable :: exc_dummy3(:,:,:,:)
 
-complex(8),allocatable :: rhoe_G(:)
-complex(8),allocatable :: rhoe_G_tmp(:)
-
 CONTAINS
 
 !=======================================================================
@@ -127,16 +124,6 @@ allocate (eexc_tmp(ng%num(1), ng%num(2), ng%num(3)))
 allocate (exc_dummy(ng%num(1), ng%num(2), ng%num(3)))
 allocate (exc_dummy2(ng%num(1), ng%num(2), ng%num(3),2))
 allocate (exc_dummy3(ng%num(1), ng%num(2), ng%num(3),3))
-
-select case(iperiodic)
-case(3)
-  if(iSCFRT==2.and.iflag_hartree==4)then
-    allocate(rhoe_G(lg_num(1)*lg_num(2)/NPUY*lg_num(3)/NPUZ))
-  else
-    allocate(rhoe_G(lg_num(1)*lg_num(2)*lg_num(3)))
-    allocate(rhoe_G_tmp(lg_num(1)*lg_num(2)*lg_num(3)))
-  end if
-end select
 
 allocate(icoo1d(3,lg_num(1)*lg_num(2)*lg_num(3)))
 

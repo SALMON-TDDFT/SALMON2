@@ -1048,7 +1048,7 @@ subroutine get_fourier_grid_G(fg)
   type(s_reciprocal_grid) :: fg
 
   if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
-  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
+  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
 
   jj = system%ngrid/nproc_size_global
   fg%ig_s = nproc_id_global*jj+1
@@ -1057,7 +1057,7 @@ subroutine get_fourier_grid_G(fg)
   fg%icomm_G = nproc_group_global
   fg%ng = system%ngrid
   allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
+  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
   if(iflag_hartree==2)then
      fg%iGzero = nGzero
      fg%Gx = Gx

@@ -22,7 +22,6 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
   use poisson_periodic_sub
   use poisson_ffte_sub
   use new_world_sub
-  use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -35,8 +34,6 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
   type(s_scalar) ,intent(in) :: srho
   type(s_scalar)             :: sVh
   type(s_reciprocal_grid)    :: fg
-  !
-  integer :: ix,iy,iz,n,nn
 
   select case(iperiodic)
   case(0)
@@ -46,21 +43,7 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
     case(2)
       call poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
     case(4)
-      call poisson_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,npuw,npuy,npuz,poisson,   &
-                        rhoe_g)
-!$omp parallel do collapse(2) default(none) &
-!$omp             private(iz,iy,ix,n,nn) &
-!$omp             shared(lg,ng,fg,rhoe_G,NPUZ,NPUY)
-      do iz=1,lg%num(3)/NPUZ
-      do iy=1,lg%num(2)/NPUY
-      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg%num(2)/NPUY*lg%num(1)+(iy-1)*lg%num(1)+ix
-        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
-        fg%zrhoG_ele(nn) = rhoe_G(n)
-      enddo
-      enddo
-      enddo
-!$omp end parallel do
+      call poisson_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,fg,poisson,npuw,npuy,npuz)
     end select
   end select
 

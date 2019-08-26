@@ -19,9 +19,8 @@ module poisson_ffte_sub
 
 contains
 
-subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
-                        rhoe_g)
-  use structures, only: s_rgrid,s_poisson
+subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,fg,poisson,npuw,npuy,npuz)
+  use structures, only: s_rgrid,s_reciprocal_grid,s_poisson
   use salmon_parallel, only: nproc_id_icommy
   use salmon_parallel, only: nproc_id_icommz
   use salmon_parallel, only: nproc_group_icommw
@@ -34,9 +33,9 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   real(8),intent(in)       :: hgs(3)
+  type(s_reciprocal_grid),intent(inout) :: fg
+  type(s_poisson),intent(inout)         :: poisson
   integer,intent(in)       :: npuw,npuy,npuz
-  type(s_poisson),intent(inout) :: poisson
-  complex(8),intent(out)   :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
   integer :: ix,iy,iz
   integer :: iix,iiy,iiz
   integer :: iz_sta,iz_end,iy_sta,iy_end
@@ -66,8 +65,6 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
   iy_sta=1
   iy_end=lg%num(2)/npuy
   
-!  rhoe_G_tmp=0.d0
-
   if(npuw==1)then
 !$OMP parallel do private(iiz,iiy)
     do iz=iz_sta,iz_end
@@ -96,18 +93,21 @@ subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0) 
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,-1) 
 
-!$OMP parallel do private(n)
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(iz,iy,ix,n) &
+!$omp             shared(iz_sta,iz_end,iy_sta,iy_end,lg,fg,poisson,NPUZ,NPUY,inv_lgnum3)
   do iz=iz_sta,iz_end
     do iy=iy_sta,iy_end
       do ix=1,lg%num(1)
         n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-        rhoe_G(n)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
+        fg%zrhoG_ele(n)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
         poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
       end do
     end do
   end do
+!$omp end parallel do
   if(nproc_id_icommz==0.and.nproc_id_icommy==0)then
-    rhoe_G(1)=0.d0
+    fg%zrhoG_ele(1)=0.d0
   end if
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,1)
