@@ -15,6 +15,10 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module structures
+#ifdef SALMON_USE_LIBXC
+  use xc_f90_types_m
+  use xc_f90_lib_m
+#endif
   implicit none
 
 ! scalar field
@@ -248,6 +252,20 @@ module structures
     integer :: num_rho_stock
     type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
   end type s_mixing
+
+  type s_xc_functional
+    integer :: xctype(3)
+    integer :: ispin
+    real(8) :: cval
+    logical :: use_gradient
+    logical :: use_laplacian
+    logical :: use_kinetic_energy
+    logical :: use_current
+#ifdef SALMON_USE_LIBXC
+    type(xc_f90_pointer_t) :: func(3)
+    type(xc_f90_pointer_t) :: info(3)
+#endif
+  end type
 
 !===================================================================================================================================
 

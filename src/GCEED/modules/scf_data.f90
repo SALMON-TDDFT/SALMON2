@@ -15,7 +15,7 @@
 !
 MODULE scf_data
 use salmon_global
-use salmon_xc, only: xc_functional
+use salmon_xc, only: s_xc_functional
 use structures, only: s_pp_info,s_pp_grid
 implicit none
 !-------------------- Parameters
@@ -106,7 +106,7 @@ real(8) :: cnmat(0:12,12),bnmat(4,4)
 !-------------------- Global variables
 
 ! Exchange Correlation
-type(xc_functional) :: xc_func
+type(s_xc_functional) :: xc_func
 
 integer :: iflag_ps
 
