@@ -33,6 +33,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use allocate_mat_sub
   use read_pslfile_sub
   use sendrecv_grid, only: s_sendrecv_grid
+  use hartree_sub, only: hartree
   use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy
   use force_sub, only: calc_force_salmon
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
@@ -229,7 +230,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
       sVh%f = Vh_stock1
     end if
   end if
-  call hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   if(iperiodic==0 .and. itt/=1)then
     if(mod(itt,2)==1)then
       Vh_stock2 = sVh%f

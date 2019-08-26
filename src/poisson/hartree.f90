@@ -15,7 +15,13 @@
 !
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
-subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+module hartree_sub
+  implicit none
+
+contains
+
+!===================================================================================================================================
+subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   use inputoutput, only: iperiodic,yn_ffte
   use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
@@ -49,4 +55,6 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
 
 return
 
-end subroutine hartree_ns
+end subroutine hartree
+
+end module hartree_sub
