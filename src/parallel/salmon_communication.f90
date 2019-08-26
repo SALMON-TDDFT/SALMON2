@@ -50,6 +50,7 @@ module salmon_communication
   public :: comm_sync_all
   public :: comm_summation
   public :: comm_bcast
+  public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
   public :: comm_alltoall
   public :: comm_get_min
@@ -59,6 +60,8 @@ module salmon_communication
   public :: comm_get_globalinfo
   public :: comm_get_groupinfo
   public :: comm_create_group
+  public :: comm_create_group_byid
+  public :: comm_free_group
 
   ! utils
   public :: comm_is_root
@@ -203,6 +206,11 @@ module salmon_communication
     module procedure comm_bcast_array5d_dcomplex
   end interface
 
+  interface comm_allgather
+    ! 1-D array
+    module procedure comm_allgather_array1d_logical
+  end interface
+
   interface comm_allgatherv
     ! 1-D array
     module procedure comm_allgatherv_array1d_double
@@ -271,6 +279,27 @@ contains
     integer :: ngid_dst, ierr
     MPI_ERROR_CHECK(call MPI_Comm_split(ngid, nprocs, key, ngid_dst, ierr))
   end function
+
+  function comm_create_group_byid(iparent, idlists) result(ichild)
+    implicit none
+    integer, intent(in) :: iparent    ! parent communicator
+    integer, intent(in) :: idlists(:) ! include ranks in new communicator
+    integer :: ichild,ierr
+    integer :: igroup_parent,igroup_child
+    MPI_ERROR_CHECK(call MPI_Comm_group(iparent, igroup_parent, ierr))
+    MPI_ERROR_CHECK(call MPI_Group_incl(igroup_parent, size(idlists), idlists, igroup_child, ierr))
+    MPI_ERROR_CHECK(call MPI_Comm_create(iparent, igroup_child, ichild, ierr))
+    MPI_ERROR_CHECK(call MPI_Group_free(igroup_child, ierr))
+  end function
+
+  subroutine comm_free_group(igroup)
+    implicit none
+    integer, intent(in) :: igroup
+    integer :: ierr
+    if (igroup /= MPI_COMM_NULL) then
+      MPI_ERROR_CHECK(call MPI_Comm_free(igroup, ierr))
+    end if
+  end subroutine
 
   function comm_is_root(npid)
     implicit none
@@ -1091,6 +1120,20 @@ contains
       rank = 0
     end if
     MPI_ERROR_CHECK(call MPI_Bcast(val, size(val)*len(val), MPI_CHARACTER, rank, ngroup, ierr))
+  end subroutine
+
+
+  subroutine comm_allgather_array1d_logical(invalue, outvalue, ngroup)
+    use mpi, only: MPI_LOGICAL
+    implicit none
+    logical, intent(in)  :: invalue(:)
+    logical, intent(out) :: outvalue(:,:)
+    integer, intent(in)  :: ngroup
+    integer :: ierr
+    call MPI_Allgather(invalue,  size(invalue), MPI_LOGICAL, &
+                       outvalue, size(invalue), MPI_LOGICAL, &
+                       ngroup, ierr)
+    call error_check(ierr)
   end subroutine
 
 

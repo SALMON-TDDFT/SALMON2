@@ -52,6 +52,7 @@ module salmon_communication
   public :: comm_sync_all
   public :: comm_summation
   public :: comm_bcast
+  public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
   public :: comm_alltoall
   public :: comm_get_min
@@ -61,6 +62,8 @@ module salmon_communication
   public :: comm_get_globalinfo
   public :: comm_get_groupinfo
   public :: comm_create_group
+  public :: comm_create_group_byid
+  public :: comm_free_group
 
   ! utils
   public :: comm_is_root
@@ -207,6 +210,11 @@ module salmon_communication
 
   interface comm_allgatherv
     ! 1-D array
+    module procedure comm_allgather_array1d_logical
+  end interface
+
+  interface comm_allgatherv
+    ! 1-D array
     module procedure comm_allgatherv_array1d_double
   end interface
 
@@ -271,6 +279,22 @@ contains
     UNUSED_VARIABLE(nprocs)
     ngid_dst = ngid
   end function
+
+  function comm_create_group_byid(iparent, idlists) result(ichild)
+    implicit none
+    integer, intent(in) :: iparent    ! parent communicator
+    integer, intent(in) :: idlists(:) ! include ranks in new communicator
+    integer :: ichild
+    UNUSED_VARIABLE(idlists)
+    ichild = iparent
+  end function
+
+  subroutine comm_free_group(igroup)
+    implicit none
+    integer, intent(in) :: igroup
+    UNUSED_VARIABLE(igroup)
+    ! no operation
+  end subroutine
 
   function comm_is_root(npid)
     implicit none
@@ -1001,6 +1025,16 @@ contains
     UNUSED_VARIABLE(val)
     UNUSED_VARIABLE(root)
     ABORT_MESSAGE(ngroup,"comm_bcast_array2d_character")
+  end subroutine
+
+
+  subroutine comm_allgather_array1d_logical(invalue, outvalue, ngroup)
+    implicit none
+    logical, intent(in)  :: invalue(:)
+    logical, intent(out) :: outvalue(:,:)
+    integer, intent(in)  :: ngroup
+    UNUSED_VARIABLE(ngroup)
+    outvalue(:) = invalue(:)
   end subroutine
 
 
