@@ -840,26 +840,20 @@ end subroutine bisection
 subroutine init_uvpsi_summation(ppg,icomm_r)
   use structures,    only: s_pp_grid
   use salmon_global, only: natom
-#ifdef SALMON_ENABLE_MPI3
-  use mpi,           only: MPI_LOGICAL
-#endif
+  use salmon_communication, only: comm_get_groupinfo &
+                                 ,comm_allgather &
+                                 ,comm_create_group_byid
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
   integer,intent(in) :: icomm_r
 
-#ifdef SALMON_ENABLE_MPI3
-! FIXME: This subroutine uses MPI functions directly...
-  integer :: ilma,ia,ierr
-  integer :: igroup_r,igroup_ia,icomm_ia
+  integer :: ilma,ia
   integer :: irank_r,isize_r,n,i
   integer :: nlma
   logical,allocatable :: ireferred_atom_comm_r(:,:)
   integer,allocatable :: iranklist(:)
 
-  call MPI_Comm_rank(icomm_r, irank_r, ierr)
-  call error_check(ierr)
-  call MPI_Comm_size(icomm_r, isize_r, ierr)
-  call error_check(ierr)
+  call comm_get_groupinfo(icomm_r, irank_r, isize_r)
 
   nlma = ppg%Nlma
 
@@ -874,10 +868,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     ia = ppg%ia_tbl(ilma)
     ppg%ireferred_atom(ia) = ppg%ireferred_atom(ia) .or. (ppg%mps(ia) > 0)
   end do
-  call MPI_Allgather(ppg%ireferred_atom,    natom, MPI_LOGICAL &
-                    ,ireferred_atom_comm_r, natom, MPI_LOGICAL &
-                    ,icomm_r, ierr)
-  call error_check(ierr)
+  call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
 
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
@@ -908,62 +899,25 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
       end if
     end do
 
-    call MPI_Comm_group(icomm_r, igroup_r, ierr)
-    call error_check(ierr)
-
-    call MPI_Group_incl(igroup_r, n, iranklist, igroup_ia, ierr)
-    call error_check(ierr)
-
-    call MPI_Comm_create(icomm_r, igroup_ia, icomm_ia, ierr)
-    call error_check(ierr)
-
-    call MPI_Group_free(igroup_ia,ierr)
-    call error_check(ierr)
-
-    ppg%icomm_atom(ia) = icomm_ia
+    ppg%icomm_atom(ia) = comm_create_group_byid(icomm_r, iranklist(1:n))
   end do
-
-contains
-  subroutine error_check(errcode)
-    use mpi, only: MPI_MAX_ERROR_STRING, MPI_SUCCESS
-    implicit none
-    integer, intent(in) :: errcode
-    character(MPI_MAX_ERROR_STRING) :: errstr
-    integer                         :: retlen, ierr
-    if (errcode /= MPI_SUCCESS) then
-      call MPI_Error_string(errcode, errstr, retlen, ierr)
-      print *, 'MPI Error:', errstr
-      call MPI_Finalize(ierr)
-    end if
-  end subroutine
-#else
-  ! no operation.
-  ! this routine requires MPI version 3.
-#endif
 end subroutine init_uvpsi_summation
 
 subroutine finalize_uvpsi_summation(ppg)
-#ifdef SALMON_ENABLE_MPI3
-  use mpi, only: MPI_COMM_NULL
-#endif
   use structures,    only: s_pp_grid
+  use salmon_communication, only: comm_free_group
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
-
-#ifdef SALMON_ENABLE_MPI3
-  integer :: ia,ierr
+  integer :: ia
 
   if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
   if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
   if (allocated(ppg%icomm_atom)) then
     do ia=1,size(ppg%icomm_atom)
-      if (ppg%icomm_atom(ia) /= MPI_COMM_NULL) then
-        call MPI_Comm_free(ppg%icomm_atom(ia),ierr)
-      end if
+      call comm_free_group(ppg%icomm_atom(ia))
     end do
     deallocate(ppg%icomm_atom)
   end if
-#endif
 end subroutine
 
 end module prep_pp_sub
