@@ -178,7 +178,7 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 if(iperiodic==3 .and. iflag_hartree==4)then
-  call prep_poisson_fft(ng)
+  call prep_poisson_fft(lg,ng,poisson)
 end if
 
 call read_pslfile(system)

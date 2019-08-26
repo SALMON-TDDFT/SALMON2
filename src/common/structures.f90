@@ -232,6 +232,7 @@ module structures
   end type s_ofile
 
   type s_poisson
+! for poisson_cg
     integer :: iterVh                              ! iteration number for poisson_cg
     integer :: npole_partial                       ! number of multipoles calculated in each node
     integer :: npole_total                         ! total number of multipoles
@@ -240,6 +241,8 @@ module structures
     integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
     integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
     real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
+! for Fourier transformation routines
+    real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
   end type s_poisson
 
 ! for DFT ground state calculations
