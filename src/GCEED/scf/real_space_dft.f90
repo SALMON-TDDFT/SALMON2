@@ -273,7 +273,7 @@ if(iopt==1)then
   end if
 
   if(iperiodic==3 .and. iflag_hartree==4)then
-    call prep_poisson_fft(ng)
+    call prep_poisson_fft(lg,ng,poisson)
   end if
 
   if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )

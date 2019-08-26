@@ -49,8 +49,6 @@ complex(8),allocatable :: rhoe_G_tmp(:)
 
 ! FFTE routine
 complex(8),allocatable :: A_FFTE(:,:,:), B_FFTE(:,:,:)
-real(8),allocatable :: coef_poisson(:,:,:)
-real(8),allocatable :: coef_poisson_FFTE(:,:,:)
 real(8),allocatable :: A_FFTE_copy(:,:,:), A_FFTE_copy2(:,:,:)
 
 CONTAINS
@@ -146,7 +144,6 @@ case(3)
   if(iflag_hartree==4)then
     allocate(A_FFTE(lg_num(1),lg_num(2)/NPUY,lg_num(3)/NPUZ))
     allocate(B_FFTE(lg_num(1),lg_num(2)/NPUY,lg_num(3)/NPUZ))
-    allocate(coef_poisson(lg_num(1),lg_num(2)/NPUY,lg_num(3)/NPUZ))
     allocate(A_FFTE_copy(lg_num(1),lg_num(2),lg_num(3)/NPUZ))
     allocate(A_FFTE_copy2(lg_num(1),lg_num(2),lg_num(3)/NPUZ))
   end if

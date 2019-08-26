@@ -14,14 +14,14 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-module hartree_ffte_sub
+module poisson_ffte_sub
   implicit none
 
 contains
 
-subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
-                        a_ffte,b_ffte,rhoe_g,coef_poisson)
-  use structures, only: s_rgrid
+subroutine poisson_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,poisson,  &
+                        a_ffte,b_ffte,rhoe_g)
+  use structures, only: s_rgrid,s_poisson
   use salmon_parallel, only: nproc_id_icommy
   use salmon_parallel, only: nproc_id_icommz
   use salmon_parallel, only: nproc_group_icommw
@@ -35,10 +35,10 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
   type(s_rgrid),intent(in) :: ng
   real(8),intent(in)       :: hgs(3)
   integer,intent(in)       :: npuw,npuy,npuz
+  type(s_poisson),intent(in) :: poisson
   complex(8),intent(out)   :: a_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
   complex(8),intent(out)   :: b_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
   complex(8),intent(out)   :: rhoe_g(lg%num(1)*lg%num(2)*lg%num(3))
-  real(8),intent(in)       :: coef_poisson(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz)
   integer :: ix,iy,iz
   integer :: iix,iiy,iiz
   integer :: iz_sta,iz_end,iy_sta,iy_end
@@ -97,7 +97,7 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
       do ix=1,lg%num(1)
         n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
         rhoe_G(n)=b_ffte(ix,iy,iz)*inv_lgnum3
-        b_ffte(ix,iy,iz)=b_ffte(ix,iy,iz)*coef_poisson(ix,iy,iz)
+        b_ffte(ix,iy,iz)=b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
       end do
     end do
   end do
@@ -131,7 +131,7 @@ subroutine hartree_ffte(lg,mg,ng,trho,tvh,hgs,npuw,npuy,npuz,  &
   end if
 
   return
-end subroutine hartree_ffte
+end subroutine poisson_ffte
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
 
-end module hartree_ffte_sub
+end module poisson_ffte_sub

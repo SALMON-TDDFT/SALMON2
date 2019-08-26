@@ -14,12 +14,12 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-module hartree_periodic_sub
+module poisson_periodic_sub
   implicit none
 
 contains
 
-subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
+subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   use structures, only: s_rgrid, s_field_parallel, s_dft_system, &
                         s_scalar, s_reciprocal_grid
   use salmon_parallel, only: nproc_group_global
@@ -252,7 +252,7 @@ subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   end do
 
   return
-end subroutine hartree_periodic
+end subroutine poisson_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
 
-end module hartree_periodic_sub
+end module poisson_periodic_sub
