@@ -34,7 +34,6 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
   integer :: ix,iy,iz,is
   real(8) :: tot_exc
   real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:)
-  integer :: iwk_dum
 
   if(ilsda==0)then
     do iz=1,ng%num(3)
@@ -76,12 +75,7 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
     enddo
   
 !$omp end parallel do
-    iwk_dum=iwk_size
-    iwk_size=12
-    call make_iwksta_iwkend
     call update_overlap_real8(srg_ng, ng, rhd)
-
-    iwk_size=iwk_dum
 
 !$OMP parallel do private(ix,iy,iz)
     do iz=ng%is(3),ng%ie(3)

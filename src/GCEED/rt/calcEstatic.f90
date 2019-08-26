@@ -33,10 +33,6 @@ real(8) :: Ex_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3
 real(8) :: Ey_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 real(8) :: Ez_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 
-iwk_size=11
-call make_iwksta_iwkend
-
-
 !$OMP parallel do private(iz,iy,ix)
 do iz=ng%is(3)-Ndh,ng%ie(3)+Ndh
 do iy=ng%is(2)-Ndh,ng%ie(2)+Ndh

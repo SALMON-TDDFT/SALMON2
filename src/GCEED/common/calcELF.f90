@@ -15,7 +15,7 @@
 !
 subroutine calcELF(ng,info,srho,ttmp)
 use structures
-use salmon_parallel, only: nproc_group_global
+use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
 use calc_allob_sub
@@ -78,11 +78,16 @@ end do
 mrelftau=0.d0
 mrcurden=0.d0
 
-
-
-
 iwk_size=1
-call make_iwksta_iwkend
+iwksta(1:3)=ista_Mxin(1:3,nproc_id_global)
+iwkend(1:3)=iend_Mxin(1:3,nproc_id_global)
+iwk2sta(1:3)=ista_Mxin(1:3,nproc_id_global)-Nd
+iwk2end(1:3)=iend_Mxin(1:3,nproc_id_global)+Nd
+iwk3sta(1:3)=ista_Mxin(1:3,nproc_id_global)
+iwk3end(1:3)=iend_Mxin(1:3,nproc_id_global)
+iwknum(1:3)=iwkend(1:3)-iwksta(1:3)+1
+iwk2num(1:3)=iwk2end(1:3)-iwk2sta(1:3)+1
+iwk3num(1:3)=iwk3end(1:3)-iwk3sta(1:3)+1
 
 if(iSCFRT==1)then
   if(iperiodic==0)then
