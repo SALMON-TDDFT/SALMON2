@@ -20,8 +20,7 @@ module hartree_cg_sub
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,  &
-                      igc_is,igc_ie,gridcoo)
+subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg,s_sendrecv_grid,s_stencil
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -47,9 +46,6 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                  mg%is(3):mg%ie(3))
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
-  integer,intent(in) :: igc_is
-  integer,intent(in) :: igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
   
   integer,parameter :: maxiter=1000
   integer :: ix,iy,iz,iter
@@ -66,8 +62,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                 ng%is_array(2):ng%ie_array(2),   &
                 ng%is_array(3):ng%ie_array(3))
   
-  call hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,pk,   &
-                        igc_is,igc_ie,gridcoo)
+  call hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,pk)
   
 !------------------------- C-G minimization
   
