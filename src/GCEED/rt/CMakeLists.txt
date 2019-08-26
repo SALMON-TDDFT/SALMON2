@@ -1,5 +1,4 @@
 set(SOURCES
-    add_polynomial.f90
     calc_current.f90
     calc_env_trigon.f90
     calcAext.f90
@@ -8,7 +7,6 @@ set(SOURCES
     check_ae_shape.f90
     convert_input_rt.f90
     dip.f90
-    gradient_ex.f90
     initA.f90
     projection.f90
     read_rt.f90
