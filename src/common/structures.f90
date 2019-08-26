@@ -231,6 +231,7 @@ module structures
   end type s_ofile
 
   type s_poisson_cg
+    integer :: iterVh                         ! iteration number for poisson_cg
     integer :: npole_partial                  ! number of multipoles calculated in each node
     integer :: npole_total                    ! total number of multipoles
     integer,allocatable :: ipole_tbl(:)       ! table for multipoles

@@ -34,7 +34,7 @@ type(s_mixing),intent(inout) :: mixing
 type(s_poisson_cg),intent(inout) :: poisson_cg
 real(8) :: dip_spacing
 
-iterVh = 0         ! Iteration counter
+poisson_cg%iterVh = 0         ! Iteration counter
 ilsda = ispin
 icalcforce=0
 
