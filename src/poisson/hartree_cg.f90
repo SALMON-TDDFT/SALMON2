@@ -21,7 +21,7 @@ contains
 
 !============================ Hartree potential (Solve Poisson equation)
 subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,  &
-                      igc_is,igc_ie,gridcoo,iflag_ps)
+                      igc_is,igc_ie,gridcoo)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg,s_sendrecv_grid,s_stencil
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
@@ -50,7 +50,6 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   integer,intent(in) :: igc_is
   integer,intent(in) :: igc_ie
   real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
-  integer,intent(in) :: iflag_ps
   
   integer,parameter :: maxiter=1000
   integer :: ix,iy,iz,iter
@@ -68,7 +67,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                 ng%is_array(3):ng%ie_array(3))
   
   call hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,pk,   &
-                        igc_is,igc_ie,gridcoo,iflag_ps)
+                        igc_is,igc_ie,gridcoo)
   
 !------------------------- C-G minimization
   
