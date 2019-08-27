@@ -48,7 +48,7 @@
 /
 
 &scf
-  ncg = 5
+  ncg = 4
   nscf = 120
   threshold = 1.d-9
 /
