@@ -6,7 +6,7 @@ program main
   use timer
   implicit none
 
-  call set_math_constants
+  call set_math_constants 
 
   call setup_parallel
   if (nproc_id_global == 0) then
