@@ -1830,7 +1830,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'iobs_num_em', iobs_num_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'iobs_samp_em', iobs_samp_em
       if(iobs_num_em==0) then
-        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,:)
+        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
         write(fh_variables_log, '("#",4X,A,"=",A)')       'obs_plane_em', obs_plane_em(1)
       else
         do i = 1,iobs_num_em

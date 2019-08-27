@@ -47,7 +47,7 @@ module sendrecv_grid
 
   ! Prepare unique MPI tag number (3~8) for send/recv based on
   ! the communication direction (idir, iside) from the sender:
-  integer function get_tag(idir, iside)
+  integer function get_tag(iside, idir)
     implicit none
     integer, intent(in) :: idir, iside
     get_tag = 2 * idir + iside
@@ -90,27 +90,28 @@ module sendrecv_grid
       do iaxis = 1, 3 ! 1:x,2:y,3:z
         if (idir == iaxis) then
           ! upside-send (US) block:
-          is_block(idir, iside_up, itype_send, idir) = rg%ie(idir) - rg%nd + 1
-          ie_block(idir, iside_up, itype_send, idir) = rg%ie(idir) 
+          is_block(idir, itype_send, iside_up, idir) = rg%ie(idir) - rg%nd + 1
+          ie_block(idir, itype_send, iside_up, idir) = rg%ie(idir)
           ! upside-recv (UR) block:
-          is_block(idir, iside_up, itype_recv, idir) = rg%ie(idir) + 1
-          ie_block(idir, iside_up, itype_recv, idir) = rg%ie(idir) + rg%nd
+          is_block(idir, itype_recv, iside_up, idir) = rg%ie(idir) + 1
+          ie_block(idir, itype_recv, iside_up, idir) = rg%ie(idir) + rg%nd
           ! downside-send (DS) block:
-          is_block(idir, iside_down, itype_send, idir) = rg%is(idir)
-          ie_block(idir, iside_down, itype_send, idir) = rg%is(idir) + rg%nd - 1
+          is_block(idir, itype_send, iside_down, idir) = rg%is(idir)
+          ie_block(idir, itype_send, iside_down, idir) = rg%is(idir) + rg%nd - 1
           ! downside-recv (DR) block:
-          is_block(idir, iside_down, itype_recv, idir) = rg%is(idir) - rg%nd
-          ie_block(idir, iside_down, itype_recv, idir) = rg%is(idir) - 1
+          is_block(idir, itype_recv, iside_down, idir) = rg%is(idir) - rg%nd
+          ie_block(idir, itype_recv, iside_down, idir) = rg%is(idir) - 1
         else
-          is_block(idir, :, :, iaxis) = rg%is(iaxis)
-          ie_block(idir, :, :, iaxis) = rg%ie(iaxis)
+          is_block(iaxis, :, :, idir) = rg%is(iaxis)
+          ie_block(iaxis, :, :, idir) = rg%ie(iaxis)
         end if
       end do
     end do
 
     ! Assign to s_sendrecv_grid structure:
     srg%nb = nb
-    srg%neig = neig
+    srg%neig(1,1:3) = neig(1:3,1)
+    srg%neig(2,1:3) = neig(1:3,2)
     srg%is_block(:, :, :, :) = is_block
     srg%ie_block(:, :, :, :) = ie_block
     srg%icomm = icomm
@@ -137,21 +138,21 @@ module sendrecv_grid
     do idir = 1, 3
       do iside = 1, 2
         ! Release persistent communication requests
-        if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= myrank) then
+        if (srg%neig(iside, idir) /= comm_proc_null) then
+          if (srg%neig(iside, idir) /= myrank) then
             if (srg%if_pcomm_real8_initialized) &
-              call comm_free_reqs(srg%ireq_real8(idir, iside, :))
+              call comm_free_reqs(srg%ireq_real8(:, iside, idir))
             if (srg%if_pcomm_complex8_initialized) &
-              call comm_free_reqs(srg%ireq_complex8(idir, iside, :))
+              call comm_free_reqs(srg%ireq_complex8(:, iside, idir))
           end if
         end if
 
         do itype = 1, 2
           ! Release allocated cache regions
-          if (allocated(srg%cache(idir, iside, itype)%dbuf)) &
-            deallocate( srg%cache(idir, iside, itype)%dbuf)
-          if (allocated(srg%cache(idir, iside, itype)%zbuf)) &
-            deallocate( srg%cache(idir, iside, itype)%zbuf)
+          if (allocated(srg%cache(itype, iside, idir)%dbuf)) &
+            deallocate( srg%cache(itype, iside, idir)%dbuf)
+          if (allocated(srg%cache(itype, iside, idir)%zbuf)) &
+            deallocate( srg%cache(itype, iside, idir)%zbuf)
         end do
       end do
     end do
@@ -185,18 +186,18 @@ module sendrecv_grid
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
-        if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= myrank) then
+        if (srg%neig(iside, idir) /= comm_proc_null) then
+          if (srg%neig(iside, idir) /= myrank) then
             ! Store the overlap reigion into the cache 
-            call pack_cache(idir, iside) 
+            call pack_cache(iside, idir) 
             ! In the first call of this subroutine, setup the persistent communication:
-            if (.not. srg%if_pcomm_real8_initialized) call init_pcomm(idir, iside)
+            if (.not. srg%if_pcomm_real8_initialized) call init_pcomm(iside, idir)
             ! Start to communication
-            call comm_start_all(srg%ireq_real8(idir, iside, :))
+            call comm_start_all(srg%ireq_real8(:, iside, idir))
           else
             ! NOTE: If neightboring nodes are itself (periodic with single proc),
             !       a simple side-to-side copy is used instead of the MPI comm.
-            call copy_self(idir, iside)
+            call copy_self(iside, idir)
           end if
         end if
       end do
@@ -204,12 +205,12 @@ module sendrecv_grid
 
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
-        if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= myrank) then
+        if (srg%neig(iside, idir) /= comm_proc_null) then
+          if (srg%neig(iside, idir) /= myrank) then
             ! Wait for recieving
-            call comm_wait_all(srg%ireq_real8(idir, iside, :))
+            call comm_wait_all(srg%ireq_real8(:, iside, idir))
             ! Write back the recieved cache
-            call unpack_cache(idir, iside)
+            call unpack_cache(iside, idir)
           end if
         end if
       end do
@@ -229,66 +230,66 @@ module sendrecv_grid
       do jdir = 1, 3
         do jside = 1, 2
           do jtype = 1, 2
-            is_b(1:3) = srg%is_block(jdir, jside, jtype, 1:3)
-            ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
-            allocate(srg%cache(jdir, jside, jtype)%dbuf( &
+            is_b(1:3) = srg%is_block(1:3, jtype, jside, jdir)
+            ie_b(1:3) = srg%ie_block(1:3, jtype, jside, jdir)
+            allocate(srg%cache(jtype, jside, jdir)%dbuf( &
               is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
           end do
         end do
       end do
     end subroutine
 
-    subroutine init_pcomm(jdir, jside)
+    subroutine init_pcomm(jside, jdir)
       use salmon_communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
-      srg%ireq_real8(jdir, jside, itype_send) = comm_send_init( &
-        srg%cache(jdir, jside, itype_send)%dbuf, &
-        srg%neig(jdir, jside), &
-        get_tag(jdir, jside), &
+      srg%ireq_real8(itype_send, jside, jdir) = comm_send_init( &
+        srg%cache(itype_send, jside, jdir)%dbuf, &
+        srg%neig(jside, jdir), &
+        get_tag(jside, jdir), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      srg%ireq_real8(jdir, jside, itype_recv) = comm_recv_init( &
-        srg%cache(jdir, jside, itype_recv)%dbuf, &
-        srg%neig(jdir, jside), &
-        get_tag(jdir, flip(jside)), & ! `jside` in sender side
+      srg%ireq_real8(itype_recv, jside, jdir) = comm_recv_init( &
+        srg%cache(itype_recv, jside, jdir)%dbuf, &
+        srg%neig(jside, jdir), &
+        get_tag(flip(jside), jdir), & ! `jside` in sender side
         srg%icomm)
     end subroutine init_pcomm
 
-    subroutine pack_cache(jdir, jside)
+    subroutine pack_cache(jside, jdir)
       use pack_unpack, only: copy_data
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
-      is_s(1:3) = srg%is_block(jdir, jside, itype_send, 1:3)
-      ie_s(1:3) = srg%ie_block(jdir, jside, itype_send, 1:3)
+      is_s(1:3) = srg%is_block(1:3, itype_send, jside, jdir)
+      ie_s(1:3) = srg%ie_block(1:3, itype_send, jside, jdir)
       call copy_data( &
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
-        srg%cache(jdir, jside, itype_send)%dbuf)
+        srg%cache(itype_send, jside, jdir)%dbuf)
     end subroutine pack_cache
 
-    subroutine unpack_cache(jdir, jside)
+    subroutine unpack_cache(jside, jdir)
       use pack_unpack, only: copy_data
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-      is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
-      ie_d(1:3) = srg%ie_block(jdir, jside, itype_recv, 1:3)
+      is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
+      ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
       call copy_data( &
-        srg%cache(jdir, jside, itype_recv)%dbuf, &
+        srg%cache(itype_recv, jside, jdir)%dbuf, &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine unpack_cache
 
-    subroutine copy_self(jdir, jside)
+    subroutine copy_self(jside, jdir)
       use pack_unpack, only: copy_data
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-      is_s(1:3) = srg%is_block(jdir, flip(jside), itype_send, 1:3)
-      ie_s(1:3) = srg%ie_block(jdir, flip(jside), itype_send, 1:3)
-      is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
-      ie_d(1:3) = srg%ie_block(jdir, jside, itype_recv, 1:3)
+      is_s(1:3) = srg%is_block(1:3, itype_send, flip(jside), jdir)
+      ie_s(1:3) = srg%ie_block(1:3, itype_send, flip(jside), jdir)
+      is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
+      ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
       call copy_data( &
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
@@ -320,18 +321,18 @@ module sendrecv_grid
     call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
-        if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= myrank) then
+        if (srg%neig(iside, idir) /= comm_proc_null) then
+          if (srg%neig(iside, idir) /= myrank) then
             ! Store the overlap reigion into the cache 
-            call pack_cache(idir, iside) 
+            call pack_cache(iside, idir) 
             ! In the first call of this subroutine, setup the persistent communication:
-            if (.not. srg%if_pcomm_complex8_initialized) call init_pcomm(idir, iside)
+            if (.not. srg%if_pcomm_complex8_initialized) call init_pcomm(iside, idir)
             ! Start to communication
-            call comm_start_all(srg%ireq_complex8(idir, iside, :))
+            call comm_start_all(srg%ireq_complex8(:, iside, idir))
           else
             ! NOTE: If neightboring nodes are itself (periodic with single proc),
             !       a simple side-to-side copy is used instead of the MPI comm.
-            call copy_self(idir, iside)
+            call copy_self(iside, idir)
           end if
         end if
       end do
@@ -339,12 +340,12 @@ module sendrecv_grid
 
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
-        if (srg%neig(idir, iside) /= comm_proc_null) then
-          if (srg%neig(idir, iside) /= myrank) then
+        if (srg%neig(iside, idir) /= comm_proc_null) then
+          if (srg%neig(iside, idir) /= myrank) then
             ! Wait for recieving
-            call comm_wait_all(srg%ireq_complex8(idir, iside, :))
+            call comm_wait_all(srg%ireq_complex8(:, iside, idir))
             ! Write back the recieved cache
-            call unpack_cache(idir, iside)
+            call unpack_cache(iside, idir)
           end if
         end if
       end do
@@ -364,66 +365,66 @@ module sendrecv_grid
       do jdir = 1, 3
         do jside = 1, 2
           do jtype = 1, 2
-            is_b(1:3) = srg%is_block(jdir, jside, jtype, 1:3)
-            ie_b(1:3) = srg%ie_block(jdir, jside, jtype, 1:3)
-            allocate(srg%cache(jdir, jside, jtype)%zbuf( &
+            is_b(1:3) = srg%is_block(1:3, jtype, jside, jdir)
+            ie_b(1:3) = srg%ie_block(1:3, jtype, jside, jdir)
+            allocate(srg%cache(jtype, jside, jdir)%zbuf( &
               is_b(1):ie_b(1), is_b(2):ie_b(2), is_b(3):ie_b(3), 1:srg%nb))
           end do
         end do
       end do
     end subroutine
 
-    subroutine init_pcomm(jdir, jside)
+    subroutine init_pcomm(jside, jdir)
       use salmon_communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
-      srg%ireq_complex8(jdir, jside, itype_send) = comm_send_init( &
-        srg%cache(jdir, jside, itype_send)%zbuf, &
-        srg%neig(jdir, jside), &
-        get_tag(jdir, jside), &
+      srg%ireq_complex8(itype_send, jside, jdir) = comm_send_init( &
+        srg%cache(itype_send, jside, jdir)%zbuf, &
+        srg%neig(jside, jdir), &
+        get_tag(jside, jdir), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      srg%ireq_complex8(jdir, jside, itype_recv) = comm_recv_init( &
-        srg%cache(jdir, jside, itype_recv)%zbuf, &
-        srg%neig(jdir, jside), &
-        get_tag(jdir, flip(jside)), & ! `jside` in sender
+      srg%ireq_complex8(itype_recv, jside, jdir) = comm_recv_init( &
+        srg%cache(itype_recv, jside, jdir)%zbuf, &
+        srg%neig(jside, jdir), &
+        get_tag(flip(jside), jdir), & ! `jside` in sender
         srg%icomm)
     end subroutine init_pcomm
 
-    subroutine pack_cache(jdir, jside)
+    subroutine pack_cache(jside, jdir)
       use pack_unpack, only: copy_data
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
-      is_s(1:3) = srg%is_block(jdir, jside, itype_send, 1:3)
-      ie_s(1:3) = srg%ie_block(jdir, jside, itype_send, 1:3)
+      is_s(1:3) = srg%is_block(1:3, itype_send, jside, jdir)
+      ie_s(1:3) = srg%ie_block(1:3, itype_send, jside, jdir)
       call copy_data( &
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
-        srg%cache(jdir, jside, itype_send)%zbuf)
+        srg%cache(itype_send, jside, jdir)%zbuf)
     end subroutine pack_cache
 
-    subroutine unpack_cache(jdir, jside)
+    subroutine unpack_cache(jside, jdir)
       use pack_unpack, only: copy_data
       implicit none
       integer, intent(in) :: jdir, jside
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-      is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
-      ie_d(1:3) = srg%ie_block(jdir, jside, itype_recv, 1:3)
+      is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
+      ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
       call copy_data( &
-        srg%cache(jdir, jside, itype_recv)%zbuf, &
+        srg%cache(itype_recv, jside, jdir)%zbuf, &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
     end subroutine unpack_cache
 
-    subroutine copy_self(jdir, jside)
+    subroutine copy_self(jside, jdir)
       use pack_unpack, only: copy_data
       integer, intent(in) :: jdir, jside
       integer :: is_s(1:3), ie_s(1:3) ! src region
       integer :: is_d(1:3), ie_d(1:3) ! dst region
-      is_s(1:3) = srg%is_block(jdir, flip(jside), itype_send, 1:3)
-      ie_s(1:3) = srg%ie_block(jdir, flip(jside), itype_send, 1:3)
-      is_d(1:3) = srg%is_block(jdir, jside, itype_recv, 1:3)
-      ie_d(1:3) = srg%ie_block(jdir, jside, itype_recv, 1:3)
+      is_s(1:3) = srg%is_block(1:3, itype_send, flip(jside), jdir)
+      ie_s(1:3) = srg%ie_block(1:3, itype_send, flip(jside), jdir)
+      is_d(1:3) = srg%is_block(1:3, itype_recv, jside, jdir)
+      ie_d(1:3) = srg%ie_block(1:3, itype_recv, jside, jdir)
       call copy_data( &
         data(is_s(1):ie_s(1), is_s(2):ie_s(2), is_s(3):ie_s(3), 1:srg%nb), &
         data(is_d(1):ie_d(1), is_d(2):ie_d(2), is_d(3):ie_d(3), 1:srg%nb))
