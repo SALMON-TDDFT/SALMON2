@@ -554,9 +554,10 @@ call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc
 end subroutine make_new_world
 
 !=====================================================================
-subroutine make_corr_pole(ng,poisson)
+subroutine make_corr_pole(lg,ng,poisson)
 use structures, only: s_rgrid,s_poisson
 implicit none
+type(s_rgrid), intent(in) :: lg
 type(s_rgrid), intent(in) :: ng
 type(s_poisson),intent(inout) :: poisson
 integer :: a,i
@@ -590,9 +591,9 @@ if(layout_multipole==2)then
   do ix=ng%is(1),ng%ie(1)
     rmin=1.d6
     do a=1,amax
-      r=sqrt( (gridcoo(ix,1)-Rion2(1,a))**2      &
-            + (gridcoo(iy,2)-Rion2(2,a))**2      &
-            + (gridcoo(iz,3)-Rion2(3,a))**2 )
+      r=sqrt( (lg%coordinate(ix,1)-Rion2(1,a))**2      &
+            + (lg%coordinate(iy,2)-Rion2(2,a))**2      &
+            + (lg%coordinate(iz,3)-Rion2(3,a))**2 )
       if ( r < rmin ) then
         rmin=r ; amin=a
       end if

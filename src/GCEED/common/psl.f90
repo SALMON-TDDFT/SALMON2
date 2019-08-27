@@ -40,7 +40,7 @@ select case(iperiodic)
 case(0)
   call calcJxyz_all
   call calcuV
-  call calcVpsl
+  call calcVpsl(lg)
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
   ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
 case(3)

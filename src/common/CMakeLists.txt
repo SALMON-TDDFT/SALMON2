@@ -19,6 +19,7 @@ set(SOURCES
    density_matrix.f90
    pack_unpack.f90
    sendrecv_grid.f90
+   set_gridcoordinate.f90
    total_energy.f90
    writefield.f90
    writefile3d.f90

@@ -19,7 +19,7 @@ module writefield
 
 contains
 
-subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
+subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,iscfrt,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
@@ -34,8 +34,6 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
   real(8),intent(out) :: rmat2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   integer,intent(in) :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
   real(8),intent(in) :: hgs(3)
-  integer,intent(in) :: igc_is,igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
   integer,intent(in) :: iscfrt
   real(8),intent(in),optional :: rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer,intent(in),optional :: itt
@@ -87,9 +85,9 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
     header_unit='A**(-3)'
     call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
   else if(format_voxel_data=='cube')then
-    call writecube(lg,103,suffix,phys_quantity,rmat2,hgs,igc_is,igc_ie,gridcoo)
+    call writecube(lg,103,suffix,phys_quantity,rmat2,hgs)
   else if(format_voxel_data=='vtk')then
-    call writevtk(lg,103,suffix,rmat2,hgs,igc_is,igc_ie,gridcoo)
+    call writevtk(lg,103,suffix,rmat2,hgs)
   end if
 
   if(iscfrt==2)then
@@ -131,16 +129,16 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,isc
       header_unit='A**(-3)'
       call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
     else if(format_voxel_data=='cube')then
-      call writecube(lg,103,suffix,phys_quantity,rmat2,hgs,igc_is,igc_ie,gridcoo)
+      call writecube(lg,103,suffix,phys_quantity,rmat2,hgs)
     else if(format_voxel_data=='vtk')then
-      call writevtk(lg,103,suffix,rmat2,hgs,igc_is,igc_ie,gridcoo)
+      call writevtk(lg,103,suffix,rmat2,hgs)
     end if
   end if
  
 end subroutine writedns
 
 !======================================================================
-subroutine writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
+subroutine writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
   use inputoutput, only: format_voxel_data
   use structures, only: s_rgrid
   use writefile3d
@@ -149,8 +147,6 @@ subroutine writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
   real(8),intent(in) :: elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   integer,intent(in) :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
   real(8),intent(in) :: hgs(3)
-  integer,intent(in) :: igc_is,igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
   integer,intent(in) :: iscfrt
   integer,intent(in),optional :: itt
   character(30) :: suffix
@@ -169,16 +165,16 @@ subroutine writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
     header_unit = "none"
     call writeavs(lg,103,suffix,header_unit,elf,icoo1d)
   else if(format_voxel_data=='cube')then
-    call writecube(lg,103,suffix,phys_quantity,elf,hgs,igc_is,igc_ie,gridcoo)
+    call writecube(lg,103,suffix,phys_quantity,elf,hgs)
   else if(format_voxel_data=='vtk')then
-    call writevtk(lg,103,suffix,elf,hgs,igc_is,igc_ie,gridcoo)
+    call writevtk(lg,103,suffix,elf,hgs)
   end if
   
 end subroutine writeelf
 
 !======================================================================
 
-subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
+subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d,hgs,itt)
   use inputoutput, only: format_voxel_data
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
@@ -193,8 +189,6 @@ subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d
   real(8),intent(out) :: rmat2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   integer,intent(in) :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
   real(8),intent(in) :: hgs(3)
-  integer,intent(in) :: igc_is,igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
   integer,intent(in),optional :: itt
   integer :: ix,iy,iz,jj
   character(30) :: suffix
@@ -271,9 +265,9 @@ subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d
       header_unit = "V/A"
       call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
     else if(format_voxel_data=='cube')then
-      call writecube(lg,103,suffix,phys_quantity,rmat2,hgs,igc_is,igc_ie,gridcoo)
+      call writecube(lg,103,suffix,phys_quantity,rmat2,hgs)
     else if(format_voxel_data=='vtk')then
-      call writevtk(lg,103,suffix,rmat2,hgs,igc_is,igc_ie,gridcoo)
+      call writevtk(lg,103,suffix,rmat2,hgs)
     end if
 
   end do  

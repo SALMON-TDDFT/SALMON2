@@ -13,13 +13,15 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE calcVpsl
+SUBROUTINE calcVpsl(lg)
+use structures, only: s_rgrid
 use salmon_parallel, only: nproc_id_global
 use prep_pp_sub, only: bisection
 use scf_data
 use allocate_psl_sub
 implicit none
 
+type(s_rgrid) :: lg
 integer :: ix,iy,iz,ak
 integer :: j,a,intr
 real(8) :: ratio1,ratio2
@@ -41,9 +43,9 @@ do a=1,MI
   do ix=mg_sta(1),mg_end(1)
   do iy=mg_sta(2),mg_end(2)
   do iz=mg_sta(3),mg_end(3)
-    r=sqrt( (gridcoo(ix,1)-Rion(1,a))**2      &
-           +(gridcoo(iy,2)-Rion(2,a))**2      &
-           +(gridcoo(iz,3)-Rion(3,a))**2 )+1.d-50
+    r=sqrt( (lg%coordinate(ix,1)-Rion(1,a))**2      &
+           +(lg%coordinate(iy,2)-Rion(2,a))**2      &
+           +(lg%coordinate(iz,3)-Rion(3,a))**2 )+1.d-50
     call bisection(r,intr,ak,nr,rad_psl)
     ratio1=(r-rad_psl(intr,ak))/(rad_psl(intr+1,ak)-rad_psl(intr,ak)) ; ratio2=1.d0-ratio1
     if(intr>=0.and.intr<=Nr)then

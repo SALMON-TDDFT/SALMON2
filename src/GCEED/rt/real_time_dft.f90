@@ -199,7 +199,7 @@ else if(ilsda==1)then
   numspin=2
 end if
 
-if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson)
+if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
 call set_ig_bound(ng,poisson)
 
 call timer_end(LOG_READ_LDA_DATA)
@@ -779,9 +779,9 @@ end select
 do iz=lg_sta(3),lg_end(3)
 do iy=lg_sta(2),lg_end(2)
 do ix=lg_sta(1),lg_end(1)
-   R1(ix,iy,iz)=(epdir_re1(1)*gridcoo(ix,1)+   &
-                 epdir_re1(2)*gridcoo(iy,2)+   &
-                 epdir_re1(3)*gridcoo(iz,3))
+   R1(ix,iy,iz)=(epdir_re1(1)*lg%coordinate(ix,1)+   &
+                 epdir_re1(2)*lg%coordinate(iy,2)+   &
+                 epdir_re1(3)*lg%coordinate(iz,3))
 end do
 end do
 end do
@@ -880,15 +880,15 @@ end do
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
-      call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
+      call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
       call calcELF(ng,info,srho,itt)
-      call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
+      call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
     if(yn_out_estatic_rt=='y')then
       call calcEstatic(ng, info, sVh, srg_ng)
-      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
+      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,itt)
     end if
   end do
 

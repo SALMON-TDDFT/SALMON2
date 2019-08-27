@@ -45,6 +45,7 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
 use calc_iobnum_sub
+use set_gridcoordinate_sub
 use scf_iteration_sub
 use rmmdiis_sub
 use density_matrix, only: calc_density
@@ -151,7 +152,7 @@ if(iopt==1)then
     itmg=img
     call set_imesh_oddeven(itmg)
     call old_mesh(lg,mg,ng)
-    call set_gridcoo(lg)
+    call set_gridcoordinate(lg,system)
 
   case(1,3) ! Continue the previous calculation
 
@@ -164,7 +165,7 @@ if(iopt==1)then
   call init_sendrecv_matrix
   select case(iperiodic)
   case(0)
-    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson)
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
   end select
   call set_ig_bound(ng,poisson)
 
@@ -312,7 +313,7 @@ if(iopt==1)then
     end if
 
     if(read_gs_wfn_k=='n') then
-      call init_wf_ns(1)
+      call init_wf_ns(lg,1)
       ! Store to psi/zpsi
       select case(iperiodic)
       case(0)
@@ -886,7 +887,7 @@ if(yn_out_psi=='y') then
 end if
 
 if(yn_out_dns=='y') then
-  call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
+  call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
 end if
 
 if(yn_out_dos=='y') then
@@ -894,7 +895,7 @@ if(yn_out_dos=='y') then
 end if
 
 if(yn_out_pdos=='y') then
-  call calc_pdos(info)
+  call calc_pdos(lg,info)
 end if
 
 if(OC==2)then
@@ -905,7 +906,7 @@ if(yn_out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
   call calcELF(ng,info,srho,0)
-  call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt)
+  call writeelf(lg,elf,icoo1d,hgs,iscfrt)
   deallocate(elf)
 end if
 call timer_end(LOG_WRITE_GS_RESULTS)

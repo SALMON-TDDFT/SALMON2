@@ -82,7 +82,7 @@ end subroutine writeavs
 
 !======================================================================
 
-subroutine writecube(lg,fp,suffix,phys_quantity,rmat,hgs,igc_is,igc_ie,gridcoo)
+subroutine writecube(lg,fp,suffix,phys_quantity,rmat,hgs)
   use inputoutput, only: natom,kion,rion,izatom
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_id_global
@@ -95,8 +95,6 @@ subroutine writecube(lg,fp,suffix,phys_quantity,rmat,hgs,igc_is,igc_ie,gridcoo)
   real(8),intent(IN) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                               lg%is(3):lg%ie(3))
   real(8),intent(in) :: hgs(3)
-  integer,intent(in) :: igc_is,igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
   character(30):: filename
   integer :: j,iatom
   integer :: ix,iy,iz
@@ -121,7 +119,7 @@ subroutine writecube(lg,fp,suffix,phys_quantity,rmat,hgs,igc_is,igc_ie,gridcoo)
       write(fp,*) "z Component of Static Electric Field"
     end if
     write(fp,*) "All values here are in a.u."
-    write(fp,'(i5,3f12.6)') natom,gridcoo(lg%is(1),1),gridcoo(lg%is(2),2),gridcoo(lg%is(3),3)
+    write(fp,'(i5,3f12.6)') natom,lg%coordinate(lg%is(1),1),lg%coordinate(lg%is(2),2),lg%coordinate(lg%is(3),3)
     write(fp,'(i5,3f12.6)') lg%num(1),hgs(1),0.d0,0.d0
     write(fp,'(i5,3f12.6)') lg%num(2),0.d0,hgs(2),0.d0
     write(fp,'(i5,3f12.6)') lg%num(3),0.d0,0.d0,hgs(3)
@@ -150,7 +148,7 @@ end subroutine writecube
 
 !======================================================================
 
-subroutine writevtk(lg,fp,suffix,rmat,hgs,igc_is,igc_ie,gridcoo)
+subroutine writevtk(lg,fp,suffix,rmat,hgs)
   use inputoutput, only: au_length_aa
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_id_global
@@ -162,8 +160,6 @@ subroutine writevtk(lg,fp,suffix,rmat,hgs,igc_is,igc_ie,gridcoo)
   real(8),intent(in) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                              lg%is(3):lg%ie(3))
   real(8),intent(in) :: hgs(3)
-  integer,intent(in) :: igc_is,igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
   character(30):: filename
   integer :: ix,iy,iz
 
@@ -176,9 +172,9 @@ subroutine writevtk(lg,fp,suffix,rmat,hgs,igc_is,igc_ie,gridcoo)
     write(fp, '(A)') "ASCII"
     write(fp, '(A)') "DATASET STRUCTURED_POINTS"
     write(fp, '(A,3(1X,I2))') "DIMENSIONS", lg%num(1), lg%num(2), lg%num(3)
-    write(fp, '(A,3(1X,F10.5))') "ORIGIN",gridcoo(lg%is(1),1)*au_length_aa,  &
-                                          gridcoo(lg%is(2),2)*au_length_aa,  &
-                                          gridcoo(lg%is(3),3)*au_length_aa
+    write(fp, '(A,3(1X,F10.5))') "ORIGIN",lg%coordinate(lg%is(1),1)*au_length_aa,  &
+                                          lg%coordinate(lg%is(2),2)*au_length_aa,  &
+                                          lg%coordinate(lg%is(3),3)*au_length_aa
     write(fp, '(A,3(1X,F10.5))') "SPACING", hgs(1)*au_length_aa,  &
                                             hgs(2)*au_length_aa,  &
                                             hgs(3)*au_length_aa
