@@ -94,7 +94,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   
   select case(iperiodic)
   case(0)
-    if(ikind_eext==1) call calcVbox(itt)
+    if(ikind_eext==1) call calcVbox(lg,itt)
     if(ihpsieff==1) then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
       do is=1,nspin
@@ -151,7 +151,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
     select case(iperiodic)
     case(0)
-      if(ikind_eext==1) call calcVbox(itt+1)
+      if(ikind_eext==1) call calcVbox(lg,itt+1)
       if(ihpsieff==1)then
   !$OMP parallel do collapse(3) private(is,iz,iy,ix)
         do is=1,nspin
@@ -361,19 +361,19 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call writedns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,rho0,itt)
+      call writedns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call calcELF(ng,info,srho,itt)
-      call writeelf(lg,elf,icoo1d,hgs,igc_is,igc_ie,gridcoo,iscfrt,itt)
+      call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
       call calcEstatic(ng, info, sVh, srg_ng)
-      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,igc_is,igc_ie,gridcoo,itt)
+      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,itt)
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)

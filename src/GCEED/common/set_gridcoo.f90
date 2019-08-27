@@ -19,72 +19,63 @@ use scf_data
 !$use omp_lib
 implicit none
 type(s_rgrid),intent(inout) :: lg
-integer :: ix,iy,iz,j
-integer :: itNd
+integer :: ix,iy,iz
 
-itNd=max(Nd,Ndh)
-igc_is=minval(lg_sta(:))-itNd
-igc_ie=maxval(lg_end(:))+itNd
-allocate(gridcoo(igc_is:igc_ie,3))
+allocate(lg%coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))
 
 select case(iperiodic)
 case(0)
   select case(imesh_oddeven(1))
     case(1)
 !$OMP parallel do
-      do ix=lg_sta(1)-itNd,lg_end(1)+itNd
-        gridcoo(ix,1)=dble(ix)*Hgs(1)
+      do ix=lg%is_overlap(1),lg%ie_overlap(1)
+        lg%coordinate(ix,1)=dble(ix)*Hgs(1)
       end do
     case(2)
 !$OMP parallel do
-      do ix=lg_sta(1)-itNd,lg_end(1)+itNd
-        gridcoo(ix,1)=(dble(ix)-0.5d0)*Hgs(1)
+      do ix=lg%is_overlap(1),lg%ie_overlap(1)
+        lg%coordinate(ix,1)=(dble(ix)-0.5d0)*Hgs(1)
       end do
   end select
 
   select case(imesh_oddeven(2))
     case(1)
 !$OMP parallel do
-      do iy=lg_sta(2)-itNd,lg_end(2)+itNd
-        gridcoo(iy,2)=dble(iy)*Hgs(2)
+      do iy=lg%is_overlap(2),lg%ie_overlap(2)
+        lg%coordinate(iy,2)=dble(iy)*Hgs(2)
       end do
     case(2)
 !$OMP parallel do
-    do iy=lg_sta(2)-itNd,lg_end(2)+itNd
-      gridcoo(iy,2)=(dble(iy)-0.5d0)*Hgs(2)
+    do iy=lg%is_overlap(2),lg%ie_overlap(2)
+      lg%coordinate(iy,2)=(dble(iy)-0.5d0)*Hgs(2)
     end do
   end select
   
   select case(imesh_oddeven(3))
     case(1)
 !$OMP parallel do
-      do iz=lg_sta(3)-itNd,lg_end(3)+itNd
-        gridcoo(iz,3)=dble(iz)*Hgs(3)
+      do iz=lg%is_overlap(3),lg%ie_overlap(3)
+        lg%coordinate(iz,3)=dble(iz)*Hgs(3)
       end do
     case(2)
 !$OMP parallel do
-      do iz=lg_sta(3)-itNd,lg_end(3)+itNd
-        gridcoo(iz,3)=(dble(iz)-0.5d0)*Hgs(3)
+      do iz=lg%is_overlap(3),lg%ie_overlap(3)
+        lg%coordinate(iz,3)=(dble(iz)-0.5d0)*Hgs(3)
       end do
   end select
 case(3)
 !$OMP parallel do
-  do ix=lg_sta(1)-itNd,lg_end(1)+itNd
-    gridcoo(ix,1)=dble(ix-1)*Hgs(1)
+  do ix=lg%is_overlap(1),lg%ie_overlap(1)
+    lg%coordinate(ix,1)=dble(ix-1)*Hgs(1)
   end do
 !$OMP parallel do
-  do iy=lg_sta(2)-itNd,lg_end(2)+itNd
-    gridcoo(iy,2)=dble(iy-1)*Hgs(2)
+  do iy=lg%is_overlap(2),lg%ie_overlap(2)
+    lg%coordinate(iy,2)=dble(iy-1)*Hgs(2)
   end do
 !$OMP parallel do
-  do iz=lg_sta(3)-itNd,lg_end(3)+itNd
-    gridcoo(iz,3)=dble(iz-1)*Hgs(3)
+  do iz=lg%is_overlap(3),lg%ie_overlap(3)
+    lg%coordinate(iz,3)=dble(iz-1)*Hgs(3)
   end do
 end select
-
-allocate(lg%coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))
-do j=1,3
-  lg%coordinate(lg%is_overlap(j):lg%ie_overlap(j),j)=gridcoo(lg%is_overlap(j):lg%ie_overlap(j),j)
-end do
 
 end subroutine set_gridcoo

@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_pdos(info)
-use structures, only: s_orbital_parallel
+subroutine calc_pdos(lg,info)
+use structures, only: s_rgrid,s_orbital_parallel
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
@@ -25,6 +25,7 @@ use scf_data
 use allocate_psl_sub
 use new_world_sub
 implicit none
+type(s_rgrid)           ,intent(in) :: lg
 type(s_orbital_parallel),intent(in) :: info
 integer :: iob,iobmax,iob_allob,iatom,L,ix,iy,iz,iik
 integer :: ikoa
@@ -78,9 +79,9 @@ do iob=1,iobmax
         do iz=mg_sta(3),mg_end(3)
         do iy=mg_sta(2),mg_end(2)
         do ix=mg_sta(1),mg_end(1)
-          xx=gridcoo(ix,1)-Rion(1,iatom)
-          yy=gridcoo(iy,2)-Rion(2,iatom)
-          zz=gridcoo(iz,3)-Rion(3,iatom)
+          xx=lg%coordinate(ix,1)-Rion(1,iatom)
+          yy=lg%coordinate(iy,2)-Rion(2,iatom)
+          zz=lg%coordinate(iz,3)-Rion(3,iatom)
           rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
           call bisection(rr,intr,ikoa,nr,rad_psl)
           ratio1=(rr-rad_psl(intr,ikoa))/(rad_psl(intr+1,ikoa)-rad_psl(intr,ikoa)) ; ratio2=1.d0-ratio1

@@ -16,12 +16,14 @@
 !=======================================================================
 !================================================= Initial wave function
 
-SUBROUTINE init_wf_ns(ifunc)
+SUBROUTINE init_wf_ns(lg,ifunc)
+use structures, only: s_rgrid
 use scf_data
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
 
+type(s_rgrid) :: lg
 integer :: ik,iob,iseed,a,ix,iy,iz
 integer :: is,iss,pstart(2),pend(2)
 real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
@@ -68,7 +70,7 @@ case(0)
       do iz=mg_sta(3),mg_end(3)
       do iy=mg_sta(2),mg_end(2)
       do ix=mg_sta(1),mg_end(1)
-        xx=gridcoo(ix,1) ; yy=gridcoo(iy,2) ; zz=gridcoo(iz,3)
+        xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
         rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
         psi(ix,iy,iz,iob_myob,1)=exp(-0.5d0*(rr*a_B)**2)*(a_B)**(3/2)
       end do
@@ -96,7 +98,7 @@ case(3)
       do iz=mg_sta(3),mg_end(3)
       do iy=mg_sta(2),mg_end(2)
       do ix=mg_sta(1),mg_end(1)
-        xx=gridcoo(ix,1) ; yy=gridcoo(iy,2) ; zz=gridcoo(iz,3)
+        xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
         rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
         zpsi(ix,iy,iz,iob_myob,ik)=exp(-0.5d0*rr**2)
       end do

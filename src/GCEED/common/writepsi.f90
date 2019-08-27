@@ -78,7 +78,7 @@ subroutine writepsi(lg)
         header_unit = "A**(-3/2)"
         call writeavs(lg,103,suffix,header_unit,matbox_l2,icoo1d)
       else if(format_voxel_data=='cube')then
-        call writecube(lg,103,suffix,phys_quantity,matbox_l2,hgs,igc_is,igc_ie,gridcoo)
+        call writecube(lg,103,suffix,phys_quantity,matbox_l2,hgs)
       end if
     end do
   end if
