@@ -1,4 +1,4 @@
-program main
+program main!test
   use salmon_global
   use salmon_parallel
   use inputoutput
