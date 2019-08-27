@@ -54,6 +54,7 @@ use writefield
 use global_variables_scf
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
+use hartree_sub, only: hartree_ns
 use force_sub
 use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
