@@ -16,6 +16,7 @@
 !=======================================================================
 !============================ Hartree potential (Solve Poisson equation)
 subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  use inputoutput, only: iperiodic,yn_ffte
   use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
   use poisson_cg_sub
@@ -39,10 +40,10 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
   case(0)
     call poisson_cg(lg,mg,ng,info_field,system,poisson,srho%f,sVh%f,srg_ng,stencil)
   case(3)
-    select case(iflag_hartree)
-    case(2)
+    select case(yn_ffte)
+    case('n')
       call poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
-    case(4)
+    case('y')
       call poisson_ffte(lg,mg,ng,info_field,srho%f,sVh%f,hgs,fg,poisson)
     end select
   end select
