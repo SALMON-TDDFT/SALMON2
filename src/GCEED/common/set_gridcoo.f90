@@ -13,11 +13,13 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine set_gridcoo
+subroutine set_gridcoo(lg)
+use structures, only: s_rgrid
 use scf_data
 !$use omp_lib
 implicit none
-integer :: ix,iy,iz
+type(s_rgrid),intent(inout) :: lg
+integer :: ix,iy,iz,j
 integer :: itNd
 
 itNd=max(Nd,Ndh)
@@ -79,5 +81,10 @@ case(3)
     gridcoo(iz,3)=dble(iz-1)*Hgs(3)
   end do
 end select
+
+allocate(lg%coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))
+do j=1,3
+  lg%coordinate(lg%is_overlap(j):lg%ie_overlap(j),j)=gridcoo(lg%is_overlap(j):lg%ie_overlap(j),j)
+end do
 
 end subroutine set_gridcoo

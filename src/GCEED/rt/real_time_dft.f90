@@ -55,7 +55,7 @@ type(s_rgrid) :: ng
 type(s_dft_system)  :: system
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
-type(s_poisson_cg) :: poisson_cg
+type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_reciprocal_grid) :: fg
 type(s_dft_energy) :: energy
@@ -91,7 +91,7 @@ posplane=0.d0
 
 inumcpu_check=0
 
-call convert_input_rt(Ntime,mixing,poisson_cg)
+call convert_input_rt(Ntime,mixing,poisson)
 allocate(system%mass(1:nelem))
 
 call set_filename
@@ -178,12 +178,12 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 if(iperiodic==3 .and. iflag_hartree==4)then
-  call prep_poisson_fft(ng)
+  call prep_poisson_fft(lg,ng,poisson)
 end if
 
 call read_pslfile(system)
 call allocate_psl
-call init_ps(ng,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
 call init_updown(info)
 call init_itype
@@ -199,8 +199,8 @@ else if(ilsda==1)then
   numspin=2
 end if
 
-if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson_cg)
-call set_ig_bound(ng,poisson_cg)
+if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson)
+call set_ig_bound(ng,poisson)
 
 call timer_end(LOG_READ_LDA_DATA)
 
@@ -270,8 +270,7 @@ allocate( alphaq_R(3,3,0:Nenergy), &
 ntmg=1
 ! 'Hartree' parameter
 
-Hconv  = Hconv !/(2d0*Ry)**2d0/a_B**3   ! Convergence criterion
-iterVh = 0        ! Iteration counter
+poisson%iterVh = 0        ! Iteration counter
 
 
 if(comm_is_root(nproc_id_global))then
@@ -336,7 +335,7 @@ endif
 
 
 ! Go into Time-Evolution
-call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson_cg)
+call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -471,7 +470,7 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson_cg)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
                            nproc_group_h, nproc_size_global
@@ -504,7 +503,7 @@ type(s_reciprocal_grid) :: fg
 type(s_md) :: md
 type(s_dft_energy) :: energy
 type(s_ofile) :: ofl
-type(s_poisson_cg) :: poisson_cg
+type(s_poisson) :: poisson
 type(s_vector) :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 
@@ -603,7 +602,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
 !????????? get_fourier_grid_G @ real_space_dft.f90
     if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
-    if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
+    if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
     jj = system%ngrid/nproc_size_global
     fg%ig_s = nproc_id_global*jj+1
     fg%ig_e = (nproc_id_global+1)*jj
@@ -611,7 +610,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     fg%icomm_G = nproc_group_global
     fg%ng = system%ngrid
     allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-    allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
+    allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
     if(iflag_hartree==2)then
        fg%iGzero = nGzero
        fg%Gx = Gx
@@ -957,11 +956,11 @@ TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson_cg,j_e,singlescale)
+     & ,poisson,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson_cg,j_e,singlescale)
+     & ,poisson,j_e,singlescale)
   end if
 end do TE
 call timer_end(LOG_RT_ITERATION)

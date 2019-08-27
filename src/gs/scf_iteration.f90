@@ -19,12 +19,13 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,itotmst,mst, &
+subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,itotmst,mst, &
                cg,ppg,vlocal,  &
                iflag_diisjump,energy, &
                norm_diff_psi_stock,  &
                miter,iditerybcg,   &
-               iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter)
+               iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter, &
+               poisson,fg,sVh)
   use inputoutput, only: iperiodic,method_min,method_mixing,mixrate
   use structures
   use timer
@@ -34,17 +35,21 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,it
   use subspace_diagonalization, only: ssdg_isolated,ssdg_periodic
   use density_matrix, only: calc_density
   use mixing_sub
+  use hartree_sub, only: hartree
   implicit none
 
+  type(s_rgrid),         intent(in)    :: lg
   type(s_rgrid),         intent(in)    :: mg
   type(s_rgrid),         intent(in)    :: ng
   type(s_dft_system),    intent(in)    :: system
   type(s_orbital_parallel),intent(in)  :: info
+  type(s_field_parallel),intent(in)    :: info_field
   type(s_orbital),       intent(inout) :: spsi,shpsi
   type(s_scalar),        intent(inout) :: srho
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg
+  type(s_sendrecv_grid), intent(inout) :: srg_ng
   type(s_pp_grid),       intent(in)    :: ppg
   integer,               intent(in)    :: itotmst
   integer,               intent(in)    :: mst(2)
@@ -60,6 +65,9 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,it
   integer,               intent(in)    :: ifmst(2)
   type(s_mixing),        intent(inout) :: mixing
   integer,               intent(in)    :: iter
+  type(s_poisson),       intent(inout) :: poisson
+  type(s_reciprocal_grid),intent(inout):: fg
+  type(s_scalar),        intent(inout) :: sVh
   integer                              :: j
 
 ! solve Kohn-Sham equation by minimization techniques
@@ -118,6 +126,10 @@ subroutine scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,it
   do j=1,system%nspin
     srho%f = srho%f + srho_s(j)%f
   end do
+
+  call timer_begin(LOG_CALC_HARTREE)
+  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call timer_end(LOG_CALC_HARTREE)
 
 end subroutine scf_iteration
 

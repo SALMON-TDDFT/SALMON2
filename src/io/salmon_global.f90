@@ -273,6 +273,7 @@ module salmon_global
 !! &poisson
   integer        :: layout_multipole
   integer        :: num_multipole_xyz(3)
+  real(8)        :: threshold_cg
 
 !! &ewald
   integer        :: newald
@@ -316,7 +317,6 @@ module salmon_global
   integer        :: iflag_comm_rho
 
 !! &group_hartree
-  real(8)        :: hconv
   integer        :: lmax_lmp
 
 !! &group_file

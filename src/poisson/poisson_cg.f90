@@ -14,20 +14,20 @@
 !  limitations under the License.
 !
 !=======================================================================
-module hartree_cg_sub
+module poisson_cg_sub
   implicit none
 
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,stencil,hconv,itervh,  &
-                      igc_is,igc_ie,gridcoo,iflag_ps)
-  use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg,s_sendrecv_grid,s_stencil
+subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil)
+  use inputoutput, only: threshold_cg
+  use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_is_root, comm_summation
   use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
-  use hartree_boundary_sub
+  use poisson_boundary_sub
   use timer
   
   implicit none
@@ -37,7 +37,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system),intent(in) :: system
-  type(s_poisson_cg),intent(in) :: poisson_cg
+  type(s_poisson),intent(inout) :: poisson
   real(8) :: trho(mg%is(1):mg%ie(1),    &
                   mg%is(2):mg%ie(2),      &
                   mg%is(3):mg%ie(3))
@@ -46,12 +46,6 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                  mg%is(3):mg%ie(3))
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   type(s_stencil),intent(in) :: stencil
-  real(8),intent(in) :: hconv
-  integer,intent(out) :: itervh
-  integer,intent(in) :: igc_is
-  integer,intent(in) :: igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
-  integer,intent(in) :: iflag_ps
   
   integer,parameter :: maxiter=1000
   integer :: ix,iy,iz,iter
@@ -68,8 +62,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
                 ng%is_array(2):ng%ie_array(2),   &
                 ng%is_array(3):ng%ie_array(3))
   
-  call hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,pk,   &
-                        igc_is,igc_ie,gridcoo,iflag_ps)
+  call poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,pk)
   
 !------------------------- C-G minimization
   
@@ -186,7 +179,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   
     sum2=tottmp*system%hvol
   
-    if ( abs(sum2) < hconv*dble(lg%num(1)*lg%num(2)*lg%num(3)) ) exit
+    if ( abs(sum2) < threshold_cg*dble(lg%num(1)*lg%num(2)*lg%num(3)) ) exit
   
     ck=sum2/sum1 ; sum1=sum2
   
@@ -201,8 +194,8 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
      
   end do iteration
   
-  iterVh=iter
-  if ( iterVh>maxiter .and. comm_is_root(nproc_id_global)) then
+  poisson%iterVh=iter
+  if ( poisson%iterVh>maxiter .and. comm_is_root(nproc_id_global)) then
      write(*,*) "Warning:Vh iteration is not converged"
      write(*,'("||tVh(i)-tVh(i-1)||**2/(# of grids) = ",e15.8)') &
                                 sum2/dble(lg%num(1)*lg%num(2)*lg%num(3))
@@ -210,7 +203,7 @@ subroutine hartree_cg(lg,mg,ng,info_field,system,poisson_cg,trho,tVh,srg_ng,sten
   
   return
 
-end subroutine hartree_cg
+end subroutine poisson_cg
 
 subroutine laplacian_poisson(ng,pk,rlap_wk,lap0,lapt)
   use structures, only: s_rgrid
@@ -250,4 +243,4 @@ subroutine laplacian_poisson(ng,pk,rlap_wk,lap0,lapt)
 
 end subroutine laplacian_poisson
 
-end module hartree_cg_sub
+end module poisson_cg_sub

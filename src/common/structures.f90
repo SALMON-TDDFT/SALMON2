@@ -65,6 +65,7 @@ module structures
                            ,is_overlap,ie_overlap & ! is_overlap=is-Nd, ie_overlap=ie+Nd
                            ,is_array,ie_array       ! allocate( array(is_array(1):ie_array(1), ...) )
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
+    real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
   type s_pcomm_cache
@@ -117,6 +118,7 @@ module structures
   type s_field_parallel
     integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
     integer :: id(3), isize(3)
+    integer :: isize_ffte(3)
   end type s_field_parallel
 
   type s_orbital
@@ -206,6 +208,7 @@ module structures
     integer :: ng,iG_s,iG_e,iGzero
     real(8),allocatable :: Gx(:),Gy(:),Gz(:)
     complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zdVG_ion(:,:)
+    complex(8),allocatable :: zrhoG_ele_tmp(:) ! work array for zrhoG_ele
   end type s_reciprocal_grid
 
   type s_fdtd_system
@@ -233,14 +236,22 @@ module structures
      character(256) :: file_rt_data, file_rt_energy_data
   end type s_ofile
 
-  type s_poisson_cg
-    integer :: npole_partial                  ! number of multipoles calculated in each node
-    integer :: npole_total                    ! total number of multipoles
-    integer,allocatable :: ipole_tbl(:)       ! table for multipoles
-    integer,allocatable :: ig_num(:)          ! number of grids for domains to which each multipole belongs
-    integer,allocatable :: ig(:,:,:)          ! grid table for domains to which each multipole belongs
-    integer,allocatable :: ig_bound(:,:,:)    ! grid table for boundaries
-  end type s_poisson_cg
+  type s_poisson
+! for poisson_cg
+    integer :: iterVh                              ! iteration number for poisson_cg
+    integer :: npole_partial                       ! number of multipoles calculated in each node
+    integer :: npole_total                         ! total number of multipoles
+    integer,allocatable :: ipole_tbl(:)            ! table for multipoles
+    integer,allocatable :: ig_num(:)               ! number of grids for domains to which each multipole belongs
+    integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
+    integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
+    real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
+! for Fourier transformation routines
+    real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
+    complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
+    complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
+    complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
+  end type s_poisson
 
 ! for DFT ground state calculations
 

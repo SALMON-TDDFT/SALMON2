@@ -54,6 +54,7 @@ use writefield
 use global_variables_scf
 use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
+use hartree_sub, only: hartree
 use force_sub
 use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
@@ -80,7 +81,7 @@ type(s_field_parallel) :: info_field
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
-type(s_poisson_cg) :: poisson_cg
+type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_scalar) :: srho
 type(s_scalar) :: sVh,sVpsl
@@ -112,7 +113,7 @@ call setcN(cnmat)
 
 call check_dos_pdos
 
-call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson_cg)
+call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 
 call init_dft(lg,system,stencil)
 if(stencil%if_orthogonal) then
@@ -153,7 +154,7 @@ if(iopt==1)then
     itmg=img
     call set_imesh_oddeven(itmg)
     call init_mesh(lg,mg)
-    call set_gridcoo
+    call set_gridcoo(lg)
     call init_mesh_s(ng)
     call check_mg(mg)
     call check_ng(ng)
@@ -169,9 +170,9 @@ if(iopt==1)then
   call init_sendrecv_matrix
   select case(iperiodic)
   case(0)
-    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson_cg)
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(ng,poisson)
   end select
-  call set_ig_bound(ng,poisson_cg)
+  call set_ig_bound(ng,poisson)
 
   call allocate_mat(ng)
   call set_icoo1d
@@ -273,7 +274,7 @@ if(iopt==1)then
   end if
 
   if(iperiodic==3 .and. iflag_hartree==4)then
-    call prep_poisson_fft(ng)
+    call prep_poisson_fft(lg,ng,poisson)
   end if
 
   if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -283,7 +284,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl
-    call init_ps(ng,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -393,7 +394,7 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     Vh=0.d0
 
-    call Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,sVh,fg)
+    call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
     Vh = sVh%f
 
     if(ilsda == 0) then
@@ -460,7 +461,7 @@ else if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     call dealloc_init_ps(ppg,ppg_all,ppn)
-    call init_ps(ng,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
     if(iperiodic==3) call get_fourier_grid_G(fg)
 
   end if
@@ -472,7 +473,8 @@ if(comm_is_root(nproc_id_global)) then
   write(*,*) '-----------------------------------------------'
   select case(iperiodic)
   case(0)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,iterVh
+    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,  &
+                                                                                 poisson%iterVh
   case(3)
     write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
   end select
@@ -494,7 +496,7 @@ end if
 
 call timer_begin(LOG_INIT_GS_ITERATION)
 iflag=1
-iterVh=1000
+poisson%iterVh=1000
 sum1=1.0d9
 
 iflag_diisjump=0
@@ -579,18 +581,13 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
-    call scf_iteration(mg,ng,system,info,stencil,srg,spsi,shpsi,srho,srho_s,itotmst,mst, &
+    call scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,itotmst,mst, &
                        cg,ppg,V_local,  &
                        iflag_diisjump,energy, &
                        norm_diff_psi_stock, &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter)
-
-    call timer_begin(LOG_CALC_HARTREE)
-    if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
-      call Hartree_ns(lg,mg,ng,info_field,system,poisson_cg,srg_ng,stencil,srho,sVh,fg)
-    end if
-    call timer_end(LOG_CALC_HARTREE)
+                       iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter,    &
+                       poisson,fg,sVh)
 
     call timer_begin(LOG_CALC_EXC_COR)
     if(imesh_s_all==1.or.(imesh_s_all==0.and.nproc_id_global<nproc_d_o_mul*nproc_d_g_mul_dm))then
@@ -676,7 +673,8 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(iflag_diisjump == 1) then
         write(*,'("Diisjump occured. Steepest descent was used.")')
       end if
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,iterVh
+      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,   &
+                                                                                   poisson%iterVh
     case(3)
       write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,energy%E_tot*2d0*Ry
     end select
@@ -1046,7 +1044,7 @@ subroutine get_fourier_grid_G(fg)
   type(s_reciprocal_grid) :: fg
 
   if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
-  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
+  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
 
   jj = system%ngrid/nproc_size_global
   fg%ig_s = nproc_id_global*jj+1
@@ -1055,7 +1053,7 @@ subroutine get_fourier_grid_G(fg)
   fg%icomm_G = nproc_group_global
   fg%ng = system%ngrid
   allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
-  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
+  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
   if(iflag_hartree==2)then
      fg%iGzero = nGzero
      fg%Gx = Gx

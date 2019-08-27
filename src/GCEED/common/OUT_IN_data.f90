@@ -656,7 +656,7 @@ end if
 
 call check_fourier
 
-call set_gridcoo
+call set_gridcoo(lg)
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))

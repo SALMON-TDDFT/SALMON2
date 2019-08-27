@@ -13,15 +13,17 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine prep_poisson_fft(ng)
-  use structures,      only: s_rgrid
+subroutine prep_poisson_fft(lg,ng,poisson)
+  use structures,      only: s_rgrid,s_poisson
   use salmon_parallel, only: nproc_id_icommy
   use salmon_parallel, only: nproc_id_icommz
   use scf_data
   use new_world_sub
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_poisson),intent(inout) :: poisson
   integer :: ng_sta_2(3),ng_end_2(3),ng_num_2(3)
   integer :: lg_sta_2(3),lg_end_2(3),lg_num_2(3)
   real(8) :: Gx,Gy,Gz
@@ -34,7 +36,10 @@ subroutine prep_poisson_fft(ng)
   real(8) :: bLx,bLy,bLz
   integer :: ky_shift,kz_shift
 
-  coef_poisson=0.d0
+  if(.not.allocated(poisson%coef))then
+    allocate(poisson%coef(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+  end if
+  poisson%coef=0.d0
 
   lg_sta_2(1:3)=lg_sta(1:3)
   lg_end_2(1:3)=lg_end(1:3)
@@ -84,9 +89,9 @@ subroutine prep_poisson_fft(ng)
     Gz=dble(kkz)*bLz
     G2=Gx**2+Gy**2+Gz**2
     if(kx==1.and.ky2==1.and.kz2==1)then
-      coef_poisson(kx,ky,kz)=0.d0
+      poisson%coef(kx,ky,kz)=0.d0
     else
-      coef_poisson(kx,ky,kz)=4.d0*Pi/G2
+      poisson%coef(kx,ky,kz)=4.d0*Pi/G2
     end if
   end do
   end do

@@ -13,9 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson_cg)
+subroutine convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 use salmon_global
-use structures, only: s_orbital_parallel, s_field_parallel, s_mixing, s_poisson_cg
+use structures, only: s_orbital_parallel, s_field_parallel, s_mixing, s_poisson
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use check_numcpu_sub
@@ -31,10 +31,10 @@ integer :: ibox2
 integer :: icheck1,icheck2
 character(100) :: file_atoms_coo
 type(s_mixing),intent(inout) :: mixing
-type(s_poisson_cg),intent(inout) :: poisson_cg
+type(s_poisson),intent(inout) :: poisson
 real(8) :: dip_spacing
 
-iterVh = 0         ! Iteration counter
+poisson%iterVh = 0         ! Iteration counter
 ilsda = ispin
 icalcforce=0
 
@@ -205,7 +205,7 @@ else if(layout_multipole==3)then
   end if
 end if
 
-poisson_cg%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
+poisson%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
 
 !===== namelist for group_file =====
 if(comm_is_root(nproc_id_global))then
