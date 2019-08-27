@@ -43,7 +43,7 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
     case(2)
       call poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
     case(4)
-      call poisson_FFTE(lg,mg,ng,srho%f,sVh%f,hgs,fg,poisson,npuw,npuy,npuz)
+      call poisson_ffte(lg,mg,ng,info_field,srho%f,sVh%f,hgs,fg,poisson)
     end select
   end select
 
