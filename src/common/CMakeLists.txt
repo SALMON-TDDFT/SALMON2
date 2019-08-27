@@ -6,8 +6,6 @@ set(SOURCES
    calc_myob.f90
    calc_ob_num.f90
    check_corrkob.f90
-   check_mg.f90
-   check_ng.f90
    check_numcpu.f90
    const.f90
    hpsi.f90

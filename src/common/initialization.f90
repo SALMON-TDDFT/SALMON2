@@ -21,13 +21,13 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(lg,system,stencil)
+subroutine init_dft(lg,mg,ng,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
   & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion
   implicit none
-  type(s_rgrid)      :: lg
+  type(s_rgrid)      :: lg,mg,ng
   type(s_dft_system) :: system
   type(s_stencil)    :: stencil
   !
@@ -58,6 +58,8 @@ subroutine init_dft(lg,system,stencil)
     hgs(1:3) = dl(1:3)
   end if
   call init_grid_whole(rsize,hgs,lg)
+  call init_grid_parallel(lg,mg,ng)
+
   system%hgs = hgs
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
@@ -99,6 +101,8 @@ subroutine init_dft(lg,system,stencil)
   return
 end subroutine init_dft
 
+!===================================================================================================================================
+
 subroutine init_grid_whole(rsize,hgs,lg)
   use structures
   use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid
@@ -107,8 +111,6 @@ subroutine init_grid_whole(rsize,hgs,lg)
   type(s_rgrid) :: lg
   !
   real(8),parameter :: epsilon=1.d-10
-  !
-  integer :: lg_sta(3),lg_end(3),lg_num(3)
   integer :: j
 
   lg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
@@ -116,33 +118,30 @@ subroutine init_grid_whole(rsize,hgs,lg)
 
   select case(iperiodic)
     case(0)
-      lg_end(:)=int((rsize(:)+epsilon)/2.d0/Hgs(:))
+      lg%ie(:)=int((rsize(:)+epsilon)/2.d0/Hgs(:))
       do j=1,3
         if(mod(int(rsize(j)/Hgs(j)+1.d-12),2)==1)then
-          lg_sta(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))
+          lg%is(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))
         else
-          lg_sta(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))+1
+          lg%is(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))+1
         end if
       end do
     case(3)
-      lg_sta(:)=1
-      lg_end(:)=int((rsize(:)+epsilon)/Hgs(:))
+      lg%is(:)=1
+      lg%ie(:)=int((rsize(:)+epsilon)/Hgs(:))
   end select
-  lg_num(:)=lg_end(:)-lg_sta(:)+1
+  lg%num(:)=lg%ie(:)-lg%is(:)+1
 
-  lg%is(1:3) = lg_sta(1:3)
-  lg%ie(1:3) = lg_end(1:3)
-  lg%num(1:3) = lg_num(1:3)
-  lg%is_overlap(1:3) = lg_sta(1:3)-nd
-  lg%ie_overlap(1:3) = lg_end(1:3)+nd
+  lg%is_overlap(1:3) = lg%is(1:3)-nd
+  lg%ie_overlap(1:3) = lg%ie(1:3)+nd
 
   allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
           ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
           ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
 
   if(iperiodic==3 .and. nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3)==1) then
-    lg%is_array(1:3) = lg_sta(1:3)
-    lg%ie_array(1:3) = lg_end(1:3)
+    lg%is_array(1:3) = lg%is(1:3)
+    lg%ie_array(1:3) = lg%ie(1:3)
     do j=lg%is_overlap(1),lg%ie_overlap(1)
       lg%idx(j) = mod(j+lg%num(1)-1,lg%num(1))+1
     end do
@@ -153,8 +152,8 @@ subroutine init_grid_whole(rsize,hgs,lg)
       lg%idz(j) = mod(j+lg%num(3)-1,lg%num(3))+1
     end do
   else
-    lg%is_array(1:3)=lg_sta(1:3)-nd
-    lg%ie_array(1:3)=lg_end(1:3)+nd
+    lg%is_array(1:3)=lg%is(1:3)-nd
+    lg%ie_array(1:3)=lg%ie(1:3)+nd
     do j=lg%is_overlap(1),lg%ie_overlap(1)
       lg%idx(j) = j
     end do
@@ -174,6 +173,205 @@ subroutine init_grid_whole(rsize,hgs,lg)
 
   return
 end subroutine init_grid_whole
+
+!===================================================================================================================================
+
+subroutine init_grid_parallel(lg,mg,ng)
+  use salmon_communication, only: comm_is_root
+  use salmon_parallel, only: nproc_id_global,nproc_size_global
+  use salmon_global, only: calc_mode,iperiodic,process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_k,nproc_ob
+  use structures, only: s_rgrid
+  implicit none
+  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid)            :: mg,ng
+  !
+  integer :: i1,i2,i3,i4,j1,j2,j3,ibox,j,ii
+  integer :: nproc,myrank
+  integer :: nproc_domain_orbital_mul,ngo(3),ngo_mul
+
+  myrank = nproc_id_global
+  nproc = nproc_size_global
+
+  allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1),ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
+
+! +------+
+! |  mg  |
+! +------+
+
+  mg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
+  mg%nd = Nd
+
+  nproc_domain_orbital_mul = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3)
+  if(process_allocation=='orbital_sequential')then
+    do j3=0,nproc_domain_orbital(3)-1
+    do j2=0,nproc_domain_orbital(2)-1
+    do j1=0,nproc_domain_orbital(1)-1
+      do i2=0,nproc_k-1
+      do i1=0,nproc_ob-1
+        ibox = nproc_ob*i2 + i1 + nproc_k*nproc_ob*( j1 + nproc_domain_orbital(1)*j2 &
+        & + nproc_domain_orbital(1)*nproc_domain_orbital(2)*j3 )
+        mg%is_all(1,ibox) = j1*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)
+        mg%ie_all(1,ibox) = (j1+1)*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)-1
+        mg%is_all(2,ibox) = j2*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)
+        mg%ie_all(2,ibox) = (j2+1)*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)-1
+        mg%is_all(3,ibox) = j3*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)
+        mg%ie_all(3,ibox) = (j3+1)*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)-1
+      end do
+      end do
+    end do
+    end do
+    end do
+  else if(process_allocation=='grid_sequential')then
+    do i2=0,nproc_k-1
+    do i1=0,nproc_ob-1
+      do j3=0,nproc_domain_orbital(3)-1
+      do j2=0,nproc_domain_orbital(2)-1
+      do j1=0,nproc_domain_orbital(1)-1
+        ibox = j1 + nproc_domain_orbital(1)*j2 + nproc_domain_orbital(1)*nproc_domain_orbital(2)*j3 &
+        & + (nproc_ob*i2 + i1)*nproc_domain_orbital_mul
+        mg%is_all(1,ibox) = j1*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)
+        mg%ie_all(1,ibox) = (j1+1)*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)-1
+        mg%is_all(2,ibox) = j2*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)
+        mg%ie_all(2,ibox) = (j2+1)*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)-1
+        mg%is_all(3,ibox) = j3*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)
+        mg%ie_all(3,ibox) = (j3+1)*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)-1
+      end do
+      end do
+      end do
+    end do
+    end do
+  end if
+
+  mg%is(:) = mg%is_all(:,myrank)
+  mg%ie(:) = mg%ie_all(:,myrank)
+
+  mg%num(:) = mg%ie(:)-mg%is(:)+1
+
+  mg%is_overlap(1:3) = mg%is(1:3)-nd
+  mg%ie_overlap(1:3) = mg%ie(1:3)+nd
+
+  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
+          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
+          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
+
+  if(iperiodic==3 .and. nproc_domain_orbital_mul==1) then
+    if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
+    mg%is_array(1:3) = mg%is(1:3)
+    mg%ie_array(1:3) = mg%ie(1:3)
+    do j=mg%is_overlap(1),mg%ie_overlap(1)
+      mg%idx(j) = mod(j+mg%num(1)-1,mg%num(1))+1
+    end do
+    do j=mg%is_overlap(2),mg%ie_overlap(2)
+      mg%idy(j) = mod(j+mg%num(2)-1,mg%num(2))+1
+    end do
+    do j=mg%is_overlap(3),mg%ie_overlap(3)
+      mg%idz(j) = mod(j+mg%num(3)-1,mg%num(3))+1
+    end do
+  else
+    mg%is_array(1:3) = mg%is(1:3)-nd
+    mg%ie_array(1:3) = mg%ie(1:3)+nd
+    do j=mg%is_overlap(1),mg%ie_overlap(1)
+      mg%idx(j) = j
+    end do
+    do j=mg%is_overlap(2),mg%ie_overlap(2)
+      mg%idy(j) = j
+    end do
+    do j=mg%is_overlap(3),mg%ie_overlap(3)
+      mg%idz(j) = j
+    end do
+  end if
+
+  if(calc_mode=='RT')then
+#ifdef SALMON_STENCIL_PADDING
+    mg%ie_array(2)=mg%ie(2)+nd+1
+#endif
+  end if
+
+  if(mg%num(1)<nd .or.mg%num(2)<nd .or.mg%num(3)<nd)then
+    stop "A system is small. Please use less number of processors."
+  end if
+
+! +------+
+! |  ng  |
+! +------+
+
+  ng%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
+  ng%nd = Nd
+
+  ngo = nproc_domain_general/nproc_domain_orbital
+  ngo_mul = ngo(1)*ngo(2)*ngo(3)
+
+  if(process_allocation=='orbital_sequential')then
+    do ii=0,nproc_domain_orbital_mul-1
+      do i4=0,nproc/nproc_domain_orbital_mul/ngo_mul-1
+      do i3=0,ngo(3)-1
+      do i2=0,ngo(2)-1
+      do i1=0,ngo(1)-1
+        ibox= i1+i2*ngo(1)+i3*ngo(1)*ngo(2)       &
+                +i4*ngo_mul   &
+                +ii*nproc/nproc_domain_orbital_mul
+        ng%is_all(1,ibox) = i1*(mg%ie_all(1,ibox)-mg%is_all(1,ibox)+1)/ngo(1)+mg%is_all(1,ibox)
+        ng%ie_all(1,ibox) = (i1+1)*(mg%ie_all(1,ibox)-mg%is_all(1,ibox)+1)/ngo(1)+mg%is_all(1,ibox)-1
+        ng%is_all(2,ibox) = i2*(mg%ie_all(2,ibox)-mg%is_all(2,ibox)+1)/ngo(2)+mg%is_all(2,ibox)
+        ng%ie_all(2,ibox) = (i2+1)*(mg%ie_all(2,ibox)-mg%is_all(2,ibox)+1)/ngo(2)+mg%is_all(2,ibox)-1
+        ng%is_all(3,ibox) = i3*(mg%ie_all(3,ibox)-mg%is_all(3,ibox)+1)/ngo(3)+mg%is_all(3,ibox)
+        ng%ie_all(3,ibox) = (i3+1)*(mg%ie_all(3,ibox)-mg%is_all(3,ibox)+1)/ngo(3)+mg%is_all(3,ibox)-1
+      end do
+      end do
+      end do
+      end do
+    end do
+  else if(process_allocation=='grid_sequential')then
+    do i4=0,nproc/nproc_domain_orbital_mul/ngo_mul-1
+    do i3=0,ngo(3)-1
+    do i2=0,ngo(2)-1
+    do i1=0,ngo(1)-1
+      do ii=0,nproc_domain_orbital_mul-1
+        ibox=ii+(i1+i2*ngo(1)+i3*ngo(1)*ngo(2))*nproc_domain_orbital_mul   &
+              +i4*nproc_domain_orbital_mul*ngo_mul
+        ng%is_all(1,ibox) = i1*(mg%ie_all(1,ii)-mg%is_all(1,ii)+1)/ngo(1)+mg%is_all(1,ii)
+        ng%ie_all(1,ibox) = (i1+1)*(mg%ie_all(1,ii)-mg%is_all(1,ii)+1)/ngo(1)+mg%is_all(1,ii)-1
+        ng%is_all(2,ibox) = i2*(mg%ie_all(2,ii)-mg%is_all(2,ii)+1)/ngo(2)+mg%is_all(2,ii)
+        ng%ie_all(2,ibox) = (i2+1)*(mg%ie_all(2,ii)-mg%is_all(2,ii)+1)/ngo(2)+mg%is_all(2,ii)-1
+        ng%is_all(3,ibox) = i3*(mg%ie_all(3,ii)-mg%is_all(3,ii)+1)/ngo(3)+mg%is_all(3,ii)
+        ng%ie_all(3,ibox) = (i3+1)*(mg%ie_all(3,ii)-mg%is_all(3,ii)+1)/ngo(3)+mg%is_all(3,ii)-1
+      end do
+    end do
+    end do
+    end do
+    end do
+  end if
+
+  ng%is(1:3) = ng%is_all(:,myrank)
+  ng%ie(1:3) = ng%ie_all(:,myrank)
+
+  ng%num(1:3) = ng%ie(1:3)-ng%is(1:3)+1
+
+  ng%is_overlap(1:3) = ng%is(1:3)-nd
+  ng%ie_overlap(1:3) = ng%ie(1:3)+nd
+  ng%is_array(1:3) = ng%is(1:3)-nd
+  ng%ie_array(1:3) = ng%ie(1:3)+nd
+
+  allocate(ng%idx(ng%is_overlap(1):ng%ie_overlap(1)) &
+          ,ng%idy(ng%is_overlap(2):ng%ie_overlap(2)) &
+          ,ng%idz(ng%is_overlap(3):ng%ie_overlap(3)))
+  do j=ng%is_overlap(1),ng%ie_overlap(1)
+    ng%idx(j) = j
+  end do
+  do j=ng%is_overlap(2),ng%ie_overlap(2)
+    ng%idy(j) = j
+  end do
+  do j=ng%is_overlap(3),ng%ie_overlap(3)
+    ng%idz(j) = j
+  end do
+
+  if(iperiodic==0.and.(ng%num(1)<nd.or.ng%num(2)<nd.or.ng%num(3)<nd))then
+    stop "A system is small. Please use less number of processors."
+  end if
+
+end subroutine init_grid_parallel
+
+!===================================================================================================================================
 
 subroutine setbn(bnmat)
   implicit none

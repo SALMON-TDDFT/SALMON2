@@ -427,8 +427,6 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_iobnum_sub
 use calc_myob_sub
 use check_corrkob_sub
-use check_mg_sub
-use check_ng_sub
 use set_gridcoordinate_sub
 use scf_data
 use new_world_sub
@@ -647,7 +645,7 @@ inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
 lg_num(:)=lg_end(:)-lg_sta(:)+1
 
 if(sum(dl)==0d0 .and. sum(num_rgrid)==0) dl = Hgs ! input variables should not be changed (future work)
-call init_dft(lg,system,stencil)
+call init_dft(lg,mg,ng,system,stencil)
 
 if(iscfrt==2)then
 #ifdef SALMON_STENCIL_PADDING
@@ -655,35 +653,11 @@ if(iscfrt==2)then
 #endif
 end if
 
+call old_mesh(lg,mg,ng)
+
 call check_fourier
 
 call set_gridcoordinate(lg,system)
-
-allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
-allocate(inum_Mxin(3,0:nproc_size_global-1))
-
-call setmg(mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
-           lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,iscfrt)
-
-if(iperiodic==3 .and. nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)==1) then
-  if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
-  mg%is(1:3)=lg%is(1:3)
-  mg%ie(1:3)=lg%ie(1:3)
-  mg%num(1:3)=lg%num(1:3)
-  mg%is_overlap(1:3)=lg%is_overlap(1:3)
-  mg%ie_overlap(1:3)=lg%ie_overlap(1:3)
-  mg%is_array(1:3)=lg%is_array(1:3)
-  mg%ie_array(1:3)=lg%ie_array(1:3)
-  if(allocated(mg%idx)) deallocate(mg%idx)
-  if(allocated(mg%idy)) deallocate(mg%idy)
-  if(allocated(mg%idz)) deallocate(mg%idz)
-  allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) & ! add shadow region
-          ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
-          ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
-  mg%idx = lg%idx
-  mg%idy = lg%idy
-  mg%idz = lg%idz
-end if
 
 if(ilsda == 0) then
   itotMST0=MST0(1)
@@ -694,10 +668,6 @@ else if(ilsda == 1) then
   itotMST=MST(1)+MST(2)
   itotfMST=ifMST(1)+ifMST(2)
 end if
-
-call init_mesh_s(ng)
-call check_mg(mg)
-call check_ng(ng)
 
 if(iflag_ps.eq.1)then
   call comm_bcast(MI_read,nproc_group_global)
