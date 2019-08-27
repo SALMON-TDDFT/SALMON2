@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
-  use salmon_parallel, only: nproc_group_h
+  use salmon_parallel, only: nproc_group_h, nproc_id_global
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
   use scf_data
@@ -76,12 +76,17 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
     enddo
   
 !$omp end parallel do
-    iwk_dum=iwk_size
-    iwk_size=12
-    call make_iwksta_iwkend
+    iwksta(1:3)=ista_Mxin_s(1:3,nproc_id_global)-Ndh
+    iwkend(1:3)=iend_Mxin_s(1:3,nproc_id_global)+Ndh
+    iwk2sta(1:3)=ista_Mxin_s(1:3,nproc_id_global)-Ndh
+    iwk2end(1:3)=iend_Mxin_s(1:3,nproc_id_global)+Ndh
+    iwk3sta(1:3)=ista_Mxin_s(1:3,nproc_id_global)
+    iwk3end(1:3)=iend_Mxin_s(1:3,nproc_id_global)
+    iwknum(1:3)=iwkend(1:3)-iwksta(1:3)+1
+    iwk2num(1:3)=iwk2end(1:3)-iwk2sta(1:3)+1
+    iwk3num(1:3)=iwk3end(1:3)-iwk3sta(1:3)+1    
     call update_overlap_real8(srg_ng, ng, rhd)
 
-    iwk_size=iwk_dum
 
 !$OMP parallel do private(ix,iy,iz)
     do iz=ng%is(3),ng%ie(3)
