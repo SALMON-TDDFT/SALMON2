@@ -47,11 +47,11 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
   real(8) :: bLx,bLy,bLz
 
   if(.not.allocated(poisson%a_ffte))then
-    allocate(poisson%a_ffte(lg%num(1),lg%num(2)/info_field%isize(2),lg%num(3)/info_field%isize(3)))
-    allocate(poisson%b_ffte(lg%num(1),lg%num(2)/info_field%isize(2),lg%num(3)/info_field%isize(3)))
+    allocate(poisson%a_ffte(lg%num(1),lg%num(2)/info_field%isize_ffte(2),lg%num(3)/info_field%isize_ffte(3)))
+    allocate(poisson%b_ffte(lg%num(1),lg%num(2)/info_field%isize_ffte(2),lg%num(3)/info_field%isize_ffte(3)))
   end if
   if(.not.allocated(poisson%a_ffte_tmp))then
-    allocate(poisson%a_ffte_tmp(lg%num(1),lg%num(2)/info_field%isize(2),lg%num(3)/info_field%isize(3)))
+    allocate(poisson%a_ffte_tmp(lg%num(1),lg%num(2)/info_field%isize_ffte(2),lg%num(3)/info_field%isize_ffte(3)))
   end if
 
   bLx=2.d0*Pi/(Hgs(1)*dble(lg%num(1)))
@@ -61,16 +61,16 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
   iz_sta=1
-  iz_end=lg%num(3)/info_field%isize(3)
+  iz_end=lg%num(3)/info_field%isize_ffte(3)
   iy_sta=1
-  iy_end=lg%num(2)/info_field%isize(2)
+  iy_end=lg%num(2)/info_field%isize_ffte(2)
   
   if(info_field%isize_ffte(1)==1)then
 !$OMP parallel do private(iiz,iiy)
     do iz=iz_sta,iz_end
-      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize(3)
+      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize_ffte(3)
       do iy=iy_sta,iy_end
-        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize(2)
+        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize_ffte(2)
         poisson%a_ffte(1:lg%ie(1),iy,iz)=trho(1:lg%ie(1),iiy,iiz)
       end do
     end do
@@ -78,9 +78,9 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
     poisson%a_ffte_tmp=0.d0
 !$OMP parallel do private(iiz,iiy,ix)
     do iz=iz_sta,iz_end
-      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize(3)
+      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize_ffte(3)
       do iy=iy_sta,iy_end
-        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize(2)
+        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize_ffte(2)
         do iix=ng%is(1),ng%ie(1)
           ix=iix-lg%is(1)+1
           poisson%a_ffte_tmp(ix,iy,iz)=trho(iix,iiy,iiz)
@@ -88,11 +88,13 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
       end do
     end do
     call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,  &
-                        lg%num(1)*lg%num(2)/info_field%isize(2)*lg%num(3)/info_field%isize(3),nproc_group_icommw)
+                        lg%num(1)*lg%num(2)/info_field%isize_ffte(2)*lg%num(3)/info_field%isize_ffte(3),nproc_group_icommw)
   end if
 
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),info_field%isize(2),info_field%isize(3),0) 
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),info_field%isize(2),info_field%isize(3),-1) 
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),0) 
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),-1) 
 
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,n) &
@@ -100,7 +102,7 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
   do iz=iz_sta,iz_end
     do iy=iy_sta,iy_end
       do ix=1,lg%num(1)
-        n=(iz-1)*lg%num(2)/info_field%isize(2)*lg%num(1)+(iy-1)*lg%num(1)+ix
+        n=(iz-1)*lg%num(2)/info_field%isize_ffte(2)*lg%num(1)+(iy-1)*lg%num(1)+ix
         fg%zrhoG_ele(n)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
         poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
       end do
@@ -111,23 +113,23 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
     fg%zrhoG_ele(1)=0.d0
   end if
 
-  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),info_field%isize(2),info_field%isize(3),1)
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),info_field%isize_ffte(2),info_field%isize_ffte(3),1)
 
   if(info_field%isize_ffte(1)==1)then
 !$OMP parallel do private(iiz,iiy)
     do iz=iz_sta,iz_end
-      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize(3)
+      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize_ffte(3)
       do iy=iy_sta,iy_end
-        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize(2)
+        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize_ffte(2)
         tvh(1:lg%ie(1),iiy,iiz)=poisson%a_ffte(1:lg%ie(1),iy,iz)
       end do
     end do
   else
 !$OMP parallel do private(iiz,iiy,ix)
     do iz=iz_sta,iz_end
-      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize(3)
+      iiz=iz+nproc_id_icommz*lg%num(3)/info_field%isize_ffte(3)
       do iy=iy_sta,iy_end
-        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize(2)
+        iiy=iy+nproc_id_icommy*lg%num(2)/info_field%isize_ffte(2)
         do iix=ng%is(1),ng%ie(1)
           ix=iix-lg%is(1)+1
           tvh(iix,iiy,iiz)=poisson%a_ffte(ix,iy,iz)

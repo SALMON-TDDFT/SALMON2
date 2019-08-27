@@ -49,7 +49,7 @@ subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg
     case('n')
       call poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
     case('y')
-      call poisson_FFTE(lg,mg,ng,info_field,srho%f,sVh%f,system%hgs,fg,poisson)
+      call poisson_ffte(lg,mg,ng,info_field,srho%f,sVh%f,system%hgs,fg,poisson)
     end select
   end select
 
