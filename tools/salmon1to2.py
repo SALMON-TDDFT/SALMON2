@@ -356,7 +356,7 @@ def special_rule(group, name, old_input):
     # fourier -> parallel/yn_ffte
     if (group, name) == ('parallel', 'yn_ffte'):
         if 'fourier' in old_input:
-            if old_input['fourier'][''].upper() == 'FFTE':
+            if old_input['fourier'][''].upper() == "'FFTE'":
                 return {'': "'y'"}
             else:
                 return {'': "'n'"}
@@ -411,7 +411,6 @@ def main():
         fh_inp = sys.stdin
     
     old_input = read_input(fh_inp)
-    print(old_input)
     fh_inp.close()
 
     buf = []
