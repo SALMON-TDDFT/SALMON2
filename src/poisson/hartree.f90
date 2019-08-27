@@ -22,7 +22,6 @@ subroutine hartree_ns(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh
   use poisson_cg_sub
   use poisson_periodic_sub
   use poisson_ffte_sub
-  use new_world_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
