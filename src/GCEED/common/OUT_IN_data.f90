@@ -429,6 +429,7 @@ use calc_myob_sub
 use check_corrkob_sub
 use check_mg_sub
 use check_ng_sub
+use set_gridcoordinate_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
@@ -656,7 +657,7 @@ end if
 
 call check_fourier
 
-call set_gridcoo(lg)
+call set_gridcoordinate(lg,system)
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))

@@ -47,6 +47,7 @@ use timer
 use calc_iobnum_sub
 use check_mg_sub
 use check_ng_sub
+use set_gridcoordinate_sub
 use scf_iteration_sub
 use rmmdiis_sub
 use density_matrix, only: calc_density
@@ -153,7 +154,7 @@ if(iopt==1)then
     itmg=img
     call set_imesh_oddeven(itmg)
     call init_mesh(lg,mg)
-    call set_gridcoo(lg)
+    call set_gridcoordinate(lg,system)
     call init_mesh_s(ng)
     call check_mg(mg)
     call check_ng(ng)
