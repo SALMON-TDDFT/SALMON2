@@ -52,7 +52,6 @@ module inputoutput
   integer :: inml_opt
   integer :: inml_md
   integer :: inml_group_fundamental
-  integer :: inml_group_parallel
   integer :: inml_group_hartree
   integer :: inml_group_file
   integer :: inml_group_others
@@ -479,10 +478,6 @@ contains
       & iwrite_projnum, &
       & itcalc_ene 
 
-    namelist/group_parallel/ &
-      & imesh_s_all, &
-      & iflag_comm_rho
-
     namelist/group_hartree/ &
       & lmax_lmp
 
@@ -813,9 +808,6 @@ contains
     itwproj                = -1
     iwrite_projnum         = 0
     itcalc_ene             = 1
-!! == default for &group_parallel
-    imesh_s_all    = 1
-    iflag_comm_rho = 1
 !! == default for &group_hartree
     lmax_lmp = 4
 !! == default for &group_file
@@ -913,9 +905,6 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=group_fundamental, iostat=inml_group_fundamental)
-      rewind(fh_namelist)
-
-      read(fh_namelist, nml=group_parallel, iostat=inml_group_parallel)
       rewind(fh_namelist)
 
       read(fh_namelist, nml=group_hartree, iostat=inml_group_hartree)
@@ -1265,9 +1254,6 @@ contains
     call comm_bcast(itwproj               ,nproc_group_global)
     call comm_bcast(iwrite_projnum        ,nproc_group_global)
     call comm_bcast(itcalc_ene            ,nproc_group_global)
-!! == bcast for &group_parallel
-    call comm_bcast(imesh_s_all   ,nproc_group_global)
-    call comm_bcast(iflag_comm_rho,nproc_group_global)
 !! == bcast for &group_hartree
     call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_file
@@ -1923,11 +1909,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'itcalc_ene', itcalc_ene
-
-      if(inml_group_parallel >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_parallel', inml_group_parallel
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'imesh_s_all', imesh_s_all
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_comm_rho', iflag_comm_rho
 
       if(inml_group_hartree >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_hartree', inml_group_hartree

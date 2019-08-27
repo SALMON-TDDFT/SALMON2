@@ -161,7 +161,6 @@ else if(ilsda == 1) then
 end if
 
 !===== namelist for group_parallel =====
-imesh_s_all=1
 if(comm_is_root(nproc_id_global))then
   ibox2=1
   icheck1=0
