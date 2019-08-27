@@ -312,10 +312,6 @@ module salmon_global
   integer        :: iwrite_projnum
   integer        :: itcalc_ene
 
-!! &group_parallel
-  integer        :: imesh_s_all
-  integer        :: iflag_comm_rho
-
 !! &group_hartree
   integer        :: lmax_lmp
 

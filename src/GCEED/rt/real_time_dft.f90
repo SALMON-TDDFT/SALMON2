@@ -892,19 +892,6 @@ end do
     end if
   end do
 
-if(iflag_comm_rho==2)then
-  allocate(rhobox1_all(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3))) 
-  allocate(rhobox2_all(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3))) 
-!$OMP parallel do private(iz,iy,ix)
-  do iz=lg_sta(3),lg_end(3)
-  do iy=lg_sta(2),lg_end(2)
-  do ix=lg_sta(1),lg_end(1)
-    rhobox1_all(ix,iy,iz) = 0.d0
-  end do
-  end do
-  end do
-end if
-
 if(iperiodic==3) call calcAext
 
 if(iflag_md==1) call init_md(system,md)
