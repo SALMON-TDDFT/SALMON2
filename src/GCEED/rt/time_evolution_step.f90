@@ -366,7 +366,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calcELF(ng,info,srho,itt)
+      call calcELF(mg,ng,srg,info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
   end if
