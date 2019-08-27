@@ -519,21 +519,40 @@ end do
 end subroutine snum_procs
 
 !======================================================================
-subroutine init_mesh_s(ng)
+subroutine old_mesh(lg,mg,ng)
 use salmon_parallel, only: nproc_size_global, nproc_id_global
 use structures, only: s_rgrid
 implicit none
-type(s_rgrid),intent(out) :: ng
+type(s_rgrid),intent(in) :: lg,mg,ng
 
-nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
+lg_sta(1:3) = lg%is(1:3)
+lg_end(1:3) = lg%ie(1:3)
+lg_num(1:3) = lg%num(1:3)
+call check_fourier
+
+mg_sta(1:3) = mg%is(1:3)
+mg_end(1:3) = mg%ie(1:3)
+mg_num(1:3) = mg%num(1:3)
+
+ng_sta(1:3) = ng%is(1:3)
+ng_end(1:3) = ng%ie(1:3)
+ng_num(1:3) = ng%num(1:3)
+
+allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
+allocate(inum_Mxin(3,0:nproc_size_global-1))
 
 allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
 allocate(inum_Mxin_s(3,0:nproc_size_global-1))
 
-call setng(ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-           nproc_size_global,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin)
+ista_mxin = mg%is_all
+iend_mxin = mg%ie_all
+inum_mxin = mg%ie_all - mg%is_all + 1
 
-end subroutine init_mesh_s
+ista_mxin_s = ng%is_all
+iend_mxin_s = ng%ie_all
+inum_mxin_s = ng%ie_all - ng%is_all + 1
+
+end subroutine old_mesh
 
 !=====================================================================
 subroutine make_iwksta_iwkend

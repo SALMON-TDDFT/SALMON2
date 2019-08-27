@@ -19,7 +19,7 @@ module set_numcpu
 contains
 
 subroutine set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-  use inputoutput, only: nproc_k,nproc_ob
+  use inputoutput, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general
   use salmon_parallel, only: nproc_size_global
   implicit none
   integer,intent(out) :: nproc_d_o(3)
@@ -109,13 +109,16 @@ subroutine set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
   nproc_d_o(1:3)=nproc_d_o_tmp(1:3)
   nproc_d_g(1:3)=nproc_d_o_tmp(1:3)
   nproc_d_g_dm(1:3)=nproc_d_g(1:3)/nproc_d_o(1:3)
+
+  nproc_domain_orbital = nproc_d_o
+  nproc_domain_general = nproc_d_g
   
 end subroutine set_numcpu_gs
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine set_numcpu_rt(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-  use inputoutput, only: nproc_k,nproc_ob
+  use inputoutput, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general
   use salmon_parallel, only: nproc_size_global
   implicit none
   integer,intent(out) :: nproc_d_o(3)
@@ -237,6 +240,9 @@ subroutine set_numcpu_rt(nproc_d_o,nproc_d_g,nproc_d_g_dm)
   nproc_d_o(1:3)=nproc_d_o_tmp(1:3)
   nproc_d_g(1:3)=nproc_d_g_tmp(1:3)
   nproc_d_g_dm(1:3)=nproc_d_g(1:3)/nproc_d_o(1:3)
+
+  nproc_domain_orbital = nproc_d_o
+  nproc_domain_general = nproc_d_g
 
 end subroutine set_numcpu_rt
 

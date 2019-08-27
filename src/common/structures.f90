@@ -61,6 +61,7 @@ module structures
                            ,is_overlap,ie_overlap & ! is_overlap=is-Nd, ie_overlap=ie+Nd
                            ,is_array,ie_array       ! allocate( array(is_array(1):ie_array(1), ...) )
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
+    integer ,allocatable :: is_all(:,:),ie_all(:,:) ! (1:3,0:nproc-1), is & ie for all MPI processes
   end type s_rgrid
 
   type s_pcomm_cache
