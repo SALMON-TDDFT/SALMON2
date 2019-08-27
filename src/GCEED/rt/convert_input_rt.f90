@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine convert_input_rt(Ntime,mixing,poisson_cg)
-use structures, only: s_mixing,s_poisson_cg
+subroutine convert_input_rt(Ntime,mixing,poisson)
+use structures, only: s_mixing,s_poisson
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use inputoutput
@@ -25,7 +25,7 @@ use new_world_sub
 implicit none
 integer :: Ntime
 type(s_mixing),intent(inout) :: mixing
-type(s_poisson_cg),intent(inout) :: poisson_cg
+type(s_poisson),intent(inout) :: poisson
 real(8) :: dip_spacing
 
 ilsda=ispin
@@ -109,7 +109,7 @@ else if(layout_multipole==3)then
   end if
 end if
 
-poisson_cg%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
+poisson%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
 
 !===== namelist for group_file =====
 if(ic==0)then

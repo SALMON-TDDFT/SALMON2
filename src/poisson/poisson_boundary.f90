@@ -14,17 +14,16 @@
 !  limitations under the License.
 !
 !=======================================================================
-module hartree_boundary_sub
+module poisson_boundary_sub
   implicit none
 
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
 
-subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
-                            igc_is,igc_ie,gridcoo,iflag_ps)
+subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
-  use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson_cg
+  use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson
   use salmon_parallel, only: nproc_size_global, nproc_group_h
   use salmon_communication, only: comm_summation
   use timer
@@ -39,21 +38,17 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system),intent(in) :: system
-  type(s_poisson_cg),intent(in) :: poisson_cg
+  type(s_poisson),intent(inout) :: poisson
   real(8) :: trho(mg%is(1):mg%ie(1),    &
                  mg%is(2):mg%ie(2),      &
                  mg%is(3):mg%ie(3))
   real(8) :: wk2(ng%is(1)-ndh:ng%ie(1)+ndh,    &
                  ng%is(2)-ndh:ng%ie(2)+ndh,      &
                  ng%is(3)-ndh:ng%ie(3)+ndh)
-  integer,intent(in) :: igc_is
-  integer,intent(in) :: igc_ie
-  real(8),intent(in) :: gridcoo(igc_is:igc_ie,3)
-  integer,intent(in) :: iflag_ps
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
-  integer :: k
+  integer :: j,k
   integer :: istart(0:nproc_size_global-1),iend(0:nproc_size_global-1)
   integer :: icount
   integer,allocatable :: itrho(:)
@@ -74,33 +69,39 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   real(8) :: rinv
   real(8) :: rbox
   real(8),allocatable :: rion2(:,:)
-  real(8),allocatable :: wkbound_h(:)
-  real(8),allocatable :: wk2bound_h(:)
   real(8) :: hvol
   integer,allocatable :: ig_num(:)
   integer,allocatable :: ig(:,:,:)
+  real(8),allocatable :: coordinate(:,:)
   
   !------------------------- Boundary condition (multipole expansion)
 
   hvol=system%hvol
-  if(allocated(poisson_cg%ig_num)) then
+  if(allocated(poisson%ig_num)) then
     if(.not.allocated(ig_num)) then
       if(layout_multipole==2)then
         allocate(ig_num(natom))
       else if(layout_multipole==3)then
-        allocate(ig_num(poisson_cg%npole_partial))
+        allocate(ig_num(poisson%npole_partial))
       end if
     end if
-    ig_num=poisson_cg%ig_num
+    ig_num=poisson%ig_num
   end if
   if(.not.allocated(ig))then
-    allocate(ig(3,maxval(poisson_cg%ig_num(:)),poisson_cg%npole_partial))
+    allocate(ig(3,maxval(poisson%ig_num(:)),poisson%npole_partial))
   end if
-  ig=poisson_cg%ig
+  ig=poisson%ig
+
+  if(.not.allocated(coordinate))then
+    allocate(coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))
+  end if
+  do j=1,3
+    coordinate(lg%is_overlap(j):lg%ie_overlap(j),j)=lg%coordinate(lg%is_overlap(j):lg%ie_overlap(j),j)
+  end do
  
-  if(.not.allocated(wkbound_h))then
-    allocate(wkbound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
-    allocate(wk2bound_h(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
+  if(.not.allocated(poisson%wkbound))then
+    allocate(poisson%wkbound(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
+    allocate(poisson%wkbound2(lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh))
   end if
  
   select case( layout_multipole )
@@ -130,9 +131,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      xx=gridcoo(ix,1)-center_trho(1,1)
-      yy=gridcoo(iy,2)-center_trho(2,1)
-      zz=gridcoo(iz,3)-center_trho(3,1)
+      xx=coordinate(ix,1)-center_trho(1,1)
+      yy=coordinate(iy,2)-center_trho(2,1)
+      zz=coordinate(iz,3)-center_trho(3,1)
       rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
       call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
       rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*hvol
@@ -145,15 +146,13 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
   case(2)
   
-  if(iflag_ps==1)then
-    num_center=natom
-    allocate (rholm((lmax_lmp+1)**2,natom))
-    allocate (rholm2((lmax_lmp+1)**2,natom))
-    allocate(itrho(natom))
-    allocate(center_trho(3,natom))
-    allocate(rion2(3,natom))
-    rion2(:,:)=rion(:,:)
-  end if
+  num_center=natom
+  allocate (rholm((lmax_lmp+1)**2,natom))
+  allocate (rholm2((lmax_lmp+1)**2,natom))
+  allocate(itrho(natom))
+  allocate(center_trho(3,natom))
+  allocate(rion2(3,natom))
+  rion2(:,:)=rion(:,:)
   
   !$OMP parallel do private(icen, lm, jj)
   do icen=1,num_center
@@ -167,7 +166,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     itrho(icen)=1
   end do
   
-  do icen=1,poisson_cg%npole_partial
+  do icen=1,poisson%npole_partial
     do ll=0,lmax_lmp
     do lm=ll**2+1,(ll+1)**2
       rholm2box=0.d0
@@ -177,21 +176,21 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
         ix=ig(1,jj,icen)
         iy=ig(2,jj,icen)
         iz=ig(3,jj,icen)
-        xx=gridcoo(ix,1)-rion2(1,poisson_cg%ipole_tbl(icen))
-        yy=gridcoo(iy,2)-rion2(2,poisson_cg%ipole_tbl(icen))
-        zz=gridcoo(iz,3)-rion2(3,poisson_cg%ipole_tbl(icen))
+        xx=coordinate(ix,1)-rion2(1,poisson%ipole_tbl(icen))
+        yy=coordinate(iy,2)-rion2(2,poisson%ipole_tbl(icen))
+        zz=coordinate(iz,3)-rion2(3,poisson%ipole_tbl(icen))
         rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
         call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
         rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*hvol
       end do
-      rholm2(lm,poisson_cg%ipole_tbl(icen))=rholm2box
+      rholm2(lm,poisson%ipole_tbl(icen))=rholm2box
     end do
     end do
   end do
   
   case(3)
   
-  num_center=poisson_cg%npole_total
+  num_center=poisson%npole_total
   
   allocate (rholm((lmax_lmp+1)**2,num_center))
   allocate (rholm2((lmax_lmp+1)**2,num_center))
@@ -211,7 +210,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     end do
   end do
   
-  do ii=1,poisson_cg%npole_partial
+  do ii=1,poisson%npole_partial
     sum1=0.d0
     sumbox1=0.d0
     sumbox2=0.d0
@@ -222,25 +221,25 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
       ixbox=ig(1,jj,ii)
       iybox=ig(2,jj,ii)
       izbox=ig(3,jj,ii)
-      xx=gridcoo(ixbox,1)
-      yy=gridcoo(iybox,2)
-      zz=gridcoo(izbox,3)
+      xx=coordinate(ixbox,1)
+      yy=coordinate(iybox,2)
+      zz=coordinate(izbox,3)
       sumbox1=sumbox1+trho(ixbox,iybox,izbox)*xx
       sumbox2=sumbox2+trho(ixbox,iybox,izbox)*yy
       sumbox3=sumbox3+trho(ixbox,iybox,izbox)*zz
       sum1=sum1+trho(ixbox,iybox,izbox)
     end do
-    center_trho_nume_deno2(1,poisson_cg%ipole_tbl(ii))=sumbox1
-    center_trho_nume_deno2(2,poisson_cg%ipole_tbl(ii))=sumbox2
-    center_trho_nume_deno2(3,poisson_cg%ipole_tbl(ii))=sumbox3
-    center_trho_nume_deno2(4,poisson_cg%ipole_tbl(ii))=sum1
+    center_trho_nume_deno2(1,poisson%ipole_tbl(ii))=sumbox1
+    center_trho_nume_deno2(2,poisson%ipole_tbl(ii))=sumbox2
+    center_trho_nume_deno2(3,poisson%ipole_tbl(ii))=sumbox3
+    center_trho_nume_deno2(4,poisson%ipole_tbl(ii))=sum1
   end do
   
   call timer_begin(LOG_ALLREDUCE_HARTREE)
-  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson_cg%npole_total,nproc_group_h)
+  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,nproc_group_h)
   call timer_end(LOG_ALLREDUCE_HARTREE)
   
-  do ii=1,poisson_cg%npole_total
+  do ii=1,poisson%npole_total
     if(center_trho_nume_deno(4,ii)*hvol>=1.d-12)then
       itrho(ii)=1
       center_trho(1:3,ii)=center_trho_nume_deno(1:3,ii)/center_trho_nume_deno(4,ii)
@@ -259,12 +258,12 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
     rholm2=0.d0
     rholm3=0.d0
-    do ii=1,poisson_cg%npole_partial
-      pl=poisson_cg%ipole_tbl(ii)
+    do ii=1,poisson%npole_partial
+      pl=poisson%ipole_tbl(ii)
       cl=ig_num(ii)
       if(itrho(pl)==1)then
   !$omp parallel default(none) &
-  !$omp          shared(ig,gridcoo,center_trho,trho,rholm3) &
+  !$omp          shared(ig,coordinate,center_trho,trho,rholm3) &
   !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz,ylm) &
   !$omp          firstprivate(ii,pl,cl,lmax_lmp,hvol)
         tid=omp_get_thread_num()
@@ -275,9 +274,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
           ixbox=ig(1,jj,ii)
           iybox=ig(2,jj,ii)
           izbox=ig(3,jj,ii)
-          xx=gridcoo(ixbox,1)-center_trho(1,pl)
-          yy=gridcoo(iybox,2)-center_trho(2,pl)
-          zz=gridcoo(izbox,3)-center_trho(3,pl)
+          xx=coordinate(ixbox,1)-center_trho(1,pl)
+          yy=coordinate(iybox,2)-center_trho(2,pl)
+          zz=coordinate(izbox,3)-center_trho(3,pl)
           rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d0-50.d0
           rinv=1.0d0/rr
           xxxx=xx*rinv
@@ -307,8 +306,8 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     deallocate(rholm3)
   else
     rholm2=0.d0
-    do ii=1,poisson_cg%npole_partial
-      if(itrho(poisson_cg%ipole_tbl(ii))==1)then
+    do ii=1,poisson%npole_partial
+      if(itrho(poisson%ipole_tbl(ii))==1)then
         rholm=0.d0
         do ll=0,lmax_lmp
         do lm=ll**2+1,(ll+1)**2
@@ -319,14 +318,14 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
             ixbox=ig(1,jj,ii)
             iybox=ig(2,jj,ii)
             izbox=ig(3,jj,ii)
-            xx=gridcoo(ixbox,1)-center_trho(1,poisson_cg%ipole_tbl(ii))
-            yy=gridcoo(iybox,2)-center_trho(2,poisson_cg%ipole_tbl(ii))
-            zz=gridcoo(izbox,3)-center_trho(3,poisson_cg%ipole_tbl(ii))
+            xx=coordinate(ixbox,1)-center_trho(1,poisson%ipole_tbl(ii))
+            yy=coordinate(iybox,2)-center_trho(2,poisson%ipole_tbl(ii))
+            zz=coordinate(izbox,3)-center_trho(3,poisson%ipole_tbl(ii))
             rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
             call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
             rholm2box=rholm2box+rr**ll*ylm*trho(ixbox,iybox,izbox)*hvol
           end do
-          rholm2(lm,poisson_cg%ipole_tbl(ii))=rholm2box
+          rholm2(lm,poisson%ipole_tbl(ii))=rholm2box
         end do
         end do
       end if
@@ -362,7 +361,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
   !$OMP parallel do
     do jj=1,lg%num(1)*lg%num(2)*lg%num(3)/minval(lg%num(1:3))*6*ndh
-      wk2bound_h(jj)=0.d0
+      poisson%wkbound2(jj)=0.d0
     end do
   
     icount=ng%num(1)*ng%num(2)*ng%num(3)/ng%num(k)*2*ndh
@@ -384,9 +383,9 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     do jj=istart(info_field%id(k)),iend(info_field%id(k))
       do icen=1,num_center
         if(itrho(icen)==1)then
-          xx=gridcoo(poisson_cg%ig_bound(1,jj,k),1)-center_trho(1,icen)
-          yy=gridcoo(poisson_cg%ig_bound(2,jj,k),2)-center_trho(2,icen)
-          zz=gridcoo(poisson_cg%ig_bound(3,jj,k),3)-center_trho(3,icen)
+          xx=coordinate(poisson%ig_bound(1,jj,k),1)-center_trho(1,icen)
+          yy=coordinate(poisson%ig_bound(2,jj,k),2)-center_trho(2,icen)
+          zz=coordinate(poisson%ig_bound(3,jj,k),3)-center_trho(3,icen)
           rr=sqrt(xx**2+yy**2+zz**2)+1.d-50 
           rinv=1.d0/rr
   !        xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
@@ -442,7 +441,7 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
           do lm=1,(lmax_lmp+1)**2
             sum1=sum1+ylm2(lm)*deno(lm)*rholm(lm,icen)
           end do
-          wk2bound_h(jj) = wk2bound_h(jj) + sum1
+          poisson%wkbound2(jj) = poisson%wkbound2(jj) + sum1
         end if
       end do
     end do
@@ -450,27 +449,27 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
     if(nproc_size_global==1)then
   !$OMP parallel do
       do jj=1,icount
-        wkbound_h(jj)=wk2bound_h(jj)
+        poisson%wkbound(jj)=poisson%wkbound2(jj)
       end do
     else
       call timer_begin(LOG_ALLREDUCE_HARTREE)
       call comm_summation( &
-        wk2bound_h,              wkbound_h,              icount/2, info_field%icomm(k), 0                    )
+        poisson%wkbound2,              poisson%wkbound,              icount/2, info_field%icomm(k), 0                    )
       call comm_summation( &
-        wk2bound_h(icount/2+1:), wkbound_h(icount/2+1:), icount/2, info_field%icomm(k), info_field%isize(k)-1)
+        poisson%wkbound2(icount/2+1:), poisson%wkbound(icount/2+1:), icount/2, info_field%icomm(k), info_field%isize(k)-1)
       call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
     if(info_field%id(k)==0) then
   !$OMP parallel do
       do jj=1,icount/2
-        wk2(poisson_cg%ig_bound(1,jj,k),poisson_cg%ig_bound(2,jj,k),poisson_cg%ig_bound(3,jj,k))=wkbound_h(jj)
+        wk2(poisson%ig_bound(1,jj,k),poisson%ig_bound(2,jj,k),poisson%ig_bound(3,jj,k))=poisson%wkbound(jj)
       end do
     end if
     if(info_field%id(k)==info_field%isize(k)-1) then
   !$OMP parallel do
       do jj=icount/2+1,icount
-        wk2(poisson_cg%ig_bound(1,jj,k),poisson_cg%ig_bound(2,jj,k),poisson_cg%ig_bound(3,jj,k))=wkbound_h(jj)
+        wk2(poisson%ig_bound(1,jj,k),poisson%ig_bound(2,jj,k),poisson%ig_bound(3,jj,k))=poisson%wkbound(jj)
       end do
     end if
   
@@ -481,6 +480,6 @@ subroutine hartree_boundary(lg,mg,ng,info_field,system,poisson_cg,trho,wk2,   &
   
   return
   
-end subroutine hartree_boundary
+end subroutine poisson_boundary
 
-end module hartree_boundary_sub
+end module poisson_boundary_sub

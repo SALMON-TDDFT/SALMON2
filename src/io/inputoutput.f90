@@ -439,7 +439,8 @@ contains
 
     namelist/poisson/ &
       & layout_multipole, &
-      & num_multipole_xyz
+      & num_multipole_xyz, &
+      & threshold_cg
 
     namelist/ewald/ &
       & newald, &
@@ -483,7 +484,6 @@ contains
       & iflag_comm_rho
 
     namelist/group_hartree/ &
-      & hconv, &
       & lmax_lmp
 
     namelist/group_file/ &
@@ -776,9 +776,10 @@ contains
     nsplit_voxel_data   = 1
     timer_process       = 'n'
 
-!! == default for &poissno
+!! == default for &poisson
     layout_multipole  = 3
     num_multipole_xyz = 0
+    threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
 !! == default for &ewald
     newald = 4
     aewald = 0.5d0
@@ -816,7 +817,6 @@ contains
     imesh_s_all    = 1
     iflag_comm_rho = 1
 !! == default for &group_hartree
-    hconv    = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
     lmax_lmp = 4
 !! == default for &group_file
     ic    = 0
@@ -1229,6 +1229,8 @@ contains
 !! == bcast for &poisson
     call comm_bcast(layout_multipole  ,nproc_group_global)
     call comm_bcast(num_multipole_xyz ,nproc_group_global)
+    call comm_bcast(threshold_cg      ,nproc_group_global)
+    threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3 
 !! == bcast for &ewald
     call comm_bcast(newald,nproc_group_global)
     call comm_bcast(aewald,nproc_group_global)
@@ -1267,8 +1269,6 @@ contains
     call comm_bcast(imesh_s_all   ,nproc_group_global)
     call comm_bcast(iflag_comm_rho,nproc_group_global)
 !! == bcast for &group_hartree
-    call comm_bcast(hconv   ,nproc_group_global)
-    hconv = hconv * (uenergy_to_au)**2 * (ulength_to_au)**3 
     call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_file
     call comm_bcast(ic   ,nproc_group_global)
@@ -1830,7 +1830,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'iobs_num_em', iobs_num_em
       write(fh_variables_log, '("#",4X,A,"=",I6)')     'iobs_samp_em', iobs_samp_em
       if(iobs_num_em==0) then
-        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,:)
+        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
         write(fh_variables_log, '("#",4X,A,"=",A)')       'obs_plane_em', obs_plane_em(1)
       else
         do i = 1,iobs_num_em
@@ -1881,6 +1881,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
 
       if(inml_ewald >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', inml_ewald
@@ -1930,7 +1931,6 @@ contains
 
       if(inml_group_hartree >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_hartree', inml_group_hartree
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hconv', hconv
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_lmp', lmax_lmp
 
       if(inml_group_file >0)ierr_nml = ierr_nml +1

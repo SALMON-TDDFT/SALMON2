@@ -14,12 +14,12 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
-module hartree_periodic_sub
+module poisson_periodic_sub
   implicit none
 
 contains
 
-subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
+subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   use structures, only: s_rgrid, s_field_parallel, s_dft_system, &
                         s_scalar, s_reciprocal_grid
   use salmon_parallel, only: nproc_group_global
@@ -50,7 +50,6 @@ subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   complex(8),allocatable :: ff2x(:,:,:)
   complex(8),allocatable :: ff2y(:,:,:)
   complex(8),allocatable :: ff2z(:,:,:)
-  complex(8),allocatable :: rhoe_g_tmp(:)
   real(8),allocatable    :: trho2z(:,:,:)
   real(8),allocatable    :: trho3z(:,:,:)
   complex(8),allocatable :: egx(:,:)
@@ -75,7 +74,6 @@ subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
     allocate(egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
     allocate(egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
     allocate(egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
-    allocate(rhoe_g_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
     allocate(trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
     allocate(trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
   end if
@@ -90,7 +88,7 @@ subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   end do
 !$OMP parallel do
   do n=1,lg%num(1)*lg%num(2)*lg%num(3)
-    rhoe_G_tmp(n)=0.d0
+    fg%zrhoG_ele_tmp(n)=0.d0
   end do
 
 !$OMP parallel do private(iz,iy,ix)
@@ -209,17 +207,17 @@ subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
     gz = kkx*B(3,1) + kky*B(3,2) + kkz*B(3,3)
     g2=gx**2+gy**2+gz**2
     if(kx-1==0.and.ky-1==0.and.kz-1==0)then
-      rhoe_G_tmp(n)=ff2x(kx,ky,kz) ! iwata
+      fg%zrhoG_ele_tmp(n)=ff2x(kx,ky,kz) ! iwata
       ff1z(kx,ky,kz)=0.d0
     else
-      rhoe_G_tmp(n)=ff2x(kx,ky,kz)
+      fg%zrhoG_ele_tmp(n)=ff2x(kx,ky,kz)
       ff1z(kx,ky,kz)=4.d0*Pi/g2*ff2x(kx,ky,kz)
     end if
   end do
   end do
   end do
 
-  call comm_summation(rhoe_G_tmp,fg%zrhoG_ele,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+  call comm_summation(fg%zrhoG_ele_tmp,fg%zrhoG_ele,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
   call comm_summation(ff1z,ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
 
 !$OMP parallel do private(iz,ky,kx)
@@ -252,7 +250,7 @@ subroutine hartree_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   end do
 
   return
-end subroutine hartree_periodic
+end subroutine poisson_periodic
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120--------
 
-end module hartree_periodic_sub
+end module poisson_periodic_sub

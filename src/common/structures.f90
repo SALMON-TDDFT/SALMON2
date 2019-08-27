@@ -15,6 +15,10 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module structures
+#ifdef SALMON_USE_LIBXC
+  use xc_f90_types_m
+  use xc_f90_lib_m
+#endif
   implicit none
 
 ! scalar field
@@ -62,6 +66,7 @@ module structures
                            ,is_array,ie_array       ! allocate( array(is_array(1):ie_array(1), ...) )
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
     integer ,allocatable :: is_all(:,:),ie_all(:,:) ! (1:3,0:nproc-1), is & ie for all MPI processes
+    real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
   type s_pcomm_cache
@@ -78,14 +83,14 @@ module structures
     integer :: nb
     ! Communicator
     integer :: icomm
-    ! Neightboring MPI id (1:x,2:y,3:z, 1:upside,2:downside):
-    integer :: neig(1:3, 1:2) 
-    ! Communication requests (1:x,2:y,3:z, 1:upside,2:downside, 1:send,2:recv):
-    integer :: ireq_real8(1:3, 1:2, 1:2)
-    integer :: ireq_complex8(1:3, 1:2, 1:2)
-    ! PComm cache (1:x,2:y,3:z, 1:upside,2:downside, 1:src/2:dst)
-    type(s_pcomm_cache) :: cache(1:3, 1:2, 1:2)
-    ! Range (dim=1:x,2:y,3:z, dir=1:upside,2:downside, 1:src/2:dst, axis=1...3)
+    ! Neightboring MPI id (1:upside,2:downside, 1:x,2:y,3:z):
+    integer :: neig(1:2, 1:3) 
+    ! Communication requests (1:send,2:recv, 1:upside,2:downside, 1:x,2:y,3:z):
+    integer :: ireq_real8(1:2, 1:2, 1:3)
+    integer :: ireq_complex8(1:2, 1:2, 1:3)
+    ! PComm cache (1:src/2:dst, 1:upside,2:downside, 1:x,2:y,3:z)
+    type(s_pcomm_cache) :: cache(1:2, 1:2, 1:3)
+    ! Range (axis=1...3, 1:src/2:dst, dir=1:upside,2:downside, dim=1:x,2:y,3:z)
     integer :: is_block(1:3, 1:2, 1:2, 1:3)
     integer :: ie_block(1:3, 1:2, 1:2, 1:3)
     ! Initialization flags
@@ -114,6 +119,7 @@ module structures
   type s_field_parallel
     integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
     integer :: id(3), isize(3)
+    integer :: isize_ffte(3)
   end type s_field_parallel
 
   type s_orbital
@@ -187,11 +193,10 @@ module structures
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
 
-#ifdef SALMON_ENABLE_MPI3
+    ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process
     integer,allocatable :: icomm_atom(:)     ! communicator for uVpsi(n:m)
-#endif
   end type s_pp_grid
 
   type s_pp_nlcc
@@ -204,6 +209,7 @@ module structures
     integer :: ng,iG_s,iG_e,iGzero
     real(8),allocatable :: Gx(:),Gy(:),Gz(:)
     complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zdVG_ion(:,:)
+    complex(8),allocatable :: zrhoG_ele_tmp(:) ! work array for zrhoG_ele
   end type s_reciprocal_grid
 
   type s_fdtd_system
@@ -231,14 +237,22 @@ module structures
      character(256) :: file_rt_data, file_rt_energy_data
   end type s_ofile
 
-  type s_poisson_cg
-    integer :: npole_partial                  ! number of multipoles calculated in each node
-    integer :: npole_total                    ! total number of multipoles
-    integer,allocatable :: ipole_tbl(:)       ! table for multipoles
-    integer,allocatable :: ig_num(:)          ! number of grids for domains to which each multipole belongs
-    integer,allocatable :: ig(:,:,:)          ! grid table for domains to which each multipole belongs
-    integer,allocatable :: ig_bound(:,:,:)    ! grid table for boundaries
-  end type s_poisson_cg
+  type s_poisson
+! for poisson_cg
+    integer :: iterVh                              ! iteration number for poisson_cg
+    integer :: npole_partial                       ! number of multipoles calculated in each node
+    integer :: npole_total                         ! total number of multipoles
+    integer,allocatable :: ipole_tbl(:)            ! table for multipoles
+    integer,allocatable :: ig_num(:)               ! number of grids for domains to which each multipole belongs
+    integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
+    integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
+    real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
+! for Fourier transformation routines
+    real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
+    complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
+    complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
+    complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
+  end type s_poisson
 
 ! for DFT ground state calculations
 
@@ -250,6 +264,20 @@ module structures
     integer :: num_rho_stock
     type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
   end type s_mixing
+
+  type s_xc_functional
+    integer :: xctype(3)
+    integer :: ispin
+    real(8) :: cval
+    logical :: use_gradient
+    logical :: use_laplacian
+    logical :: use_kinetic_energy
+    logical :: use_current
+#ifdef SALMON_USE_LIBXC
+    type(xc_f90_pointer_t) :: func(3)
+    type(xc_f90_pointer_t) :: info(3)
+#endif
+  end type
 
 !===================================================================================================================================
 

@@ -1,8 +1,9 @@
 set(SOURCES
-    hartree_boundary.f90
-    hartree_cg.f90
-    hartree_ffte.f90
-    hartree_periodic.f90
+    hartree.f90
+    poisson_boundary.f90
+    poisson_cg.f90
+    poisson_ffte.f90
+    poisson_periodic.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

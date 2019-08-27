@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic_FFTE(ng)
-  use structures,      only: s_rgrid
+subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
+  use structures,      only: s_rgrid,s_poisson
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_parallel, only: nproc_id_icommy, nproc_id_icommz
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
@@ -23,7 +23,9 @@ subroutine calcVpsl_periodic_FFTE(ng)
   use allocate_psl_sub
   use allocate_mat_sub
   implicit none
+  type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_poisson),intent(inout) :: poisson
   
   integer :: ii,ix,iy,iz,ak
   integer :: iix,iiy,iiz
@@ -44,6 +46,10 @@ subroutine calcVpsl_periodic_FFTE(ng)
   integer :: iy_sta,iy_end,iz_sta,iz_end
   integer :: i,iix2,iiy2,iiz2
   
+  if(.not.allocated(poisson%a_ffte))then
+    allocate(poisson%a_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+    allocate(poisson%b_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+  end if
 
 !calculate reciprocal lattice vector
   bLx=2.d0*Pi/(Hgs(1)*dble(lg_num(1)))
@@ -146,18 +152,18 @@ subroutine calcVpsl_periodic_FFTE(ng)
     enddo
   enddo
 
-  CALL PZFFT3DV_MOD(A_FFTE,B_FFTE,lg_num(1),lg_num(2),lg_num(3),NPUY,NPUZ,0) 
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg_num(1),lg_num(2),lg_num(3),NPUY,NPUZ,0) 
 
   do iz=1,lg_num(3)/NPUZ
   do iy=1,lg_num(2)/NPUY
   do ix=1,lg_num(1)
     n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-    B_FFTE(ix,iy,iz)=Vion_G(n)*dble(lg_num(1)*lg_num(2)*lg_num(3))
+    poisson%b_ffte(ix,iy,iz)=Vion_G(n)*dble(lg_num(1)*lg_num(2)*lg_num(3))
   enddo
   enddo
   enddo
 
-  CALL PZFFT3DV_MOD(B_FFTE,A_FFTE,lg_num(1),lg_num(2),lg_num(3),NPUY,NPUZ,1)
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg_num(1),lg_num(2),lg_num(3),NPUY,NPUZ,1)
 
 !$OMP parallel do
   do iz = lg_sta(3),lg_end(3)
@@ -173,8 +179,7 @@ subroutine calcVpsl_periodic_FFTE(ng)
       iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
       do iy=iy_sta,iy_end
         iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
-!            Vpsl(1:lg_end(1),iiy,iiz)=A_FFTE(1:lg_end(1),iy,iz)
-        matbox_l(1:lg_end(1),iiy,iiz)=A_FFTE(1:lg_end(1),iy,iz)
+        matbox_l(1:lg_end(1),iiy,iiz)=poisson%a_ffte(1:lg_end(1),iy,iz)
       end do
     end do
   else
@@ -185,7 +190,7 @@ subroutine calcVpsl_periodic_FFTE(ng)
         iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
         do iix=ng%is(1),ng%ie(1)
           ix=iix-lg_sta(1)+1
-          matbox_l(iix,iiy,iiz)=A_FFTE(ix,iy,iz)
+          matbox_l(iix,iiy,iiz)=poisson%a_ffte(ix,iy,iz)
         end do
       end do
     end do

@@ -174,8 +174,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
-! NOTE: This directive is a compiler hint to stabilize the performance of summation
-#ifdef __INTEL_COMPILER
+#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
@@ -270,6 +269,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
   use salmon_global, only: natom
   use timer
+  use salmon_communication, only: comm_summation
 #ifdef SALMON_ENABLE_MPI3
   use salmon_communication, only: comm_wait_all
   use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX

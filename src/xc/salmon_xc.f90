@@ -15,6 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 module salmon_xc
+  use structures, only: s_xc_functional
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
@@ -39,20 +40,6 @@ module salmon_xc
   integer, parameter :: salmon_xctype_libxc = 101
 #endif
 
-  type xc_functional
-    integer :: xctype(3)
-    integer :: ispin
-    real(8) :: cval
-    logical :: use_gradient
-    logical :: use_laplacian
-    logical :: use_kinetic_energy
-    logical :: use_current
-#ifdef SALMON_USE_LIBXC
-    type(xc_f90_pointer_t) :: func(3)
-    type(xc_f90_pointer_t) :: info(3)
-#endif
-  end type
-
 contains
 
 
@@ -74,7 +61,7 @@ contains
 
   subroutine init_xc(xc, ispin, cval, xcname, xname, cname)
     implicit none
-    type(xc_functional), intent(inout) :: xc
+    type(s_xc_functional), intent(inout) :: xc
     integer, intent(in)                :: ispin
     real(8), intent(in)                :: cval
     character(*), intent(in), optional :: xcname
@@ -372,7 +359,7 @@ contains
 
   subroutine finalize_xc(xc)
     implicit none
-    type(xc_functional), intent(inout) :: xc
+    type(s_xc_functional), intent(inout) :: xc
 
 #ifdef SALMON_USE_LIBXC
     if (xc%xctype(1) == salmon_xctype_libxc) call xc_f90_func_end(xc%func(1))
@@ -391,7 +378,7 @@ contains
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
     implicit none
-    type(xc_functional), intent(in) :: xc
+    type(s_xc_functional), intent(in) :: xc
     real(8), intent(in), optional :: rho(:, :, :) ! ispin = 0
     real(8), intent(in), optional :: rho_s(:, :, :, :) ! ispin = 1
     real(8), intent(out), optional :: exc(:, :, :) ! epsilon_xc[rho]

@@ -253,13 +253,17 @@ contains
     real(8) :: BT(3,3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+    complex(8),allocatable :: uVpsi(:)
 
 #ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
     BT = transpose(stencil%rmatrix_B)
-    if(info%if_divide_rspace) call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+    if(info%if_divide_rspace) then
+      call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+      allocate(uVpsi(ppg%Nlma))
+    end if
 
   ! overlap region communication
     if(info%if_divide_rspace) then
@@ -278,8 +282,8 @@ contains
         wrk2 = matmul(BT,wrk2)
 
         if(info%if_divide_rspace) then
-          call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
-                                             ,uVpsibox2(ispin,io,ik,im,:))
+          uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+          call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
         else
           call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
@@ -295,7 +299,7 @@ contains
     end do
     end do
 
-    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2)
+    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2,uVpsi)
 
     return
 
@@ -363,13 +367,17 @@ contains
     real(8) :: wrk1(3),wrk2(3),wrk3(3),BT(3,3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
+    complex(8),allocatable :: uVpsi(:)
 
 #ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
     BT = transpose(stencil%rmatrix_B)
-    if(info%if_divide_rspace) call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+    if(info%if_divide_rspace) then
+      call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
+      allocate(uVpsi(ppg%Nlma))
+    end if
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
@@ -381,8 +389,8 @@ contains
         call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,mg%is,mg%ie)
 
         if(info%if_divide_rspace) then
-          call calc_current_nonlocal_rdivided(wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik &
-                                             ,uVpsibox2(ispin,io,ik,im,:))
+          uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
+          call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
         else
           call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
@@ -403,7 +411,7 @@ contains
     end do
     end do
 
-    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2)
+    if(info%if_divide_rspace) deallocate(uVpsibox,uVpsibox2,uVpsi)
 
     return
 
