@@ -140,9 +140,9 @@ module sendrecv_grid
         if (srg%neig(idir, iside) /= comm_proc_null) then
           if (srg%neig(idir, iside) /= myrank) then
             if (srg%if_pcomm_real8_initialized) &
-              call comm_free_reqs(srg%ireq_real8(idir, iside, :))
+              call comm_free_reqs(srg%ireq_real8(:, iside, idir))
             if (srg%if_pcomm_complex8_initialized) &
-              call comm_free_reqs(srg%ireq_complex8(idir, iside, :))
+              call comm_free_reqs(srg%ireq_complex8(:, iside, idir))
           end if
         end if
 
@@ -192,7 +192,7 @@ module sendrecv_grid
             ! In the first call of this subroutine, setup the persistent communication:
             if (.not. srg%if_pcomm_real8_initialized) call init_pcomm(idir, iside)
             ! Start to communication
-            call comm_start_all(srg%ireq_real8(idir, iside, :))
+            call comm_start_all(srg%ireq_real8(:, iside, idir))
           else
             ! NOTE: If neightboring nodes are itself (periodic with single proc),
             !       a simple side-to-side copy is used instead of the MPI comm.
@@ -207,7 +207,7 @@ module sendrecv_grid
         if (srg%neig(idir, iside) /= comm_proc_null) then
           if (srg%neig(idir, iside) /= myrank) then
             ! Wait for recieving
-            call comm_wait_all(srg%ireq_real8(idir, iside, :))
+            call comm_wait_all(srg%ireq_real8(:, iside, idir))
             ! Write back the recieved cache
             call unpack_cache(idir, iside)
           end if
@@ -243,13 +243,13 @@ module sendrecv_grid
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
-      srg%ireq_real8(jdir, jside, itype_send) = comm_send_init( &
+      srg%ireq_real8(itype_send, jside, jdir) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%dbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      srg%ireq_real8(jdir, jside, itype_recv) = comm_recv_init( &
+      srg%ireq_real8(itype_recv, jside, jdir) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%dbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, flip(jside)), & ! `jside` in sender side
@@ -327,7 +327,7 @@ module sendrecv_grid
             ! In the first call of this subroutine, setup the persistent communication:
             if (.not. srg%if_pcomm_complex8_initialized) call init_pcomm(idir, iside)
             ! Start to communication
-            call comm_start_all(srg%ireq_complex8(idir, iside, :))
+            call comm_start_all(srg%ireq_complex8(:, iside, idir))
           else
             ! NOTE: If neightboring nodes are itself (periodic with single proc),
             !       a simple side-to-side copy is used instead of the MPI comm.
@@ -342,7 +342,7 @@ module sendrecv_grid
         if (srg%neig(idir, iside) /= comm_proc_null) then
           if (srg%neig(idir, iside) /= myrank) then
             ! Wait for recieving
-            call comm_wait_all(srg%ireq_complex8(idir, iside, :))
+            call comm_wait_all(srg%ireq_complex8(:, iside, idir))
             ! Write back the recieved cache
             call unpack_cache(idir, iside)
           end if
@@ -378,13 +378,13 @@ module sendrecv_grid
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
-      srg%ireq_complex8(jdir, jside, itype_send) = comm_send_init( &
+      srg%ireq_complex8(itype_send, jside, jdir) = comm_send_init( &
         srg%cache(jdir, jside, itype_send)%zbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, jside), &
         srg%icomm)
       ! Recv (and initialize persistent communication)
-      srg%ireq_complex8(jdir, jside, itype_recv) = comm_recv_init( &
+      srg%ireq_complex8(itype_recv, jside, jdir) = comm_recv_init( &
         srg%cache(jdir, jside, itype_recv)%zbuf, &
         srg%neig(jdir, jside), &
         get_tag(jdir, flip(jside)), & ! `jside` in sender

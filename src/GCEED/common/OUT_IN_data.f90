@@ -1272,7 +1272,7 @@ if(IC<=2)then
 end if
 
 if(comm_is_root(nproc_id_global))then
-  read(96) esp0(:itotMST0,:num_kpoints_rd),rocc0(:itotMST0,:num_kpoints_rd)
+  read(96) esp0(:,:),rocc0(:,:)
   if(itotMST0>=itotMST)then
     if(ilsda == 0)then
       is_sta=1
