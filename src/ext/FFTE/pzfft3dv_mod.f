@@ -416,7 +416,7 @@ C     1                  MPI_DOUBLE_COMPLEX,ICOMMY,IERR)
       IMPLICIT REAL*8 (A-H,O-Z)
       COMPLEX*16 A(*),B(*)
      
-      CALL ALLTOALL_1D(NN,A,B,ICOMM,NPU)
+      CALL ALLTOALL_1D(A,B,NN,ICOMM,NPU)
  
       END
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
