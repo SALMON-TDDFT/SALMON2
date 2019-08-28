@@ -21,13 +21,13 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(lg,mg,ng,system,stencil)
+subroutine init_dft(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
   & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion
   implicit none
-  type(s_rgrid)      :: lg,mg,ng
+  type(s_rgrid)      :: lg
   type(s_dft_system) :: system
   type(s_stencil)    :: stencil
   !
@@ -58,8 +58,6 @@ subroutine init_dft(lg,mg,ng,system,stencil)
     hgs(1:3) = dl(1:3)
   end if
   call init_grid_whole(rsize,hgs,lg)
-  call init_grid_parallel(lg,mg,ng)
-
   system%hgs = hgs
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
@@ -100,6 +98,92 @@ subroutine init_dft(lg,mg,ng,system,stencil)
 
   return
 end subroutine init_dft
+
+!===================================================================================================================================
+
+subroutine init_orbital_parallel_singlecell(system,info)
+  use structures
+  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital
+  use salmon_parallel, only: nproc_group_global
+use  calc_iobnum_sub ! remove this line
+use calc_iroot_sub! remove this line
+use scf_data! remove this line
+use calc_allob_sub! remove this line
+  implicit none
+  type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel)      :: info
+  !
+  integer :: io,jspin,ik
+  integer :: jj,iob
+
+! for single-cell calculations
+  info%im_s = 1
+  info%im_e = 1
+  info%numm = 1
+
+! # of k points
+  info%ik_s = info%id_k * system%nk / nproc_k + 1
+  info%ik_e = (info%id_k+1) * system%nk / nproc_k
+  info%numk = info%ik_e - info%ik_s + 1
+
+! # of orbitals
+  info%io_s = 1
+  info%io_e = (info%id_o+1) * system%no / nproc_ob - info%id_o * system%no / nproc_ob
+  info%numo = info%io_e - info%io_s + 1
+!  info%io_s = info%id_o * system%no / nproc_ob + 1
+!  info%io_e = (info%id_o+1) * system%no / nproc_ob
+!  info%numo = info%io_e - info%io_s + 1
+
+! for parallelization
+  info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
+  info%if_divide_orbit  = nproc_ob.ne.1
+  info%icomm_rko  = nproc_group_global
+
+  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
+            ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
+            ,info%irank_jo(1:system%no))
+
+  info%jo_tbl(:) = 0 !(initial value)
+  do iob=info%io_s,info%io_e
+    call calc_allob(iob,jj,itotmst,mst,info%numo)
+    info%io_tbl(iob) = jj
+    info%jo_tbl(jj)  = iob
+  end do
+
+  do jspin=1,system%nspin
+    do ik=info%ik_s,info%ik_e
+      do iob=info%io_s,info%io_e
+        jj = info%io_tbl(iob)
+        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+      end do
+    end do
+  end do
+
+  do jj=1, system%no
+    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
+  end do
+
+!  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1),info%irank_io(1:system%no))
+!
+!! process ID corresponding to the orbital index io
+!  do io=1, system%no
+!    if(mod(io*nproc_ob,system%no)==0)then
+!      info%irank_io(io) = io*nproc_ob/system%no - 1
+!    else
+!      info%irank_io(io) = io*nproc_ob/system%no
+!    end if
+!  end do
+!
+!! occupation number (initaial value)
+!  do jspin=1,system%nspin
+!    do ik=info%ik_s,info%ik_e
+!      do io=info%io_s,info%io_e
+!        info%occ(io,ik,jspin,1) = system%rocc(io,ik,jspin)*system%wtk(ik) ! initial value
+!      end do
+!    end do
+!  end do
+
+end subroutine init_orbital_parallel_singlecell
 
 !===================================================================================================================================
 
@@ -194,9 +278,9 @@ subroutine init_grid_parallel(lg,mg,ng)
 
   allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1),ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
 
-! +------+
-! |  mg  |
-! +------+
+! +-------------------------------+
+! | mg: r-space grid for orbitals |
+! +-------------------------------+
 
   mg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   mg%nd = Nd
@@ -291,9 +375,9 @@ subroutine init_grid_parallel(lg,mg,ng)
     stop "A system is small. Please use less number of processors."
   end if
 
-! +------+
-! |  ng  |
-! +------+
+! +-----------------------------+
+! | ng: r-space grid for fields |
+! +-----------------------------+
 
   ng%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   ng%nd = Nd

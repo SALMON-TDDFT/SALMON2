@@ -645,7 +645,8 @@ inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
 lg_num(:)=lg_end(:)-lg_sta(:)+1
 
 if(sum(dl)==0d0 .and. sum(num_rgrid)==0) dl = Hgs ! input variables should not be changed (future work)
-call init_dft(lg,mg,ng,system,stencil)
+call init_dft(lg,system,stencil)
+call init_grid_parallel(lg,mg,ng) ! lg --> mg & ng
 
 if(iscfrt==2)then
 #ifdef SALMON_STENCIL_PADDING
@@ -723,10 +724,15 @@ if(ilsda==1)then
 end if
 
 if(iSCFRT==2) call make_new_world(info,info_field)
+call init_orbital_parallel_singlecell(system,info)
 
-call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
+k_sta = info%ik_s
+k_end = info%ik_e
+k_num = info%numk
+iobnum = info%numo
 
-call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
+!call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
+!call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iSCFRT==2)then
   call allocate_mat(ng)
