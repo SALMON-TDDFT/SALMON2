@@ -219,10 +219,6 @@ real(8),allocatable :: Ex_fast(:,:,:),Ec_fast(:,:,:)
 
 integer, allocatable :: idiis_sd(:)
 
-integer :: iwksta(3),iwkend(3),iwknum(3)
-integer :: iwk2sta(3),iwk2end(3),iwk2num(3)
-integer :: iwk3sta(3),iwk3end(3),iwk3num(3)
-integer :: iwk_size
 
 integer :: maxlm
 
