@@ -512,7 +512,7 @@ end subroutine snum_procs
 
 !======================================================================
 subroutine old_mesh(lg,mg,ng)
-use salmon_parallel, only: nproc_size_global, nproc_id_global
+use salmon_parallel, only: nproc_size_global
 use structures, only: s_rgrid
 implicit none
 type(s_rgrid),intent(in) :: lg,mg,ng

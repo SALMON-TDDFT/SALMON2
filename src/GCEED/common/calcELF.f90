@@ -15,7 +15,7 @@
 !
 subroutine calcELF(mg,ng,srg,info,srho,ttmp)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global
+use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
 use misc_routines, only: get_wtime
 use calc_allob_sub

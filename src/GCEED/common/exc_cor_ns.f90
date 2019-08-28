@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
-  use salmon_parallel, only: nproc_group_h, nproc_id_global
+  use salmon_parallel, only: nproc_group_h
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
   use scf_data

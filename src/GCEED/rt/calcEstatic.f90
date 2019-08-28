@@ -15,7 +15,6 @@
 !
 subroutine calcEstatic(ng, info, sVh, srg_ng)
 use salmon_communication, only: comm_summation
-use salmon_parallel, only: nproc_id_global
 use scf_data
 use new_world_sub
 use structures, only: s_rgrid, s_orbital_parallel, s_scalar, s_sendrecv_grid
