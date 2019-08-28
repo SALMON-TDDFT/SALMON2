@@ -13,10 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
-  use structures,      only: s_rgrid,s_poisson
+subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
+  use structures,      only: s_rgrid,s_field_parallel,s_poisson
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
-  use salmon_parallel, only: nproc_id_icommy, nproc_id_icommz
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
   use new_world_sub
@@ -25,6 +24,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
   
   integer :: ii,ix,iy,iz,ak
@@ -46,6 +46,11 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
   integer :: iy_sta,iy_end,iz_sta,iz_end
   integer :: i,iix2,iiy2,iiz2
   
+  integer :: npuy,npuz
+
+  npuy=info_field%isize_ffte(2)
+  npuz=info_field%isize_ffte(3)
+  
   if(.not.allocated(poisson%a_ffte))then
     allocate(poisson%a_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
     allocate(poisson%b_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
@@ -57,9 +62,9 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
   bLz=2.d0*Pi/(Hgs(3)*dble(lg_num(3)))
 
   iz_sta=1
-  iz_end=lg_num(3)/NPUZ
+  iz_end=lg_num(3)/npuz
   iy_sta=1
-  iy_end=lg_num(2)/NPUY
+  iy_end=lg_num(2)/npuy
  
   NG_s=1
   NG_e=lg_num(1)*lg_num(2)*lg_num(3)
@@ -78,17 +83,17 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
     enddo
   end do
 
-  do iz=1,lg_num(3)/NPUZ
-  do iy=1,lg_num(2)/NPUY
+  do iz=1,lg_num(3)/npuz
+  do iy=1,lg_num(2)/npuy
   do ix=1,lg_num(1)
-    n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+    n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
     iix2=ix-1+lg_sta(1)
-    iiy2=iy-1+nproc_id_icommy*lg_num(2)/NPUY+lg_sta(2)
-    iiz2=iz-1+nproc_id_icommz*lg_num(3)/NPUZ+lg_sta(3)
-    if(ix==1.and.iy==1.and.iz==1.and.nproc_id_icommz==0.and.nproc_id_icommy==0) nGzero=n
+    iiy2=iy-1+info_field%id_ffte(2)*lg_num(2)/npuy+lg_sta(2)
+    iiz2=iz-1+info_field%id_ffte(3)*lg_num(3)/npuz+lg_sta(3)
+    if(ix==1.and.iy==1.and.iz==1.and.info_field%id_ffte(3)==0.and.info_field%id_ffte(2)==0) nGzero=n
     iix=ix-1-lg_num(1)*(1+sign(1,(iix2-1-(lg_num(1)+1)/2)))/2
-    iiy=iy-1+nproc_id_icommy*lg_num(2)/NPUY-lg_num(2)*(1+sign(1,(iiy2-1-(lg_num(2)+1)/2)))/2
-    iiz=iz-1+nproc_id_icommz*lg_num(3)/NPUZ-lg_num(3)*(1+sign(1,(iiz2-1-(lg_num(3)+1)/2)))/2
+    iiy=iy-1+info_field%id_ffte(2)*lg_num(2)/npuy-lg_num(2)*(1+sign(1,(iiy2-1-(lg_num(2)+1)/2)))/2
+    iiz=iz-1+info_field%id_ffte(3)*lg_num(3)/npuz-lg_num(3)*(1+sign(1,(iiz2-1-(lg_num(3)+1)/2)))/2
     Gx(n)=dble(iix)*bLx
     Gy(n)=dble(iiy)*bLy
     Gz(n)=dble(iiz)*bLz
@@ -99,10 +104,10 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
   dVloc_G(:,:)=0.d0
   do ak=1,MKI
     imax=min(Mr(ak),Nr-1)
-    do iz=1,lg_num(3)/NPUZ
-    do iy=1,lg_num(2)/NPUY
+    do iz=1,lg_num(3)/npuz
+    do iy=1,lg_num(2)/npuy
     do ix=1,lg_num(1)
-      n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+      n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
       G2sq=sqrt(Gx(n)**2+Gy(n)**2+Gz(n)**2)
       s=0.d0
       if (n == nGzero) then
@@ -125,10 +130,10 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
   aLxyz=Hvol*dble(lg_num(1)*lg_num(2)*lg_num(3))
   rhoion_G=0.d0
   do iatom=1,MI
-    do iz=1,lg_num(3)/NPUZ
-    do iy=1,lg_num(2)/NPUY
+    do iz=1,lg_num(3)/npuz
+    do iy=1,lg_num(2)/npuy
     do ix=1,lg_num(1)
-      n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+      n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
       rhoion_G(n)=rhoion_G(n)+Zps(Kion(iatom))/aLxyz*exp(-zI*(Gx(n)*Rion(1,iatom)+Gy(n)*Rion(2,iatom)+Gz(n)*Rion(3,iatom)))
     enddo
     enddo
@@ -138,10 +143,10 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
   Vion_G=0.d0
   do iatom=1,MI
     ak=Kion(iatom)
-    do iz=1,lg_num(3)/NPUZ
-    do iy=1,lg_num(2)/NPUY
+    do iz=1,lg_num(3)/npuz
+    do iy=1,lg_num(2)/npuy
     do ix=1,lg_num(1)
-      n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+      n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
       G2=Gx(n)**2+Gy(n)**2+Gz(n)**2
       Gd=Gx(n)*Rion(1,iatom)+Gy(n)*Rion(2,iatom)+Gz(n)*Rion(3,iatom)
       Vion_G(n)=Vion_G(n)+dVloc_G(n,ak)*exp(-zI*Gd)/aLxyz
@@ -152,18 +157,18 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
     enddo
   enddo
 
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg_num(1),lg_num(2),lg_num(3),NPUY,NPUZ,0) 
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg_num(1),lg_num(2),lg_num(3),npuy,npuz,0) 
 
-  do iz=1,lg_num(3)/NPUZ
-  do iy=1,lg_num(2)/NPUY
+  do iz=1,lg_num(3)/npuz
+  do iy=1,lg_num(2)/npuy
   do ix=1,lg_num(1)
-    n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
+    n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
     poisson%b_ffte(ix,iy,iz)=Vion_G(n)*dble(lg_num(1)*lg_num(2)*lg_num(3))
   enddo
   enddo
   enddo
 
-  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg_num(1),lg_num(2),lg_num(3),NPUY,NPUZ,1)
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg_num(1),lg_num(2),lg_num(3),npuy,npuz,1)
 
 !$OMP parallel do
   do iz = lg_sta(3),lg_end(3)
@@ -173,21 +178,21 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,poisson)
   end do
   end do
   end do
-  if(NPUW==1)then
+  if(info_field%isize_ffte(1)==1)then
 !$OMP parallel do private(iiz,iiy)
     do iz=iz_sta,iz_end
-      iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
+      iiz=iz+info_field%id_ffte(3)*lg_num(3)/npuz
       do iy=iy_sta,iy_end
-        iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
+        iiy=iy+info_field%id_ffte(2)*lg_num(2)/npuy
         matbox_l(1:lg_end(1),iiy,iiz)=poisson%a_ffte(1:lg_end(1),iy,iz)
       end do
     end do
   else
 !$OMP parallel do private(iiz,iiy,ix)
     do iz=iz_sta,iz_end
-      iiz=iz+nproc_id_icommz*lg_num(3)/NPUZ
+      iiz=iz+info_field%id_ffte(3)*lg_num(3)/npuz
       do iy=iy_sta,iy_end
-        iiy=iy+nproc_id_icommy*lg_num(2)/NPUY
+        iiy=iy+info_field%id_ffte(2)*lg_num(2)/npuy
         do iix=ng%is(1),ng%ie(1)
           ix=iix-lg_sta(1)+1
           matbox_l(iix,iiy,iiz)=poisson%a_ffte(ix,iy,iz)

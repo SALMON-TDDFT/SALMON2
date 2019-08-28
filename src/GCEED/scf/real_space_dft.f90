@@ -245,7 +245,7 @@ if(iopt==1)then
   end if
 
   if(iperiodic==3 .and. iflag_hartree==4)then
-    call prep_poisson_fft(lg,ng,poisson)
+    call prep_poisson_fft(lg,ng,info_field,poisson)
   end if
 
   if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
@@ -255,7 +255,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl
-    call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -265,7 +265,7 @@ if(iopt==1)then
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
   end if
 
-  if(iperiodic==3) call get_fourier_grid_G(fg)
+  if(iperiodic==3) call get_fourier_grid_G(info_field,fg)
 
   select case( IC )
   case default ! New calculation
@@ -432,8 +432,8 @@ else if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     call dealloc_init_ps(ppg,ppg_all,ppn)
-    call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
-    if(iperiodic==3) call get_fourier_grid_G(fg)
+    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    if(iperiodic==3) call get_fourier_grid_G(info_field,fg)
 
   end if
   call timer_end(LOG_INIT_GS)
@@ -1006,10 +1006,12 @@ subroutine band_information
   return
 end subroutine band_information
 
-subroutine get_fourier_grid_G(fg)
-  use structures, only: s_reciprocal_grid
+subroutine get_fourier_grid_G(info_field,fg)
+  use structures, only: s_field_parallel,s_reciprocal_grid
   implicit none
+  type(s_field_parallel) :: info_field
   type(s_reciprocal_grid) :: fg
+  integer :: npuy,npuz
 
   if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
   if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
@@ -1036,11 +1038,13 @@ subroutine get_fourier_grid_G(fg)
      fg%Gz = 0.d0
      fg%zrhoG_ion = 0.d0
      fg%zdVG_ion = 0.d0
-     do iz=1,lg_num(3)/NPUZ
-     do iy=1,lg_num(2)/NPUY
+     npuy=info_field%isize_ffte(2)
+     npuz=info_field%isize_ffte(3)
+     do iz=1,lg_num(3)/npuz
+     do iy=1,lg_num(2)/npuy
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+        n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
+        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
         fg%Gx(nn) = Gx(n)
         fg%Gy(nn) = Gy(n)
         fg%Gz(nn) = Gz(n)

@@ -14,28 +14,16 @@
 !  limitations under the License.
 !
 !======================================================================
-subroutine alltoall_1d_y(vec_a,vec_b,nn,npuy)
+subroutine alltoall_1d(n,vec_a,vec_b,icomm,npu)
   use salmon_communication, only: comm_alltoall
-  use salmon_parallel, only: nproc_group_icommy
   implicit none
-  complex(8),intent(in)   :: vec_a(nn)
-  complex(8),intent(out)  :: vec_b(nn)
-  integer,intent(in)      :: nn
-  integer,intent(in)      :: npuy
+  integer,intent(in)      :: n
+  complex(8),intent(in)   :: vec_a(n)
+  complex(8),intent(out)  :: vec_b(n)
+  integer,intent(in)      :: icomm
+  integer,intent(in)      :: npu
 
-  call comm_alltoall(vec_a,vec_b,nproc_group_icommy,nn/npuy)
+  call comm_alltoall(vec_a,vec_b,icomm,n/npu)
 
-end subroutine alltoall_1d_y
+end subroutine alltoall_1d
 !======================================================================
-subroutine alltoall_1d_z(vec_a,vec_b,nn,npuz)
-  use salmon_communication, only: comm_alltoall
-  use salmon_parallel, only: nproc_group_icommz
-  implicit none
-  complex(8),intent(in)   :: vec_a(nn)
-  complex(8),intent(out)  :: vec_b(nn)
-  integer,intent(in)      :: nn
-  integer,intent(in)      :: npuz
-
-  call comm_alltoall(vec_a,vec_b,nproc_group_icommz,nn/npuz)
-
-end subroutine alltoall_1d_z
