@@ -21,10 +21,6 @@ implicit none
 
 integer,allocatable :: icorr_polenum(:)
 
-! FFTE routine
-integer :: iquot
-integer :: i11,i12,i13,i14,i15
-
 CONTAINS
 
 !=======================================================================
