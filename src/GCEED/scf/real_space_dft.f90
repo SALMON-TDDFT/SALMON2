@@ -177,7 +177,6 @@ if(iopt==1)then
 
   call allocate_mat(ng)
   call set_icoo1d
-  call allocate_sendrecv
   call init_code_optimization
 
   ! Initialization of s_sendrecv_grid structure (experimental implementation)
