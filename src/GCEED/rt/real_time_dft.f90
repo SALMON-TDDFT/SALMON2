@@ -23,7 +23,6 @@ use init_sendrecv_sub
 use new_world_sub
 use read_pslfile_sub
 use allocate_psl_sub
-use persistent_comm
 
 implicit none
 
@@ -190,7 +189,6 @@ call init_itype
 call init_sendrecv_matrix
 
 call allocate_sendrecv
-call init_persistent_requests(info)
 call init_code_optimization
 
 if(ilsda==0)then
