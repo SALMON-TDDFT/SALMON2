@@ -645,7 +645,8 @@ inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
 lg_num(:)=lg_end(:)-lg_sta(:)+1
 
 if(sum(dl)==0d0 .and. sum(num_rgrid)==0) dl = Hgs ! input variables should not be changed (future work)
-call init_dft(lg,mg,ng,system,stencil)
+call init_dft(lg,system,stencil)
+call init_grid_parallel(lg,mg,ng) ! lg --> mg & ng
 
 if(iscfrt==2)then
 #ifdef SALMON_STENCIL_PADDING

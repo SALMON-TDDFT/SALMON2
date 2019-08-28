@@ -112,7 +112,9 @@ call check_dos_pdos
 
 call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 
-call init_dft(lg,mg,ng,system,stencil)
+call init_dft(lg,system,stencil)
+call init_grid_parallel(lg,mg,ng) ! lg --> mg & ng
+
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
 else
