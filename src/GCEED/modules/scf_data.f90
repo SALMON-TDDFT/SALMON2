@@ -395,10 +395,6 @@ integer,allocatable::icoo1d(:,:)
 
 integer :: MI_read
 
-! variables for FFTE routine
-integer,dimension(3) :: LNPU
-integer :: NPUZ,NPUY,NPUW
-
 real(8) :: absorption(0:100000)
 real(8) :: absorption_d(0:100000)
 real(8) :: absorption_id(0:100000)

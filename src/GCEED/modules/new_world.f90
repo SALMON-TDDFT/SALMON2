@@ -500,52 +500,21 @@ end if
 nproc_group_korbital_vhxc = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc_size_korbital_vhxc)
 
-!call FACTOR(nproc,LNPU)
-!NPUZ=(2**(LNPU(1)/2))*(3**(LNPU(2)/2))*(5**(LNPU(3)/2))
-!NPUY=nproc/NPUZ
-
-!if(iflag_hartree==4)then
-
 ! communicators for FFTE routine
-  NPUW=nproc_d_g_dm(1)*nproc_d_o(1)
-  NPUY=nproc_d_g_dm(2)*nproc_d_o(2)
-  NPUZ=nproc_d_g_dm(3)*nproc_d_o(3)
-
-  info_field%isize_ffte(1)=NPUW
-  info_field%isize_ffte(2)=NPUY
-  info_field%isize_ffte(3)=NPUZ
-
-  icolor=info_field%id(3)+info_field%id(1)*NPUZ
+  icolor=info_field%id(3)+info_field%id(1)*info_field%isize_ffte(3)
   ikey=info_field%id(2)
-  nproc_group_icommy = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommy, nproc_id_icommy, nproc_size_icommy)
+  info_field%icomm_ffte(2) = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(info_field%icomm_ffte(2), info_field%id_ffte(2), info_field%isize_ffte(2))
 
-  icolor=info_field%id(2)+info_field%id(1)*NPUY
+  icolor=info_field%id(2)+info_field%id(1)*info_field%isize_ffte(2)
   ikey=info_field%id(3)
-  nproc_group_icommz = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommz, nproc_id_icommz, nproc_size_icommz)
+  info_field%icomm_ffte(3) = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(info_field%icomm_ffte(3), info_field%id_ffte(3), info_field%isize_ffte(3))
 
-  icolor=info_field%id(2)+info_field%id(3)*NPUY
+  icolor=info_field%id(2)+info_field%id(3)*info_field%isize_ffte(2)
   ikey=info_field%id(1)
-  nproc_group_icommw = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommw, nproc_id_icommw, nproc_size_icommw)
-
-  iquot=nproc_id_global/(NPUY*NPUZ)
-  
-  i11=mod(nproc_id_global,nproc_d_o(2)*nproc_d_o(3))
-  i12=i11/nproc_d_o(2)
-  i13=i12*nproc_d_o(3)
-  i14=nproc_id_global/(NPUY*nproc_d_o(3))
-  icolor=i13+i14+iquot*NPUZ
-  
-  i11=mod(nproc_id_global,nproc_d_o(2))
-  i12=nproc_id_global/(nproc_d_o(2)*nproc_d_o(3))
-  ikey=i11*NPUY/nproc_d_o(2)+mod(i12,NPUY/nproc_d_o(2))
-  
-  nproc_group_icommy_copy = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommy_copy, nproc_id_icommy_copy, nproc_size_icommy_copy)
-
-!end if
+  info_field%icomm_ffte(1) = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
 
   nproc_group_tdks = nproc_group_global
   nproc_id_tdks    = nproc_id_global

@@ -13,16 +13,15 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine prep_poisson_fft(lg,ng,poisson)
-  use structures,      only: s_rgrid,s_poisson
-  use salmon_parallel, only: nproc_id_icommy
-  use salmon_parallel, only: nproc_id_icommz
+subroutine prep_poisson_fft(lg,ng,info_field,poisson)
+  use structures,      only: s_rgrid,s_field_parallel,s_poisson
   use scf_data
   use new_world_sub
   use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
   integer :: ng_sta_2(3),ng_end_2(3),ng_num_2(3)
   integer :: lg_sta_2(3),lg_end_2(3),lg_num_2(3)
@@ -35,6 +34,11 @@ subroutine prep_poisson_fft(lg,ng,poisson)
   integer :: kx_sta,kx_end,ky_sta,ky_end,kz_sta,kz_end
   real(8) :: bLx,bLy,bLz
   integer :: ky_shift,kz_shift
+  
+  integer :: npuy,npuz
+
+  npuy=info_field%isize_ffte(2)
+  npuz=info_field%isize_ffte(3)
 
   if(.not.allocated(poisson%coef))then
     allocate(poisson%coef(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
@@ -67,12 +71,12 @@ subroutine prep_poisson_fft(lg,ng,poisson)
     kx_sta=lg_sta_2(1)
     kx_end=lg_end_2(1)
     ky_sta=1
-    ky_end=lg_num_2(2)/NPUY
+    ky_end=lg_num_2(2)/npuy
     kz_sta=1
-    kz_end=lg_num_2(3)/NPUZ
+    kz_end=lg_num_2(3)/npuz
   
-    ky_shift=nproc_id_icommy*lg_num_2(2)/NPUY
-    kz_shift=nproc_id_icommz*lg_num_2(3)/NPUZ
+    ky_shift=info_field%id_ffte(2)*lg_num_2(2)/npuy
+    kz_shift=info_field%id_ffte(3)*lg_num_2(3)/npuz
   end if
 
   do kz = kz_sta,kz_end

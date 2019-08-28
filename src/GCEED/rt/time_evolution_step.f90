@@ -313,7 +313,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
      !(currently does not work)
      if(iperiodic==3)then
-        call get_fourier_grid_G_rt(system,lg,ng,fg)
+        call get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
      endif
 
      call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
@@ -382,9 +382,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
 END SUBROUTINE time_evolution_step
 
-subroutine get_fourier_grid_G_rt(system,lg,ng,fg)
+subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
   use salmon_global, only: nelem
-  use structures, only: s_dft_system, s_reciprocal_grid, s_rgrid
+  use structures, only: s_dft_system, s_reciprocal_grid, s_field_parallel, s_rgrid
   use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
   use scf_data
   use allocate_psl_sub
@@ -392,9 +392,12 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,fg)
   type(s_dft_system),intent(in) :: system
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
   type(s_reciprocal_grid) :: fg
 
   integer :: jj,ix,iy,iz,n,nn
+
+  integer :: npuy,npuz
 
   if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
   if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
@@ -421,11 +424,13 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,fg)
      fg%Gz = 0.d0
      fg%zrhoG_ion = 0.d0
      fg%zdVG_ion = 0.d0
-     do iz=1,lg_num(3)/NPUZ
-     do iy=1,lg_num(2)/NPUY
+     npuy=info_field%isize_ffte(2)
+     npuz=info_field%isize_ffte(3)
+     do iz=1,lg_num(3)/npuz
+     do iy=1,lg_num(2)/npuy
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+        n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
+        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
         fg%Gx(nn) = Gx(n)
         fg%Gy(nn) = Gy(n)
         fg%Gz(nn) = Gz(n)
