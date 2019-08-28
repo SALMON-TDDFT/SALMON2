@@ -431,9 +431,16 @@ else if(iopt>=2)then
   call timer_begin(LOG_INIT_GS)
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
+    rion_update = .true.
     call dealloc_init_ps(ppg,ppg_all,ppn)
     call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
-    if(iperiodic==3) call get_fourier_grid_G(info_field,fg)
+    sVpsl%f = Vpsl
+    if(iperiodic==3) then
+       if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
+       stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
+       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+       call get_fourier_grid_G(info_field,fg)
+    end if
 
   end if
   call timer_end(LOG_INIT_GS)
