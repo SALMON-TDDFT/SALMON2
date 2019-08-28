@@ -41,6 +41,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   integer :: nspin,ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
   logical :: if_kAc,if_singlescale
+  integer :: igs(3),ige(3)
+  integer,parameter :: nblk(3) = [16, 16, 16]
+  integer :: ibx,iby,ibz
 
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -108,13 +111,26 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
           k_lap0 = stencil%coef_lap0
           k_nabt = 0d0
         end if
+!$omp parallel do default(none) collapse(5) &
+!$omp          private(io,ispin,igs,ige,ibx,iby,ibz) &
+!$omp          shared(ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt)
         do io=io_s,io_e
         do ispin=1,Nspin
-          call stencil_C(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
-                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                        ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+        do ibz=mg%is(3),mg%ie(3),nblk(3)
+        do iby=mg%is(2),mg%ie(2),nblk(2)
+        do ibx=mg%is(1),mg%ie(1),nblk(1)
+          igs(3) = ibz ; ige(3) = min(ibz + nblk(3), mg%ie(3))
+          igs(2) = iby ; ige(2) = min(iby + nblk(2), mg%ie(2))
+          igs(1) = ibx ; ige(1) = min(ibx + nblk(1), mg%ie(1))
+          call stencil_C_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
+                                    ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                    ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
         end do
         end do
+        end do
+        end do
+        end do
+!$omp end parallel do
       end do
       end do
     else if(stencil%if_orthogonal .and. if_singlescale) then
