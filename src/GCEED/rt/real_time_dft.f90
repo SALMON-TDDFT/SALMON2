@@ -511,8 +511,8 @@ real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
 integer :: is,jspin
-integer :: neig(1:3, 1:2)
-integer :: neig_ng(1:3, 1:2)
+integer :: neig(1:2, 1:3)
+integer :: neig_ng(1:2, 1:3)
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -547,19 +547,19 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   ! Initialization of s_sendrecv_grid structure (experimental implementation)
   neig(1, 1) = iup_array(1)
-  neig(1, 2) = idw_array(1)
-  neig(2, 1) = jup_array(1)
+  neig(2, 1) = idw_array(1)
+  neig(1, 2) = jup_array(1)
   neig(2, 2) = jdw_array(1)
-  neig(3, 1) = kup_array(1)
-  neig(3, 2) = kdw_array(1)
+  neig(1, 3) = kup_array(1)
+  neig(2, 3) = kdw_array(1)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
 
   neig_ng(1, 1) = iup_array(2)
-  neig_ng(1, 2) = idw_array(2)
-  neig_ng(2, 1) = jup_array(2)
+  neig_ng(2, 1) = idw_array(2)
+  neig_ng(1, 2) = jup_array(2)
   neig_ng(2, 2) = jdw_array(2)
-  neig_ng(3, 1) = kup_array(2)
-  neig_ng(3, 2) = kdw_array(2)
+  neig_ng(1, 3) = kup_array(2)
+  neig_ng(2, 3) = kdw_array(2)
   call init_sendrecv_grid(srg_ng, ng, 1, &
     & nproc_group_global, neig_ng)
 

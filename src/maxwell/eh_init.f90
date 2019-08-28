@@ -1496,7 +1496,7 @@ subroutine eh_prep_GCEED(fs,fw)
   type(ls_fdtd_work), intent(inout) :: fw
   type(s_orbital_parallel)          :: info
   type(s_field_parallel)            :: info_field
-  integer                           :: neig_ng_eh(1:3,1:2)
+  integer                           :: neig_ng_eh(1:2,1:3)
   integer                           :: ii
   
   !set mpi condition
@@ -1528,9 +1528,9 @@ subroutine eh_prep_GCEED(fs,fw)
   
   !set sendrecv environment
   call init_updown(info)
-  neig_ng_eh(1,1)=iup_array(2); neig_ng_eh(1,2)=idw_array(2);
-  neig_ng_eh(2,1)=jup_array(2); neig_ng_eh(2,2)=jdw_array(2);
-  neig_ng_eh(3,1)=kup_array(2); neig_ng_eh(3,2)=kdw_array(2);
+  neig_ng_eh(1,1)=iup_array(2); neig_ng_eh(2,1)=idw_array(2);
+  neig_ng_eh(1,2)=jup_array(2); neig_ng_eh(2,2)=jdw_array(2);
+  neig_ng_eh(1,3)=kup_array(2); neig_ng_eh(2,3)=kdw_array(2);
   !This process about ng is temporal. 
   !With modifying set_ng to be applied to arbitrary Nd, this process will be removed.
   fs%ng%is_overlap(1:3)=fs%ng%is(1:3)-fw%Nd
