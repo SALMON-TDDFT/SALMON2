@@ -188,7 +188,6 @@ call init_updown(info)
 call init_itype
 call init_sendrecv_matrix
 
-call allocate_sendrecv
 call init_code_optimization
 
 if(ilsda==0)then

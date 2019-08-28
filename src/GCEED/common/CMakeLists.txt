@@ -1,5 +1,4 @@
 set(SOURCES
-    allocate_sendrecv.f90
     calcELF.f90
     calcJxyz_all.f90
     calcJxyz_all_periodic.f90

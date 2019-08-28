@@ -24,23 +24,6 @@ integer :: jdw_array(4)
 integer :: kup_array(4)
 integer :: kdw_array(4)
 
-integer :: itype_r(24)
-integer :: itype_c(24)
-
-real(8),allocatable :: rmatbox1_x_s(:,:,:),rmatbox1_y_s(:,:,:),rmatbox1_z_s(:,:,:)
-real(8),allocatable :: rmatbox2_x_s(:,:,:),rmatbox2_y_s(:,:,:),rmatbox2_z_s(:,:,:)
-
-complex(8),allocatable :: cmatbox1_x_s(:,:,:),cmatbox1_y_s(:,:,:),cmatbox1_z_s(:,:,:)
-complex(8),allocatable :: cmatbox2_x_s(:,:,:),cmatbox2_y_s(:,:,:),cmatbox2_z_s(:,:,:)
-
-real(8),allocatable :: rmatbox1_x_h(:,:,:),rmatbox1_y_h(:,:,:),rmatbox1_z_h(:,:,:)
-real(8),allocatable :: rmatbox2_x_h(:,:,:),rmatbox2_y_h(:,:,:),rmatbox2_z_h(:,:,:)
-real(8),allocatable :: rmatbox3_x_h(:,:,:),rmatbox3_y_h(:,:,:),rmatbox3_z_h(:,:,:)
-real(8),allocatable :: rmatbox4_x_h(:,:,:),rmatbox4_y_h(:,:,:),rmatbox4_z_h(:,:,:)
-
-complex(8),allocatable :: cmatbox1_x_h(:,:,:),cmatbox1_y_h(:,:,:),cmatbox1_z_h(:,:,:)
-complex(8),allocatable :: cmatbox2_x_h(:,:,:),cmatbox2_y_h(:,:,:),cmatbox2_z_h(:,:,:)
-
 CONTAINS
 
 !=======================================================================
@@ -515,78 +498,9 @@ integer :: inum_Mxin2(3,0:nproc_size_global-1)
 
 inum_Mxin2(1:3,0:nproc_size_global-1)=inum_Mxin_s(1:3,0:nproc_size_global-1)
 
-allocate(rmatbox1_x_s(Nd,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox1_y_s(inum_Mxin2(1,nproc_id_global),Nd,inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox1_z_s(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Nd))
-allocate(rmatbox2_x_s(Nd,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox2_y_s(inum_Mxin2(1,nproc_id_global),Nd,inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox2_z_s(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Nd))
-
-rmatbox1_x_s=0.d0
-rmatbox1_y_s=0.d0
-rmatbox1_z_s=0.d0
-rmatbox2_x_s=0.d0
-rmatbox2_y_s=0.d0
-rmatbox2_z_s=0.d0
-
 inum_Mxin2(1:3,0:nproc_size_global-1)=inum_Mxin(1:3,0:nproc_size_global-1)
 
-allocate(cmatbox1_x_s(Nd,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox1_y_s(inum_Mxin2(1,nproc_id_global),Nd,inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox1_z_s(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Nd))
-allocate(cmatbox2_x_s(Nd,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox2_y_s(inum_Mxin2(1,nproc_id_global),Nd,inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox2_z_s(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Nd))
-
-cmatbox1_x_s=0.d0
-cmatbox1_y_s=0.d0
-cmatbox1_z_s=0.d0
-cmatbox2_x_s=0.d0
-cmatbox2_y_s=0.d0
-cmatbox2_z_s=0.d0
-
 inum_Mxin2(1:3,0:nproc_size_global-1)=inum_Mxin_s(1:3,0:nproc_size_global-1)
-
-allocate(rmatbox1_x_h(Ndh,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox1_y_h(inum_Mxin2(1,nproc_id_global),Ndh,inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox1_z_h(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Ndh))
-allocate(rmatbox2_x_h(Ndh,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox2_y_h(inum_Mxin2(1,nproc_id_global),Ndh,inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox2_z_h(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Ndh))
-allocate(rmatbox3_x_h(Ndh,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox3_y_h(inum_Mxin2(1,nproc_id_global),Ndh,inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox3_z_h(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Ndh))
-allocate(rmatbox4_x_h(Ndh,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox4_y_h(inum_Mxin2(1,nproc_id_global),Ndh,inum_Mxin2(3,nproc_id_global)))
-allocate(rmatbox4_z_h(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Ndh))
-
-rmatbox1_x_h=0.d0
-rmatbox1_y_h=0.d0
-rmatbox1_z_h=0.d0
-rmatbox2_x_h=0.d0
-rmatbox2_y_h=0.d0
-rmatbox2_z_h=0.d0
-rmatbox3_x_h=0.d0
-rmatbox3_y_h=0.d0
-rmatbox3_z_h=0.d0
-rmatbox4_x_h=0.d0
-rmatbox4_y_h=0.d0
-rmatbox4_z_h=0.d0
-
-allocate(cmatbox1_x_h(Ndh,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox1_y_h(inum_Mxin2(1,nproc_id_global),Ndh,inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox1_z_h(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Ndh))
-allocate(cmatbox2_x_h(Ndh,inum_Mxin2(2,nproc_id_global),inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox2_y_h(inum_Mxin2(1,nproc_id_global),Ndh,inum_Mxin2(3,nproc_id_global)))
-allocate(cmatbox2_z_h(inum_Mxin2(1,nproc_id_global),inum_Mxin2(2,nproc_id_global),Ndh))
-
-cmatbox1_x_h=0.d0
-cmatbox1_y_h=0.d0
-cmatbox1_z_h=0.d0
-cmatbox2_x_h=0.d0
-cmatbox2_y_h=0.d0
-cmatbox2_z_h=0.d0
-
 
 end subroutine init_sendrecv_matrix
 
