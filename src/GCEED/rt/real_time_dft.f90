@@ -536,33 +536,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
-  info%im_s=1
-  info%im_e=1
-  info%numm=1
-  info%ik_s=k_sta
-  info%ik_e=k_end
-  info%numk=k_num
-  info%io_s=1
-  info%io_e=iobnum/nspin
-  info%numo=iobnum/nspin
-
-  info%if_divide_rspace = nproc_d_o_mul.ne.1   ! moved just after init_lattice
-  info%if_divide_orbit = nproc_ob.ne.1
-  info%icomm_rko = nproc_group_global
-
-  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
-          ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
-          ,info%irank_jo(1:system%no))
-  info%jo_tbl(:) = 0 ! info%io_s-1 (initial value)
-  do iob=info%io_s,info%io_e
-    call calc_allob(iob,jj,itotmst,mst,iobnum)
-    info%io_tbl(iob) = jj
-    info%jo_tbl(jj) = iob
-  end do
-  do jj=1, system%no
-    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
-  end do
-
   do ik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
       do jspin=1,system%nspin

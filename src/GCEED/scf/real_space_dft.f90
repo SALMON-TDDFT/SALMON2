@@ -114,6 +114,7 @@ call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 
 call init_dft(lg,system,stencil)
 call init_grid_parallel(lg,mg,ng) ! lg --> mg & ng
+call init_orbital_parallel_singlecell(system,info)
 
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
@@ -124,9 +125,13 @@ allocate(system%mass(1:nelem))
 
 call set_filename
 
-call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
+k_sta = info%ik_s
+k_end = info%ik_e
+k_num = info%numk
+iobnum = info%numo
 
-call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
+!call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
+!call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)
@@ -203,30 +208,6 @@ if(iopt==1)then
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
-  info%im_s = 1
-  info%im_e = 1
-  info%numm = 1
-  info%ik_s = k_sta
-  info%ik_e = k_end
-  info%numk = k_num
-  info%io_s = 1
-  info%io_e = iobnum/nspin
-  info%numo = iobnum/nspin
-
-  info%if_divide_rspace = nproc_d_o_mul.ne.1
-  info%if_divide_orbit  = nproc_ob.ne.1
-  info%icomm_rko  = nproc_group_global
-  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
-            ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
-            ,info%irank_jo(1:system%no))
-
-  info%jo_tbl(:) = 0 !(initial value)
-  do iob=info%io_s,info%io_e
-    call calc_allob(iob,jj,itotmst,mst,iobnum)
-    info%io_tbl(iob) = jj
-    info%jo_tbl(jj)  = iob
-  end do
-
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
@@ -234,10 +215,6 @@ if(iopt==1)then
         info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
       end do
     end do
-  end do
-
-  do jj=1, system%no
-    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
   end do
 
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))

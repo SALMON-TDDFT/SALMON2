@@ -145,7 +145,7 @@ use calc_allob_sub! remove this line
 
   info%jo_tbl(:) = 0 !(initial value)
   do iob=info%io_s,info%io_e
-    call calc_allob(iob,jj,itotmst,mst,iobnum)
+    call calc_allob(iob,jj,itotmst,mst,info%numo)
     info%io_tbl(iob) = jj
     info%jo_tbl(jj)  = iob
   end do
