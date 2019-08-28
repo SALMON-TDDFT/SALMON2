@@ -539,8 +539,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   do ik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
       do jspin=1,system%nspin
-        jj = info%io_tbl(iob)
-        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,1)*system%wtk(ik)
+        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,1)*system%wtk(ik)
       end do
     end do
   end do
@@ -823,7 +822,7 @@ end if
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob+(is-1)*info%numo,ik)
+        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob -info%io_s+1 +(is-1)*info%numo,ik)
       end do
       end do
       end do

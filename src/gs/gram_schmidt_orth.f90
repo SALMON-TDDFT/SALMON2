@@ -57,14 +57,14 @@ contains
 
     integer :: nsize_rg
     integer :: ik, im, ispin
-    integer :: jo1, jo2, io1, io2
+    integer :: io1, io2
     real(8) :: coeff(1:sys%no), coeff_tmp(1:sys%no)
     real(8) :: norm2, norm2_tmp
     real(8), dimension( &
       & rg%is_array(1):rg%ie_array(1), &
       & rg%is_array(2):rg%ie_array(2), &
       & rg%is_array(3):rg%ie_array(3)) &
-      & :: wf_jo1, wf_exc, wf_exc_tmp
+      & :: wf_io1, wf_exc, wf_exc_tmp
 
     nsize_rg =  (rg%ie_array(1) - rg%is_array(1) + 1) &
       & * (rg%ie_array(2) - rg%is_array(2) + 1) &
@@ -74,27 +74,25 @@ contains
     do ik = wfi%ik_s, wfi%ik_e
     do ispin = 1, sys%nspin
 
-      ! Loop for all orbit #jo1:
-      do jo1 = 1, sys%no
+      ! Loop for all orbit #io1:
+      do io1 = 1, sys%no
 
-        ! Retrieve orbit #jo1 into "wf_jo1":
-        if (has_orbit(jo1)) then
-          io1 = wfi%jo_tbl(jo1)
+        ! Retrieve orbit #io1 into "wf_io1":
+        if (wfi%io_s<= io1 .and. io1 <= wfi%io_e) then
           call copy_data( &
             & wf%rwf(:, :, :, ispin, io1, ik, im), &
-            & wf_jo1)
+            & wf_io1)
         end if
         if (wfi%if_divide_orbit) &
-          & call comm_bcast(wf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
+          & call comm_bcast(wf_io1, wfi%icomm_o, wfi%irank_io(io1))
         
         ! Calculate overlap coefficients: 
         coeff_tmp = 0d0
-        do jo2 = 1, jo1 - 1
-          if (has_orbit(jo2)) then
-            io2 = wfi%jo_tbl(jo2)
-            coeff_tmp(jo2) = dot_wf( &
+        do io2 = 1, io1 - 1
+          if (wfi%io_s<= io2 .and. io2 <= wfi%io_e) then
+            coeff_tmp(io2) = dot_wf( &
               & wf%rwf(:, :, :, ispin, io2, ik, im), &
-              & wf_jo1)
+              & wf_io1)
           end if
         end do 
         if (wfi%if_divide_rspace .or. wfi%if_divide_orbit) then
@@ -105,11 +103,10 @@ contains
 
         ! Calculate exclusion term "wf_exc":
         wf_exc_tmp = 0d0
-        do jo2 = 1, jo1 - 1
-          if (has_orbit(jo2)) then
-            io2 = wfi%jo_tbl(jo2)
+        do io2 = 1, io1 - 1
+          if (wfi%io_s<= io2 .and. io2 <= wfi%io_e) then
             call axpy_wf( &
-              & coeff(jo2), wf%rwf(:, :, :, ispin, io2, ik, im), &
+              & coeff(io2), wf%rwf(:, :, :, ispin, io2, ik, im), &
               & wf_exc_tmp)
           end if
         end do
@@ -119,24 +116,23 @@ contains
           call copy_data(wf_exc_tmp, wf_exc)
         end if
 
-        if (has_orbit(jo1)) then
+        if (wfi%io_s<= io1 .and. io1 <= wfi%io_e) then
           ! Exclude non-orthonormal component:
-          call axpy_wf(-1d0, wf_exc, wf_jo1)
+          call axpy_wf(-1d0, wf_exc, wf_io1)
           ! Normalization:
-          norm2_tmp = dot_wf(wf_jo1, wf_jo1)
+          norm2_tmp = dot_wf(wf_io1, wf_io1)
           if (wfi%if_divide_rspace) then
             call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
           else
             norm2 = norm2_tmp
           endif
-          call scal_wf(1d0 / sqrt(norm2), wf_jo1)
+          call scal_wf(1d0 / sqrt(norm2), wf_io1)
           ! Write back to "rwf":
-          io1 = wfi%jo_tbl(jo1)
           call copy_data( &
-            & wf_jo1, &
+            & wf_io1, &
             & wf%rwf(:, :, :, ispin, io1, ik, im)) 
         end if
-      end do !jo1
+      end do !io1
     
     end do !ispin
     end do !ik
@@ -144,13 +140,6 @@ contains
     
     return
   contains
-
-  logical function has_orbit(jo) result(f)
-    implicit none
-    integer, intent(in) :: jo
-    f = (1 <= wfi%jo_tbl(jo))
-    return
-  end function has_orbit
 
   ! Dot product of two wavefunctions:
   real(8) function dot_wf(x, y) result(p)
@@ -244,14 +233,14 @@ contains
 
     integer :: nsize_rg
     integer :: ik, im, ispin
-    integer :: jo1, jo2, io1, io2
+    integer :: io1, io2
     complex(8) :: coeff(1:sys%no), coeff_tmp(1:sys%no)
     real(8) :: norm2, norm2_tmp
     complex(8), dimension( &
       & rg%is_array(1):rg%ie_array(1), &
       & rg%is_array(2):rg%ie_array(2), &
       & rg%is_array(3):rg%ie_array(3)) &
-      & :: wf_jo1, wf_exc, wf_exc_tmp
+      & :: wf_io1, wf_exc, wf_exc_tmp
 
     complex(8), parameter :: one = 1d0
 
@@ -263,27 +252,25 @@ contains
     do ik = wfi%ik_s, wfi%ik_e
     do ispin = 1, sys%nspin
 
-      ! Loop for all orbit #jo1:
-      do jo1 = 1, sys%no
+      ! Loop for all orbit #io1:
+      do io1 = 1, sys%no
 
-        ! Retrieve orbit #jo1 into "wf_jo1":
-        if (has_orbit(jo1)) then
-          io1 = wfi%jo_tbl(jo1)
+        ! Retrieve orbit #io1 into "wf_io1":
+        if (wfi%io_s<= io1 .and. io1 <= wfi%io_e) then
           call copy_data( &
             & wf%zwf(:, :, :, ispin, io1, ik, im), &
-            & wf_jo1)
+            & wf_io1)
         end if
         if (wfi%if_divide_orbit) &
-          & call comm_bcast(wf_jo1, wfi%icomm_o, wfi%irank_jo(jo1))
+          & call comm_bcast(wf_io1, wfi%icomm_o, wfi%irank_io(io1))
         
         ! Calculate overlap coefficients: 
         coeff_tmp = 0d0
-        do jo2 = 1, jo1 - 1
-          if (has_orbit(jo2)) then
-            io2 = wfi%jo_tbl(jo2)
-            coeff_tmp(jo2) = dot_wf( &
+        do io2 = 1, io1 - 1
+          if (wfi%io_s<= io2 .and. io2 <= wfi%io_e) then
+            coeff_tmp(io2) = dot_wf( &
               & wf%zwf(:, :, :, ispin, io2, ik, im), &
-              & wf_jo1)
+              & wf_io1)
           end if
         end do 
         if (wfi%if_divide_rspace .or. wfi%if_divide_orbit) then
@@ -294,11 +281,10 @@ contains
 
         ! Calculate exclusion term "wf_exc":
         wf_exc_tmp = 0d0
-        do jo2 = 1, jo1 - 1
-          if (has_orbit(jo2)) then
-            io2 = wfi%jo_tbl(jo2)
+        do io2 = 1, io1 - 1
+          if (wfi%io_s<= io2 .and. io2 <= wfi%io_e) then
             call axpy_wf( &
-              & coeff(jo2), wf%zwf(:, :, :, ispin, io2, ik, im), &
+              & coeff(io2), wf%zwf(:, :, :, ispin, io2, ik, im), &
               & wf_exc_tmp)
           end if
         end do
@@ -308,24 +294,23 @@ contains
           call copy_data(wf_exc_tmp, wf_exc)
         endif
 
-        if (has_orbit(jo1)) then
+        if (wfi%io_s<= io1 .and. io1 <= wfi%io_e) then
           ! Exclude non-orthonormal component:
-          call axpy_wf(-one, wf_exc, wf_jo1)
+          call axpy_wf(-one, wf_exc, wf_io1)
           ! Normalization:
-          norm2_tmp = real(dot_wf(wf_jo1, wf_jo1))
+          norm2_tmp = real(dot_wf(wf_io1, wf_io1))
           if (wfi%if_divide_rspace) then
             call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
           else
             norm2 = norm2_tmp
           endif
-          call scal_wf(one / sqrt(norm2), wf_jo1)
+          call scal_wf(one / sqrt(norm2), wf_io1)
           ! Write back to "zwf":
-          io1 = wfi%jo_tbl(jo1)
           call copy_data( &
-            & wf_jo1, &
+            & wf_io1, &
             & wf%zwf(:, :, :, ispin, io1, ik, im)) 
         end if
-      end do !jo1
+      end do !io1
     
     end do !ispin
     end do !ik
@@ -333,13 +318,6 @@ contains
     
     return
   contains
-
-  logical function has_orbit(jo) result(f)
-    implicit none
-    integer, intent(in) :: jo
-    f = (1 <= wfi%jo_tbl(jo))
-    return
-  end function has_orbit
 
   ! Dot product of two wavefunctions:
   complex(8) function dot_wf(x, y) result(p)

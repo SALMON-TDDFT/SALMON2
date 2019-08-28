@@ -211,8 +211,7 @@ if(iopt==1)then
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)
-        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,jspin)*system%wtk(ik)
       end do
     end do
   end do
@@ -297,7 +296,7 @@ if(iopt==1)then
         do ik=k_sta,k_end
         do iob=1,info%numo
           do is=1,nspin
-            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
             & psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
           end do
         end do
@@ -306,7 +305,7 @@ if(iopt==1)then
         do ik=k_sta,k_end
         do iob=1,info%numo
           do is=1,nspin
-            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
             & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
           end do
         end do
@@ -400,7 +399,7 @@ if(iopt==1)then
       do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
-          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
           & psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
         end do
       end do
@@ -409,7 +408,7 @@ if(iopt==1)then
       do ik=k_sta,k_end
       do iob=1,info%numo
         do is=1,nspin
-          spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob,ik,1) = &
+          spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
           & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
         end do
       end do
@@ -543,8 +542,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)
-        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,jspin)*system%wtk(ik)
       end do
     end do
   end do
@@ -738,7 +736,7 @@ case(0)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob,ik,1)
+        psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
       end do
       end do
       end do
@@ -753,7 +751,7 @@ case(3)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob,ik,1)
+        zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
       end do
       end do
       end do

@@ -226,7 +226,7 @@ CONTAINS
     type(s_sendrecv_grid),intent(inout) :: srg
     type(s_pp_grid),intent(in) :: ppg
     !
-    integer :: ik,io,jo,ispin,im,nk,no,is(3),ie(3),Nspin
+    integer :: ik,io,ispin,im,nk,no,is(3),ie(3),Nspin
     real(8) :: E_tmp,E_local(2),E_sum(2)
     real(8),allocatable :: wrk1(:,:),wrk2(:,:)
 
@@ -247,8 +247,7 @@ CONTAINS
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          jo = info%io_tbl(io)
-          wrk1(jo,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+          wrk1(io,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
                         * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
@@ -259,12 +258,11 @@ CONTAINS
     ! eigen energies (esp)
       do ispin=1,Nspin
 !$omp parallel do collapse(2) default(none) &
-!$omp          private(ik,io,jo) &
+!$omp          private(ik,io) &
 !$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          jo = info%io_tbl(io)
-          wrk1(jo,ik) = sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
+          wrk1(io,ik) = sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
                                  * htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
