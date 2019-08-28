@@ -17,7 +17,7 @@
 
 SUBROUTINE OUT_data(ng,mixing)
 use structures, only: s_rgrid, s_mixing
-use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, nproc_group_h
+use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
 use check_corrkob_sub
@@ -254,7 +254,7 @@ matbox2(ng%is(1):ng%ie(1),   &
         ng%is(2):ng%ie(2),   &
         ng%is(3):ng%ie(3))
 
-call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
   write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -269,7 +269,7 @@ do ii=1,mixing%num_rho_stock+1
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))
 
-  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
   if(comm_is_root(nproc_id_global))then
     write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -285,7 +285,7 @@ do ii=1,mixing%num_rho_stock
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))
 
-  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
   if(comm_is_root(nproc_id_global))then
     write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
   end if
@@ -301,7 +301,7 @@ if(ilsda == 1)then
               ng%is(2):ng%ie(2),   &
               ng%is(3):ng%ie(3),is)
 
-    call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+    call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
     if(comm_is_root(nproc_id_global))then
       write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -316,7 +316,7 @@ if(ilsda == 1)then
                 ng%is(2):ng%ie(2),   &
                 ng%is(3):ng%ie(3))
 
-      call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+      call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
       if(comm_is_root(nproc_id_global))then
         write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -332,7 +332,7 @@ if(ilsda == 1)then
                 ng%is(2):ng%ie(2),   &
                 ng%is(3):ng%ie(3))
 
-      call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+      call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
       if(comm_is_root(nproc_id_global))then
         write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -355,7 +355,7 @@ matbox2(ng%is(1):ng%ie(1),   &
         ng%is(2):ng%ie(2),   &
         ng%is(3):ng%ie(3))
 
-call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
   write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -370,7 +370,7 @@ if(ilsda == 0)then
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))
 
-  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
   if(comm_is_root(nproc_id_global))then
     write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -385,7 +385,7 @@ else if(ilsda == 1) then
             ng%is(2):ng%ie(2),   &
             ng%is(3):ng%ie(3),is)
 
-    call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+    call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
     if(comm_is_root(nproc_id_global))then
       write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))
@@ -402,7 +402,7 @@ matbox2(ng%is(1):ng%ie(1),   &
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))
 
-  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_h)
+  call comm_summation(matbox2,matbox,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
   write(97) ((( matbox(ix,iy,iz),ix=lg_sta(1),lg_end(1)),iy=lg_sta(2),lg_end(2)),iz=lg_sta(3),lg_end(3))

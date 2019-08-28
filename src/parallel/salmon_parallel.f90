@@ -51,10 +51,6 @@ module salmon_parallel
 !  integer, public :: nproc_id_orbitalgrid
 !  integer, public :: nproc_size_orbitalgrid
 
-  integer, public :: nproc_group_h
-  integer, public :: nproc_id_h
-  integer, public :: nproc_size_h
-
   ! call once
   public :: setup_parallel
   public :: end_parallel

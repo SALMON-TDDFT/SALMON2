@@ -50,9 +50,6 @@ subroutine diis_core(mg,info,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
                            mg%is(3):mg%ie(3),0:ncg)
   real(8) :: Rbar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),      &
                            mg%is(3):mg%ie(3),0:ncg)
-  character(30) :: commname
-  
-  commname='icomm_r'
   
   allocate(Rmat(iter,iter))
   allocate(Smat(iter,iter))
@@ -61,10 +58,10 @@ subroutine diis_core(mg,info,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
         
   do ii=0,iter-1
     do jj=0,iter-1
-      call inner_product(mg,info,R1(:,:,:,ii),R1(:,:,:,jj),rbox,commname)
+      call inner_product(mg,info,R1(:,:,:,ii),R1(:,:,:,jj),rbox)
       Rmat(ii+1,jj+1)=rbox*hvol
   
-      call inner_product(mg,info,phi(:,:,:,ii),phi(:,:,:,jj),rbox,commname)
+      call inner_product(mg,info,phi(:,:,:,ii),phi(:,:,:,jj),rbox)
       Smat(ii+1,jj+1)=rbox*hvol
     end do
   end do
@@ -108,7 +105,7 @@ subroutine diis_core(mg,info,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
     end do
     end do
       
-    call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
+    call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox)
     rnorm=sqrt(rbox*hvol)
   !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
@@ -135,7 +132,7 @@ subroutine diis_core(mg,info,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
       end do
       end do
       end do
-      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
+      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox)
    
       rnorm=sqrt(rbox*hvol)
   !$OMP parallel do private(iz,iy,ix)
@@ -181,7 +178,7 @@ subroutine diis_core(mg,info,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
         end do
       end do
   
-      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox,commname)
+      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox)
       rnorm=sqrt(rbox*hvol)
   !$OMP parallel do private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)

@@ -15,7 +15,7 @@
 !
 subroutine subdip(ng,srho,rNe,poisson)
 use structures, only: s_rgrid,s_scalar,s_poisson
-use salmon_parallel, only: nproc_group_h, nproc_id_global
+use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
 use new_world_sub
@@ -63,8 +63,8 @@ call timer_begin(LOG_CALC_DP)
    rbox_array(4)=rbox1
    
    call timer_begin(LOG_ALLREDUCE_DIPOLE)
-   call comm_summation(rbox_array,rbox_array2,4,nproc_group_h)
-   call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_h)
+   call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
+   call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_global)
    call timer_end(LOG_ALLREDUCE_DIPOLE)
 
    rNe=rbox_array2(4)*Hvol               ! Number of electrons

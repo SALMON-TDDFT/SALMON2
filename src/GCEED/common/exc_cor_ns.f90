@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
-  use salmon_parallel, only: nproc_group_h
+  use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
   use scf_data
@@ -145,7 +145,7 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
   end do
   tot_exc=tot_exc*hvol
  
-  call comm_summation(tot_exc,E_xc,nproc_group_h)
+  call comm_summation(tot_exc,E_xc,nproc_group_global)
 
   return
 end subroutine exc_cor_ns
