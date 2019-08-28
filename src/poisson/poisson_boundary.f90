@@ -24,7 +24,7 @@ contains
 subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson
-  use salmon_parallel, only: nproc_size_global, nproc_group_h
+  use salmon_parallel, only: nproc_size_global, nproc_group_global
   use salmon_communication, only: comm_summation
   use timer
   
@@ -236,7 +236,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   end do
   
   call timer_begin(LOG_ALLREDUCE_HARTREE)
-  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,nproc_group_h)
+  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,nproc_group_global)
   call timer_end(LOG_ALLREDUCE_HARTREE)
   
   do ii=1,poisson%npole_total
@@ -344,7 +344,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
     end do
   else
     call timer_begin(LOG_ALLREDUCE_HARTREE)
-    call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,nproc_group_h)
+    call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,nproc_group_global)
     call timer_end(LOG_ALLREDUCE_HARTREE)
   end if
   

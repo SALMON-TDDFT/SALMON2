@@ -289,55 +289,6 @@ end if
 info%icomm_k = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
 
-!new_world for comm_mesh_s
-
-nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-
-if(process_allocation=='orbital_sequential')then
-  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-  do i3=0,nproc_d_g_dm(3)-1
-  do i2=0,nproc_d_g_dm(2)-1
-  do i1=0,nproc_d_g_dm(1)-1
-    do ii=0,nproc_d_o_mul-1
-      ibox=i1+i2*nproc_d_g_dm(1)   &
-             +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-             +i4*nproc_d_g_mul_dm  &
-             +ii*nproc_size_global/nproc_d_o_mul
-      if(nproc_id_global==ibox)then
-        icolor=i4
-        ikey=i1+i2*nproc_d_g_dm(1)   &
-               +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-               +ii*nproc_d_g_mul_dm
-      end if
-    end do
-  end do
-  end do
-  end do
-  end do
-else if(process_allocation=='grid_sequential')then
-  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-  do i3=0,nproc_d_g_dm(3)-1
-  do i2=0,nproc_d_g_dm(2)-1
-  do i1=0,nproc_d_g_dm(1)-1
-    do ii=0,nproc_d_o_mul-1
-      ibox=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
-            +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-            +i4*nproc_d_o_mul*nproc_d_g_mul_dm
-      if(nproc_id_global==ibox)then
-        icolor=i4
-        ikey=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
-              +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end do
-  end do
-  end do
-  end do
-  end do
-end if
-
-nproc_group_h = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_h, nproc_id_h, nproc_size_h)
-
 if(process_allocation=='orbital_sequential')then
   do iz=0,nproc_d_o(3)-1
   do iy=0,nproc_d_o(2)-1

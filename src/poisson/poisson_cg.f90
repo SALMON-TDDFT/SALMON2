@@ -23,7 +23,7 @@ contains
 subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
-  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_h
+  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation
   use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
@@ -119,7 +119,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   if(nproc_size_global==1)then
   else
     call timer_begin(LOG_ALLREDUCE_HARTREE)
-    call comm_summation(sum1,sum2,nproc_group_h)
+    call comm_summation(sum1,sum2,nproc_group_global)
     call timer_end(LOG_ALLREDUCE_HARTREE)
     sum1=sum2
   end if
@@ -143,7 +143,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
       tottmp=totbox
     else
       call timer_begin(LOG_ALLREDUCE_HARTREE)
-      call comm_summation(totbox,tottmp,nproc_group_h)
+      call comm_summation(totbox,tottmp,nproc_group_global)
       call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
@@ -173,7 +173,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
       tottmp=totbox
     else
       call timer_begin(LOG_ALLREDUCE_HARTREE)
-      call comm_summation(totbox,tottmp,nproc_group_h)
+      call comm_summation(totbox,tottmp,nproc_group_global)
       call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   

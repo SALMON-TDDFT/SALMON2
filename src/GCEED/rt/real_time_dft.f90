@@ -470,8 +470,7 @@ END subroutine Real_Time_DFT
 
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
-                           nproc_group_h, nproc_size_global
+use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -788,7 +787,7 @@ if(IC_rt==0)then
   end do
   end do
 
-  call comm_summation(rbox_array,rbox_array2,4,nproc_group_h)
+  call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
   vecDs(1:3)=rbox_array2(1:3)*Hgs(1:3)*Hvol
 
 end if

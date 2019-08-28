@@ -39,7 +39,7 @@ END MODULE global_variables_scf
 subroutine Real_Space_DFT
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
-                           nproc_group_h, nproc_id_kgrid
+                           nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -598,7 +598,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,nproc_group_h)
+      call comm_summation(sum0,sum1,nproc_group_global)
       if(ispin==0)then
         sum1=sum1*Hvol/(dble(ifMST(1))*2.d0)
       else if(ispin==1)then
@@ -614,7 +614,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,nproc_group_h)
+      call comm_summation(sum0,sum1,nproc_group_global)
       if(convergence=='norm_rho_dng')then
         sum1=sum1/dble(lg_num(1)*lg_num(2)*lg_num(3))
       end if
@@ -628,7 +628,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,nproc_group_h)
+      call comm_summation(sum0,sum1,nproc_group_global)
       if(convergence=='norm_pot_dng')then
         sum1=sum1/dble(lg_num(1)*lg_num(2)*lg_num(3))
       end if
