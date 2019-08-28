@@ -55,14 +55,6 @@ module salmon_parallel
   integer, public :: nproc_id_h
   integer, public :: nproc_size_h
 
-  integer, public :: nproc_group_korbital_vhxc
-  integer, public :: nproc_id_korbital_vhxc
-  integer, public :: nproc_size_korbital_vhxc
-
-  integer, public :: nproc_group_bound(3)
-! integer, public :: nproc_id_bound(3)
-! integer, public :: nproc_size_bound(3)
-
   ! call once
   public :: setup_parallel
   public :: end_parallel

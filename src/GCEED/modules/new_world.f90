@@ -456,48 +456,6 @@ end if
 info_field%icomm(3) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
 
-if(process_allocation=='orbital_sequential')then
-  do ii=0,nproc_d_o_mul-1
-    do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-    do i3=0,nproc_d_g_dm(3)-1
-    do i2=0,nproc_d_g_dm(2)-1
-    do i1=0,nproc_d_g_dm(1)-1
-      ibox=i1+i2*nproc_d_g_dm(1)   &
-             +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
-             +i4*nproc_d_g_mul_dm   &
-             +ii*nproc_size_global/nproc_d_o_mul
-      if(nproc_id_global==ibox)then
-        icolor=i4+ii*nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm
-        ikey=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end do
-    end do
-    end do
-    end do
-  end do
-else if(process_allocation=='grid_sequential')then
-  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-  do i3=0,nproc_d_g_dm(3)-1
-  do i2=0,nproc_d_g_dm(2)-1
-  do i1=0,nproc_d_g_dm(1)-1
-    do ii=0,nproc_d_o_mul-1
-      ibox=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
-            +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-            +i4*nproc_d_o_mul*nproc_d_g_mul_dm
-      if(nproc_id_global==ibox)then
-        icolor=ii+i4*nproc_d_o_mul
-        ikey=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end do
-  end do
-  end do
-  end do
-  end do
-end if
-
-nproc_group_korbital_vhxc = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc_size_korbital_vhxc)
-
 ! communicators for FFTE routine
   icolor=info_field%id(3)+info_field%id(1)*info_field%isize_ffte(3)
   ikey=info_field%id(2)
