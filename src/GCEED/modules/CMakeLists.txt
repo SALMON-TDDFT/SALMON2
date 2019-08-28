@@ -9,6 +9,8 @@ set(SOURCES
     readbox_rt.f90
     read_pslfile.f90
     scf_data.f90
+    sendrecv.f90
+    persistent_comm.f90
     )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
