@@ -105,10 +105,6 @@ subroutine init_orbital_parallel_singlecell(system,info)
   use structures
   use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital
   use salmon_parallel, only: nproc_group_global
-use  calc_iobnum_sub ! remove this line
-use calc_iroot_sub! remove this line
-use scf_data! remove this line
-use calc_allob_sub! remove this line
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel)      :: info
@@ -127,61 +123,34 @@ use calc_allob_sub! remove this line
   info%numk = info%ik_e - info%ik_s + 1
 
 ! # of orbitals
-  info%io_s = 1
-  info%io_e = (info%id_o+1) * system%no / nproc_ob - info%id_o * system%no / nproc_ob
+  info%io_s = info%id_o * system%no / nproc_ob + 1
+  info%io_e = (info%id_o+1) * system%no / nproc_ob
   info%numo = info%io_e - info%io_s + 1
-!  info%io_s = info%id_o * system%no / nproc_ob + 1
-!  info%io_e = (info%id_o+1) * system%no / nproc_ob
-!  info%numo = info%io_e - info%io_s + 1
 
 ! for parallelization
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
   info%if_divide_orbit  = nproc_ob.ne.1
   info%icomm_rko  = nproc_group_global
 
-  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1) &
-            ,info%io_tbl(info%io_s:info%io_e), info%jo_tbl(1:system%no) &
-            ,info%irank_jo(1:system%no))
+  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1),info%irank_io(1:system%no))
 
-  info%jo_tbl(:) = 0 !(initial value)
-  do iob=info%io_s,info%io_e
-    call calc_allob(iob,jj,itotmst,mst,info%numo)
-    info%io_tbl(iob) = jj
-    info%jo_tbl(jj)  = iob
+! process ID corresponding to the orbital index io
+  do io=1, system%no
+    if(mod(io*nproc_ob,system%no)==0)then
+      info%irank_io(io) = io*nproc_ob/system%no - 1
+    else
+      info%irank_io(io) = io*nproc_ob/system%no
+    end if
   end do
 
+! occupation number (initaial value)
   do jspin=1,system%nspin
     do ik=info%ik_s,info%ik_e
-      do iob=info%io_s,info%io_e
-        jj = info%io_tbl(iob)
-        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,jspin)*system%wtk(ik)
+      do io=info%io_s,info%io_e
+        info%occ(io,ik,jspin,1) = system%rocc(io,ik,jspin)*system%wtk(ik) ! initial value
       end do
     end do
   end do
-
-  do jj=1, system%no
-    call calc_iroot(jj,info%irank_jo(jj),ilsda,nproc_ob,itotmst,mst)
-  end do
-
-!  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1),info%irank_io(1:system%no))
-!
-!! process ID corresponding to the orbital index io
-!  do io=1, system%no
-!    if(mod(io*nproc_ob,system%no)==0)then
-!      info%irank_io(io) = io*nproc_ob/system%no - 1
-!    else
-!      info%irank_io(io) = io*nproc_ob/system%no
-!    end if
-!  end do
-!
-!! occupation number (initaial value)
-!  do jspin=1,system%nspin
-!    do ik=info%ik_s,info%ik_e
-!      do io=info%io_s,info%io_e
-!        info%occ(io,ik,jspin,1) = system%rocc(io,ik,jspin)*system%wtk(ik) ! initial value
-!      end do
-!    end do
-!  end do
 
 end subroutine init_orbital_parallel_singlecell
 
