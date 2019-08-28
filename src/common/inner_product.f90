@@ -26,9 +26,8 @@ module inner_product_sub
   contains
 
 !=======================================================================
-  subroutine r_inner_product(mg,info,matbox1,matbox2,rbox2,commname)
+  subroutine r_inner_product(mg,info,matbox1,matbox2,rbox2)
     use structures, only: s_rgrid, s_orbital_parallel
-    use salmon_parallel, only: nproc_group_h
     use salmon_communication, only: comm_summation
     implicit none
     type(s_rgrid),intent(in) :: mg
@@ -36,7 +35,6 @@ module inner_product_sub
     real(8),intent(in) :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8),intent(in) :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     real(8),intent(out) :: rbox2
-    character(30),intent(in) :: commname
     integer :: ix,iy,iz
     real(8) :: rbox
     
@@ -50,19 +48,13 @@ module inner_product_sub
     end do
     end do
 
-    select case(commname)    
-    case("icomm_r")
-      call comm_summation(rbox,rbox2,info%icomm_r)
-    case("nproc_group_h")
-      call comm_summation(rbox,rbox2,nproc_group_h)
-    end select
+    call comm_summation(rbox,rbox2,info%icomm_r)
   
   end subroutine r_inner_product
   
 !=======================================================================
-  subroutine c_inner_product(mg,info,matbox1,matbox2,cbox2,commname)
+  subroutine c_inner_product(mg,info,matbox1,matbox2,cbox2)
     use structures, only: s_rgrid, s_orbital_parallel
-    use salmon_parallel, only: nproc_group_h
     use salmon_communication, only: comm_summation
     implicit none
     type(s_rgrid),intent(in) :: mg
@@ -70,7 +62,6 @@ module inner_product_sub
     complex(8),intent(in)  :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     complex(8),intent(in)  :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     complex(8),intent(out) :: cbox2
-    character(30),intent(in) :: commname
     integer :: ix,iy,iz
     complex(8) :: cbox
     
@@ -84,12 +75,7 @@ module inner_product_sub
     end do
     end do
     
-    select case(commname)    
-    case("icomm_r")
-      call comm_summation(cbox,cbox2,info%icomm_r)
-    case("nproc_group_h")
-      call comm_summation(cbox,cbox2,nproc_group_h)
-    end select
+    call comm_summation(cbox,cbox2,info%icomm_r)
     
   end subroutine c_inner_product
   

@@ -177,12 +177,12 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 if(iperiodic==3 .and. iflag_hartree==4)then
-  call prep_poisson_fft(lg,ng,poisson)
+  call prep_poisson_fft(lg,ng,info_field,poisson)
 end if
 
 call read_pslfile(system)
 call allocate_psl
-call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
 call init_updown(info)
 call init_itype
@@ -470,8 +470,7 @@ END subroutine Real_Time_DFT
 
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global, & 
-                           nproc_group_h, nproc_size_global
+use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -524,6 +523,8 @@ type(s_scalar) :: srho,sVh,sVpsl
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 
+integer :: npuy,npuz
+
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   if(ispin==0)then
@@ -539,8 +540,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   do ik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
       do jspin=1,system%nspin
-        jj = info%io_tbl(iob)
-        info%occ(iob,ik,jspin,1) = system%rocc(jj,ik,1)*system%wtk(ik)
+        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,1)*system%wtk(ik)
       end do
     end do
   end do
@@ -596,11 +596,13 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
        fg%Gz = 0.d0
        fg%zrhoG_ion = 0.d0
        fg%zdVG_ion = 0.d0
-       do iz=1,lg_num(3)/NPUZ
-       do iy=1,lg_num(2)/NPUY
+       npuy=info_field%isize_ffte(2)
+       npuz=info_field%isize_ffte(3)
+       do iz=1,lg_num(3)/npuz
+       do iy=1,lg_num(2)/npuy
        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/NPUY*lg_num(1)+(iy-1)*lg_num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/NPUY*ng%num(1)+fg%ig_s-1
+          n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
+          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
           fg%Gx(nn) = Gx(n)
           fg%Gy(nn) = Gy(n)
           fg%Gz(nn) = Gz(n)
@@ -785,7 +787,7 @@ if(IC_rt==0)then
   end do
   end do
 
-  call comm_summation(rbox_array,rbox_array2,4,nproc_group_h)
+  call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
   vecDs(1:3)=rbox_array2(1:3)*Hgs(1:3)*Hvol
 
 end if
@@ -823,7 +825,7 @@ end if
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob+(is-1)*info%numo,ik)
+        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob -info%io_s+1 +(is-1)*info%numo,ik)
       end do
       end do
       end do

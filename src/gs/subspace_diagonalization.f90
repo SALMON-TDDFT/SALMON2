@@ -20,11 +20,12 @@ contains
 
 subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
-  use salmon_communication, only: comm_summation
+  use salmon_communication, only: comm_summation,comm_bcast
   use timer
   use hpsi_sub
   use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
+  use pack_unpack, only: copy_data
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
@@ -39,11 +40,11 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   real(8)   ,dimension(system%nspin,system%no) :: rbox1,rbox2
   real(8),dimension(system%no,system%no,system%nspin) :: mat1,mat2,evec
   real(8) :: cbox
+  real(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
 
   call timer_begin(LOG_DIAG_TOTAL)
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ subspace_diag"
-  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ subspace_diag"
 
   nspin = system%nspin
   no = system%no
@@ -56,23 +57,47 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
   mat1 = 0d0
 
-  !$omp parallel do private(io1,io2,ispin,cbox,iz,iy,ix) collapse(3)
-  do ispin=1,nspin
-  do io1=io_s,io_e
-  do io2=io_s,io_e
-    cbox = 0d0
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
-      cbox = cbox + spsi%rwf(ix,iy,iz,ispin,io1,1,1) * shpsi%rwf(ix,iy,iz,ispin,io2,1,1)
+  if(info%if_divide_orbit) then
+    do ispin = 1, nspin
+      do io1 = 1, no
+        if (io_s<= io1 .and. io1 <= io_e) then
+          call copy_data(spsi%rwf(:, :, :, ispin, io1, 1, 1),wf_io1)
+        end if
+        call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
+        do io2 = 1, no
+          if (io_s<= io2 .and. io2 <= io_e) then
+            cbox = 0d0
+            !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+:cbox)
+            do iz=is(3),ie(3)
+            do iy=is(2),ie(2)
+            do ix=is(1),ie(1)
+              cbox = cbox + wf_io1(ix,iy,iz) * shpsi%rwf(ix,iy,iz,ispin,io2,1,1)
+            end do
+            end do
+            end do
+            mat1(io1,io2,ispin) = cbox * system%hvol
+          end if
+        end do
+      end do !io1
+    end do !ispin
+  else
+    !$omp parallel do private(io1,io2,ispin,cbox,iz,iy,ix) collapse(3)
+    do ispin=1,nspin
+    do io1=io_s,io_e
+    do io2=io_s,io_e
+      cbox = 0d0
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+      do ix=is(1),ie(1)
+        cbox = cbox + spsi%rwf(ix,iy,iz,ispin,io1,1,1) * shpsi%rwf(ix,iy,iz,ispin,io2,1,1)
+      end do
+      end do
+      end do
+      mat1(io1,io2,ispin) = cbox * system%hvol
     end do
     end do
     end do
-    mat1(io1,io2,ispin) = cbox * system%hvol
-  end do
-  end do
-  end do
-
+  end if
 
   call timer_begin(LOG_DIAG_ALLREDUCE)
   call comm_summation(mat1,mat2,no**2*nspin,info%icomm_rko)
@@ -136,11 +161,12 @@ end subroutine ssdg_isolated
 
 subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
-  use salmon_communication, only: comm_summation
+  use salmon_communication, only: comm_summation,comm_bcast
   use timer
   use hpsi_sub
   use eigen_subdiag_periodic_sub
   use sendrecv_grid, only: s_sendrecv_grid
+  use pack_unpack, only: copy_data
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
@@ -155,11 +181,11 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   real(8)   ,dimension(system%nspin,system%no,system%nk) :: rbox1,rbox2
   complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat1,mat2,evec
   complex(8) :: cbox
+  complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   
   call timer_begin(LOG_DIAG_TOTAL)
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ subspace_diag"
-  if(info%if_divide_orbit) stop "error: nproc_ob/=1 @ subspace_diag"
 
   nspin = system%nspin
   no = system%no
@@ -175,24 +201,51 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
   mat1 = 0d0
 
-  !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
-  do ik=ik_s,ik_e
-  do ispin=1,nspin
-  do io1=io_s,io_e
-  do io2=io_s,io_e
-    cbox = 0d0
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
-      cbox = cbox + conjg(spsi%zwf(ix,iy,iz,ispin,io1,ik,1)) * shpsi%zwf(ix,iy,iz,ispin,io2,ik,1)
+  if(info%if_divide_orbit) then
+    do ik=ik_s,ik_e
+    do ispin = 1, nspin
+      do io1 = 1, no
+        if (io_s<= io1 .and. io1 <= io_e) then
+          call copy_data(spsi%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
+        end if
+        call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
+        do io2 = 1, no
+          if (io_s<= io2 .and. io2 <= io_e) then
+            cbox = 0d0
+            !$omp parallel do private(iz,iy,ix) collapse(2) reduction(+:cbox)
+            do iz=is(3),ie(3)
+            do iy=is(2),ie(2)
+            do ix=is(1),ie(1)
+              cbox = cbox + wf_io1(ix,iy,iz) * shpsi%zwf(ix,iy,iz,ispin,io2,ik,1)
+            end do
+            end do
+            end do
+            mat1(io1,io2,ispin,ik) = cbox * system%hvol
+          end if
+        end do
+      end do !io1
+    end do !ispin
+    end do
+  else
+    !$omp parallel do private(ik,io1,io2,ispin,cbox,iz,iy,ix) collapse(4)
+    do ik=ik_s,ik_e
+    do ispin=1,nspin
+    do io1=io_s,io_e
+    do io2=io_s,io_e
+      cbox = 0d0
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+      do ix=is(1),ie(1)
+        cbox = cbox + conjg(spsi%zwf(ix,iy,iz,ispin,io1,ik,1)) * shpsi%zwf(ix,iy,iz,ispin,io2,ik,1)
+      end do
+      end do
+      end do
+      mat1(io1,io2,ispin,ik) = cbox * system%hvol
     end do
     end do
     end do
-    mat1(io1,io2,ispin,ik) = cbox * system%hvol
-  end do
-  end do
-  end do
-  end do
+    end do
+  end if
 
   call timer_begin(LOG_DIAG_ALLREDUCE)
   call comm_summation(mat1,mat2,no**2*nspin*nk,info%icomm_rko)

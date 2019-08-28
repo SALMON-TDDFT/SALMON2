@@ -101,25 +101,26 @@ module structures
   type s_orbital_parallel
     logical :: if_divide_rspace
     logical :: if_divide_orbit
-    integer :: icomm_r,   id_r,   isize_r   ! communicator for r-space
-    integer :: icomm_k,   id_k,   isize_k   ! communicator for k-space
-    integer :: icomm_o,   id_o,   isize_o   ! communicator for orbital
-    integer :: icomm_ro,  id_ro,  isize_ro  ! communicator for r-space & orbital
-    integer :: icomm_ko,  id_ko,  isize_ko  ! communicator for k-space & orbital
+    integer :: icomm_r,   id_r,   isize_r   ! communicator, process ID, & # of processes for r-space
+    integer :: icomm_k,   id_k,   isize_k   ! communicator, process ID, & # of processes for k-space
+    integer :: icomm_o,   id_o,   isize_o   ! communicator, process ID, & # of processes for orbital
+    integer :: icomm_ro,  id_ro,  isize_ro  ! communicator, process ID, & # of processes for r-space & orbital
+    integer :: icomm_ko,  id_ko,  isize_ko  ! communicator, process ID, & # of processes for k-space & orbital
     integer :: icomm_rko ! communicator for r-space, k-space & orbital
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
-    integer,allocatable :: io_tbl(:)  ! jo=io_tbl(io), io=io_s~io_e, jo=1~no
-    integer,allocatable :: jo_tbl(:)  ! io=io_tbl(jo), jo=1~no, io=io_s~io_e
-    integer,allocatable :: irank_jo(:) ! MPI rank of the orbital index #jo
+    integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
     real(8),allocatable :: occ(:,:,:,:) ! (io,ik,ispin,im), occ = rocc*wk, occupation numbers
   end type s_orbital_parallel
 
   type s_field_parallel
     integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
     integer :: id(3), isize(3)
-    integer :: isize_ffte(3)
+    integer :: icomm_ffte(3) ! 1: x-direction, 2: y-direction, 3: z-direction
+                             ! Inside core FFTE routine, x-direction is redundant and
+                             ! yz-direction is parallel.
+    integer :: id_ffte(3), isize_ffte(3)
   end type s_field_parallel
 
   type s_orbital
@@ -363,10 +364,8 @@ contains
 
   subroutine deallocate_orbital_parallel(info)
     type(s_orbital_parallel) :: info
-    DEAL(info%io_tbl)
-    DEAL(info%jo_tbl)
     DEAL(info%occ)
-    DEAL(info%irank_jo)
+    DEAL(info%irank_io)
   end subroutine deallocate_orbital_parallel
 
   subroutine deallocate_orbital(psi)

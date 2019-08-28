@@ -107,12 +107,12 @@ if(process_allocation=='orbital_sequential')then
     case(0)
       iup_array(2)=comm_proc_null
     case(3)
-      iup_array(2)=nproc_id_h+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1-nproc_d_g_mul_dm*nproc_d_o(1)
+      iup_array(2)=nproc_id_global+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1-nproc_d_g_mul_dm*nproc_d_o(1)
     end select
   else if(imrs(1)==nproc_d_g_dm(1)-1) then
-    iup_array(2)=nproc_id_h+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1
+    iup_array(2)=nproc_id_global+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1
   else
-    iup_array(2)=nproc_id_h+1
+    iup_array(2)=nproc_id_global+1
   end if
 else if(process_allocation=='grid_sequential')then
   if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
@@ -120,12 +120,12 @@ else if(process_allocation=='grid_sequential')then
     case(0)
       iup_array(2)=comm_proc_null
     case(3)
-      iup_array(2)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)-nproc_d_o(1)
+      iup_array(2)=nproc_id_global+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)-nproc_d_o(1)
     end select
   else if(imrs(1)==nproc_d_g_dm(1)-1) then
-    iup_array(2)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)
+    iup_array(2)=nproc_id_global+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    iup_array(2)=nproc_id_h+nproc_d_o_mul
+    iup_array(2)=nproc_id_global+nproc_d_o_mul
   end if
 end if
 
@@ -133,11 +133,11 @@ if(process_allocation=='grid_sequential')then
   if(nproc_d_o(1)==1.and.nproc_d_g_dm(1)==1)then
     iup_array(4)=comm_proc_null
   else if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
-    iup_array(4)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)-nproc_d_o(1)
+    iup_array(4)=nproc_id_global+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)-nproc_d_o(1)
   else if(imrs(1)==nproc_d_g_dm(1)-1) then
-    iup_array(4)=nproc_id_h+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)
+    iup_array(4)=nproc_id_global+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    iup_array(4)=nproc_id_h+nproc_d_o_mul
+    iup_array(4)=nproc_id_global+nproc_d_o_mul
   end if
 end if
 
@@ -147,12 +147,12 @@ if(process_allocation=='orbital_sequential')then
     case(0)
       idw_array(2)=comm_proc_null
     case(3)
-      idw_array(2)=nproc_id_h-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1+nproc_d_g_mul_dm*nproc_d_o(1)
+      idw_array(2)=nproc_id_global-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1+nproc_d_g_mul_dm*nproc_d_o(1)
     end select
   else if(imrs(1)==0) then
-    idw_array(2)=nproc_id_h-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1
+    idw_array(2)=nproc_id_global-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1
   else
-    idw_array(2)=nproc_id_h-1
+    idw_array(2)=nproc_id_global-1
   end if
 else if(process_allocation=='grid_sequential')then
   if(imr(1)==0.and.imrs(1)==0) then
@@ -160,12 +160,12 @@ else if(process_allocation=='grid_sequential')then
     case(0)
       idw_array(2)=comm_proc_null
     case(3)
-      idw_array(2)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)+nproc_d_o(1)
+      idw_array(2)=nproc_id_global-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)+nproc_d_o(1)
     end select
   else if(imrs(1)==0) then
-    idw_array(2)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)
+    idw_array(2)=nproc_id_global-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    idw_array(2)=nproc_id_h-nproc_d_o_mul
+    idw_array(2)=nproc_id_global-nproc_d_o_mul
   end if
 end if
 
@@ -173,11 +173,11 @@ if(process_allocation=='grid_sequential')then
   if(nproc_d_o(1)==1.and.nproc_d_g_dm(1)==1)then
     idw_array(4)=comm_proc_null
   else if(imr(1)==0.and.imrs(1)==0) then
-    idw_array(4)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)+nproc_d_o(1)
+    idw_array(4)=nproc_id_global-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)+nproc_d_o(1)
   else if(imrs(1)==0) then
-    idw_array(4)=nproc_id_h-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)
+    idw_array(4)=nproc_id_global-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)
   else
-    idw_array(4)=nproc_id_h-nproc_d_o_mul
+    idw_array(4)=nproc_id_global-nproc_d_o_mul
   end if
 end if
 
@@ -187,14 +187,14 @@ if(process_allocation=='orbital_sequential')then
     case(0)
       jup_array(2)=comm_proc_null
     case(3)
-      jup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)    &
+      jup_array(2)=nproc_id_global+nproc_d_g_mul_dm*nproc_d_o(1)    &
                                     -(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)
     end select 
   else if(imrs(2)==nproc_d_g_dm(2)-1) then
-    jup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)    &
+    jup_array(2)=nproc_id_global+nproc_d_g_mul_dm*nproc_d_o(1)    &
                                     -(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)
   else
-    jup_array(2)=nproc_id_h+nproc_d_g_dm(1)
+    jup_array(2)=nproc_id_global+nproc_d_g_dm(1)
   end if
 else if(process_allocation=='grid_sequential')then
   if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
@@ -202,14 +202,14 @@ else if(process_allocation=='grid_sequential')then
     case(0)
       jup_array(2)=comm_proc_null
     case(3)
-      jup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+      jup_array(2)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)  &
             +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)-nproc_d_o(1)*nproc_d_o(2)
     end select
   else if(imrs(2)==nproc_d_g_dm(2)-1) then
-    jup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+    jup_array(2)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)  &
             +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)
+    jup_array(2)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
@@ -217,14 +217,14 @@ if(process_allocation=='grid_sequential')then
   if(nproc_d_o(2)==1.and.nproc_d_g_dm(2)==1)then
     jup_array(4)=comm_proc_null
   else if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
-    jup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+    jup_array(4)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)  &
             +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
             -nproc_d_o(1)*nproc_d_o(2)
   else if(imrs(2)==nproc_d_g_dm(2)-1) then
-    jup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)  &
+    jup_array(4)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)  &
             +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)
+    jup_array(4)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
@@ -234,14 +234,14 @@ if(process_allocation=='orbital_sequential')then
     case(0)
       jdw_array(2)=comm_proc_null
     case(3)
-      jdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)    &
+      jdw_array(2)=nproc_id_global-nproc_d_g_mul_dm*nproc_d_o(1)    &
                                     +(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)
     end select
   else if(imrs(2)==0) then
-    jdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)    &
+    jdw_array(2)=nproc_id_global-nproc_d_g_mul_dm*nproc_d_o(1)    &
                                     +(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)
   else
-    jdw_array(2)=nproc_id_h-nproc_d_g_dm(1)
+    jdw_array(2)=nproc_id_global-nproc_d_g_dm(1)
   end if
 else if(process_allocation=='grid_sequential')then
   if(imr(2)==0.and.imrs(2)==0) then
@@ -249,14 +249,14 @@ else if(process_allocation=='grid_sequential')then
     case(0)
       jdw_array(2)=comm_proc_null
     case(3)
-      jdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+      jdw_array(2)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)  &
             -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)+nproc_d_o(1)*nproc_d_o(2)
     end select
   else if(imrs(2)==0) then
-    jdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+    jdw_array(2)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)  &
               -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)
+    jdw_array(2)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
@@ -264,14 +264,14 @@ if(process_allocation=='grid_sequential')then
   if(nproc_d_o(2)==1.and.nproc_d_g_dm(2)==1)then
     jdw_array(4)=comm_proc_null
   else if(imr(2)==0.and.imrs(2)==0) then
-    jdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+    jdw_array(4)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)  &
               -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
               +nproc_d_o(1)*nproc_d_o(2)
   else if(imrs(2)==0) then
-    jdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)  &
+    jdw_array(4)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)  &
               -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    jdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)
+    jdw_array(4)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)
   end if
 end if
 
@@ -282,15 +282,15 @@ if(process_allocation=='orbital_sequential')then
     case(0)
       kup_array(2)=comm_proc_null
     case(3)
-      kup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
+      kup_array(2)=nproc_id_global+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
                                     -(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
                                     -nproc_d_g_mul_dm*nproc_d_o_mul
     end select
   else if(imrs(3)==nproc_d_g_dm(3)-1) then
-    kup_array(2)=nproc_id_h+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
+    kup_array(2)=nproc_id_global+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
                                     -(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    kup_array(2)=nproc_id_h+nproc_d_g_dm(1)*nproc_d_g_dm(2)
+    kup_array(2)=nproc_id_global+nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 else if(process_allocation=='grid_sequential')then
   if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
@@ -298,16 +298,16 @@ else if(process_allocation=='grid_sequential')then
     case(0)
       kup_array(2)=comm_proc_null
     case(3)
-      kup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
+      kup_array(2)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
               +nproc_d_o(1)*nproc_d_o(2)   &
               -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)-nproc_d_o_mul
     end select
   else if(imrs(3)==nproc_d_g_dm(3)-1) then
-    kup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+    kup_array(2)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
               +nproc_d_o(1)*nproc_d_o(2)   &
               -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kup_array(2)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
+    kup_array(2)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 
@@ -315,16 +315,16 @@ if(process_allocation=='grid_sequential')then
   if(nproc_d_o(3)==1.and.nproc_d_g_dm(3)==1)then
     kup_array(4)=comm_proc_null
   else if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
-    kup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+    kup_array(4)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
               +nproc_d_o(1)*nproc_d_o(2)   &
               -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)  &
               -nproc_d_o_mul
   else if(imrs(3)==nproc_d_g_dm(3)-1) then
-    kup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+    kup_array(4)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
               +nproc_d_o(1)*nproc_d_o(2)   &
               -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kup_array(4)=nproc_id_h+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
+    kup_array(4)=nproc_id_global+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 
@@ -334,15 +334,15 @@ if(process_allocation=='orbital_sequential')then
     case(0)
       kdw_array(2)=comm_proc_null
     case(3)
-      kdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
+      kdw_array(2)=nproc_id_global-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
                                     +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
                                     +nproc_d_g_mul_dm*nproc_d_o_mul
     end select
   else if(imrs(3)==0) then
-    kdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
+    kdw_array(2)=nproc_id_global-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
                                     +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   else
-    kdw_array(2)=nproc_id_h-nproc_d_g_dm(1)*nproc_d_g_dm(2)
+    kdw_array(2)=nproc_id_global-nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 else if(process_allocation=='grid_sequential')then
   if(imr(3)==0.and.imrs(3)==0) then
@@ -350,16 +350,16 @@ else if(process_allocation=='grid_sequential')then
     case(0)
       kdw_array(2)=comm_proc_null
     case(3)
-      kdw_array(2)=nproc_id_h-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
+      kdw_array(2)=nproc_id_global-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
                                     +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
                                     +nproc_d_g_mul_dm*nproc_d_o_mul
     end select
   else if(imrs(3)==0) then
-    kdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+    kdw_array(2)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
               -nproc_d_o(1)*nproc_d_o(2)   &
               +nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kdw_array(2)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
+    kdw_array(2)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 
@@ -367,16 +367,16 @@ if(process_allocation=='grid_sequential')then
   if(nproc_d_o(3)==1.and.nproc_d_g_dm(3)==1)then
     kdw_array(4)=comm_proc_null
   else if(imr(3)==0.and.imrs(3)==0) then
-    kdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+    kdw_array(4)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
               -nproc_d_o(1)*nproc_d_o(2)   &
               +nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)  &
               +nproc_d_o_mul
   else if(imrs(3)==0) then
-    kdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
+    kdw_array(4)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
               -nproc_d_o(1)*nproc_d_o(2)   &
               +nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
   else
-    kdw_array(4)=nproc_id_h-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
+    kdw_array(4)=nproc_id_global-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
   end if
 end if
 

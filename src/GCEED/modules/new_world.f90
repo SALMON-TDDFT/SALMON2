@@ -21,10 +21,6 @@ implicit none
 
 integer,allocatable :: icorr_polenum(:)
 
-! FFTE routine
-integer :: iquot
-integer :: i11,i12,i13,i14,i15
-
 CONTAINS
 
 !=======================================================================
@@ -293,55 +289,6 @@ end if
 info%icomm_k = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
 
-!new_world for comm_mesh_s
-
-nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-
-if(process_allocation=='orbital_sequential')then
-  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-  do i3=0,nproc_d_g_dm(3)-1
-  do i2=0,nproc_d_g_dm(2)-1
-  do i1=0,nproc_d_g_dm(1)-1
-    do ii=0,nproc_d_o_mul-1
-      ibox=i1+i2*nproc_d_g_dm(1)   &
-             +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-             +i4*nproc_d_g_mul_dm  &
-             +ii*nproc_size_global/nproc_d_o_mul
-      if(nproc_id_global==ibox)then
-        icolor=i4
-        ikey=i1+i2*nproc_d_g_dm(1)   &
-               +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-               +ii*nproc_d_g_mul_dm
-      end if
-    end do
-  end do
-  end do
-  end do
-  end do
-else if(process_allocation=='grid_sequential')then
-  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-  do i3=0,nproc_d_g_dm(3)-1
-  do i2=0,nproc_d_g_dm(2)-1
-  do i1=0,nproc_d_g_dm(1)-1
-    do ii=0,nproc_d_o_mul-1
-      ibox=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
-            +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-            +i4*nproc_d_o_mul*nproc_d_g_mul_dm
-      if(nproc_id_global==ibox)then
-        icolor=i4
-        ikey=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
-              +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end do
-  end do
-  end do
-  end do
-  end do
-end if
-
-nproc_group_h = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_h, nproc_id_h, nproc_size_h)
-
 if(process_allocation=='orbital_sequential')then
   do iz=0,nproc_d_o(3)-1
   do iy=0,nproc_d_o(2)-1
@@ -460,94 +407,21 @@ end if
 info_field%icomm(3) = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
 
-if(process_allocation=='orbital_sequential')then
-  do ii=0,nproc_d_o_mul-1
-    do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-    do i3=0,nproc_d_g_dm(3)-1
-    do i2=0,nproc_d_g_dm(2)-1
-    do i1=0,nproc_d_g_dm(1)-1
-      ibox=i1+i2*nproc_d_g_dm(1)   &
-             +i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
-             +i4*nproc_d_g_mul_dm   &
-             +ii*nproc_size_global/nproc_d_o_mul
-      if(nproc_id_global==ibox)then
-        icolor=i4+ii*nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm
-        ikey=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end do
-    end do
-    end do
-    end do
-  end do
-else if(process_allocation=='grid_sequential')then
-  do i4=0,nproc_size_global/nproc_d_o_mul/nproc_d_g_mul_dm-1
-  do i3=0,nproc_d_g_dm(3)-1
-  do i2=0,nproc_d_g_dm(2)-1
-  do i1=0,nproc_d_g_dm(1)-1
-    do ii=0,nproc_d_o_mul-1
-      ibox=ii+i1*nproc_d_o_mul+i2*nproc_d_o_mul*nproc_d_g_dm(1)   &
-            +i3*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-            +i4*nproc_d_o_mul*nproc_d_g_mul_dm
-      if(nproc_id_global==ibox)then
-        icolor=ii+i4*nproc_d_o_mul
-        ikey=i1+i2*nproc_d_g_dm(1)+i3*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end do
-  end do
-  end do
-  end do
-  end do
-end if
-
-nproc_group_korbital_vhxc = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(nproc_group_korbital_vhxc, nproc_id_korbital_vhxc, nproc_size_korbital_vhxc)
-
-!call FACTOR(nproc,LNPU)
-!NPUZ=(2**(LNPU(1)/2))*(3**(LNPU(2)/2))*(5**(LNPU(3)/2))
-!NPUY=nproc/NPUZ
-
-!if(iflag_hartree==4)then
-
 ! communicators for FFTE routine
-  NPUW=nproc_d_g_dm(1)*nproc_d_o(1)
-  NPUY=nproc_d_g_dm(2)*nproc_d_o(2)
-  NPUZ=nproc_d_g_dm(3)*nproc_d_o(3)
-
-  info_field%isize_ffte(1)=NPUW
-  info_field%isize_ffte(2)=NPUY
-  info_field%isize_ffte(3)=NPUZ
-
-  icolor=info_field%id(3)+info_field%id(1)*NPUZ
+  icolor=info_field%id(3)+info_field%id(1)*info_field%isize_ffte(3)
   ikey=info_field%id(2)
-  nproc_group_icommy = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommy, nproc_id_icommy, nproc_size_icommy)
+  info_field%icomm_ffte(2) = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(info_field%icomm_ffte(2), info_field%id_ffte(2), info_field%isize_ffte(2))
 
-  icolor=info_field%id(2)+info_field%id(1)*NPUY
+  icolor=info_field%id(2)+info_field%id(1)*info_field%isize_ffte(2)
   ikey=info_field%id(3)
-  nproc_group_icommz = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommz, nproc_id_icommz, nproc_size_icommz)
+  info_field%icomm_ffte(3) = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(info_field%icomm_ffte(3), info_field%id_ffte(3), info_field%isize_ffte(3))
 
-  icolor=info_field%id(2)+info_field%id(3)*NPUY
+  icolor=info_field%id(2)+info_field%id(3)*info_field%isize_ffte(2)
   ikey=info_field%id(1)
-  nproc_group_icommw = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommw, nproc_id_icommw, nproc_size_icommw)
-
-  iquot=nproc_id_global/(NPUY*NPUZ)
-  
-  i11=mod(nproc_id_global,nproc_d_o(2)*nproc_d_o(3))
-  i12=i11/nproc_d_o(2)
-  i13=i12*nproc_d_o(3)
-  i14=nproc_id_global/(NPUY*nproc_d_o(3))
-  icolor=i13+i14+iquot*NPUZ
-  
-  i11=mod(nproc_id_global,nproc_d_o(2))
-  i12=nproc_id_global/(nproc_d_o(2)*nproc_d_o(3))
-  ikey=i11*NPUY/nproc_d_o(2)+mod(i12,NPUY/nproc_d_o(2))
-  
-  nproc_group_icommy_copy = comm_create_group(nproc_group_global, icolor, ikey)
-  call comm_get_groupinfo(nproc_group_icommy_copy, nproc_id_icommy_copy, nproc_size_icommy_copy)
-
-!end if
+  info_field%icomm_ffte(1) = comm_create_group(nproc_group_global, icolor, ikey)
+  call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
 
   nproc_group_tdks = nproc_group_global
   nproc_id_tdks    = nproc_id_global
