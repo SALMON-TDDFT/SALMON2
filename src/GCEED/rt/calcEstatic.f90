@@ -15,6 +15,7 @@
 !
 subroutine calcEstatic(ng, info, sVh, srg_ng)
 use salmon_communication, only: comm_summation
+use salmon_parallel, only: nproc_id_global
 use scf_data
 use new_world_sub
 use structures, only: s_rgrid, s_orbital_parallel, s_scalar, s_sendrecv_grid
@@ -32,9 +33,6 @@ real(8) :: Vh_wk(ng%is(1)-Ndh:ng%ie(1)+Ndh,   &
 real(8) :: Ex_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 real(8) :: Ey_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 real(8) :: Ez_static2(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
-
-iwk_size=11
-call make_iwksta_iwkend
 
 
 !$OMP parallel do private(iz,iy,ix)

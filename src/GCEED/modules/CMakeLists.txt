@@ -3,15 +3,12 @@ set(SOURCES
     allocate_psl.f90
     change_order.f90
     deallocate_mat.f90
-    gradient2.f90
     gradient.f90
     init_sendrecv.f90
     new_world.f90
     readbox_rt.f90
     read_pslfile.f90
     scf_data.f90
-    sendrecv.f90
-    persistent_comm.f90
     )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

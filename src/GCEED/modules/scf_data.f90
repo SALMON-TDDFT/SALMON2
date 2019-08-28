@@ -219,10 +219,6 @@ real(8),allocatable :: Ex_fast(:,:,:),Ec_fast(:,:,:)
 
 integer, allocatable :: idiis_sd(:)
 
-integer :: iwksta(3),iwkend(3),iwknum(3)
-integer :: iwk2sta(3),iwk2end(3),iwk2num(3)
-integer :: iwk3sta(3),iwk3end(3),iwk3num(3)
-integer :: iwk_size
 
 integer :: maxlm
 
@@ -549,46 +545,6 @@ iend_mxin_s = ng%ie_all
 inum_mxin_s = ng%ie_all - ng%is_all + 1
 
 end subroutine old_mesh
-
-!=====================================================================
-subroutine make_iwksta_iwkend
-use salmon_parallel, only: nproc_id_global
-implicit none
-
-if(iwk_size==1)then
-  iwksta(1:3)=ista_Mxin(1:3,nproc_id_global)
-  iwkend(1:3)=iend_Mxin(1:3,nproc_id_global)
-  iwk2sta(1:3)=ista_Mxin(1:3,nproc_id_global)-Nd
-  iwk2end(1:3)=iend_Mxin(1:3,nproc_id_global)+Nd
-  iwk3sta(1:3)=ista_Mxin(1:3,nproc_id_global)
-  iwk3end(1:3)=iend_Mxin(1:3,nproc_id_global)
-else if(iwk_size==2)then
-  iwksta(1:3)=ista_Mxin(1:3,nproc_id_global)-Nd
-  iwkend(1:3)=iend_Mxin(1:3,nproc_id_global)+Nd
-  iwk2sta(1:3)=ista_Mxin(1:3,nproc_id_global)-Nd
-  iwk2end(1:3)=iend_Mxin(1:3,nproc_id_global)+Nd
-  iwk3sta(1:3)=ista_Mxin(1:3,nproc_id_global)
-  iwk3end(1:3)=iend_Mxin(1:3,nproc_id_global)
-else if(iwk_size==11.or.iwk_size==31)then
-  iwksta(1:3)=ista_Mxin_s(1:3,nproc_id_global)
-  iwkend(1:3)=iend_Mxin_s(1:3,nproc_id_global)
-  iwk2sta(1:3)=ista_Mxin_s(1:3,nproc_id_global)-Ndh
-  iwk2end(1:3)=iend_Mxin_s(1:3,nproc_id_global)+Ndh
-  iwk3sta(1:3)=ista_Mxin_s(1:3,nproc_id_global)
-  iwk3end(1:3)=iend_Mxin_s(1:3,nproc_id_global)
-else if(iwk_size==12.or.iwk_size==32)then
-  iwksta(1:3)=ista_Mxin_s(1:3,nproc_id_global)-Ndh
-  iwkend(1:3)=iend_Mxin_s(1:3,nproc_id_global)+Ndh
-  iwk2sta(1:3)=ista_Mxin_s(1:3,nproc_id_global)-Ndh
-  iwk2end(1:3)=iend_Mxin_s(1:3,nproc_id_global)+Ndh
-  iwk3sta(1:3)=ista_Mxin_s(1:3,nproc_id_global)
-  iwk3end(1:3)=iend_Mxin_s(1:3,nproc_id_global)
-end if
-iwknum(1:3)=iwkend(1:3)-iwksta(1:3)+1
-iwk2num(1:3)=iwk2end(1:3)-iwk2sta(1:3)+1
-iwk3num(1:3)=iwk3end(1:3)-iwk3sta(1:3)+1
-
-end subroutine make_iwksta_iwkend
 
 function check_rion_update() result(rion_update)
   implicit none

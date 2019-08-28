@@ -26,7 +26,6 @@ use init_sendrecv_sub
 use change_order_sub
 use read_pslfile_sub
 use allocate_psl_sub
-use persistent_comm
 use structure_opt_sub
 use calc_allob_sub
 use salmon_total_energy
@@ -172,7 +171,6 @@ if(iopt==1)then
   call allocate_mat(ng)
   call set_icoo1d
   call allocate_sendrecv
-  call init_persistent_requests(info)
   call init_code_optimization
 
   ! Initialization of s_sendrecv_grid structure (experimental implementation)
@@ -905,7 +903,7 @@ end if
 if(yn_out_elf=='y')then
   allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
                lg_sta(3):lg_end(3)))
-  call calcELF(ng,info,srho,0)
+  call calcELF(mg,ng,srg,info,srho,0)
   call writeelf(lg,elf,icoo1d,hgs,iscfrt)
   deallocate(elf)
 end if

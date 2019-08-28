@@ -23,7 +23,6 @@ use init_sendrecv_sub
 use new_world_sub
 use read_pslfile_sub
 use allocate_psl_sub
-use persistent_comm
 
 implicit none
 
@@ -190,7 +189,6 @@ call init_itype
 call init_sendrecv_matrix
 
 call allocate_sendrecv
-call init_persistent_requests(info)
 call init_code_optimization
 
 if(ilsda==0)then
@@ -883,7 +881,7 @@ end do
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
-      call calcELF(ng,info,srho,itt)
+      call calcELF(mg,ng,srg,info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
     if(yn_out_estatic_rt=='y')then
