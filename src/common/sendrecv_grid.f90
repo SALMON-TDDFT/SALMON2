@@ -43,6 +43,7 @@ module sendrecv_grid
     implicit none
     integer, intent(in) :: i
     flip = 3 - i
+    return
   end function flip
 
   ! Prepare unique MPI tag number (3~8) for send/recv based on
@@ -63,7 +64,7 @@ module sendrecv_grid
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
-    integer, intent(in) ::  nb, icomm, neig(1:3, 1:2)
+    integer, intent(in) ::  nb, icomm, neig(1:2, 1:3)
 
     integer :: idir, iaxis
     integer :: is_block(1:3, 1:2, 1:2, 1:3)
@@ -110,8 +111,7 @@ module sendrecv_grid
 
     ! Assign to s_sendrecv_grid structure:
     srg%nb = nb
-    srg%neig(1,1:3) = neig(1:3,1)
-    srg%neig(2,1:3) = neig(1:3,2)
+    srg%neig(1:2, 1:3) = neig(1:2, 1:3)
     srg%is_block(:, :, :, :) = is_block
     srg%ie_block(:, :, :, :) = ie_block
     srg%icomm = icomm

@@ -71,7 +71,7 @@ real(8) :: rho_half(mg%is(1):mg%ie(1),   &
                     mg%is(3):mg%ie(3))
 
 ! Create communicator for single orbital (experimental implementation):
-call init_sendrecv_grid(srg_ob_1, mg, 1, info%icomm_r, transpose(srg%neig))
+call init_sendrecv_grid(srg_ob_1, mg, 1, info%icomm_r, srg%neig)
 
 !$OMP parallel do private(iz,iy,ix)
 do iz=mg%is(3),mg%ie(3)
