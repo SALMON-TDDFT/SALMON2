@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE OUT_data_rt(ng)
-use structures,      only: s_rgrid
+SUBROUTINE OUT_data_rt(ng,info)
+use structures,      only: s_rgrid,s_orbital_parallel
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
@@ -23,6 +23,7 @@ use scf_data
 use allocate_mat_sub
 implicit none
 type(s_rgrid), intent(in) :: ng
+type(s_orbital_parallel), intent(in) :: info
 integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer :: ibox
@@ -83,7 +84,7 @@ end if
 do iik=1,num_kpoints_rd
 do iob=1,itotMST
   call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
+  call check_corrkob(iob,info,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
 
   cmatbox_l2=0.d0
     if(mod(itotNtime,2)==1)then
@@ -339,7 +340,7 @@ end if
 do iik=k_sta,k_end
 do iob=1,itotMST
   call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-  call check_corrkob(iob,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
+  call check_corrkob(iob,info,iik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   
   if(num_datafiles_IN==1.or.num_datafiles_IN>nproc_size_global)then
     if(comm_is_root(nproc_id_global))then

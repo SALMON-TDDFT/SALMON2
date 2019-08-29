@@ -16,14 +16,15 @@
 !=======================================================================
 !================================================= Initial wave function
 
-SUBROUTINE init_wf_ns(lg,ifunc)
-use structures, only: s_rgrid
+SUBROUTINE init_wf_ns(lg,info,ifunc)
+use structures, only: s_rgrid,s_orbital_parallel
 use scf_data
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
 
 type(s_rgrid) :: lg
+type(s_orbital_parallel),intent(in) :: info
 integer :: ik,iob,iseed,a,ix,iy,iz
 integer :: is,iss,pstart(2),pend(2)
 real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
@@ -61,7 +62,7 @@ case(0)
   do is=1,iss
   do iob=pstart(is),pend(is)
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-    call check_corrkob(iob,1,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
+    call check_corrkob(iob,info,1,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
     call quickrnd_ns ; x1=Xmax*(2.d0*rnd-1.d0)
     call quickrnd_ns ; y1=Ymax*(2.d0*rnd-1.d0)
     call quickrnd_ns ; z1=Zmax*(2.d0*rnd-1.d0)
@@ -89,7 +90,7 @@ case(3)
   do ik=1,num_kpoints_rd
   do iob=pstart(is),pend(is)
     call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-    call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
+    call check_corrkob(iob,info,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
     call quickrnd_ns ; x1=Xmax*rnd
     call quickrnd_ns ; y1=Ymax*rnd
     call quickrnd_ns ; z1=Zmax*rnd

@@ -89,7 +89,7 @@ if(iSCFRT==1)then
   if(iperiodic==0)then
 
     do iob=1,iobnum
-      call calc_allob(iob,p_allob,itotmst,mst,iobnum)
+      call calc_allob(iob,info,p_allob,itotmst,mst,iobnum)
       if((ilsda==0.and.p_allob<=ifMST(1)).or.  &
          (ilsda==1.and.(p_allob<=ifMST(1).or.(p_allob>=MST(1)+1.and.p_allob<=MST(1)+ifMST(2)))))then
   
@@ -111,7 +111,7 @@ if(iSCFRT==1)then
   else if(iperiodic==3)then
 
     do iob=1,iobnum
-      call calc_allob(iob,p_allob,itotmst,mst,iobnum)
+      call calc_allob(iob,info,p_allob,itotmst,mst,iobnum)
       if((ilsda==0.and.p_allob<=ifMST(1)).or.  &
          (ilsda==1.and.(p_allob<=ifMST(1).or.(p_allob>=MST(1)+1.and.p_allob<=MST(1)+ifMST(2)))))then
   
@@ -151,7 +151,7 @@ else
 
   do iob=1,iobnum
 
-    call calc_allob(iob,p_allob,itotmst,mst,iobnum)
+    call calc_allob(iob,info,p_allob,itotmst,mst,iobnum)
     if((ilsda==0.and.p_allob<=ifMST(1)).or.   &
        (ilsda==1.and.(p_allob<=ifMST(1).or.(p_allob>=MST(1)+1.and.p_allob<=MST(1)+ifMST(2)))))then
 

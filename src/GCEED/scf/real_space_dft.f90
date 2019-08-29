@@ -27,7 +27,6 @@ use change_order_sub
 use read_pslfile_sub
 use allocate_psl_sub
 use structure_opt_sub
-use calc_allob_sub
 use salmon_total_energy
 use hpsi_sub
 implicit none
@@ -38,12 +37,10 @@ END MODULE global_variables_scf
 
 subroutine Real_Space_DFT
 use structures
-use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global, &
-                           nproc_id_kgrid
+use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
-use calc_iobnum_sub
 use set_gridcoordinate_sub
 use scf_iteration_sub
 use rmmdiis_sub
@@ -129,9 +126,6 @@ k_sta = info%ik_s
 k_end = info%ik_e
 k_num = info%numk
 iobnum = info%numo
-
-!call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
-!call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)
@@ -288,7 +282,7 @@ if(iopt==1)then
     end if
 
     if(read_gs_wfn_k=='n') then
-      call init_wf_ns(lg,1)
+      call init_wf_ns(lg,info,1)
       ! Store to psi/zpsi
       select case(iperiodic)
       case(0)
@@ -864,7 +858,7 @@ call band_information
 call write_eigen
 
 if(yn_out_psi=='y') then
-  call writepsi(lg)
+  call writepsi(lg,info)
 end if
 
 if(yn_out_dns=='y') then
@@ -897,7 +891,7 @@ call timer_begin(LOG_WRITE_LDA_DATA)
 ! LDA data
 ! subroutines in scf_data.f90
 if ( OC==1.or.OC==2.or.OC==3 ) then
-  call OUT_data(ng,mixing)
+  call OUT_data(ng,info,mixing)
 end if
 call timer_end(LOG_WRITE_LDA_DATA)
 

@@ -18,10 +18,12 @@ module calc_iobnum_sub
 
 contains
 
-subroutine calc_iobnum(tmst,trank,tiobnum,nproc_ob)
+subroutine calc_iobnum(tmst,info,tiobnum,nproc_ob)
   use inputoutput, only : ispin
+  use structures, only : s_orbital_parallel
   implicit none
-  integer :: tmst,trank,tiobnum
+  integer :: tmst,tiobnum
+  type(s_orbital_parallel),intent(in) :: info
   integer :: ttmst
   integer :: nproc_ob
   
@@ -31,7 +33,7 @@ subroutine calc_iobnum(tmst,trank,tiobnum,nproc_ob)
     ttmst=tmst/2
   end if
   
-  tiobnum=(trank+1)*ttmst/nproc_ob-trank*ttmst/nproc_ob
+  tiobnum=(info%id_o+1)*ttmst/nproc_ob-info%id_o*ttmst/nproc_ob
   
   if(ispin==1)then
     tiobnum=tiobnum*2

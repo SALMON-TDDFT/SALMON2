@@ -136,7 +136,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   iflag_diisjump=0
   
   do iob=1,system%nspin*numo
-    call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*numo)
+    call calc_allob(iob,info,iob_allob,itotmst,mst,system%nspin*numo)
     if(iob>numo)then
       is=2
     else
@@ -262,7 +262,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   
   iflag_diisjump=0
   do iob=1,system%nspin*numo
-    call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*numo)
+    call calc_allob(iob,info,iob_allob,itotmst,mst,system%nspin*numo)
     if(iob>numo)then
       is=2
     else
@@ -294,7 +294,7 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
       psi_stock(mg_xs:mg_xe,mg_ys:mg_ye,mg_zs:mg_ze,1:system%nspin,  &
                       1:numo,info%ik_s:info%ik_e,1)
     do iob=1,system%nspin*numo
-      call calc_allob(iob,iob_allob,itotmst,mst,system%nspin*numo)
+      call calc_allob(iob,info,iob_allob,itotmst,mst,system%nspin*numo)
       if(iob>numo)then
         is=2
       else

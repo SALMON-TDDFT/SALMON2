@@ -18,23 +18,24 @@ module calc_allob_sub
 
 contains
 
-subroutine calc_allob(iob,iob_allob,itotmst,mst,iobnum)
+subroutine calc_allob(iob,info,iob_allob,itotmst,mst,iobnum)
   use inputoutput, only: ispin,nproc_ob
-  use salmon_parallel, only: nproc_id_kgrid
+  use structures, only: s_orbital_parallel
   implicit none
   integer,intent(in) :: iob
+  type(s_orbital_parallel),intent(in) :: info
   integer,intent(out) ::  iob_allob
   integer,intent(in) :: itotmst,mst(2),iobnum
   integer :: iob_tmp
   
   if(ispin==0)then
-    iob_allob=nproc_id_kgrid*itotmst/nproc_ob+iob
+    iob_allob=info%id_o*itotmst/nproc_ob+iob
   else
     if(iob<=iobnum/2)then
-      iob_allob=nproc_id_kgrid*mst(1)/nproc_ob+iob
+      iob_allob=info%id_o*mst(1)/nproc_ob+iob
     else
       iob_tmp=iob-iobnum/2
-      iob_allob=nproc_id_kgrid*mst(2)/nproc_ob+iob_tmp+mst(1)
+      iob_allob=info%id_o*mst(2)/nproc_ob+iob_tmp+mst(1)
     end if
   end if
   

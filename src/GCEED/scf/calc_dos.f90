@@ -52,7 +52,7 @@ dos_l_tmp=0.d0
  
 do iik=k_sta,k_end
 do iob=1,iobmax
-  call calc_allob(iob,iob_allob,itotmst,mst,iobnum)
+  call calc_allob(iob,info,iob_allob,itotmst,mst,iobnum)
   select case (out_dos_function)
   case('lorentzian') 
     fk=2.d0*out_dos_width/pi
