@@ -44,7 +44,7 @@ result2 = {}
 linecount = 0
 for line in open("Si_eigen.data"):
     linecount += 1
-    if linecount == 4: # a line for io=1, ik=1
+    if linecount == 5: # a line for io=1, ik=1
         for name1, [resval1, refval1, error1] in checklist1.items():
             data = line.split()
             result1[name1] = float(data[1])
