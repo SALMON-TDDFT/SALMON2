@@ -731,9 +731,6 @@ k_end = info%ik_e
 k_num = info%numk
 iobnum = info%numo
 
-!call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
-!call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
-
 if(iSCFRT==2)then
   call allocate_mat(ng)
   call set_icoo1d

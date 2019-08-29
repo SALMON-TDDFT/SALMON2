@@ -54,7 +54,6 @@ use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
-use calc_iroot_sub
 use gram_schmidt_orth, only: gram_schmidt 
 use print_sub
 use read_gs
@@ -126,9 +125,6 @@ k_sta = info%ik_s
 k_end = info%ik_e
 k_num = info%numk
 iobnum = info%numo
-
-!call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
-!call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)

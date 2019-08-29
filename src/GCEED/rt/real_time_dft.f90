@@ -478,7 +478,6 @@ use global_variables_rt
 use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
 use sendrecv_grid, only: init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
-use calc_iroot_sub
 use force_sub, only: calc_force_salmon
 use hpsi_sub, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
