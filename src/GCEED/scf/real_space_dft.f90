@@ -108,8 +108,6 @@ inumcpu_check=0
 call setbN(bnmat)
 call setcN(cnmat)
 
-call check_dos_pdos
-
 call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 
 call init_dft(lg,system,stencil)
