@@ -253,7 +253,7 @@ C     1                  MPI_DOUBLE_COMPLEX,ICOMMZ,IERR)
 !$OMP MASTER
 C      CALL MPI_ALLTOALL(BXZYP,NN/NPUY,MPI_DOUBLE_COMPLEX,AXZYP,NN/NPUY,
 C     1                  MPI_DOUBLE_COMPLEX,ICOMMY,IERR)
-      call CONVERT_1D(BXZYP,AXZYP,NN,ICOMMZ,NPUY)
+      call CONVERT_1D(BXZYP,AXZYP,NN,ICOMMY,NPUY)
 !$OMP END MASTER
 !$OMP BARRIER
 !$OMP DO
@@ -416,7 +416,7 @@ C     1                  MPI_DOUBLE_COMPLEX,ICOMMY,IERR)
       IMPLICIT REAL*8 (A-H,O-Z)
       COMPLEX*16 A(*),B(*)
      
-      CALL ALLTOALL_1D(NN,A,B,ICOMM,NPU)
+      CALL ALLTOALL_1D(A,B,NN,ICOMM,NPU)
  
       END
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

@@ -89,9 +89,11 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
   end if
 
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),0) 
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),-1) 
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,n) &
@@ -110,7 +112,9 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
     fg%zrhoG_ele(1)=0.d0
   end if
 
-  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),info_field%isize_ffte(2),info_field%isize_ffte(3),1)
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
   if(info_field%isize_ffte(1)==1)then
 !$OMP parallel do private(iiz,iiy)

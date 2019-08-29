@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 !======================================================================
-subroutine alltoall_1d(n,vec_a,vec_b,icomm,npu)
+subroutine alltoall_1d(vec_a,vec_b,n,icomm,npu)
   use salmon_communication, only: comm_alltoall
   implicit none
   integer,intent(in)      :: n
