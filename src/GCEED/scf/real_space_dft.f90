@@ -156,7 +156,6 @@ if(iopt==1)then
 
   end select
 
-  call init_updown(info)
   call init_itype
   call init_sendrecv_matrix
   select case(iperiodic)
@@ -169,24 +168,13 @@ if(iopt==1)then
   call set_icoo1d
   call init_code_optimization
 
-  ! Initialization of s_sendrecv_grid structure (experimental implementation)
-  neig(1, 1) = iup_array(1)
-  neig(2, 1) = idw_array(1)
-  neig(1, 2) = jup_array(1)
-  neig(2, 2) = jdw_array(1)
-  neig(1, 3) = kup_array(1)
-  neig(2, 3) = kdw_array(1)
+  ! sendrecv_grid object for wavefunction updates
+  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
-
-  neig_ng(1, 1) = iup_array(2)
-  neig_ng(2, 1) = idw_array(2)
-  neig_ng(1, 2) = jup_array(2)
-  neig_ng(2, 2) = jdw_array(2)
-  neig_ng(1, 3) = kup_array(2)
-  neig_ng(2, 3) = kdw_array(2)
-  call init_sendrecv_grid(srg_ng, ng, 1, &
-    & nproc_group_global, neig_ng)
-
+  ! sendrecv_grid object for scalar potential updates
+  call create_sendrecv_neig_ng(neig_ng, info, iperiodic) ! neighboring node array
+  call init_sendrecv_grid(srg_ng, ng, 1, nproc_group_global, neig_ng)
+  
   if(ispin==0)then
     nspin=1
   else
