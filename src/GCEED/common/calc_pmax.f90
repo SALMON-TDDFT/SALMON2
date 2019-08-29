@@ -13,19 +13,20 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_pmax(iobmax)
-use salmon_parallel, only: nproc_id_kgrid
+subroutine calc_pmax(iobmax,info)
+use structures, only: s_orbital_parallel
 use calc_iobnum_sub
 use scf_data
 use new_world_sub
 implicit none
 integer :: iobmax
+type(s_orbital_parallel),intent(in) :: info
 
 if(iSCFRT==1)then
   iobmax=iobnum
 else if(iSCFRT==2)then
   if(ilsda==0)then
-    call calc_iobnum(ifMST(1),nproc_id_kgrid,iobmax,nproc_ob)
+    call calc_iobnum(ifMST(1),info,iobmax,nproc_ob)
   else if(ilsda==1)then
     iobmax=iobnum
   end if

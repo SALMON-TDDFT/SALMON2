@@ -15,9 +15,9 @@
 !
 !======================================================================
 !======================================================================
-subroutine writepsi(lg)
+subroutine writepsi(lg,info)
   use inputoutput, only: au_length_aa
-  use structures, only: s_rgrid
+  use structures, only: s_rgrid,s_orbital_parallel
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use writefile3d
@@ -27,6 +27,7 @@ subroutine writepsi(lg)
   use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
+  type(s_orbital_parallel),intent(in) :: info
   integer :: iob,ix,iy,iz
   integer :: p0,iob_myob,icheck_corrkob
   character(30) :: suffix
@@ -38,7 +39,7 @@ subroutine writepsi(lg)
     do p0=1,itotMST
       call conv_p0(p0,iob)
       call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-      call check_corrkob(iob,1,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(iob,info,1,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
   !OMP parallel do private(iz,iy,ix)
       do iz=lg_sta(3),lg_end(3)
       do iy=lg_sta(2),lg_end(2)

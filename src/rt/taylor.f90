@@ -23,7 +23,6 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   use inputoutput, only: n_hamil
   use structures
   use hpsi_sub
-  use calc_allob_sub
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   integer,parameter     :: nd=4 

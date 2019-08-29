@@ -75,16 +75,16 @@ do is=1,iss
       esp(iob,iik)=esp(imin,iik)
       esp(imin,iik)=rbox
       matbox1=0.d0
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(iob,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox1(:,:,:)=tpsi(:,:,:,iob_myob,iik)
       call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
       matbox3=0.d0
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(imin,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox3(:,:,:)=tpsi(:,:,:,imin_myob,iik)
       call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(iob,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,iob_myob,iik)=matbox4(:,:,:)
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(imin,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,imin_myob,iik)=matbox2(:,:,:)
     end if
   end do
@@ -145,16 +145,16 @@ do is=1,iss
       esp(iob,iik)=esp(imin,iik)
       esp(imin,iik)=rbox
       matbox1=0.d0
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(iob,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox1(:,:,:)=tpsi(:,:,:,iob_myob,iik)
       call comm_summation(matbox1,matbox2,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
       matbox3=0.d0
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(imin,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) matbox3(:,:,:)=tpsi(:,:,:,imin_myob,iik)
       call comm_summation(matbox3,matbox4,mg_num(1)*mg_num(2)*mg_num(3),info%icomm_o)
-      call check_corrkob(iob,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(iob,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,iob_myob,iik)=matbox4(:,:,:)
-      call check_corrkob(imin,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(imin,info,iik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
       if(icheck_corrkob==1) tpsi(:,:,:,imin_myob,iik)=matbox2(:,:,:)
     end if
   end do

@@ -15,7 +15,6 @@
 !
 MODULE global_variables_rt
 use inputoutput
-use calc_allob_sub
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
@@ -336,7 +335,7 @@ call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poi
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
-if(OC_rt==1) call OUT_data_rt(ng)
+if(OC_rt==1) call OUT_data_rt(ng,info)
 call timer_end(LOG_WRITE_RT_DATA)
 
 

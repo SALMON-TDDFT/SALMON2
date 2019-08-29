@@ -15,8 +15,8 @@
 !
 !=======================================================================
 
-SUBROUTINE OUT_data(ng,mixing)
-use structures, only: s_rgrid, s_mixing
+SUBROUTINE OUT_data(ng,info,mixing)
+use structures, only: s_rgrid, s_orbital_parallel, s_mixing
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
@@ -28,6 +28,7 @@ use allocate_psl_sub
 use allocate_mat_sub
 implicit none
 type(s_rgrid), intent(in)    :: ng
+type(s_orbital_parallel),intent(in) :: info
 type(s_mixing),intent(inout) :: mixing
 integer :: is,iob,jj,ik
 integer :: ix,iy,iz
@@ -159,7 +160,7 @@ case(0)
     do ik=1,num_kpoints_rd
     do iob=1,itotMST
       call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-      call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(iob,info,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   
       matbox_l=0.d0
       if(icorr_p==1)then
@@ -198,7 +199,7 @@ case(3)
     do iob=1,itotMST
 
       call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-      call check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
+      call check_corrkob(iob,info,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
       cmatbox_l=0.d0
       if(icorr_p==1)then
         cmatbox_l(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))   &
@@ -422,7 +423,6 @@ END SUBROUTINE OUT_data
 SUBROUTINE IN_data(lg,mg,ng,info,info_field,system,stencil,mixing)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
-use salmon_parallel, only: nproc_id_kgrid
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_iobnum_sub
 use calc_myob_sub
@@ -731,9 +731,6 @@ k_end = info%ik_e
 k_num = info%numk
 iobnum = info%numo
 
-!call setk(k_sta, k_end, k_num, num_kpoints_rd, nproc_k, info%id_k)
-!call calc_iobnum(itotMST,nproc_id_kgrid,iobnum,nproc_ob)
-
 if(iSCFRT==2)then
   call allocate_mat(ng)
   call set_icoo1d
@@ -787,7 +784,7 @@ else if(iSCFRT==2)then
     zpsi_out(:,:,:,:,:) = 0.d0
   end if
   if(iwrite_projection==1)then
-    call calc_iobnum(itotMST0,nproc_id_kgrid,iobnum0,nproc_ob)
+    call calc_iobnum(itotMST0,info,iobnum0,nproc_ob)
     if(iobnum0.ge.1)then
       allocate(zpsi_t0(mg%is_overlap(1):mg%ie_overlap(1), &
                      & mg%is_overlap(2):mg%ie_overlap(2), &
@@ -976,7 +973,7 @@ do p0=pstart(is),pend(is)
 ! read file
   call conv_p0(p0,iob)
   call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
-  call check_corrkob(iob,ik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
+  call check_corrkob(iob,info,ik,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
 
   if(IC<=2)then
     if(nproc_id_global<num_datafiles_IN)then

@@ -79,9 +79,7 @@ else if(process_allocation=='grid_sequential')then
 end if
 
 info%icomm_o = comm_create_group(nproc_group_global, icolor, ikey)
-call comm_get_groupinfo(info%icomm_o, nproc_id_kgrid, nproc_size_kgrid)
-info%id_o = nproc_id_kgrid
-info%isize_o = nproc_size_kgrid
+call comm_get_groupinfo(info%icomm_o, info%id_o, info%isize_o)
 
 !new_world for comm_korbital
 if(process_allocation=='orbital_sequential')then

@@ -18,12 +18,11 @@ module check_corrkob_sub
 
 contains
 
-subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
-  use salmon_parallel, only: nproc_id_kgrid
+subroutine check_corrkob(iob,info,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   use calc_iquotient_sub
-!  use structures, only: s_orbital_parallel
+  use structures, only: s_orbital_parallel
   implicit none
-!  type(s_orbital_parallel),intent(in) :: info
+  type(s_orbital_parallel),intent(in) :: info
   integer,intent(in)  :: iob,ik
   integer,intent(out) :: icorr_p
   integer,intent(in)  :: ilsda,nproc_ob,k_sta,k_end,mst(2)
@@ -37,7 +36,7 @@ subroutine check_corrkob(iob,ik,icorr_p,ilsda,nproc_ob,k_sta,k_end,mst)
   end if 
 
   call calc_iquotient(iob_tmp,nproc_ob,mst(1),iquotient)
-  if(nproc_id_kgrid==iquotient.and.ik>=k_sta.and.ik<=k_end)then
+  if(info%id_o==iquotient.and.ik>=k_sta.and.ik<=k_end)then
     icorr_p=1
   else
     icorr_p=0
