@@ -157,7 +157,8 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
     enddo
   enddo
 
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg_num(1),lg_num(2),lg_num(3),npuy,npuz,0) 
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg_num(1),lg_num(2),lg_num(3),npuy,npuz,0 &
+                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
   do iz=1,lg_num(3)/npuz
   do iy=1,lg_num(2)/npuy
@@ -168,7 +169,8 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   enddo
   enddo
 
-  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg_num(1),lg_num(2),lg_num(3),npuy,npuz,1)
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg_num(1),lg_num(2),lg_num(3),npuy,npuz,1 &
+                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
 !$OMP parallel do
   do iz = lg_sta(3),lg_end(3)
