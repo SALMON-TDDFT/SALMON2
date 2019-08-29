@@ -110,7 +110,6 @@ subroutine init_orbital_parallel_singlecell(system,info)
   type(s_orbital_parallel)      :: info
   !
   integer :: io,jspin,ik
-  integer :: jj,iob
 
 ! for single-cell calculations
   info%im_s = 1
@@ -341,7 +340,7 @@ subroutine init_grid_parallel(lg,mg,ng)
   end if
 
   if(mg%num(1)<nd .or.mg%num(2)<nd .or.mg%num(3)<nd)then
-    stop "A system is small. Please use less number of processors."
+    stop "The system is small. Please use less number of processors."
   end if
 
 ! +-----------------------------+
@@ -419,7 +418,7 @@ subroutine init_grid_parallel(lg,mg,ng)
   end do
 
   if(iperiodic==0.and.(ng%num(1)<nd.or.ng%num(2)<nd.or.ng%num(3)<nd))then
-    stop "A system is small. Please use less number of processors."
+    stop "The system is small. Please use less number of processors."
   end if
 
 end subroutine init_grid_parallel
