@@ -271,9 +271,6 @@ real(8) :: Exc
 
 integer :: imr(3),imrs(3),igroup
 
-real(8),allocatable :: rho_stock(:,:,:,:)
-real(8),allocatable :: Vlocal_stock(:,:,:,:)
-
 integer :: iflag_subspace_diag
 
 real(8),allocatable :: Vh_stock1(:,:,:)

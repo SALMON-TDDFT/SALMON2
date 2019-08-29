@@ -81,8 +81,7 @@ type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
-type(s_scalar) :: srho
-type(s_scalar) :: sVh,sVpsl
+type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
 type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_nlcc) :: ppn
@@ -482,34 +481,19 @@ idiis_sd=0
 if(img==1.and.iopt==1) allocate(norm_diff_psi_stock(itotMST,1))
 norm_diff_psi_stock=1.0d9
 
-if(img>=2.or.iopt>=2) deallocate(rho_stock,Vlocal_stock)
-allocate(rho_stock(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1))
-if(ilsda==0)then
-  allocate(Vlocal_stock(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1))
-else
-  allocate(Vlocal_stock(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:2))
-end if
+if(img>=2.or.iopt>=2) deallocate(rho_old%f,Vlocal_old%f)
+call allocate_scalar(ng,rho_old)
+call allocate_scalar(ng,Vlocal_old)
 
-if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    rho_stock(ix,iy,iz,1)=rho(ix,iy,iz)
-    Vlocal_stock(ix,iy,iz,1)=Vlocal(ix,iy,iz,1)
-  end do
-  end do
-  end do
-else
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    rho_stock(ix,iy,iz,1)=rho(ix,iy,iz)
-    Vlocal_stock(ix,iy,iz,1:2)=Vlocal(ix,iy,iz,1:2)
-  end do
-  end do
-  end do
-end if
+do iz=ng%is(3),ng%ie(3)
+do iy=ng%is(2),ng%ie(2)
+do ix=ng%is(1),ng%ie(1)
+  rho_old%f(ix,iy,iz)=srho%f(ix,iy,iz)
+  Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
+end do
+end do
+end do
 
 ! Setup NLCC term from pseudopotential
 call calc_nlcc(pp, system, mg, ppn)
@@ -598,7 +582,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng%is(3),ng%ie(3) 
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        sum0=sum0+abs(srho%f(ix,iy,iz)-rho_stock(ix,iy,iz,1))
+        sum0=sum0+abs(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
       end do
       end do
       end do
@@ -614,7 +598,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng%is(3),ng%ie(3) 
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        sum0=sum0+(srho%f(ix,iy,iz)-rho_stock(ix,iy,iz,1))**2
+        sum0=sum0+(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
       end do
       end do
       end do
@@ -628,7 +612,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng%is(3),ng%ie(3) 
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        sum0=sum0+(V_local(1)%f(ix,iy,iz)-Vlocal_stock(ix,iy,iz,1))**2
+        sum0=sum0+(V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
       end do
       end do
       end do
@@ -692,29 +676,15 @@ DFT_Iteration : do iter=1,iDiter(img)
   end if
   call timer_end(LOG_WRITE_GS_RESULTS)
 
-
-if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    rho_stock(ix,iy,iz,1)=srho%f(ix,iy,iz)
-    Vlocal_stock(ix,iy,iz,1)=V_local(1)%f(ix,iy,iz)
+    rho_old%f(ix,iy,iz)=srho%f(ix,iy,iz)
+    Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
   end do
   end do
   end do
-else if(ilsda==1)then
-!$OMP parallel do private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    rho_stock(ix,iy,iz,1)=srho%f(ix,iy,iz)
-    Vlocal_stock(ix,iy,iz,1)=V_local(1)%f(ix,iy,iz)
-    Vlocal_stock(ix,iy,iz,2)=V_local(2)%f(ix,iy,iz)
-  end do
-  end do
-  end do
-end if
 
 end do DFT_Iteration
 
