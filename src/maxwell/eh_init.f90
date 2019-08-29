@@ -1487,7 +1487,7 @@ subroutine eh_prep_GCEED(fs,fw)
                                ista_Mxin,iend_Mxin,inum_Mxin,&
                                ista_Mxin_s,iend_Mxin_s,inum_Mxin_s
   use new_world_sub,     only: make_new_world
-  use init_sendrecv_sub, only: init_updown,iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
+  use init_sendrecv_sub, only: create_sendrecv_neig_ng
   use sendrecv_grid,     only: init_sendrecv_grid
   use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
   use salmon_maxwell,    only: ls_fdtd_work
@@ -1527,10 +1527,6 @@ subroutine eh_prep_GCEED(fs,fw)
   fw%ioddeven(:)=imesh_oddeven(:);
   
   !set sendrecv environment
-  call init_updown(info)
-  neig_ng_eh(1,1)=iup_array(2); neig_ng_eh(2,1)=idw_array(2);
-  neig_ng_eh(1,2)=jup_array(2); neig_ng_eh(2,2)=jdw_array(2);
-  neig_ng_eh(1,3)=kup_array(2); neig_ng_eh(2,3)=kdw_array(2);
   !This process about ng is temporal. 
   !With modifying set_ng to be applied to arbitrary Nd, this process will be removed.
   fs%ng%is_overlap(1:3)=fs%ng%is(1:3)-fw%Nd
@@ -1553,6 +1549,8 @@ subroutine eh_prep_GCEED(fs,fw)
     fs%ng%idz(ii)=ii
   end do
   fs%ng%Nd=fw%Nd
+
+  call create_sendrecv_neig_ng(neig_ng_eh, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,neig_ng_eh)
-  
+
 end subroutine eh_prep_GCEED

@@ -183,7 +183,6 @@ call read_pslfile(system)
 call allocate_psl
 call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
-call init_updown(info)
 call init_itype
 call init_sendrecv_matrix
 
@@ -474,7 +473,7 @@ use density_matrix, only: calc_density
 use writefield
 use timer
 use global_variables_rt
-use init_sendrecv_sub, only: iup_array,idw_array,jup_array,jdw_array,kup_array,kdw_array
+use init_sendrecv_sub, only: create_sendrecv_neig_mg, create_sendrecv_neig_ng
 use sendrecv_grid, only: init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub, only: calc_force_salmon
@@ -542,23 +541,12 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     end do
   end do
 
-  ! Initialization of s_sendrecv_grid structure (experimental implementation)
-  neig(1, 1) = iup_array(1)
-  neig(2, 1) = idw_array(1)
-  neig(1, 2) = jup_array(1)
-  neig(2, 2) = jdw_array(1)
-  neig(1, 3) = kup_array(1)
-  neig(2, 3) = kdw_array(1)
+  ! sendrecv_grid object for wavefunction updates
+  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
-
-  neig_ng(1, 1) = iup_array(2)
-  neig_ng(2, 1) = idw_array(2)
-  neig_ng(1, 2) = jup_array(2)
-  neig_ng(2, 2) = jdw_array(2)
-  neig_ng(1, 3) = kup_array(2)
-  neig_ng(2, 3) = kdw_array(2)
-  call init_sendrecv_grid(srg_ng, ng, 1, &
-    & nproc_group_global, neig_ng)
+  ! sendrecv_grid object for scalar potential updates
+  call create_sendrecv_neig_ng(neig_ng, info, iperiodic) ! neighboring node array
+  call init_sendrecv_grid(srg_ng, ng, 1, nproc_group_global, neig_ng)
 
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
