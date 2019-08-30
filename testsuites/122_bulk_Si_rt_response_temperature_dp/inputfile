@@ -1,0 +1,76 @@
+&calculation
+  calc_mode = 'RT'
+/
+
+&control
+  sysname = 'Si'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&parallel
+  yn_domain_parallel='y'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 10.26d0, 10.26d0, 10.26d0
+  nstate = 32
+  nelec = 32
+  nelem = 1
+  natom = 8
+  temperature_k = 300.d0
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.855d0, 0.855d0, 0.855d0
+/
+
+&kgrid
+  num_kgrid = 2, 2, 2
+/
+
+&tgrid
+  nt = 180
+  dt = 0.16
+/
+
+&scf
+  ncg = 4
+  nscf = 120
+  threshold = 1.d-9
+/
+
+&emfield
+  ae_shape1 = 'impulse'
+  epdir_re1 = 0., 0., 1.
+/
+
+&analysis
+  nenergy = 1000
+  de = 0.001
+/
+
+&atomic_coor
+  'Si'	.0	.0	.0	1
+  'Si'	2.565	2.565	2.565	1
+  'Si'	5.13	.0	5.13	1
+  'Si'	.0	5.13	5.13	1
+  'Si'	5.13	5.13	.0	1
+  'Si'	7.695	2.565	7.695	1
+  'Si'	2.565	7.695	7.695	1
+  'Si'	7.695	7.695	2.565	1
+/

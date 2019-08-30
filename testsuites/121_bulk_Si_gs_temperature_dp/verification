@@ -1,0 +1,79 @@
+#!/usr/bin/env python
+
+# This verification script file is automatically executed after the SALMON.
+# If necessary, this script file can used for the verification of the result.
+# The script MUST indicate a "return-code 0", if the calculation is successful.
+# If a negative value is returned, it is treated as a test failure.
+
+import sys
+import os
+import re
+
+print("#" * 60)
+print("# Verification start")
+
+filelist = [
+    "Si_eigen.data",
+]
+
+checklist1 = {
+    "eigen energy for io=1, ik=2": [
+        100,  # Temporary value for result
+        -0.1556597101991845,  # Reference value
+        0.00004,  # Permissible error (~0.001eV)
+    ],
+}
+
+checklist2 = {
+    "eigen energy for io=16, ik=2": [
+        100,  # Temporary value for result
+        0.1991261669274569,  # Reference value
+        0.00004,  # Permissible error (~0.001eV)
+    ],
+}
+
+print("# Checking the existance of outputfile")
+for item in filelist:
+    if not os.path.exists(item):
+        print("File not found: %s" % item)
+        sys.exit(-1)  # Failure
+
+print("# Checking calculated result")
+result1 = {}
+result2 = {}
+linecount = 0
+for line in open("Si_eigen.data"):
+    linecount += 1
+    if linecount == 38: # a line for io=1, ik=2
+        for name1, [resval1, refval1, error1] in checklist1.items():
+            data = line.split()
+            result1[name1] = float(data[1])
+    if linecount == 53: # a line for io=16, ik=2
+        for name2, [resval2, refval2, error2] in checklist2.items():
+            data = line.split()
+            result2[name2] = float(data[1])
+
+for name1, [resval1, refval1, error1] in checklist1.items():
+    if name1 not in result1:
+        print("Result %s (%s) is not found" % (name1, ptn))
+        sys.exit(-1)  # Failure
+    else:
+        print("Result %s = %e (Reference = %e)" % (name1, result1[name1], refval1))
+        if abs(result1[name1] - refval1) > error1:
+            print("Mismatch |%e - %e| > %e)" % (result1[name1], refval1, error1))
+            sys.exit(-1)  # Failure
+
+for name2, [resval2, refval2, error2] in checklist2.items():
+    if name2 not in result2:
+        print("Result %s (%s) is not found" % (name2, ptn))
+        sys.exit(-1)  # Failure
+    else:
+        print("Result %s = %e (Reference = %e)" % (name2, result2[name2], refval2))
+        if abs(result2[name2] - refval2) > error2:
+            print("Mismatch |%e - %e| > %e)" % (result2[name2], refval2, error2))
+            sys.exit(-1)  # Failure
+
+print("# Verification end")
+print("#" * 60)
+
+sys.exit(0)  # Success
