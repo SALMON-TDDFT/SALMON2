@@ -41,6 +41,7 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   real(8),dimension(system%no,system%no,system%nspin) :: mat1,mat2,evec
   real(8) :: cbox
   real(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+  real(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
 
   call timer_begin(LOG_DIAG_TOTAL)
 
@@ -114,14 +115,35 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 !$omp end workshare
 
   call timer_begin(LOG_DIAG_UPDATE)
+  if(info%if_divide_orbit) then
+    do ispin=1,nspin
+    do io2 = 1, no
+      if (io_s<= io2 .and. io2 <= io_e) then
+        call copy_data(spsi%rwf(:, :, :, ispin, io2, 1, 1),wf_io2)
+      end if
+      call comm_bcast(wf_io2, info%icomm_o, info%irank_io(io2))
+      !$omp parallel do private(io1,iz,iy,ix) collapse(3)
+      do io1=io_s,io_e
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          shpsi%rwf(ix,iy,iz,ispin,io1,1,1) = shpsi%rwf(ix,iy,iz,ispin,io1,1,1) + evec(io2,io1,ispin) * wf_io2(ix,iy,iz)
+        end do
+        end do
+        end do
+      end do
+    end do
+    end do
+  else
   !$omp parallel do private(io1,io2,ispin) collapse(2)
-  do ispin=1,nspin
-  do io1=io_s,io_e
-  do io2=io_s,io_e
-    shpsi%rwf(:,:,:,ispin,io1,1,1) = shpsi%rwf(:,:,:,ispin,io1,1,1) + evec(io2,io1,ispin) * spsi%rwf(:,:,:,ispin,io2,1,1)
-  end do
-  end do
-  end do
+    do ispin=1,nspin
+    do io1=io_s,io_e
+    do io2=io_s,io_e
+      shpsi%rwf(:,:,:,ispin,io1,1,1) = shpsi%rwf(:,:,:,ispin,io1,1,1) + evec(io2,io1,ispin) * spsi%rwf(:,:,:,ispin,io2,1,1)
+    end do
+    end do
+    end do
+  end if
 
 ! normalization
   rbox1 = 0d0
@@ -182,6 +204,7 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat1,mat2,evec
   complex(8) :: cbox
   complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+  complex(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   
   call timer_begin(LOG_DIAG_TOTAL)
 
@@ -216,7 +239,7 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
             do iz=is(3),ie(3)
             do iy=is(2),ie(2)
             do ix=is(1),ie(1)
-              cbox = cbox + wf_io1(ix,iy,iz) * shpsi%zwf(ix,iy,iz,ispin,io2,ik,1)
+              cbox = cbox + conjg(wf_io1(ix,iy,iz)) * shpsi%zwf(ix,iy,iz,ispin,io2,ik,1)
             end do
             end do
             end do
@@ -250,7 +273,7 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   call timer_begin(LOG_DIAG_ALLREDUCE)
   call comm_summation(mat1,mat2,no**2*nspin*nk,info%icomm_rko)
   call timer_end(LOG_DIAG_ALLREDUCE)
-    
+ 
   do ik=ik_s,ik_e
   do ispin=1,nspin
     call timer_begin(LOG_DIAG_EIGEN)
@@ -264,16 +287,40 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 !$omp end workshare
 
   call timer_begin(LOG_DIAG_UPDATE)
+  
+  if(info%if_divide_orbit) then
+    do ik=ik_s,ik_e
+    do ispin=1,nspin
+    do io2 = 1, no
+      if (io_s<= io2 .and. io2 <= io_e) then
+        call copy_data(spsi%zwf(:, :, :, ispin, io2, ik, 1),wf_io2)
+      end if
+      call comm_bcast(wf_io2, info%icomm_o, info%irank_io(io2))
+      !$omp parallel do private(io1,iz,iy,ix) collapse(3)
+      do io1=io_s,io_e
+        do iz=is(3),ie(3)
+        do iy=is(2),ie(2)
+        do ix=is(1),ie(1)
+          shpsi%zwf(ix,iy,iz,ispin,io1,ik,1) = shpsi%zwf(ix,iy,iz,ispin,io1,ik,1) + evec(io2,io1,ispin,ik) * wf_io2(ix,iy,iz)
+        end do
+        end do
+        end do
+      end do
+    end do
+    end do
+    end do
+  else
   !$omp parallel do private(ik,io1,io2,ispin) collapse(3)
-  do ik=ik_s,ik_e
-  do ispin=1,nspin
-  do io1=io_s,io_e
-  do io2=io_s,io_e
-    shpsi%zwf(:,:,:,ispin,io1,ik,1) = shpsi%zwf(:,:,:,ispin,io1,ik,1) + evec(io2,io1,ispin,ik) * spsi%zwf(:,:,:,ispin,io2,ik,1)
-  end do
-  end do
-  end do
-  end do
+    do ik=ik_s,ik_e
+    do ispin=1,nspin
+    do io1=io_s,io_e
+    do io2=io_s,io_e
+      shpsi%zwf(:,:,:,ispin,io1,ik,1) = shpsi%zwf(:,:,:,ispin,io1,ik,1) + evec(io2,io1,ispin,ik) * spsi%zwf(:,:,:,ispin,io2,ik,1)
+    end do
+    end do
+    end do
+    end do
+  end if
 
 ! normalization
   rbox1 = 0d0
