@@ -165,12 +165,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
       end if
     case(3)
       if(use_singlescale=='y') then
-      ! future work: etrs for single-scale Maxwell-TDDFT
-!        call calc_density_matrix(nspin,info,mg,srg,tpsi,dmat)
-!        call calc_microscopic_current(nspin,mg,stencil,info,tpsi,dmat,j_e)
-!        singlescale%E_electron = energy%E_tot
-!        call fdtd_singlescale(itt-1,lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
-!        call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+        stop "etrs mode for single-scale Maxwell-TDDFT is not implemented"
       else
         call calc_vecAc(system%vec_Ac,4)
         do ik=info%ik_s,info%ik_e

@@ -56,6 +56,7 @@ use print_sub
 use read_gs
 use code_optimization
 use salmon_initialization
+use occupation
 implicit none
 integer :: ix,iy,iz,ik,ikoa,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -118,10 +119,10 @@ allocate(system%mass(1:nelem))
 
 call set_filename
 
-k_sta = info%ik_s
-k_end = info%ik_e
-k_num = info%numk
-iobnum = info%numo
+k_sta = info%ik_s ! future work: remove this line
+k_end = info%ik_e ! future work: remove this line
+k_num = info%numk ! future work: remove this line
+iobnum = info%numo ! future work: remove this line
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)
@@ -147,7 +148,7 @@ if(iopt==1)then
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
-    call old_mesh(lg,mg,ng)
+    call old_mesh(lg,mg,ng) ! future work: remove this line
     call set_gridcoordinate(lg,system)
 
   case(1,3) ! Continue the previous calculation
@@ -181,17 +182,7 @@ if(iopt==1)then
     nspin=2
   end if
 
-  system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
-
   allocate(energy%esp(system%no,system%nk,system%nspin))
-
-  do jspin=1,system%nspin
-    do ik=info%ik_s,info%ik_e
-      do iob=info%io_s,info%io_e
-        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,jspin)*system%wtk(ik)
-      end do
-    end do
-  end do
 
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 
@@ -496,25 +487,10 @@ DFT_Iteration : do iter=1,iDiter(img)
   ! for calc_total_energy_periodic
   rion_update = check_rion_update() .or. (iter == 1)
 
-  if(temperature_k>=0.d0.and.Miter>iditer_notemperature) then
-    if(iperiodic.eq.3) then
-      call ne2mu_p
-    else
-      call ne2mu
-    endif
-  else
-    call calc_occupation
-  endif
-
-  system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
-
-  do jspin=1,system%nspin
-    do ik=info%ik_s,info%ik_e
-      do iob=info%io_s,info%io_e
-        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,jspin)*system%wtk(ik)
-      end do
-    end do
-  end do
+  if(temperature>=0.d0 .and. Miter>iditer_notemperature) then
+    call ne2mu(energy,system,info)
+  end if
+  rocc(1:itotMST,1:system%nk) = system%rocc(1:itotMST,1:system%nk,1) ! future work: remove this line
 
   call copy_density(system%nspin,ng,srho_s,mixing)
 

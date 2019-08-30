@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module inputoutput
+  use phys_constants
   use salmon_global
   implicit none
 !Physical constant
@@ -986,6 +987,7 @@ contains
     call comm_bcast(nelec_spin         ,nproc_group_global)
     call comm_bcast(temperature        ,nproc_group_global)
     call comm_bcast(temperature_k      ,nproc_group_global)
+    if(temperature_k>=0d0) temperature = temperature_k * kB_au ! Kelvin --> atomic units
     call comm_bcast(nelem              ,nproc_group_global)
     call comm_bcast(natom              ,nproc_group_global)
     call comm_bcast(file_atom_coor     ,nproc_group_global)
