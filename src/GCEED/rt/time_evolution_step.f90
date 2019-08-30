@@ -283,7 +283,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
     if(iflag_md==1) then
       call timer_begin(LOG_CALC_CURRENT_ION)
-      call calc_current_ion(system,curr_ion(:,itt))
+      call calc_current_ion(lg,system,curr_ion(:,itt))
       call timer_end(LOG_CALC_CURRENT_ION)
     end if
 
@@ -365,13 +365,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calcELF(mg,ng,srg,info,srho,itt)
+      call calcELF(lg,mg,ng,srg,info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call calcEstatic(ng, info, sVh, srg_ng)
+      call calcEstatic(lg, ng, info, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,itt)
     end if
   end if
@@ -425,10 +425,10 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
      fg%zdVG_ion = 0.d0
      npuy=info_field%isize_ffte(2)
      npuz=info_field%isize_ffte(3)
-     do iz=1,lg_num(3)/npuz
-     do iy=1,lg_num(2)/npuy
+     do iz=1,lg%num(3)/npuz
+     do iy=1,lg%num(2)/npuy
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
+        n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
         nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
         fg%Gx(nn) = Gx(n)
         fg%Gy(nn) = Gy(n)

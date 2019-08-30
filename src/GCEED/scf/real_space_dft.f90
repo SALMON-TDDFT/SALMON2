@@ -162,10 +162,10 @@ if(iopt==1)then
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
   end select
-  call set_ig_bound(ng,poisson)
+  call set_ig_bound(lg,ng,poisson)
 
   call allocate_mat(ng)
-  call set_icoo1d
+  call set_icoo1d(lg)
   call init_code_optimization
 
   ! sendrecv_grid object for wavefunction updates
@@ -231,7 +231,7 @@ if(iopt==1)then
     Vpsl=0d0
   else
     call read_pslfile(system)
-    call allocate_psl
+    call allocate_psl(lg)
     call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
@@ -242,7 +242,7 @@ if(iopt==1)then
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
   end if
 
-  if(iperiodic==3) call get_fourier_grid_G(info_field,fg)
+  if(iperiodic==3) call get_fourier_grid_G(lg,info_field,fg)
 
   select case( IC )
   case default ! New calculation
@@ -416,7 +416,7 @@ else if(iopt>=2)then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
        call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-       call get_fourier_grid_G(info_field,fg)
+       call get_fourier_grid_G(lg,info_field,fg)
     end if
 
   end if
@@ -585,7 +585,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       call comm_summation(sum0,sum1,nproc_group_global)
       if(convergence=='norm_rho_dng')then
-        sum1=sum1/dble(lg_num(1)*lg_num(2)*lg_num(3))
+        sum1=sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
     case('norm_pot','norm_pot_dng')
       sum0=0.d0
@@ -599,7 +599,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       call comm_summation(sum0,sum1,nproc_group_global)
       if(convergence=='norm_pot_dng')then
-        sum1=sum1/dble(lg_num(1)*lg_num(2)*lg_num(3))
+        sum1=sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
   end select 
 
@@ -833,9 +833,9 @@ if(OC==2)then
 end if
 
 if(yn_out_elf=='y')then
-  allocate(elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),      &
-               lg_sta(3):lg_end(3)))
-  call calcELF(mg,ng,srg,info,srho,0)
+  allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),      &
+               lg%is(3):lg%ie(3)))
+  call calcELF(lg,mg,ng,srg,info,srho,0)
   call writeelf(lg,elf,icoo1d,hgs,iscfrt)
   deallocate(elf)
 end if
@@ -846,7 +846,7 @@ call timer_begin(LOG_WRITE_LDA_DATA)
 ! LDA data
 ! subroutines in scf_data.f90
 if ( OC==1.or.OC==2.or.OC==3 ) then
-  call OUT_data(ng,info,mixing)
+  call OUT_data(lg,ng,info,mixing)
 end if
 call timer_end(LOG_WRITE_LDA_DATA)
 
@@ -961,9 +961,10 @@ subroutine band_information
   return
 end subroutine band_information
 
-subroutine get_fourier_grid_G(info_field,fg)
-  use structures, only: s_field_parallel,s_reciprocal_grid
+subroutine get_fourier_grid_G(lg,info_field,fg)
+  use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid
   implicit none
+  type(s_rgrid),intent(in) :: lg
   type(s_field_parallel) :: info_field
   type(s_reciprocal_grid) :: fg
   integer :: npuy,npuz
@@ -995,10 +996,10 @@ subroutine get_fourier_grid_G(info_field,fg)
      fg%zdVG_ion = 0.d0
      npuy=info_field%isize_ffte(2)
      npuz=info_field%isize_ffte(3)
-     do iz=1,lg_num(3)/npuz
-     do iy=1,lg_num(2)/npuy
+     do iz=1,lg%num(3)/npuz
+     do iy=1,lg%num(2)/npuy
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
+        n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
         nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
         fg%Gx(nn) = Gx(n)
         fg%Gy(nn) = Gy(n)

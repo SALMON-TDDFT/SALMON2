@@ -14,19 +14,21 @@
 !  limitations under the License.
 !
 !=======================================================================
-subroutine check_fourier
+subroutine check_fourier(lg)
+  use structures, only: s_rgrid
   use salmon_global, only: yn_ffte
   use salmon_parallel, only: nproc_id_global, end_parallel
   use salmon_communication, only: comm_is_root
   use scf_data
   implicit none
+  type(s_rgrid),intent(in) :: lg
   integer :: j,ii
   integer :: lg_num_tmp
 
   if(iflag_hartree==4)then
-    ! this code treats the situation that lg_num(1:3) is less than or equal to 48,828,125
+    ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
     do j=1,3
-      lg_num_tmp=lg_num(j)
+      lg_num_tmp=lg%num(j)
       do ii=1,26
         if(mod(lg_num_tmp,2)==0)then
           lg_num_tmp=lg_num_tmp/2

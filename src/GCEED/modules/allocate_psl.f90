@@ -47,21 +47,23 @@ integer :: nGzero
 contains
 !==================================================================================================
 
-subroutine allocate_psl
+subroutine allocate_psl(lg)
+use structures, only: s_rgrid
 use scf_data
 implicit none
+type(s_rgrid),intent(in) :: lg
 real(8) :: r
 integer :: Nr0,nprj_u,nprj_v
 
 select case(iperiodic)
 case(0)
-  r=sqrt((dble(lg_num(1))*Hgs(1))**2  &
-        +(dble(lg_num(2))*Hgs(2))**2  &
-        +(dble(lg_num(3))*Hgs(3))**2)
+  r=sqrt((dble(lg%num(1))*Hgs(1))**2  &
+        +(dble(lg%num(2))*Hgs(2))**2  &
+        +(dble(lg%num(3))*Hgs(3))**2)
 case(3)
-  r=sqrt((dble(lg_num(1))*Hgs(1))**2  &
-        +(dble(lg_num(2))*Hgs(2))**2  &
-        +(dble(lg_num(3))*Hgs(3))**2)+maxval(Rps(:))
+  r=sqrt((dble(lg%num(1))*Hgs(1))**2  &
+        +(dble(lg%num(2))*Hgs(2))**2  &
+        +(dble(lg%num(3))*Hgs(3))**2)+maxval(Rps(:))
 end select
 Nr0=r/rmin_step+1
 if(Nr0<maxval(Mr(:)))then
@@ -103,15 +105,15 @@ allocate(numatom_ps(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 
 if(iperiodic==3)then
   allocate(vloctbl(Nr,MKI))
-  allocate(Gx(lg_num(1)*lg_num(2)*lg_num(3)))
-  allocate(Gy(lg_num(1)*lg_num(2)*lg_num(3)))
-  allocate(Gz(lg_num(1)*lg_num(2)*lg_num(3)))
-  allocate(dVloc_G(lg_num(1)*lg_num(2)*lg_num(3),MKI))
-  allocate(dVloc_G_tmp(lg_num(1)*lg_num(2)*lg_num(3),MKI))
-  allocate(rhoion_G(lg_num(1)*lg_num(2)*lg_num(3)))
-  allocate(rhoion_G_tmp(lg_num(1)*lg_num(2)*lg_num(3)))
-  allocate(Vion_G(lg_num(1)*lg_num(2)*lg_num(3)))
-  allocate(Vion_G_tmp(lg_num(1)*lg_num(2)*lg_num(3)))
+  allocate(Gx(lg%num(1)*lg%num(2)*lg%num(3)))
+  allocate(Gy(lg%num(1)*lg%num(2)*lg%num(3)))
+  allocate(Gz(lg%num(1)*lg%num(2)*lg%num(3)))
+  allocate(dVloc_G(lg%num(1)*lg%num(2)*lg%num(3),MKI))
+  allocate(dVloc_G_tmp(lg%num(1)*lg%num(2)*lg%num(3),MKI))
+  allocate(rhoion_G(lg%num(1)*lg%num(2)*lg%num(3)))
+  allocate(rhoion_G_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
+  allocate(Vion_G(lg%num(1)*lg%num(2)*lg%num(3)))
+  allocate(Vion_G_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
 end if
 
 allocate(Jxxyyzz_all(1:3,1:maxMps,1:MI))

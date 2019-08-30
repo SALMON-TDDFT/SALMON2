@@ -39,20 +39,20 @@ call storevpp
 Mps_all=0
 select case(iperiodic)
 case(0)
-  call calcJxyz_all
-  call calcuV
+  call calcJxyz_all(lg)
+  call calcuV(lg)
   call calcVpsl(lg)
   allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
   ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
 case(3)
   select case(iflag_hartree)
   case(2)
-    call calcVpsl_periodic(matrix_A,brl)
+    call calcVpsl_periodic(lg,matrix_A,brl)
   case(4)
     call calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   end select
-  call calcJxyz_all_periodic(alat,matrix_A)
-  call calcuV
+  call calcJxyz_all_periodic(lg,alat,matrix_A)
+  call calcuV(lg)
 end select
 
 call init_uvpsi_summation(ppg,icomm_r)

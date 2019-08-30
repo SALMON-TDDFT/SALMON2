@@ -180,7 +180,7 @@ if(iperiodic==3 .and. iflag_hartree==4)then
 end if
 
 call read_pslfile(system)
-call allocate_psl
+call allocate_psl(lg)
 call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
 call init_itype
@@ -195,7 +195,7 @@ else if(ilsda==1)then
 end if
 
 if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
-call set_ig_bound(ng,poisson)
+call set_ig_bound(lg,ng,poisson)
 
 call timer_end(LOG_READ_LDA_DATA)
 
@@ -583,10 +583,10 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
        fg%zdVG_ion = 0.d0
        npuy=info_field%isize_ffte(2)
        npuz=info_field%isize_ffte(3)
-       do iz=1,lg_num(3)/npuz
-       do iy=1,lg_num(2)/npuy
+       do iz=1,lg%num(3)/npuz
+       do iy=1,lg%num(2)/npuy
        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg_num(2)/npuy*lg_num(1)+(iy-1)*lg_num(1)+ix
+          n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
           nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
           fg%Gx(nn) = Gx(n)
           fg%Gy(nn) = Gy(n)
@@ -613,15 +613,15 @@ idiffDensity=1
 ielf=2
 fileLaser= "laser.out"
 
-allocate (R1(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2), & 
-                              lg_sta(3):lg_end(3))) 
+allocate (R1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), & 
+                              lg%is(3):lg%ie(3))) 
 !if(ikind_eext.ne.0)then
-  allocate( Vbox(lg_sta(1)-Nd:lg_end(1)+Nd,lg_sta(2)-Nd:lg_end(2)+Nd, & 
-                                           lg_sta(3)-Nd:lg_end(3)+Nd))
+  allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, & 
+                                           lg%is(3)-Nd:lg%ie(3)+Nd))
 !endif
 
-allocate( elf(lg_sta(1):lg_end(1),lg_sta(2):lg_end(2), & 
-                              lg_sta(3):lg_end(3))) 
+allocate( elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), & 
+                              lg%is(3):lg%ie(3))) 
 
 allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
@@ -702,41 +702,41 @@ end select
 
 select case(imesh_oddeven(1))
   case(1)
-    do i1=lg_sta(1),lg_end(1)
+    do i1=lg%is(1),lg%ie(1)
       vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/Hgs(1)
     end do
   case(2)
-    do i1=lg_sta(1),lg_end(1)
+    do i1=lg%is(1),lg%ie(1)
       vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/Hgs(1)
     end do
 end select
 
 select case(imesh_oddeven(2))
   case(1)
-    do i2=lg_sta(2),lg_end(2)
+    do i2=lg%is(2),lg%ie(2)
       vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/Hgs(2)
     end do
   case(2)
-    do i2=lg_sta(2),lg_end(2)
+    do i2=lg%is(2),lg%ie(2)
       vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/Hgs(2)
     end do
 end select
 
 select case(imesh_oddeven(3))
   case(1)
-    do i3=lg_sta(3),lg_end(3)
+    do i3=lg%is(3),lg%ie(3)
       vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/Hgs(3)
     end do
   case(2)
-    do i3=lg_sta(3),lg_end(3)
+    do i3=lg%is(3),lg%ie(3)
       vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/Hgs(3)
     end do
 end select
 
 !$OMP parallel do collapse(2) private(iz,iy,ix)
-do iz=lg_sta(3),lg_end(3)
-do iy=lg_sta(2),lg_end(2)
-do ix=lg_sta(1),lg_end(1)
+do iz=lg%is(3),lg%ie(3)
+do iy=lg%is(2),lg%ie(2)
+do ix=lg%is(1),lg%ie(1)
    R1(ix,iy,iz)=(epdir_re1(1)*lg%coordinate(ix,1)+   &
                  epdir_re1(2)*lg%coordinate(iy,2)+   &
                  epdir_re1(3)*lg%coordinate(iz,3))
@@ -841,11 +841,11 @@ end do
       call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
-      call calcELF(mg,ng,srg,info,srho,itt)
+      call calcELF(lg,mg,ng,srg,info,srho,itt)
       call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
     if(yn_out_estatic_rt=='y')then
-      call calcEstatic(ng, info, sVh, srg_ng)
+      call calcEstatic(lg, ng, info, sVh, srg_ng)
       call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,itt)
     end if
   end do
