@@ -19,7 +19,7 @@ filelist = [
 checklist1 = {
     "eigen energy for io=1, ik=2": [
         100,  # Temporary value for result
-        -0.1556597101991845,  # Reference value
+        -0.1716931864035824,  # Reference value
         0.00004,  # Permissible error (~0.001eV)
     ],
 }
@@ -27,7 +27,7 @@ checklist1 = {
 checklist2 = {
     "eigen energy for io=16, ik=2": [
         100,  # Temporary value for result
-        0.1991261669274569,  # Reference value
+        0.2004353567586252,  # Reference value
         0.00004,  # Permissible error (~0.001eV)
     ],
 }
