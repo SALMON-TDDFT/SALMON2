@@ -38,11 +38,12 @@ subroutine calc_emfields(nspin,curr_in)
 
 end subroutine calc_emfields
 
-subroutine calc_current_ion(system,j_ion)
-  use structures, only: s_dft_system
+subroutine calc_current_ion(lg,system,j_ion)
+  use structures, only: s_rgrid, s_dft_system
   use salmon_global, only: MI,Kion
-  use scf_data, only: pp,lg_num,Hvol
+  use scf_data, only: pp,Hvol
   implicit none
+  type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system
   integer :: ia
   real(8) :: j_ion(3)
@@ -57,6 +58,6 @@ subroutine calc_current_ion(system,j_ion)
   do ia=1,MI
      j_ion(:) = j_ion(:) - pp%Zps(Kion(ia)) * system%Velocity(:,ia)
   enddo
-  j_ion(:) = j_ion(:)/(dble(lg_num(1)*lg_num(2)*lg_num(3))*Hvol)
+  j_ion(:) = j_ion(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*Hvol)
 
 end subroutine calc_current_ion

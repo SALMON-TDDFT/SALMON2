@@ -41,9 +41,9 @@ subroutine writepsi(lg,info)
       call calc_myob(iob,iob_myob,ilsda,nproc_ob,itotmst,mst)
       call check_corrkob(iob,info,1,icheck_corrkob,ilsda,nproc_ob,k_sta,k_end,mst)
   !OMP parallel do private(iz,iy,ix)
-      do iz=lg_sta(3),lg_end(3)
-      do iy=lg_sta(2),lg_end(2)
-      do ix=lg_sta(1),lg_end(1)
+      do iz=lg%is(3),lg%ie(3)
+      do iy=lg%is(2),lg%ie(2)
+      do ix=lg%is(1),lg%ie(1)
         matbox_l(ix,iy,iz)=0.d0
       end do
       end do
@@ -70,7 +70,7 @@ subroutine writepsi(lg,info)
         end do
       end if
 
-      call comm_summation(matbox_l,matbox_l2,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
+      call comm_summation(matbox_l,matbox_l2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
       write(filenum, '(i5)') p0
       suffix = "psi"//trim(adjustl(filenum))

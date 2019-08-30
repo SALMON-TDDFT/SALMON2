@@ -6,7 +6,6 @@ set(SOURCES
     gradient.f90
     init_sendrecv.f90
     new_world.f90
-    readbox_rt.f90
     read_pslfile.f90
     scf_data.f90
     )

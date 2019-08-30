@@ -13,14 +13,14 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcEstatic(ng, info, sVh, srg_ng)
+subroutine calcEstatic(lg, ng, info, sVh, srg_ng)
 use salmon_communication, only: comm_summation
 use scf_data
 use new_world_sub
 use structures, only: s_rgrid, s_orbital_parallel, s_scalar, s_sendrecv_grid
 use sendrecv_grid, only: update_overlap_real8
 implicit none
-type(s_rgrid),intent(in)            :: ng
+type(s_rgrid),intent(in)            :: lg, ng
 type(s_orbital_parallel),intent(in) :: info
 type(s_scalar),intent(in) :: sVh
 type(s_sendrecv_grid),intent(inout) :: srg_ng
@@ -54,7 +54,7 @@ end do
 
 call update_overlap_real8(srg_ng, ng, Vh_wk)
 
-if(ng%is(1)==lg_sta(1))then
+if(ng%is(1)==lg%is(1))then
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
@@ -65,7 +65,7 @@ if(ng%is(1)==lg_sta(1))then
   end do
 end if
 
-if(ng%ie(1)==lg_end(1))then
+if(ng%ie(1)==lg%ie(1))then
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
@@ -76,7 +76,7 @@ if(ng%ie(1)==lg_end(1))then
   end do
 end if
 
-if(ng%is(2)==lg_sta(2))then
+if(ng%is(2)==lg%is(2))then
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
   do ix=ng%is(1),ng%ie(1)
@@ -87,7 +87,7 @@ if(ng%is(2)==lg_sta(2))then
   end do
 end if
 
-if(ng%ie(2)==lg_end(2))then
+if(ng%ie(2)==lg%ie(2))then
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
   do ix=ng%is(1),ng%ie(1)
@@ -98,7 +98,7 @@ if(ng%ie(2)==lg_end(2))then
   end do
 end if
 
-if(ng%is(3)==lg_sta(3))then
+if(ng%is(3)==lg%is(3))then
 !$OMP parallel do private(iz,iy,ix)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
@@ -109,7 +109,7 @@ if(ng%is(3)==lg_sta(3))then
   end do
 end if
 
-if(ng%ie(3)==lg_end(3))then
+if(ng%ie(3)==lg%ie(3))then
 !$OMP parallel do private(iz,iy,ix)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)

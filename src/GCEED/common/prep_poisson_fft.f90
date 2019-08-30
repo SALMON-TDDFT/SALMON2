@@ -45,9 +45,9 @@ subroutine prep_poisson_fft(lg,ng,info_field,poisson)
   end if
   poisson%coef=0.d0
 
-  lg_sta_2(1:3)=lg_sta(1:3)
-  lg_end_2(1:3)=lg_end(1:3)
-  lg_num_2(1:3)=lg_num(1:3)
+  lg_sta_2(1:3)=lg%is(1:3)
+  lg_end_2(1:3)=lg%ie(1:3)
+  lg_num_2(1:3)=lg%num(1:3)
   
   ng_sta_2(1:3)=ng%is(1:3)
   ng_end_2(1:3)=ng%ie(1:3)
