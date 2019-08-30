@@ -25,7 +25,7 @@ subroutine init_dft(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
-  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion
+  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -77,7 +77,15 @@ subroutine init_dft(lg,system,stencil)
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
   system%rion = rion
-  system%rocc = 0d0 ! initial value
+
+! initial value of occupation
+  system%rocc = 0d0
+  select case(system%nspin)
+  case(1)
+    system%rocc(1:nelec/2,:,1) = 2d0
+  case(2)
+    system%rocc(1:nelec/2,:,1:2) = 1d0
+  end select
 
   call setbn(bnmat)
   call setcn(cnmat)

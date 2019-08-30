@@ -13,306 +13,147 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_occupation
-  use salmon_communication, only: comm_is_root
-  use scf_data
+module occupation
   implicit none
-  real(8),parameter :: bltz=8.6173214d-5
-  integer :: is_sta,is_end
-  integer :: iobsta(2),iobend(2)
 
-  if(ilsda==0)then
-    is_sta=1
-    is_end=1
-  else
-    is_sta=1
-    is_end=2
-    iobsta(1)=1
-    iobend(1)=MST(1)
-    iobsta(2)=MST(1)+1
-    iobend(2)=itotMST
-  end if
+contains
 
-  rocc(1:itotMST,:num_kpoints_rd)=0.d0
-  if(ilsda==0)then
-    rocc(1:ifMST(1),:num_kpoints_rd)=2.d0
-  else
-    rocc(1:ifMST(1),:num_kpoints_rd)=1.d0
-    rocc(MST(1)+1:MST(1)+ifMST(2),:num_kpoints_rd)=1.d0
-  end if
+SUBROUTINE ne2mu(energy,system,info)
+  use structures
+  use salmon_parallel, only: nproc_id_global
+  use salmon_communication, only: comm_is_root
+  use salmon_global, only: nelec, temperature
+  implicit none
+  type(s_dft_energy),intent(in) :: energy
+  type(s_dft_system)            :: system
+  type(s_orbital_parallel)      :: info
+  !
+  integer :: jspin,io,ik,nspin,nk,no,iter
+  real(8) :: nein,muout
+  real(8) :: mu1,mu2,mu3,ne1,ne3,ne3o,diff_ne
+  integer :: ii,p5,p1,p2
+  integer :: nc
+  real(8) :: diff_mu,muo
+  real(8) :: diff_ne2
 
-end subroutine calc_occupation
-SUBROUTINE ne2mu !(nein,muout)
-use salmon_parallel, only: nproc_id_global
-use salmon_communication, only: comm_is_root
-use scf_data
-implicit none
+  nspin = system%nspin
+  nk = system%nk
+  no = system%no
 
-!      real(8), intent(in)  :: nein
-!      real(8), intent(out) :: muout
-real(8) :: nein,muout
-real(8) :: mu1,mu2,mu3,ne1,ne3,ne3o,diff_ne
-integer :: ii,p5,p1,p2,iob,ik
-integer :: nc
-real(8) :: diff_mu,muo
-real(8) :: diff_ne2
+  nein = dble(nelec)
 
-!      diff_ne = 100.d0
+  mu1 = minval(energy%esp)
+  mu2 = maxval(energy%esp)
+  nc=0
 
-      nein=rNetot
+  ITERATION: do iter=1,100000
+    diff_ne = 100.d0
+    diff_ne2 = 100.d0
 
-      mu1 = esp(1,1)       !-100.d0
-      mu2 = esp(itotMST,1)
-      nc=0
+    ne1  = 0d0
+    ne3  = 0d0
+    ne3o = 0d0
 
-200   continue
-      diff_ne = 100.d0
-      diff_ne2 = 100.d0
-!      mu2 = 0.4d0   !esp(itotMST)       !100.d0
+    diff_mu =100.d0
+    muo=0.0d0
 
-      ii = 1
+    call mu2ne(mu1,ne1)
 
-      ne1  = 0d0
-      ne3  = 0d0
-      ne3o = 0d0
-!
-      diff_mu =100.d0
-      muo=0.0d0
-!
-      call mu2ne(mu1,ne1)
+    do ii=1,1000
+      if ( ii .eq. 1000 ) then
+        if ( nc .le. 50)  then
+           nc= nc + 1
+           mu1 = minval(energy%esp) - 0.2d0*dble(nc)
+           mu2 = maxval(energy%esp) + 0.2d0*dble(nc)
+           cycle ITERATION
+        else
+           print *,'=================================='
+           print *,'Const Ne does not converged!!!!!!!'
+           print *,'=================================='
+           exit ITERATION
+        endif
+      endif
+      if ( diff_ne < 1d-10  .and. diff_mu < 1d-9  &
+         .and. diff_ne2 < 1.d-9 ) exit ITERATION
+      mu3 = mu1 + (mu2-mu1)/2.d0
+      ne3=0
+      call mu2ne(mu3,ne3)
+      diff_ne = abs((ne3-ne3o)/ne3)
+      diff_ne2 = abs(nein-ne3)
+      if ( (ne1-nein)*(ne3-nein) > 0 ) then
+        mu1=mu3
+        ne1=ne3
+      else
+        mu2=mu3
+      end if
 
-!      do while ( diff_ne > 1d-10 .and. ii < 1000 )
-      do ii=1,1000
-         if ( ii .eq. 1000 ) then
-            if ( nc .le. 50)  then
-!               print *,'=================================='
-!               print *,'  Start next const Ne iterration  '
-!               print *,'=================================='
-               nc= nc + 1
-               mu1 = esp(1,1) - 0.2d0*dble(nc)
-               mu2 = esp(itotMST,1) + 0.2d0*dble(nc)
-               go to 200
-            else
-               print *,'=================================='
-               print *,'Const Ne does not converged!!!!!!!'
-               print *,'=================================='
-               goto 100
-            endif
-         endif
-         if ( diff_ne < 1d-10  .and. diff_mu < 1d-9  &
-             .and. diff_ne2 < 1.d-9 ) goto 100
-         mu3 = mu1 + (mu2-mu1)/2.d0
-!         if (ii.eq.1) mu3=mu2
-         ne3=0
-         call mu2ne(mu3,ne3)
-!         if (ii.eq.1) call mu2ne(mu2,ne3)
-         diff_ne = abs((ne3-ne3o)/ne3)
-         diff_ne2 = abs(nein-ne3)
-!         print *, ii,'diff_ne2=',diff_ne2,diff_ne,mu3,ne1,ne3
-         if ( (ne1-nein)*(ne3-nein) > 0 ) then
-            mu1=mu3
-            ne1=ne3
-         else
-            mu2=mu3
-         end if
+      ne3o = ne3
+      diff_mu = mu3 - muo
+      muo  = mu3
+    end do
+  end do ITERATION
 
-!         ii = ii+1
-         ne3o = ne3
-         diff_mu = mu3 - muo
-         muo  = mu3
+  muout = mu3
+  call mu2ne(muout,ne3)
 
-      end do
-100   continue
-!
-      muout = mu3
-
-      call mu2ne(muout,ne3)
-
-      if(comm_is_root(nproc_id_global))then       !.and.iscf==1) then
-         write(*,*)
-         write(*,*) 'Fractional Occupation Numbers :'
-         write(*,*)
-         do ik=1,num_kpoints_rd
-           do p5=1,(itotMST+4)/5
+  if(comm_is_root(nproc_id_global))then
+     write(*,*)
+     write(*,*) 'Fractional Occupation Numbers :'
+     write(*,*)
+     do ik=1,nk
+     do jspin=1,nspin
+        if(ik<=10)then
+          print *, ' iik = ',ik
+          do p5=1,(no+4)/5
              p1=5*(p5-1)+1
-             p2=5*p5 ; if ( p2 > itotMST ) p2=itotMST
-             write(*,'(1x,5(i3,f8.4,1x))')  (iob,rocc(iob,ik),iob=p1,p2)
-           end do
-         end do
-         write(*,*)
-         write(*,'(a,f15.8)') ' Fermi level         = ',muout*2d0*Ry
-         write(*,'(a,f15.8)') ' Number of Electrons = ',ne3
-         write(*,*)
-      end if
-!
-END SUBROUTINE ne2mu
-!
-!
-SUBROUTINE mu2ne(muin,neout)
-use scf_data
-!use global_variables
-implicit none
+             p2=5*p5 ; if ( p2 > no ) p2=no
+             write(*,'(1x,5(i3,f8.4,1x))')  (io,system%rocc(io,ik,jspin),io=p1,p2)
+          end do
+        endif
+    end do
+    end do
+    write(*,*)
+    write(*,'(a,f15.8)') ' Fermi level (a.u.)  = ',muout
+    write(*,'(a,f15.8)') ' Number of Electrons = ',ne3
+    write(*,*)
+  end if
 
-real(8),parameter :: bltz=8.6173214d-5
-real(8), intent(in)  :: muin
-real(8), intent(out) :: neout
-real(8) :: fact
-integer :: iob
-integer :: ik
-real(8) :: temperature_au
-
-temperature_au=temperature_k*bltz/2.d0/Ry
-
-neout=0d0
-do ik=1,num_kpoints_rd
-  do iob=1,itotMST
-    fact=(dble(esp(iob,ik))-muin)/temperature_au
-    if(fact.ge.40.d0) then
-       rocc(iob,ik)=0.d0
-    else
-       rocc(iob,ik)=2d0/(1.d0+dexp((dble(esp(iob,ik))-muin)/temperature_au))
-    endif
-    neout=neout+rocc(iob,ik)
-  end do
-end do
-
-
-END SUBROUTINE mu2ne
-
-!
-SUBROUTINE ne2mu_p
-use salmon_parallel, only: nproc_id_global
-use salmon_communication, only: comm_is_root
-use scf_data
-implicit none
-
-real(8) :: nein,muout
-real(8) :: mu1,mu2,mu3,ne1,ne3,ne3o,diff_ne
-integer :: ii,p5,p1,p2,iob,iik
-integer :: nc
-real(8) :: diff_mu,muo
-real(8) :: diff_ne2
-
-!      diff_ne = 100.d0
-      nein=rNetot
-
-      mu1 = esp(1,1)-0.3d0
-      mu2 = esp(itotMST,1)+0.3d0
-      nc=0
-
-200   continue
-      diff_ne = 100.d0
-      diff_ne2 = 100.d0
-!      mu2 = 0.4d0   !esp(itotMST)       !100.d0
-
-      ii = 1
-
-      ne1  = 0d0
-      ne3  = 0d0
-      ne3o = 0d0
-!
-      diff_mu =100.d0
-      muo=0.0d0
-!
-      call mu2ne_p(mu1,ne1)
-
-!      do while ( diff_ne > 1d-10 .and. ii < 1000 )
-      do ii=1,1000
-         if ( ii .eq. 1000 ) then
-            if ( nc .le. 50)  then
-!               print *,'=================================='
-!               print *,'  Start next const Ne iterration  '
-!               print *,'=================================='
-               nc= nc + 1
-               mu1 = esp(1,1) - 0.2d0*dble(nc)
-               mu2 = esp(itotMST,1) + 0.2d0*dble(nc)
-               go to 200
-            else
-               print *,'=================================='
-               print *,'Const Ne does not converged!!!!!!!'
-               print *,'=================================='
-               goto 100
-            endif
-         endif
-         if ( diff_ne < 1d-10  .and. diff_mu < 1d-9  &
-             .and. diff_ne2 < 1.d-9 ) goto 100
-         mu3 = mu1 + (mu2-mu1)/2.d0
-!         if (ii.eq.1) mu3=mu2
-         ne3=0
-         call mu2ne_p(mu3,ne3)
-!         if (ii.eq.1) call mu2ne(mu2,ne3)
-         diff_ne = abs((ne3-ne3o)/ne3)
-         diff_ne2 = abs(nein-ne3)
-!         print *, ii,'diff_ne2=',diff_ne2,diff_ne,mu3,ne1,ne3
-         if ( (ne1-nein)*(ne3-nein) > 0 ) then
-            mu1=mu3
-            ne1=ne3
-         else
-            mu2=mu3
-         end if
-
-!         ii = ii+1
-         ne3o = ne3
-         diff_mu = mu3 - muo
-         muo  = mu3
-
+  do jspin=1,system%nspin
+    do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+        info%occ(io,ik,jspin,1) = system%rocc(io,ik,jspin)*system%wtk(ik)
       end do
-100   continue
-!
-      muout = mu3
+    end do
+  end do
 
-      call mu2ne_p(muout,ne3)
+  return
+contains
 
-      if(comm_is_root(nproc_id_global))then
-         write(*,*)
-         write(*,*) 'Fractional Occupation Numbers :'
-         write(*,*)
-         do iik=1,num_kpoints_rd
-            if(iik<=10)then
-              print *, ' iik = ',iik
-              do p5=1,(itotMST+4)/5
-                 p1=5*(p5-1)+1
-                 p2=5*p5 ; if ( p2 > itotMST ) p2=itotMST
-                 write(*,'(1x,5(i3,f8.4,1x))')  (iob,rocc(iob,iik),iob=p1,p2)
-              end do
-            endif
-         enddo
-         write(*,*)
-         write(*,'(a,f15.8)') ' Fermi level         = ',muout*2d0*Ry
-         write(*,'(a,f15.8)') ' Number of Electrons = ',ne3
-         write(*,*)
-      end if
-!
-END SUBROUTINE ne2mu_p
-!
-SUBROUTINE mu2ne_p(muin,neout)
-use scf_data
-implicit none
+  SUBROUTINE mu2ne(muin,neout)
+    implicit none
+    real(8), intent(in)  :: muin
+    real(8), intent(out) :: neout
+    !
+    real(8) :: fact
+    neout=0d0
 
-real(8),parameter :: bltz=8.6173214d-5
-real(8), intent(in)  :: muin
-real(8), intent(out) :: neout
-real(8) :: fact
-integer :: iob,iik
-real(8) :: temperature_au
+    do jspin=1,nspin
+    do ik=1,nk
+    do io=1,no
+       fact = (energy%esp(io,ik,jspin)-muin)/temperature
+       if(fact.ge.40.d0) then
+          system%rocc(io,ik,jspin) = 0.d0
+       else
+          system%rocc(io,ik,jspin) = 2d0/( 1.d0 + exp( (energy%esp(io,ik,jspin)-muin)/temperature ) )
+       endif
+       neout = neout + system%rocc(io,ik,jspin)*system%wtk(ik)
+    end do
+    end do
+    end do
 
-temperature_au=temperature_k*bltz/2.d0/Ry
+  END SUBROUTINE mu2ne
 
-neout=0d0
+END SUBROUTINE ne2mu
 
-do iik=1,num_kpoints_rd
-do iob=1,itotMST
-   fact=(dble(esp(iob,iik))-muin)/temperature_au
-   if(fact.ge.40.d0) then
-      rocc(iob,iik)=0.d0
-   else
-      rocc(iob,iik)=2d0/(1.d0+dexp((dble(esp(iob,iik))-muin)/temperature_au))
-   endif
-   neout=neout+rocc(iob,iik)*wtk(iik)
-end do
-end do
-
-END SUBROUTINE mu2ne_p
-
-
+end module Occupation
 
