@@ -13,21 +13,23 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE calcuV
+SUBROUTINE calcuV(lg)
+use structures,           only: s_rgrid
 use salmon_communication, only: comm_is_root
 use prep_pp_sub, only: set_nlma,init_lma_tbl,init_uv,set_lma_tbl,calc_uv
 use scf_data
 use allocate_psl_sub
 implicit none
-integer :: iatom,jj,lm
+  type(s_rgrid),intent(in) :: lg
+  integer :: iatom,jj,lm
 
   integer :: i,ik,ix,iy,iz,l,ll,l0,m
   integer :: nl
 
   real(8) :: hx,hy,hz
-  integer :: lx(lg_num(1)*lg_num(2)*lg_num(3))
-  integer :: ly(lg_num(1)*lg_num(2)*lg_num(3))
-  integer :: lz(lg_num(1)*lg_num(2)*lg_num(3))
+  integer :: lx(lg%num(1)*lg%num(2)*lg%num(3))
+  integer :: ly(lg%num(1)*lg%num(2)*lg%num(3))
+  integer :: lz(lg%num(1)*lg%num(2)*lg%num(3))
 
   integer :: lma
   character(17) :: property
@@ -45,17 +47,17 @@ integer :: iatom,jj,lm
   property='initial'
   flag_use_grad_wf_on_force=.false. 
 
-  nl=lg_num(1)*lg_num(2)*lg_num(3)
+  nl=lg%num(1)*lg%num(2)*lg%num(3)
 
   hx=Hgs(1)
   hy=Hgs(2)
   hz=Hgs(3)
 
   if(iperiodic==0)then
-    do iz=lg_sta(3),lg_end(3)
-    do iy=lg_sta(2),lg_end(2)
-    do ix=lg_sta(1),lg_end(1)
-      i=(iz-lg_sta(3))*lg_num(1)*lg_num(2)+(iy-lg_sta(2))*lg_num(1)+ix-lg_sta(1)+1
+    do iz=lg%is(3),lg%ie(3)
+    do iy=lg%is(2),lg%ie(2)
+    do ix=lg%is(1),lg%ie(1)
+      i=(iz-lg%is(3))*lg%num(1)*lg%num(2)+(iy-lg%is(2))*lg%num(1)+ix-lg%is(1)+1
       lx(i)=ix
       ly(i)=iy
       lz(i)=iz
@@ -63,10 +65,10 @@ integer :: iatom,jj,lm
     end do
     end do
   else if(iperiodic==3)then
-    do iz=1,lg_num(3)
-    do iy=1,lg_num(2)
-    do ix=1,lg_num(1)
-      i=(iz-1)*lg_num(1)*lg_num(2)+(iy-1)*lg_num(1)+ix
+    do iz=1,lg%num(3)
+    do iy=1,lg%num(2)
+    do ix=1,lg%num(1)
+      i=(iz-1)*lg%num(1)*lg%num(2)+(iy-1)*lg%num(1)+ix
       lx(i)=ix-1
       ly(i)=iy-1
       lz(i)=iz-1

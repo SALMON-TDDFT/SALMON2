@@ -25,7 +25,7 @@ SUBROUTINE calcVbox(lg,itt_t)
   
   implicit none
   
-  type(s_rgrid) :: lg
+  type(s_rgrid),intent(in) :: lg
   integer :: itt_t
   integer :: ix,iy,iz,jj
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
@@ -51,12 +51,12 @@ SUBROUTINE calcVbox(lg,itt_t)
     else
       if(icalcforce==1.or.iflag_md==1)then
         do jj=1,3
-          if(lg_sta(jj)==mg_sta(jj))then
+          if(lg%is(jj)==mg_sta(jj))then
             ix_sta_Vbox(jj)=mg_sta(jj)
           else
             ix_sta_Vbox(jj)=mg_sta(jj)-Nd
           end if
-          if(lg_end(jj)==mg_end(jj))then
+          if(lg%ie(jj)==mg_end(jj))then
             ix_end_Vbox(jj)=mg_end(jj)
           else
             ix_end_Vbox(jj)=mg_end(jj)+Nd

@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcELF(mg,ng,srg,info,srho,ttmp)
+subroutine calcELF(lg,mg,ng,srg,info,srho,ttmp)
 use structures
 use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
@@ -25,6 +25,7 @@ use allocate_mat_sub
 use new_world_sub
 use sendrecv_grid, only: init_sendrecv_grid
 implicit none
+type(s_rgrid),intent(in)            :: lg
 type(s_rgrid),intent(in)            :: mg
 type(s_rgrid),intent(in)            :: ng
 type(s_sendrecv_grid),intent(in)    :: srg
@@ -261,7 +262,7 @@ end do
 end do
 end do
 
-call comm_summation(matbox_l,elf,lg_num(1)*lg_num(2)*lg_num(3),nproc_group_global)
+call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
 
 call dealloc_cache(srg_ob_1)

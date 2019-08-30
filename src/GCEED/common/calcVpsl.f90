@@ -34,7 +34,7 @@ allocate(ppg%Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(
 do a=1,MI
   ak=Kion(a)
   do j=1,3
-    if(abs(Rion(j,a))<lg_num(j)*Hgs(j))then
+    if(abs(Rion(j,a))<lg%num(j)*Hgs(j))then
       continue
     else
       write(*,*) "Rion error",nproc_id_global,a,j,Rion(j,a)

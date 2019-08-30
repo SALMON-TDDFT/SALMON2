@@ -531,12 +531,12 @@ else if(layout_multipole==3)then
   do j2=0,num_multipole_xyz(2)-1
   do j1=0,num_multipole_xyz(1)-1
     ibox = j1 + num_multipole_xyz(1)*j2 + num_multipole_xyz(1)*num_multipole_xyz(2)*j3 
-    ista_Mxin_pole(1,ibox)=j1*lg_num(1)/num_multipole_xyz(1)+lg_sta(1)
-    iend_Mxin_pole(1,ibox)=(j1+1)*lg_num(1)/num_multipole_xyz(1)+lg_sta(1)-1
-    ista_Mxin_pole(2,ibox)=j2*lg_num(2)/num_multipole_xyz(2)+lg_sta(2)
-    iend_Mxin_pole(2,ibox)=(j2+1)*lg_num(2)/num_multipole_xyz(2)+lg_sta(2)-1
-    ista_Mxin_pole(3,ibox)=j3*lg_num(3)/num_multipole_xyz(3)+lg_sta(3)
-    iend_Mxin_pole(3,ibox)=(j3+1)*lg_num(3)/num_multipole_xyz(3)+lg_sta(3)-1
+    ista_Mxin_pole(1,ibox)=j1*lg%num(1)/num_multipole_xyz(1)+lg%is(1)
+    iend_Mxin_pole(1,ibox)=(j1+1)*lg%num(1)/num_multipole_xyz(1)+lg%is(1)-1
+    ista_Mxin_pole(2,ibox)=j2*lg%num(2)/num_multipole_xyz(2)+lg%is(2)
+    iend_Mxin_pole(2,ibox)=(j2+1)*lg%num(2)/num_multipole_xyz(2)+lg%is(2)-1
+    ista_Mxin_pole(3,ibox)=j3*lg%num(3)/num_multipole_xyz(3)+lg%is(3)
+    iend_Mxin_pole(3,ibox)=(j3+1)*lg%num(3)/num_multipole_xyz(3)+lg%is(3)-1
   end do
   end do
   end do
@@ -621,11 +621,11 @@ end if
 end subroutine make_corr_pole
 
 !=====================================================================
-subroutine set_ig_bound(ng,poisson)
+subroutine set_ig_bound(lg,ng,poisson)
 use structures, only: s_rgrid,s_poisson
 use salmon_parallel
 implicit none
-type(s_rgrid), intent(in) :: ng
+type(s_rgrid), intent(in)     :: lg, ng
 type(s_poisson),intent(inout) :: poisson
 integer :: ix,iy,iz
 integer :: ibox
@@ -639,7 +639,7 @@ allocate( poisson%ig_bound(3,ibox,3) )
 icount=0
 do iz=ng%is(3),ng%ie(3)
 do iy=ng%is(2),ng%ie(2)
-do ix=lg_sta(1)-Ndh,lg_sta(1)-1
+do ix=lg%is(1)-Ndh,lg%is(1)-1
   icount=icount+1
   poisson%ig_bound(1,icount,1)=ix
   poisson%ig_bound(2,icount,1)=iy
@@ -649,7 +649,7 @@ end do
 end do
 do iz=ng%is(3),ng%ie(3)
 do iy=ng%is(2),ng%ie(2)
-do ix=lg_end(1)+1,lg_end(1)+Ndh
+do ix=lg%ie(1)+1,lg%ie(1)+Ndh
   icount=icount+1
   poisson%ig_bound(1,icount,1)=ix
   poisson%ig_bound(2,icount,1)=iy
@@ -659,7 +659,7 @@ end do
 end do
 icount=0
 do iz=ng%is(3),ng%ie(3)
-do iy=lg_sta(2)-Ndh,lg_sta(2)-1
+do iy=lg%is(2)-Ndh,lg%is(2)-1
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
   poisson%ig_bound(1,icount,2)=ix
@@ -669,7 +669,7 @@ end do
 end do
 end do
 do iz=ng%is(3),ng%ie(3)
-do iy=lg_end(2)+1,lg_end(2)+Ndh
+do iy=lg%ie(2)+1,lg%ie(2)+Ndh
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
   poisson%ig_bound(1,icount,2)=ix
@@ -679,7 +679,7 @@ end do
 end do
 end do
 icount=0
-do iz=lg_sta(3)-Ndh,lg_sta(3)-1
+do iz=lg%is(3)-Ndh,lg%is(3)-1
 do iy=ng%is(2),ng%ie(2)
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
@@ -689,7 +689,7 @@ do ix=ng%is(1),ng%ie(1)
 end do
 end do
 end do
-do iz=lg_end(3)+1,lg_end(3)+Ndh
+do iz=lg%ie(3)+1,lg%ie(3)+Ndh
 do iy=ng%is(2),ng%ie(2)
 do ix=ng%is(1),ng%ie(1)
   icount=icount+1
