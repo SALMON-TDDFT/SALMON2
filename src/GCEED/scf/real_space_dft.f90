@@ -119,10 +119,10 @@ allocate(system%mass(1:nelem))
 
 call set_filename
 
-k_sta = info%ik_s
-k_end = info%ik_e
-k_num = info%numk
-iobnum = info%numo
+k_sta = info%ik_s ! future work: remove this line
+k_end = info%ik_e ! future work: remove this line
+k_num = info%numk ! future work: remove this line
+iobnum = info%numo ! future work: remove this line
 
 if(iflag_opt==1)then
    call structure_opt_ini(MI)
@@ -148,7 +148,7 @@ if(iopt==1)then
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
     call set_imesh_oddeven(itmg)
-    call old_mesh(lg,mg,ng)
+    call old_mesh(lg,mg,ng) ! future work: remove this line
     call set_gridcoordinate(lg,system)
 
   case(1,3) ! Continue the previous calculation
@@ -490,6 +490,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(temperature>=0.d0 .and. Miter>iditer_notemperature) then
     call ne2mu(energy,system,info)
   end if
+  rocc(1:itotMST,1:system%nk) = system%rocc(1:itotMST,1:system%nk,1) ! future work: remove this line
 
   call copy_density(system%nspin,ng,srho_s,mixing)
 
