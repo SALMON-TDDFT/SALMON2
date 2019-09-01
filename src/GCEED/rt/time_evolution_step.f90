@@ -123,7 +123,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   !(MD:part1 & update of pseudopotential)
   if(iflag_md==1) then
      call time_evolution_step_md_part1(system,md)
-     call update_pseudo_rt(itt,info,system,stencil,lg,ng,poisson,fg,ppg,ppg_all,ppn)
+     call update_pseudo_rt(itt,info,info_field,system,stencil,lg,ng,poisson,fg,ppg,ppg_all,ppn)
      sVpsl%f = Vpsl ! future work: remove Vpsl
   endif
 
@@ -390,10 +390,9 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
   type(s_reciprocal_grid) :: fg
 
   integer :: jj,ix,iy,iz,n,nn
-
   integer :: npuy,npuz
 
-  if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
+  if(allocated(fg%Gx))        deallocate(fg%Gx,fg%Gy,fg%Gz)
   if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
 
   jj = system%ngrid/nproc_size_global

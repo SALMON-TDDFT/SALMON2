@@ -875,7 +875,7 @@ if(iflag_md==1 .or. icalcforce==1)then
         stencil%vec_kAc(1:3,ik) = system%vec_k(1:3,ik)
       end do
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-      call get_fourier_grid_G_rt(system,lg,ng,fg)
+      call get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
    endif
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
 
