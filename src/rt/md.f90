@@ -258,13 +258,15 @@ subroutine time_evolution_step_md_part1(system,md)
 
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,system,stencil,lg,ng,poisson,fg,ppg,ppg_all,ppn)
+subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,ng,poisson,fg,ppg,ppg_all,ppn)
   use structures, only: s_dft_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
-    s_orbital_parallel
+    s_orbital_parallel, s_field_parallel
   use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
+  use hpsi_sub, only: update_kvector_nonlocalpt
   implicit none
   type(s_orbital_parallel) :: info
+  type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system) :: system
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
@@ -275,18 +277,21 @@ subroutine update_pseudo_rt(itt,info,system,stencil,lg,ng,poisson,fg,ppg,ppg_all
   type(s_pp_grid) :: ppg,ppg_all
   integer :: itt
 
-  if(iperiodic==3) call get_fourier_grid_G_rt(system,lg,ng,fg)
-
   !update pseudopotential
   if (mod(itt,step_update_ps)==0 ) then
-     !xxxx call prep_ps_periodic('update_all       ')
      call dealloc_init_ps(ppg,ppg_all,ppn)
-     call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+     call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   else if (mod(itt,step_update_ps2)==0 ) then
-     !xxxx call prep_ps_periodic('update_wo_realloc')
      !xxxxxxx this option is not yet made xxxxxx
      call dealloc_init_ps(ppg,ppg_all,ppn)
-     call init_ps(lg,ng,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+     call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+  endif
+
+  if(iperiodic==3) then
+     if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
+     stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
+     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+     call get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
   endif
 
 end subroutine 
