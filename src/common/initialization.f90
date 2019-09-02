@@ -110,15 +110,14 @@ end subroutine init_dft
 !===================================================================================================================================
 
 subroutine init_orbital_parallel_singlecell(system,info)
-  use inputoutput, only: calc_mode,temperature,nelec,nelec_spin
   use structures
-  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital
+  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,calc_mode,temperature,nelec,nelec_spin
   use salmon_parallel, only: nproc_group_global
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel)      :: info
   !
-  integer :: io,jspin,ik
+  integer :: io,jspin,ik,no
 
 ! for single-cell calculations
   info%im_s = 1
@@ -131,27 +130,22 @@ subroutine init_orbital_parallel_singlecell(system,info)
   info%numk = info%ik_e - info%ik_s + 1
 
 ! # of orbitals
-  info%io_s = info%id_o * system%no / nproc_ob + 1
-  info%io_e = (info%id_o+1) * system%no / nproc_ob
-  info%numo = info%io_e - info%io_s + 1
   if(calc_mode=='RT'.and.temperature<-1.d-12)then
     if(system%nspin==2.and.sum(nelec_spin(:))>0)then
-      info%io_s = info%id_o * maxval(nelec_spin(:)) / nproc_ob + 1
-      info%io_e = (info%id_o+1) * maxval(nelec_spin(:)) / nproc_ob
-      info%numo = info%io_e - info%io_s + 1
+      no = maxval(nelec_spin(:))
     else
       if(mod(nelec,2)==0)then
-        info%io_s = info%id_o * nelec/2 / nproc_ob + 1
-        info%io_e = (info%id_o+1) * nelec/2 / nproc_ob
-        info%numo = info%io_e - info%io_s + 1
+        no = nelec/2
       else
-        info%io_s = info%id_o * ((nelec+1)/2) / nproc_ob + 1
-        info%io_e = (info%id_o+1) * ((nelec+1)/2) / nproc_ob
-        info%numo = info%io_e - info%io_s + 1
+        no = (nelec+1)/2
       end if
     end if
+  else
+    no = system%no
   end if
-
+  info%io_s = info%id_o * no / nproc_ob + 1
+  info%io_e = (info%id_o+1) * no / nproc_ob
+  info%numo = info%io_e - info%io_s + 1
 
 ! for parallelization
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
