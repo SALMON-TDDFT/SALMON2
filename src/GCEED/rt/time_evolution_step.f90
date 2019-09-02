@@ -40,6 +40,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
   use hpsi_sub, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
+  use salmon_pp, only: calc_nlcc !test hoge
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -49,7 +50,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
-  type(s_pp_nlcc),intent(in)    :: ppn
+!  type(s_pp_nlcc),intent(in)    :: ppn
+  type(s_pp_nlcc),intent(inout)    :: ppn !hoge test
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
@@ -82,8 +84,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   if_use_dmat = (use_singlescale=='y') ! .or. if_metaGGA ! (future work)
 
   ! for calc_total_energy_periodic
-  rion_update = check_rion_update() .or. (itt == Miter_rt+1)
-  
+  if(iflag_md==1) then
+     rion_update = .true.
+  else
+     rion_update = check_rion_update() .or. (itt == Miter_rt+1)
+  endif
+
   select case(ikind_eext)
     case(0,3,9:12)
       ihpsieff=0
@@ -123,7 +129,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   !(MD:part1 & update of pseudopotential)
   if(iflag_md==1) then
      call time_evolution_step_md_part1(system,md)
-     call update_pseudo_rt(itt,info,info_field,system,stencil,lg,ng,poisson,fg,ppg,ppg_all,ppn)
+     call update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,ppg,ppg_all,ppn)
      sVpsl%f = Vpsl ! future work: remove Vpsl
   endif
 
