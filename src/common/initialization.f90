@@ -110,6 +110,7 @@ end subroutine init_dft
 !===================================================================================================================================
 
 subroutine init_orbital_parallel_singlecell(system,info)
+  use inputoutput, only: calc_mode,temperature,nelec,nelec_spin
   use structures
   use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital
   use salmon_parallel, only: nproc_group_global
@@ -133,6 +134,24 @@ subroutine init_orbital_parallel_singlecell(system,info)
   info%io_s = info%id_o * system%no / nproc_ob + 1
   info%io_e = (info%id_o+1) * system%no / nproc_ob
   info%numo = info%io_e - info%io_s + 1
+  if(calc_mode=='RT'.and.temperature<-1.d-12)then
+    if(system%nspin==2.and.sum(nelec_spin(:))>0)then
+      info%io_s = info%id_o * maxval(nelec_spin(:)) / nproc_ob + 1
+      info%io_e = (info%id_o+1) * maxval(nelec_spin(:)) / nproc_ob
+      info%numo = info%io_e - info%io_s + 1
+    else
+      if(mod(nelec,2)==0)then
+        info%io_s = info%id_o * nelec/2 / nproc_ob + 1
+        info%io_e = (info%id_o+1) * nelec/2 / nproc_ob
+        info%numo = info%io_e - info%io_s + 1
+      else
+        info%io_s = info%id_o * ((nelec+1)/2) / nproc_ob + 1
+        info%io_e = (info%id_o+1) * ((nelec+1)/2) / nproc_ob
+        info%numo = info%io_e - info%io_s + 1
+      end if
+    end if
+  end if
+
 
 ! for parallelization
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1

@@ -110,6 +110,8 @@ module structures
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
+                              ! For calc_mode='RT' and temperature=0, these values are calculated from nelec.
+                              ! In other cases, these are calculated from nstate.
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
     real(8),allocatable :: occ(:,:,:,:) ! (io,ik,ispin,im), occ = rocc*wk, occupation numbers
   end type s_orbital_parallel
