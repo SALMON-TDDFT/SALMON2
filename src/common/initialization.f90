@@ -25,7 +25,7 @@ subroutine init_dft(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
-  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec
+  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -65,8 +65,21 @@ subroutine init_dft(lg,system,stencil)
   call init_kvector(num_kgrid,system)
 
   system%iperiodic = iperiodic
-  system%no   = nstate
   system%nion = natom
+
+  if(calc_mode=='RT'.and.temperature<-1.d-12)then
+    if(system%nspin==2.and.sum(nelec_spin(:))>0)then
+      system%no = maxval(nelec_spin(:))
+    else
+      if(mod(nelec,2)==0)then
+        system%no = nelec/2
+      else
+        system%no = (nelec+1)/2
+      end if
+    end if
+  else
+    system%no = nstate
+  end if
 
   if(ispin==0)then
     system%nspin=1
@@ -111,13 +124,13 @@ end subroutine init_dft
 
 subroutine init_orbital_parallel_singlecell(system,info)
   use structures
-  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,calc_mode,temperature,nelec,nelec_spin
+  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital
   use salmon_parallel, only: nproc_group_global
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel)      :: info
   !
-  integer :: io,jspin,ik,no
+  integer :: io,jspin,ik
 
 ! for single-cell calculations
   info%im_s = 1
@@ -130,21 +143,8 @@ subroutine init_orbital_parallel_singlecell(system,info)
   info%numk = info%ik_e - info%ik_s + 1
 
 ! # of orbitals
-  if(calc_mode=='RT'.and.temperature<-1.d-12)then
-    if(system%nspin==2.and.sum(nelec_spin(:))>0)then
-      no = maxval(nelec_spin(:))
-    else
-      if(mod(nelec,2)==0)then
-        no = nelec/2
-      else
-        no = (nelec+1)/2
-      end if
-    end if
-  else
-    no = system%no
-  end if
-  info%io_s = info%id_o * no / nproc_ob + 1
-  info%io_e = (info%id_o+1) * no / nproc_ob
+  info%io_s = info%id_o * system%no / nproc_ob + 1
+  info%io_e = (info%id_o+1) * system%no / nproc_ob
   info%numo = info%io_e - info%io_s + 1
 
 ! for parallelization
