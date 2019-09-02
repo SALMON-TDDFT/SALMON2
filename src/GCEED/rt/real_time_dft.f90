@@ -205,7 +205,7 @@ call timer_begin(LOG_INIT_RT)
 Eion=0.d0
 do ia=1,MI
 do ib=1,ia-1
-  rab=sqrt((Rion(1,ia)-Rion(1,ib))**2      &
+  rab=sqrt( (Rion(1,ia)-Rion(1,ib))**2      &
            +(Rion(2,ia)-Rion(2,ib))**2      &
            +(Rion(3,ia)-Rion(3,ib))**2)
   Eion=Eion+Zps(Kion(ia))*Zps(Kion(ib))/rab
@@ -613,19 +613,20 @@ idiffDensity=1
 ielf=2
 fileLaser= "laser.out"
 
-allocate (R1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), & 
-                              lg%is(3):lg%ie(3))) 
+allocate( R1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
+                               lg%is(3):lg%ie(3)))
+                               
 !if(ikind_eext.ne.0)then
-  allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, & 
-                                           lg%is(3)-Nd:lg%ie(3)+Nd))
+allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, & 
+                                       lg%is(3)-Nd:lg%ie(3)+Nd))
 !endif
 
 allocate( elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), & 
-                              lg%is(3):lg%ie(3))) 
+                                lg%is(3):lg%ie(3))) 
 
 allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
-  allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
+allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
 
   call allocate_scalar(mg,srho)

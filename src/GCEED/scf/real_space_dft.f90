@@ -400,7 +400,8 @@ else if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     rion_update = .true.
-    call dealloc_init_ps(ppg,ppg_all,ppn)
+    call dealloc_init_ps(ppg,ppg_all)
+!    call calc_nlcc(pp, system, mg, ppn) !test
     call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
     sVpsl%f = Vpsl
     if(iperiodic==3) then

@@ -124,7 +124,7 @@ CONTAINS
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ia,ib,ix,iy,iz,r,rab,rr) &
 !$omp          shared(NEwald,system,pp,Kion,aEwald)
-    do ia=1,system%nion
+      do ia=1,system%nion
       do ix=-NEwald,NEwald
       do iy=-NEwald,NEwald
       do iz=-NEwald,NEwald
@@ -142,7 +142,7 @@ CONTAINS
       end do
       end do
       end do
-    end do
+      end do
 !$omp end parallel do
     E_tmp = E_tmp - Pi*sum(pp%Zps(Kion(:)))**2/(2*aEwald*sysvol)-sqrt(aEwald/Pi)*sum(pp%Zps(Kion(:))**2)
 

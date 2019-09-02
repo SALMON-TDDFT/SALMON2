@@ -309,7 +309,9 @@ module salmon_pp
     real(8) :: rion_repr(3)
     real(8) :: r, rc, r1, r2, r3
     real(8) :: ratio1, ratio2
-  
+
+    if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
+ 
     ! Allocate
     allocate(ppn%rho_nlcc( &
       & rg%is(1):rg%ie(1), &
