@@ -19,6 +19,90 @@ module init_poisson_sub
 
 contains
 
+subroutine set_ig_bound(lg,ng,poisson)
+  use structures, only: s_rgrid,s_poisson
+  use salmon_parallel
+  implicit none
+  type(s_rgrid), intent(in)     :: lg, ng
+  type(s_poisson),intent(inout) :: poisson
+  integer :: ix,iy,iz
+  integer :: ibox
+  integer :: icount
+  integer,parameter :: ndh=4
+  
+  ibox=ng%num(1)*ng%num(2)*ng%num(3)/minval(ng%num(1:3))*2*ndh
+  allocate( poisson%ig_bound(3,ibox,3) )
+  
+  icount=0
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=lg%is(1)-ndh,lg%is(1)-1
+    icount=icount+1
+    poisson%ig_bound(1,icount,1)=ix
+    poisson%ig_bound(2,icount,1)=iy
+    poisson%ig_bound(3,icount,1)=iz
+  end do
+  end do
+  end do
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=lg%ie(1)+1,lg%ie(1)+ndh
+    icount=icount+1
+    poisson%ig_bound(1,icount,1)=ix
+    poisson%ig_bound(2,icount,1)=iy
+    poisson%ig_bound(3,icount,1)=iz
+  end do
+  end do
+  end do
+  icount=0
+  do iz=ng%is(3),ng%ie(3)
+  do iy=lg%is(2)-ndh,lg%is(2)-1
+  do ix=ng%is(1),ng%ie(1)
+    icount=icount+1
+    poisson%ig_bound(1,icount,2)=ix
+    poisson%ig_bound(2,icount,2)=iy
+    poisson%ig_bound(3,icount,2)=iz
+  end do
+  end do
+  end do
+  do iz=ng%is(3),ng%ie(3)
+  do iy=lg%ie(2)+1,lg%ie(2)+ndh
+  do ix=ng%is(1),ng%ie(1)
+    icount=icount+1
+    poisson%ig_bound(1,icount,2)=ix
+    poisson%ig_bound(2,icount,2)=iy
+    poisson%ig_bound(3,icount,2)=iz
+  end do
+  end do
+  end do
+  icount=0
+  do iz=lg%is(3)-ndh,lg%is(3)-1
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    icount=icount+1
+    poisson%ig_bound(1,icount,3)=ix
+    poisson%ig_bound(2,icount,3)=iy
+    poisson%ig_bound(3,icount,3)=iz
+  end do
+  end do
+  end do
+  do iz=lg%ie(3)+1,lg%ie(3)+ndh
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    icount=icount+1
+    poisson%ig_bound(1,icount,3)=ix
+    poisson%ig_bound(2,icount,3)=iy
+    poisson%ig_bound(3,icount,3)=iz
+  end do
+  end do
+  end do
+  
+  return
+
+end subroutine set_ig_bound
+
+!=====================================================================
+
 subroutine init_poisson_fft(lg,ng,system,info_field,poisson)
   use math_constants, only : pi
   use structures,     only: s_rgrid,s_dft_system,s_field_parallel,s_poisson
