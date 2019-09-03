@@ -57,6 +57,7 @@ use read_gs
 use code_optimization
 use salmon_initialization
 use occupation
+use init_poisson_sub
 implicit none
 integer :: ix,iy,iz,ik,ikoa,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -213,7 +214,7 @@ if(iopt==1)then
   end if
 
   if(iperiodic==3 .and. iflag_hartree==4)then
-    call prep_poisson_fft(lg,ng,info_field,poisson)
+    call init_poisson_fft(lg,ng,system,info_field,poisson)
   end if
 
   if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
