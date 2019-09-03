@@ -46,7 +46,7 @@ select case(ikind_eext)
         ipulse=2
         call calc_env_trigon(ipulse,env_trigon_2)
         do j2=1,3
-          A_ext(j2,itt)=A_ext(j2,itt)+E_amplitude1*epdir_re1(j2)*env_trigon_2
+          A_ext(j2,itt)=A_ext(j2,itt)+E_amplitude2*epdir_re2(j2)*env_trigon_2
         enddo
       end if
     end do
