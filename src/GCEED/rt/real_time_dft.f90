@@ -45,6 +45,7 @@ use timer
 use global_variables_rt
 use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
+use init_poisson_sub
 implicit none
 
 type(s_rgrid) :: lg
@@ -176,7 +177,7 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 if(iperiodic==3 .and. iflag_hartree==4)then
-  call prep_poisson_fft(lg,ng,info_field,poisson)
+  call init_poisson_fft(lg,ng,system,info_field,poisson)
 end if
 
 call read_pslfile(system)

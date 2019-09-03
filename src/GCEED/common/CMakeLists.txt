@@ -16,7 +16,6 @@ set(SOURCES
     init_k_rd.f90
     OUT_IN_data.f90
     psl.f90
-    prep_poisson_fft.f90
     read_copy_pot.f90
     set_filename.f90
     set_icoo1d.f90
