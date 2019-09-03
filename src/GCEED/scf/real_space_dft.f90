@@ -893,6 +893,21 @@ if(comm_is_root(nproc_id_global)) then
                               ikoa,Lref(ikoa),Mlps(ikoa),Rps(ikoa)*a_B
   end do
 
+  write(1,*)
+  select case(unit_system)
+  case('au','a.u.')
+     write(1,*) "Force [au] "
+     do iatom=1,MI
+        write(1,'(i6,3e16.8)') iatom,(system%Force(ix,iatom),ix=1,3)
+     end do
+  case('A_eV_fs')
+     write(1,*) "Force [eV/A] "
+     do iatom=1,MI
+        write(1,'(i6,3e16.8)') iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+     end do
+  end select
+
+
   close(1)
 
 end if

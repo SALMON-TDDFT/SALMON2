@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# Test preparation script
+#
+# The preparation script is automatically executed before starting SALMON. 
+# if required, this script file can utilized for the preparation of 
+# the input data for the following calculations.
+
+cp ../pseudo/H_rps.dat ./
+cp ../pseudo/O_rps.dat ./
+cp ../123_periodic_H2O_gs_dp/H2O_gs.bin ./
+if [ -e H2O_rt_energy.data ]; then
+  rm H2O_rt_energy.data
+fi
