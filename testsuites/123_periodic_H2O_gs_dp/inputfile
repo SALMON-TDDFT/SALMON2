@@ -48,8 +48,8 @@
 
 
 &scf
-  nscf = 200
-  threshold=1d-8
+  nscf = 250
+  threshold=1d-10
 /
 
 &atomic_coor
