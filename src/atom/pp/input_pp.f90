@@ -69,6 +69,14 @@ subroutine input_pp(pp,hx,hy,hz)
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'
       end select
 
+! outside mr (needed for isolated systems)
+      if(pp%nrmax>pp%mr(ik))then
+        do i=pp%mr(ik)+1,pp%nrmax
+          pp%vpp(i,0:pp%mlps(ik))=-pp%zps(ik)/pp%rad(i:pp%nrmax,ik)
+          pp%upp(i,0:pp%mlps(ik))=0.d0
+        end do
+      end if
+
 ! Set meaning domain in the arrays 
       pp%rps(ik)=maxval(rrc(0:pp%mlps(ik)))
       do i=1,pp%nrmax

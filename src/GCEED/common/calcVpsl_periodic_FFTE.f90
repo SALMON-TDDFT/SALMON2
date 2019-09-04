@@ -79,7 +79,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   
   do ak=1,MKI
     do ii=1,Mr(ak)
-      vloctbl(ii,ak)=vpp(ii,Lref(ak),ak)
+      vloctbl(ii,ak)=pp%vpp_f(ii,Lref(ak),ak)
     enddo
   end do
 

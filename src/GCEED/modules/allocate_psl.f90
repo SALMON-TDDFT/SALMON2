@@ -21,7 +21,6 @@ use read_pslfile_sub
 integer :: Nr
 
 real(8), allocatable :: rhopp(:,:)
-real(8), allocatable :: vpp(:,:,:)
 real(8), allocatable :: uppr(:,:,:)
 
 real(8), allocatable :: rad_psl(:,:)
@@ -49,7 +48,7 @@ use scf_data
 implicit none
 type(s_rgrid),intent(in) :: lg
 real(8) :: r
-integer :: Nr0,nprj_u,nprj_v
+integer :: Nr0,nprj_u
 
 select case(iperiodic)
 case(0)
@@ -72,9 +71,7 @@ maxMps=int(4.d0/3.d0*Pi*(rmaxRps+4.d0*maxval(Hgs(:)))**3/Hvol)
 Mlmps=maxlm
 
 nprj_u=size(upp_f,2)
-nprj_v=size(vpp_f,2)
 allocate(rhopp(0:Nr,MKI))
-allocate(vpp(0:Nr,0:nprj_v-1,MKI))
 allocate(uppr(0:Nr,0:nprj_u-1,MKI))
 allocate(rad_psl(0:Nr,MKI))
 
@@ -101,7 +98,7 @@ end subroutine allocate_psl
 !==================================================================================================
 subroutine deallocate_psl
 
-deallocate(rhopp,vpp,uppr)
+deallocate(rhopp,uppr)
 deallocate(ur)
 deallocate(rad_psl)
 

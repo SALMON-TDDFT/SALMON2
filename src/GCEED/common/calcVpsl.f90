@@ -21,7 +21,7 @@ use scf_data
 use allocate_psl_sub
 implicit none
 
-type(s_rgrid) :: lg
+type(s_rgrid),intent(in)   :: lg
 integer :: ix,iy,iz,ak
 integer :: j,a,intr
 real(8) :: ratio1,ratio2
@@ -53,18 +53,17 @@ do a=1,MI
     else
       write(*,*) "intr error",nproc_id_global,intr,r
     end if
-    !if(Lref(ak)>Nlps.or.Lref(ak)<0) write(*,*) "Lref error",nproc_id_global,Lref(ak)
-    if(Lref(ak)>size(vpp,2)-1.or.Lref(ak)<0) write(*,*) "Lref error",nproc_id_global,Lref(ak)
+
     Vpsl(ix,iy,iz)=Vpsl(ix,iy,iz)      &
-                +ratio1*vpp(intr+1,Lref(ak),ak)      &
-                +ratio2*vpp(intr,Lref(ak),ak)
+                +ratio1*pp%vpp_f(intr+1,Lref(ak),ak)      &
+                +ratio2*pp%vpp_f(intr,Lref(ak),ak)
 
     if(icalcforce==1)then
       Vpsl_atom(ix,iy,iz,a)=                    &
-                +ratio1*vpp(intr+1,Lref(ak),ak)      &
-                +ratio2*vpp(intr,Lref(ak),ak)
+                +ratio1*pp%vpp_f(intr+1,Lref(ak),ak)      &
+                +ratio2*pp%vpp_f(intr,Lref(ak),ak)
     end if
-    ppg%Vpsl_atom(ix,iy,iz,a) = ratio1*vpp(intr+1,Lref(ak),ak) + ratio2*vpp(intr,Lref(ak),ak)
+    ppg%Vpsl_atom(ix,iy,iz,a) = ratio1*pp%vpp_f(intr+1,Lref(ak),ak) + ratio2*pp%vpp_f(intr,Lref(ak),ak)
   end do
   end do
   end do

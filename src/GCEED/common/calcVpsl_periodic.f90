@@ -59,7 +59,7 @@ subroutine calcVpsl_periodic(lg,matrix_A,brl)
   
   do ak=1,MKI
     do ii=1,Mr(ak)
-      vloctbl(ii,ak)=vpp(ii,Lref(ak),ak)
+      vloctbl(ii,ak)=pp%vpp_f(ii,Lref(ak),ak)
     enddo
   end do
   
