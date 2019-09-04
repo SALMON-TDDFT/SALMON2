@@ -92,13 +92,10 @@ subroutine calcJxyz_all_periodic(lg,al0,matrix_A0)
                                     lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     hx,hy,hz,al0,matrix_A0)
 
-  Mps(1:MI)=ppg%mps(1:MI) 
-  Mps_all(1:MI)=ppg_all%mps(1:MI) 
-
   if(iSCFRT==1)then
     do iatom=1,MI
       if(comm_is_root(nproc_id_global))then
-        write(*,*) "Mps =", Mps_all(iatom)
+        write(*,*) "Mps =", ppg_all%mps(iatom)
       end if
     end do
   end if

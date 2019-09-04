@@ -36,7 +36,6 @@ end if
 
 call storevpp
 
-Mps_all=0
 select case(iperiodic)
 case(0)
   call calcJxyz_all(lg)

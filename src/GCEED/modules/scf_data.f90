@@ -174,8 +174,6 @@ integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)
 real(8),allocatable :: Zps(:)              ! Pseudo charge
 real(8),allocatable :: Rps(:)              ! Core radius
-integer,allocatable :: Mps_all(:)
-integer,allocatable :: Mps(:)
 integer :: Mlmps
 integer :: Mlps(maxMKI),Lref(maxMKI)
 real(8),allocatable :: Vpsl(:,:,:)                 ! Local pseudopotential

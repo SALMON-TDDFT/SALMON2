@@ -78,9 +78,6 @@ implicit none
                                     lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     hx,hy,hz)
   
-  Mps(1:MI)=ppg%mps(1:MI) 
-  Mps_all(1:MI)=ppg_all%mps(1:MI) 
-
 return
 
 end subroutine calcJxyz_all

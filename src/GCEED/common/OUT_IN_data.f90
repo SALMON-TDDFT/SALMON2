@@ -52,7 +52,7 @@ if(comm_is_root(nproc_id_global))then
   open(97,file=file_OUT,form='unformatted')
   
 !version number
-  version_num(1)=40
+  version_num(1)=41
   version_num(2)=1
   write(97) version_num(1),version_num(2)
   write(97) Nd
@@ -74,10 +74,6 @@ if(comm_is_root(nproc_id_global))then
   write(97) (rLsize(jj,ntmg),jj=1,3)
   write(97) Miter
   write(97) layout_multipole
-  
-  if(iflag_ps.eq.1)then
-    write(97) Mps_all(1:MI)
-  end if
   
   if(iflag_ps.eq.1)then
     write(97) Kion(:MI)
@@ -686,7 +682,7 @@ if(iflag_ps.eq.1)then
      if(version_num_box(1)<=31)then
        read(96) 
        read(96) 
-     else
+     else if(version_num_box(1)<=40)then
        read(96) 
      end if
    end if

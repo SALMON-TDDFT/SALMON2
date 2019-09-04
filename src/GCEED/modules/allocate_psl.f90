@@ -72,9 +72,6 @@ else
   Nr=Nr0
 end if
 
-allocate(Mps_all(1:MI))
-allocate(Mps(1:MI))
-
 maxMps=int(4.d0/3.d0*Pi*(rmaxRps+4.d0*maxval(Hgs(:)))**3/Hvol)
 Mlmps=maxlm
 
@@ -125,8 +122,6 @@ end subroutine allocate_psl
 !==================================================================================================
 subroutine deallocate_psl
 
-deallocate(Mps_all)
-deallocate(Mps)
 deallocate(uV_all,uVu)
 
 deallocate(rhopp,vpp,uppr,uVnl)
