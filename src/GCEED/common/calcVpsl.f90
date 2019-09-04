@@ -48,7 +48,7 @@ do a=1,MI
            +(lg%coordinate(iz,3)-Rion(3,a))**2 )+1.d-50
     call bisection(r,intr,ak,pp%nrmax,pp%rad)
     ratio1=(r-pp%rad(intr,ak))/(pp%rad(intr+1,ak)-pp%rad(intr,ak)) ; ratio2=1.d0-ratio1
-    if(intr>0.and.intr<=Nr)then
+    if(intr>0.and.intr<=pp%nrmax)then
       continue
     else
       write(*,*) "intr error",nproc_id_global,intr,r

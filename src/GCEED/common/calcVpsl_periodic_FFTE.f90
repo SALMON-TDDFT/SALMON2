@@ -27,7 +27,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
   
-  integer :: ii,ix,iy,iz,ak
+  integer :: ix,iy,iz,ak
   integer :: iix,iiy,iiz
   integer :: iatom
   
@@ -77,12 +77,6 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   
   nGzero=-1
   
-  do ak=1,MKI
-    do ii=1,Mr(ak)
-      vloctbl(ii,ak)=pp%vpp_f(ii,Lref(ak),ak)
-    enddo
-  end do
-
   do iz=1,lg%num(3)/npuz
   do iy=1,lg%num(2)/npuy
   do ix=1,lg%num(1)
@@ -103,7 +97,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
 
   dVloc_G(:,:)=0.d0
   do ak=1,MKI
-    imax=min(Mr(ak),Nr-1)
+    imax=Mr(ak)
     do iz=1,lg%num(3)/npuz
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
@@ -113,12 +107,12 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
       if (n == nGzero) then
         do i=2,imax
           r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-          s=s+4*Pi*r**2*(vloctbl(i,ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
+          s=s+4*Pi*r**2*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       else
         do i=2,imax
           r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-          s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(vloctbl(i,ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
+          s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       endif
       dVloc_G(n,ak)=s

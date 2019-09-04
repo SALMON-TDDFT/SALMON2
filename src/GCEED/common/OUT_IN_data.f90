@@ -68,7 +68,7 @@ if(comm_is_root(nproc_id_global))then
     write(97) (ifMST(is),is=1,2)
   end if
   if(iflag_ps.eq.1)then
-    write(97) MI,MKI,maxMps,Mlmps
+    write(97) MI,MKI
   end if
   write(97) (Hgs(jj),jj=1,3)
   write(97) (rLsize(jj,ntmg),jj=1,3)
@@ -561,11 +561,11 @@ if(comm_is_root(nproc_id_global))then
   end if
   if(version_num_box(1)<=31)then
     if(iflag_ps.eq.1)then
-      read(96) MI_read,MKI,maxMdvbox,maxMps,Mlmps
+      read(96) MI_read,MKI,maxMdvbox
     end if
   else
     if(iflag_ps.eq.1)then
-      read(96) MI_read,MKI,maxMps,Mlmps
+      read(96) MI_read,MKI
     end if
   end if
   if(version_num_box(1)>=35)then
@@ -668,8 +668,6 @@ end if
 if(iflag_ps.eq.1)then
   call comm_bcast(MI_read,nproc_group_global)
   call comm_bcast(MKI,nproc_group_global)
-  call comm_bcast(maxMps,nproc_group_global)
-  call comm_bcast(Mlmps,nproc_group_global)
   MI=MI_read
 end if
 
