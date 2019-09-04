@@ -79,7 +79,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   
   do ak=1,MKI
     do ii=1,Mr(ak)
-      vloctbl(ii,ak)=vpp(ii,Lref(ak),ak)
+      vloctbl(ii,ak)=pp%vpp_f(ii,Lref(ak),ak)
     enddo
   end do
 
@@ -112,13 +112,13 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
       s=0.d0
       if (n == nGzero) then
         do i=2,imax
-          r=rad_psl(i,ak)
-          s=s+4*Pi*r**2*(vloctbl(i,ak)+Zps(ak)/r)*(rad_psl(i+1,ak)-rad_psl(i,ak))
+          r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+          s=s+4*Pi*r**2*(vloctbl(i,ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       else
         do i=2,imax
-          r=rad_psl(i,ak)
-          s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(vloctbl(i,ak)+Zps(ak)/r)*(rad_psl(i+1,ak)-rad_psl(i,ak))
+          r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+          s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(vloctbl(i,ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       endif
       dVloc_G(n,ak)=s

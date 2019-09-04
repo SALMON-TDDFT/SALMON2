@@ -21,7 +21,7 @@ use scf_data
 use allocate_psl_sub
 implicit none
 
-type(s_rgrid) :: lg
+type(s_rgrid),intent(in)   :: lg
 integer :: ix,iy,iz,ak
 integer :: j,a,intr
 real(8) :: ratio1,ratio2
@@ -46,25 +46,24 @@ do a=1,MI
     r=sqrt( (lg%coordinate(ix,1)-Rion(1,a))**2      &
            +(lg%coordinate(iy,2)-Rion(2,a))**2      &
            +(lg%coordinate(iz,3)-Rion(3,a))**2 )+1.d-50
-    call bisection(r,intr,ak,nr,rad_psl)
-    ratio1=(r-rad_psl(intr,ak))/(rad_psl(intr+1,ak)-rad_psl(intr,ak)) ; ratio2=1.d0-ratio1
-    if(intr>=0.and.intr<=Nr)then
+    call bisection(r,intr,ak,pp%nrmax,pp%rad)
+    ratio1=(r-pp%rad(intr,ak))/(pp%rad(intr+1,ak)-pp%rad(intr,ak)) ; ratio2=1.d0-ratio1
+    if(intr>0.and.intr<=Nr)then
       continue
     else
       write(*,*) "intr error",nproc_id_global,intr,r
     end if
-    !if(Lref(ak)>Nlps.or.Lref(ak)<0) write(*,*) "Lref error",nproc_id_global,Lref(ak)
-    if(Lref(ak)>size(vpp,2)-1.or.Lref(ak)<0) write(*,*) "Lref error",nproc_id_global,Lref(ak)
+
     Vpsl(ix,iy,iz)=Vpsl(ix,iy,iz)      &
-                +ratio1*vpp(intr+1,Lref(ak),ak)      &
-                +ratio2*vpp(intr,Lref(ak),ak)
+                +ratio1*pp%vpp_f(intr,Lref(ak),ak)      &
+                +ratio2*pp%vpp_f(intr-1,Lref(ak),ak)  !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
 
     if(icalcforce==1)then
       Vpsl_atom(ix,iy,iz,a)=                    &
-                +ratio1*vpp(intr+1,Lref(ak),ak)      &
-                +ratio2*vpp(intr,Lref(ak),ak)
+                +ratio1*pp%vpp_f(intr,Lref(ak),ak)      &
+                +ratio2*pp%vpp_f(intr-1,Lref(ak),ak)
     end if
-    ppg%Vpsl_atom(ix,iy,iz,a) = ratio1*vpp(intr+1,Lref(ak),ak) + ratio2*vpp(intr,Lref(ak),ak)
+    ppg%Vpsl_atom(ix,iy,iz,a) = ratio1*pp%vpp_f(intr,Lref(ak),ak) + ratio2*pp%vpp_f(intr-1,Lref(ak),ak)
   end do
   end do
   end do

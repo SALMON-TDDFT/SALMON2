@@ -169,7 +169,7 @@ integer :: maxMps
 ! Pseudopotential
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg,ppg_all
-integer,parameter :: Nrmax=3000,Lmax=4
+integer,parameter :: Lmax=4
 integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)
 real(8),allocatable :: Zps(:)              ! Pseudo charge

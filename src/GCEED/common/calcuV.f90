@@ -21,9 +21,8 @@ use scf_data
 use allocate_psl_sub
 implicit none
   type(s_rgrid),intent(in) :: lg
-  integer :: iatom,jj,lm
 
-  integer :: i,ik,ix,iy,iz,l,ll,l0,m
+  integer :: i,ix,iy,iz
   integer :: nl
 
   real(8) :: hx,hy,hz
@@ -31,7 +30,6 @@ implicit none
   integer :: ly(lg%num(1)*lg%num(2)*lg%num(3))
   integer :: lz(lg%num(1)*lg%num(2)*lg%num(3))
 
-  integer :: lma
   character(17) :: property
   
   real(8),allocatable :: save_udVtbl_a(:,:,:)

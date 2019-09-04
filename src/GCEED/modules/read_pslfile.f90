@@ -30,11 +30,7 @@ module read_pslfile_sub
   integer,allocatable :: Mr(:)
   real(8),allocatable :: step(:)
   
-  real(8), allocatable :: upp_f(:,:,:)
   real(8), allocatable :: rhopp_f(:,:)
-  real(8), allocatable :: vpp_f(:,:,:)
-  
-  real(8), allocatable :: rad_f(:,:)
   
   contains
   !==================================================================================================
@@ -45,8 +41,9 @@ module read_pslfile_sub
     use input_pp_sub, only: input_pp
     use prep_pp_sub, only: init_mps
     implicit none
-    integer :: ak,i,ll,l0,l,nprj_u,nprj_v
+    integer :: ak
     type(s_dft_system), intent(inout)  :: system
+    integer :: nrmax
     
     allocate( Mlps0(MKI) )
     allocate( Mr(MKI) )
@@ -54,17 +51,18 @@ module read_pslfile_sub
     
     allocate( Zps(MKI) )
     allocate( Rps(MKI) )
-    
-    call init_pp(pp,Nrmax,Lmax,flag_nlcc)
+
+    if(iperiodic==0)then 
+      nrmax=20000
+    else if(iperiodic==3)then
+      nrmax=3000
+    end if
+
+    call init_pp(pp,nrmax,Lmax,flag_nlcc)
     call init_mps(ppg)
     call init_mps(ppg_all)
     
-    nprj_u = size( pp%upp_f, 2 )
-    nprj_v = size( pp%vpp_f, 2 )
-    allocate(upp_f(0:Nrmax,0:nprj_u-1,MKI))
     allocate(rhopp_f(0:Nrmax,MKI))
-    allocate(vpp_f(0:Nrmax,0:nprj_v-1,MKI)); vpp_f=0.0d0
-    allocate(rad_f(0:Nrmax,MKI) )
     
     call input_pp(pp,harray(1,1),harray(2,1),harray(3,1))
  
@@ -72,29 +70,6 @@ module read_pslfile_sub
   
     Lref(1:MKI)=pp%lref(1:MKI)
 
-    do ak=1,MKI
-      Mr(ak)=pp%mr(ak)
-      Mlps0(ak)=pp%mlps(ak)
-      l0=0
-      do ll=0,Mlps0(ak)
-      do l=l0,l0+pp%nproj(ll,ak)-1
-        do i=0,Mr(ak)
-          upp_f(i,l,ak)=pp%upp_f(i,l,ak)
-          vpp_f(i,l,ak)=pp%vpp_f(i,l,ak)
-        end do
-      end do
-      l0=l
-      end do
-      if( Lref(ak) > Mlps0(ak) )then
-        do i=0,Mr(ak)
-          vpp_f(i,Lref(ak),ak) = pp%vpp_f(i,Lref(ak),ak)
-        end do
-      end if
-      do i=1,Mr(ak)
-        rad_f(i-1,ak)=pp%rad(i,ak)
-      end do
-    end do
-  
     Zps(1:MKI)=pp%zps(1:MKI)
     Rps(1:MKI)=pp%rps(1:MKI)
     rmaxRps=maxval(Rps(1:MKI))
