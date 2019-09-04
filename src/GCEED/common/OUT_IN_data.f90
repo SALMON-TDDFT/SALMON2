@@ -76,7 +76,7 @@ if(comm_is_root(nproc_id_global))then
   write(97) layout_multipole
   
   if(iflag_ps.eq.1)then
-    write(97) Jxyz_all(1:3,1:maxMps,1:MI),Mps_all(1:MI)
+    write(97) Mps_all(1:MI)
   end if
   
   if(iflag_ps.eq.1)then

@@ -78,13 +78,6 @@ allocate(Mps(1:MI))
 maxMps=int(4.d0/3.d0*Pi*(rmaxRps+4.d0*maxval(Hgs(:)))**3/Hvol)
 Mlmps=maxlm
 
-allocate(Jxyz_all(1:3,1:maxMps,1:MI))
-allocate(Jxyz_tmp1(1:3,1:maxMps,1:MI))
-allocate(Jxyz_tmp2(1:3,1:maxMps,1:MI))
-if(iperiodic==3)then
-  allocate(Jxxyyzz_tmp1(1:3,1:maxMps,1:MI))
-  allocate(Jxxyyzz_tmp2(1:3,1:maxMps,1:MI))
-end if
 allocate(uV_all(maxMps,Mlmps,MI), uVu(Mlmps,MI)); uVu=0.0d0
 
 nprj_u=size(upp_f,2)
@@ -99,7 +92,6 @@ allocate(ur(maxMps,Mlmps))
 
 allocate(rho_core(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
-allocate(Jxyz(3,maxMps,MI))
 allocate(uV(maxMps,Mlmps,MI))
 allocate(numatom_ps(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
@@ -115,9 +107,6 @@ if(iperiodic==3)then
   allocate(Vion_G(lg%num(1)*lg%num(2)*lg%num(3)))
   allocate(Vion_G_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
 end if
-
-allocate(Jxxyyzz_all(1:3,1:maxMps,1:MI))
-allocate(Jxxyyzz(1:3,1:maxMps,1:MI))
 
 if(iflag_ps==1) then
   allocate (uVpsibox_c(1:maxlm,1:MI))
@@ -136,8 +125,6 @@ end subroutine allocate_psl
 !==================================================================================================
 subroutine deallocate_psl
 
-deallocate(Jxyz_all,Jxyz_tmp1,Jxyz_tmp2)
-if(iperiodic==3) deallocate(Jxxyyzz_tmp1,Jxxyyzz_tmp2)
 deallocate(Mps_all)
 deallocate(Mps)
 deallocate(uV_all,uVu)
@@ -148,7 +135,7 @@ deallocate(rad_psl)
 
 deallocate(rho_core)
 
-deallocate(Jxyz,uV)
+deallocate(uV)
 deallocate(numatom_ps)
 
 if(iperiodic==3)then
@@ -157,8 +144,6 @@ if(iperiodic==3)then
   deallocate(dVloc_G,rhoion_G,Vion_G)
   deallocate(dVloc_G_tmp,rhoion_G_tmp,Vion_G_tmp)
 end if
-deallocate(Jxxyyzz_all)
-deallocate(Jxxyyzz)
 
 if(iflag_ps==1) then
   deallocate (uVpsibox_c,uVpsibox2_c)
