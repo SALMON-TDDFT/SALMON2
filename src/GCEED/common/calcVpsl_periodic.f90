@@ -26,7 +26,7 @@ subroutine calcVpsl_periodic(lg,matrix_A,brl)
   type(s_rgrid),intent(in) :: lg
   real(8),intent(in) :: matrix_A(3,3),brl(3,3)
   
-  integer :: ii,ix,iy,iz,ak
+  integer :: ix,iy,iz,ak
   integer :: iix,iiy,iiz
   integer :: n
   real(8) :: aLxyz
@@ -56,12 +56,6 @@ subroutine calcVpsl_periodic(lg,matrix_A,brl)
   allocate(dvloc_g_tmp2(ng_l_s_para:ng_l_e_para,MKI))
  
   nGzero=-1
-  
-  do ak=1,MKI
-    do ii=1,Mr(ak)
-      vloctbl(ii,ak)=pp%vpp_f(ii,Lref(ak),ak)
-    enddo
-  end do
   
   n=0
   do iz=lg%is(3),lg%ie(3)

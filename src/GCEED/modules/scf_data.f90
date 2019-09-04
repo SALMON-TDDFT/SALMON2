@@ -164,8 +164,6 @@ real(8) :: Hvol
 real(8) :: Harray(3,maxntmg)  ! Grid spacing
 real(8) :: rLsize(3,maxntmg)    ! size of the box
 
-integer :: maxMps
-
 ! Pseudopotential
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg,ppg_all
@@ -174,7 +172,6 @@ integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)
 real(8),allocatable :: Zps(:)              ! Pseudo charge
 real(8),allocatable :: Rps(:)              ! Core radius
-integer :: Mlmps
 integer :: Mlps(maxMKI),Lref(maxMKI)
 real(8),allocatable :: Vpsl(:,:,:)                 ! Local pseudopotential
 real(8),allocatable :: Vpsl_atom(:,:,:,:)
@@ -322,10 +319,6 @@ character(100):: rtDiffOutFile
 character(100):: rtELFOutFile
 character(100):: file_Projection
 character(20):: fileNumber
-
-integer,allocatable :: numatom_ps(:,:,:)
-integer,allocatable :: iatomnum_ps(:,:,:,:)
-integer :: maxMps_all
 
 real(8), allocatable :: rho_n(:,:,:)
 real(8), allocatable :: Vh_n(:,:,:)

@@ -18,17 +18,6 @@ module allocate_psl_sub
 use scf_data
 use read_pslfile_sub
 
-integer :: Nr
-
-real(8), allocatable :: rhopp(:,:)
-
-real(8), allocatable :: rad_psl(:,:)
-
-real(8), allocatable :: ur(:,:)
-
-real(8),allocatable :: rho_core(:,:,:)
-
-real(8),allocatable :: vloctbl(:,:)
 real(8),allocatable :: Gx(:),Gy(:),Gz(:)
 real(8),allocatable :: dVloc_G(:,:)
 real(8),allocatable :: dVloc_G_tmp(:,:)
@@ -46,40 +35,8 @@ use structures, only: s_rgrid
 use scf_data
 implicit none
 type(s_rgrid),intent(in) :: lg
-real(8) :: r
-integer :: Nr0
-
-select case(iperiodic)
-case(0)
-  r=sqrt((dble(lg%num(1))*Hgs(1))**2  &
-        +(dble(lg%num(2))*Hgs(2))**2  &
-        +(dble(lg%num(3))*Hgs(3))**2)
-case(3)
-  r=sqrt((dble(lg%num(1))*Hgs(1))**2  &
-        +(dble(lg%num(2))*Hgs(2))**2  &
-        +(dble(lg%num(3))*Hgs(3))**2)+maxval(Rps(:))
-end select
-Nr0=r/rmin_step+1
-if(Nr0<maxval(Mr(:)))then
-  Nr=maxval(Mr(:))+1
-else
-  Nr=Nr0
-end if
-
-maxMps=int(4.d0/3.d0*Pi*(rmaxRps+4.d0*maxval(Hgs(:)))**3/Hvol)
-Mlmps=maxlm
-
-allocate(rhopp(0:Nr,MKI))
-allocate(rad_psl(0:Nr,MKI))
-
-allocate(ur(maxMps,Mlmps))
-
-allocate(rho_core(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
-allocate(numatom_ps(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
 if(iperiodic==3)then
-  allocate(vloctbl(Nr,MKI))
   allocate(Gx(lg%num(1)*lg%num(2)*lg%num(3)))
   allocate(Gy(lg%num(1)*lg%num(2)*lg%num(3)))
   allocate(Gz(lg%num(1)*lg%num(2)*lg%num(3)))
@@ -95,16 +52,7 @@ end subroutine allocate_psl
 !==================================================================================================
 subroutine deallocate_psl
 
-deallocate(rhopp)
-deallocate(ur)
-deallocate(rad_psl)
-
-deallocate(rho_core)
-
-deallocate(numatom_ps)
-
 if(iperiodic==3)then
-  deallocate(vloctbl)
   deallocate(Gx,Gy,Gz)
   deallocate(dVloc_G,rhoion_G,Vion_G)
   deallocate(dVloc_G_tmp,rhoion_G_tmp,Vion_G_tmp)
