@@ -641,7 +641,7 @@ lg%num(:)=lg%ie(:)-lg%is(:)+1
 
 if(sum(dl)==0d0 .and. sum(num_rgrid)==0) dl = Hgs ! input variables should not be changed (future work)
 call init_dft(lg,system,stencil)
-call init_grid_parallel(lg,mg,ng) ! lg --> mg & ng
+call init_grid_parallel(nproc_id_global,nproc_size_global,lg,mg,ng) ! lg --> mg & ng
 
 if(iscfrt==2)then
 #ifdef SALMON_STENCIL_PADDING

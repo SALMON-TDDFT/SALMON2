@@ -23,7 +23,6 @@ contains
 subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
-  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation
   use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
@@ -116,10 +115,10 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   end do
   end do
   
-  if(nproc_size_global==1)then
+  if(info_field%isize_all==1)then
   else
     call timer_begin(LOG_ALLREDUCE_HARTREE)
-    call comm_summation(sum1,sum2,nproc_group_global)
+    call comm_summation(sum1,sum2,info_field%icomm_all)
     call timer_end(LOG_ALLREDUCE_HARTREE)
     sum1=sum2
   end if
@@ -139,11 +138,11 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
     end do
     end do
   
-    if(nproc_size_global==1)then
+    if(info_field%isize_all==1)then
       tottmp=totbox
     else
       call timer_begin(LOG_ALLREDUCE_HARTREE)
-      call comm_summation(totbox,tottmp,nproc_group_global)
+      call comm_summation(totbox,tottmp,info_field%icomm_all)
       call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
@@ -169,11 +168,11 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
     end do
     end do
   
-    if(nproc_size_global==1)then
+    if(info_field%isize_all==1)then
       tottmp=totbox
     else
       call timer_begin(LOG_ALLREDUCE_HARTREE)
-      call comm_summation(totbox,tottmp,nproc_group_global)
+      call comm_summation(totbox,tottmp,info_field%icomm_all)
       call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
@@ -195,7 +194,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   end do iteration
   
   poisson%iterVh=iter
-  if ( poisson%iterVh>maxiter .and. comm_is_root(nproc_id_global)) then
+  if ( poisson%iterVh>maxiter .and. comm_is_root(info_field%id_all)) then
      write(*,*) "Warning:Vh iteration is not converged"
      write(*,'("||tVh(i)-tVh(i-1)||**2/(# of grids) = ",e15.8)') &
                                 sum2/dble(lg%num(1)*lg%num(2)*lg%num(3))

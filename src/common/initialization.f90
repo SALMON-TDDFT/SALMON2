@@ -125,7 +125,6 @@ end subroutine init_dft
 subroutine init_orbital_parallel_singlecell(system,info)
   use structures
   use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital
-  use salmon_parallel, only: nproc_group_global
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel)      :: info
@@ -150,7 +149,6 @@ subroutine init_orbital_parallel_singlecell(system,info)
 ! for parallelization
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
   info%if_divide_orbit  = nproc_ob.ne.1
-  info%icomm_rko  = nproc_group_global
 
   allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1),info%irank_io(1:system%no))
 
@@ -249,21 +247,17 @@ end subroutine init_grid_whole
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(lg,mg,ng)
+subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   use salmon_communication, only: comm_is_root
-  use salmon_parallel, only: nproc_id_global,nproc_size_global
   use salmon_global, only: calc_mode,iperiodic,process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_k,nproc_ob
   use structures, only: s_rgrid
   implicit none
+  integer      ,intent(in) :: myrank,nproc
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid)            :: mg,ng
   !
   integer :: i1,i2,i3,i4,j1,j2,j3,ibox,j,ii
-  integer :: nproc,myrank
   integer :: nproc_domain_orbital_mul,ngo(3),ngo_mul
-
-  myrank = nproc_id_global
-  nproc = nproc_size_global
 
   allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1),ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
 
@@ -328,7 +322,7 @@ subroutine init_grid_parallel(lg,mg,ng)
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
 
   if(iperiodic==3 .and. nproc_domain_orbital_mul==1) then
-    if(comm_is_root(nproc_id_global)) write(*,*) "r-space parallelization: off"
+    if(comm_is_root(myrank)) write(*,*) "r-space parallelization: off"
     mg%is_array(1:3) = mg%is(1:3)
     mg%ie_array(1:3) = mg%ie(1:3)
     do j=mg%is_overlap(1),mg%ie_overlap(1)

@@ -210,7 +210,6 @@ end subroutine make_corr_pole
 
 subroutine set_ig_bound(lg,ng,poisson)
   use structures, only: s_rgrid,s_poisson
-  use salmon_parallel
   implicit none
   type(s_rgrid), intent(in)     :: lg, ng
   type(s_poisson),intent(inout) :: poisson

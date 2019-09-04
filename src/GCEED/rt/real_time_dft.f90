@@ -547,7 +547,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_ng, ng, 1, nproc_group_global, neig_ng)
+  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
 
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)

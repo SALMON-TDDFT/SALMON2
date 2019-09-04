@@ -43,6 +43,12 @@ integer :: icolor,ikey
 
 integer :: npuy,npuz
 
+! info
+
+info%icomm_rko  = nproc_group_global
+info%id_rko = nproc_id_global
+info%isize_rko = nproc_size_global
+
 !new_world for comm_kgrid
 if(process_allocation=='orbital_sequential')then
   do i3=0,nproc_d_o(3)-1
@@ -288,6 +294,12 @@ end if
  
 info%icomm_k = comm_create_group(nproc_group_global, icolor, ikey)
 call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
+
+! info_field
+
+info_field%icomm_all = info%icomm_rko
+info_field%id_all = info%id_rko
+info_field%isize_all = info%isize_rko
 
 if(process_allocation=='orbital_sequential')then
   do iz=0,nproc_d_o(3)-1
