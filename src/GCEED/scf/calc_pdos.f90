@@ -83,11 +83,12 @@ do iob=1,iobmax
           yy=lg%coordinate(iy,2)-Rion(2,iatom)
           zz=lg%coordinate(iz,3)-Rion(3,iatom)
           rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
-          call bisection(rr,intr,ikoa,nr,rad_psl)
-          if(intr==0) intr=1
-          ratio1=(rr-rad_psl(intr,ikoa))/(rad_psl(intr+1,ikoa)-rad_psl(intr,ikoa)) ; ratio2=1.d0-ratio1
-          phi_r= ratio1*pp%upp_f(intr+1,Lref(ikoa),ikoa)/rr**(Lref(ikoa)+1)*sqrt((2*Lref(ikoa)+1)/(4*Pi)) +  &
-                 ratio2*pp%upp_f(intr,Lref(ikoa),ikoa)/rr**(Lref(ikoa)+1)*sqrt((2*Lref(ikoa)+1)/(4*Pi))
+          call bisection(rr,intr,ikoa,pp%nrmax,pp%rad)
+          if(intr==1) intr=2
+          ratio1=(rr-pp%rad(intr,ikoa))/(pp%rad(intr+1,ikoa)-pp%rad(intr,ikoa)) ; ratio2=1.d0-ratio1
+          phi_r= ratio1*pp%upp_f(intr,Lref(ikoa),ikoa)/rr**(Lref(ikoa)+1)*sqrt((2*Lref(ikoa)+1)/(4*Pi)) +  &
+                 ratio2*pp%upp_f(intr-1,Lref(ikoa),ikoa)/rr**(Lref(ikoa)+1)*sqrt((2*Lref(ikoa)+1)/(4*Pi))
+                                        !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
           call Ylm_sub(xx,yy,zz,lm,Ylm)
           rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+psi(ix,iy,iz,iob,iik)*phi_r*Ylm*Hvol
         end do

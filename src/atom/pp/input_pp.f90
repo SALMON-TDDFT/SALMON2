@@ -231,7 +231,7 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   pp%upp(0:pp%mr(ik),0:pp%mlps(ik))=pp%upp(0:pp%mr(ik),0:pp%mlps(ik))*sqrt(au_length_aa)
 
   do i=1,pp%nrmax
-    pp%rad(i,ik)=(i-1)*step
+    pp%rad(i,ik)=(i-1)*step  !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
   enddo
 
   if(Lmax_ps(ik) >= 0)pp%mlps(ik) = Lmax_ps(ik) ! Maximum angular momentum given by input

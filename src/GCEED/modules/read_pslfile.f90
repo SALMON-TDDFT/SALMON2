@@ -32,8 +32,6 @@ module read_pslfile_sub
   
   real(8), allocatable :: rhopp_f(:,:)
   
-  real(8), allocatable :: rad_f(:,:)
-  
   contains
   !==================================================================================================
   subroutine read_pslfile(system)
@@ -43,7 +41,7 @@ module read_pslfile_sub
     use input_pp_sub, only: input_pp
     use prep_pp_sub, only: init_mps
     implicit none
-    integer :: ak,i
+    integer :: ak
     type(s_dft_system), intent(inout)  :: system
     integer :: nrmax
     
@@ -65,7 +63,6 @@ module read_pslfile_sub
     call init_mps(ppg_all)
     
     allocate(rhopp_f(0:Nrmax,MKI))
-    allocate(rad_f(0:Nrmax,MKI) )
     
     call input_pp(pp,harray(1,1),harray(2,1),harray(3,1))
  
@@ -73,12 +70,6 @@ module read_pslfile_sub
   
     Lref(1:MKI)=pp%lref(1:MKI)
 
-    do ak=1,MKI
-      do i=1,Mr(ak)
-        rad_f(i-1,ak)=pp%rad(i,ak)
-      end do
-    end do
-  
     Zps(1:MKI)=pp%zps(1:MKI)
     Rps(1:MKI)=pp%rps(1:MKI)
     rmaxRps=maxval(Rps(1:MKI))

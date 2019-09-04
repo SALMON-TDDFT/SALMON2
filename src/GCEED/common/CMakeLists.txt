@@ -21,7 +21,6 @@ set(SOURCES
     set_icoo1d.f90
     set_imesh_oddeven.f90
     set_is.f90
-    storevpp.f90
     writepsi.f90
     ylm.f90
     )

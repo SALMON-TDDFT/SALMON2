@@ -34,8 +34,6 @@ if(iSCFRT==1)then
   end if
 end if
 
-call storevpp
-
 select case(iperiodic)
 case(0)
   call calcJxyz_all(lg)
