@@ -23,7 +23,6 @@ integer :: Nr
 real(8), allocatable :: rhopp(:,:)
 real(8), allocatable :: vpp(:,:,:)
 real(8), allocatable :: uppr(:,:,:)
-real(8), allocatable :: uVnl(:,:,:)
 
 real(8), allocatable :: rad_psl(:,:)
 
@@ -38,9 +37,6 @@ real(8),allocatable :: dVloc_G_tmp(:,:)
 complex(8),allocatable :: rhoion_G(:),Vion_G(:)
 complex(8),allocatable :: rhoion_G_tmp(:)
 complex(8),allocatable :: Vion_G_tmp(:)
-
-complex(8),allocatable :: uVpsibox_c(:,:),uVpsibox2_c(:,:)
-complex(8),allocatable :: uVpsibox1_j(:,:,:,:,:),uVpsibox2_j(:,:,:,:,:)
 
 integer :: nGzero
 
@@ -75,21 +71,17 @@ end if
 maxMps=int(4.d0/3.d0*Pi*(rmaxRps+4.d0*maxval(Hgs(:)))**3/Hvol)
 Mlmps=maxlm
 
-allocate(uV_all(maxMps,Mlmps,MI), uVu(Mlmps,MI)); uVu=0.0d0
-
 nprj_u=size(upp_f,2)
 nprj_v=size(vpp_f,2)
 allocate(rhopp(0:Nr,MKI))
 allocate(vpp(0:Nr,0:nprj_v-1,MKI))
 allocate(uppr(0:Nr,0:nprj_u-1,MKI))
-allocate(uVnl(0:Nr,0:nprj_u-1,MKI))
 allocate(rad_psl(0:Nr,MKI))
 
 allocate(ur(maxMps,Mlmps))
 
 allocate(rho_core(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
-allocate(uV(maxMps,Mlmps,MI))
 allocate(numatom_ps(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
 if(iperiodic==3)then
@@ -105,32 +97,16 @@ if(iperiodic==3)then
   allocate(Vion_G_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
 end if
 
-if(iflag_ps==1) then
-  allocate (uVpsibox_c(1:maxlm,1:MI))
-  allocate (uVpsibox2_c(1:maxlm,1:MI))
-  uVpsibox_c=0.d0
-  uVpsibox2_c=0.d0
-  if(iperiodic==3.and.iSCFRT==2)then
-    allocate (uVpsibox1_j(4,1:maxlm,1:MI,1:iobnum,k_sta:k_end))
-    allocate (uVpsibox2_j(4,1:maxlm,1:MI,1:iobnum,k_sta:k_end))
-    uVpsibox1_j=0.d0
-    uVpsibox2_j=0.d0
-  end if
-end if
-
 end subroutine allocate_psl
 !==================================================================================================
 subroutine deallocate_psl
 
-deallocate(uV_all,uVu)
-
-deallocate(rhopp,vpp,uppr,uVnl)
+deallocate(rhopp,vpp,uppr)
 deallocate(ur)
 deallocate(rad_psl)
 
 deallocate(rho_core)
 
-deallocate(uV)
 deallocate(numatom_ps)
 
 if(iperiodic==3)then
@@ -138,11 +114,6 @@ if(iperiodic==3)then
   deallocate(Gx,Gy,Gz)
   deallocate(dVloc_G,rhoion_G,Vion_G)
   deallocate(dVloc_G_tmp,rhoion_G_tmp,Vion_G_tmp)
-end if
-
-if(iflag_ps==1) then
-  deallocate (uVpsibox_c,uVpsibox2_c)
-  if(iperiodic==3.and.iSCFRT==2) deallocate (uVpsibox1_j,uVpsibox2_j)
 end if
 
 end subroutine deallocate_psl

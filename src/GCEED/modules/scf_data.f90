@@ -178,7 +178,6 @@ integer :: Mlmps
 integer :: Mlps(maxMKI),Lref(maxMKI)
 real(8),allocatable :: Vpsl(:,:,:)                 ! Local pseudopotential
 real(8),allocatable :: Vpsl_atom(:,:,:,:)
-real(8),allocatable :: uV_all(:,:,:),uVu(:,:)          ! Non-local
 !Nonlinear core correction
 logical :: flag_nlcc = .false.
 
@@ -323,8 +322,6 @@ character(100):: rtDiffOutFile
 character(100):: rtELFOutFile
 character(100):: file_Projection
 character(20):: fileNumber
-
-real(8),allocatable :: uV(:,:,:)
 
 integer,allocatable :: numatom_ps(:,:,:)
 integer,allocatable :: iatomnum_ps(:,:,:,:)

@@ -89,7 +89,6 @@ end if
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_ps.eq.1)then
-    write(97) uV_all(:maxMps,:Mlmps,:MI),uVu(:Mlmps,:MI)
     write(97) Mlps(:MKI),Lref(:MKI)
   end if
 end if
@@ -856,7 +855,11 @@ allocate( Vpsl(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
 if(icalcforce==1) allocate( Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),MI) )
 
 if(comm_is_root(nproc_id_global))then
-  if(version_num_box(1)>=32)then
+  if(version_num_box(1)>=41)then
+    if(iflag_ps.eq.1)then
+      read(96) Mlps(:MKI),Lref(:MKI)
+    end if
+  else if(version_num_box(1)>=32)then
     if(iflag_ps.eq.1)then
       read(96) 
       read(96) Mlps(:MKI),Lref(:MKI)

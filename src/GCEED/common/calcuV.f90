@@ -104,41 +104,6 @@ implicit none
 
   rinv_hvol=1.d0/Hvol
 
-  lma = 0
-  do iatom=1,MI
-    ik=Kion(iatom)
-    lm=0
-    l0=0
-    do l=0,Mlps(ik)
-    do ll=l0,l0+pp%nproj(l,ik)-1
-      if ( pp%inorm(ll,ik)==0) then
-        !do lm=l**2+1,(l+1)**2
-        !  do jj=1,ppg%mps(iatom)
-        !    uV(jj,lm,iatom) = 0.d0
-        !  end do
-        !  do jj=1,ppg_all%mps(iatom)
-        !    uV_all(jj,lm,iatom) = 0.d0
-        !  end do
-        !  uVu(lm,iatom)=1.d-10
-        !end do 
-      else
-        do m=l**2+1,(l+1)**2
-          lm = lm + 1
-          lma = lma + 1
-          do jj=1,ppg%mps(iatom)
-            uV(jj,lm,iatom) = ppg%uv(jj,lma)
-          end do
-          do jj=1,ppg_all%mps(iatom)
-            uV_all(jj,lm,iatom) = ppg_all%uv(jj,lma)
-          end do
-          uVu(lm,iatom)=ppg%rinv_uvu(lma)*rinv_hvol
-        end do 
-      end if
-    end do
-    l0=ll
-    end do
-  end do
-
 return
 
 END SUBROUTINE calcuV
