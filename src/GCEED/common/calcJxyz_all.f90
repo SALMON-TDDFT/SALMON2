@@ -78,27 +78,6 @@ implicit none
                                     lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     hx,hy,hz)
   
-  Mps(1:MI)=ppg%mps(1:MI) 
-  Mps_all(1:MI)=ppg_all%mps(1:MI) 
-
-  Jxyz=0
-  Jxyz_all=0
-  Jxxyyzz=0
-  Jxxyyzz_all=0
-
-  do iatom=1,MI
-    do j=1,Mps(iatom)
-      Jxyz(1,j,iatom)=ppg%jxyz(1,j,iatom)
-      Jxyz(2,j,iatom)=ppg%jxyz(2,j,iatom)
-      Jxyz(3,j,iatom)=ppg%jxyz(3,j,iatom)
-    end do
-    do j=1,Mps_all(iatom)
-      Jxyz_all(1,j,iatom)=ppg_all%jxyz(1,j,iatom)
-      Jxyz_all(2,j,iatom)=ppg_all%jxyz(2,j,iatom)
-      Jxyz_all(3,j,iatom)=ppg_all%jxyz(3,j,iatom)
-    end do
-  end do
-
 return
 
 end subroutine calcJxyz_all

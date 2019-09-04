@@ -174,18 +174,10 @@ integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)
 real(8),allocatable :: Zps(:)              ! Pseudo charge
 real(8),allocatable :: Rps(:)              ! Core radius
-integer,allocatable :: Jxyz_all(:,:,:),Mps_all(:),Jxxyyzz_all(:,:,:)
-integer,allocatable :: Mps(:)
-integer,allocatable :: Jxyz_tmp1(:,:,:)
-integer,allocatable :: Jxyz_tmp2(:,:,:)
-integer,allocatable :: Jxxyyzz_tmp1(:,:,:)
-integer,allocatable :: Jxxyyzz_tmp2(:,:,:)
-integer,allocatable :: Jxxyyzz(:,:,:)
 integer :: Mlmps
 integer :: Mlps(maxMKI),Lref(maxMKI)
 real(8),allocatable :: Vpsl(:,:,:)                 ! Local pseudopotential
 real(8),allocatable :: Vpsl_atom(:,:,:,:)
-real(8),allocatable :: uV_all(:,:,:),uVu(:,:)          ! Non-local
 !Nonlinear core correction
 logical :: flag_nlcc = .false.
 
@@ -330,9 +322,6 @@ character(100):: rtDiffOutFile
 character(100):: rtELFOutFile
 character(100):: file_Projection
 character(20):: fileNumber
-
-integer,allocatable :: Jxyz(:,:,:)
-real(8),allocatable :: uV(:,:,:)
 
 integer,allocatable :: numatom_ps(:,:,:)
 integer,allocatable :: iatomnum_ps(:,:,:,:)
