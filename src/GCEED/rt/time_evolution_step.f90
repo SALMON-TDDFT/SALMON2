@@ -241,7 +241,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_end(LOG_CALC_HARTREE)
 
   call timer_begin(LOG_CALC_EXC_COR)
-  call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
+  call exc_cor_ns(system,xc_func, ng, srg_ng, system%nspin, ilsda, srho_s, ppn, sVxc, energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
