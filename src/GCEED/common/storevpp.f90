@@ -18,8 +18,7 @@ SUBROUTINE storevpp
 use scf_data
 use allocate_psl_sub
 implicit none
-integer :: i,ak,L,l0,ll
-real(8) :: r
+integer :: i,ak
 
 !-------------------- Read atomic pseudopotential data
 
@@ -48,20 +47,6 @@ do ak=1,MKI
          rad_psl(i,ak)=i*step(ak)
        end do
   end select
-
-  l0=0
-  do ll=0,Mlps0(ak)
-  do L=l0,l0+pp%nproj(ll,ak)-1
-    do i=1,Mr(ak)
-      r=rad_psl(i,ak)
-      uppr(i,L,ak)=upp_f(i,L,ak)/r**(ll+1)*sqrt((2*ll+1)/(4*Pi))
-    end do
-    uppr(0,L,ak)=uppr(1,L,ak)
-  end do
-  l0=L
-  end do
-
-  uppr(Mr(ak)+1:Nr,:,ak)=0.d0
 
 end do
 

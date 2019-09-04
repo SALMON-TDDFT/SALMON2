@@ -30,7 +30,7 @@ subroutine calcJxyz_all_periodic(lg,al0,matrix_A0)
   
   complex(8),parameter :: zI=(0.d0,1.d0)
   
-  integer :: i,j
+  integer :: i
   integer :: mmx(mg_num(1)*mg_num(2)*mg_num(3))
   integer :: mmy(mg_num(1)*mg_num(2)*mg_num(3))
   integer :: mmz(mg_num(1)*mg_num(2)*mg_num(3))

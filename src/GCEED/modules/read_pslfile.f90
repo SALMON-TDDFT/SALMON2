@@ -30,7 +30,6 @@ module read_pslfile_sub
   integer,allocatable :: Mr(:)
   real(8),allocatable :: step(:)
   
-  real(8), allocatable :: upp_f(:,:,:)
   real(8), allocatable :: rhopp_f(:,:)
   
   real(8), allocatable :: rad_f(:,:)
@@ -44,7 +43,7 @@ module read_pslfile_sub
     use input_pp_sub, only: input_pp
     use prep_pp_sub, only: init_mps
     implicit none
-    integer :: ak,i,ll,l0,l,nprj_u
+    integer :: ak,i
     type(s_dft_system), intent(inout)  :: system
     integer :: nrmax
     
@@ -65,8 +64,6 @@ module read_pslfile_sub
     call init_mps(ppg)
     call init_mps(ppg_all)
     
-    nprj_u = size( pp%upp_f, 2 )
-    allocate(upp_f(0:Nrmax,0:nprj_u-1,MKI))
     allocate(rhopp_f(0:Nrmax,MKI))
     allocate(rad_f(0:Nrmax,MKI) )
     
@@ -77,17 +74,6 @@ module read_pslfile_sub
     Lref(1:MKI)=pp%lref(1:MKI)
 
     do ak=1,MKI
-      Mr(ak)=pp%mr(ak)
-      Mlps0(ak)=pp%mlps(ak)
-      l0=0
-      do ll=0,Mlps0(ak)
-      do l=l0,l0+pp%nproj(ll,ak)-1
-        do i=0,Mr(ak)
-          upp_f(i,l,ak)=pp%upp_f(i,l,ak)
-        end do
-      end do
-      l0=l
-      end do
       do i=1,Mr(ak)
         rad_f(i-1,ak)=pp%rad(i,ak)
       end do
