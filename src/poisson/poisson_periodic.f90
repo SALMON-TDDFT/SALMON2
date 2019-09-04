@@ -22,7 +22,6 @@ contains
 subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   use structures, only: s_rgrid, s_field_parallel, s_dft_system, &
                         s_scalar, s_reciprocal_grid
-  use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use math_constants, only : pi
   implicit none
@@ -217,7 +216,7 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   end do
   end do
 
-  call comm_summation(fg%zrhoG_ele_tmp,fg%zrhoG_ele,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+  call comm_summation(fg%zrhoG_ele_tmp,fg%zrhoG_ele,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
   call comm_summation(ff1z,ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
 
 !$OMP parallel do private(iz,ky,kx)
@@ -238,7 +237,7 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg)
   end do
   end do
   end do
-  call comm_summation(ff1,ff2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+  call comm_summation(ff1,ff2,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
 
 !$OMP parallel do private(iz,iy,ix)
   do iz = mg%is(3),mg%ie(3)

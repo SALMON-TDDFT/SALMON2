@@ -24,7 +24,6 @@ contains
 subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson
-  use salmon_parallel, only: nproc_size_global, nproc_group_global
   use salmon_communication, only: comm_summation
   use timer
   
@@ -49,7 +48,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
   integer :: j,k
-  integer :: istart(0:nproc_size_global-1),iend(0:nproc_size_global-1)
+  integer :: istart(0:info_field%isize_all-1),iend(0:info_field%isize_all-1)
   integer :: icount
   integer,allocatable :: itrho(:)
   integer :: num_center
@@ -236,7 +235,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   end do
   
   call timer_begin(LOG_ALLREDUCE_HARTREE)
-  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,nproc_group_global)
+  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,info_field%icomm_all)
   call timer_end(LOG_ALLREDUCE_HARTREE)
   
   do ii=1,poisson%npole_total
@@ -337,14 +336,14 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   
   end select
   
-  if(nproc_size_global==1)then
+  if(info_field%isize_all==1)then
   !$OMP parallel do
     do icen=1,num_center
       rholm(:,icen)=rholm2(:,icen)
     end do
   else
     call timer_begin(LOG_ALLREDUCE_HARTREE)
-    call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,nproc_group_global)
+    call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,info_field%icomm_all)
     call timer_end(LOG_ALLREDUCE_HARTREE)
   end if
   
@@ -446,7 +445,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
       end do
     end do
   
-    if(nproc_size_global==1)then
+    if(info_field%isize_all==1)then
   !$OMP parallel do
       do jj=1,icount
         poisson%wkbound(jj)=poisson%wkbound2(jj)

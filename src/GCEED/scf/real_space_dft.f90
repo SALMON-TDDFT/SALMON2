@@ -108,7 +108,7 @@ call setcN(cnmat)
 call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 
 call init_dft(lg,system,stencil)
-call init_grid_parallel(lg,mg,ng) ! lg --> mg & ng
+call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
 call init_orbital_parallel_singlecell(system,info)
 
 if(stencil%if_orthogonal) then
@@ -175,7 +175,7 @@ if(iopt==1)then
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_ng, ng, 1, nproc_group_global, neig_ng)
+  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
   
   if(ispin==0)then
     nspin=1
@@ -545,7 +545,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,nproc_group_global)
+      call comm_summation(sum0,sum1,info_field%icomm_all)
       if(ispin==0)then
         sum1=sum1*Hvol/(dble(ifMST(1))*2.d0)
       else if(ispin==1)then
@@ -561,7 +561,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,nproc_group_global)
+      call comm_summation(sum0,sum1,info_field%icomm_all)
       if(convergence=='norm_rho_dng')then
         sum1=sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
@@ -575,7 +575,7 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,nproc_group_global)
+      call comm_summation(sum0,sum1,info_field%icomm_all)
       if(convergence=='norm_pot_dng')then
         sum1=sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
@@ -629,7 +629,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   end do
   end do
   end do
-  call comm_summation(rNebox1,rNebox2,nproc_group_global)
+  call comm_summation(rNebox1,rNebox2,info_field%icomm_all)
   if(comm_is_root(nproc_id_global))then
     write(*,*) "Ne=",rNebox2*Hvol
   end if

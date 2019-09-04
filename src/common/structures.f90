@@ -106,7 +106,7 @@ module structures
     integer :: icomm_o,   id_o,   isize_o   ! communicator, process ID, & # of processes for orbital
     integer :: icomm_ro,  id_ro,  isize_ro  ! communicator, process ID, & # of processes for r-space & orbital
     integer :: icomm_ko,  id_ko,  isize_ko  ! communicator, process ID, & # of processes for k-space & orbital
-    integer :: icomm_rko ! communicator for r-space, k-space & orbital
+    integer :: icomm_rko, id_rko, isize_rko ! communicator, process ID, & # of processes for r-space, k-space & orbital
     integer :: im_s,im_e,numm ! im=im_s,...,im_e, numm=im_e-im_s+1
     integer :: ik_s,ik_e,numk ! ik=ik_s,...,ik_e, numk=ik_e-ik_s+1
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
@@ -117,6 +117,7 @@ module structures
   end type s_orbital_parallel
 
   type s_field_parallel
+    integer :: icomm_all,id_all,isize_all ! communicator, process ID, & # of processes
     integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
     integer :: id(3), isize(3)
     integer :: icomm_ffte(3) ! 1: x-direction, 2: y-direction, 3: z-direction
