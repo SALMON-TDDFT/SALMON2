@@ -15,6 +15,8 @@
 !
 module structure_opt_sub
   implicit none
+  ! Global variables like below is not allowed by our policy
+  ! These should be moved (do it later...)
   real(8),allocatable :: r1_opt(:),r2_opt(:)
   real(8),allocatable :: H_opt(:,:),H_opt_temp(:,:)
 contains

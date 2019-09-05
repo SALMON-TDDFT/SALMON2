@@ -20,10 +20,10 @@ module timer
   integer,public,parameter :: LOG_TOTAL                 = 0
   integer,public,parameter :: LOG_INIT                  = 1 ! general init.
 
-  integer,public,parameter :: LOG_READ_LDA_DATA         = 10
+  integer,public,parameter :: LOG_READ_GS_DATA         = 10
   integer,public,parameter :: LOG_READ_RT_DATA          = 11
-  integer,public,parameter :: LOG_WRITE_LDA_DATA        = 12
-  integer,public,parameter :: LOG_WRITE_LDA_INFOS       = 13
+  integer,public,parameter :: LOG_WRITE_GS_DATA        = 12
+  integer,public,parameter :: LOG_WRITE_GS_INFO       = 13
   integer,public,parameter :: LOG_WRITE_RT_DATA         = 14
   integer,public,parameter :: LOG_WRITE_GS_RESULTS      = 15
   integer,public,parameter :: LOG_WRITE_RT_RESULTS      = 16

@@ -52,7 +52,7 @@ use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
 use gram_schmidt_orth, only: gram_schmidt 
-use print_sub
+use write_sub
 use read_gs
 use code_optimization
 use salmon_initialization
@@ -820,19 +820,19 @@ end if
 call timer_end(LOG_WRITE_GS_RESULTS)
 
 
-call timer_begin(LOG_WRITE_LDA_DATA)
-! LDA data
+call timer_begin(LOG_WRITE_GS_DATA)
+! GS data
 ! subroutines in scf_data.f90
 if ( OC==1.or.OC==2.or.OC==3 ) then
   call OUT_data(lg,ng,info,mixing)
 end if
-call timer_end(LOG_WRITE_LDA_DATA)
+call timer_end(LOG_WRITE_GS_DATA)
 
 
-! LDA information
-call timer_begin(LOG_WRITE_LDA_INFOS)
+! GS information
+call timer_begin(LOG_WRITE_GS_INFO)
 if(comm_is_root(nproc_id_global)) then
-  open(1,file=LDA_info)
+  open(1,file=file_gs_info)
 
   write(1,*) "Total number of iteration = ", Miter
   write(1,*)
@@ -913,7 +913,7 @@ if(comm_is_root(nproc_id_global)) then
 
 end if
 
-call timer_end(LOG_WRITE_LDA_INFOS)
+call timer_end(LOG_WRITE_GS_INFO)
 
 deallocate(Vlocal)
 call finalize_xc(xc_func)

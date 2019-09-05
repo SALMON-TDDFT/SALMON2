@@ -15,12 +15,12 @@
 !
 !======================================================================
 !======================================================================
-module writefile3d
+module write_file3d
   implicit none
 
 contains
 
-subroutine writeavs(lg,fp,suffix,header_unit,rmat,icoo1d)
+subroutine write_avs(lg,fp,suffix,header_unit,rmat,icoo1d)
   use inputoutput, only: nsplit_voxel_data
   use salmon_parallel, only: nproc_id_global
   use structures, only: s_rgrid
@@ -78,11 +78,11 @@ subroutine writeavs(lg,fp,suffix,header_unit,rmat,icoo1d)
     endif
   endif
   
-end subroutine writeavs
+end subroutine write_avs
 
 !======================================================================
 
-subroutine writecube(lg,fp,suffix,phys_quantity,rmat,hgs)
+subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,hgs)
   use inputoutput, only: natom,kion,rion,izatom
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_id_global
@@ -144,11 +144,11 @@ subroutine writecube(lg,fp,suffix,phys_quantity,rmat,hgs)
     close(fp)
   end if
 
-end subroutine writecube
+end subroutine write_cube
 
 !======================================================================
 
-subroutine writevtk(lg,fp,suffix,rmat,hgs)
+subroutine write_vtk(lg,fp,suffix,rmat,hgs)
   use inputoutput, only: au_length_aa
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_id_global
@@ -194,8 +194,8 @@ subroutine writevtk(lg,fp,suffix,rmat,hgs)
     close(fp)
   end if
 
-end subroutine writevtk
+end subroutine write_vtk
 
 !======================================================================
 
-end module writefile3d
+end module write_file3d

@@ -352,7 +352,6 @@ integer,allocatable :: rho_region_nz(:,:)
 integer :: numspin
 
 integer :: icalcforce
-real(8),allocatable :: rforce(:,:)
 integer :: iflag_md
 
 real(8) :: fcN(0:12)
@@ -392,7 +391,7 @@ real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 !filename
 character(100) :: file_OUT
 character(100) :: file_IN
-character(100) :: LDA_Info
+character(100) :: file_gs_info
 character(100) :: file_eigen
 character(100) :: file_RT
 character(100) :: file_alpha_lr

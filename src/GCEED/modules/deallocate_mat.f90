@@ -36,10 +36,6 @@ deallocate (cmatbox_l,cmatbox_l2)
 
 deallocate (wk_s_h,wk2_s_h,lap_wk_s_h)
 
-if(icalcforce==1) then
-  deallocate(rforce)
-end if
-
 if(iSCFRT==1.and.icalcforce==1)then
   deallocate(rgrad_wk)
 else if(iSCFRT==2.and.icalcforce==1)then
