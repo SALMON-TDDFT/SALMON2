@@ -43,7 +43,7 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
 use global_variables_rt
-use print_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
+use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use init_poisson_sub
 implicit none
@@ -161,7 +161,7 @@ end select
 call timer_end(LOG_INIT_RT)
 
 
-call timer_begin(LOG_READ_LDA_DATA)
+call timer_begin(LOG_READ_GS_DATA)
 ! Read SCF data
 call IN_data(lg,mg,ng,info,info_field,system,stencil,mixing)
 
@@ -198,7 +198,7 @@ end if
 if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
 call set_ig_bound(lg,ng,poisson)
 
-call timer_end(LOG_READ_LDA_DATA)
+call timer_end(LOG_READ_GS_DATA)
 
 
 call timer_begin(LOG_INIT_RT)
@@ -480,7 +480,7 @@ use salmon_pp, only: calc_nlcc
 use force_sub, only: calc_force_salmon
 use hpsi_sub, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
-use print_sub, only: write_xyz
+use write_sub, only: write_xyz
 use fdtd_coulomb_gauge, only: ls_singlescale
 implicit none
 

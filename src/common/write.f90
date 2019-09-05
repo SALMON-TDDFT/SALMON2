@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-module print_sub
+module write_sub
   use math_constants,only : zi
   implicit none
 
@@ -660,4 +660,4 @@ contains
     return
   end subroutine write_prod_dk_data
 
-end module print_sub
+end module write_sub
