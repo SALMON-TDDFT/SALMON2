@@ -3,7 +3,6 @@ set(SOURCES
     calc_pdos.f90
     convert_input_scf.f90
     copy_density.f90
-    prep_ini.f90
     real_space_dft.f90
     write_eigen.f90
     )

@@ -359,13 +359,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call writedns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calcELF(lg,mg,ng,srg,info,srho,itt)
-      call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
+      call calc_elf(lg,mg,ng,srg,info,srho,itt)
+      call write_elf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
