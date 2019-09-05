@@ -19,13 +19,14 @@ subroutine set_filename
   use scf_data
   implicit none
   
-  file_IN=trim(sysname)//"_gs.bin"
-  file_OUT=trim(sysname)//"_gs.bin"
+  file_in_gs_bin =trim(sysname)//"_gs.bin"
+  file_out_gs_bin=trim(sysname)//"_gs.bin"
+
  !file_gs_info=trim(sysname)//"_info.data"
   file_eigen=trim(sysname)//"_eigen.data"
 
-  file_OUT_rt=trim(sysname)//"_rt.bin"
-  file_IN_rt=trim(sysname)//"_rt.bin"
+  file_out_rt_bin=trim(sysname)//"_rt.bin"
+  file_in_rt_bin =trim(sysname)//"_rt.bin"
 
   file_RT=trim(sysname)//"_p.data"
   file_alpha_lr=trim(sysname)//"_lr.data"
@@ -42,7 +43,7 @@ subroutine set_filename
   file_external=trim(sysname)//"_ext.data"
   file_Projection=trim(sysname)//"_proj.data"
   
-  file_ini=trim(sysname)//"_ini.data"
+ !file_ini=trim(sysname)//"_ini.data" !removed
 
   return
 

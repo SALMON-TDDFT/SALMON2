@@ -1,5 +1,5 @@
 set(SOURCES
-    calcELF.f90
+    calc_elf.f90
     calcJxyz_all.f90
     calcJxyz_all_periodic.f90
     calc_pmax.f90
@@ -14,14 +14,14 @@ set(SOURCES
     exc_cor_ns.f90
     init_wf.f90
     init_k_rd.f90
-    OUT_IN_data.f90
+    read_write_gs_bin.f90
     psl.f90
     read_copy_pot.f90
     set_filename.f90
     set_icoo1d.f90
     set_imesh_oddeven.f90
     set_is.f90
-    writepsi.f90
+    write_psi.f90
     ylm.f90
     )
 

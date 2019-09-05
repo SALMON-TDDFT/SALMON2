@@ -15,7 +15,7 @@
 !
 !======================================================================
 !======================================================================
-subroutine writepsi(lg,info)
+subroutine write_psi(lg,info)
   use inputoutput, only: au_length_aa
   use structures, only: s_rgrid,s_orbital_parallel
   use salmon_parallel, only: nproc_group_global
@@ -84,5 +84,5 @@ subroutine writepsi(lg,info)
     end do
   end if
   
-end subroutine writepsi
+end subroutine write_psi
 

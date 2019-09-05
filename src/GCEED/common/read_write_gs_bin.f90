@@ -15,7 +15,7 @@
 !
 !=======================================================================
 
-SUBROUTINE OUT_data(lg,ng,info,mixing)
+SUBROUTINE write_gs_bin(lg,ng,info,mixing)
 use structures, only: s_rgrid, s_orbital_parallel, s_mixing
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -34,8 +34,7 @@ integer :: is,iob,jj,ik
 integer :: ix,iy,iz
 real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
 complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
-character(100) :: file_OUT_data
-character(100) :: file_OUT_data_ini
+character(100) :: file_out_gs_num_bin
 integer :: ibox
 integer :: ii,j1,j2,j3
 integer :: myrank_datafiles
@@ -49,7 +48,7 @@ integer :: icorr_p
 
 if(comm_is_root(nproc_id_global))then
 
-  open(97,file=file_OUT,form='unformatted')
+  open(97,file=file_out_gs_bin,form='unformatted')
   
 !version number
   version_num(1)=41
@@ -100,7 +99,8 @@ allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
 if(OC<=2)then
   if(num_datafiles_OUT==1.or.num_datafiles_OUT>nproc_size_global)then
-    file_OUT_data_ini = file_OUT_ini
+    !file_OUT_data_ini = file_OUT_ini
+     write(*,*) "Error: prep_ini and file_ini are removed from code"
   else
     if(nproc_id_global<num_datafiles_OUT)then
       myrank_datafiles=nproc_id_global
@@ -142,8 +142,8 @@ if(OC<=2)then
       inum_Mxin_datafile(:)=iend_Mxin_datafile(:)-ista_Mxin_datafile(:)+1
 
       write(fileNumber_data, '(i6.6)') myrank_datafiles
-      file_OUT_data = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
-      open(87,file=file_OUT_data,form='unformatted')
+      file_out_gs_num_bin = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
+      open(87,file=file_out_gs_num_bin,form='unformatted')
     end if
   end if
 end if
@@ -411,11 +411,11 @@ end if
 deallocate(matbox,matbox2)
 deallocate(cmatbox,cmatbox2)
 
-END SUBROUTINE OUT_data
+END SUBROUTINE write_gs_bin
 
 !=======================================================================
 
-SUBROUTINE IN_data(lg,mg,ng,info,info_field,system,stencil,mixing)
+SUBROUTINE read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -445,7 +445,7 @@ real(8),allocatable :: matbox3(:,:,:)
 real(8),allocatable :: esp0(:,:),rocc0(:,:)
 complex(8),allocatable :: cmatbox(:,:,:)
 complex(8),allocatable :: cmatbox2(:,:,:)
-character(100) :: file_IN_data
+character(100) :: file_in_gs_num_bin
 character(8) :: cha_version_num(2)
 integer :: version_num_box(2)
 integer :: myrank_datafiles
@@ -484,8 +484,8 @@ call setbN(bnmat)
 call setcN(cnmat)
 
 if(comm_is_root(nproc_id_global))then
-  write(*,*) file_IN
-  open(96,file=file_IN,form='unformatted')
+  write(*,*) file_in_gs_bin
+  open(96,file=file_in_gs_bin,form='unformatted')
 
   read(96) version_num_box(1),version_num_box(2)
 end if
@@ -916,8 +916,8 @@ if(IC<=2)then
 
       if(num_datafiles_IN>=2.and.nproc_id_global<num_datafiles_IN)then
         write(fileNumber_data, '(i6.6)') myrank_datafiles
-        file_IN_data = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
-        open(86,file=file_IN_data,form='unformatted')
+        file_in_gs_num_bin = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
+        open(86,file=file_in_gs_num_bin,form='unformatted')
       end if
     end if
   end if
@@ -1384,5 +1384,5 @@ deallocate( esp0,rocc0 )
 deallocate(matbox,matbox2,matbox3)
 deallocate(cmatbox,cmatbox2)
 
-END SUBROUTINE IN_data
+END SUBROUTINE read_gs_bin
 

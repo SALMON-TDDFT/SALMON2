@@ -494,7 +494,6 @@ contains
       & iflag_psicube, &
       & lambda1_diis, &
       & lambda2_diis, &
-      & file_ini, &
       & num_projection, &
       & iwrite_projection_ob, &
       & iwrite_projection_k, &
@@ -822,7 +821,6 @@ contains
     iflag_psicube        = 0
     lambda1_diis         = 0.5d0
     lambda2_diis         = 0.3d0
-    file_ini             = 'file_ini'
     num_projection       = 1
     do ii=1,200
       iwrite_projection_ob(ii) = ii
@@ -1269,7 +1267,6 @@ contains
     call comm_bcast(iflag_psicube       ,nproc_group_global)
     call comm_bcast(lambda1_diis        ,nproc_group_global)
     call comm_bcast(lambda2_diis        ,nproc_group_global)
-    call comm_bcast(file_ini            ,nproc_group_global)
     call comm_bcast(num_projection      ,nproc_group_global)
     call comm_bcast(iwrite_projection_ob,nproc_group_global)
     call comm_bcast(iwrite_projection_k ,nproc_group_global)
@@ -1930,7 +1927,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_psicube', iflag_psicube
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda1_diis', lambda1_diis
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda2_diis', lambda2_diis
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_ini', file_ini
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)

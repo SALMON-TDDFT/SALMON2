@@ -94,7 +94,6 @@ call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
 ihpsieff=0
-
 iblacsinit=0
 
 call timer_begin(LOG_TOTAL)
@@ -155,7 +154,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call IN_data(lg,mg,ng,info,info_field,system,stencil,mixing)
+    call read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
 
   end select
 
@@ -185,7 +184,6 @@ if(iopt==1)then
   end if
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
-
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 
   call allocate_scalar(mg,srho)
@@ -231,9 +229,8 @@ if(iopt==1)then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
     stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+    call get_fourier_grid_G(lg,info_field,fg)
   end if
-
-  if(iperiodic==3) call get_fourier_grid_G(lg,info_field,fg)
 
   select case( IC )
   case default ! New calculation
@@ -326,7 +323,7 @@ if(iopt==1)then
     end do
     rho = srho%f
 
-    allocate (Vlocal(mg_sta(1):mg_end(1),  &
+    allocate( Vlocal(mg_sta(1):mg_end(1),  &
                 mg_sta(2):mg_end(2),  &
                 mg_sta(3):mg_end(3),nspin))
 
@@ -420,11 +417,13 @@ if(comm_is_root(nproc_id_global)) then
   write(*,*) '-----------------------------------------------'
   select case(iperiodic)
   case(0)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,  &
-                                                                                 poisson%iterVh
+    write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
   case(3)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
+    write(*,101) Miter,energy%E_tot*2d0*Ry
   end select
+100 format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
+101 format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
+
   do ik=1,num_kpoints_rd
     if(ik<=3)then
       if(iperiodic==3) write(*,*) "k=",ik
@@ -437,7 +436,6 @@ if(comm_is_root(nproc_id_global)) then
     end if
   end do
 end if
-
 
 !---------------------------------------- Iteration
 
@@ -477,9 +475,9 @@ if (comm_is_root(nproc_id_global)) then
 end if    
 call timer_end(LOG_INIT_GS_ITERATION)
 
+
 call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
-
 
   if(sum1<threshold) cycle DFT_Iteration
 
@@ -524,9 +522,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 
     call timer_begin(LOG_CALC_CHANGE_ORDER)
-    if(iperiodic==0)then  
-      call change_order(psi,info)
-    end if
+    if(iperiodic==0) call change_order(psi,info)
     call timer_end(LOG_CALC_CHANGE_ORDER)
 
   end if
@@ -587,10 +583,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       if(iflag_diisjump == 1) then
         write(*,'("Diisjump occured. Steepest descent was used.")')
       end if
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,   &
-                                                                                   poisson%iterVh
+      write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
     case(3)
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,energy%E_tot*2d0*Ry
+      write(*,101) Miter,energy%E_tot*2d0*Ry
     end select
     do ik=1,num_kpoints_rd
       if(ik<=3)then
@@ -605,19 +600,23 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
 
     select case(convergence)
-      case('rho_dne')
-        write(*,'("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec     = ",i6,e15.8)') Miter,sum1
+      case('rho_dne' )
+        write(*,200) Miter, sum1
       case('norm_rho')
-        write(*,'("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)') Miter,sum1/a_B**6
+        write(*,201) Miter, sum1/a_B**6
       case('norm_rho_dng')
-        write(*,'("iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)') Miter,sum1/a_B**6
+        write(*,202) Miter, sum1/a_B**6
       case('norm_pot')
-        write(*,'("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2              = ",i6,e15.8)') Miter,     &
-                                                                         sum1*(2.d0*Ry)**2/a_B**6
+        write(*,203) Miter, sum1*(2.d0*Ry)**2/a_B**6
       case('norm_pot_dng')
-        write(*,'("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids) = ",i6,e15.8)') Miter,     &
-                                                                         sum1*(2.d0*Ry)**2/a_B**6
+        write(*,204) Miter, sum1*(2.d0*Ry)**2/a_B**6
     end select
+200 format("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
+201 format("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)
+202 format("iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
+203 format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2              = ",i6,e15.8)
+204 format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
+
   end if 
   rNebox1=0.d0 
 !$OMP parallel do reduction(+:rNebox1) private(iz,iy,ix)
@@ -646,7 +645,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 end do DFT_Iteration
 
-! for OUT_data
+! for writing GS data
 Vh = sVh%f
 rho = srho%f
 if(ilsda == 1) then
@@ -696,7 +695,6 @@ end select
 if(write_gs_wfn_k == 'y') then
   if(iperiodic==3) then
     call write_wfn(lg,mg,spsi,info,system)
-    
     ! Experimental Implementation of Inner-Product Outputs:
     call write_prod_dk_data(lg, mg, system, info, spsi) 
   else
@@ -736,7 +734,6 @@ end if
 !end if
 
 if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
-
 deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 
@@ -782,51 +779,27 @@ end if
 end do Structure_Optimization_Iteration
 
 
-!---------------------------------------- Output
+!------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
-call band_information
-
+call write_band_information
 call write_eigen
-
-if(yn_out_psi=='y') then
-  call writepsi(lg,info)
-end if
-
-if(yn_out_dns=='y') then
-  call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
-end if
-
-if(yn_out_dos=='y') then
-  call calc_dos(info)
-end if
-
-if(yn_out_pdos=='y') then
-  call calc_pdos(lg,info)
-end if
-
-if(OC==2)then
-  call prep_ini
-end if
-
-if(yn_out_elf=='y')then
-  allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),      &
-               lg%is(3):lg%ie(3)))
-  call calcELF(lg,mg,ng,srg,info,srho,0)
-  call writeelf(lg,elf,icoo1d,hgs,iscfrt)
+if(yn_out_psi=='y' ) call write_psi(lg,info)
+if(yn_out_dns=='y' ) call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
+if(yn_out_dos=='y' ) call calc_dos(info)
+if(yn_out_pdos=='y') call calc_pdos(lg,info)
+if(yn_out_elf=='y' ) then
+  allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  call calc_elf(lg,mg,ng,srg,info,srho,0)
+  call write_elf(lg,elf,icoo1d,hgs,iscfrt)
   deallocate(elf)
 end if
 call timer_end(LOG_WRITE_GS_RESULTS)
 
-
+! write GS data
 call timer_begin(LOG_WRITE_GS_DATA)
-! GS data
-! subroutines in scf_data.f90
-if ( OC==1.or.OC==2.or.OC==3 ) then
-  call OUT_data(lg,ng,info,mixing)
-end if
+if( OC==1.or.OC==2.or.OC==3 ) call write_gs_bin(lg,ng,info,mixing)
 call timer_end(LOG_WRITE_GS_DATA)
-
 
 ! write GS information
 call timer_begin(LOG_WRITE_GS_INFO)
@@ -840,7 +813,7 @@ call timer_end(LOG_TOTAL)
 
 contains
 
-subroutine band_information
+subroutine write_band_information
   implicit none
   integer :: ik
   real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
@@ -870,7 +843,7 @@ subroutine band_information
     write(*,*) '---------------------------------------------------------'
   end if
   return
-end subroutine band_information
+end subroutine write_band_information
 
 subroutine get_fourier_grid_G(lg,info_field,fg)
   use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid
