@@ -21,7 +21,7 @@ subroutine set_filename
   
   file_IN=trim(sysname)//"_gs.bin"
   file_OUT=trim(sysname)//"_gs.bin"
-  file_gs_info=trim(sysname)//"_info.data"
+ !file_gs_info=trim(sysname)//"_info.data"
   file_eigen=trim(sysname)//"_eigen.data"
 
   file_OUT_rt=trim(sysname)//"_rt.bin"
