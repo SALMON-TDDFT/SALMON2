@@ -128,7 +128,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
   !(MD:part1 & update of pseudopotential)
   if(iflag_md==1) then
-     call time_evolution_step_md_part1(system,md)
+     call time_evolution_step_md_part1(itt,system,md)
      call update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,ppg,ppg_all,ppn)
      sVpsl%f = Vpsl ! future work: remove Vpsl
   endif

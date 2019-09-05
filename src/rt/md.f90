@@ -229,32 +229,39 @@ subroutine cal_Tion_Temperature_ion(Ene_ion,Temp_ion,system)
 end subroutine cal_Tion_Temperature_ion
 
 
-subroutine time_evolution_step_md_part1(system,md)
+subroutine time_evolution_step_md_part1(itt,system,md)
   use structures, only: s_dft_system, s_md
   use salmon_global, only: MI,Kion,dt, Rion
   use const, only: umass,hartree2J,kB
+  use inputoutput, only: step_velocity_scaling
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
-  integer :: iatom
+  integer :: itt,iatom
   real(8) :: mass_au, dt_h
 
-     dt_h = dt*0.5d0
+  dt_h = dt*0.5d0
 
-     !update ion velocity with dt/2
-     do iatom=1,MI
-        mass_au = umass * system%Mass(Kion(iatom))
-        system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
-     enddo
+  !update ion velocity with dt/2
+  do iatom=1,MI
+     mass_au = umass * system%Mass(Kion(iatom))
+     system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
+  enddo
 
-     md%Rion_last(:,:) = system%Rion(:,:)
-     md%Force_last(:,:)= system%Force(:,:)
+  !velocity scaling
+  if(step_velocity_scaling>=1 .and. mod(itt,step_velocity_scaling)==0) then
+     call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
+     call apply_velocity_scaling_ion(md%Temperature,system)
+  endif
 
-     !update ion coordinate with dt
-     do iatom=1,MI
-        system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
-     enddo
-     Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
+  md%Rion_last(:,:) = system%Rion(:,:)
+  md%Force_last(:,:)= system%Force(:,:)
+
+  !update ion coordinate with dt
+  do iatom=1,MI
+     system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
+  enddo
+  Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
 
 end subroutine 
 
@@ -325,5 +332,19 @@ subroutine time_evolution_step_md_part2(system,md)
   call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
 
 end subroutine 
+
+subroutine apply_velocity_scaling_ion(Temp_ion,system)
+  use structures, only: s_dft_system
+  use inputoutput, only: temperature0_ion_k
+  implicit none
+  type(s_dft_system) :: system
+  real(8) :: Temp_ion, fac_vscaling
+
+  fac_vscaling = sqrt(temperature0_ion_k/Temp_ion)
+  system%Velocity(:,:) = system%Velocity(:,:) * fac_vscaling
+
+  return
+end subroutine apply_velocity_scaling_ion
+
 
 end module md_sub
