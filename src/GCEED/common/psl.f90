@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE init_ps(lg,ng,info_field,poisson,alat,brl,matrix_A,icomm_r)
-use structures,      only: s_rgrid,s_field_parallel,s_poisson
+SUBROUTINE init_ps(lg,ng,fg,info_field,poisson,alat,brl,matrix_A,icomm_r)
+use structures,      only: s_rgrid,s_reciprocal_grid,s_field_parallel,s_poisson
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root
 use scf_data
@@ -23,6 +23,7 @@ use prep_pp_sub, only: init_uvpsi_summation
 implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: ng
+type(s_reciprocal_grid),intent(inout) :: fg
 type(s_field_parallel),intent(in) :: info_field
 type(s_poisson),intent(inout) :: poisson
 real(8),intent(in) :: alat(3,3),brl(3,3),matrix_A(3,3)
@@ -44,9 +45,9 @@ case(0)
 case(3)
   select case(iflag_hartree)
   case(2)
-    call calcVpsl_periodic(lg,matrix_A,brl)
+    call calcVpsl_periodic(lg,fg,matrix_A)
   case(4)
-    call calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
+    call calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   end select
   call calcJxyz_all_periodic(lg,alat,matrix_A)
   call calcuV(lg)
