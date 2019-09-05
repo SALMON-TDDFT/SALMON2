@@ -58,6 +58,7 @@ use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
+use prep_pp_sub, only: calc_vpsl_new
 implicit none
 integer :: ix,iy,iz,ik,ikoa,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -409,7 +410,8 @@ else if(iopt>=2)then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
        call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-       call get_fourier_grid_G(lg,info_field,fg)
+!       call get_fourier_grid_G(lg,info_field,fg)
+       call calc_vpsl_new(mg,system,stencil,pp,fg,sVpsl,ppg)
     end if
 
   end if
