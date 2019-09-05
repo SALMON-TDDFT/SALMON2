@@ -59,8 +59,8 @@ use salmon_initialization
 use occupation
 use init_poisson_sub
 implicit none
-integer :: ix,iy,iz,ik,ikoa,is,i,j
-integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
+integer :: ix,iy,iz,ik,is,i,j
+integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
@@ -829,90 +829,9 @@ end if
 call timer_end(LOG_WRITE_GS_DATA)
 
 
-! GS information
+! write GS information
 call timer_begin(LOG_WRITE_GS_INFO)
-if(comm_is_root(nproc_id_global)) then
-  open(1,file=file_gs_info)
-
-  write(1,*) "Total number of iteration = ", Miter
-  write(1,*)
-  select case (ilsda)
-  case(0)
-    write(1,*) "Number of states = ", nstate
-    write(1,*) "Number of electrons = ", ifMST(1)*2
-  case(1)
-    write(1,*) "Number of states = ", (nstate_spin(is),is=1,2)
-    write(1,*) "Number of electrons = ", (nelec_spin(is),is=1,2)
-  end select
-  write(1,*)
-  write(1,*) "Total energy (eV) = ", energy%E_tot*2d0*Ry
-  write(1,*) "1-particle energies (eV)"
-  select case (ilsda)
-  case(0)
-    do p5=1,(nstate+3)/4
-      p1=4*(p5-1)+1
-      p2=4*p5 ; if ( p2 > nstate ) p2=nstate
-      write(1,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
-    end do
-  case(1)
-    do is=1,2
-      select case(is)
-      case(1)
-        write(1,*) "for up-spin"
-        do p5=1,(nstate_spin(is)+3)/4
-          p1=4*(p5-1)+1
-          p2=4*p5 ; if ( p2 > nstate_spin(1) ) p2=nstate_spin(1)
-          write(1,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
-        end do
-      case(2)
-        write(1,*) "for down-spin"
-        do p5=1,(nstate_spin(is)+3)/4
-          p1=4*(p5-1)+1+nstate_spin(1)
-          p2=4*p5+nstate_spin(1) ; if ( p2 > nstate_spin(1)+nstate_spin(2) ) p2=nstate_spin(1)+nstate_spin(2)
-          write(1,'(1x,4(i5,f15.4,2x))') (iob-nstate_spin(1),energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
-        end do
-      end select
-    end do
-  end select
-  write(1,*)
-
-  do ii=1,ntmg
-    write(1,'(1x,a,3f14.8)') "Size of the box (A) = ", rLsize(:,ii)*a_B
-  end do
-
-  write(1,'(1x,a,3f14.8)')   "Grid spacing (A)    = ", (Hgs(jj)*a_B,jj=1,3)
-  write(1,*)
-  write(1,'(1x,"Number of atoms = ",i8)') MI
-  do ik=1,MKI
-    write(1,'(1x,"iZatom(",i3,")     = ",i8)') ik, iZatom(ik)
-  end do
-  write(1,*)
-  write(1,*) "Ref. and max angular momentum",      &
-             " and pseudo-core radius of PP (A)"
-  do ikoa=1,MKI
-     write(1,'(1x,"(",i3,")  "," Ref, Max, Rps =",2i4,f8.3)')      &
-                              ikoa,Lref(ikoa),Mlps(ikoa),Rps(ikoa)*a_B
-  end do
-
-  write(1,*)
-  select case(unit_system)
-  case('au','a.u.')
-     write(1,*) "Force [au] "
-     do iatom=1,MI
-        write(1,'(i6,3e16.8)') iatom,(system%Force(ix,iatom),ix=1,3)
-     end do
-  case('A_eV_fs')
-     write(1,*) "Force [eV/A] "
-     do iatom=1,MI
-        write(1,'(i6,3e16.8)') iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
-     end do
-  end select
-
-
-  close(1)
-
-end if
-
+call write_info_data(system,energy)
 call timer_end(LOG_WRITE_GS_INFO)
 
 deallocate(Vlocal)
