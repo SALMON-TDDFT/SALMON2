@@ -100,7 +100,7 @@ allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 if(OC<=2)then
   if(num_datafiles_OUT==1.or.num_datafiles_OUT>nproc_size_global)then
     !file_OUT_data_ini = file_OUT_ini
-     write(*,*) "Error: prep_ini and file_ini are removed from code"
+    !write(*,*) "Error: prep_ini and file_ini are removed from code"
   else
     if(nproc_id_global<num_datafiles_OUT)then
       myrank_datafiles=nproc_id_global
