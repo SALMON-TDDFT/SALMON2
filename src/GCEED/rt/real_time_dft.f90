@@ -46,6 +46,7 @@ use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use init_poisson_sub
+use init_reciprocal_grid_sub
 implicit none
 
 type(s_rgrid) :: lg
@@ -176,13 +177,11 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-if(iperiodic==3 .and. iflag_hartree==4)then
-  call init_poisson_fft(lg,ng,system,info_field,poisson)
-end if
+if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
 call read_pslfile(system)
 call allocate_psl(lg)
-call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
 
 call init_itype
 call init_sendrecv_matrix
@@ -468,7 +467,7 @@ END subroutine Real_Time_DFT
 
 SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
 use structures
-use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_size_global
+use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use density_matrix, only: calc_density
 use writefield
@@ -521,6 +520,7 @@ type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 
 integer :: npuy,npuz
+real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
 
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
@@ -558,28 +558,21 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
 
 !????????? get_fourier_grid_G @ real_space_dft.f90
-    if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
     if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
-    jj = system%ngrid/nproc_size_global
-    fg%ig_s = nproc_id_global*jj+1
-    fg%ig_e = (nproc_id_global+1)*jj
-    if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-    fg%icomm_G = nproc_group_global
-    fg%ng = system%ngrid
-    allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
     allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
     if(iflag_hartree==2)then
-       fg%iGzero = nGzero
-       fg%Gx = Gx
-       fg%Gy = Gy
-       fg%Gz = Gz
        fg%zrhoG_ion = rhoion_G
        fg%zdVG_ion = dVloc_G
     else if(iflag_hartree==4)then
-       fg%iGzero = 1
-       fg%Gx = 0.d0
-       fg%Gy = 0.d0
-       fg%Gz = 0.d0
+       allocate(Gx_tmp(fg%ng))
+       allocate(Gy_tmp(fg%ng))
+       allocate(Gz_tmp(fg%ng))
+       Gx_tmp=fg%Gx
+       Gy_tmp=fg%Gy
+       Gz_tmp=fg%Gz
+       fg%Gx=0.d0
+       fg%Gy=0.d0
+       fg%Gz=0.d0
        fg%zrhoG_ion = 0.d0
        fg%zdVG_ion = 0.d0
        npuy=info_field%isize_ffte(2)
@@ -589,9 +582,9 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
        do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
           n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
           nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
-          fg%Gx(nn) = Gx(n)
-          fg%Gy(nn) = Gy(n)
-          fg%Gz(nn) = Gz(n)
+          fg%Gx(nn)=Gx_tmp(n)
+          fg%Gy(nn)=Gy_tmp(n)
+          fg%Gz(nn)=Gz_tmp(n)
           fg%zrhoG_ion(nn) = rhoion_G(n)
           fg%zdVG_ion(nn,:) = dVloc_G(n,:)
        enddo

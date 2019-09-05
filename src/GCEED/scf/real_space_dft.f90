@@ -37,7 +37,7 @@ END MODULE global_variables_scf
 
 subroutine Real_Space_DFT
 use structures
-use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -58,6 +58,7 @@ use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
+use init_reciprocal_grid_sub
 implicit none
 integer :: ix,iy,iz,ik,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -213,9 +214,7 @@ if(iopt==1)then
     &                 ,1:iobnum,k_sta:k_end))
   end if
 
-  if(iperiodic==3 .and. iflag_hartree==4)then
-    call init_poisson_fft(lg,ng,system,info_field,poisson)
-  end if
+  if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
   if(.not. allocated(Vpsl_atom)) allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
@@ -224,7 +223,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl(lg)
-    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -880,30 +879,24 @@ subroutine get_fourier_grid_G(lg,info_field,fg)
   type(s_field_parallel) :: info_field
   type(s_reciprocal_grid) :: fg
   integer :: npuy,npuz
+  real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
 
-  if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
   if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
 
-  jj = system%ngrid/nproc_size_global
-  fg%ig_s = nproc_id_global*jj+1
-  fg%ig_e = (nproc_id_global+1)*jj
-  if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-  fg%icomm_G = nproc_group_global
-  fg%ng = system%ngrid
-  allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
   allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
   if(iflag_hartree==2)then
-     fg%iGzero = nGzero
-     fg%Gx = Gx
-     fg%Gy = Gy
-     fg%Gz = Gz
      fg%zrhoG_ion = rhoion_G
      fg%zdVG_ion = dVloc_G
   else if(iflag_hartree==4)then
-     fg%iGzero = 1
-     fg%Gx = 0.d0
-     fg%Gy = 0.d0
-     fg%Gz = 0.d0
+     allocate(Gx_tmp(fg%ng))
+     allocate(Gy_tmp(fg%ng))
+     allocate(Gz_tmp(fg%ng))
+     Gx_tmp=fg%Gx
+     Gy_tmp=fg%Gy
+     Gz_tmp=fg%Gz
+     fg%Gx=0.d0
+     fg%Gy=0.d0
+     fg%Gz=0.d0
      fg%zrhoG_ion = 0.d0
      fg%zdVG_ion = 0.d0
      npuy=info_field%isize_ffte(2)
@@ -913,14 +906,15 @@ subroutine get_fourier_grid_G(lg,info_field,fg)
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
         n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
         nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
-        fg%Gx(nn) = Gx(n)
-        fg%Gy(nn) = Gy(n)
-        fg%Gz(nn) = Gz(n)
+        fg%Gx(nn)=Gx_tmp(n)
+        fg%Gy(nn)=Gy_tmp(n)
+        fg%Gz(nn)=Gz_tmp(n)
         fg%zrhoG_ion(nn) = rhoion_G(n)
         fg%zdVG_ion(nn,:) = dVloc_G(n,:)
      enddo
      enddo
      enddo
+     deallocate(Gx_tmp,Gy_tmp,Gz_tmp)
   end if
 
 end subroutine get_fourier_grid_G

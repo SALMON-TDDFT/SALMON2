@@ -289,12 +289,12 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
   if (mod(itt,step_update_ps)==0 ) then
      call dealloc_init_ps(ppg,ppg_all)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+     call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   else if (mod(itt,step_update_ps2)==0 ) then
      !xxxxxxx this option is not yet made xxxxxx
      call dealloc_init_ps(ppg,ppg_all)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+     call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   endif
 
   if(iperiodic==3) then

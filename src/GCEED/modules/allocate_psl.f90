@@ -18,14 +18,11 @@ module allocate_psl_sub
 use scf_data
 use read_pslfile_sub
 
-real(8),allocatable :: Gx(:),Gy(:),Gz(:)
 real(8),allocatable :: dVloc_G(:,:)
 real(8),allocatable :: dVloc_G_tmp(:,:)
 complex(8),allocatable :: rhoion_G(:),Vion_G(:)
 complex(8),allocatable :: rhoion_G_tmp(:)
 complex(8),allocatable :: Vion_G_tmp(:)
-
-integer :: nGzero
 
 contains
 !==================================================================================================
@@ -37,9 +34,6 @@ implicit none
 type(s_rgrid),intent(in) :: lg
 
 if(iperiodic==3)then
-  allocate(Gx(lg%num(1)*lg%num(2)*lg%num(3)))
-  allocate(Gy(lg%num(1)*lg%num(2)*lg%num(3)))
-  allocate(Gz(lg%num(1)*lg%num(2)*lg%num(3)))
   allocate(dVloc_G(lg%num(1)*lg%num(2)*lg%num(3),MKI))
   allocate(dVloc_G_tmp(lg%num(1)*lg%num(2)*lg%num(3),MKI))
   allocate(rhoion_G(lg%num(1)*lg%num(2)*lg%num(3)))
@@ -53,7 +47,6 @@ end subroutine allocate_psl
 subroutine deallocate_psl
 
 if(iperiodic==3)then
-  deallocate(Gx,Gy,Gz)
   deallocate(dVloc_G,rhoion_G,Vion_G)
   deallocate(dVloc_G_tmp,rhoion_G_tmp,Vion_G_tmp)
 end if

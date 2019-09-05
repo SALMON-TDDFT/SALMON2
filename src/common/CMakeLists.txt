@@ -9,6 +9,8 @@ set(SOURCES
    check_numcpu.f90
    const.f90
    hpsi.f90
+   initialization.f90
+   init_reciprocal_grid.f90
    inner_product.f90
    inner_product3.f90
    set_isstaend.f90
@@ -28,7 +30,6 @@ set(SOURCES
    force.f90
    stencil_c_core/typical/omp.f90
    stencil_c_core/typical/seq.f90
-   initialization.f90
    )
 
 if (EXPLICIT_VEC)

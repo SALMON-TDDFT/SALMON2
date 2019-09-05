@@ -383,7 +383,6 @@ END SUBROUTINE time_evolution_step
 subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
   use salmon_global, only: nelem
   use structures, only: s_dft_system, s_reciprocal_grid, s_field_parallel, s_rgrid
-  use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
   use scf_data
   use allocate_psl_sub
   implicit none
@@ -393,32 +392,26 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
   type(s_field_parallel),intent(in) :: info_field
   type(s_reciprocal_grid) :: fg
 
-  integer :: jj,ix,iy,iz,n,nn
+  integer :: ix,iy,iz,n,nn
   integer :: npuy,npuz
+  real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
 
-  if(allocated(fg%Gx))        deallocate(fg%Gx,fg%Gy,fg%Gz)
   if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
 
-  jj = system%ngrid/nproc_size_global
-  fg%ig_s = nproc_id_global*jj+1
-  fg%ig_e = (nproc_id_global+1)*jj
-  if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-  fg%icomm_G = nproc_group_global
-  fg%ng = system%ngrid
-  allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
   allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
   if(iflag_hartree==2)then
-     fg%iGzero = nGzero
-     fg%Gx = Gx
-     fg%Gy = Gy
-     fg%Gz = Gz
      fg%zrhoG_ion = rhoion_G
      fg%zdVG_ion = dVloc_G
   else if(iflag_hartree==4)then
-     fg%iGzero = 1
-     fg%Gx = 0.d0
-     fg%Gy = 0.d0
-     fg%Gz = 0.d0
+     allocate(Gx_tmp(fg%ng))
+     allocate(Gy_tmp(fg%ng))
+     allocate(Gz_tmp(fg%ng))
+     Gx_tmp=fg%Gx
+     Gy_tmp=fg%Gy
+     Gz_tmp=fg%Gz
+     fg%Gx=0.d0
+     fg%Gy=0.d0
+     fg%Gz=0.d0
      fg%zrhoG_ion = 0.d0
      fg%zdVG_ion = 0.d0
      npuy=info_field%isize_ffte(2)
@@ -428,9 +421,9 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
         n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
         nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
-        fg%Gx(nn) = Gx(n)
-        fg%Gy(nn) = Gy(n)
-        fg%Gz(nn) = Gz(n)
+        fg%Gx(nn)=Gx_tmp(n)
+        fg%Gy(nn)=Gy_tmp(n)
+        fg%Gz(nn)=Gz_tmp(n)
         fg%zrhoG_ion(nn) = rhoion_G(n)
         fg%zdVG_ion(nn,:) = dVloc_G(n,:)
      enddo
