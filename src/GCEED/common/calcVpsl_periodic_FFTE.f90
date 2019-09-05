@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
-  use structures,      only: s_rgrid,s_field_parallel,s_poisson
+subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
+  use structures,      only: s_rgrid,s_reciprocal_grid,s_field_parallel,s_poisson
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
@@ -24,10 +24,11 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_reciprocal_grid),intent(inout) :: fg
   type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
   
-  integer :: ii,ix,iy,iz,ak
+  integer :: ix,iy,iz,ak
   integer :: iix,iiy,iiz
   integer :: iatom
   
@@ -75,14 +76,8 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
   NG_l_e_para = (nproc_id_global+1)*numtmp
   if(nproc_id_global==nproc_size_global-1) NG_l_e_para=NG_e
   
-  nGzero=-1
+  fg%iGzero=-1
   
-  do ak=1,MKI
-    do ii=1,Mr(ak)
-      vloctbl(ii,ak)=vpp(ii,Lref(ak),ak)
-    enddo
-  end do
-
   do iz=1,lg%num(3)/npuz
   do iy=1,lg%num(2)/npuy
   do ix=1,lg%num(1)
@@ -90,35 +85,37 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
     iix2=ix-1+lg%is(1)
     iiy2=iy-1+info_field%id_ffte(2)*lg%num(2)/npuy+lg%is(2)
     iiz2=iz-1+info_field%id_ffte(3)*lg%num(3)/npuz+lg%is(3)
-    if(ix==1.and.iy==1.and.iz==1.and.info_field%id_ffte(3)==0.and.info_field%id_ffte(2)==0) nGzero=n
+    if(ix==1.and.iy==1.and.iz==1.and.info_field%id_ffte(3)==0.and.info_field%id_ffte(2)==0) then
+      fg%iGzero=n
+    end if
     iix=ix-1-lg%num(1)*(1+sign(1,(iix2-1-(lg%num(1)+1)/2)))/2
     iiy=iy-1+info_field%id_ffte(2)*lg%num(2)/npuy-lg%num(2)*(1+sign(1,(iiy2-1-(lg%num(2)+1)/2)))/2
     iiz=iz-1+info_field%id_ffte(3)*lg%num(3)/npuz-lg%num(3)*(1+sign(1,(iiz2-1-(lg%num(3)+1)/2)))/2
-    Gx(n)=dble(iix)*bLx
-    Gy(n)=dble(iiy)*bLy
-    Gz(n)=dble(iiz)*bLz
+    fg%Gx(n)=dble(iix)*bLx
+    fg%Gy(n)=dble(iiy)*bLy
+    fg%Gz(n)=dble(iiz)*bLz
   enddo
   enddo
   enddo
 
   dVloc_G(:,:)=0.d0
   do ak=1,MKI
-    imax=min(Mr(ak),Nr-1)
+    imax=Mr(ak)
     do iz=1,lg%num(3)/npuz
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-      G2sq=sqrt(Gx(n)**2+Gy(n)**2+Gz(n)**2)
+      G2sq=sqrt(fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2)
       s=0.d0
-      if (n == nGzero) then
+      if (n == fg%iGzero) then
         do i=2,imax
-          r=rad_psl(i,ak)
-          s=s+4*Pi*r**2*(vloctbl(i,ak)+Zps(ak)/r)*(rad_psl(i+1,ak)-rad_psl(i,ak))
+          r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+          s=s+4*Pi*r**2*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       else
         do i=2,imax
-          r=rad_psl(i,ak)
-          s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(vloctbl(i,ak)+Zps(ak)/r)*(rad_psl(i+1,ak)-rad_psl(i,ak))
+          r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+          s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       endif
       dVloc_G(n,ak)=s
@@ -134,7 +131,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-      rhoion_G(n)=rhoion_G(n)+Zps(Kion(iatom))/aLxyz*exp(-zI*(Gx(n)*Rion(1,iatom)+Gy(n)*Rion(2,iatom)+Gz(n)*Rion(3,iatom)))
+      rhoion_G(n)=rhoion_G(n)+Zps(Kion(iatom))/aLxyz*exp(-zI*(fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)))
     enddo
     enddo
     enddo
@@ -147,10 +144,10 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,info_field,poisson)
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-      G2=Gx(n)**2+Gy(n)**2+Gz(n)**2
-      Gd=Gx(n)*Rion(1,iatom)+Gy(n)*Rion(2,iatom)+Gz(n)*Rion(3,iatom)
+      G2=fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2
+      Gd=fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)
       Vion_G(n)=Vion_G(n)+dVloc_G(n,ak)*exp(-zI*Gd)/aLxyz
-      if(n == nGzero) cycle
+      if(n == fg%iGzero) cycle
       Vion_G(n)=Vion_G(n)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/aLxyz
     enddo
     enddo

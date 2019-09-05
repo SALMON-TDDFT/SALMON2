@@ -34,7 +34,6 @@ use misc_routines, only: get_wtime
 implicit none
 type(s_orbital_parallel),intent(inout) :: info
 type(s_field_parallel),intent(inout) :: info_field
-integer :: ii
 integer :: i1,i2,i3,i4,i5
 integer :: ix,iy,iz
 integer :: ixs,iys,izs

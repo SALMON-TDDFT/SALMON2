@@ -9,6 +9,8 @@ set(SOURCES
    check_numcpu.f90
    const.f90
    hpsi.f90
+   initialization.f90
+   init_reciprocal_grid.f90
    inner_product.f90
    inner_product3.f90
    set_isstaend.f90
@@ -21,14 +23,13 @@ set(SOURCES
    sendrecv_grid.f90
    set_gridcoordinate.f90
    total_energy.f90
-   writefield.f90
-   writefile3d.f90
+   write_field.f90
+   write_file3d.f90
+   write.f90
    lattice.f90
    force.f90
-   print.f90
    stencil_c_core/typical/omp.f90
    stencil_c_core/typical/seq.f90
-   initialization.f90
    )
 
 if (EXPLICIT_VEC)

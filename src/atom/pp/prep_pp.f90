@@ -931,11 +931,11 @@ subroutine bisection(xx,inode,iak,nr,rad_psl)
   integer,intent(out) :: inode
   integer,intent(in)  :: iak
   integer,intent(in)  :: nr
-  real(8),intent(in)  :: rad_psl(0:nr,nelem)
+  real(8),intent(in)  :: rad_psl(nr,nelem)
   real(8),intent(in)  :: xx
   integer :: imin,imax
   
-  imin=0
+  imin=1
   imax=nr
   do while (imax-imin>1)
     inode=(imin+imax)/2

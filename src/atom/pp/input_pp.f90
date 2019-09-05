@@ -69,6 +69,14 @@ subroutine input_pp(pp,hx,hy,hz)
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'
       end select
 
+! outside mr (needed for isolated systems)
+      if(pp%nrmax>pp%mr(ik))then
+        do i=pp%mr(ik)+1,pp%nrmax
+          pp%vpp(i,0:pp%mlps(ik))=-pp%zps(ik)/pp%rad(i:pp%nrmax,ik)
+          pp%upp(i,0:pp%mlps(ik))=0.d0
+        end do
+      end if
+
 ! Set meaning domain in the arrays 
       pp%rps(ik)=maxval(rrc(0:pp%mlps(ik)))
       do i=1,pp%nrmax
@@ -223,7 +231,7 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   pp%upp(0:pp%mr(ik),0:pp%mlps(ik))=pp%upp(0:pp%mr(ik),0:pp%mlps(ik))*sqrt(au_length_aa)
 
   do i=1,pp%nrmax
-    pp%rad(i,ik)=(i-1)*step
+    pp%rad(i,ik)=(i-1)*step  !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
   enddo
 
   if(Lmax_ps(ik) >= 0)pp%mlps(ik) = Lmax_ps(ik) ! Maximum angular momentum given by input

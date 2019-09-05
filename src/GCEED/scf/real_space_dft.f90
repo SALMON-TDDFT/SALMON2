@@ -37,7 +37,7 @@ END MODULE global_variables_scf
 
 subroutine Real_Space_DFT
 use structures
-use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
@@ -52,16 +52,17 @@ use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
 use gram_schmidt_orth, only: gram_schmidt 
-use print_sub
+use write_sub
 use read_gs
 use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
+use init_reciprocal_grid_sub
 use prep_pp_sub, only: calc_vpsl_new
 implicit none
-integer :: ix,iy,iz,ik,ikoa,is,i,j
-integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
+integer :: ix,iy,iz,ik,is,i,j
+integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
@@ -214,9 +215,7 @@ if(iopt==1)then
     &                 ,1:iobnum,k_sta:k_end))
   end if
 
-  if(iperiodic==3 .and. iflag_hartree==4)then
-    call init_poisson_fft(lg,ng,system,info_field,poisson)
-  end if
+  if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
   if(.not. allocated(Vpsl_atom)) allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
@@ -225,7 +224,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl(lg)
-    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -822,100 +821,19 @@ end if
 call timer_end(LOG_WRITE_GS_RESULTS)
 
 
-call timer_begin(LOG_WRITE_LDA_DATA)
-! LDA data
+call timer_begin(LOG_WRITE_GS_DATA)
+! GS data
 ! subroutines in scf_data.f90
 if ( OC==1.or.OC==2.or.OC==3 ) then
   call OUT_data(lg,ng,info,mixing)
 end if
-call timer_end(LOG_WRITE_LDA_DATA)
+call timer_end(LOG_WRITE_GS_DATA)
 
 
-! LDA information
-call timer_begin(LOG_WRITE_LDA_INFOS)
-if(comm_is_root(nproc_id_global)) then
-  open(1,file=LDA_info)
-
-  write(1,*) "Total number of iteration = ", Miter
-  write(1,*)
-  select case (ilsda)
-  case(0)
-    write(1,*) "Number of states = ", nstate
-    write(1,*) "Number of electrons = ", ifMST(1)*2
-  case(1)
-    write(1,*) "Number of states = ", (nstate_spin(is),is=1,2)
-    write(1,*) "Number of electrons = ", (nelec_spin(is),is=1,2)
-  end select
-  write(1,*)
-  write(1,*) "Total energy (eV) = ", energy%E_tot*2d0*Ry
-  write(1,*) "1-particle energies (eV)"
-  select case (ilsda)
-  case(0)
-    do p5=1,(nstate+3)/4
-      p1=4*(p5-1)+1
-      p2=4*p5 ; if ( p2 > nstate ) p2=nstate
-      write(1,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
-    end do
-  case(1)
-    do is=1,2
-      select case(is)
-      case(1)
-        write(1,*) "for up-spin"
-        do p5=1,(nstate_spin(is)+3)/4
-          p1=4*(p5-1)+1
-          p2=4*p5 ; if ( p2 > nstate_spin(1) ) p2=nstate_spin(1)
-          write(1,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
-        end do
-      case(2)
-        write(1,*) "for down-spin"
-        do p5=1,(nstate_spin(is)+3)/4
-          p1=4*(p5-1)+1+nstate_spin(1)
-          p2=4*p5+nstate_spin(1) ; if ( p2 > nstate_spin(1)+nstate_spin(2) ) p2=nstate_spin(1)+nstate_spin(2)
-          write(1,'(1x,4(i5,f15.4,2x))') (iob-nstate_spin(1),energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
-        end do
-      end select
-    end do
-  end select
-  write(1,*)
-
-  do ii=1,ntmg
-    write(1,'(1x,a,3f14.8)') "Size of the box (A) = ", rLsize(:,ii)*a_B
-  end do
-
-  write(1,'(1x,a,3f14.8)')   "Grid spacing (A)    = ", (Hgs(jj)*a_B,jj=1,3)
-  write(1,*)
-  write(1,'(1x,"Number of atoms = ",i8)') MI
-  do ik=1,MKI
-    write(1,'(1x,"iZatom(",i3,")     = ",i8)') ik, iZatom(ik)
-  end do
-  write(1,*)
-  write(1,*) "Ref. and max angular momentum",      &
-             " and pseudo-core radius of PP (A)"
-  do ikoa=1,MKI
-     write(1,'(1x,"(",i3,")  "," Ref, Max, Rps =",2i4,f8.3)')      &
-                              ikoa,Lref(ikoa),Mlps(ikoa),Rps(ikoa)*a_B
-  end do
-
-  write(1,*)
-  select case(unit_system)
-  case('au','a.u.')
-     write(1,*) "Force [au] "
-     do iatom=1,MI
-        write(1,'(i6,3e16.8)') iatom,(system%Force(ix,iatom),ix=1,3)
-     end do
-  case('A_eV_fs')
-     write(1,*) "Force [eV/A] "
-     do iatom=1,MI
-        write(1,'(i6,3e16.8)') iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
-     end do
-  end select
-
-
-  close(1)
-
-end if
-
-call timer_end(LOG_WRITE_LDA_INFOS)
+! write GS information
+call timer_begin(LOG_WRITE_GS_INFO)
+call write_info_data(system,energy)
+call timer_end(LOG_WRITE_GS_INFO)
 
 deallocate(Vlocal)
 call finalize_xc(xc_func)
@@ -963,30 +881,24 @@ subroutine get_fourier_grid_G(lg,info_field,fg)
   type(s_field_parallel) :: info_field
   type(s_reciprocal_grid) :: fg
   integer :: npuy,npuz
+  real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
 
-  if(allocated(fg%Gx))       deallocate(fg%Gx,fg%Gy,fg%Gz)
   if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
 
-  jj = system%ngrid/nproc_size_global
-  fg%ig_s = nproc_id_global*jj+1
-  fg%ig_e = (nproc_id_global+1)*jj
-  if(nproc_id_global==nproc_size_global-1) fg%ig_e = system%ngrid
-  fg%icomm_G = nproc_group_global
-  fg%ng = system%ngrid
-  allocate(fg%Gx(fg%ng),fg%Gy(fg%ng),fg%Gz(fg%ng))
   allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
   if(iflag_hartree==2)then
-     fg%iGzero = nGzero
-     fg%Gx = Gx
-     fg%Gy = Gy
-     fg%Gz = Gz
      fg%zrhoG_ion = rhoion_G
      fg%zdVG_ion = dVloc_G
   else if(iflag_hartree==4)then
-     fg%iGzero = 1
-     fg%Gx = 0.d0
-     fg%Gy = 0.d0
-     fg%Gz = 0.d0
+     allocate(Gx_tmp(fg%ng))
+     allocate(Gy_tmp(fg%ng))
+     allocate(Gz_tmp(fg%ng))
+     Gx_tmp=fg%Gx
+     Gy_tmp=fg%Gy
+     Gz_tmp=fg%Gz
+     fg%Gx=0.d0
+     fg%Gy=0.d0
+     fg%Gz=0.d0
      fg%zrhoG_ion = 0.d0
      fg%zdVG_ion = 0.d0
      npuy=info_field%isize_ffte(2)
@@ -996,14 +908,15 @@ subroutine get_fourier_grid_G(lg,info_field,fg)
      do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
         n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
         nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
-        fg%Gx(nn) = Gx(n)
-        fg%Gy(nn) = Gy(n)
-        fg%Gz(nn) = Gz(n)
+        fg%Gx(nn)=Gx_tmp(n)
+        fg%Gy(nn)=Gy_tmp(n)
+        fg%Gz(nn)=Gz_tmp(n)
         fg%zrhoG_ion(nn) = rhoion_G(n)
         fg%zdVG_ion(nn,:) = dVloc_G(n,:)
      enddo
      enddo
      enddo
+     deallocate(Gx_tmp,Gy_tmp,Gz_tmp)
   end if
 
 end subroutine get_fourier_grid_G

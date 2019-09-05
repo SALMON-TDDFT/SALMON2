@@ -24,7 +24,7 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,iscfrt,rho0,itt)
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
-  use writefile3d
+  use write_file3d
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -83,11 +83,11 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,iscfrt,rho0,itt)
   phys_quantity = "dns"
   if(format_voxel_data=='avs')then
     header_unit='A**(-3)'
-    call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
+    call write_avs(lg,103,suffix,header_unit,rmat2,icoo1d)
   else if(format_voxel_data=='cube')then
-    call writecube(lg,103,suffix,phys_quantity,rmat2,hgs)
+    call write_cube(lg,103,suffix,phys_quantity,rmat2,hgs)
   else if(format_voxel_data=='vtk')then
-    call writevtk(lg,103,suffix,rmat2,hgs)
+    call write_vtk(lg,103,suffix,rmat2,hgs)
   end if
 
   if(iscfrt==2)then
@@ -127,11 +127,11 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,iscfrt,rho0,itt)
     phys_quantity = "dnsdiff"
     if(format_voxel_data=='avs')then
       header_unit='A**(-3)'
-      call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
+      call write_avs(lg,103,suffix,header_unit,rmat2,icoo1d)
     else if(format_voxel_data=='cube')then
-      call writecube(lg,103,suffix,phys_quantity,rmat2,hgs)
+      call write_cube(lg,103,suffix,phys_quantity,rmat2,hgs)
     else if(format_voxel_data=='vtk')then
-      call writevtk(lg,103,suffix,rmat2,hgs)
+      call write_vtk(lg,103,suffix,rmat2,hgs)
     end if
   end if
  
@@ -141,7 +141,7 @@ end subroutine writedns
 subroutine writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
   use inputoutput, only: format_voxel_data
   use structures, only: s_rgrid
-  use writefile3d
+  use write_file3d
   implicit none
   type(s_rgrid),intent(in) :: lg
   real(8),intent(in) :: elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
@@ -163,11 +163,11 @@ subroutine writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
   phys_quantity = "elf"
   if(format_voxel_data=='avs')then
     header_unit = "none"
-    call writeavs(lg,103,suffix,header_unit,elf,icoo1d)
+    call write_avs(lg,103,suffix,header_unit,elf,icoo1d)
   else if(format_voxel_data=='cube')then
-    call writecube(lg,103,suffix,phys_quantity,elf,hgs)
+    call write_cube(lg,103,suffix,phys_quantity,elf,hgs)
   else if(format_voxel_data=='vtk')then
-    call writevtk(lg,103,suffix,elf,hgs)
+    call write_vtk(lg,103,suffix,elf,hgs)
   end if
   
 end subroutine writeelf
@@ -179,7 +179,7 @@ subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
-  use writefile3d
+  use write_file3d
   implicit none
   type(s_rgrid),intent(in) :: lg,mg,ng
   real(8),intent(in) :: ex_static(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
@@ -263,11 +263,11 @@ subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,icoo1d
 
     if(format_voxel_data=='avs')then
       header_unit = "V/A"
-      call writeavs(lg,103,suffix,header_unit,rmat2,icoo1d)
+      call write_avs(lg,103,suffix,header_unit,rmat2,icoo1d)
     else if(format_voxel_data=='cube')then
-      call writecube(lg,103,suffix,phys_quantity,rmat2,hgs)
+      call write_cube(lg,103,suffix,phys_quantity,rmat2,hgs)
     else if(format_voxel_data=='vtk')then
-      call writevtk(lg,103,suffix,rmat2,hgs)
+      call write_vtk(lg,103,suffix,rmat2,hgs)
     end if
 
   end do  

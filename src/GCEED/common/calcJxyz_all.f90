@@ -21,8 +21,8 @@ use scf_data
 use allocate_psl_sub
 implicit none
   type(s_rgrid),intent(in) :: lg
-  integer :: iatom,ix,iy,iz
-  integer :: i,j
+  integer :: ix,iy,iz
+  integer :: i
   integer :: mmx(mg_num(1)*mg_num(2)*mg_num(3))
   integer :: mmy(mg_num(1)*mg_num(2)*mg_num(3))
   integer :: mmz(mg_num(1)*mg_num(2)*mg_num(3))

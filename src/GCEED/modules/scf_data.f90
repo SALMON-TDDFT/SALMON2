@@ -164,17 +164,14 @@ real(8) :: Hvol
 real(8) :: Harray(3,maxntmg)  ! Grid spacing
 real(8) :: rLsize(3,maxntmg)    ! size of the box
 
-integer :: maxMps
-
 ! Pseudopotential
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg,ppg_all
-integer,parameter :: Nrmax=3000,Lmax=4
+integer,parameter :: Lmax=4
 integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)
 real(8),allocatable :: Zps(:)              ! Pseudo charge
 real(8),allocatable :: Rps(:)              ! Core radius
-integer :: Mlmps
 integer :: Mlps(maxMKI),Lref(maxMKI)
 real(8),allocatable :: Vpsl(:,:,:)                 ! Local pseudopotential
 real(8),allocatable :: Vpsl_atom(:,:,:,:)
@@ -323,10 +320,6 @@ character(100):: rtELFOutFile
 character(100):: file_Projection
 character(20):: fileNumber
 
-integer,allocatable :: numatom_ps(:,:,:)
-integer,allocatable :: iatomnum_ps(:,:,:,:)
-integer :: maxMps_all
-
 real(8), allocatable :: rho_n(:,:,:)
 real(8), allocatable :: Vh_n(:,:,:)
 real(8), allocatable :: Vh0(:,:,:)
@@ -359,7 +352,6 @@ integer,allocatable :: rho_region_nz(:,:)
 integer :: numspin
 
 integer :: icalcforce
-real(8),allocatable :: rforce(:,:)
 integer :: iflag_md
 
 real(8) :: fcN(0:12)
@@ -399,7 +391,7 @@ real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 !filename
 character(100) :: file_OUT
 character(100) :: file_IN
-character(100) :: LDA_Info
+!character(100) :: file_gs_info
 character(100) :: file_eigen
 character(100) :: file_RT
 character(100) :: file_alpha_lr

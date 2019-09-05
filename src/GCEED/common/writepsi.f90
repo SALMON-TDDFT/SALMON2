@@ -20,7 +20,7 @@ subroutine writepsi(lg,info)
   use structures, only: s_rgrid,s_orbital_parallel
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
-  use writefile3d
+  use write_file3d
   use calc_myob_sub
   use check_corrkob_sub
   use scf_data
@@ -77,9 +77,9 @@ subroutine writepsi(lg,info)
       phys_quantity = "psi"
       if(format_voxel_data=='avs')then
         header_unit = "A**(-3/2)"
-        call writeavs(lg,103,suffix,header_unit,matbox_l2,icoo1d)
+        call write_avs(lg,103,suffix,header_unit,matbox_l2,icoo1d)
       else if(format_voxel_data=='cube')then
-        call writecube(lg,103,suffix,phys_quantity,matbox_l2,hgs)
+        call write_cube(lg,103,suffix,phys_quantity,matbox_l2,hgs)
       end if
     end do
   end if
