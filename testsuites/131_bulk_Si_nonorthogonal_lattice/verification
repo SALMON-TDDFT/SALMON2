@@ -25,9 +25,9 @@ checklist1 = {
 }
 
 checklist2 = {
-    "eigen energy for io=8, ik=2": [
+    "eigen energy for io=4, ik=2": [
         100,  # Temporary value for result
-        0.4478237,  # Reference value
+        0.1469584576,  # Reference value
         0.0004,  # Permissible error (~0.01eV)
     ],
 }
@@ -48,7 +48,7 @@ for line in open("Si_eigen.data"):
         for name1, [resval1, refval1, error1] in checklist1.items():
             data = line.split()
             result1[name1] = float(data[1])
-    if linecount == 21: # a line for io=8, ik=2
+    if linecount == 17: # a line for io=4, ik=2
         for name2, [resval2, refval2, error2] in checklist2.items():
             data = line.split()
             result2[name2] = float(data[1])
