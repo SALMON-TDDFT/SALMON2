@@ -19,7 +19,7 @@ module writefield
 
 contains
 
-subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,iscfrt,rho0,itt)
+subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,iscfrt,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
@@ -135,10 +135,10 @@ subroutine writedns(lg,mg,ng,rho,rmat,rmat2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
   end if
  
-end subroutine writedns
+end subroutine write_dns
 
 !======================================================================
-subroutine writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
+subroutine write_elf(lg,elf,icoo1d,hgs,iscfrt,itt)
   use inputoutput, only: format_voxel_data
   use structures, only: s_rgrid
   use write_file3d
@@ -170,7 +170,7 @@ subroutine writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
     call write_vtk(lg,103,suffix,elf,hgs)
   end if
   
-end subroutine writeelf
+end subroutine write_elf
 
 !======================================================================
 

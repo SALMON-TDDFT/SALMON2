@@ -163,8 +163,8 @@ call timer_end(LOG_INIT_RT)
 
 
 call timer_begin(LOG_READ_GS_DATA)
-! Read SCF data
-call IN_data(lg,mg,ng,info,info_field,system,stencil,mixing)
+! Read GS data
+call read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then
@@ -181,7 +181,7 @@ if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
 call read_pslfile(system)
 call allocate_psl(lg)
-call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
 
 call init_itype
 call init_sendrecv_matrix
@@ -251,7 +251,7 @@ if(IC_rt==0) then
   itotNtime=Ntime
   Miter_rt=0
 else if(IC_rt==1) then
-  call IN_data_rt(ng,info,Ntime)
+  call read_rt_bin(ng,info,Ntime)
 end if
 call timer_end(LOG_READ_RT_DATA)
 
@@ -334,7 +334,7 @@ call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poi
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
-if(OC_rt==1) call OUT_data_rt(ng,info)
+if(OC_rt==1) call write_rt_bin(ng,info)
 call timer_end(LOG_WRITE_RT_DATA)
 
 
@@ -534,14 +534,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
-  do ik=info%ik_s,info%ik_e
-    do iob=info%io_s,info%io_e
-      do jspin=1,system%nspin
-        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,1)*system%wtk(ik)
-      end do
-    end do
-  end do
-
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
@@ -637,7 +629,7 @@ allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2)
     write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
   end if
 
-  call calc_density(srho_s,spsi_in,info,mg,nspin)
+  call calc_density(system,srho_s,spsi_in,info,mg)
 
   if(ilsda==0)then  
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -830,11 +822,11 @@ end do
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
-      call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
-      call calcELF(lg,mg,ng,srg,info,srho,itt)
-      call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
+      call calc_elf(lg,mg,ng,srg,info,srho,itt)
+      call write_elf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
     if(yn_out_estatic_rt=='y')then
       call calcEstatic(lg, ng, info, sVh, srg_ng)

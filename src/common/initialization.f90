@@ -129,7 +129,7 @@ subroutine init_orbital_parallel_singlecell(system,info)
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel)      :: info
   !
-  integer :: io,jspin,ik
+  integer :: io
 
 ! for single-cell calculations
   info%im_s = 1
@@ -150,7 +150,7 @@ subroutine init_orbital_parallel_singlecell(system,info)
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
   info%if_divide_orbit  = nproc_ob.ne.1
 
-  allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1),info%irank_io(1:system%no))
+  allocate(info%irank_io(1:system%no))
 
 ! process ID corresponding to the orbital index io
   do io=1, system%no
@@ -159,15 +159,6 @@ subroutine init_orbital_parallel_singlecell(system,info)
     else
       info%irank_io(io) = io*nproc_ob/system%no
     end if
-  end do
-
-! occupation number (initaial value)
-  do jspin=1,system%nspin
-    do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-        info%occ(io,ik,jspin,1) = system%rocc(io,ik,jspin)*system%wtk(ik) ! initial value
-      end do
-    end do
   end do
 
 end subroutine init_orbital_parallel_singlecell

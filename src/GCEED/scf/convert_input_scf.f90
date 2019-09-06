@@ -268,11 +268,11 @@ iAtomicNumber(:)=0 ! dummy
 
 select case(yn_out_psi)
 case('y')
-  iflag_writepsi=1
+  iflag_write_psi=1
 case('n')
-  iflag_writepsi=0
+  iflag_write_psi=0
 case default
-  stop 'invalid iflag_writepsi'
+  stop 'invalid iflag_write_psi'
 end select
 
 select case(yn_out_elf_rt)
@@ -302,7 +302,7 @@ case default
   stop 'invalid iflag_pdos'
 end select
 
-call comm_bcast(iflag_writepsi, nproc_group_global)
+call comm_bcast(iflag_write_psi, nproc_group_global)
 call comm_bcast(iflag_ELF,      nproc_group_global)
 call comm_bcast(iflag_dos,      nproc_group_global)
 call comm_bcast(iflag_pdos,     nproc_group_global)

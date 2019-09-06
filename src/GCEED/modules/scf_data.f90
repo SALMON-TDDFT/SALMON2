@@ -130,7 +130,7 @@ integer :: Miter_rt    ! Total number of Iteration for RT calculation
 
 integer :: iflag_diisjump
 
-integer :: iflag_writepsi
+integer :: iflag_write_psi
 real(8),allocatable :: rto(:)
 integer ,allocatable:: idip2int(:)
 real(8),allocatable :: rto_ix(:,:)
@@ -280,17 +280,8 @@ integer :: lg_num_fmax(3)
 real(8), allocatable :: rhobox1_all(:,:,:), rhobox2_all(:,:,:)
 
 integer :: iDiter(maxntmg)
-
-character(LEN=100) :: file_OUT_ini
-integer :: num_mol
-real(8) :: rlatcon
-real(8), allocatable :: coo_mol_ini(:,:)
-
 integer :: lg_sta_ini(3),lg_end_ini(3),lg_num_ini(3)
 integer :: mg_sta_ini(3),mg_end_ini(3),mg_num_ini(3)
-real(8) :: H_ini(3)
-real(8) :: rLsize_ini(3)
-
 integer :: img
 
 integer :: itt
@@ -318,7 +309,7 @@ character(100):: rtOutFile
 character(100):: rtDiffOutFile
 character(100):: rtELFOutFile
 character(100):: file_Projection
-character(20):: fileNumber
+character(20) :: fileNumber
 
 real(8), allocatable :: rho_n(:,:,:)
 real(8), allocatable :: Vh_n(:,:,:)
@@ -368,8 +359,7 @@ real(8),allocatable :: E_ind(:,:)
 real(8),allocatable :: E_tot(:,:)
 
 integer,allocatable :: oblist(:)
-
-integer,allocatable::icoo1d(:,:)
+integer,allocatable ::icoo1d(:,:)
 
 integer :: MI_read
 
@@ -379,18 +369,15 @@ real(8) :: absorption_id(0:100000)
 
 integer :: iflag_dos
 integer :: iflag_pdos
-
 integer :: iflag_ELF
-
 integer :: iflag_indA
-
 integer :: iflag_hartree
 
 real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 
 !filename
-character(100) :: file_OUT
-character(100) :: file_IN
+character(100) :: file_out_gs_bin
+character(100) :: file_in_gs_bin
 !character(100) :: file_gs_info
 character(100) :: file_eigen
 character(100) :: file_RT
@@ -405,8 +392,8 @@ character(100) :: file_RT_dip2_q
 character(100) :: file_alpha_dip2_q
 character(100) :: file_RT_dip2_e
 character(100) :: file_external
-character(100) :: file_OUT_rt
-character(100) :: file_IN_rt
+character(100) :: file_out_rt_bin
+character(100) :: file_in_rt_bin
 
 !arrays for isend and irecv
 

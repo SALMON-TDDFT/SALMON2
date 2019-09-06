@@ -61,7 +61,7 @@ use init_poisson_sub
 use init_reciprocal_grid_sub
 use prep_pp_sub, only: calc_vpsl_new
 implicit none
-integer :: ix,iy,iz,ik,is,i,j
+integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
@@ -95,7 +95,6 @@ call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
 ihpsieff=0
-
 iblacsinit=0
 
 call timer_begin(LOG_TOTAL)
@@ -156,7 +155,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call IN_data(lg,mg,ng,info,info_field,system,stencil,mixing)
+    call read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
 
   end select
 
@@ -186,7 +185,6 @@ if(iopt==1)then
   end if
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
-
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 
   call allocate_scalar(mg,srho)
@@ -224,7 +222,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl(lg)
-    call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -232,9 +230,8 @@ if(iopt==1)then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
     stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+    call get_fourier_grid_G(lg,info_field,fg)
   end if
-
-  if(iperiodic==3) call get_fourier_grid_G(lg,info_field,fg)
 
   select case( IC )
   case default ! New calculation
@@ -259,26 +256,9 @@ if(iopt==1)then
 
     if(read_gs_wfn_k=='n') then
       call init_wf_ns(lg,info,1)
-      ! Store to psi/zpsi
-      select case(iperiodic)
-      case(0)
-        do ik=k_sta,k_end
-        do iob=1,info%numo
-          do is=1,nspin
-            spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
-            & psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
-          end do
-        end do
-        end do
-      case(3)
-        do ik=k_sta,k_end
-        do iob=1,info%numo
-          do is=1,nspin
-            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
-            & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
-          end do
-        end do
-      end do
+      select case(iperiodic) ! Store to psi/zpsi
+      case(0) ; call copy_psi_to_rwf(info,nspin,mg,spsi)
+      case(3) ; call copy_zpsi_to_zwf(info,nspin,mg,spsi)
       end select
     else
       if(iperiodic==0) stop "error: read_gs_wfn_k='y' & iperiodic=0"
@@ -297,7 +277,7 @@ if(iopt==1)then
     do i=1,mixing%num_rho_stock+1
       allocate(mixing%srho_in(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
       allocate(mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-      mixing%srho_in(i)%f(:,:,:)=0.d0
+      mixing%srho_in(i)%f(:,:,:) =0.d0
       mixing%srho_out(i)%f(:,:,:)=0.d0
     end do
 
@@ -308,29 +288,28 @@ if(iopt==1)then
         do i=1,mixing%num_rho_stock+1
           allocate(mixing%srho_s_in(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
           allocate(mixing%srho_s_out(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-          mixing%srho_s_in(i,j)%f(:,:,:)=0.d0
+          mixing%srho_s_in(i,j)%f(:,:,:) =0.d0
           mixing%srho_s_out(i,j)%f(:,:,:)=0.d0
         end do
       end do
     end if
 
     if(read_gs_dns_cube == 'n') then
-      call calc_density(srho_s,spsi,info,mg,nspin)
+       call calc_density(system,srho_s,spsi,info,mg)
     else
-      if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
-      call read_dns(lg,mg,srho_s(1)%f) ! cube file only
+       if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
+       call read_dns(lg,mg,srho_s(1)%f) ! cube file only
     end if
 
     srho%f = 0d0
     do jspin=1,nspin
-      srho%f = srho%f + srho_s(jspin)%f
+       srho%f = srho%f + srho_s(jspin)%f
     end do
     rho = srho%f
 
-    allocate (Vlocal(mg_sta(1):mg_end(1),  &
-                mg_sta(2):mg_end(2),  &
-                mg_sta(3):mg_end(3),nspin))
-
+    allocate( Vlocal(mg_sta(1):mg_end(1),  &
+                     mg_sta(2):mg_end(2),  &
+                     mg_sta(3):mg_end(3),nspin))
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     Vh=0.d0
 
@@ -338,9 +317,9 @@ if(iopt==1)then
     Vh = sVh%f
 
     if(ilsda == 0) then
-      allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     else if(ilsda == 1) then
-      allocate( Vxc_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
+       allocate( Vxc_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
     end if
     allocate( esp(itotMST,num_kpoints_rd) )
 
@@ -348,48 +327,32 @@ if(iopt==1)then
 
     call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
-      Vlocal(:,:,:,jspin) = V_local(jspin)%f
+       Vlocal(:,:,:,jspin) = V_local(jspin)%f
     end do
 
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
     case(3)
-      rion_update = .true. ! it's first calculation
-      call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+       rion_update = .true. ! it's first calculation
+       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
 
   case(1,3) ! Continue the previous calculation
 
-    select case(iperiodic)
-    case(0)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
-          & psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
-        end do
-      end do
-      end do
-    case(3)
-      do ik=k_sta,k_end
-      do iob=1,info%numo
-        do is=1,nspin
-          spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
-          & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
-        end do
-      end do
-    end do
+    select case(iperiodic) !Store
+      case(0) ; call copy_psi_to_rwf(info,nspin,mg,spsi)
+      case(3) ; call copy_zpsi_to_zwf(info,nspin,mg,spsi)
     end select
     srho%f = rho
     if(ilsda == 1)then
-      srho_s(1)%f = rho_s(:,:,:,1)
-      srho_s(2)%f = rho_s(:,:,:,2)
+       srho_s(1)%f = rho_s(:,:,:,1)
+       srho_s(2)%f = rho_s(:,:,:,2)
     end if
     do jspin=1,nspin
-      V_local(jspin)%f = Vlocal(:,:,:,jspin)
+       V_local(jspin)%f = Vlocal(:,:,:,jspin)
     end do
 
   end select
@@ -403,14 +366,14 @@ else if(iopt>=2)then
     rion_update = .true.
     call dealloc_init_ps(ppg,ppg_all)
 !    call calc_nlcc(pp, system, mg, ppn) !test
-    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
     sVpsl%f = Vpsl
     if(iperiodic==3) then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
        call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
        if(iflag_hartree==2)then
-         call calc_vpsl_new(mg,system,stencil,pp,fg,sVpsl,ppg)
+         call calc_vpsl_new(mg,system,pp,fg,sVpsl,ppg)
        else if(iflag_hartree==4)then
          call get_fourier_grid_G(lg,info_field,fg)
        end if
@@ -424,12 +387,12 @@ end if
 if(comm_is_root(nproc_id_global)) then
   write(*,*) '-----------------------------------------------'
   select case(iperiodic)
-  case(0)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,  &
-                                                                                 poisson%iterVh
-  case(3)
-    write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
+  case(0) ; write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
+  case(3) ; write(*,101) Miter,energy%E_tot*2d0*Ry
   end select
+100 format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
+101 format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
+
   do ik=1,num_kpoints_rd
     if(ik<=3)then
       if(iperiodic==3) write(*,*) "k=",ik
@@ -442,7 +405,6 @@ if(comm_is_root(nproc_id_global)) then
     end if
   end do
 end if
-
 
 !---------------------------------------- Iteration
 
@@ -467,8 +429,8 @@ call allocate_scalar(ng,Vlocal_old)
 do iz=ng%is(3),ng%ie(3)
 do iy=ng%is(2),ng%ie(2)
 do ix=ng%is(1),ng%ie(1)
-  rho_old%f(ix,iy,iz)=srho%f(ix,iy,iz)
-  Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
+   rho_old%f(ix,iy,iz)=srho%f(ix,iy,iz)
+   Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
 end do
 end do
 end do
@@ -482,9 +444,9 @@ if (comm_is_root(nproc_id_global)) then
 end if    
 call timer_end(LOG_INIT_GS_ITERATION)
 
+
 call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
-
 
   if(sum1<threshold) cycle DFT_Iteration
 
@@ -494,7 +456,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   rion_update = check_rion_update() .or. (iter == 1)
 
   if(temperature>=0.d0 .and. Miter>iditer_notemperature) then
-    call ne2mu(energy,system,info)
+     call ne2mu(energy,system)
   end if
   rocc(1:itotMST,1:system%nk) = system%rocc(1:itotMST,1:system%nk,1) ! future work: remove this line
 
@@ -519,19 +481,15 @@ DFT_Iteration : do iter=1,iDiter(img)
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
-    case(0)
-      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
-    case(3)
-      call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+    case(0); call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+    case(3); call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
     esp = energy%esp(:,:,1) !++++++++
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
 
     call timer_begin(LOG_CALC_CHANGE_ORDER)
-    if(iperiodic==0)then  
-      call change_order(psi,info)
-    end if
+    if(iperiodic==0) call change_order(psi,info)
     call timer_end(LOG_CALC_CHANGE_ORDER)
 
   end if
@@ -545,15 +503,15 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng%is(3),ng%ie(3) 
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        sum0=sum0+abs(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+         sum0 = sum0 + abs(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
       end do
       end do
       end do
       call comm_summation(sum0,sum1,info_field%icomm_all)
       if(ispin==0)then
-        sum1=sum1*Hvol/(dble(ifMST(1))*2.d0)
+         sum1 = sum1*Hvol/(dble(ifMST(1))*2.d0)
       else if(ispin==1)then
-        sum1=sum1*Hvol/dble(ifMST(1)+ifMST(2))
+         sum1 = sum1*Hvol/dble(ifMST(1)+ifMST(2))
       end if
     case('norm_rho','norm_rho_dng')
       sum0=0.d0
@@ -561,13 +519,13 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng%is(3),ng%ie(3) 
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        sum0=sum0+(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
+         sum0 = sum0 + (srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
       end do
       end do
       end do
       call comm_summation(sum0,sum1,info_field%icomm_all)
       if(convergence=='norm_rho_dng')then
-        sum1=sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
+         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
     case('norm_pot','norm_pot_dng')
       sum0=0.d0
@@ -575,13 +533,13 @@ DFT_Iteration : do iter=1,iDiter(img)
       do iz=ng%is(3),ng%ie(3) 
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        sum0=sum0+(V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
+         sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
       end do
       end do
       end do
       call comm_summation(sum0,sum1,info_field%icomm_all)
       if(convergence=='norm_pot_dng')then
-        sum1=sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
+         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
   end select 
 
@@ -590,12 +548,11 @@ DFT_Iteration : do iter=1,iDiter(img)
     select case(iperiodic)
     case(0)
       if(iflag_diisjump == 1) then
-        write(*,'("Diisjump occured. Steepest descent was used.")')
+         write(*,'("Diisjump occured. Steepest descent was used.")')
       end if
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)') Miter,energy%E_tot*2d0*Ry,   &
-                                                                                   poisson%iterVh
+      write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
     case(3)
-      write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,energy%E_tot*2d0*Ry
+      write(*,101) Miter,energy%E_tot*2d0*Ry
     end select
     do ik=1,num_kpoints_rd
       if(ik<=3)then
@@ -610,32 +567,31 @@ DFT_Iteration : do iter=1,iDiter(img)
     end do
 
     select case(convergence)
-      case('rho_dne')
-        write(*,'("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec     = ",i6,e15.8)') Miter,sum1
-      case('norm_rho')
-        write(*,'("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)') Miter,sum1/a_B**6
-      case('norm_rho_dng')
-        write(*,'("iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)') Miter,sum1/a_B**6
-      case('norm_pot')
-        write(*,'("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2              = ",i6,e15.8)') Miter,     &
-                                                                         sum1*(2.d0*Ry)**2/a_B**6
-      case('norm_pot_dng')
-        write(*,'("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids) = ",i6,e15.8)') Miter,     &
-                                                                         sum1*(2.d0*Ry)**2/a_B**6
+      case('rho_dne' )     ; write(*,200) Miter, sum1
+      case('norm_rho')     ; write(*,201) Miter, sum1/a_B**6
+      case('norm_rho_dng') ; write(*,202) Miter, sum1/a_B**6
+      case('norm_pot')     ; write(*,203) Miter, sum1*(2.d0*Ry)**2/a_B**6
+      case('norm_pot_dng') ; write(*,204) Miter, sum1*(2.d0*Ry)**2/a_B**6
     end select
+200 format("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
+201 format("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)
+202 format("iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
+203 format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2              = ",i6,e15.8)
+204 format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
+
   end if 
   rNebox1=0.d0 
 !$OMP parallel do reduction(+:rNebox1) private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    rNebox1=rNebox1+srho%f(ix,iy,iz)
+     rNebox1 = rNebox1 + srho%f(ix,iy,iz)
   end do
   end do
   end do
   call comm_summation(rNebox1,rNebox2,info_field%icomm_all)
   if(comm_is_root(nproc_id_global))then
-    write(*,*) "Ne=",rNebox2*Hvol
+     write(*,*) "Ne=",rNebox2*Hvol
   end if
   call timer_end(LOG_WRITE_GS_RESULTS)
 
@@ -643,20 +599,20 @@ DFT_Iteration : do iter=1,iDiter(img)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    rho_old%f(ix,iy,iz)=srho%f(ix,iy,iz)
-    Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
+     rho_old%f(ix,iy,iz)    = srho%f(ix,iy,iz)
+     Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
   end do
   end do
   end do
 
 end do DFT_Iteration
 
-! for OUT_data
+! for writing GS data
 Vh = sVh%f
 rho = srho%f
 if(ilsda == 1) then
   do jspin=1,system%nspin
-    Vxc_s(:,:,:,jspin) = sVxc(jspin)%f
+     Vxc_s(:,:,:,jspin) = sVxc(jspin)%f
   end do
 else
   Vxc = sVxc(1)%f
@@ -665,43 +621,14 @@ Exc = energy%E_xc
 
 ! Store to psi/zpsi
 select case(iperiodic)
-case(0)
-  do ik=k_sta,k_end
-  do iob=1,info%numo
-    do is=1,nspin
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        psi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%rwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-case(3)
-  do ik=k_sta,k_end
-  do iob=1,info%numo
-    do is=1,nspin
-      !$OMP parallel do private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik)=spsi%zwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
-      end do
-      end do
-      end do
-    end do
-  end do
-end do
+  case(0) ; call copy_rwf_to_psi(info,nspin,mg,spsi)
+  case(3) ; call copy_zwf_to_zpsi(info,nspin,mg,spsi)
 end select
 
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then
   if(iperiodic==3) then
     call write_wfn(lg,mg,spsi,info,system)
-    
     ! Experimental Implementation of Inner-Product Outputs:
     call write_prod_dk_data(lg, mg, system, info, spsi) 
   else
@@ -712,10 +639,10 @@ end if
 ! output transition moment
 if(yn_out_tm  == 'y') then
   if(iperiodic==3) then
-    call write_k_data(system,stencil)
-    call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
+     call write_k_data(system,stencil)
+     call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
   else
-    write(*,*) "error: yn_out_tm='y' & iperiodic=0"
+     write(*,*) "error: yn_out_tm='y' & iperiodic=0"
   end if
 end if
 
@@ -730,18 +657,16 @@ else
       write(*,*) "===== force ====="
       do iatom=1,MI
          select case(unit_system)
-         case('au','a.u.')
-            write(*,'(i6,3e16.8)') iatom,(system%Force(ix,iatom),ix=1,3)
-         case('A_eV_fs')
-            write(*,'(i6,3e16.8)') iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+         case('au','a.u.'); write(*,300)iatom,(system%Force(ix,iatom),ix=1,3)
+         case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
          end select
       end do
+300   format(i6,3e16.8)
    end if
 end if
 !end if
 
 if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
-
 deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 
@@ -767,8 +692,8 @@ if(iflag_opt==1) then
   end if
 
   if(flag_opt_conv) then
-    call structure_opt_fin
-    exit Multigrid_Iteration
+     call structure_opt_fin
+     exit Multigrid_Iteration
   end if
 
 else
@@ -787,51 +712,27 @@ end if
 end do Structure_Optimization_Iteration
 
 
-!---------------------------------------- Output
+!------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
-call band_information
-
+call write_band_information
 call write_eigen
-
-if(yn_out_psi=='y') then
-  call writepsi(lg,info)
-end if
-
-if(yn_out_dns=='y') then
-  call writedns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
-end if
-
-if(yn_out_dos=='y') then
-  call calc_dos(info)
-end if
-
-if(yn_out_pdos=='y') then
-  call calc_pdos(lg,info)
-end if
-
-if(OC==2)then
-  call prep_ini
-end if
-
-if(yn_out_elf=='y')then
-  allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),      &
-               lg%is(3):lg%ie(3)))
-  call calcELF(lg,mg,ng,srg,info,srho,0)
-  call writeelf(lg,elf,icoo1d,hgs,iscfrt)
+if(yn_out_psi=='y' ) call write_psi(lg,info)
+if(yn_out_dns=='y' ) call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
+if(yn_out_dos=='y' ) call calc_dos(info)
+if(yn_out_pdos=='y') call calc_pdos(lg,info)
+if(yn_out_elf=='y' ) then
+  allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  call calc_elf(lg,mg,ng,srg,info,srho,0)
+  call write_elf(lg,elf,icoo1d,hgs,iscfrt)
   deallocate(elf)
 end if
 call timer_end(LOG_WRITE_GS_RESULTS)
 
-
+! write GS data
 call timer_begin(LOG_WRITE_GS_DATA)
-! GS data
-! subroutines in scf_data.f90
-if ( OC==1.or.OC==2.or.OC==3 ) then
-  call OUT_data(lg,ng,info,mixing)
-end if
+if( OC==1.or.OC==2.or.OC==3 ) call write_gs_bin(lg,ng,info,mixing)
 call timer_end(LOG_WRITE_GS_DATA)
-
 
 ! write GS information
 call timer_begin(LOG_WRITE_GS_INFO)
@@ -845,7 +746,95 @@ call timer_end(LOG_TOTAL)
 
 contains
 
-subroutine band_information
+subroutine copy_psi_to_rwf(info,nspin,mg,spsi)
+  use scf_data, only: psi
+  implicit none
+  integer                 ,intent(in) :: nspin
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_orbital)         ,intent(inout) :: spsi
+  integer :: ik,iob,is
+
+  do ik=k_sta,k_end
+  do iob=1,info%numo
+  do is=1,nspin
+     spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
+         &  psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
+  end do
+  end do
+  end do
+end subroutine copy_psi_to_rwf
+
+subroutine copy_zpsi_to_zwf(info,nspin,mg,spsi)
+  use scf_data, only: zpsi
+  implicit none
+  integer                 ,intent(in) :: nspin
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_orbital)         ,intent(inout) :: spsi
+  integer :: ik,iob,is
+
+  do ik=k_sta,k_end
+  do iob=1,info%numo
+  do is=1,nspin
+     spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
+          & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
+  end do
+  end do
+  end do
+end subroutine copy_zpsi_to_zwf
+
+subroutine copy_rwf_to_psi(info,nspin,mg,spsi)
+  use scf_data, only: psi
+  implicit none
+  integer                 ,intent(in) :: nspin
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_orbital)         ,intent(in) :: spsi
+  integer :: ik,iob,is, ix,iy,iz
+
+  do ik=k_sta,k_end
+  do iob=1,info%numo
+  do is=1,nspin
+     !$OMP parallel do private(iz,iy,ix)
+     do iz=mg%is(3),mg%ie(3)
+     do iy=mg%is(2),mg%ie(2)
+     do ix=mg%is(1),mg%ie(1)
+        psi(ix,iy,iz,iob+(is-1)*info%numo,ik) = spsi%rwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
+     end do
+     end do
+     end do
+  end do
+  end do
+  end do
+end subroutine copy_rwf_to_psi
+
+subroutine copy_zwf_to_zpsi(info,nspin,mg,spsi)
+  use scf_data, only: zpsi
+  implicit none
+  integer                 ,intent(in) :: nspin
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_orbital)         ,intent(in) :: spsi
+  integer :: ik,iob,is, ix,iy,iz
+
+  do ik=k_sta,k_end
+  do iob=1,info%numo
+  do is=1,nspin
+     !$OMP parallel do private(iz,iy,ix)
+     do iz=mg%is(3),mg%ie(3)
+     do iy=mg%is(2),mg%ie(2)
+     do ix=mg%is(1),mg%ie(1)
+        zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik) = spsi%zwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
+     end do
+     end do
+     end do
+  end do
+  end do
+  end do
+end subroutine copy_zwf_to_zpsi
+
+subroutine write_band_information
   implicit none
   integer :: ik
   real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
@@ -875,7 +864,7 @@ subroutine band_information
     write(*,*) '---------------------------------------------------------'
   end if
   return
-end subroutine band_information
+end subroutine write_band_information
 
 subroutine get_fourier_grid_G(lg,info_field,fg)
   use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid

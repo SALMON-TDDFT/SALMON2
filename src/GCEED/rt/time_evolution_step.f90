@@ -197,7 +197,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_end(LOG_CALC_TIME_PROPAGATION)
 
   call timer_begin(LOG_CALC_RHO)
-  call calc_density(srho_s,spsi_out,info,mg,nspin)
+  call calc_density(system,srho_s,spsi_out,info,mg)
 
   if(nspin==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -271,13 +271,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
   case(3)
 
-    if(if_use_dmat) call calc_density_matrix(nspin,info,mg,srg,spsi_out,dmat)
+    if(if_use_dmat) call calc_density_matrix(system,info,mg,srg,spsi_out,dmat)
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then
-      call calc_current_use_dmat(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
+      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
     else
-      call calc_current(nspin,system%ngrid,mg,stencil,info,srg,spsi_out,ppg,curr_tmp(1:3,1:nspin))
+      call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_tmp(1:3,1:nspin))
     end if
     call calc_emfields(nspin,curr_tmp)
     call timer_end(LOG_CALC_CURRENT)
@@ -294,7 +294,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
     if(use_singlescale=='y') then
-      call calc_microscopic_current(nspin,mg,stencil,info,spsi_out,dmat,j_e)
+      call calc_microscopic_current(system,mg,stencil,info,spsi_out,dmat,j_e)
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
@@ -359,13 +359,13 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call writedns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calcELF(lg,mg,ng,srg,info,srho,itt)
-      call writeelf(lg,elf,icoo1d,hgs,iscfrt,itt)
+      call calc_elf(lg,mg,ng,srg,info,srho,itt)
+      call write_elf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
   end if
   if(yn_out_estatic_rt=='y')then

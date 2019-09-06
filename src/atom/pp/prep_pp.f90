@@ -165,7 +165,7 @@ end subroutine calc_vpsl
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_new(mg,system,stencil,pp,fg,vpsl,ppg)
+subroutine calc_vpsl_new(mg,system,pp,fg,vpsl,ppg)
   use salmon_global,only : natom, nelem, kion
   use salmon_communication, only: comm_summation
   use math_constants,only : pi,zi
@@ -173,7 +173,6 @@ subroutine calc_vpsl_new(mg,system,stencil,pp,fg,vpsl,ppg)
   implicit none
   type(s_rgrid)     ,intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_stencil),intent(in) :: stencil
   type(s_pp_info),intent(in) :: pp
   type(s_reciprocal_grid)    :: fg
   type(s_scalar)             :: vpsl
@@ -184,7 +183,7 @@ subroutine calc_vpsl_new(mg,system,stencil,pp,fg,vpsl,ppg)
   real(8) :: g2,gr,s,g2sq,r1,dr,vloc_av
   complex(8) :: vion_g_ia(fg%ng,natom),tmp_exp
 
-  matrix_A = stencil%rmatrix_A
+  matrix_A = system%rmatrix_A
 
 !$omp parallel
 !$omp do private(ik,n,g2sq,s,r1,dr,i,vloc_av) collapse(2)

@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcELF(lg,mg,ng,srg,info,srho,ttmp)
+subroutine calc_elf(lg,mg,ng,srg,info,srho,ttmp)
 use structures
 use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_summation
@@ -267,4 +267,4 @@ call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_globa
 
 call dealloc_cache(srg_ob_1)
 
-end subroutine calcELF
+end subroutine calc_elf

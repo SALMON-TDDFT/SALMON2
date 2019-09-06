@@ -327,7 +327,6 @@ module salmon_global
   integer        :: iflag_psicube
   real(8)        :: lambda1_diis
   real(8)        :: lambda2_diis
-  character(100) :: file_ini
   integer        :: num_projection
   integer        :: iwrite_projection_ob(200)
   integer        :: iwrite_projection_k(200)

@@ -9,7 +9,7 @@ set(SOURCES
     dip.f90
     initA.f90
     projection.f90
-    read_rt.f90
+    read_write_rt_bin.f90
     real_time_dft.f90
     set_vonf_sd.f90
     taylor_coe.f90

@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE OUT_data_rt(ng,info)
+SUBROUTINE write_rt_bin(ng,info)
 use structures,      only: s_rgrid,s_orbital_parallel
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -27,7 +27,7 @@ type(s_orbital_parallel), intent(in) :: info
 integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer :: ibox
-character(100) :: file_OUT_rt_data
+character(100) :: file_out_rt_bin_num_bin
 integer :: ii,j1,j2,j3
 integer :: nproc_id_global_datafiles
 integer :: ista_Mxin_datafile(3)
@@ -38,7 +38,7 @@ character(8) :: fileNumber_data
 integer :: iob_myob
 integer :: icorr_p
 
-if(comm_is_root(nproc_id_global)) open(99,file=file_OUT_rt,form='unformatted')
+if(comm_is_root(nproc_id_global)) open(99,file=file_out_rt_bin,form='unformatted')
 
 if(comm_is_root(nproc_id_global)) write(99) itotNtime
 
@@ -75,8 +75,8 @@ if(num_datafiles_OUT>=2.and.num_datafiles_OUT<=nproc_size_global)then
     inum_Mxin_datafile(:)=iend_Mxin_datafile(:)-ista_Mxin_datafile(:)+1
 
     write(fileNumber_data, '(i6.6)') nproc_id_global_datafiles
-    file_Out_rt_data = trim(adjustl(sysname))//"_rt_"//trim(adjustl(fileNumber_data))//".bin"
-    open(89,file=file_Out_rt_data,form='unformatted')
+    file_out_rt_bin_num_bin = trim(adjustl(sysname))//"_rt_"//trim(adjustl(fileNumber_data))//".bin"
+    open(89,file=file_out_rt_bin_num_bin,form='unformatted')
 
   end if
 end if
@@ -252,10 +252,10 @@ if(comm_is_root(nproc_id_global)) then
 end if
 
 
-END SUBROUTINE OUT_data_rt
+END SUBROUTINE write_rt_bin
 
 !---------------------------------------------------------------------------
-SUBROUTINE IN_data_rt(ng,info,Ntime)
+SUBROUTINE read_rt_bin(ng,info,Ntime)
 use structures, only: s_rgrid, s_orbital_parallel
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -270,7 +270,7 @@ type(s_orbital_parallel),intent(in) :: info
 integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer       :: Ntime
-character(100) :: file_IN_rt_data
+character(100) :: file_in_rt_bin_num_bin
 integer :: ibox
 integer :: ii,j1,j2,j3
 integer :: nproc_id_global_datafiles
@@ -284,7 +284,7 @@ integer :: icorr_p
 
 if(comm_is_root(nproc_id_global))then
 
-   open(98,file=file_IN_rt,form='unformatted')
+   open(98,file=file_in_rt_bin,form='unformatted')
 
 end if
 
@@ -330,8 +330,8 @@ if(num_datafiles_IN>=2.and.num_datafiles_IN<=nproc_size_global)then
     inum_Mxin_datafile(:)=iend_Mxin_datafile(:)-ista_Mxin_datafile(:)+1
 
     write(fileNumber_data, '(i6.6)') nproc_id_global_datafiles
-    file_IN_rt_data = trim(adjustl(sysname))//"_rt_"//trim(adjustl(fileNumber_data))//".bin"
-    open(88,file=file_IN_rt_data,form='unformatted')
+    file_in_rt_bin_num_bin = trim(adjustl(sysname))//"_rt_"//trim(adjustl(fileNumber_data))//".bin"
+    open(88,file=file_in_rt_bin_num_bin,form='unformatted')
 
   end if
 end if
@@ -500,5 +500,5 @@ end do
 
 if(comm_is_root(nproc_id_global)) close(98)
 
-END SUBROUTINE IN_data_rt
+END SUBROUTINE read_rt_bin
 

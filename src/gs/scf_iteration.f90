@@ -114,7 +114,7 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
 ! density
   call timer_begin(LOG_CALC_RHO)
 
-  call calc_density(srho_s,spsi,info,mg,system%nspin)
+  call calc_density(system,srho_s,spsi,info,mg)
 
   select case(method_mixing)
     case ('simple') ; call simple_mixing(ng,system,1.d0-mixrate,mixrate,srho_s,mixing)
