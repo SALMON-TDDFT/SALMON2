@@ -25,23 +25,25 @@ contains
 ! dmat(r,-dr) = conjg(dmat(r-dr,dr))
 ! j(r) = sum occ aimag( conjg(psi(r))* (sum nabt*psi)(r) ) = aimag( sum_dr nabt(dr)* dmat(r,dr) )
 
-  subroutine calc_density_matrix(nspin,info,mg,srg,psi,dmat)
+  subroutine calc_density_matrix(system,info,mg,srg,psi,dmat)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
     use salmon_communication, only: comm_summation
     use timer
     implicit none
-    integer        ,intent(in) :: nspin
+    type(s_dft_system),intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_sendrecv_grid)      :: srg
     type(s_orbital)            :: psi
     type(s_dmatrix)            :: dmat
     !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize
+    integer :: im,ispin,ik,io,is(3),ie(3),nsize,nspin
     integer :: iz,iy,ix,ii,ix1,iy1,iz1
     complex(8) :: pocc
     complex(8),allocatable :: wrk(:,:,:,:,:)
+
+    nspin = system%nspin
 
     call timer_begin(LOG_CALC_DENSITY_MATRIX)
 
@@ -89,7 +91,7 @@ contains
         iz1 = mg%idz(iz)
 
         ! dir = 1,2,3 = xx,yy,zz (yz,zx,xy)
-        pocc = conjg( psi%zwf(ix1,iy1,iz1,ispin,io,ik,im) ) * info%occ(io,ik,ispin,im)
+        pocc = conjg( psi%zwf(ix1,iy1,iz1,ispin,io,ik,im) ) * system%rocc(io,ik,ispin)*system%wtk(ik)
 !dir$ unroll
         do ii=1,Nd
           wrk(ii,1,ix,iy,iz) = wrk(ii,1,ix,iy,iz) + psi%zwf(mg%idx(ix+ii),iy1,iz1,ispin,io,ik,im) * pocc
@@ -117,22 +119,24 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_density(rho,psi,info,mg,nspin)
+  subroutine calc_density(system,rho,psi,info,mg)
     use structures
     use salmon_communication, only: comm_summation
     use salmon_parallel, only: get_thread_id,get_nthreads
     use misc_routines, only: ceiling_pow2
     use timer
     implicit none
-    integer        ,intent(in) :: nspin
+    type(s_dft_system),intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_orbital),intent(in) :: psi
-    type(s_scalar) :: rho(nspin,info%im_s:info%im_e)
+    type(s_scalar) :: rho(system%nspin,info%im_s:info%im_e)
     !
-    integer :: im,ispin,ik,io,is(3),ie(3),nsize,tid,ix,iy,iz,nthreads
+    integer :: im,ispin,ik,io,is(3),ie(3),nsize,nspin,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
+
+    nspin = system%nspin
 
 #ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
 !dir$ attributes align : 2097152 :: wrk
@@ -161,7 +165,7 @@ contains
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
           wrk2 = abs( psi%rwf(ix,iy,iz,ispin,io,ik,im) )**2
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin,im)
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
         end do
         end do
         end do
@@ -201,7 +205,7 @@ contains
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
           wrk2 = abs( psi%zwf(ix,iy,iz,ispin,io,ik,im) )**2
-          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * info%occ(io,ik,ispin,im)
+          wrk(ix,iy,iz,tid) = wrk(ix,iy,iz,tid) + wrk2 * system%rocc(io,ik,ispin)*system%wtk(ik)
         end do
         end do
         end do
@@ -291,7 +295,7 @@ contains
           call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
 
-        wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * info%occ(io,ik,ispin,im)
+        wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin)*system%wtk(ik)
 
       end do
       end do
@@ -401,7 +405,7 @@ contains
           call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
         end if
 
-        wrk3 = wrk3 + (wrk1 + wrk2) * info%occ(io,ik,ispin,im)
+        wrk3 = wrk3 + (wrk1 + wrk2) * system%rocc(io,ik,ispin)*system%wtk(ik)
 
       end do
       end do
@@ -559,11 +563,11 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_microscopic_current(nspin,mg,stencil,info,psi,dmat,curr)
+  subroutine calc_microscopic_current(system,mg,stencil,info,psi,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
     implicit none
-    integer,intent(in) :: nspin
+    type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
     type(s_orbital_parallel),intent(in) :: info
@@ -571,8 +575,10 @@ contains
     type(s_dmatrix),intent(in) :: dmat
     type(s_vector)             :: curr ! electron number current density (without rho*A/c)
     !
-    integer :: ispin,im,ik,io,is(3),ie(3),nsize
+    integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
+
+    nspin = system%nspin
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im_s, im_e @ calc_microscopic_current"
     im = 1
@@ -590,7 +596,7 @@ contains
       do io=info%io_s,info%io_e
 
         call kvec_part(mg%is_array,mg%ie_array,is,ie,stencil%vec_kAc(:,ik),psi%zwf(:,:,:,ispin,io,ik,im),wrk)
-        wrk2 = wrk2 + wrk * info%occ(io,ik,ispin,im)
+        wrk2 = wrk2 + wrk * system%rocc(io,ik,ispin)*system%wtk(ik)
 
 !       call nonlocal_part
 

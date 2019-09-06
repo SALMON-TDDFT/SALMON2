@@ -126,7 +126,8 @@ contains
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
           w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin,im) * dble(w(:))* ppg%Vpsl_atom(ix,iy,iz,ia) * system%Hvol
+          F_tmp(:,ia) = F_tmp(:,ia) - 2d0*system%rocc(io,ik,ispin)*system%wtk(ik)  &
+          & * dble(w(:))* ppg%Vpsl_atom(ix,iy,iz,ia) * system%Hvol
         end do
         end do
         end do
@@ -144,7 +145,8 @@ contains
           w = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           duVpsi = duVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
         end do
-        F_tmp(:,ia) = F_tmp(:,ia) - 2d0*info%occ(io,ik,ispin,im) * dble( conjg(duVpsi(:)) * uVpsibox2(ilma,iorb) ) * system%Hvol
+        F_tmp(:,ia) = F_tmp(:,ia) - 2d0*system%rocc(io,ik,ispin)*system%wtk(ik) &
+        & * dble( conjg(duVpsi(:)) * uVpsibox2(ilma,iorb) ) * system%Hvol
       end do
 
     end do

@@ -534,14 +534,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
-  do ik=info%ik_s,info%ik_e
-    do iob=info%io_s,info%io_e
-      do jspin=1,system%nspin
-        info%occ(iob,ik,jspin,1) = system%rocc(iob,ik,1)*system%wtk(ik)
-      end do
-    end do
-  end do
-
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
@@ -640,7 +632,7 @@ allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2)
     write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
   end if
 
-  call calc_density(srho_s,spsi_in,info,mg,nspin)
+  call calc_density(system,srho_s,spsi_in,info,mg)
 
   if(ilsda==0)then  
 !$OMP parallel do private(iz,iy,ix) collapse(2)

@@ -295,7 +295,7 @@ if(iopt==1)then
     end if
 
     if(read_gs_dns_cube == 'n') then
-       call calc_density(srho_s,spsi,info,mg,nspin)
+       call calc_density(system,srho_s,spsi,info,mg)
     else
        if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
        call read_dns(lg,mg,srho_s(1)%f) ! cube file only
@@ -453,7 +453,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   rion_update = check_rion_update() .or. (iter == 1)
 
   if(temperature>=0.d0 .and. Miter>iditer_notemperature) then
-     call ne2mu(energy,system,info)
+     call ne2mu(energy,system)
   end if
   rocc(1:itotMST,1:system%nk) = system%rocc(1:itotMST,1:system%nk,1) ! future work: remove this line
 

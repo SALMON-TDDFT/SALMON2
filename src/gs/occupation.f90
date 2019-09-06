@@ -18,7 +18,7 @@ module occupation
 
 contains
 
-SUBROUTINE ne2mu(energy,system,info)
+SUBROUTINE ne2mu(energy,system)
   use structures
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
@@ -26,7 +26,6 @@ SUBROUTINE ne2mu(energy,system,info)
   implicit none
   type(s_dft_energy),intent(in) :: energy
   type(s_dft_system)            :: system
-  type(s_orbital_parallel)      :: info
   !
   integer :: jspin,io,ik,nspin,nk,no,iter
   real(8) :: nein,muout
@@ -117,14 +116,6 @@ SUBROUTINE ne2mu(energy,system,info)
     write(*,'(a,f15.8)') ' Number of Electrons = ',ne3
     write(*,*)
   end if
-
-  do jspin=1,system%nspin
-    do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-        info%occ(io,ik,jspin,1) = system%rocc(io,ik,jspin)*system%wtk(ik)
-      end do
-    end do
-  end do
 
   return
 contains

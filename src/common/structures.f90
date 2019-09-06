@@ -114,7 +114,6 @@ module structures
                               ! For calc_mode='RT' and temperature<0, these values are calculated from nelec.
                               ! In other cases, these are calculated from nstate.
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
-    real(8),allocatable :: occ(:,:,:,:) ! (io,ik,ispin,im), occ = rocc*wk, occupation numbers
   end type s_orbital_parallel
 
   type s_field_parallel
@@ -368,7 +367,6 @@ contains
 
   subroutine deallocate_orbital_parallel(info)
     type(s_orbital_parallel) :: info
-    DEAL(info%occ)
     DEAL(info%irank_io)
   end subroutine deallocate_orbital_parallel
 

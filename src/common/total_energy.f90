@@ -280,7 +280,7 @@ CONTAINS
       do ispin=1,Nspin
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
-          E_tmp = E_tmp + info%occ(io,ik,ispin,im) &
+          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) &
                       * sum( conjg( tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) &
                                  * ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
@@ -299,7 +299,7 @@ CONTAINS
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
 
-          E_tmp = E_tmp + info%occ(io,ik,ispin,im) * system%hvol &
+          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) * system%hvol &
             * sum( conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im)) &
               * (htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
                 - (ttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
