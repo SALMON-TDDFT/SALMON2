@@ -46,6 +46,10 @@ program main
   case('Single_scale_Maxwell_TDDFT'  ); call real_time_dft
   case('Multi_scale_Maxwell_TDDFT'   ); call arted   !temporally
   case('Maxwell')                     ; call classic_em
+ !case('SBE')                         ; call main_sbe
+ !case('Maxwell_SBE')                 ; call main_maxwell_sbe
+ !case('TTM')                         ; call main_ttm
+ !case('Maxwell_TTM')                 ; call main_maxwell_ttm
   case default ; stop 'invalid theory'
   end select
 
