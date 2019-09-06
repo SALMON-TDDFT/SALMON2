@@ -372,8 +372,11 @@ else if(iopt>=2)then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
        call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-!       call get_fourier_grid_G(lg,info_field,fg)
-       call calc_vpsl_new(mg,system,pp,fg,sVpsl,ppg)
+       if(iflag_hartree==2)then
+         call calc_vpsl_new(mg,system,pp,fg,sVpsl,ppg)
+       else if(iflag_hartree==4)then
+         call get_fourier_grid_G(lg,info_field,fg)
+       end if
     end if
 
   end if
@@ -872,13 +875,10 @@ subroutine get_fourier_grid_G(lg,info_field,fg)
   integer :: npuy,npuz
   real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
 
-  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
+  if(iflag_hartree==4)then
+     if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
+     allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
 
-  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
-  if(iflag_hartree==2)then
-     fg%zrhoG_ion = rhoion_G
-     fg%zdVG_ion = dVloc_G
-  else if(iflag_hartree==4)then
      allocate(Gx_tmp(fg%ng))
      allocate(Gy_tmp(fg%ng))
      allocate(Gz_tmp(fg%ng))
