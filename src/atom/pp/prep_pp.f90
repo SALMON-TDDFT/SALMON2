@@ -165,7 +165,67 @@ end subroutine calc_vpsl
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_new(mg,system,pp,fg,vpsl,ppg)
+SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
+  use structures
+  use salmon_global,only : natom, kion
+  use salmon_parallel, only: nproc_id_global
+  implicit none
+  type(s_rgrid)     ,intent(in) :: mg,lg
+  type(s_dft_system),intent(in) :: system
+  type(s_pp_info),intent(in) :: pp
+  type(s_scalar)             :: vpsl
+  type(s_pp_grid)            :: ppg
+  !
+  integer :: ix,iy,iz,ak
+  integer :: j,a,intr
+  real(8) :: ratio1,ratio2,r
+
+  Vpsl%f=0.d0
+
+  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
+  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
+  do a=1,natom
+    ak=Kion(a)
+    do j=1,3
+      if(abs(system%Rion(j,a))<lg%num(j)*system%Hgs(j))then
+        continue
+      else
+        write(*,*) "Rion error",nproc_id_global,a,j,system%Rion(j,a)
+      end if
+    end do
+    do ix=mg%is(1),mg%ie(1)
+    do iy=mg%is(2),mg%ie(2)
+    do iz=mg%is(3),mg%ie(3)
+      r=sqrt( (lg%coordinate(ix,1)-system%Rion(1,a))**2      &
+             +(lg%coordinate(iy,2)-system%Rion(2,a))**2      &
+             +(lg%coordinate(iz,3)-system%Rion(3,a))**2 )+1.d-50
+      call bisection(r,intr,ak,pp%nrmax,pp%rad)
+      ratio1=(r-pp%rad(intr,ak))/(pp%rad(intr+1,ak)-pp%rad(intr,ak)) ; ratio2=1.d0-ratio1
+      if(intr>0.and.intr<=pp%nrmax)then
+        continue
+      else
+        write(*,*) "intr error",nproc_id_global,intr,r
+      end if
+
+      Vpsl%f(ix,iy,iz)=Vpsl%f(ix,iy,iz)      &
+                  +ratio1*pp%vpp_f(intr,pp%Lref(ak),ak)      &
+                  +ratio2*pp%vpp_f(intr-1,pp%Lref(ak),ak)  !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+
+      ppg%Vpsl_atom(ix,iy,iz,a) = ratio1*pp%vpp_f(intr,pp%Lref(ak),ak) + ratio2*pp%vpp_f(intr-1,pp%Lref(ak),ak)
+    end do
+    end do
+    end do
+  end do
+
+  allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
+  ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
+
+  return
+END SUBROUTINE calc_Vpsl_isolated
+
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+subroutine calc_vpsl_periodic(mg,system,pp,fg,vpsl,ppg)
   use salmon_global,only : natom, nelem, kion
   use salmon_communication, only: comm_summation
   use math_constants,only : pi,zi
@@ -184,6 +244,8 @@ subroutine calc_vpsl_new(mg,system,pp,fg,vpsl,ppg)
   complex(8) :: vion_g_ia(fg%ng,natom),tmp_exp
 
   matrix_A = system%rmatrix_A
+  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
+  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 
 !$omp parallel
 !$omp do private(ik,n,g2sq,s,r1,dr,i,vloc_av) collapse(2)
@@ -273,7 +335,7 @@ subroutine calc_vpsl_new(mg,system,pp,fg,vpsl,ppg)
 !$omp end do
 !$omp end parallel
 
-end subroutine calc_vpsl_new
+end subroutine calc_vpsl_periodic
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_mps(ppg)

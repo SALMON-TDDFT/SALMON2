@@ -4,8 +4,6 @@ set(SOURCES
     calcJxyz_all_periodic.f90
     calc_pmax.f90
     calcuV.f90
-    calcVpsl.f90
-    calcVpsl_periodic.f90
     calcVpsl_periodic_FFTE.f90
     check_cep.f90
     check_fourier.f90
