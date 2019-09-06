@@ -45,7 +45,9 @@ case(3)
   case(2)
     call calc_vpsl_periodic(mg,system,pp,fg,sVpsl,ppg)
   case(4)
+    if(.not.allocated(sVpsl%f)) call allocate_scalar(mg,sVpsl)
     call calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
+    sVpsl%f = Vpsl
   end select
   call calcJxyz_all_periodic(lg,system%primitive_a,system%rmatrix_A)
   call calcuV(lg)

@@ -182,7 +182,7 @@ SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
 
   Vpsl%f=0.d0
 
-  call allocate_scalar(mg,Vpsl)
+  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
   allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
   do a=1,natom
     ak=Kion(a)
@@ -244,7 +244,7 @@ subroutine calc_vpsl_periodic(mg,system,pp,fg,vpsl,ppg)
   complex(8) :: vion_g_ia(fg%ng,natom),tmp_exp
 
   matrix_A = system%rmatrix_A
-  call allocate_scalar(mg,Vpsl)
+  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
   allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 
 !$omp parallel
