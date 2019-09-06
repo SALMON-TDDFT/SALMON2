@@ -58,7 +58,6 @@ use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
-use prep_pp_sub, only: calc_vpsl_new
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -221,9 +220,8 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl(lg)
-    call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
+    call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
   end if
-  sVpsl%f = Vpsl
 
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
@@ -365,15 +363,12 @@ else if(iopt>=2)then
     rion_update = .true.
     call dealloc_init_ps(ppg,ppg_all)
 !    call calc_nlcc(pp, system, mg, ppn) !test
-    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
-    sVpsl%f = Vpsl
+    call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
     if(iperiodic==3) then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
        call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-       if(iflag_hartree==2)then
-         call calc_vpsl_new(mg,system,pp,fg,sVpsl,ppg)
-       else if(iflag_hartree==4)then
+       if(iflag_hartree==4)then
          call get_fourier_grid_G(lg,info_field,fg)
        end if
     end if
@@ -607,6 +602,8 @@ DFT_Iteration : do iter=1,iDiter(img)
 end do DFT_Iteration
 
 ! for writing GS data
+Vpsl = sVpsl%f
+if(allocated(Vpsl_atom)) Vpsl_atom = ppg%Vpsl_atom
 Vh = sVh%f
 rho = srho%f
 if(ilsda == 1) then

@@ -62,6 +62,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_mixing) :: mixing
+type(s_scalar) :: sVpsl
 real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
 real(8),allocatable :: Sf(:)
@@ -181,7 +182,7 @@ if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
 call read_pslfile(system)
 call allocate_psl(lg)
-call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
+call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
 
 call init_itype
 call init_sendrecv_matrix
@@ -330,7 +331,7 @@ endif
 
 
 ! Go into Time-Evolution
-call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
+call Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson,sVpsl)
 
 
 call timer_begin(LOG_WRITE_RT_DATA)
@@ -465,7 +466,7 @@ END subroutine Real_Time_DFT
 
 !=========%==============================================================
 
-SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson)
+SUBROUTINE Time_Evolution(lg,mg,ng,system,info,info_field,stencil,fg,energy,md,ofl,poisson,sVpsl)
 use structures
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
@@ -499,6 +500,7 @@ type(s_ofile) :: ofl
 type(s_poisson) :: poisson
 type(s_vector) :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
+type(s_scalar) :: sVpsl
 
 complex(8),parameter :: zi=(0.d0,1.d0)
 integer :: iob,i1,i2,i3,ix,iy,iz,jj,ik,iik,n,nn
@@ -515,7 +517,7 @@ real(8)    :: rbox_array2(10)
 
 character(100) :: comment_line
 
-type(s_scalar) :: srho,sVh,sVpsl
+type(s_scalar) :: srho,sVh
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 

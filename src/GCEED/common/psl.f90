@@ -13,20 +13,20 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE init_ps(lg,ng,fg,info_field,poisson,alat,brl,matrix_A,icomm_r)
-use structures,      only: s_rgrid,s_reciprocal_grid,s_field_parallel,s_poisson
+SUBROUTINE init_ps(lg,mg,ng,system,fg,info_field,poisson,icomm_r,sVpsl)
+use structures
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root
 use scf_data
 use allocate_psl_sub
-use prep_pp_sub, only: init_uvpsi_summation
+use prep_pp_sub
 implicit none
-type(s_rgrid),intent(in) :: lg
-type(s_rgrid),intent(in) :: ng
+type(s_rgrid),intent(in) :: lg,mg,ng
+type(s_dft_system),intent(in) :: system
 type(s_reciprocal_grid),intent(inout) :: fg
 type(s_field_parallel),intent(in) :: info_field
 type(s_poisson),intent(inout) :: poisson
-real(8),intent(in) :: alat(3,3),brl(3,3),matrix_A(3,3)
+type(s_scalar) :: sVpsl
 integer,intent(in) :: icomm_r
 
 if(iSCFRT==1)then
@@ -39,17 +39,15 @@ select case(iperiodic)
 case(0)
   call calcJxyz_all(lg)
   call calcuV(lg)
-  call calcVpsl(lg)
-  allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,1))
-  ppg%zekr_uV(:,:,1) = cmplx(ppg%uV)
+  call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
 case(3)
   select case(iflag_hartree)
   case(2)
-    call calcVpsl_periodic(lg,fg,matrix_A)
+    call calc_vpsl_periodic(mg,system,pp,fg,sVpsl,ppg)
   case(4)
     call calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   end select
-  call calcJxyz_all_periodic(lg,alat,matrix_A)
+  call calcJxyz_all_periodic(lg,system%primitive_a,system%rmatrix_A)
   call calcuV(lg)
 end select
 
