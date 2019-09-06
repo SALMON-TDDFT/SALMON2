@@ -174,7 +174,7 @@ contains
 
     ! gtpsi = (nabla) psi
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,ib2,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,stencil%rmatrix_B)
+          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
       do ib1=1,NB
         do i=1,3
           wrk(i) = sum(conjg(tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,ib1,ik,im)) &
