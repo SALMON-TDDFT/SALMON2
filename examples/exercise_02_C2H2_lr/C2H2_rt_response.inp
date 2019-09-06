@@ -4,7 +4,7 @@
   unit_system='A_eV_fs'
 /
 &calculation
-  calc_mode='RT'
+  theory='TDDFT_response'
 /
 &control
   sysname = 'C2H2'
