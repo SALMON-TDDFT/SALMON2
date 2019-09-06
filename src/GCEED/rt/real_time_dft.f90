@@ -46,7 +46,7 @@ use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use init_poisson_sub
-use init_reciprocal_grid_sub
+use salmon_initialization
 implicit none
 
 type(s_rgrid) :: lg

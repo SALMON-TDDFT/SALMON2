@@ -58,7 +58,6 @@ use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
-use init_reciprocal_grid_sub
 use prep_pp_sub, only: calc_vpsl_new
 implicit none
 integer :: ix,iy,iz,ik,i,j
