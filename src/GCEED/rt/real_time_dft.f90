@@ -616,14 +616,12 @@ allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2)
 
   call allocate_scalar(mg,srho)
   call allocate_scalar(mg,sVh)
-  call allocate_scalar(mg,sVpsl)
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
   do jspin=1,system%nspin
     call allocate_scalar(mg,srho_s(jspin))
     call allocate_scalar(mg,V_local(jspin))
     call allocate_scalar(mg,sVxc(jspin))
   end do
-  sVpsl%f = Vpsl
 
   call calc_nlcc(pp, system, mg, ppn)
   if (comm_is_root(nproc_id_global)) then

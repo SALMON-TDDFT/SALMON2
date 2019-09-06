@@ -187,7 +187,6 @@ if(iopt==1)then
 
   call allocate_scalar(mg,srho)
   call allocate_scalar(mg,sVh)
-  call allocate_scalar(mg,sVpsl)
   do jspin=1,system%nspin
     call allocate_scalar(mg,srho_s(jspin))
     call allocate_scalar(mg,V_local(jspin))
