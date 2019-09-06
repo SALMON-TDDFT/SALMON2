@@ -58,23 +58,6 @@ module inputoutput
   integer :: inml_group_others
   integer :: inml_code
 
-!! === old variables: will be removed after some time
-  integer :: inml_group_function
-!  integer :: inml_units
-!  integer :: inml_control
-!  integer :: inml_system
-  integer :: inml_incident
-!  integer :: inml_propagation
-!  integer :: inml_rgrid
-!  integer :: inml_kgrid
-  integer :: inml_tstep
-  integer :: inml_electrons
-!  integer :: inml_pseudo
-  integer :: inml_response
-!  integer :: inml_multiscale
-  integer :: inml_group_atom
-!! === old variables: will be removed after some time
-
 !Input/Output units
   integer :: iflag_unit_time
   integer,parameter :: ntype_unit_time_au = 0

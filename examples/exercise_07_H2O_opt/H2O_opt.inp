@@ -1,7 +1,7 @@
 ! geomerty optimization function (with periodic boundary condition) is still trial
 ! (MPI parallelization is not supported in optimization)
 &calculation
-  calc_mode = 'GS'
+  theory = 'DFT'
   use_geometry_opt='y'
 /
 
