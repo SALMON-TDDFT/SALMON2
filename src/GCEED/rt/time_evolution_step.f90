@@ -396,13 +396,9 @@ subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
   integer :: npuy,npuz
   real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
 
-  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
-
-  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
-  if(iflag_hartree==2)then
-     fg%zrhoG_ion = rhoion_G
-     fg%zdVG_ion = dVloc_G
-  else if(iflag_hartree==4)then
+  if(iflag_hartree==4)then
+     if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
+     allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
      allocate(Gx_tmp(fg%ng))
      allocate(Gy_tmp(fg%ng))
      allocate(Gz_tmp(fg%ng))

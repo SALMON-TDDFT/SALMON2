@@ -21,7 +21,7 @@ contains
 
 !=====================================================================
 subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
-  use inputoutput,     only : yn_ffte
+  use inputoutput,     only : nelem,yn_ffte
   use salmon_parallel, only : nproc_group_global,nproc_id_global,nproc_size_global
   use math_constants,  only : pi
   use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_field_parallel,s_poisson
@@ -150,6 +150,9 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   end select 
  
+  if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
+  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
+
   return
 end subroutine init_reciprocal_grid
 !=====================================================================

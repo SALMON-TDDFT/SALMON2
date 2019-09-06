@@ -37,13 +37,16 @@ subroutine calcVpsl_periodic(lg,fg,matrix_A)
   integer :: lx(lg%num(1)*lg%num(2)*lg%num(3))
   integer :: ly(lg%num(1)*lg%num(2)*lg%num(3))
   integer :: lz(lg%num(1)*lg%num(2)*lg%num(3))
-  complex(8),allocatable :: dvloc_g_tmp2(:,:)
-  complex(8),allocatable :: rhoion_g_tmp2(:)
+  complex(8),allocatable :: zdVG_ion_tmp2(:,:)
+  complex(8),allocatable :: zrhoG_ion_tmp2(:)
   real(8),allocatable :: vpsl_ia(:,:)
   real(8),allocatable :: vpsl_tmp2(:)
   integer :: i,ia
   real(8) :: hx,hy,hz
  
+  if(.not.allocated(fg%zrhoG_ion_tmp)) allocate(fg%zrhoG_ion_tmp(fg%ng))
+  if(.not.allocated(fg%zdVG_ion_tmp)) allocate(fg%zdVG_ion_tmp(fg%ng,nelem))
+
   NG_s=1
   NG_e=lg%num(1)*lg%num(2)*lg%num(3)
   
@@ -53,18 +56,18 @@ subroutine calcVpsl_periodic(lg,fg,matrix_A)
   NG_l_e_para = (nproc_id_global+1)*numtmp
   if(nproc_id_global==nproc_size_global-1) NG_l_e_para=NG_e
 
-  allocate(dvloc_g_tmp2(ng_l_s_para:ng_l_e_para,MKI))
+  allocate(zdVG_ion_tmp2(ng_l_s_para:ng_l_e_para,MKI))
  
-  call calc_vloc(pp,dvloc_g_tmp2,fg%Gx,fg%Gy,fg%Gz,ng_e,ng_l_s_para,ng_l_e_para,fg%iGzero)
+  call calc_vloc(pp,zdVG_ion_tmp2,fg%Gx,fg%Gy,fg%Gz,ng_e,ng_l_s_para,ng_l_e_para,fg%iGzero)
 
-  dvloc_g_tmp=0.d0
+  fg%zdVG_ion_tmp=0.d0
   do ak=1,MKI
     do n=ng_l_s_para,ng_l_e_para
-      dvloc_g_tmp(n,ak)=dvloc_g_tmp2(n,ak)
+      fg%zdVG_ion_tmp(n,ak)=zdVG_ion_tmp2(n,ak)
     end do
   end do
 
-  call comm_summation(dVloc_G_tmp,dVloc_G,(NG_e-NG_s+1)*MKI,nproc_group_global)
+  call comm_summation(fg%zdVG_ion_tmp,fg%zdVG_ion,(NG_e-NG_s+1)*MKI,nproc_group_global)
 
   
   hx=Hgs(1) 
@@ -83,19 +86,19 @@ subroutine calcVpsl_periodic(lg,fg,matrix_A)
   end do
   end do
  
-  allocate(rhoion_g_tmp2(ng_l_s_para:ng_l_e_para))
+  allocate(zrhoG_ion_tmp2(ng_l_s_para:ng_l_e_para))
   allocate(vpsl_ia(lg%num(1)*lg%num(2)*lg%num(3),MI))
   allocate(vpsl_tmp2(ng_s:ng_e))
 
-  call calc_vpsl(pp,rhoion_g_tmp2,vpsl_ia,vpsl_tmp2,dvloc_g_tmp2,  &
+  call calc_vpsl(pp,zrhoG_ion_tmp2,vpsl_ia,vpsl_tmp2,zdVG_ion_tmp2,  &
                      fg%iGzero,fg%Gx,fg%Gy,fg%Gz,ng_e,ng_l_s_para,ng_l_e_para,ng_e,alxyz,lx,ly,lz,hx,hy,hz,matrix_A)
 
-  deallocate(dvloc_g_tmp2)
+  deallocate(zdVG_ion_tmp2)
 
-  rhoion_G_tmp=0.d0
-  rhoion_G_tmp(ng_l_s_para:ng_l_e_para)=rhoion_g_tmp2(ng_l_s_para:ng_l_e_para)
+  fg%zrhoG_ion_tmp=0.d0
+  fg%zrhoG_ion_tmp(ng_l_s_para:ng_l_e_para)=zrhoG_ion_tmp2(ng_l_s_para:ng_l_e_para)
 
-  call comm_summation(rhoion_G_tmp,rhoion_G,NG_e-NG_s+1,nproc_group_global)
+  call comm_summation(fg%zrhoG_ion_tmp,fg%zrhoG_ion,NG_e-NG_s+1,nproc_group_global)
 
   allocate(ppg%Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI))
 

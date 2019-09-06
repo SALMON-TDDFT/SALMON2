@@ -213,7 +213,7 @@ module structures
     integer :: ng,iG_s,iG_e,iGzero
     real(8),allocatable :: Gx(:),Gy(:),Gz(:)
     complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zdVG_ion(:,:)
-    complex(8),allocatable :: zrhoG_ele_tmp(:) ! work array for zrhoG_ele
+    complex(8),allocatable :: zrhoG_ion_tmp(:),zrhoG_ele_tmp(:),zdVG_ion_tmp(:,:) ! work arrays
   end type s_reciprocal_grid
 
   type s_fdtd_system
