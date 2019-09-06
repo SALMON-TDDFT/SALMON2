@@ -222,7 +222,7 @@ if(iopt==1)then
   else
     call read_pslfile(system)
     call allocate_psl(lg)
-    call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
   end if
   sVpsl%f = Vpsl
 
@@ -366,14 +366,14 @@ else if(iopt>=2)then
     rion_update = .true.
     call dealloc_init_ps(ppg,ppg_all)
 !    call calc_nlcc(pp, system, mg, ppn) !test
-    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+    call init_ps(lg,ng,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
     sVpsl%f = Vpsl
     if(iperiodic==3) then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
        call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
 !       call get_fourier_grid_G(lg,info_field,fg)
-       call calc_vpsl_new(mg,system,stencil,pp,fg,sVpsl,ppg)
+       call calc_vpsl_new(mg,system,pp,fg,sVpsl,ppg)
     end if
 
   end if

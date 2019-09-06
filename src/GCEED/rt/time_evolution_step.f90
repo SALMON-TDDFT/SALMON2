@@ -275,9 +275,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then
-      call calc_current_use_dmat(nspin,system%ngrid,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
+      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
     else
-      call calc_current(nspin,system%ngrid,mg,stencil,info,srg,spsi_out,ppg,curr_tmp(1:3,1:nspin))
+      call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_tmp(1:3,1:nspin))
     end if
     call calc_emfields(nspin,curr_tmp)
     call timer_end(LOG_CALC_CURRENT)

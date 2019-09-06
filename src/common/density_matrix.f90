@@ -233,22 +233,22 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_current(nspin,ngrid,mg,stencil,info,srg,psi,ppg,curr)
+  subroutine calc_current(system,mg,stencil,info,srg,psi,ppg,curr)
     use structures
     use sendrecv_grid, only: update_overlap_complex8
     use salmon_communication, only: comm_summation
     use pseudo_pt_sub, only: calc_uVpsi_rdivided
     implicit none
-    integer        ,intent(in) :: nspin,ngrid
+    type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
     type(s_orbital_parallel),intent(in) :: info
     type(s_sendrecv_grid)      :: srg
     type(s_orbital)            :: psi
     type(s_pp_grid),intent(in) :: ppg
-    real(8) :: curr(3,nspin,info%im_s:info%im_e)
+    real(8) :: curr(3,system%nspin,info%im_s:info%im_e)
     !
-    integer :: ispin,im,ik,io
+    integer :: ispin,im,ik,io,nspin,ngrid
     real(8),dimension(3) :: wrk1,wrk2,wrk3,wrk4
     real(8) :: BT(3,3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
@@ -259,7 +259,10 @@ contains
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
-    BT = transpose(stencil%rmatrix_B)
+    nspin = system%nspin
+    ngrid = system%ngrid
+
+    BT = transpose(system%rmatrix_B)
     if(info%if_divide_rspace) then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
@@ -349,21 +352,21 @@ contains
 
   end subroutine calc_current
 
-  subroutine calc_current_use_dmat(nspin,ngrid,mg,stencil,info,psi,ppg,dmat,curr)
+  subroutine calc_current_use_dmat(system,mg,stencil,info,psi,ppg,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
     use pseudo_pt_sub, only: calc_uVpsi_rdivided
     implicit none
-    integer        ,intent(in) :: nspin,ngrid
+    type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
     type(s_orbital_parallel),intent(in) :: info
     type(s_orbital),intent(in) :: psi
     type(s_pp_grid),intent(in) :: ppg
     type(s_dmatrix),intent(in) :: dmat
-    real(8) :: curr(3,nspin,info%im_s:info%im_e)
+    real(8) :: curr(3,system%nspin,info%im_s:info%im_e)
     !
-    integer :: ispin,im,ik,io
+    integer :: ispin,im,ik,io,nspin,ngrid
     real(8) :: wrk1(3),wrk2(3),wrk3(3),BT(3,3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
@@ -373,7 +376,10 @@ contains
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
-    BT = transpose(stencil%rmatrix_B)
+    nspin = system%nspin
+    ngrid = system%ngrid
+
+    BT = transpose(system%rmatrix_B)
     if(info%if_divide_rspace) then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))

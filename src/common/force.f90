@@ -118,7 +118,7 @@ contains
 
     ! gtpsi = (nabla) psi
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,stencil%rmatrix_B)
+          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
 
     ! local part
       do ia=1,nion

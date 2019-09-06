@@ -61,8 +61,9 @@ SUBROUTINE init_lattice(system,stencil)
   f_uw = F(1,3) + F(3,1)
   f_vw = F(2,3) + F(3,2)
 
-  stencil%rmatrix_A = A
-  stencil%rmatrix_B = B
+  system%rmatrix_A = A
+  system%rmatrix_B = B
+
   stencil%coef_F(1) = f_uu
   stencil%coef_F(2) = f_vv
   stencil%coef_F(3) = f_ww

@@ -181,7 +181,7 @@ if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
 call read_pslfile(system)
 call allocate_psl(lg)
-call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,stencil%rmatrix_A,info%icomm_r)
+call init_ps(lg,ng,fg,info_field,poisson,system%primitive_a,system%primitive_b,system%rmatrix_A,info%icomm_r)
 
 call init_itype
 call init_sendrecv_matrix
