@@ -32,7 +32,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   integer :: iix,iiy,iiz
   integer :: iatom
   
-  integer :: n
+  integer :: n,nn
   real(8) :: bLx,bLy,bLz
   real(8) :: aLxyz
   integer :: NG_s,NG_e
@@ -98,7 +98,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   enddo
   enddo
 
-  dVloc_G(:,:)=0.d0
+  fg%zdVG_ion(:,:)=0.d0
   do ak=1,MKI
     imax=Mr(ak)
     do iz=1,lg%num(3)/npuz
@@ -118,20 +118,21 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
           s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       endif
-      dVloc_G(n,ak)=s
+      fg%zdVG_ion(n,ak)=s
     enddo
     enddo
     enddo
   enddo
  
   aLxyz=Hvol*dble(lg%num(1)*lg%num(2)*lg%num(3))
-  rhoion_G=0.d0
+  fg%zrhoG_ion=0.d0
   do iatom=1,MI
     do iz=1,lg%num(3)/npuz
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-      rhoion_G(n)=rhoion_G(n)+Zps(Kion(iatom))/aLxyz*exp(-zI*(fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)))
+      fg%zrhoG_ion(n)=fg%zrhoG_ion(n)+Zps(Kion(iatom))/aLxyz  &
+                          *exp(-zI*(fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)))
     enddo
     enddo
     enddo
@@ -146,7 +147,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
       G2=fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2
       Gd=fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)
-      Vion_G(n)=Vion_G(n)+dVloc_G(n,ak)*exp(-zI*Gd)/aLxyz
+      Vion_G(n)=Vion_G(n)+fg%zdVG_ion(n,ak)*exp(-zI*Gd)/aLxyz
       if(n == fg%iGzero) cycle
       Vion_G(n)=Vion_G(n)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/aLxyz
     enddo
@@ -208,6 +209,22 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   end do
   end do
   end do
+
+! displacement of Gx etc. for total energy calculations
+! Removal of this part is a future work.
+  do iz=1,lg%num(3)/npuz
+  do iy=1,lg%num(2)/npuy
+  do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+     n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
+     nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
+     fg%Gx(nn)=fg%Gx(n)
+     fg%Gy(nn)=fg%Gy(n)
+     fg%Gz(nn)=fg%Gz(n)
+     fg%zrhoG_ion(nn) = fg%zrhoG_ion(n)
+     fg%zdVG_ion(nn,:) = fg%zdVG_ion(n,:)
+  enddo
+  enddo
+  enddo
 
   return
 
