@@ -28,29 +28,29 @@ module code_optimization
 
 contains
   subroutine switch_stencil_optimization(nlens)
-    use salmon_global, only: want_stencil_hand_vectorization
+    use salmon_global, only: yn_want_stencil_hand_vectorization
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions
 #ifdef SALMON_EXPLICIT_VECTORIZATION
     ! unit-stride direction is should multiple of 4
     optimized_stencil_is_callable = (mod(nlens(1), 4) == 0) &
-    &    .and. (want_stencil_hand_vectorization == 'y')
+    &    .and. (yn_want_stencil_hand_vectorization == 'y')
 #else
     optimized_stencil_is_callable = .false.
 #endif
   end subroutine
 
   subroutine switch_openmp_parallelization(nlens)
-    use salmon_global, only: want_stencil_openmp_parallelization, &
-                             force_stencil_openmp_parallelization, &
-                             force_stencil_sequential_computation
+    use salmon_global, only: yn_want_stencil_openmp_parallelization, &
+                             yn_force_stencil_openmp_parallelization, &
+                             yn_force_stencil_sequential_computation
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions
     logical :: ret
-    ret = (want_stencil_openmp_parallelization  == 'y') .and. (nlens(1)*nlens(2)*nlens(3) >= 32*32*32)
+    ret = (yn_want_stencil_openmp_parallelization  == 'y') .and. (nlens(1)*nlens(2)*nlens(3) >= 32*32*32)
 
-    if (force_stencil_openmp_parallelization == 'y') ret = .true.  ! forcible option: use OpenMP parallelized code
-    if (force_stencil_sequential_computation == 'y') ret = .false. ! forcible option: use sequential code
+    if (yn_force_stencil_openmp_parallelization == 'y') ret = .true.  ! forcible option: use OpenMP parallelized code
+    if (yn_force_stencil_sequential_computation == 'y') ret = .false. ! forcible option: use sequential code
 
     stencil_is_parallelized_by_omp = ret
   end subroutine

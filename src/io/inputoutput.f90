@@ -492,10 +492,10 @@ contains
       & iflag_estatic
 
     namelist/code/ &
-      & want_stencil_openmp_parallelization, &
-      & want_stencil_hand_vectorization, &
-      & force_stencil_openmp_parallelization, &
-      & force_stencil_sequential_computation
+      & yn_want_stencil_openmp_parallelization, &
+      & yn_want_stencil_hand_vectorization, &
+      & yn_force_stencil_openmp_parallelization, &
+      & yn_force_stencil_sequential_computation
 
 
 !! == default for &unit ==
@@ -820,10 +820,10 @@ contains
     iwdenstep                  = 0
     iflag_estatic              = 0
 !! == default for code
-    want_stencil_openmp_parallelization = 'y'
-    want_stencil_hand_vectorization     = 'y'
-    force_stencil_openmp_parallelization = 'n'
-    force_stencil_sequential_computation = 'n'
+    yn_want_stencil_openmp_parallelization = 'y'
+    yn_want_stencil_hand_vectorization     = 'y'
+    yn_force_stencil_openmp_parallelization = 'n'
+    yn_force_stencil_sequential_computation = 'n'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1266,16 +1266,16 @@ contains
     call comm_bcast(iwdenstep           ,nproc_group_global)
     call comm_bcast(iflag_estatic       ,nproc_group_global)
 !! == bcast for code
-    call comm_bcast(want_stencil_openmp_parallelization ,nproc_group_global)
-    call comm_bcast(want_stencil_hand_vectorization     ,nproc_group_global)
-    call comm_bcast(force_stencil_openmp_parallelization,nproc_group_global)
-    call comm_bcast(force_stencil_sequential_computation,nproc_group_global)
+    call comm_bcast(yn_want_stencil_openmp_parallelization ,nproc_group_global)
+    call comm_bcast(yn_want_stencil_hand_vectorization     ,nproc_group_global)
+    call comm_bcast(yn_force_stencil_openmp_parallelization,nproc_group_global)
+    call comm_bcast(yn_force_stencil_sequential_computation,nproc_group_global)
 
-    if (force_stencil_openmp_parallelization == 'y' .and. force_stencil_sequential_computation == 'y') then
+    if (yn_force_stencil_openmp_parallelization == 'y' .and. yn_force_stencil_sequential_computation == 'y') then
       if (comm_is_root(nproc_id_global)) then
         print *, 'WARNING: exclusive options are both specified, could you please check your input file.'
-        print *, "         `force_stencil_openmp_parallelization = 'y'`, and"
-        print *, "         `force_stencil_sequential_computation = 'y'`"
+        print *, "         `yn_force_stencil_openmp_parallelization = 'y'`, and"
+        print *, "         `yn_force_stencil_sequential_computation = 'y'`"
       end if
     end if
 
@@ -1946,10 +1946,10 @@ contains
 
       if(inml_code >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'code', inml_code
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'want_stencil_openmp_parallelization', want_stencil_openmp_parallelization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'want_stencil_hand_vectorization', want_stencil_hand_vectorization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'force_stencil_openmp_parallelization', force_stencil_openmp_parallelization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'force_stencil_sequential_computation', force_stencil_sequential_computation
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_openmp_parallelization', yn_want_stencil_openmp_parallelization
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_hand_vectorization', yn_want_stencil_hand_vectorization
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_openmp_parallelization', yn_force_stencil_openmp_parallelization
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_sequential_computation', yn_force_stencil_sequential_computation
 
       close(fh_variables_log)
 
