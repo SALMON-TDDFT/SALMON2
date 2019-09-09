@@ -86,7 +86,7 @@ subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
     if (stencil_is_parallelized_by_omp) then
       call stencil_C_tuned_omp(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
     else
-      call stencil_C_tuned_seq(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call stencil_C_tuned_seq(is_array,ie_array,is,ie,modx,mody,modz,is,ie,tpsi,htpsi,V_local,lap0,lapt,nabt)
     end if
 #else
     stop 'error: explicit vectorization does not support'
@@ -96,7 +96,7 @@ subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
     if (stencil_is_parallelized_by_omp) then
       call stencil_C_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,lap0,lapt,nabt)
     else
-      call stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,is,ie,tpsi,htpsi,V_local,lap0,lapt,nabt)
     end if
   end if
 

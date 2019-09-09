@@ -41,9 +41,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   integer :: nspin,ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
   logical :: if_kAc,if_singlescale
-  integer :: igs(3),ige(3)
-  integer,parameter :: nblk(3) = [16, 16, 16]
-  integer :: ibx,iby,ibz
+  logical :: is_enable_overlapping
 
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -58,6 +56,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   
   if_kAc = allocated(stencil%vec_kAc)
   if_singlescale = allocated(system%Ac_micro%v)
+
+  ! check: can we execute computation/communication overlapping
+  is_enable_overlapping = stencil%if_orthogonal .and. &
+                          .not. if_singlescale  .and. &
+                          info%if_divide_rspace .and. &
+                          (im_e - im_s) <= 0    .and. &
+                          (ik_e - ik_s) <= 0
 
   if(allocated(tpsi%rwf)) then
 
@@ -90,7 +95,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   ! overlap region communication
     call timer_begin(LOG_UHPSI_UPDATE_OVERLAP)
-    if(info%if_divide_rspace) then
+    if(info%if_divide_rspace .and. .not. is_enable_overlapping) then
       call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
     call timer_end(LOG_UHPSI_UPDATE_OVERLAP)
@@ -111,26 +116,18 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
           k_lap0 = stencil%coef_lap0
           k_nabt = 0d0
         end if
-!$omp parallel do default(none) collapse(5) &
-!$omp          private(io,ispin,igs,ige,ibx,iby,ibz) &
-!$omp          shared(ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt)
-        do io=io_s,io_e
-        do ispin=1,Nspin
-        do ibz=mg%is(3),mg%ie(3),nblk(3)
-        do iby=mg%is(2),mg%ie(2),nblk(2)
-        do ibx=mg%is(1),mg%ie(1),nblk(1)
-          igs(3) = ibz ; ige(3) = min(ibz + nblk(3), mg%ie(3))
-          igs(2) = iby ; ige(2) = min(iby + nblk(2), mg%ie(2))
-          igs(1) = ibx ; ige(1) = min(ibx + nblk(1), mg%ie(1))
-          call stencil_C_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
-                                    ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                    ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
-        end do
-        end do
-        end do
-        end do
-        end do
-!$omp end parallel do
+
+        if (is_enable_overlapping) then
+          call stencil_C_overlapped
+        else
+          do io=io_s,io_e
+          do ispin=1,Nspin
+            call stencil_C(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                          ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                          ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+          end do
+          end do
+        end if
       end do
       end do
     else if(stencil%if_orthogonal .and. if_singlescale) then
@@ -208,6 +205,155 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   call timer_end(LOG_UHPSI_ALL)
 
   return
+contains
+  subroutine stencil_C_overlapped
+    use sendrecv_grid, only: srg_pack, srg_communication, srg_unpack, &
+                             update_overlap_complex8
+    use code_optimization, only: modx,mody,modz,optimized_stencil_is_callable
+    implicit none
+    integer :: igs(3),ige(3)
+    integer,parameter :: nxblk=8, nyblk=8, nzblk=8
+    integer :: ibx,iby,ibz
+    integer :: idir,iside,ibs(3),ibe(3)
+
+! phase 1. pack halo region
+    call timer_begin(LOG_UHPSI_OVL_PHASE1)
+    call update_overlap_complex8(srg, mg, tpsi%zwf, srg_pack)
+    call timer_end  (LOG_UHPSI_OVL_PHASE1)
+
+! phase 2. halo communication and computation without halo region
+    call timer_begin(LOG_UHPSI_OVL_PHASE2)
+!$omp parallel default(none) &
+!$omp          private(io,ispin,igs,ige,ibx,iby,ibz) &
+!$omp          shared(ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,srg,modx,mody,modz) &
+!$omp          shared(optimized_stencil_is_callable)
+
+! halo communication by master thread (tid = 0)
+!$omp master
+    call timer_begin(LOG_UHPSI_OVL_PHASE2_COMM)
+    call update_overlap_complex8(srg, mg, tpsi%zwf, srg_communication)
+    call timer_end  (LOG_UHPSI_OVL_PHASE2_COMM)
+!$omp end master
+
+! A computation with multi-thread except master thread,
+! but master thread can join this loop if the communication completed before computation done.
+!$omp do collapse(5) schedule(dynamic,1)
+    do io=io_s,io_e
+    do ispin=1,Nspin
+    do ibz=mg%is(3)+4,mg%ie(3)-4,nzblk
+    do iby=mg%is(2)+4,mg%ie(2)-4,nyblk
+    do ibx=mg%is(1)+4,mg%ie(1)-4,nxblk
+      igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, mg%ie(3)-4)
+      igs(2) = iby ; ige(2) = min(iby + nyblk - 1, mg%ie(2)-4)
+      igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, mg%ie(1)-4)
+      if (optimized_stencil_is_callable) then
+        call stencil_C_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
+                                ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+      else
+        call stencil_C_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
+                                  ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                  ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+      end if
+    end do
+    end do
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+    call timer_end  (LOG_UHPSI_OVL_PHASE2)
+
+! phase 3. unpack halo region
+    call timer_begin(LOG_UHPSI_OVL_PHASE3)
+    call update_overlap_complex8(srg, mg, tpsi%zwf, srg_unpack)
+    call timer_end  (LOG_UHPSI_OVL_PHASE3)
+
+! phase 4. computation with halo region
+    call timer_begin(LOG_UHPSI_OVL_PHASE4)
+!$omp parallel default(none) &
+!$omp          private(io,ispin,idir,iside,igs,ige,ibx,iby,ibz,ibs,ibe) &
+!$omp          shared(ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,srg,modx,mody,modz) &
+!$omp          shared(optimized_stencil_is_callable)
+    do idir=1,3
+    do iside=1,2
+
+      select case((idir-1)*2+iside)
+        case(1) ! update X (up)
+          ibs(3) = mg%is(3)
+          ibe(3) = mg%ie(3)
+          ibs(2) = mg%is(2)
+          ibe(2) = mg%ie(2)
+          ibs(1) = mg%ie(1) - 4 + 1
+          ibe(1) = mg%ie(1)
+        case(2) ! update X (down)
+          ibs(3) = mg%is(3)
+          ibe(3) = mg%ie(3)
+          ibs(2) = mg%is(2)
+          ibe(2) = mg%ie(2)
+          ibs(1) = mg%is(1)
+          ibe(1) = mg%is(1) + 4 - 1
+        case(3) ! update Y (up)
+          ibs(3) = mg%is(3)
+          ibe(3) = mg%ie(3)
+          ibs(2) = mg%ie(2) - 4 + 1
+          ibe(2) = mg%ie(2)
+          ibs(1) = mg%is(1) + 4
+          ibe(1) = mg%ie(1) - 4
+        case(4) ! update Y (down)
+          ibs(3) = mg%is(3)
+          ibe(3) = mg%ie(3)
+          ibs(2) = mg%is(2)
+          ibe(2) = mg%is(2) + 4 - 1
+          ibs(1) = mg%is(1) + 4
+          ibe(1) = mg%ie(1) - 4
+        case(5) ! update Z (up)
+          ibs(3) = mg%ie(3) - 4 + 1
+          ibe(3) = mg%ie(3)
+          ibs(2) = mg%is(2) + 4
+          ibe(2) = mg%ie(2) - 4
+          ibs(1) = mg%is(1) + 4
+          ibe(1) = mg%ie(1) - 4
+        case(6) ! update Z (down)
+          ibs(3) = mg%is(3)
+          ibe(3) = mg%is(3) + 4 - 1
+          ibs(2) = mg%is(2) + 4
+          ibe(2) = mg%ie(2) - 4
+          ibs(1) = mg%is(1) + 4
+          ibe(1) = mg%ie(1) - 4
+        case default
+          stop 'error: compute halo region'
+      end select
+
+!$omp do collapse(5)
+      do io=io_s,io_e
+      do ispin=1,Nspin
+      do ibz=ibs(3),ibe(3),nzblk
+      do iby=ibs(2),ibe(2),nyblk
+      do ibx=ibs(1),ibe(1),nxblk
+        igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, ibe(3))
+        igs(2) = iby ; ige(2) = min(iby + nyblk - 1, ibe(2))
+        igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, ibe(1))
+        if (optimized_stencil_is_callable) then
+          call stencil_C_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
+                                  ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                  ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+        else
+          call stencil_C_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
+                                    ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                    ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+        end if
+      end do
+      end do
+      end do
+      end do
+      end do
+!$omp end do
+    end do
+    end do
+!$omp end parallel
+    call timer_end  (LOG_UHPSI_OVL_PHASE4)
+  end subroutine ! stencil_C_overlapped
 end subroutine hpsi
 
 !===================================================================================================================================
