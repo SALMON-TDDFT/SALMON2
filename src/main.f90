@@ -40,10 +40,10 @@ program main
 
   !GCEED: (main)
   select case(theory)
-  case('DFT')                         ; call real_space_dft
+  case('DFT')                         ; call main_dft
   case('DFT_MD')                      ; call arted   !temporally
-  case('TDDFT_response','TDDFT_pulse'); call real_time_dft
-  case('Single_scale_Maxwell_TDDFT'  ); call real_time_dft
+  case('TDDFT_response','TDDFT_pulse'); call main_tddft
+  case('Single_scale_Maxwell_TDDFT'  ); call main_tddft
   case('Multi_scale_Maxwell_TDDFT'   ); call arted   !temporally
   case('Maxwell')                     ; call classic_em
  !case('SBE')                         ; call main_sbe
