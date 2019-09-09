@@ -18,7 +18,6 @@ use structures,           only: s_rgrid
 use salmon_communication, only: comm_is_root
 use prep_pp_sub, only: set_nlma,init_lma_tbl,init_uv,set_lma_tbl,calc_uv
 use scf_data
-use allocate_psl_sub
 implicit none
   type(s_rgrid),intent(in) :: lg
 

@@ -24,7 +24,6 @@ use check_corrkob_sub
 use scf_data
 use new_world_sub
 use read_pslfile_sub
-use allocate_psl_sub
 use allocate_mat_sub
 implicit none
 type(s_rgrid), intent(in)    :: lg, ng

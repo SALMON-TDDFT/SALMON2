@@ -25,7 +25,6 @@ use new_world_sub
 use init_sendrecv_sub
 use change_order_sub
 use read_pslfile_sub
-use allocate_psl_sub
 use structure_opt_sub
 use salmon_total_energy
 use hpsi_sub
@@ -65,7 +64,7 @@ real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
-integer :: itmg,nspin,n,nn
+integer :: itmg,nspin
 integer :: neig(1:2, 1:3)
 integer :: neig_ng(1:2, 1:3)
 
@@ -218,7 +217,6 @@ if(iopt==1)then
     Vpsl=0d0
   else
     call read_pslfile(system)
-    call allocate_psl(lg)
     call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
   end if
 
@@ -226,7 +224,6 @@ if(iopt==1)then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
     stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-    call get_fourier_grid_G(lg,info_field,fg)
   end if
 
   select case( IC )
@@ -367,9 +364,6 @@ else if(iopt>=2)then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
        call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-       if(iflag_hartree==4)then
-         call get_fourier_grid_G(lg,info_field,fg)
-       end if
     end if
 
   end if
@@ -860,50 +854,6 @@ subroutine write_band_information
   end if
   return
 end subroutine write_band_information
-
-subroutine get_fourier_grid_G(lg,info_field,fg)
-  use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid
-  implicit none
-  type(s_rgrid),intent(in) :: lg
-  type(s_field_parallel) :: info_field
-  type(s_reciprocal_grid) :: fg
-  integer :: npuy,npuz
-  real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
-
-  if(iflag_hartree==4)then
-     if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
-     allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
-
-     allocate(Gx_tmp(fg%ng))
-     allocate(Gy_tmp(fg%ng))
-     allocate(Gz_tmp(fg%ng))
-     Gx_tmp=fg%Gx
-     Gy_tmp=fg%Gy
-     Gz_tmp=fg%Gz
-     fg%Gx=0.d0
-     fg%Gy=0.d0
-     fg%Gz=0.d0
-     fg%zrhoG_ion = 0.d0
-     fg%zdVG_ion = 0.d0
-     npuy=info_field%isize_ffte(2)
-     npuz=info_field%isize_ffte(3)
-     do iz=1,lg%num(3)/npuz
-     do iy=1,lg%num(2)/npuy
-     do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
-        fg%Gx(nn)=Gx_tmp(n)
-        fg%Gy(nn)=Gy_tmp(n)
-        fg%Gz(nn)=Gz_tmp(n)
-        fg%zrhoG_ion(nn) = rhoion_G(n)
-        fg%zdVG_ion(nn,:) = dVloc_G(n,:)
-     enddo
-     enddo
-     enddo
-     deallocate(Gx_tmp,Gy_tmp,Gz_tmp)
-  end if
-
-end subroutine get_fourier_grid_G
 
 subroutine init_code_optimization
   implicit none

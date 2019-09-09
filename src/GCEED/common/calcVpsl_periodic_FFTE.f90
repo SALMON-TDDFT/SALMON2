@@ -13,17 +13,17 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
-  use structures,      only: s_rgrid,s_reciprocal_grid,s_field_parallel,s_poisson
+subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
+  use structures,      only: s_rgrid,s_dft_system,s_reciprocal_grid,s_field_parallel,s_poisson
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
   use new_world_sub
-  use allocate_psl_sub
   use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_dft_system),intent(in) :: system
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
@@ -32,7 +32,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   integer :: iix,iiy,iiz
   integer :: iatom
   
-  integer :: n
+  integer :: n,nn
   real(8) :: bLx,bLy,bLz
   real(8) :: aLxyz
   integer :: NG_s,NG_e
@@ -43,7 +43,6 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   real(8) :: Gd
   real(8) :: s
   real(8) :: r
-  integer :: imax
   integer :: iy_sta,iy_end,iz_sta,iz_end
   integer :: i,iix2,iiy2,iiz2
   
@@ -98,9 +97,8 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   enddo
   enddo
 
-  dVloc_G(:,:)=0.d0
+  fg%zdVG_ion(:,:)=0.d0
   do ak=1,MKI
-    imax=Mr(ak)
     do iz=1,lg%num(3)/npuz
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
@@ -108,36 +106,41 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
       G2sq=sqrt(fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2)
       s=0.d0
       if (n == fg%iGzero) then
-        do i=2,imax
+        do i=2,pp%nrloc(ak)
           r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
           s=s+4*Pi*r**2*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       else
-        do i=2,imax
+        do i=2,pp%nrloc(ak)
           r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
           s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       endif
-      dVloc_G(n,ak)=s
+      fg%zdVG_ion(n,ak)=s
     enddo
     enddo
     enddo
   enddo
  
   aLxyz=Hvol*dble(lg%num(1)*lg%num(2)*lg%num(3))
-  rhoion_G=0.d0
+  fg%zrhoG_ion=0.d0
   do iatom=1,MI
     do iz=1,lg%num(3)/npuz
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-      rhoion_G(n)=rhoion_G(n)+Zps(Kion(iatom))/aLxyz*exp(-zI*(fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)))
+      fg%zrhoG_ion(n)=fg%zrhoG_ion(n)+Zps(Kion(iatom))/aLxyz  &
+                          *exp(-zI*(fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)))
     enddo
     enddo
     enddo
   enddo
 
-  Vion_G=0.d0
+!initialization
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0 &
+                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+  poisson%b_ffte=0.d0
   do iatom=1,MI
     ak=Kion(iatom)
     do iz=1,lg%num(3)/npuz
@@ -146,22 +149,17 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
       G2=fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2
       Gd=fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)
-      Vion_G(n)=Vion_G(n)+dVloc_G(n,ak)*exp(-zI*Gd)/aLxyz
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)+fg%zdVG_ion(n,ak)*exp(-zI*Gd)/aLxyz
       if(n == fg%iGzero) cycle
-      Vion_G(n)=Vion_G(n)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/aLxyz
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/aLxyz
     enddo
     enddo
     enddo
   enddo
-
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0 &
-                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
-
   do iz=1,lg%num(3)/npuz
   do iy=1,lg%num(2)/npuy
   do ix=1,lg%num(1)
-    n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-    poisson%b_ffte(ix,iy,iz)=Vion_G(n)*dble(lg%num(1)*lg%num(2)*lg%num(3))
+    poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*dble(lg%num(1)*lg%num(2)*lg%num(3))
   enddo
   enddo
   enddo
@@ -208,6 +206,22 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   end do
   end do
   end do
+
+! displacement of Gx etc. for total energy calculations
+! Removal of this part is a future work.
+  do iz=1,lg%num(3)/npuz
+  do iy=1,lg%num(2)/npuy
+  do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+     n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
+     nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
+     fg%Gx(nn)=fg%Gx(n)
+     fg%Gy(nn)=fg%Gy(n)
+     fg%Gz(nn)=fg%Gz(n)
+     fg%zrhoG_ion(nn) = fg%zrhoG_ion(n)
+     fg%zdVG_ion(nn,:) = fg%zdVG_ion(n,:)
+  enddo
+  enddo
+  enddo
 
   return
 

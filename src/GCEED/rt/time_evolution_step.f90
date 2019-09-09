@@ -310,11 +310,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   !(force)
   if(icalcforce==1)then  ! and or rvf flag in future
 
-     !(currently does not work)
-     if(iperiodic==3)then
-        call get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
-     endif
-
      call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
 
      !force on ion directly from field --- should put in calc_force_salmon?
@@ -379,51 +374,3 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
 END SUBROUTINE time_evolution_step
 
-subroutine get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
-  use salmon_global, only: nelem
-  use structures, only: s_dft_system, s_reciprocal_grid, s_field_parallel, s_rgrid
-  use scf_data
-  use allocate_psl_sub
-  implicit none
-  type(s_dft_system),intent(in) :: system
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid),intent(in) :: ng
-  type(s_field_parallel),intent(in) :: info_field
-  type(s_reciprocal_grid) :: fg
-
-  integer :: ix,iy,iz,n,nn
-  integer :: npuy,npuz
-  real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
-
-  if(iflag_hartree==4)then
-     if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zdVG_ion)
-     allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zdVG_ion(fg%ng,nelem))
-     allocate(Gx_tmp(fg%ng))
-     allocate(Gy_tmp(fg%ng))
-     allocate(Gz_tmp(fg%ng))
-     Gx_tmp=fg%Gx
-     Gy_tmp=fg%Gy
-     Gz_tmp=fg%Gz
-     fg%Gx=0.d0
-     fg%Gy=0.d0
-     fg%Gz=0.d0
-     fg%zrhoG_ion = 0.d0
-     fg%zdVG_ion = 0.d0
-     npuy=info_field%isize_ffte(2)
-     npuz=info_field%isize_ffte(3)
-     do iz=1,lg%num(3)/npuz
-     do iy=1,lg%num(2)/npuy
-     do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-        n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-        nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
-        fg%Gx(nn)=Gx_tmp(n)
-        fg%Gy(nn)=Gy_tmp(n)
-        fg%Gz(nn)=Gz_tmp(n)
-        fg%zrhoG_ion(nn) = rhoion_G(n)
-        fg%zdVG_ion(nn,:) = dVloc_G(n,:)
-     enddo
-     enddo
-     enddo
-  end if
-
-end subroutine get_fourier_grid_G_rt
