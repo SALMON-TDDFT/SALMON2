@@ -8,9 +8,9 @@ set(SOURCES
     convert_input_rt.f90
     dip.f90
     initA.f90
+    main_tddft.f90
     projection.f90
     read_write_rt_bin.f90
-    real_time_dft.f90
     set_vonf_sd.f90
     taylor_coe.f90
     time_evolution_step.f90

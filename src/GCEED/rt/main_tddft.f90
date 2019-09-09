@@ -36,7 +36,7 @@ END MODULE global_variables_rt
 
 !=======================================================================
 
-subroutine Real_Time_DFT
+subroutine main_tddft
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -462,7 +462,7 @@ subroutine init_code_optimization
   end if
 end subroutine
 
-END subroutine Real_Time_DFT
+end subroutine main_tddft
 
 !=========%==============================================================
 
@@ -551,7 +551,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
 
-!????????? get_fourier_grid_G @ real_space_dft.f90
+!????????? get_fourier_grid_G @ main_dft.f90
     if(iflag_hartree==4)then
        if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
        allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))

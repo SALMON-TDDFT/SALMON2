@@ -35,7 +35,7 @@ END MODULE global_variables_scf
 
 !=======================================================================
 
-subroutine Real_Space_DFT
+subroutine main_dft
 use structures
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -924,6 +924,6 @@ subroutine init_code_optimization
   end if
 end subroutine
 
-END subroutine Real_Space_DFT
+end subroutine main_dft
 
 
