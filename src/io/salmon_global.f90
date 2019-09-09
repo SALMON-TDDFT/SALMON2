@@ -354,5 +354,6 @@ character(256),allocatable :: atom_name(:)
   character(1) :: yn_want_stencil_hand_vectorization
   character(1) :: yn_force_stencil_openmp_parallelization
   character(1) :: yn_force_stencil_sequential_computation
+  character(1) :: yn_want_communication_overlapping
 
 end module salmon_global

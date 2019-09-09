@@ -495,7 +495,8 @@ contains
       & yn_want_stencil_openmp_parallelization, &
       & yn_want_stencil_hand_vectorization, &
       & yn_force_stencil_openmp_parallelization, &
-      & yn_force_stencil_sequential_computation
+      & yn_force_stencil_sequential_computation, &
+      & yn_want_communication_overlapping
 
 
 !! == default for &unit ==
@@ -824,6 +825,7 @@ contains
     yn_want_stencil_hand_vectorization     = 'y'
     yn_force_stencil_openmp_parallelization = 'n'
     yn_force_stencil_sequential_computation = 'n'
+    yn_want_communication_overlapping = 'n'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1270,6 +1272,7 @@ contains
     call comm_bcast(yn_want_stencil_hand_vectorization     ,nproc_group_global)
     call comm_bcast(yn_force_stencil_openmp_parallelization,nproc_group_global)
     call comm_bcast(yn_force_stencil_sequential_computation,nproc_group_global)
+    call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
 
     if (yn_force_stencil_openmp_parallelization == 'y' .and. yn_force_stencil_sequential_computation == 'y') then
       if (comm_is_root(nproc_id_global)) then
@@ -1950,6 +1953,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_hand_vectorization', yn_want_stencil_hand_vectorization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_openmp_parallelization', yn_force_stencil_openmp_parallelization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_sequential_computation', yn_force_stencil_sequential_computation
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
 
       close(fh_variables_log)
 

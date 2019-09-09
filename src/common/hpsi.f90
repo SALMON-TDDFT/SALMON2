@@ -26,6 +26,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use stencil_sub
   use pseudo_pt_sub
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
+  use salmon_global, only: yn_want_communication_overlapping
   use timer
   implicit none
   type(s_dft_system)      ,intent(in) :: system
@@ -58,7 +59,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   if_singlescale = allocated(system%Ac_micro%v)
 
   ! check: can we execute computation/communication overlapping
-  is_enable_overlapping = stencil%if_orthogonal .and. &
+  is_enable_overlapping = (yn_want_communication_overlapping == 'y') .and. &
+                          stencil%if_orthogonal .and. &
                           .not. if_singlescale  .and. &
                           info%if_divide_rspace .and. &
                           (im_e - im_s) <= 0    .and. &
