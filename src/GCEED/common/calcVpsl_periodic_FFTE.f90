@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
-  use structures,      only: s_rgrid,s_reciprocal_grid,s_field_parallel,s_poisson
+subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
+  use structures,      only: s_rgrid,s_dft_system,s_reciprocal_grid,s_field_parallel,s_poisson
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
@@ -24,6 +24,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
+  type(s_dft_system),intent(in) :: system
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
@@ -138,7 +139,10 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
     enddo
   enddo
 
-  Vion_G=0.d0
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0 &
+                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+  poisson%b_ffte=0.d0
   do iatom=1,MI
     ak=Kion(iatom)
     do iz=1,lg%num(3)/npuz
@@ -147,24 +151,12 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
       G2=fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2
       Gd=fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)
-      Vion_G(n)=Vion_G(n)+fg%zdVG_ion(n,ak)*exp(-zI*Gd)/aLxyz
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)+fg%zdVG_ion(n,ak)*exp(-zI*Gd)/system%hvol
       if(n == fg%iGzero) cycle
-      Vion_G(n)=Vion_G(n)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/aLxyz
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/system%hvol
     enddo
     enddo
     enddo
-  enddo
-
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0 &
-                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
-
-  do iz=1,lg%num(3)/npuz
-  do iy=1,lg%num(2)/npuy
-  do ix=1,lg%num(1)
-    n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-    poisson%b_ffte(ix,iy,iz)=Vion_G(n)*dble(lg%num(1)*lg%num(2)*lg%num(3))
-  enddo
-  enddo
   enddo
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,1 &

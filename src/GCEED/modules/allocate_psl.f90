@@ -20,9 +20,8 @@ use read_pslfile_sub
 
 real(8),allocatable :: dVloc_G(:,:)
 real(8),allocatable :: dVloc_G_tmp(:,:)
-complex(8),allocatable :: rhoion_G(:),Vion_G(:)
+complex(8),allocatable :: rhoion_G(:)
 complex(8),allocatable :: rhoion_G_tmp(:)
-complex(8),allocatable :: Vion_G_tmp(:)
 
 contains
 !==================================================================================================
@@ -38,8 +37,6 @@ if(iperiodic==3)then
   allocate(dVloc_G_tmp(lg%num(1)*lg%num(2)*lg%num(3),MKI))
   allocate(rhoion_G(lg%num(1)*lg%num(2)*lg%num(3)))
   allocate(rhoion_G_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
-  allocate(Vion_G(lg%num(1)*lg%num(2)*lg%num(3)))
-  allocate(Vion_G_tmp(lg%num(1)*lg%num(2)*lg%num(3)))
 end if
 
 end subroutine allocate_psl
@@ -47,8 +44,8 @@ end subroutine allocate_psl
 subroutine deallocate_psl
 
 if(iperiodic==3)then
-  deallocate(dVloc_G,rhoion_G,Vion_G)
-  deallocate(dVloc_G_tmp,rhoion_G_tmp,Vion_G_tmp)
+  deallocate(dVloc_G,rhoion_G)
+  deallocate(dVloc_G_tmp,rhoion_G_tmp)
 end if
 
 end subroutine deallocate_psl
