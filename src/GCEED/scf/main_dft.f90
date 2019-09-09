@@ -25,7 +25,6 @@ use new_world_sub
 use init_sendrecv_sub
 use change_order_sub
 use read_pslfile_sub
-use allocate_psl_sub
 use structure_opt_sub
 use salmon_total_energy
 use hpsi_sub
@@ -218,7 +217,6 @@ if(iopt==1)then
     Vpsl=0d0
   else
     call read_pslfile(system)
-    call allocate_psl(lg)
     call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
   end if
 

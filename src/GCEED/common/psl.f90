@@ -18,7 +18,6 @@ use structures
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root
 use scf_data
-use allocate_psl_sub
 use prep_pp_sub
 implicit none
 type(s_rgrid),intent(in) :: lg,mg,ng

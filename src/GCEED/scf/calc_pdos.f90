@@ -22,7 +22,6 @@ use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
 use prep_pp_sub, only: bisection
 use calc_allob_sub
 use scf_data
-use allocate_psl_sub
 use new_world_sub
 implicit none
 type(s_rgrid)           ,intent(in) :: lg

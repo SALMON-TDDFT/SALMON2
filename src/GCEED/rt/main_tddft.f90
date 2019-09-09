@@ -21,7 +21,6 @@ use deallocate_mat_sub
 use init_sendrecv_sub
 use new_world_sub
 use read_pslfile_sub
-use allocate_psl_sub
 
 implicit none
 
@@ -181,7 +180,6 @@ end if
 if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
 call read_pslfile(system)
-call allocate_psl(lg)
 call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
 
 call init_itype

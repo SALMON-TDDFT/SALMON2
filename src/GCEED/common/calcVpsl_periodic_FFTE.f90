@@ -19,7 +19,6 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
   use new_world_sub
-  use allocate_psl_sub
   use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
@@ -44,7 +43,6 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
   real(8) :: Gd
   real(8) :: s
   real(8) :: r
-  integer :: imax
   integer :: iy_sta,iy_end,iz_sta,iz_end
   integer :: i,iix2,iiy2,iiz2
   
@@ -101,7 +99,6 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
 
   fg%zdVG_ion(:,:)=0.d0
   do ak=1,MKI
-    imax=Mr(ak)
     do iz=1,lg%num(3)/npuz
     do iy=1,lg%num(2)/npuy
     do ix=1,lg%num(1)
@@ -109,12 +106,12 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
       G2sq=sqrt(fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2)
       s=0.d0
       if (n == fg%iGzero) then
-        do i=2,imax
+        do i=2,pp%nrloc(ak)
           r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
           s=s+4*Pi*r**2*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
       else
-        do i=2,imax
+        do i=2,pp%nrloc(ak)
           r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
           s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(pp%vpp_f(i,Lref(ak),ak)+Zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
         enddo
@@ -139,6 +136,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
     enddo
   enddo
 
+!initialization
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0 &
                    ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
@@ -151,12 +149,19 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
       n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
       G2=fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2
       Gd=fg%Gx(n)*Rion(1,iatom)+fg%Gy(n)*Rion(2,iatom)+fg%Gz(n)*Rion(3,iatom)
-      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)+fg%zdVG_ion(n,ak)*exp(-zI*Gd)/system%hvol
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)+fg%zdVG_ion(n,ak)*exp(-zI*Gd)/aLxyz
       if(n == fg%iGzero) cycle
-      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/system%hvol
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)-4*Pi/G2*Zps(ak)*exp(-zI*Gd)/aLxyz
     enddo
     enddo
     enddo
+  enddo
+  do iz=1,lg%num(3)/npuz
+  do iy=1,lg%num(2)/npuy
+  do ix=1,lg%num(1)
+    poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*dble(lg%num(1)*lg%num(2)*lg%num(3))
+  enddo
+  enddo
   enddo
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,1 &
