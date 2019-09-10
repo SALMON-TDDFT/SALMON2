@@ -81,9 +81,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      call stencil_R(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
-                    ,tpsi%rwf(:,:,:,ispin,io,ik,im),htpsi%rwf(:,:,:,ispin,io,ik,im) &
-                    ,V_local(ispin)%f,stencil%coef_lap0,stencil%coef_lap)
+      call dstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                   ,tpsi%rwf(:,:,:,ispin,io,ik,im),htpsi%rwf(:,:,:,ispin,io,ik,im) &
+                   ,V_local(ispin)%f,stencil%coef_lap0,stencil%coef_lap)
     end do
     end do
     end do
@@ -91,7 +91,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_STENCIL)
 
   ! pseudopotential
-    call pseudo_R(tpsi,htpsi,info,Nspin,ppg)
+    call dpseudo(tpsi,htpsi,info,Nspin,ppg)
 
   else
 
@@ -120,11 +120,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end if
 
         if (is_enable_overlapping) then
-          call stencil_C_overlapped
+          call zstencil_overlapped
         else
           do io=io_s,io_e
           do ispin=1,Nspin
-            call stencil_C(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+            call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                           ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                           ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
           end do
@@ -138,7 +138,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,Nspin
-        call stencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+        call zstencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                       ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                       ,V_local(ispin)%f,system%Ac_micro%v,system%div_Ac%f,stencil%coef_lap0 &
                       ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
@@ -162,9 +162,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end if
         do io=io_s,io_e
         do ispin=1,Nspin
-          call stencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%ztmp &
-                                    ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                    ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
+          call zstencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%ztmp &
+                                     ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                     ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
         end do
         end do
       end do
@@ -200,7 +200,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
   ! pseudopotential
-    call pseudo_C(tpsi,htpsi,info,nspin,ppg)
+    call zpseudo(tpsi,htpsi,info,nspin,ppg)
 
   end if
 
@@ -208,7 +208,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   return
 contains
-  subroutine stencil_C_overlapped
+  subroutine zstencil_overlapped
     use sendrecv_grid, only: srg_pack, srg_communication, srg_unpack, &
                              update_overlap_complex8
     use code_optimization, only: modx,mody,modz,optimized_stencil_is_callable
@@ -249,13 +249,13 @@ contains
       igs(2) = iby ; ige(2) = min(iby + nyblk - 1, mg%ie(2)-4)
       igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, mg%ie(1)-4)
       if (optimized_stencil_is_callable) then
-        call stencil_C_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
-                                ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+        call zstencil_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
+                               ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                               ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
       else
-        call stencil_C_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
-                                  ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                  ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+        call zstencil_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
+                                 ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                 ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
       end if
     end do
     end do
@@ -337,13 +337,13 @@ contains
         igs(2) = iby ; ige(2) = min(iby + nyblk - 1, ibe(2))
         igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, ibe(1))
         if (optimized_stencil_is_callable) then
-          call stencil_C_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
-                                  ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                  ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+          call zstencil_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
+                                 ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                 ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
         else
-          call stencil_C_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
-                                    ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                                    ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+          call zstencil_typical_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
+                                   ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                                   ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
         end if
       end do
       end do
@@ -355,7 +355,7 @@ contains
     end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
-  end subroutine ! stencil_C_overlapped
+  end subroutine zstencil_overlapped
 end subroutine hpsi
 
 !===================================================================================================================================

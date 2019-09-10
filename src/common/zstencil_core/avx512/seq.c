@@ -20,26 +20,26 @@
 #include <assert.h>
 #include "./glue.h"
 
-void stencil_c_tuned_seq_imp( const int PNLx
-                            , const int PNLy
-                            , const int PNLz
-                            , const int NLx
-                            , const int NLy
-                            , const int NLz
-                            , const int NHx
-                            , const int NHy
-                            , const int NHz
-                            , int    const * restrict modx
-                            , int    const * restrict mody
-                            , int    const * restrict modz
-                            , int    const            igs[restrict 3]
-                            , int    const            ige[restrict 3]
-                            , double const * restrict A
-                            , double const            B[restrict NLz][NLy][NLx]
-                            , double const            C[restrict 12]
-                            , double const            D[restrict 12]
-                            , double complex const    E[restrict PNLz][PNLy][PNLx]
-                            , double complex          F[restrict PNLz][PNLy][PNLx]
+void zstencil_tuned_seq_imp( const int PNLx
+                           , const int PNLy
+                           , const int PNLz
+                           , const int NLx
+                           , const int NLy
+                           , const int NLz
+                           , const int NHx
+                           , const int NHy
+                           , const int NHz
+                           , int    const * restrict modx
+                           , int    const * restrict mody
+                           , int    const * restrict modz
+                           , int    const            igs[restrict 3]
+                           , int    const            ige[restrict 3]
+                           , double const * restrict A
+                           , double const            B[restrict NLz][NLy][NLx]
+                           , double const            C[restrict 12]
+                           , double const            D[restrict 12]
+                           , double complex const    E[restrict PNLz][PNLy][PNLx]
+                           , double complex          F[restrict PNLz][PNLy][PNLx]
 )
 {
   const int isx = igs[0], isy = igs[1], isz = igs[2];
@@ -181,21 +181,21 @@ void stencil_c_tuned_seq_imp( const int PNLx
  * is      : one origin
  * ie      : one origin
  */
-void stencil_c_tuned_seq_( int            const            is_array[restrict 3]
-                         , int            const            ie_array[restrict 3]
-                         , int            const            is[restrict 3]
-                         , int            const            ie[restrict 3]
-                         , int            const * restrict modx
-                         , int            const * restrict mody
-                         , int            const * restrict modz
-                         , int            const            igs_[restrict 3]
-                         , int            const            ige_[restrict 3]
-                         , double complex const * restrict E
-                         , double complex       * restrict F
-                         , double         const * restrict B
-                         , double         const * restrict A_
-                         , double         const            C[restrict 12]
-                         , double         const            D[restrict 12]
+void zstencil_tuned_seq_( int            const            is_array[restrict 3]
+                        , int            const            ie_array[restrict 3]
+                        , int            const            is[restrict 3]
+                        , int            const            ie[restrict 3]
+                        , int            const * restrict modx
+                        , int            const * restrict mody
+                        , int            const * restrict modz
+                        , int            const            igs_[restrict 3]
+                        , int            const            ige_[restrict 3]
+                        , double complex const * restrict E
+                        , double complex       * restrict F
+                        , double         const * restrict B
+                        , double         const * restrict A_
+                        , double         const            C[restrict 12]
+                        , double         const            D[restrict 12]
 )
 {
 #define INT_ABS(X) (X) < 0 ? -(X) : (X)
@@ -234,12 +234,12 @@ void stencil_c_tuned_seq_( int            const            is_array[restrict 3]
   assert(ige[0] % 4 == 0);
 #undef INT_ABS
 
-  stencil_c_tuned_seq_imp(PNLx, PNLy, PNLz, NLx, NLy, NLz, NHx, NHy, NHz, modx, mody, modz, igs, ige
-                         , A_
-                         , (double         const (* restrict)[NLy][NLx])(B)
-                         , C
-                         , D
-                         , (double complex const (* restrict)[PNLy][PNLx])(E)
-                         , (double complex       (* restrict)[PNLy][PNLx])(F)
-                         );
+  zstencil_tuned_seq_imp(PNLx, PNLy, PNLz, NLx, NLy, NLz, NHx, NHy, NHz, modx, mody, modz, igs, ige
+                        , A_
+                        , (double         const (* restrict)[NLy][NLx])(B)
+                        , C
+                        , D
+                        , (double complex const (* restrict)[PNLy][PNLx])(E)
+                        , (double complex       (* restrict)[PNLy][PNLx])(F)
+                        );
 }
