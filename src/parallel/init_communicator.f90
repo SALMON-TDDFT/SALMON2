@@ -25,8 +25,6 @@ subroutine init_communicator_dft(comm,info,info_field)
   use salmon_communication, only: comm_create_group, comm_get_groupinfo, &
                                   comm_summation
   use misc_routines, only: get_wtime
-  use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid !??
-  use init_sendrecv_sub!??
   implicit none
   integer,      intent(in) :: comm
   type(s_orbital_parallel) :: info
