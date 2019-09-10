@@ -123,6 +123,7 @@ contains
     use salmon_parallel, only: get_thread_id,get_nthreads
     use misc_routines, only: ceiling_pow2
     use timer
+    use sym_rho_sub, only: sym_rho
     implicit none
     integer        ,intent(in) :: nspin
     type(s_orbital_parallel),intent(in) :: info
@@ -222,6 +223,9 @@ contains
         call timer_begin(LOG_ALLREDUCE_RHO)
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
         call timer_end(LOG_ALLREDUCE_RHO)
+
+        call sym_rho( rho(ispin,im)%f(:,:,:) )
+
       end do
       end do
 

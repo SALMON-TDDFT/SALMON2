@@ -26,6 +26,7 @@ subroutine init_dft(lg,system,stencil)
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
   & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin
+  use sym_sub, only: init_sym_sub
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -62,6 +63,7 @@ subroutine init_dft(lg,system,stencil)
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
   call init_lattice(system,stencil)
+  call init_sym_sub( system%primitive_a, system%primitive_b )
   call init_kvector(num_kgrid,system)
 
   system%iperiodic = iperiodic
