@@ -337,8 +337,6 @@ case('y')
   iflag_hartree=4
 end select
 
-call make_new_world(info,info_field)
-
 if(comm_is_root(nproc_id_global))close(fh_namelist)
 
 mixing%num_rho_stock=21

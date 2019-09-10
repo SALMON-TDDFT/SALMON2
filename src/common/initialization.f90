@@ -444,7 +444,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   type(s_poisson),intent(inout) :: poisson
   real(8) :: brl(3,3)
   integer :: n,myrank,nproc
-  integer :: ix,iy,iz,jj
+  integer :: ix,iy,iz
   integer :: iix,iiy,iiz
   integer :: ng_sta_2(3),ng_end_2(3),ng_num_2(3)
   integer :: lg_sta_2(3),lg_end_2(3),lg_num_2(3)

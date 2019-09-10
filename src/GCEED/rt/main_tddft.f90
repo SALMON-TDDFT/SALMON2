@@ -47,6 +47,8 @@ use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use init_poisson_sub
 use salmon_initialization
+use init_communicator
+use set_gridcoordinate_sub
 implicit none
 
 type(s_rgrid) :: lg
@@ -162,6 +164,19 @@ end select
 
 call timer_end(LOG_INIT_RT)
 
+call init_communicator_dft(nproc_group_global,info,info_field)
+call init_dft(lg,system,stencil)
+call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
+call init_orbital_parallel_singlecell(system,info)
+if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+call set_gridcoordinate(lg,system)
+
+Hgs = system%Hgs ! future work: remove this line
+Hvol = system%Hvol ! future work: remove this line
+k_sta = info%ik_s ! future work: remove this line
+k_end = info%ik_e ! future work: remove this line
+k_num = info%numk ! future work: remove this line
+iobnum = info%numo ! future work: remove this line
 
 call timer_begin(LOG_READ_GS_DATA)
 ! Read GS data
@@ -178,14 +193,9 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
-
 call read_pslfile(system)
 call allocate_psl(lg)
 call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
-
-call init_itype
-call init_sendrecv_matrix
 
 call init_code_optimization
 
@@ -538,9 +548,9 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
+  call init_sendrecv_grid(srg, mg, info%numo*info%numk, info%icomm_r, neig)
   ! sendrecv_grid object for scalar potential updates
-  call create_sendrecv_neig_ng(neig_ng, info, iperiodic) ! neighboring node array
+  call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
 
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
