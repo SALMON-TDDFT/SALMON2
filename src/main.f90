@@ -6,7 +6,7 @@ program main
   use math_constants
   use timer
   implicit none
-  character(16)  :: theory_org
+  character(32)  :: theory_org
 
 
   call set_math_constants
@@ -83,7 +83,7 @@ contains
 
   subroutine convert_theory_to_new_keyword(theory_org,theory)
     implicit none
-    character(16)  :: theory_org, theory
+    character(32)  :: theory_org, theory
 
     if(theory_org=="TDDFT   ") then
 
@@ -111,11 +111,20 @@ contains
           write(*,*) "calc_mode=GS_RT is not supported now!!!"
        end select
 
+       select case(use_ehrenfest_md)
+       case('y') ; yn_md='y'
+       end select
+
+       select case(use_geometry_opt)
+       case('y') ; yn_opt='y'
+       end select
+
+
     endif
   end subroutine convert_theory_to_new_keyword
 
   subroutine set_old_input_keyword(theory)
-    character(16)  :: theory
+    character(32)  :: theory
 
     if(theory.ne."TDDFT " .and. theory.ne."Maxwell ") then
 
