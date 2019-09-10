@@ -88,6 +88,13 @@ subroutine eh_init(fs,fw)
   call eh_prep_GCEED(fs,fw)
   
   !set coordinate
+  do ii=1,3
+    if(mod(int(fs%rlsize(ii)/fs%hgs(ii)+1.d-12),2)==1)then
+      fw%ioddeven(ii)=1
+    else
+      fw%ioddeven(ii)=2
+    end if
+  end do 
   allocate(fw%coo(minval(fs%lg%is(:))-fw%Nd:maxval(fs%lg%ie(:))+fw%Nd,3))
   call set_coo_em(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo(:,:))
   
@@ -1474,7 +1481,7 @@ end subroutine eh_input_shape
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_prep_GCEED(fs,fw)
-  use inputoutput,       only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,iperiodic
+  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,iperiodic
   use salmon_parallel,   only: nproc_id_global,nproc_size_global,nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_o_mul,nproc_d_g_mul_dm,nproc_d_g_dm,&
