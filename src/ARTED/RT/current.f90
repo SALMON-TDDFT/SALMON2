@@ -17,15 +17,6 @@
 !This file contain one subroutine.
 !SUBROUTINE current
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-#ifdef ARTED_USE_NVTX
-#define NVTX_BEG(name,id)  call nvtxStartRange(name,id)
-#define NVTX_END()         call nvtxEndRange()
-#else
-#define NVTX_BEG(name,id)
-#define NVTX_END()
-#endif
-
-
 #ifdef ARTED_CURRENT_PREPROCESSING
 subroutine current_RT_preconditioner(ib,ik,A)
   use Global_Variables
@@ -78,29 +69,16 @@ end subroutine
 subroutine current(mode,NBtmp,zutmp)
   use Global_Variables, only: NL,NK_s,NK_e
   use timer
-#ifdef ARTED_USE_NVTX
-  use nvtx
-#endif
   implicit none
   character(2), intent(in) :: mode
   integer,intent(in)       :: NBtmp
   complex(8),intent(in)    :: zutmp(NL,NBtmp,NK_s:NK_e)
   real(8) :: jx,jy,jz
 
-  NVTX_BEG('current_RT()',2)
   call timer_begin(LOG_CALC_CURRENT)
-#ifdef _OPENACC
-  if (mode == 'RT') then
-    call current_acc_impl(zutmp,jx,jy,jz)
-  else
-    call impl(mode,NBtmp,zutmp,jx,jy,jz)
-  end if
-#else
   call impl(mode,NBtmp,zutmp,jx,jy,jz)
-#endif
   call summation(jx,jy,jz)
   call timer_end(LOG_CALC_CURRENT)
-  NVTX_END()
 
 contains
   subroutine impl(mode, NBtmp, zutmp, jxs, jys, jzs)

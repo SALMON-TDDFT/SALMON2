@@ -16,14 +16,6 @@
 #define TIMER_BEG(id) call timer_thread_begin(id)
 #define TIMER_END(id) call timer_thread_end(id)
 
-#ifdef ARTED_USE_NVTX
-#define NVTX_BEG(name,id)  call nvtxStartRange(name,id)
-#define NVTX_END()         call nvtxEndRange()
-#else
-#define NVTX_BEG(name,id)
-#define NVTX_END()
-#endif
-
 subroutine hamiltonian(zu,flag_current)
   use Global_Variables
   use timer
