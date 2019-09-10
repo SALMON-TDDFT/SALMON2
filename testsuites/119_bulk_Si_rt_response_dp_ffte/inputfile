@@ -1,5 +1,5 @@
 &calculation
-  calc_mode = 'RT'
+  theory='TDDFT_response'
 /
 
 &control

@@ -1,5 +1,5 @@
 &calculation
-  calc_mode = 'GS'
+  theory='DFT'
 /
 
 &control

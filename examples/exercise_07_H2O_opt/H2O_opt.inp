@@ -2,7 +2,7 @@
 ! (MPI parallelization is not supported in optimization)
 &calculation
   theory = 'DFT'
-  use_geometry_opt='y'
+  yn_opt='y'
 /
 
 &control

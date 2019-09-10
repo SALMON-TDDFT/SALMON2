@@ -1,6 +1,5 @@
 &calculation
-  calc_mode = 'RT'
-  use_ms_maxwell = 'y'
+  theory='Multi_scale_Maxwell_TDDFT'
 /
 
 &control
