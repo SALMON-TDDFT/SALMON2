@@ -1,6 +1,6 @@
 Acknowledgements
 
-- We support the GPU acceleration with OpenACC platform in parts of simulation.
+- We support the GPU acceleration with OpenACC platform in parts of simulation. (However, we removed the support from version 2.0.0 due to the balance between human resources and demand of users)
   Thanks to Mr. Akira Naruse (NVIDIA Corporation)
 
 - We use the FFTE (http://www.ffte.jp/) package with partially modification.

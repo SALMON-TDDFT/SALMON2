@@ -17,14 +17,6 @@
 #define LOG_BEG(id) call timer_thread_begin(id)
 #define LOG_END(id) call timer_thread_end(id)
 
-#ifdef ARTED_USE_NVTX
-#define NVTX_BEG(name,id)  call nvtxStartRange(name,id)
-#define NVTX_END()         call nvtxEndRange()
-#else
-#define NVTX_BEG(name,id)
-#define NVTX_END()
-#endif
-
 module hpsi
   use timer
   implicit none
@@ -100,9 +92,6 @@ contains
     use Global_Variables, only: NLx,NLy,NLz,kAc,lapx,lapy,lapz,nabx,naby,nabz,Vloc,Mps,iuV,Hxyz,Nlma,zproj, & 
     & flag_set_ini_Ac_local, Ac2_al,Ac1x_al,Ac1y_al,Ac1z_al,nabt_al
     use opt_variables, only: lapt,PNLx,PNLy,PNLz,PNL,spseudo,dpseudo
-#ifdef ARTED_USE_NVTX
-    use nvtx
-#endif
     use salmon_parallel, only: get_thread_id
     use salmon_global, only: yn_local_field
     use stencil_sub, only: zstencil
@@ -118,8 +107,6 @@ contains
     integer :: tid
     integer :: is_array(3),ie_array(3)
     integer :: is(3),ie(3)
-
-    NVTX_BEG('hpsi1()',3)
 
     k2=sum(kAc(ik,:)**2)
     k2lap0_2=(k2-(lapx(0)+lapy(0)+lapz(0)))*0.5d0
@@ -163,8 +150,6 @@ contains
       tid = get_thread_id()
       call pseudo_pt(ik,zproj(:,:,ik),tpsi,htpsi,spseudo(:,tid),dpseudo(:,tid))
     LOG_END(LOG_HPSI_PSEUDO)
-
-    NVTX_END()
 
   contains
     subroutine subtraction(Vloc,tpsi,htpsi,ttpsi)
