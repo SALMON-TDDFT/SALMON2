@@ -1491,6 +1491,7 @@ subroutine eh_prep_GCEED(fs,fw)
   use sendrecv_grid,     only: init_sendrecv_grid
   use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
   use salmon_maxwell,    only: ls_fdtd_work
+  use salmon_initialization
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
@@ -1506,6 +1507,9 @@ subroutine eh_prep_GCEED(fs,fw)
   nproc_d_g=nproc_domain_general
   call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
   call init_communicator_dft(nproc_group_global,info,info_field)
+
+  call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
+  call init_grid_parallel(info%id_rko,info%isize_rko,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
   
   !set sendrecv environment
   !This process about ng is temporal. 
