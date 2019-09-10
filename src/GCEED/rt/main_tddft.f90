@@ -45,6 +45,7 @@ use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use init_poisson_sub
 use salmon_initialization
+use prep_pp_sub
 use density_matrix, only: calc_density
 use writefield
 use salmon_pp, only: calc_nlcc
@@ -74,6 +75,8 @@ type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
 type(s_sendrecv_grid) :: srg,srg_ng
+type(s_pp_info) :: pp
+type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_vector) :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
@@ -212,8 +215,8 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-call read_pslfile(system)
-call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
+call read_pslfile(system,pp,ppg)
+call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 
 call init_code_optimization
 
@@ -679,11 +682,11 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   end if
 end do TE

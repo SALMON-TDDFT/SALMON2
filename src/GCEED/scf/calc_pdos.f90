@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_pdos(lg,info)
-use structures, only: s_rgrid,s_orbital_parallel
+subroutine calc_pdos(lg,info,pp)
+use structures
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
@@ -26,6 +26,7 @@ use new_world_sub
 implicit none
 type(s_rgrid)           ,intent(in) :: lg
 type(s_orbital_parallel),intent(in) :: info
+type(s_pp_info)         ,intent(in) :: pp
 integer :: iob,iobmax,iob_allob,iatom,L,ix,iy,iz,iik
 integer :: ikoa
 integer :: intr

@@ -175,7 +175,6 @@ subroutine remove_system_momentum(flag_print_check,system)
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   use const, only: umass
-!  use scf_data, only: ppg,ppg_all
   implicit none
   type(s_dft_system) :: system
   integer :: ia, flag_print_check
@@ -265,14 +264,14 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,ppg,ppg_all,ppn,sVpsl)
+subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
   use structures, only: s_dft_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
-    s_orbital_parallel, s_field_parallel, s_scalar
+    s_orbital_parallel, s_field_parallel, s_scalar, s_pp_info
   use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
   use hpsi_sub, only: update_kvector_nonlocalpt
   use salmon_pp, only: calc_nlcc
-  use scf_data, only: pp
+  use prep_pp_sub, only: init_ps,dealloc_init_ps
   implicit none
   type(s_orbital_parallel) :: info
   type(s_field_parallel),intent(in) :: info_field
@@ -281,21 +280,22 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
   type(s_poisson),intent(inout) :: poisson
   type(s_reciprocal_grid) :: fg
   type(s_stencil),intent(inout) :: stencil
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_nlcc) :: ppn
-  type(s_pp_grid) :: ppg,ppg_all
+  type(s_pp_grid) :: ppg
   type(s_scalar) :: sVpsl
   integer :: itt
 
   !update pseudopotential
   if (mod(itt,step_update_ps)==0 ) then
-     call dealloc_init_ps(ppg,ppg_all)
+     call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
+     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   else if (mod(itt,step_update_ps2)==0 ) then
      !xxxxxxx this option is not yet made xxxxxx
-     call dealloc_init_ps(ppg,ppg_all)
+     call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
+     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   endif
 
   if(iperiodic==3) then

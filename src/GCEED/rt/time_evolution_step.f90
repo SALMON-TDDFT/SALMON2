@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng, &
-&   ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
 &   poisson,j_e,singlescale)
   use structures
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -50,6 +50,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
+  type(s_pp_info),intent(in) :: pp
+  type(s_pp_grid) :: ppg
 !  type(s_pp_nlcc),intent(in)    :: ppn
   type(s_pp_nlcc),intent(inout)    :: ppn !hoge test
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
@@ -129,7 +131,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   !(MD:part1 & update of pseudopotential)
   if(iflag_md==1) then
      call time_evolution_step_md_part1(itt,system,md)
-     call update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,ppg,ppg_all,ppn,sVpsl)
+     call update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
 
   if(propagator=='etrs')then
@@ -283,7 +285,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
     if(iflag_md==1) then
       call timer_begin(LOG_CALC_CURRENT_ION)
-      call calc_current_ion(lg,system,curr_ion(:,itt))
+      call calc_current_ion(lg,system,pp,curr_ion(:,itt))
       call timer_end(LOG_CALC_CURRENT_ION)
     end if
 
