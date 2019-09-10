@@ -14,14 +14,15 @@
 !  limitations under the License.
 !
 
-subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
-                                ,tpsi,htpsi,V_local,lap0,lapt,nabt &
-                                )
+#define LOOP_BLOCKING
+
+subroutine zstencil_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
+                               ,tpsi,htpsi,V_local,lap0,lapt,nabt &
+                               )
   implicit none
 
   integer,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
   integer,intent(in) :: idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
-  integer,intent(in) :: igs(3),ige(3)
 
   complex(8),intent(in)  :: tpsi   (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
   complex(8),intent(out) :: htpsi  (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
@@ -34,6 +35,11 @@ subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
   integer    :: ix,iy,iz
   complex(8) :: v,w
   complex(8) :: t(8)
+
+#ifdef LOOP_BLOCKING
+  integer :: bz,bz_e,bz_step
+  integer :: by,by_e,by_step
+#endif
 
 #ifdef __INTEL_COMPILER
 #if defined(__KNC__) || defined(__AVX512F__)
@@ -53,14 +59,30 @@ subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
 #define DY(dt) ix,idy(iy+(dt)),iz
 #define DZ(dt) ix,iy,idz(iz+(dt))
 
-  do iz=igs(3),ige(3)
-  do iy=igs(2),ige(2)
+#ifdef LOOP_BLOCKING
+  bz_step = 8
+  by_step = 8
 
-!dir$ assume_aligned V_local(is(1),iy,iz):MEM_ALIGN
-!dir$ assume_aligned tpsi(is_array(1),iy,iz)   :MEM_ALIGN
-!dir$ assume_aligned htpsi(is_array(1),iy,iz)  :MEM_ALIGN
+!$omp parallel do collapse(2) private(ix,iy,iz,v,w,t,bz,by,bz_e,by_e)
+  do bz=is(3),ie(3),bz_step
+  do by=is(2),ie(2),by_step
 
-  do ix=igs(1),ige(1)
+    bz_e = min(bz + bz_step - 1, ie(3))
+    by_e = min(by + by_step - 1, ie(2))
+
+  do iz=bz,bz_e
+  do iy=by,by_e
+#else
+!$omp parallel do collapse(2) private(ix,iy,iz,v,w,t)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+#endif
+
+!dir$ assume_aligned V_local(is(1),iy,iz)     :MEM_ALIGN
+!dir$ assume_aligned tpsi(is_array(1),iy,iz)  :MEM_ALIGN
+!dir$ assume_aligned htpsi(is_array(1),iy,iz) :MEM_ALIGN
+
+  do ix=is(1),ie(1)
     t(1) = tpsi(DX( 4))
     t(2) = tpsi(DX( 3))
     t(3) = tpsi(DX( 2))
@@ -97,6 +119,17 @@ subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
     & +nabt(7)*(t(3)-t(7)) &
     & +nabt(8)*(t(4)-t(8))) + w
 
+    htpsi(ix,iy,iz) = V_local(ix,iy,iz)*tpsi(ix,iy,iz) &
+                    + lap0*tpsi(ix,iy,iz) &
+                    - 0.5d0 * v - zI * w
+  end do
+
+#if _OPENMP >= 201307
+#ifndef __ARM_FLANG
+!$omp simd
+#endif
+#endif
+  do ix=is(1),ie(1)
     t(1) = tpsi(DZ( 1))
     t(2) = tpsi(DZ( 2))
     t(3) = tpsi(DZ( 3))
@@ -109,17 +142,20 @@ subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
     v=(lapt( 9)*(t(1)+t(5)) &
     & +lapt(10)*(t(2)+t(6)) &
     & +lapt(11)*(t(3)+t(7)) &
-    & +lapt(12)*(t(4)+t(8))) + v
+    & +lapt(12)*(t(4)+t(8)))
     w=(nabt( 9)*(t(1)-t(5)) &
     & +nabt(10)*(t(2)-t(6)) &
     & +nabt(11)*(t(3)-t(7)) &
-    & +nabt(12)*(t(4)-t(8))) + w
+    & +nabt(12)*(t(4)-t(8)))
 
-    htpsi(ix,iy,iz) = V_local(ix,iy,iz)*tpsi(ix,iy,iz) &
-                    + lap0*tpsi(ix,iy,iz) &
+    htpsi(ix,iy,iz) = htpsi(ix,iy,iz) &
                     - 0.5d0 * v - zI * w
   end do
+  end do
+  end do
 
+#ifdef LOOP_BLOCKING
   end do
   end do
+#endif
 end subroutine

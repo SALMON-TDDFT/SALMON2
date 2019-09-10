@@ -24,8 +24,8 @@ contains
 # define DY(dt) ix,idy(iy+(dt)),iz
 # define DZ(dt) ix,iy,idz(iz+(dt))
 
-subroutine stencil_R(is_array,ie_array,is,ie,idx,idy,idz &
-                    ,tpsi,htpsi,V_local,lap0,lapt)
+subroutine dstencil(is_array,ie_array,is,ie,idx,idy,idz &
+                   ,tpsi,htpsi,V_local,lap0,lapt)
   implicit none
   integer,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                         ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -65,12 +65,12 @@ subroutine stencil_R(is_array,ie_array,is,ie,idx,idy,idz &
 !$OMP end parallel
 
   return
-end subroutine stencil_R
+end subroutine dstencil
 
 !===================================================================================================================================
 
-subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
-                    ,tpsi,htpsi,V_local,lap0,lapt,nabt)
+subroutine zstencil(is_array,ie_array,is,ie,idx,idy,idz &
+                   ,tpsi,htpsi,V_local,lap0,lapt,nabt)
   use code_optimization, &
 &    only: modx,mody,modz,optimized_stencil_is_callable,stencil_is_parallelized_by_omp
   implicit none
@@ -84,9 +84,9 @@ subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
 #ifdef SALMON_EXPLICIT_VECTORIZATION
     ! optimized version with hand-coding vectorization (AVX-512, SVE...)
     if (stencil_is_parallelized_by_omp) then
-      call stencil_C_tuned_omp(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call zstencil_tuned_omp(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)
     else
-      call stencil_C_tuned_seq(is_array,ie_array,is,ie,modx,mody,modz,is,ie,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call zstencil_tuned_seq(is_array,ie_array,is,ie,modx,mody,modz,is,ie,tpsi,htpsi,V_local,lap0,lapt,nabt)
     end if
 #else
     stop 'error: explicit vectorization does not support'
@@ -94,19 +94,19 @@ subroutine stencil_C(is_array,ie_array,is,ie,idx,idy,idz &
   else
     ! typical version with fortran compiler vectorization
     if (stencil_is_parallelized_by_omp) then
-      call stencil_C_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call zstencil_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,lap0,lapt,nabt)
     else
-      call stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,is,ie,tpsi,htpsi,V_local,lap0,lapt,nabt)
+      call zstencil_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,is,ie,tpsi,htpsi,V_local,lap0,lapt,nabt)
     end if
   end if
 
   return
-end subroutine stencil_C
+end subroutine zstencil
 
 !===================================================================================================================================
 
-subroutine stencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz,wrk &
-                                ,tpsi,htpsi,V_local,lap0,lapt,nabt,Bk,F)
+subroutine zstencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz,wrk &
+                                 ,tpsi,htpsi,V_local,lap0,lapt,nabt,Bk,F)
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -198,15 +198,15 @@ subroutine stencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz,wrk &
 !$OMP end parallel
 
   return
-end subroutine stencil_nonorthogonal
+end subroutine zstencil_nonorthogonal
 
 !===================================================================================================================================
 
 # define DR(dt) idx(ix+(sx)*(dt)),idy(iy+(sy)*(dt)),idz(iz+(sz)*(dt))
 
 ! (future works)
-subroutine stencil_nonorthogonal_highsymmetry(is_array,ie_array,is,ie,idx,idy,idz,ndir &
-                                             ,tpsi,htpsi,V_local,lap0,lapt,nabt,sign)
+subroutine zstencil_nonorthogonal_highsymmetry(is_array,ie_array,is,ie,idx,idy,idz,ndir &
+                                              ,tpsi,htpsi,V_local,lap0,lapt,nabt,sign)
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4),ndir,sign(3,4:ndir)
@@ -275,11 +275,11 @@ subroutine stencil_nonorthogonal_highsymmetry(is_array,ie_array,is,ie,idx,idy,id
 !$OMP end parallel
 
   return
-end subroutine stencil_nonorthogonal_highsymmetry
+end subroutine zstencil_nonorthogonal_highsymmetry
 
 !===================================================================================================================================
 
-subroutine stencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
+subroutine zstencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
                                 ,tpsi,htpsi,V_local,Ac,div_Ac,lap0,lapt,nabt,k)
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
@@ -347,7 +347,7 @@ subroutine stencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
 !$OMP end parallel
 
   return
-end subroutine stencil_microAc
+end subroutine zstencil_microAc
 
 !===================================================================================================================================
 

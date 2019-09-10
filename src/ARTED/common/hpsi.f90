@@ -105,7 +105,7 @@ contains
 #endif
     use salmon_parallel, only: get_thread_id
     use salmon_global, only: yn_local_field
-    use stencil_sub, only: stencil_C
+    use stencil_sub, only: zstencil
     use code_optimization, only: modx,mody,modz
     use Ac_yn_local_field
     implicit none
@@ -147,9 +147,9 @@ contains
       nabt2( 5: 8)=nabt( 5: 8)
       nabt2( 9:12)=nabt( 1: 4)
 
-      call stencil_C(is_array,ie_array,is,ie &
-      &             ,modx(NLz-4:NLz*2+4),mody(NLy-4:NLy*2+4),modz(NLx-4:NLx*2+4) &
-      &             ,tpsi,htpsi,Vloc,k2lap0_2,lapt2,nabt2)
+      call zstencil(is_array,ie_array,is,ie &
+      &            ,modx(NLz-4:NLz*2+4),mody(NLy-4:NLy*2+4),modz(NLx-4:NLx*2+4) &
+      &            ,tpsi,htpsi,Vloc,k2lap0_2,lapt2,nabt2)
       ! ===
       if(yn_local_field=='y' .and. flag_set_ini_Ac_local)then
          call hpsi1_RT_stencil_add_Ac_local(Ac2_al(:,ik),Ac1x_al,Ac1y_al,Ac1z_al,nabt_al,tpsi,htpsi)
