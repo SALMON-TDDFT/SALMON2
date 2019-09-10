@@ -23,9 +23,10 @@ contains
 
 subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
   use structures
-  use salmon_global, only: iperiodic
+  use salmon_global, only: iperiodic,num_multipole_xyz,layout_multipole
   use sendrecv_grid
   use init_communicator
+  use init_poisson_sub
   implicit none
   integer,intent(in) :: comm
   type(s_orbital_parallel) :: info
@@ -43,7 +44,16 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   call init_dft_system(lg,system,stencil)
   call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info)
-  if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+
+  poisson%iterVh = 0 ! Iteration counter
+  poisson%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
+  select case(iperiodic)
+  case(0)
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
+  case(3)
+    call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+  end select
+  call set_ig_bound(lg,ng,poisson)
 
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
@@ -59,7 +69,7 @@ end subroutine init_dft
 subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate &
   & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin
   implicit none
   type(s_rgrid)      :: lg
@@ -122,6 +132,7 @@ subroutine init_dft_system(lg,system,stencil)
     system%nspin=2
   end if
 
+  allocate(system%mass(1:nelem))
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
   system%rion = rion
