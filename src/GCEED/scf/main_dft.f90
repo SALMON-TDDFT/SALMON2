@@ -172,11 +172,13 @@ if(iopt==1)then
 
   call allocate_scalar(mg,srho)
   call allocate_scalar(mg,sVh)
+  call allocate_scalar(mg,sVpsl)
   do jspin=1,system%nspin
     call allocate_scalar(mg,srho_s(jspin))
     call allocate_scalar(mg,V_local(jspin))
     call allocate_scalar(mg,sVxc(jspin))
   end do
+  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 
   select case(iperiodic)
   case(0)

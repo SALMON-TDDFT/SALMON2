@@ -193,6 +193,17 @@ call timer_end(LOG_INIT_RT)
 
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
 
+call allocate_scalar(mg,srho)
+call allocate_scalar(mg,sVh)
+call allocate_scalar(mg,sVpsl)
+allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
+do jspin=1,system%nspin
+  call allocate_scalar(mg,srho_s(jspin))
+  call allocate_scalar(mg,V_local(jspin))
+  call allocate_scalar(mg,sVxc(jspin))
+end do
+allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
+
 Hgs = system%Hgs ! future work: remove this line
 Hvol = system%Hvol ! future work: remove this line
 k_sta = info%ik_s ! future work: remove this line
@@ -412,15 +423,6 @@ allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
 allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
-
-  call allocate_scalar(mg,srho)
-  call allocate_scalar(mg,sVh)
-  allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
-  do jspin=1,system%nspin
-    call allocate_scalar(mg,srho_s(jspin))
-    call allocate_scalar(mg,V_local(jspin))
-    call allocate_scalar(mg,sVxc(jspin))
-  end do
 
   call calc_nlcc(pp, system, mg, ppn)
   if (comm_is_root(nproc_id_global)) then

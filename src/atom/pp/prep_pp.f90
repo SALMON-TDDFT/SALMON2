@@ -120,7 +120,6 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
     case('n')
       call calc_vpsl_periodic(mg,system,pp,fg,sVpsl,ppg)
     case('y')
-      if(.not.allocated(sVpsl%f)) call allocate_scalar(mg,sVpsl)
       call calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson,pp,ppg,sVpsl)
     end select
   end select
@@ -139,8 +138,6 @@ SUBROUTINE dealloc_init_ps(ppg)
   deallocate(ppg%jxyz, ppg%jxx, ppg%jyy, ppg%jzz, ppg%rxyz)
   deallocate(ppg%lma_tbl, ppg%ia_tbl)
   deallocate(ppg%rinv_uvu,ppg%uv,ppg%duv)
-
-  if(allocated(ppg%Vpsl_atom)) deallocate(ppg%Vpsl_atom)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   call finalize_uvpsi_summation(ppg)
@@ -315,8 +312,6 @@ SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
 
   Vpsl%f=0.d0
 
-  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
-  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
   do a=1,natom
     ak=Kion(a)
     do j=1,3
@@ -377,8 +372,6 @@ subroutine calc_vpsl_periodic(mg,system,pp,fg,vpsl,ppg)
   complex(8) :: vion_g_ia(fg%ng,natom),tmp_exp
 
   matrix_A = system%rmatrix_A
-  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
-  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 
 !$omp parallel
 !$omp do private(ik,n,g2sq,s,r1,dr,i,vloc_av) collapse(2)
