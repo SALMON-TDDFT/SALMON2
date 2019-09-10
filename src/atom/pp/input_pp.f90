@@ -72,7 +72,7 @@ subroutine input_pp(pp,hx,hy,hz)
 ! outside mr (needed for isolated systems)
       if(pp%nrmax>pp%mr(ik))then
         do i=pp%mr(ik)+1,pp%nrmax
-          pp%vpp(i,0:pp%mlps(ik))=-pp%zps(ik)/pp%rad(i:pp%nrmax,ik)
+          pp%vpp(i,0:pp%mlps(ik))=-pp%zps(ik)/pp%rad(i,ik)
           pp%upp(i,0:pp%mlps(ik))=0.d0
         end do
       end if
