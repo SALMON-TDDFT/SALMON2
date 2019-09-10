@@ -33,8 +33,10 @@ program main
   case('n')
      select case(iperiodic)
      case(3) 
-        call arted
-        stop
+        if( theory/='Maxwell' ) then
+          call arted
+          stop
+        end if
      end select
   end select
 
