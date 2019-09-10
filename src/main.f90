@@ -14,9 +14,8 @@ program main
   if (nproc_id_global == 0) then
     call print_software_version
   endif
-  call read_input
 
-  call timer_initialize
+  call read_input
 
   !convert old keyword of "theory" to new keyword (if it is old)
   theory_org = theory
@@ -26,7 +25,11 @@ program main
         write(*,'(a)') "# theory keyword was converted to a new one:"
         write(*,'(2a)')"# theory=",trim(theory)
      endif
+  else if(theory.ne."Maxwell ") then
+     call set_old_input_keyword(theory)  !remove later...
   endif
+
+  call timer_initialize
 
   !ARTED: (legacy: only in the case of iperiodic=3 + domain parallel=y)
   select case(yn_domain_parallel)  
@@ -108,6 +111,42 @@ contains
 
     endif
   end subroutine convert_theory_to_new_keyword
+
+  subroutine set_old_input_keyword(theory)
+    character(16)  :: theory
+
+    if(theory.ne."TDDFT " .and. theory.ne."Maxwell ") then
+
+       select case(theory)
+       case('DFT')
+          calc_mode='GS'
+       case('DFT_MD')
+          yn_md='y'
+          calc_mode='GS'
+          use_adiabatic_md='y'
+       case('TDDFT_response','TDDFT_pulse')
+          calc_mode='RT'
+       case('Multi_scale_Maxwell_TDDFT')
+          calc_mode='RT'
+          use_ms_maxwell='y'
+       case('Single_scale_Maxwell_TDDFT')
+          calc_mode='RT'
+          use_singlescale='y'
+       case('DFT_TDDFT')
+          calc_mode='GS_RT'  !legacy-- this is not supported officially now
+          write(*,*) "theory=DFT_TDDFT is not supported officially !!"
+       end select
+
+       select case(yn_md)
+       case('y') ; use_ehrenfest_md='y'
+       end select
+
+       select case(yn_opt)
+       case('y') ; use_geometry_opt='y'
+       end select
+
+    endif
+  end subroutine set_old_input_keyword
 
   subroutine print_software_version
     use salmon_xc, only: print_xc_info
