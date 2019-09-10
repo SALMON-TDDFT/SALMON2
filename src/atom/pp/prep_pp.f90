@@ -19,6 +19,134 @@ module prep_pp_sub
 
 contains
 
+subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+  use structures
+  use salmon_parallel, only: nproc_id_global
+  use salmon_communication, only: comm_is_root
+  use salmon_global, only: iperiodic,yn_ffte
+  implicit none
+  type(s_rgrid)           ,intent(in) :: lg,mg,ng
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_field_parallel)  ,intent(in) :: info_field
+  type(s_reciprocal_grid)             :: fg
+  type(s_poisson)                     :: poisson
+  type(s_pp_info)         ,intent(in) :: pp
+  type(s_pp_grid)                     :: ppg
+  type(s_scalar)                      :: sVpsl
+  !
+  integer :: ix,iy,iz,i,nl
+  integer :: mmx(mg%num(1)*mg%num(2)*mg%num(3))
+  integer :: mmy(mg%num(1)*mg%num(2)*mg%num(3))
+  integer :: mmz(mg%num(1)*mg%num(2)*mg%num(3))
+  integer :: lx(lg%num(1)*lg%num(2)*lg%num(3))
+  integer :: ly(lg%num(1)*lg%num(2)*lg%num(3))
+  integer :: lz(lg%num(1)*lg%num(2)*lg%num(3))
+  real(8) :: alx,aly,alz
+  real(8) :: hx,hy,hz
+  character(17) :: property
+  real(8),allocatable :: save_udVtbl_a(:,:,:)
+  real(8),allocatable :: save_udVtbl_b(:,:,:)
+  real(8),allocatable :: save_udVtbl_c(:,:,:)
+  real(8),allocatable :: save_udVtbl_d(:,:,:)
+  logical :: flag_use_grad_wf_on_force
+
+  if(comm_is_root(nproc_id_global))then
+    write(*,*) ''
+    write(*,*) '============init_ps=============='
+  endif
+
+  hx = system%Hgs(1)
+  hy = system%Hgs(2)
+  hz = system%Hgs(3)
+  alx = system%Hgs(1)*dble(lg%num(1))
+  aly = system%Hgs(2)*dble(lg%num(2))
+  alz = system%Hgs(3)*dble(lg%num(3))
+  nl = lg%num(1)*lg%num(2)*lg%num(3)
+
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    i=(iz-mg%is(3))*mg%num(1)*mg%num(2)+(iy-mg%is(2))*mg%num(1)+ix-mg%is(1)+1
+    mmx(i)=ix
+    mmy(i)=iy
+    mmz(i)=iz
+  end do
+  end do
+  end do
+
+  do iz=lg%is(3),lg%ie(3)
+  do iy=lg%is(2),lg%ie(2)
+  do ix=lg%is(1),lg%ie(1)
+    i=(iz-lg%is(3))*lg%num(1)*lg%num(2)+(iy-lg%is(2))*lg%num(1)+ix-lg%is(1)+1
+    lx(i)=ix
+    ly(i)=iy
+    lz(i)=iz
+  end do
+  end do
+  end do
+
+  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
+                                   mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
+                                   hx,hy,hz,system%primitive_a,system%rmatrix_A)
+
+  call init_jxyz(ppg)
+
+  call calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
+                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
+                                    hx,hy,hz,system%primitive_a,system%rmatrix_A)
+
+  call set_nlma(pp,ppg)
+  call init_lma_tbl(pp,ppg)
+  call init_uv(pp,ppg)
+  call set_lma_tbl(pp,ppg)
+
+  allocate( save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,system%nion) )
+  allocate( save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,system%nion) )
+  allocate( save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,system%nion) )
+  allocate( save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,system%nion) )
+
+  property='initial'
+  flag_use_grad_wf_on_force=.false.
+  call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
+               lx,ly,lz,nl,hx,hy,hz,  &
+               flag_use_grad_wf_on_force,property,system%Hvol)
+
+  select case(iperiodic)
+  case(0)
+    call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
+  case(3)
+    select case(yn_ffte)
+    case('n')
+      call calc_vpsl_periodic(mg,system,pp,fg,sVpsl,ppg)
+    case('y')
+      call calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson,pp,ppg,sVpsl)
+    end select
+  end select
+
+  call init_uvpsi_summation(ppg,info%icomm_r)
+
+end subroutine init_ps
+
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+SUBROUTINE dealloc_init_ps(ppg)
+  use structures, only: s_pp_grid
+  implicit none
+  type(s_pp_grid) :: ppg
+
+  deallocate(ppg%jxyz, ppg%jxx, ppg%jyy, ppg%jzz, ppg%rxyz)
+  deallocate(ppg%lma_tbl, ppg%ia_tbl)
+  deallocate(ppg%rinv_uvu,ppg%uv,ppg%duv)
+  if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
+
+  call finalize_uvpsi_summation(ppg)
+END SUBROUTINE dealloc_init_ps
+
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+! for ARTED
+! future work: remove this subroutine
 subroutine calc_vloc(pp,dvloc_g,gx,gy,gz,ng,ng_s,ng_e,ngzero)
   use salmon_global,only : nelem
   use math_constants,only : pi
@@ -66,6 +194,8 @@ end subroutine calc_vloc
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
+! for ARTED
+! future work: remove this subroutine
 subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
                      ngzero,gx,gy,gz,ng,ng_s,ng_e,nl,alxyz,lx,ly,lz,hx,hy,hz,matrix_A0)
   use salmon_global,only : natom, nelem, kion, rion
@@ -182,8 +312,6 @@ SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
 
   Vpsl%f=0.d0
 
-  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
-  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
   do a=1,natom
     ak=Kion(a)
     do j=1,3
@@ -244,8 +372,6 @@ subroutine calc_vpsl_periodic(mg,system,pp,fg,vpsl,ppg)
   complex(8) :: vion_g_ia(fg%ng,natom),tmp_exp
 
   matrix_A = system%rmatrix_A
-  if(.not.allocated(vpsl%f)) call allocate_scalar(mg,Vpsl)
-  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 
 !$omp parallel
 !$omp do private(ik,n,g2sq,s,r1,dr,i,vloc_av) collapse(2)

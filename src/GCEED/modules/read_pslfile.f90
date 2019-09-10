@@ -34,15 +34,17 @@ module read_pslfile_sub
   
   contains
   !==================================================================================================
-  subroutine read_pslfile(system)
+  subroutine read_pslfile(system,pp,ppg)
     use salmon_communication, only: comm_is_root
     use salmon_pp, only: init_pp
-    use structures, only: s_dft_system
+    use structures
     use input_pp_sub, only: input_pp
     use prep_pp_sub, only: init_mps
     implicit none
     integer :: ak
-    type(s_dft_system), intent(inout)  :: system
+    type(s_dft_system) :: system
+    type(s_pp_info) :: pp
+    type(s_pp_grid) :: ppg
     integer :: nrmax
     
     allocate( Mlps0(MKI) )
@@ -60,7 +62,6 @@ module read_pslfile_sub
 
     call init_pp(pp,nrmax,Lmax,flag_nlcc)
     call init_mps(ppg)
-    call init_mps(ppg_all)
     
     allocate(rhopp_f(0:Nrmax,MKI))
     

@@ -54,6 +54,7 @@ use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
+use prep_pp_sub
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -76,6 +77,8 @@ type(s_stencil) :: stencil
 type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
 type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
 type(s_reciprocal_grid) :: fg
+type(s_pp_info) :: pp
+type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_cg)  :: cg
@@ -169,11 +172,13 @@ if(iopt==1)then
 
   call allocate_scalar(mg,srho)
   call allocate_scalar(mg,sVh)
+  call allocate_scalar(mg,sVpsl)
   do jspin=1,system%nspin
     call allocate_scalar(mg,srho_s(jspin))
     call allocate_scalar(mg,V_local(jspin))
     call allocate_scalar(mg,sVxc(jspin))
   end do
+  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 
   select case(iperiodic)
   case(0)
@@ -197,8 +202,8 @@ if(iopt==1)then
   if(iflag_ps.eq.0)then
     Vpsl=0d0
   else
-    call read_pslfile(system)
-    call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
+    call read_pslfile(system,pp,ppg)
+    call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end if
 
   if(iperiodic==3) then
@@ -338,9 +343,9 @@ else if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   if(iflag_ps/=0) then
     rion_update = .true.
-    call dealloc_init_ps(ppg,ppg_all)
+    call dealloc_init_ps(ppg)
 !    call calc_nlcc(pp, system, mg, ppn) !test
-    call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
+    call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
     if(iperiodic==3) then
        if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
        stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
@@ -691,7 +696,7 @@ call write_eigen
 if(yn_out_psi=='y' ) call write_psi(lg,info)
 if(yn_out_dns=='y' ) call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
 if(yn_out_dos=='y' ) call calc_dos(info)
-if(yn_out_pdos=='y') call calc_pdos(lg,info)
+if(yn_out_pdos=='y') call calc_pdos(lg,info,pp)
 if(yn_out_elf=='y' ) then
   allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   call calc_elf(lg,mg,ng,srg,info,srho,0)
