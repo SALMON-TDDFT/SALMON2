@@ -27,15 +27,15 @@ set(SOURCES
    write.f90
    lattice.f90
    force.f90
-   stencil_c_core/typical/omp.f90
-   stencil_c_core/typical/seq.f90
+   zstencil_core/typical/omp.f90
+   zstencil_core/typical/seq.f90
    )
 
 if (EXPLICIT_VEC)
   set(SOURCES
       ${SOURCES}
-      stencil_c_core/${SIMD_SET}/omp.c
-      stencil_c_core/${SIMD_SET}/seq.c
+      zstencil_core/${SIMD_SET}/omp.c
+      zstencil_core/${SIMD_SET}/seq.c
       )
 endif ()
 

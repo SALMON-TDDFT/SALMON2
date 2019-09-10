@@ -20,7 +20,7 @@ module pseudo_pt_sub
 
 contains
 
-subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
+subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
   use structures
   use salmon_communication, only: comm_summation
   use timer
@@ -154,11 +154,11 @@ subroutine pseudo_R(tpsi,htpsi,info,nspin,ppg)
   call timer_end(LOG_UHPSI_PSEUDO)
 
   return
-end subroutine pseudo_R
+end subroutine dpseudo
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
-subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
+subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   use structures
   use timer
   implicit none
@@ -263,7 +263,7 @@ subroutine pseudo_C(tpsi,htpsi,info,nspin,ppg)
   call timer_end(LOG_UHPSI_PSEUDO)
 
   return
-end subroutine pseudo_C
+end subroutine zpseudo
 
 subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
