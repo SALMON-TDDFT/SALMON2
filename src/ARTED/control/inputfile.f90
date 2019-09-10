@@ -58,7 +58,7 @@ contains
     NB = nstate
 !    Nelec = nelec
 !    ext_field ! this variable is removed
-!    MD_option   ! this variable is replaced by use_ehrenfest_md
+!    MD_option   ! this variable is replaced by yn_md
 !    AD_RHO ! this variable is replaced by projection_option
 
 !    namelist/rgrid/ &

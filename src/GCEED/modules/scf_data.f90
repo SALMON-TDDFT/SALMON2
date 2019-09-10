@@ -492,8 +492,8 @@ end subroutine old_mesh
 function check_rion_update() result(rion_update)
   implicit none
   logical :: rion_update
-  ! iflag_opt <= calculation%use_geometry_opt (in scf)
-  ! iflag_md  <= calculation%use_ehrenfest_md (in rt)
+  ! iflag_opt <= calculation%yn_opt (in scf)
+  ! iflag_md  <= calculation%yn_md (in rt)
   if (iscfrt == 1) then
     rion_update = (iflag_opt == 1)
   else if (iscfrt == 2) then

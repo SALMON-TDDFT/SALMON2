@@ -43,7 +43,7 @@ subroutine write_density(it,action)
 
 
   if(action=='rt') then
-     if(use_ehrenfest_md=='y') &
+     if(yn_md=='y') &
      &   call analysis_RT_using_GS(Rion_update_rt,Nscf,zu_t,it,"get_dns_gs")
 
      if (comm_is_root(nproc_id_global)) then
@@ -78,7 +78,7 @@ subroutine write_density(it,action)
 end subroutine write_density
 
 subroutine write_density_cube(fh, write_difference)
-  use Global_Variables, only: NLx,NLy,NLz,Hx,Hy,Hz,NI,Kion,Rion,Zatom,Lxyz,rho,rho_gs,rho_gs_t,use_ehrenfest_md
+  use Global_Variables, only: NLx,NLy,NLz,Hx,Hy,Hz,NI,Kion,Rion,Zatom,Lxyz,rho,rho_gs,rho_gs_t,yn_md
   implicit none
   integer, intent(in) :: fh
   logical, intent(in) :: write_difference
@@ -103,7 +103,7 @@ subroutine write_density_cube(fh, write_difference)
   do iy=0, NLy-1
   do iz=0, NLz-1
      if (write_difference) then
-        if(use_ehrenfest_md=='y') then
+        if(yn_md=='y') then
            r = rho(Lxyz(ix,iy,iz)) - rho_gs_t(Lxyz(ix,iy,iz))
         else
            r = rho(Lxyz(ix,iy,iz)) - rho_gs(Lxyz(ix,iy,iz))

@@ -99,7 +99,7 @@ contains
       call optimization_log(nproc_k, nproc_ob, nproc_domain_orbital, nproc_domain_general)
     end if
 
-    if(use_ehrenfest_md=='y' .or. use_adiabatic_md=='y') then
+    if(yn_md=='y' .or. use_adiabatic_md=='y') then
        call init_md
     endif
 
@@ -447,7 +447,7 @@ contains
        write(*,*) 'Nscf=',Nscf
        !    write(*,*) 'ext_field =',ext_field
        !    write(*,*) 'Longi_Trans =',Longi_Trans
-       write(*,*) 'use_ehrenfest_md =', use_ehrenfest_md
+       write(*,*) 'yn_md =', yn_md
        write(*,*) 'projection_option =', projection_option
        write(*,*) 'Nt,dt=',Nt,dt
     endif
@@ -463,7 +463,7 @@ contains
     allocate(javt(0:Nt+1,3))
     allocate(Eall_t(0:Nt+1),Tion_t(0:Nt+1),Temperature_ion_t(0:Nt+1),Ework_integ_fdR(-1:Nt+1))
     Eall_t = 0d0; Tion_t = 0d0; Temperature_ion_t = 0d0; Ework_integ_fdR = 0d0
-    if(use_ehrenfest_md=='y') then
+    if(yn_md=='y') then
        allocate(javt_ion(0:Nt+1,3))
        if(ensemble=="NVT".and.thermostat=="nose-hoover")then
           allocate(Enh_t(0:Nt+1),Hnvt_t(0:Nt+1))
@@ -785,7 +785,7 @@ contains
     allocate(Jm_m(1:3, nmacro))
     allocate(Jm_new_m(1:3, nmacro))
     allocate(jm_new_m_tmp(1:3, nmacro))
-    if(use_ehrenfest_md=='y') then
+    if(yn_md=='y') then
        allocate(jm_ion_new_m_tmp(1:3, nmacro))
        allocate(Jm_ion_m(    1:3, nmacro))
        allocate(Jm_ion_new_m(1:3, nmacro))

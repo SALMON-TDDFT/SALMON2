@@ -4,9 +4,12 @@
 	projection_option='no'
 /
 &calculation
-	calc_mode='GS_RT'
-	use_ehrenfest_md='n'
-	use_ms_maxwell='n'
+!	(run-1: DFT, run-2: TDDFT_response)
+  	theory='DFT'
+! 	theory='TDDFT_response'
+!!	calc_mode='GS_RT'
+!!	use_ehrenfest_md='n'
+!!	use_ms_maxwell='n'
 /
 &control
 	backup_frequency=0

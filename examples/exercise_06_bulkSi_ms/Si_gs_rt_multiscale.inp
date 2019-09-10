@@ -1,6 +1,7 @@
 &calculation
-  calc_mode = 'GS_RT'
-  use_ms_maxwell = 'y'
+!(first-run: DFT, second-run: Multi_scale_Maxwell_TDDFT)
+  theory='DFT'
+! theory='Multi_scale_Maxwell_TDDFT'
 /
 
 &control

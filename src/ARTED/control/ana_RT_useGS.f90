@@ -92,11 +92,11 @@ Subroutine analysis_RT_using_GS(Rion_xyz_update,iter_GS_max,zu,it,action)
 
   !(this condition may be changed for md option in futre)
   Vloc_save(:) = Vloc(:)
-  if(use_ehrenfest_md=='n' .and. projection_option=='gs') Vloc(:)=Vloc_GS(:)
+  if(yn_md=='n' .and. projection_option=='gs') Vloc(:)=Vloc_GS(:)
   zu_GS(:,:,:)=zu_GS0(:,:,:)
 
   if(it .ne. it_last_update_zu_GS_proj) then
-  if(use_ehrenfest_md=='y'.and.(projection_option=='gs'.or.action=="get_dns_gs"))then
+  if(yn_md=='y'.and.(projection_option=='gs'.or.action=="get_dns_gs"))then
      !(some variables are changed assuming this subroutine is called only in RT)
      iflag_gs_init_wf = 1
      PrLv_scf = 0
@@ -126,7 +126,7 @@ Subroutine analysis_RT_using_GS(Rion_xyz_update,iter_GS_max,zu,it,action)
 
      do iter_GS=1,iter_GS_max
       !(this if-condition may be changed later)
-      !if(use_ehrenfest_md=='y')then !for better conv
+      !if(yn_md=='y')then !for better conv
        if(threshold_dEall.le.1d-5)then !for better conv
           call diag_omp
           call Gram_Schmidt

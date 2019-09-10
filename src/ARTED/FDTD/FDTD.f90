@@ -395,7 +395,7 @@ subroutine dt_evolve_Ac_1d
 
 
 !!(add ion current)
-  if(use_ehrenfest_md=='y')then
+  if(yn_md=='y')then
 !$omp parallel do default(shared) private(ix_m)
     do ix_m = nx1_m, nx2_m
        Ac_new_ms(:,ix_m,iy_m,iz_m) = Ac_new_ms(:,ix_m,iy_m,iz_m) &
@@ -778,7 +778,7 @@ subroutine calc_energy_joule()
     do iy_m = ny1_m, ny2_m
       do ix_m = nx1_m, nx2_m
         jm_mid_old = (Jm_ms(:, ix_m, iy_m, iz_m) + Jm_old_ms(:, ix_m, iy_m, iz_m)) * 0.5
-        if(use_ehrenfest_md=='y') then
+        if(yn_md=='y') then
            jm_mid_old = jm_mid_old + (Jm_ion_ms(:,ix_m,iy_m,iz_m) + Jm_ion_old_ms(:,ix_m,iy_m,iz_m))*0.5
         endif
         elec_mid_old = - (Ac_ms(:, ix_m, iy_m, iz_m) - Ac_old_ms(:, ix_m, iy_m, iz_m)) / dt

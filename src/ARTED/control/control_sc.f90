@@ -52,7 +52,7 @@ subroutine tddft_sc
     entrance_iter=-1
   end if
 
-  select case(use_ehrenfest_md)
+  select case(yn_md)
   case('y')
     Rion_update_rt = rion_update_on
   case('n')
@@ -74,7 +74,7 @@ subroutine tddft_sc
   call current0(zu_t)
   javt(0,:)=jav(:)
 
-  if(use_ehrenfest_md=='y') then
+  if(yn_md=='y') then
      call current_RT_ion
      javt_ion(0,:)=jav_ion(:)  
   endif
@@ -117,7 +117,7 @@ subroutine tddft_sc
 
   Temperature_ion= 0d0
   Ework          = 0d0
-  if(use_ehrenfest_md=='y') then
+  if(yn_md=='y') then
      dt_h       = dt*0.5d0
      Enh_gkTlns = 0d0
      Enh        = 0d0
@@ -130,7 +130,7 @@ subroutine tddft_sc
   call timer_begin(LOG_RT_ITERATION)
   do iter=entrance_iter+1,Nt
 
-    if (use_ehrenfest_md == 'y') then
+    if (yn_md == 'y') then
        !(Velocity Verlet integrator for ion dynamics)
        !NHC act on velocity with dt/2
        if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
@@ -189,7 +189,7 @@ subroutine tddft_sc
     call current_RT(zu_t)
 
     javt(iter+1,:)=jav(:)
-    if (use_ehrenfest_md == 'y') then
+    if (yn_md == 'y') then
       call current_RT_ion
       javt_ion(iter+1,:)=jav_ion(:)
       aforce(:,:) = force(:,:)
@@ -216,7 +216,7 @@ subroutine tddft_sc
     if(yn_local_field=='y') call get_Eelemag_FionAc_yn_local_field(iter)
     force=force+FionAc
 
-    if (use_ehrenfest_md == 'y') then
+    if (yn_md == 'y') then
        aforce(:,:) = 0.5d0*( aforce(:,:) + force(:,:) )
 
        !update ion velocity with dt/2
@@ -246,7 +246,7 @@ subroutine tddft_sc
     Temperature_ion_t(iter) = Temperature_ion
     Ework_integ_fdR(iter) = Ework_integ_fdR(iter-1) + Ework
 
-    if(use_ehrenfest_md=='y'.and.ensemble=="NVT".and.thermostat=="nose-hoover")then
+    if(yn_md=='y'.and.ensemble=="NVT".and.thermostat=="nose-hoover")then
        Enh_t(iter)  = Enh
        Hnvt_t(iter) = Eall + Enh
     endif
@@ -260,7 +260,7 @@ subroutine tddft_sc
     ! Export to standard log file
     if (comm_is_root(nproc_id_global)) then
        if (iter/10*10==iter) then
-       if (use_ehrenfest_md=='y') then
+       if (yn_md=='y') then
            write(*,120) iter*dt,&
            & (E_ext(iter,ixyz),E_tot(iter,ixyz),ixyz=1,3),&
            &  Eall, Eall-Eall0, Tion, Temperature_ion
@@ -281,7 +281,7 @@ subroutine tddft_sc
 
     ! Export to file_trj
     if (yn_out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
-       if(use_ehrenfest_md=='n') &
+       if(yn_md=='n') &
        &  call Ion_Force_omp(Rion_update_rt,calc_mode_rt)
        write(comment_line,110) iter, iter*dt
 110    format("#rt   step=",i8,"   time",e16.6)
@@ -402,7 +402,7 @@ subroutine tddft_sc
     end if
   endif
 
-  if (use_ehrenfest_md == 'y') call print_restart_data_md_gs
+  if (yn_md == 'y') call print_restart_data_md_gs
 
   if(comm_is_root(nproc_id_global)) then
     write(*,*) 'This is the end of RT calculation'
@@ -445,7 +445,7 @@ contains
       write(fh_rt, '("#",1X,A,":",1X,A)') "E_ext", "External electric field"
       write(fh_rt, '("#",1X,A,":",1X,A)') "Ac_tot", "Total vector potential field"
       write(fh_rt, '("#",1X,A,":",1X,A)') "E_tot", "Total electric field"
-      if(use_ehrenfest_md=='y') then
+      if(yn_md=='y') then
         write(fh_rt, '("#",1X,A,":",1X,A)') "Jm", "Matter current density(electrons)"
         write(fh_rt, '("#",1X,A,":",1X,A)') "Jmi","Matter current density(ions)"
       else
@@ -468,7 +468,7 @@ contains
         & 14, "Jm_x", trim(t_unit_current%name), &
         & 15, "Jm_y", trim(t_unit_current%name), &
         & 16, "Jm_z", trim(t_unit_current%name)
-      if(use_ehrenfest_md=='y') then
+      if(yn_md=='y') then
       write(fh_rt, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
         & 17, "-Jmi_x", trim(t_unit_current%name), &
         & 18, "-Jmi_y", trim(t_unit_current%name), &
@@ -485,7 +485,7 @@ contains
           & Ac_tot(iiter, 1:3) * t_unit_ac%conv, &
           & E_tot(iiter, 1:3) * t_unit_elec%conv, &
           & javt(iiter, 1:3) * t_unit_current%conv
-        if(use_ehrenfest_md=='y') then
+        if(yn_md=='y') then
         write(fh_rt, "(99(1X,E23.15E3))",advance='no') &
           & javt_ion(iiter, 1:3) * t_unit_current%conv
         endif
@@ -498,7 +498,7 @@ contains
       write(fh_rt_energy, '("#",1X,A)') "Real time calculation"
       write(fh_rt_energy, '("#",1X,A,":",1X,A)') "Eall", "Total energy"
       write(fh_rt_energy, '("#",1X,A,":",1X,A)') "Eall0", "Initial energy"
-      if(use_ehrenfest_md=='y') then
+      if(yn_md=='y') then
       write(fh_rt_energy, '("#",1X,A,":",1X,A)') "Tion", "Kinetic energy of ions"
       write(fh_rt_energy, '("#",1X,A,":",1X,A)') "Temperature_ion", "Temperature of ions"
       write(fh_rt_energy, '("#",1X,A,":",1X,A)') "E_work", "Work energy of ions(sum f*dr)"
@@ -514,7 +514,7 @@ contains
         & 2, "Eall", trim(t_unit_energy%name), &
         & 3, "Eall-Eall0", trim(t_unit_energy%name)
 
-      if(use_ehrenfest_md=='y') then
+      if(yn_md=='y') then
       write(fh_rt_energy, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
         & 4, "Tion", trim(t_unit_energy%name), &
         & 5, "Temperature_ion", "K", &
@@ -530,12 +530,12 @@ contains
       write(fh_rt_energy,*)
 
       do iiter = 0, niter
-        if( use_ehrenfest_md/='y' .and. mod(iiter,nstep_energy_calc)/=0)cycle
+        if( yn_md/='y' .and. mod(iiter,nstep_energy_calc)/=0)cycle
         write(fh_rt_energy, "(F16.8,99(1X,E23.15E3))",advance='no') &
           & iiter * dt * t_unit_time%conv, &
           & Eall_t(iiter) * t_unit_energy%conv, &
           & (Eall_t(iiter) - Eall0) * t_unit_energy%conv
-        if(use_ehrenfest_md=='y') then
+        if(yn_md=='y') then
         write(fh_rt_energy, "(99(1X,E23.15E3))",advance='no') &
           & Tion_t(iiter) * t_unit_energy%conv, &
           & Temperature_ion_t(iiter), &
