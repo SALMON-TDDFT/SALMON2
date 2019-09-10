@@ -15,9 +15,9 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_finalize(fs,fw)
-  use inputoutput,          only: dt_em,utime_from_au,ulength_from_au,uenergy_from_au,unit_system,iperiodic,&
-                                  ae_shape1,ae_shape2,e_impulse,sysname,nt_em,nenergy,de, &
-                                  directory,iobs_num_em,iobs_samp_em,obs_plane_em
+  use salmon_global,        only: dt_em,unit_system,iperiodic,ae_shape1,ae_shape2,e_impulse,sysname, &
+                                  nt_em,nenergy,de,directory,iobs_num_em,iobs_samp_em,obs_plane_em
+  use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use structures,           only: s_fdtd_system
@@ -184,7 +184,7 @@ end subroutine eh_finalize
 !=========================================================================================
 != Fourier transformation in eh ==========================================================
 subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
-  use inputoutput,    only: wf_em
+  use salmon_global,  only: wf_em
   use math_constants, only: zi
   implicit none
   integer,intent(in)   :: nt,ne

@@ -15,10 +15,11 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_calc(fs,fw)
-  use inputoutput,          only: dt_em,pole_num_ld,iobs_num_em,iobs_samp_em,obs_plane_em,&
-                                  directory,utime_from_au,t1_t2,t1_start,&
+  use salmon_global,        only: dt_em,pole_num_ld,iobs_num_em,iobs_samp_em,obs_plane_em,&
+                                  directory,t1_t2,t1_start,&
                                   E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                   E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
+  use inputoutput,          only: utime_from_au
   use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_summation
   use structures,           only: s_fdtd_system
@@ -250,7 +251,7 @@ contains
   !=========================================================================================
   != calculate linear response =============================================================
   subroutine eh_calc_lr
-    use inputoutput,          only: iperiodic
+    use salmon_global,        only: iperiodic
     use salmon_parallel,      only: nproc_group_global
     use salmon_communication, only: comm_summation
     implicit none
@@ -417,9 +418,9 @@ contains
       tf_i=cos(theta1)**2*cos(theta2_i)*gamma
     else if(aes=='Acos2')then
       tf_r=-(-alpha*sin(2.d0*theta1)*cos(theta2_r)   &
-             -beta*cos(theta1)**2*sin(theta2_r))*gamma
+             -beta*cos(theta1)**2*sin(theta2_r))/beta*gamma
       tf_i=-(-alpha*sin(2.d0*theta1)*cos(theta2_i)   &
-             -beta*cos(theta1)**2*sin(theta2_i))*gamma
+             -beta*cos(theta1)**2*sin(theta2_i))/beta*gamma
     end if
 !    tf_r=exp(-0.5d0*(( ((dble(iter)-0.5d0)*dt_em-10.0d0*tw1)/tw1 )**2.0d0) ) !test time factor
     add_inc(:)=amp*(tf_r*ep_r(:)+tf_i*ep_i(:))
@@ -772,7 +773,7 @@ end subroutine eh_fd
 !=========================================================================================
 != save plane data =======================================================================
 subroutine eh_save_plane(id,ipl,conv,ng_is,ng_ie,lg_is,lg_ie,Nd,ifn,iobs,iter,f,var)
-  use inputoutput,          only: directory
+  use salmon_global,        only: directory
   use salmon_parallel,      only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_summation
   implicit none
