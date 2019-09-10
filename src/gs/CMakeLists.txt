@@ -3,7 +3,6 @@ set(SOURCES
     eigen_subdiag_periodic_${FILE_MATHLIB}.f90
     conjugate_gradient.f90
     mixing.f90
-    rmmdiis_eigen.f90
     rmmdiis_eigen_lapack.f90
     rmmdiis.f90
     subspace_diagonalization.f90

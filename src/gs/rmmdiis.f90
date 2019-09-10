@@ -20,6 +20,12 @@ module rmmdiis_sub
   private :: axpyv,axpyzv,scalev,copyv,dotv,normv,diffv,setv
   private :: hpsi_test_diis
 
+  interface inner_product
+
+    module procedure r_inner_product, c_inner_product
+
+  end interface
+
 contains
 
 !=======================================================================
@@ -36,7 +42,6 @@ subroutine rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst  &
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use calc_allob_sub
-  use diis_core_sub
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   
@@ -571,5 +576,286 @@ subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg
   call hpsi(stpsi,shtpsi,info_ob,mg,v,system_spin1,stencil,srg_ob_1,ppg)
 
 end subroutine hpsi_test_diis
+
+subroutine r_inner_product(mg,info,matbox1,matbox2,rbox2)
+  use structures, only: s_rgrid, s_orbital_parallel
+  use salmon_communication, only: comm_summation
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
+  real(8),intent(in) :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(in) :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(out) :: rbox2
+  integer :: ix,iy,iz
+  real(8) :: rbox
+
+  rbox=0.d0
+  !$omp parallel do reduction(+ : rbox) private(iz,iy,ix)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    rbox=rbox+matbox1(ix,iy,iz)*matbox2(ix,iy,iz)
+  end do
+  end do
+  end do
+
+  call comm_summation(rbox,rbox2,info%icomm_r)
+
+end subroutine r_inner_product
+
+!=======================================================================
+subroutine c_inner_product(mg,info,matbox1,matbox2,cbox2)
+  use structures, only: s_rgrid, s_orbital_parallel
+  use salmon_communication, only: comm_summation
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
+  complex(8),intent(in)  :: matbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8),intent(in)  :: matbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8),intent(out) :: cbox2
+  integer :: ix,iy,iz
+  complex(8) :: cbox
+
+  cbox=0.d0
+  !$omp parallel do reduction(+ : cbox) private(iz,iy,ix)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    cbox=cbox+conjg(matbox1(ix,iy,iz))*matbox2(ix,iy,iz)
+  end do
+  end do
+  end do
+
+  call comm_summation(cbox,cbox2,info%icomm_r)
+
+end subroutine c_inner_product
+
+subroutine inner_product3(mg,info,rmatbox1,rmatbox2,rbox2)
+  use structures, only: s_rgrid, s_orbital_parallel
+  use salmon_communication, only: comm_summation
+  use timer
+  !$ use omp_lib
+  implicit none
+  type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
+  real(8),intent(in) :: rmatbox1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(in) :: rmatbox2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(out) :: rbox2
+  integer :: ix,iy,iz
+  real(8) :: rbox
+
+  rbox=0.d0
+  !$omp parallel do reduction(+ : rbox) private(iz,iy,ix)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    rbox=rbox+rmatbox1(ix,iy,iz)*rmatbox2(ix,iy,iz)
+  end do
+  end do
+  end do
+
+  call timer_begin(LOG_ALLREDUCE_INNER_PRODUCT3)
+  call comm_summation(rbox,rbox2,info%icomm_r)
+  call timer_end(LOG_ALLREDUCE_INNER_PRODUCT3)
+
+end subroutine inner_product3
+
+subroutine diis_core(mg,info,itotmst,hvol,phi,R1,phibar,Rbar,iob,iter,pcheck)
+  use inputoutput, only: ncg
+  use structures, only: s_rgrid, s_orbital_parallel
+  use eigen_sub
+  !$ use omp_lib
+  implicit none
+
+  type(s_rgrid),intent(in) :: mg
+  type(s_orbital_parallel),intent(in) :: info
+  integer,intent(in) :: itotmst
+  real(8),intent(in) :: hvol
+  integer :: ii,jj,iob,iter,ix,iy,iz,ier2
+  integer :: ibox,icount
+  real(8),allocatable :: Rmat(:,:),Smat(:,:)
+  real(8),allocatable :: betav(:)
+  real(8),allocatable :: alpha(:),eval(:),evec(:,:)
+  real(8) :: evalbox
+  real(8) :: rnorm
+  real(8) :: rbox
+  integer :: pcheck(1:itotmst,0:ncg)
+
+  real(8) :: phi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),      &
+                           mg%is(3):mg%ie(3),0:ncg)
+  real(8) :: R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),      &
+                           mg%is(3):mg%ie(3),0:ncg)
+  real(8) :: phibar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),      &
+                           mg%is(3):mg%ie(3),0:ncg)
+  real(8) :: Rbar(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),      &
+                           mg%is(3):mg%ie(3),0:ncg)
+
+  allocate(Rmat(iter,iter))
+  allocate(Smat(iter,iter))
+  allocate(alpha(iter),betav(iter),eval(iter))
+  allocate(evec(iter,iter))
+
+  do ii=0,iter-1
+    do jj=0,iter-1
+      call inner_product(mg,info,R1(:,:,:,ii),R1(:,:,:,jj),rbox)
+      Rmat(ii+1,jj+1)=rbox*hvol
+
+      call inner_product(mg,info,phi(:,:,:,ii),phi(:,:,:,jj),rbox)
+      Smat(ii+1,jj+1)=rbox*hvol
+    end do
+  end do
+
+  call eigenval(Smat,eval,iter)
+
+  do ii=1,iter-1
+    evalbox=eval(ii)
+    ibox=ii
+    do jj=ii+1,iter
+      if(eval(jj) > evalbox)then
+        evalbox=eval(jj)
+        ibox=jj
+      end if
+    end do
+    if(ibox /= ii)then
+      eval(ibox) = eval(ii)
+      eval(ii) = evalbox
+    end if
+  end do
+
+  icount=0
+  do ii=1,iter
+    if(ii == 1)then
+      if(abs(eval(1)-dble(iter)) < 1.0d-13)      &
+        icount = icount + 1
+    else
+      if(eval(ii) < 1.0d-13) icount = icount + 1
+    end if
+  end do
+
+  if(icount == iter)then
+  ! if phibar is estimated to be equal mixture of previous phis,
+  ! update phibar by newest phi
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      phibar(ix,iy,iz,iter-1)=phi(ix,iy,iz,iter-1)
+    end do
+    end do
+    end do
+
+    call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox)
+    rnorm=sqrt(rbox*hvol)
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)/rnorm
+      Rbar(ix,iy,iz,iter-1)=R1(ix,iy,iz,iter-1)
+    end do
+    end do
+    end do
+
+  else
+
+    call gen_eigen(Rmat,Smat,alpha,betav,evec,iter,ier2)
+
+    if(ier2 .ne. 0) then
+  ! if Smat is not positive-definite,
+  ! update phibar by newest phi
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        phibar(ix,iy,iz,iter-1)=phi(ix,iy,iz,iter-1)
+      end do
+      end do
+      end do
+      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox)
+
+      rnorm=sqrt(rbox*hvol)
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)/rnorm
+      end do
+      end do
+      end do
+
+      pcheck(iob,iter)=ier2
+
+    else
+      eval=alpha/betav
+
+      evalbox=eval(1)
+      ibox=1
+      do ii=2,iter
+        if(eval(ii) <= evalbox)then
+          evalbox=eval(ii)
+          ibox=ii
+        end if
+      end do
+
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        phibar(ix,iy,iz,iter-1)=0d0
+      end do
+      end do
+      end do
+      do ii=1,iter
+  !$OMP parallel do private(iz,iy,ix)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)      &
+                        +dble(evec(ii,ibox))*phi(ix,iy,iz,ii-1)
+        end do
+        end do
+        end do
+      end do
+
+      call inner_product(mg,info,phibar(:,:,:,iter-1),phibar(:,:,:,iter-1),rbox)
+      rnorm=sqrt(rbox*hvol)
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        phibar(ix,iy,iz,iter-1)=phibar(ix,iy,iz,iter-1)/rnorm
+      end do
+      end do
+      end do
+
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        Rbar(ix,iy,iz,iter-1)=0d0
+      end do
+      end do
+      end do
+      do ii=1,iter
+  !$OMP parallel do private(iz,iy,ix)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          Rbar(ix,iy,iz,iter-1)=Rbar(ix,iy,iz,iter-1)      &
+                       +dble(evec(ii,ibox))*R1(ix,iy,iz,ii-1)/rnorm
+        end do
+        end do
+        end do
+      end do
+
+    end if
+  end if
+
+  deallocate(Rmat, Smat)
+  deallocate(alpha, betav, eval, evec)
+
+  return
+
+end subroutine diis_core
 
 end module rmmdiis_sub

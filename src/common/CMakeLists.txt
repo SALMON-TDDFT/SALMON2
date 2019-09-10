@@ -10,9 +10,6 @@ set(SOURCES
    const.f90
    hpsi.f90
    initialization.f90
-   inner_product.f90
-   inner_product3.f90
-   set_isstaend.f90
    stencil.f90
    pseudo_pt.f90
    set_numcpu.f90
