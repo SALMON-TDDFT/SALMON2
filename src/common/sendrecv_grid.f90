@@ -30,6 +30,12 @@ module sendrecv_grid
   integer, parameter :: itype_send = 1
   integer, parameter :: itype_recv = 2
 
+  integer, public, parameter :: srg_initialization = 0
+  integer, public, parameter :: srg_pack           = 1
+  integer, public, parameter :: srg_unpack         = 2
+  integer, public, parameter :: srg_communication  = 4
+  integer, public, parameter :: srg_all            = 7
+
   interface update_overlap
   module procedure update_overlap_real8
   module procedure update_overlap_complex8
@@ -163,7 +169,7 @@ module sendrecv_grid
     return
   end subroutine
 
-  subroutine update_overlap_real8(srg, rg, data)
+  subroutine update_overlap_real8(srg, rg, data, istage)
     use salmon_communication, only: comm_get_groupinfo, &
       & comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
@@ -175,8 +181,15 @@ module sendrecv_grid
       rg%is_array(2):rg%ie_array(2), &
       rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
+    integer, intent(in), optional :: istage
     integer :: idir, iside
-    integer :: myrank, nprocs
+    integer :: myrank, nprocs, iphase
+
+    if (present(istage)) then
+      iphase = istage
+    else
+      iphase = srg_all
+    end if
 
     ! Obtain myrank in communication group:
     call comm_get_groupinfo(srg%icomm, myrank, nprocs)
@@ -188,16 +201,24 @@ module sendrecv_grid
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(iside, idir) /= comm_proc_null) then
           if (srg%neig(iside, idir) /= myrank) then
-            ! Store the overlap reigion into the cache 
-            call pack_cache(iside, idir) 
+            if (iand(iphase,srg_pack) > 0) then
+              ! Store the overlap region into the cache
+              call pack_cache(iside, idir)
+            end if
+
             ! In the first call of this subroutine, setup the persistent communication:
             if (.not. srg%if_pcomm_real8_initialized) call init_pcomm(iside, idir)
-            ! Start to communication
-            call comm_start_all(srg%ireq_real8(:, iside, idir))
+
+            if (iand(iphase,srg_communication) > 0) then
+              ! Start to communication
+              call comm_start_all(srg%ireq_real8(:, iside, idir))
+            end if
           else
-            ! NOTE: If neightboring nodes are itself (periodic with single proc),
-            !       a simple side-to-side copy is used instead of the MPI comm.
-            call copy_self(iside, idir)
+            if (iand(iphase,srg_unpack) > 0) then
+              ! NOTE: If neightboring nodes are itself (periodic with single proc),
+              !       a simple side-to-side copy is used instead of the MPI comm.
+              call copy_self(iside, idir)
+            end if
           end if
         end if
       end do
@@ -207,10 +228,15 @@ module sendrecv_grid
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(iside, idir) /= comm_proc_null) then
           if (srg%neig(iside, idir) /= myrank) then
-            ! Wait for recieving
-            call comm_wait_all(srg%ireq_real8(:, iside, idir))
-            ! Write back the recieved cache
-            call unpack_cache(iside, idir)
+            if (iand(iphase,srg_communication) > 0) then
+              ! Wait for recieving
+              call comm_wait_all(srg%ireq_real8(:, iside, idir))
+            end if
+
+            if (iand(iphase,srg_unpack) > 0) then
+              ! Write back the recieved cache
+              call unpack_cache(iside, idir)
+            end if
           end if
         end if
       end do
@@ -298,7 +324,7 @@ module sendrecv_grid
   end subroutine update_overlap_real8
 
 
-  subroutine update_overlap_complex8(srg, rg, data)
+  subroutine update_overlap_complex8(srg, rg, data, istage)
     use salmon_communication, only: comm_get_groupinfo, &
       & comm_start_all, comm_wait_all, comm_proc_null
     use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
@@ -310,8 +336,15 @@ module sendrecv_grid
       rg%is_array(2):rg%ie_array(2), &
       rg%is_array(3):rg%ie_array(3), &
       1:srg%nb)
+    integer, intent(in), optional :: istage
     integer :: idir, iside
-    integer :: myrank, nprocs
+    integer :: myrank, nprocs, iphase
+
+    if (present(istage)) then
+      iphase = istage
+    else
+      iphase = srg_all
+    end if
 
     ! Obtain myrank in communication group:
     call comm_get_groupinfo(srg%icomm, myrank, nprocs)
@@ -323,16 +356,24 @@ module sendrecv_grid
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(iside, idir) /= comm_proc_null) then
           if (srg%neig(iside, idir) /= myrank) then
-            ! Store the overlap reigion into the cache 
-            call pack_cache(iside, idir) 
+            if (iand(iphase,srg_pack) > 0) then
+              ! Store the overlap region into the cache
+              call pack_cache(iside, idir)
+            end if
+
             ! In the first call of this subroutine, setup the persistent communication:
             if (.not. srg%if_pcomm_complex8_initialized) call init_pcomm(iside, idir)
-            ! Start to communication
-            call comm_start_all(srg%ireq_complex8(:, iside, idir))
+
+            if (iand(iphase,srg_communication) > 0) then
+              ! Start to communication
+              call comm_start_all(srg%ireq_complex8(:, iside, idir))
+            end if
           else
-            ! NOTE: If neightboring nodes are itself (periodic with single proc),
-            !       a simple side-to-side copy is used instead of the MPI comm.
-            call copy_self(iside, idir)
+            if (iand(iphase,srg_unpack) > 0) then
+              ! NOTE: If neightboring nodes are itself (periodic with single proc),
+              !       a simple side-to-side copy is used instead of the MPI comm.
+              call copy_self(iside, idir)
+            end if
           end if
         end if
       end do
@@ -342,10 +383,14 @@ module sendrecv_grid
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(iside, idir) /= comm_proc_null) then
           if (srg%neig(iside, idir) /= myrank) then
-            ! Wait for recieving
-            call comm_wait_all(srg%ireq_complex8(:, iside, idir))
-            ! Write back the recieved cache
-            call unpack_cache(iside, idir)
+            if (iand(iphase,srg_communication) > 0) then
+              ! Wait for recieving
+              call comm_wait_all(srg%ireq_complex8(:, iside, idir))
+            end if
+            if (iand(iphase,srg_unpack) > 0) then
+              ! Write back the recieved cache
+              call unpack_cache(iside, idir)
+            end if
           end if
         end if
       end do

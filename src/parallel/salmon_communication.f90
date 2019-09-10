@@ -247,9 +247,11 @@ module salmon_communication
 
 contains
   subroutine comm_init
+    use mpi, only: MPI_THREAD_FUNNELED
     implicit none
     integer :: ierr
-    MPI_ERROR_CHECK(call MPI_Init(ierr))
+    integer :: iprovided
+    MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED, iprovided, ierr))
   end subroutine
 
   subroutine comm_finalize

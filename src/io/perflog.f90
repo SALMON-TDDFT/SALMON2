@@ -258,6 +258,14 @@ contains
     call set(6, LOG_UHPSI_PSEUDO_COMM,    'pseudo-pt (comm.)')
     call write_loadbalance(fd, 6, tsrc, headers, mode)
 
+    call set(0, 0, 'hpsi-overlapped')
+    call set(1, LOG_UHPSI_OVL_PHASE1,      'pack halo')
+    call set(2, LOG_UHPSI_OVL_PHASE2,      'comp/comm overlap')
+    call set(3, LOG_UHPSI_OVL_PHASE2_COMM, 'halo communication')
+    call set(4, LOG_UHPSI_OVL_PHASE3,      'unpack halo')
+    call set(5, LOG_UHPSI_OVL_PHASE4,      'halo computation')
+    call write_loadbalance(fd, 5, tsrc, headers, mode)
+
     call write_root(fd, '=== performance [GFLOPS] ===')
     call write_flops(fd, mode)
   contains

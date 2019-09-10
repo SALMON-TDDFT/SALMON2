@@ -14,13 +14,14 @@
 !  limitations under the License.
 !
 
-subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
+subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
                                 ,tpsi,htpsi,V_local,lap0,lapt,nabt &
                                 )
   implicit none
 
   integer,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
   integer,intent(in) :: idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  integer,intent(in) :: igs(3),ige(3)
 
   complex(8),intent(in)  :: tpsi   (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
   complex(8),intent(out) :: htpsi  (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
@@ -52,14 +53,14 @@ subroutine stencil_C_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 #define DY(dt) ix,idy(iy+(dt)),iz
 #define DZ(dt) ix,iy,idz(iz+(dt))
 
-  do iz=is(3),ie(3)
-  do iy=is(2),ie(2)
+  do iz=igs(3),ige(3)
+  do iy=igs(2),ige(2)
 
 !dir$ assume_aligned V_local(is(1),iy,iz):MEM_ALIGN
 !dir$ assume_aligned tpsi(is_array(1),iy,iz)   :MEM_ALIGN
 !dir$ assume_aligned htpsi(is_array(1),iy,iz)  :MEM_ALIGN
 
-  do ix=is(1),ie(1)
+  do ix=igs(1),ige(1)
     t(1) = tpsi(DX( 4))
     t(2) = tpsi(DX( 3))
     t(3) = tpsi(DX( 2))

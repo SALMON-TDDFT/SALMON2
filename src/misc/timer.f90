@@ -137,6 +137,12 @@ module timer
   integer,public,parameter :: LOG_UHPSI_PSEUDO         = 254
   integer,public,parameter :: LOG_UHPSI_PSEUDO_COMM    = 255
 
+  integer,public,parameter :: LOG_UHPSI_OVL_PHASE1     = 256
+  integer,public,parameter :: LOG_UHPSI_OVL_PHASE2     = 257
+  integer,public,parameter :: LOG_UHPSI_OVL_PHASE2_COMM= 258
+  integer,public,parameter :: LOG_UHPSI_OVL_PHASE3     = 259
+  integer,public,parameter :: LOG_UHPSI_OVL_PHASE4     = 260
+
   ! ===============================================================
 
 

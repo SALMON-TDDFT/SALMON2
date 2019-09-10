@@ -32,6 +32,8 @@ void stencil_c_tuned_seq_imp( const int PNLx
                             , int    const * restrict modx
                             , int    const * restrict mody
                             , int    const * restrict modz
+                            , int    const            igs[restrict 3]
+                            , int    const            ige[restrict 3]
                             , double const * restrict A
                             , double const            B[restrict NLz][NLy][NLx]
                             , double const            C[restrict 12]
@@ -40,10 +42,9 @@ void stencil_c_tuned_seq_imp( const int PNLx
                             , double complex          F[restrict PNLz][PNLy][PNLx]
 )
 {
-  const int NSx = NHx * 2,   NSy = NHy * 2,   NSz = NHz * 2;
-  const int isx = NHx,       isy = NHy,       isz = NHz;
-  const int iex = isx + NLx, iey = isy + NLy, iez = isz + NLz;
-
+  const int isx = igs[0], isy = igs[1], isz = igs[2];
+  const int iex = ige[0], iey = ige[1], iez = ige[2];
+  const int NSx = NHx * 2, NSy = NHy * 2, NSz = NHz * 2;
 
   __m512d at   = _mm512_set1_pd(*A);
   __m512d HALF = _mm512_set1_pd(-0.5);
@@ -80,7 +81,7 @@ void stencil_c_tuned_seq_imp( const int PNLx
     __m512i uyz = _mm512_mask_blend_epi32(0xFF00, ymp, zmp);
     __m512i tyz = _mm512_mask_blend_epi32(0xFF00, tiy, tiz);
 
-    double         const* b = &B[iz-isz][iy-isy][0];
+    double         const* b = &B[iz-NHz][iy-NHy][0];
     double complex const* e = &E[iz    ][iy    ][0];
     double complex      * f = &F[iz    ][iy    ][0];
 
@@ -161,7 +162,7 @@ void stencil_c_tuned_seq_imp( const int PNLx
         }
       }
 
-      bt = dcast_to_dcmplx(b + ix - isx);
+      bt = dcast_to_dcmplx(b + ix - NHx);
       v2 = _mm512_fmadd_pd(at, ex, tt);
       v4 = (__m512d) _mm512_shuffle_epi32((__m512i) ut, _MM_PERM_BADC);
       v3 = (__m512d) _mm512_xor_si512((__m512i) v4, INV);
@@ -187,6 +188,8 @@ void stencil_c_tuned_seq_( int            const            is_array[restrict 3]
                          , int            const * restrict modx
                          , int            const * restrict mody
                          , int            const * restrict modz
+                         , int            const            igs_[restrict 3]
+                         , int            const            ige_[restrict 3]
                          , double complex const * restrict E
                          , double complex       * restrict F
                          , double         const * restrict B
@@ -207,14 +210,31 @@ void stencil_c_tuned_seq_( int            const            is_array[restrict 3]
   const int NHx  = INT_ABS(is_array[0] - is[0]); // shadow
   const int NHy  = INT_ABS(is_array[1] - is[1]);
   const int NHz  = INT_ABS(is_array[2] - is[2]);
-#undef INT_ABS
+
+  int igs[3] = { NHx,          NHy,          NHz };
+  int ige[3] = { igs[0] + NLx, igs[1] + NLy, igs[2] + NLz };
+
+  for (int i = 0 ; i < 3 ; ++i)
+  {
+    if (is[i] < igs_[i])
+      igs[i] = igs[i] + igs_[i] - is[i];
+    if (ige_[i] < ie[i])
+      ige[i] = igs[i] + ige_[i] - igs_[i] + 1;
+  }
+
+  if (ige[0] > NHx + NLx) ige[0] = NHx + NLx;
+  if (ige[1] > NHy + NLy) ige[1] = NHy + NLy;
+  if (ige[2] > NHz + NLz) ige[2] = NHz + NLz;
 
   assert(NLx % 4 == 0);
   assert(NHx == 4 || NHx == 0);
   assert(NHy == 4 || NHy == 0);
   assert(NHz == 4 || NHz == 0);
+  assert(igs[0] % 4 == 0);
+  assert(ige[0] % 4 == 0);
+#undef INT_ABS
 
-  stencil_c_tuned_seq_imp(PNLx, PNLy, PNLz, NLx, NLy, NLz, NHx, NHy, NHz, modx, mody, modz
+  stencil_c_tuned_seq_imp(PNLx, PNLy, PNLz, NLx, NLy, NLz, NHx, NHy, NHz, modx, mody, modz, igs, ige
                          , A_
                          , (double         const (* restrict)[NLy][NLx])(B)
                          , C
