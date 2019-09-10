@@ -1,6 +1,6 @@
 &calculation
-  calc_mode = 'RT'
-  use_ehrenfest_md = 'y'
+  theory='TDDFT_pulse'
+  yn_md = 'y'
 /
 
 &control

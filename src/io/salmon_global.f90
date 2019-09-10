@@ -38,13 +38,15 @@ module salmon_global
 !Input variables
 !! &calculation
   character(16)  :: theory
-  character(16)  :: calc_mode
-  character(1)   :: use_ehrenfest_md
-  character(1)   :: use_adiabatic_md
-  character(1)   :: use_ms_maxwell
-  character(1)   :: use_geometry_opt
+  character(16)  :: calc_mode          !remove later
+  character(1)   :: use_ehrenfest_md   !remove later
+  character(1)   :: use_adiabatic_md   !remove later
+  character(1)   :: use_ms_maxwell     !remove later
+  character(1)   :: use_geometry_opt   !remove later
+  character(1)   :: use_singlescale    !remove later
   character(16)  :: use_potential_model
-  character(1)   :: use_singlescale ! temporary
+  character(1)   :: yn_md
+  character(1)   :: yn_opt
 !! &control      
   character(8)   :: restart_option
   integer        :: backup_frequency
