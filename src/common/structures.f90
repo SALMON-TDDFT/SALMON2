@@ -114,6 +114,7 @@ module structures
                               ! For calc_mode='RT' and temperature<0, these values are calculated from nelec.
                               ! In other cases, these are calculated from nstate.
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
+    integer :: imr(3) ! for sendrecv
   end type s_orbital_parallel
 
   type s_field_parallel
@@ -124,6 +125,7 @@ module structures
                              ! Inside core FFTE routine, x-direction is redundant and
                              ! yz-direction is parallel.
     integer :: id_ffte(3), isize_ffte(3)
+    integer :: imr(3),imrs(3) ! for sendrecv
   end type s_field_parallel
 
   type s_orbital

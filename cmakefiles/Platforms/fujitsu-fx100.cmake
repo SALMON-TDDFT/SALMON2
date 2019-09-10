@@ -20,7 +20,6 @@ set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-O3 -Kfast,simd=1")
 
 set(USE_MPI_DEFAULT             ON)
-set(REDUCE_FOR_MANYCORE_DEFAULT ON)
 
 
 ########

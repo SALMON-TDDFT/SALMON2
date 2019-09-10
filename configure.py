@@ -68,11 +68,6 @@ group.add_option('--build-required-packages', action='store_true', default=False
 
 parser.add_option_group(group)
 
-group = OptionGroup(parser, 'Optimization options')
-group.add_option('--enable-reduce-for-manycore',  action='store_true',  dest='reduce_manycore')
-group.add_option('--disable-reduce-for-manycore', action='store_false',  dest='reduce_manycore', help='enable/disable reduction code optimization for many-core processor.')
-parser.add_option_group(group)
-
 group = OptionGroup(parser, 'Optimization options for stencil computations')
 group.add_option('--explicit-vec',          action='store_true',  dest='explicit_vec',      help='enable explicit vectorization. it requires --simd-set option to be set.')
 group.add_option('--compiler-vec',          action='store_false', dest='explicit_vec',      help='entrust optimization to a compiler.')
@@ -117,7 +112,6 @@ add_option(dict, 'DOMAIN_IS_POW2',      options.domain_two)
 add_option(dict, 'ARRAY_PADDING',       options.padding)
 add_option(dict, 'EXPLICIT_VEC',        options.explicit_vec)
 add_option(dict, 'SW_PREFETCH',         options.swp)
-add_option(dict, 'REDUCE_FOR_MANYCORE', options.reduce_manycore)
 
 add_option(dict, 'HPSI_TEST',           options.hpsi_test)
 if options.simd is not None:

@@ -21,7 +21,42 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(lg,system,stencil)
+subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
+  use structures
+  use salmon_global, only: iperiodic
+  use sendrecv_grid
+  use init_communicator
+  implicit none
+  integer,intent(in) :: comm
+  type(s_orbital_parallel) :: info
+  type(s_field_parallel)   :: info_field
+  type(s_rgrid)      :: lg,mg,ng
+  type(s_dft_system) :: system
+  type(s_stencil)    :: stencil
+  type(s_reciprocal_grid) :: fg
+  type(s_poisson)    :: poisson
+  type(s_sendrecv_grid) :: srg,srg_ng
+  !
+  integer,dimension(2,3) :: neig,neig_ng
+
+  call init_communicator_dft(comm,info,info_field)
+  call init_dft_system(lg,system,stencil)
+  call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
+  call init_orbital_parallel_singlecell(system,info)
+  if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+
+  ! sendrecv_grid object for wavefunction updates
+  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
+  call init_sendrecv_grid(srg, mg, info%numo*info%numk, info%icomm_r, neig)
+  ! sendrecv_grid object for scalar potential updates
+  call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
+  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
+
+end subroutine init_dft
+
+!===================================================================================================================================
+
+subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
@@ -117,8 +152,10 @@ subroutine init_dft(lg,system,stencil)
     end do
   end do
 
+  call set_gridcoordinate(lg,system)
+
   return
-end subroutine init_dft
+end subroutine init_dft_system
 
 !===================================================================================================================================
 
@@ -167,7 +204,7 @@ end subroutine init_orbital_parallel_singlecell
 
 subroutine init_grid_whole(rsize,hgs,lg)
   use structures
-  use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid
+  use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid,theory,al_em,dl_em
   implicit none
   real(8),intent(in) :: rsize(3),hgs(3)
   type(s_rgrid) :: lg
@@ -227,11 +264,16 @@ subroutine init_grid_whole(rsize,hgs,lg)
     end do
   end if
 
-  if(sum(abs(dl)) <= 1d-12) then
-    if( maxval(abs(num_rgrid-lg%num)) > 0) stop "error: num_rgrid /= lg%num"
-  else
-    if( maxval(abs((rsize/dl)-dble(lg%num))) > 1d-4 ) stop "error: abs((rsize/dl)-dble(lg%num)) is too large"
-  end if
+  select case(theory)
+  case('Maxwell')
+    if( maxval(abs((al_em/dl_em)-dble(lg%num))) > 1d-4 ) stop "error: abs((al_em/dl_em)-dble(lg%num)) is too large"
+  case default
+    if(sum(abs(dl)) <= 1d-12) then
+      if( maxval(abs(num_rgrid-lg%num)) > 0) stop "error: num_rgrid /= lg%num"
+    else
+      if( maxval(abs((rsize/dl)-dble(lg%num))) > 1d-4 ) stop "error: abs((rsize/dl)-dble(lg%num)) is too large"
+    end if
+  end select
 
   return
 end subroutine init_grid_whole
@@ -444,7 +486,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   type(s_poisson),intent(inout) :: poisson
   real(8) :: brl(3,3)
   integer :: n,myrank,nproc
-  integer :: ix,iy,iz,jj
+  integer :: ix,iy,iz
   integer :: iix,iiy,iiz
   real(8) :: G2
   integer :: kx,ky,kz
@@ -544,6 +586,75 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   return
 end subroutine init_reciprocal_grid
+
+!===================================================================================================================================
+
+subroutine set_gridcoordinate(lg,system)
+  use structures, only: s_rgrid,s_dft_system
+  use salmon_global, only: iperiodic
+  implicit none
+  type(s_rgrid),     intent(inout) :: lg
+  type(s_dft_system),intent(in)    :: system
+  integer :: ix,iy,iz
+
+  allocate(lg%coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))
+
+  select case(iperiodic)
+  case(0)
+    select case(mod(lg%num(1),2))
+      case(1)
+!$OMP parallel do
+        do ix=lg%is_overlap(1),lg%ie_overlap(1)
+          lg%coordinate(ix,1)=dble(ix)*system%hgs(1)
+        end do
+      case(0)
+!$OMP parallel do
+        do ix=lg%is_overlap(1),lg%ie_overlap(1)
+          lg%coordinate(ix,1)=(dble(ix)-0.5d0)*system%hgs(1)
+        end do
+    end select
+
+    select case(mod(lg%num(2),2))
+      case(1)
+!$OMP parallel do
+        do iy=lg%is_overlap(2),lg%ie_overlap(2)
+          lg%coordinate(iy,2)=dble(iy)*system%hgs(2)
+        end do
+      case(0)
+!$OMP parallel do
+      do iy=lg%is_overlap(2),lg%ie_overlap(2)
+        lg%coordinate(iy,2)=(dble(iy)-0.5d0)*system%hgs(2)
+      end do
+    end select
+
+    select case(mod(lg%num(3),2))
+      case(1)
+!$OMP parallel do
+        do iz=lg%is_overlap(3),lg%ie_overlap(3)
+          lg%coordinate(iz,3)=dble(iz)*system%hgs(3)
+        end do
+      case(0)
+!$OMP parallel do
+        do iz=lg%is_overlap(3),lg%ie_overlap(3)
+          lg%coordinate(iz,3)=(dble(iz)-0.5d0)*system%hgs(3)
+        end do
+    end select
+  case(3)
+!$OMP parallel do
+    do ix=lg%is_overlap(1),lg%ie_overlap(1)
+      lg%coordinate(ix,1)=dble(ix-1)*system%hgs(1)
+    end do
+!$OMP parallel do
+    do iy=lg%is_overlap(2),lg%ie_overlap(2)
+      lg%coordinate(iy,2)=dble(iy-1)*system%hgs(2)
+    end do
+!$OMP parallel do
+    do iz=lg%is_overlap(3),lg%ie_overlap(3)
+      lg%coordinate(iz,3)=dble(iz-1)*system%hgs(3)
+    end do
+  end select
+
+end subroutine set_gridcoordinate
 
 !===================================================================================================================================
 

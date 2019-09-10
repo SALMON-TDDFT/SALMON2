@@ -23,14 +23,6 @@
 # define OMP_SIMD
 #endif
 
-#ifdef ARTED_USE_NVTX
-#define NVTX_BEG(name,id)  call nvtxStartRange(name,id)
-#define NVTX_END()         call nvtxEndRange()
-#else
-#define NVTX_BEG(name,id)
-#define NVTX_END()
-#endif
-
 subroutine psi_rho_GS
   use global_variables, only: zu_GS,NB
   implicit none
@@ -50,9 +42,6 @@ subroutine psi_rho_impl(zutmp,zu_NB)
   use opt_variables
   use salmon_parallel, only: nproc_group_tdks
   use salmon_communication, only: comm_summation
-#ifdef ARTED_USE_NVTX
-  use nvtx
-#endif
   implicit none
   integer,intent(in)    :: zu_NB
   complex(8),intent(in) :: zutmp(0:NL-1,zu_NB,NK_s:NK_e)
@@ -105,7 +94,6 @@ contains
 
     mytid = tid
 
-#ifdef ARTED_REDUCE_FOR_MANYCORE
     zrhotmp(:,mytid)=0.d0
 
 !$omp do private(ik,ib,i) collapse(2)
@@ -126,56 +114,6 @@ contains
       i = i/2
 !$omp barrier
     end do
-#else
-    mytid = 0
-
-!$omp single
-    zrhotmp(:,mytid) = 0.d0
-!$omp end single
-
-    do ik=NK_s,NK_e
-    do ib=1,NBoccmax
-!$omp do private(i)
-    do i=0,NL-1
-      zrhotmp(i,mytid)=zrhotmp(i,mytid)+(zfac*occ(ib,ik))*abs(zutmp(i,ib,ik))**2
-    end do
-!$omp end do
-    end do
-    end do
-#endif
-  end subroutine
-
-  subroutine reduce_acc(zfac, zutmp, zu_NB, zrho)
-    use global_variables
-    implicit none
-    real(8),intent(in)    :: zfac
-    integer,intent(in)    :: zu_NB
-    complex(8),intent(in) :: zutmp(0:NL-1, zu_NB, NK_s:NK_e)
-    real(8),intent(out)   :: zrho(0:NL-1)
-
-    integer :: ib,ik,i
-    real(8) :: my_zrho
-
-    NVTX_BEG("reduce_acc()",1)
-!$acc kernels pcopy(zrho) pcopyin(zutmp,occ)
-    zrho(:)=0.d0
-
-!$acc loop gang vector(1)
-    do ik=NK_s,NK_e
-!$acc loop gang vector(128) private(my_zrho)
-      do i=0,NL-1
-        my_zrho = 0.d0
-!$acc loop seq
-        do ib=1,NBoccmax
-          my_zrho = my_zrho + (zfac*occ(ib,ik))*abs(zutmp(i,ib,ik))**2
-        end do
-!$acc atomic update
-        zrho(i) = zrho(i) + my_zrho
-!$acc end atomic
-      end do
-    end do
-!$acc end kernels
-    NVTX_END()
   end subroutine
 
   subroutine sym1(zutmp,zu_NB,zrho_l)
@@ -189,20 +127,12 @@ contains
 
     integer :: tid
 
-    NVTX_BEG("sym1()",1)
-
-#ifdef _OPENACC
-    call reduce_acc(1.0d0,zutmp,zu_NB,zrho_l)
-#else
 !$omp parallel private(tid)
 !$  tid=omp_get_thread_num()
     call reduce(tid,1.0d0,zutmp,zu_NB)
 !$omp end parallel
 
     zrho_l(:) = zrhotmp(0:NL-1,0)
-#endif
-
-    NVTX_END()
   end subroutine
 
   !====== diamond(4) structure =========================!
@@ -219,20 +149,12 @@ contains
     integer :: i,tid
     real(8) :: zfac
 
-    NVTX_BEG("sym4()",2)
-
     zfac=1.0d0/4d0
-
-#ifdef _OPENACC
-    call reduce_acc(zfac,zutmp,zu_NB,zrhotmp(:,0))
-#endif
 
 !$omp parallel private(tid)
 !$  tid=omp_get_thread_num()
 
-#ifndef _OPENACC
     call reduce(tid,zfac,zutmp,zu_NB)
-#endif
 
 ! 1.T_3
 !$omp do OMP_SIMD
@@ -248,8 +170,6 @@ contains
     end do
 !$omp end do OMP_SIMD
 !$omp end parallel
-
-    NVTX_END()
   end subroutine
 
   !====== diamond(8) structure =========================!
@@ -267,21 +187,13 @@ contains
     integer :: i,tid
     real(8) :: zfac
 
-    NVTX_BEG("sym8()",3)
-
     ! wk(ik)=8.0,(ikx==iky >. wk(ik)=4.0)
     zfac=1.0d0/32d0
-
-#ifdef _OPENACC
-    call reduce_acc(zfac,zutmp,zu_NB,zrhotmp(:,0))
-#endif
 
 !$omp parallel private(tid)
 !$  tid=omp_get_thread_num()
 
-#ifndef _OPENACC
     call reduce(tid,zfac,zutmp,zu_NB)
-#endif
 
 ! 1.T_4
 !$omp do OMP_SIMD
@@ -335,21 +247,13 @@ contains
     integer :: i,tid
     real(8) :: zfac
 
-    NVTX_BEG("sym8_diamond2()",4)
-
     ! wk(ik)=8.0,(ikx==iky >. wk(ik)=4.0)
     zfac=1.0d0/16d0
-
-#ifdef _OPENACC
-    call reduce_acc(zfac,zutmp,zu_NB,zrhotmp(:,0))
-#endif
 
 !$omp parallel private(tid)
 !$  tid=omp_get_thread_num()
 
-#ifndef _OPENACC
     call reduce(tid,zfac,zutmp,zu_NB)
-#endif
 
 !$omp do OMP_SIMD
     do i=0,NL-1
@@ -395,16 +299,10 @@ contains
     ! wk(ik)=8.0,(ikx==iky >. wk(ik)=4.0)
     zfac=1.0d0/16d0
 
-#ifdef _OPENACC
-    call reduce_acc(zfac,zutmp,zu_NB,zrhotmp(:,0))
-#endif
-
 !$omp parallel private(tid)
 !$  tid=omp_get_thread_num()
 
-#ifndef _OPENACC
     call reduce(tid,zfac,zutmp,zu_NB)
-#endif
 
 ! 1.T_3
 !$omp do OMP_SIMD
@@ -434,8 +332,6 @@ contains
     end do
 !$omp end do OMP_SIMD
 !$omp end parallel
-
-    NVTX_END()
   end subroutine
 end subroutine psi_rho_impl
 

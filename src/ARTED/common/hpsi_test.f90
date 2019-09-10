@@ -17,14 +17,6 @@
 #define LOG_BEG(id) call timer_thread_begin(id)
 #define LOG_END(id) call timer_thread_end(id)
 
-#ifdef ARTED_USE_NVTX
-#define NVTX_BEG(name,id)  call nvtxStartRange(name,id)
-#define NVTX_END()         call nvtxEndRange()
-#else
-#define NVTX_BEG(name,id)
-#define NVTX_END()
-#endif
-
 module hpsi
   use timer
   implicit none
@@ -106,9 +98,6 @@ contains
     use opt_variables, only: PNLx,PNLy,PNLz
 !    use Global_Variables, only: NLx,NLy,NLz,kAc,lapx,lapy,lapz,nabx,naby,nabz,Vloc,Mps,uV,iuV,Hxyz,ekr_omp,Nlma,a_tbl,Nps,NI,Jxyz
 !    use opt_variables, only: lapt,PNLx,PNLy,PNLz,PNL
-#ifdef ARTED_USE_NVTX
-    use nvtx
-#endif
     implicit none
     integer,intent(in)              :: ik
     complex(8),intent(in)           ::  tpsi0(0:PNLz-1,0:PNLy-1,0:PNLx-1)

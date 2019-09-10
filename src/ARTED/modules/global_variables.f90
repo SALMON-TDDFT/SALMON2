@@ -107,11 +107,7 @@ Module Global_Variables
   real(8),allocatable :: rho_nlcc(:),tau_nlcc(:)
 
 ! wave functions, work array
-#ifdef _OPENACC
-  complex(8),allocatable,pinned :: zu_t(:,:,:)
-#else
   complex(8),allocatable :: zu_t(:,:,:)
-#endif
   complex(8),allocatable :: zu_GS(:,:,:),zu_GS0(:,:,:)
   complex(8),allocatable :: tpsi(:),htpsi(:),zwork(:,:,:),ttpsi(:)
   real(8),allocatable :: work(:,:,:)
@@ -257,11 +253,7 @@ Module Global_Variables
   !! NOTE: This switch will be removed after marging the common FDTD routine..
   logical :: debug_switch_no_radiation
   
-#ifdef _OPENACC
-  complex(8),allocatable,pinned :: zu_m(:,:,:,:)
-#else
   complex(8),allocatable :: zu_m(:,:,:,:)
-#endif
   real(8),allocatable :: Rion_m(:,:,:),velocity_m(:,:,:),force_m(:,:,:)
   real(8),allocatable :: Rion_eq_m(:,:,:),dRion_m(:,:,:,:)
   real(8),allocatable :: Vh_m(:,:)

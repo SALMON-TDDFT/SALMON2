@@ -88,6 +88,13 @@ subroutine eh_init(fs,fw)
   call eh_prep_GCEED(fs,fw)
   
   !set coordinate
+  do ii=1,3
+    if(mod(int(fs%rlsize(ii)/fs%hgs(ii)+1.d-12),2)==1)then
+      fw%ioddeven(ii)=1
+    else
+      fw%ioddeven(ii)=2
+    end if
+  end do 
   allocate(fw%coo(minval(fs%lg%is(:))-fw%Nd:maxval(fs%lg%ie(:))+fw%Nd,3))
   call set_coo_em(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo(:,:))
   
@@ -1474,7 +1481,7 @@ end subroutine eh_input_shape
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_prep_GCEED(fs,fw)
-  use inputoutput,       only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,iperiodic
+  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,iperiodic
   use salmon_parallel,   only: nproc_id_global,nproc_size_global,nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
   use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_o_mul,nproc_d_g_mul_dm,nproc_d_g_dm,&
@@ -1486,11 +1493,11 @@ subroutine eh_prep_GCEED(fs,fw)
                                ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,Nd, &
                                ista_Mxin,iend_Mxin,inum_Mxin,&
                                ista_Mxin_s,iend_Mxin_s,inum_Mxin_s
-  use new_world_sub,     only: make_new_world
-  use init_sendrecv_sub, only: create_sendrecv_neig_ng
-  use sendrecv_grid,     only: init_sendrecv_grid
+  use init_communicator, only: init_communicator_dft
+  use sendrecv_grid
   use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
   use salmon_maxwell,    only: ls_fdtd_work
+  use salmon_initialization
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
@@ -1505,26 +1512,10 @@ subroutine eh_prep_GCEED(fs,fw)
   nproc_d_o=nproc_domain_orbital
   nproc_d_g=nproc_domain_general
   call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-  nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
-  nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-  call make_new_world(info,info_field)
-  call setk(k_sta,k_end,k_num,num_kpoints_rd,nproc_k,info%id_k)
-  
-  !set grid and odd or even grid paterns
-  rLsize(:,1)=fs%rlsize(:); Harray(:,1)=fs%hgs(:);
-  Hgs(:)=Harray(:,1); Hvol=Hgs(1)*Hgs(2)*Hgs(3);
-  call set_imesh_oddeven(1)
-  call setlg(fs%lg,lg_sta,lg_end,lg_num,ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,    &
-             Hgs,Nd,rLsize(:,1),imesh_oddeven,iperiodic)
-  allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1), &
-           inum_Mxin(3,0:nproc_size_global-1))
-  call setmg(fs%mg,mg_sta,mg_end,mg_num,ista_Mxin,iend_Mxin,inum_Mxin,  &
-             lg_sta,lg_num,nproc_size_global,nproc_id_global,nproc_d_o,nproc_k,nproc_ob,1)
-  allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
-  allocate(inum_Mxin_s(3,0:nproc_size_global-1))
-  call setng(fs%ng,ng_sta,ng_end,ng_num,ista_Mxin_s,iend_Mxin_s,inum_Mxin_s, &
-             nproc_size_global,nproc_id_global,nproc_d_o,nproc_d_g_dm,ista_Mxin,iend_Mxin)
-  fw%ioddeven(:)=imesh_oddeven(:);
+  call init_communicator_dft(nproc_group_global,info,info_field)
+
+  call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
+  call init_grid_parallel(info%id_rko,info%isize_rko,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
   
   !set sendrecv environment
   !This process about ng is temporal. 
@@ -1550,7 +1541,7 @@ subroutine eh_prep_GCEED(fs,fw)
   end do
   fs%ng%Nd=fw%Nd
 
-  call create_sendrecv_neig_ng(neig_ng_eh, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(fs%srg_ng,fs%ng,1,nproc_group_global,neig_ng_eh)
+  call create_sendrecv_neig_ng(neig_ng_eh, info_field, iperiodic) ! neighboring node array
+  call init_sendrecv_grid(fs%srg_ng,fs%ng, 1, info_field%icomm_all, neig_ng_eh)
 
 end subroutine eh_prep_GCEED

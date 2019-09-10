@@ -1,6 +1,7 @@
 set(SOURCES
     salmon_parallel.f90
     code_optimization.f90
+    init_communicator.f90
 )
 
 if (USE_MPI)

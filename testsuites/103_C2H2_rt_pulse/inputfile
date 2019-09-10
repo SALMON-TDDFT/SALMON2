@@ -25,6 +25,9 @@
   lloc_ps(1)=1
   lloc_ps(2)=0
 /
+&rgrid
+  dl = 0.25d0, 0.25d0, 0.25d0
+/
 &functional
   xc = 'PZ'
 /

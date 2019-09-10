@@ -322,23 +322,7 @@ subroutine raman_maxwell_ms
 !xx  ! Output filename
 !xx  write(file_energy_transfer, "(A,'energy-transfer.data')") trim(directory)
   
-!$acc enter data copyin(ik_table,ib_table)
-!$acc enter data copyin(lapx,lapy,lapz)
-!$acc enter data copyin(nabx,naby,nabz)
-!$acc enter data copyin(modx,mody,modz)
-!$acc enter data copyin(zJxyz,zKxyz)
-!$acc enter data copyin(uV,iuV)
-!$acc enter data copyin(kAc)
-!$acc enter data copyin(zproj)
-!$acc enter data copyin(ik_table,ib_table)
-!$acc enter data copyin(ekr_omp)
-!$acc enter data copyin(a_tbl,jxyz,mps)
-
-!$acc enter data create(kAc_new)
-!$acc enter data create(ghtpsi)
-
   call timer_begin(LOG_RT_ITERATION)
-!$acc enter data copyin(zu_m)
   RTiteratopm : do iter=entrance_iter+1, Nt ! sato
 
     !! NOTE: flg_out_ms_step (the macroscopic field will exported in this step)
@@ -474,7 +458,6 @@ subroutine raman_maxwell_ms
 !xx      kAc(:,3) = kAc0(:,3) + Ac_new_m(3,imacro)
 
       !===========================================================================
-!xx!$acc update device(kAc,kAc_new)
 !xx      call current_RT_MS(imacro) ! Timer: LOG_CURRENT
 !xx      if (use_ehrenfest_md == 'y') then
 !xx         call current_RT_ion_MS(imacro)
@@ -514,7 +497,6 @@ subroutine raman_maxwell_ms
        call Ion_Force_ForceField_MS(imacro)
        call Ion_Force_RamanTensor_MS(imacro)
 
-!xx!$acc update self(zu_m(:,:,:,imacro))
 !xx        aforce(:,:) = force_m(:,:,imacro)
 !xx        call Ion_Force_omp(Rion_update_rt,calc_mode_rt,imacro)
 !xx        call Ion_Force_Ac_MS(imacro)
@@ -524,7 +506,6 @@ subroutine raman_maxwell_ms
 !xx      else
 !xx        if (flg_out_ms_next_step) then
 !xx          call Total_Energy_omp(Rion_update_rt,calc_mode_rt,imacro)
-!xx!$acc update self(zu_m(:,:,:,imacro))
 !xx          call Ion_Force_omp(Rion_update_rt,calc_mode_rt,imacro)
 !xx        end if
       end if
@@ -556,7 +537,6 @@ subroutine raman_maxwell_ms
       ! Calculate + store excitation number (if required in the next iteration..)
 !xx      call timer_begin(LOG_ANA_RT_USEGS)
 !xx      if (flg_out_projection_next_step) then
-!xx!$acc update self(zu_m(:,:,:,imacro))
 !xx        call analysis_RT_using_GS(Rion_update_rt,Nscf,zu_m(:,:,:,imacro),iter,"projection")
 !xx        if(comm_is_root(nproc_id_tdks))then ! sato
 !xx          excited_electron_new_m_tmp(imacro) = sum(occ) - sum(ovlp_occ(1:NBoccmax,:))
@@ -637,7 +617,6 @@ subroutine raman_maxwell_ms
       call comm_sync_all
       write(*,*) nproc_id_global,'iter =',iter
       iter_now=iter
-!$acc update self(zu_m)
       call timer_end(LOG_RT_ITERATION)
       call prep_restart_write
       go to 1
@@ -667,7 +646,6 @@ subroutine raman_maxwell_ms
     end if
     
   enddo RTiteratopm !end of RT iteraction========================
-!$acc exit data copyout(zu_m)
   call timer_end(LOG_RT_ITERATION)
 
   if(comm_is_root(nproc_id_global)) write(*,*) 'This is the start of write section'
