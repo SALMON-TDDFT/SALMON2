@@ -123,6 +123,11 @@ configure_file(
   ${CMAKE_BINARY_DIR}/versionf.h
 )
 
+configure_file(
+  ${CMAKE_SOURCE_DIR}/src/config.h.in
+  ${CMAKE_BINARY_DIR}/config.h
+)
+
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src)        # sources
 add_subdirectory(${CMAKE_SOURCE_DIR}/testsuites) # tests
