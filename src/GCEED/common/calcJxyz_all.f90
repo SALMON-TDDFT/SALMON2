@@ -18,7 +18,6 @@ use structures,           only: s_rgrid
 use salmon_communication, only: comm_is_root, comm_summation
 use prep_pp_sub, only: calc_nps,init_jxyz,calc_jxyz
 use scf_data
-use allocate_psl_sub
 implicit none
   type(s_rgrid),intent(in) :: lg
   integer :: ix,iy,iz

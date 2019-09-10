@@ -21,7 +21,6 @@ use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
                        out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au
 use calc_allob_sub
 use scf_data
-use allocate_psl_sub
 use new_world_sub
 implicit none
 type(s_orbital_parallel),intent(in) :: info

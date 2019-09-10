@@ -446,8 +446,6 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   integer :: n,myrank,nproc
   integer :: ix,iy,iz
   integer :: iix,iiy,iiz
-  integer :: ng_sta_2(3),ng_end_2(3),ng_num_2(3)
-  integer :: lg_sta_2(3),lg_end_2(3),lg_num_2(3)
   real(8) :: G2
   integer :: kx,ky,kz
   integer :: kkx,kky,kkz
@@ -502,27 +500,19 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     end if
     poisson%coef=0.d0
 
-    lg_sta_2(1:3)=lg%is(1:3)
-    lg_end_2(1:3)=lg%ie(1:3)
-    lg_num_2(1:3)=lg%num(1:3)
+    bLx=2.d0*pi/(system%hgs(1)*dble(lg%num(1)))
+    bLy=2.d0*pi/(system%hgs(2)*dble(lg%num(2)))
+    bLz=2.d0*pi/(system%hgs(3)*dble(lg%num(3)))
 
-    ng_sta_2(1:3)=ng%is(1:3)
-    ng_end_2(1:3)=ng%ie(1:3)
-    ng_num_2(1:3)=ng%num(1:3)
-
-    bLx=2.d0*pi/(system%hgs(1)*dble(lg_num_2(1)))
-    bLy=2.d0*pi/(system%hgs(2)*dble(lg_num_2(2)))
-    bLz=2.d0*pi/(system%hgs(3)*dble(lg_num_2(3)))
-
-    kx_sta=lg_sta_2(1)
-    kx_end=lg_end_2(1)
+    kx_sta=lg%is(1)
+    kx_end=lg%ie(1)
     ky_sta=1
-    ky_end=lg_num_2(2)/npuy
+    ky_end=lg%num(2)/npuy
     kz_sta=1
-    kz_end=lg_num_2(3)/npuz
+    kz_end=lg%num(3)/npuz
 
-    ky_shift=info_field%id_ffte(2)*lg_num_2(2)/npuy
-    kz_shift=info_field%id_ffte(3)*lg_num_2(3)/npuz
+    ky_shift=info_field%id_ffte(2)*lg%num(2)/npuy
+    kz_shift=info_field%id_ffte(3)*lg%num(3)/npuz
 
     fg%iGzero = -1
     do kz = kz_sta,kz_end
@@ -530,10 +520,10 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     do kx = kx_sta,kx_end
       ky2=ky+ky_shift
       kz2=kz+kz_shift
-      n=(kz2-lg_sta_2(3))*lg_num_2(2)*lg_num_2(1)+(ky2-lg_sta_2(2))*lg_num_2(1)+kx-lg_sta_2(1)+1
-      kkx=kx-1-lg_num_2(1)*(1+sign(1,(kx-1-lg_num_2(1)/2)))/2
-      kky=ky2-1-lg_num_2(2)*(1+sign(1,(ky2-1-lg_num_2(2)/2)))/2
-      kkz=kz2-1-lg_num_2(3)*(1+sign(1,(kz2-1-lg_num_2(3)/2)))/2
+      n=(kz2-lg%is(3))*lg%num(2)*lg%num(1)+(ky2-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
+      kkx=kx-1-lg%num(1)*(1+sign(1,(kx-1-lg%num(1)/2)))/2
+      kky=ky2-1-lg%num(2)*(1+sign(1,(ky2-1-lg%num(2)/2)))/2
+      kkz=kz2-1-lg%num(3)*(1+sign(1,(kz2-1-lg%num(3)/2)))/2
       fg%Gx(n)=dble(kkx)*bLx
       fg%Gy(n)=dble(kky)*bLy
       fg%Gz(n)=dble(kkz)*bLz

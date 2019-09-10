@@ -20,7 +20,6 @@ subroutine calcJxyz_all_periodic(lg,al0,matrix_A0)
   use prep_pp_sub, only: calc_nps,init_jxyz,calc_jxyz
   use scf_data
   use read_pslfile_sub
-  use allocate_psl_sub
   implicit none
   type(s_rgrid),intent(in) :: lg
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)

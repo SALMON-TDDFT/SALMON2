@@ -1,6 +1,5 @@
 set(SOURCES
     allocate_mat.f90
-    allocate_psl.f90
     change_order.f90
     deallocate_mat.f90
     gradient.f90

@@ -18,7 +18,6 @@ use structures
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root
 use scf_data
-use allocate_psl_sub
 use prep_pp_sub
 implicit none
 type(s_rgrid),intent(in) :: lg,mg,ng
@@ -46,7 +45,7 @@ case(3)
     call calc_vpsl_periodic(mg,system,pp,fg,sVpsl,ppg)
   case(4)
     if(.not.allocated(sVpsl%f)) call allocate_scalar(mg,sVpsl)
-    call calcVpsl_periodic_FFTE(lg,ng,fg,info_field,poisson)
+    call calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
     sVpsl%f = Vpsl
   end select
   call calcJxyz_all_periodic(lg,system%primitive_a,system%rmatrix_A)

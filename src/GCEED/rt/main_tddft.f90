@@ -21,7 +21,6 @@ use deallocate_mat_sub
 use init_sendrecv_sub
 use new_world_sub
 use read_pslfile_sub
-use allocate_psl_sub
 
 implicit none
 
@@ -194,7 +193,6 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 call read_pslfile(system)
-call allocate_psl(lg)
 call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
 
 call init_code_optimization
@@ -513,7 +511,7 @@ type(ls_singlescale) :: singlescale
 type(s_scalar) :: sVpsl
 
 complex(8),parameter :: zi=(0.d0,1.d0)
-integer :: iob,i1,i2,i3,ix,iy,iz,jj,ik,iik,n,nn
+integer :: iob,i1,i2,i3,ix,iy,iz,jj,ik,iik
 integer :: nspin
 real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
@@ -530,9 +528,6 @@ character(100) :: comment_line
 type(s_scalar) :: srho,sVh
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
-
-integer :: npuy,npuz
-real(8),allocatable :: Gx_tmp(:),Gy_tmp(:),Gz_tmp(:)
 
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
@@ -560,38 +555,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-
-!????????? get_fourier_grid_G @ main_dft.f90
-    if(iflag_hartree==4)then
-       if(allocated(fg%zrhoG_ion)) deallocate(fg%zrhoG_ion,fg%zrhoG_ele,fg%zrhoG_ele_tmp,fg%zdVG_ion)
-       allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
-       allocate(Gx_tmp(fg%ng))
-       allocate(Gy_tmp(fg%ng))
-       allocate(Gz_tmp(fg%ng))
-       Gx_tmp=fg%Gx
-       Gy_tmp=fg%Gy
-       Gz_tmp=fg%Gz
-       fg%Gx=0.d0
-       fg%Gy=0.d0
-       fg%Gz=0.d0
-       fg%zrhoG_ion = 0.d0
-       fg%zdVG_ion = 0.d0
-       npuy=info_field%isize_ffte(2)
-       npuz=info_field%isize_ffte(3)
-       do iz=1,lg%num(3)/npuz
-       do iy=1,lg%num(2)/npuy
-       do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
-          n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
-          nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
-          fg%Gx(nn)=Gx_tmp(n)
-          fg%Gy(nn)=Gy_tmp(n)
-          fg%Gz(nn)=Gz_tmp(n)
-          fg%zrhoG_ion(nn) = rhoion_G(n)
-          fg%zdVG_ion(nn,:) = dVloc_G(n,:)
-       enddo
-       enddo
-       enddo
-    end if
   end if
 
 if(comm_is_root(nproc_id_global).and.iperiodic==3) then
@@ -869,7 +832,6 @@ if(iflag_md==1 .or. icalcforce==1)then
         stencil%vec_kAc(1:3,ik) = system%vec_k(1:3,ik)
       end do
       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-      call get_fourier_grid_G_rt(system,lg,ng,info_field,fg)
    endif
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
 
