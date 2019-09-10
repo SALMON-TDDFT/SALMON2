@@ -43,7 +43,6 @@ use timer
 use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
-use init_poisson_sub
 use salmon_initialization
 use prep_pp_sub
 use density_matrix, only: calc_density
@@ -121,8 +120,8 @@ posplane=0.d0
 
 inumcpu_check=0
 
-call convert_input_rt(Ntime,mixing,poisson)
-allocate(system%mass(1:nelem))
+call convert_input_rt(Ntime)
+mixing%num_rho_stock=21
 
 call set_filename
 
@@ -236,9 +235,6 @@ if(ilsda==0)then
 else if(ilsda==1)then
   numspin=2
 end if
-
-if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
-call set_ig_bound(lg,ng,poisson)
 
 call timer_end(LOG_READ_GS_DATA)
 

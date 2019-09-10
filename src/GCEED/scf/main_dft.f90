@@ -53,7 +53,6 @@ use read_gs
 use code_optimization
 use salmon_initialization
 use occupation
-use init_poisson_sub
 use prep_pp_sub
 implicit none
 integer :: ix,iy,iz,ik,i,j
@@ -101,7 +100,8 @@ inumcpu_check=0
 call setbN(bnmat)
 call setcN(cnmat)
 
-call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
+call convert_input_scf(file_atoms_coo)
+mixing%num_rho_stock=21
 
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
 
@@ -110,7 +110,6 @@ if(stencil%if_orthogonal) then
 else
   if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
 end if
-allocate(system%mass(1:nelem))
 
 call set_filename
 
@@ -150,12 +149,6 @@ if(iopt==1)then
     call read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
 
   end select
-
-  select case(iperiodic)
-  case(0)
-    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
-  end select
-  call set_ig_bound(lg,ng,poisson)
 
   call allocate_mat(ng)
   call set_icoo1d(lg)
