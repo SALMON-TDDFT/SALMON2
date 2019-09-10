@@ -1487,8 +1487,7 @@ subroutine eh_prep_GCEED(fs,fw)
                                ista_Mxin,iend_Mxin,inum_Mxin,&
                                ista_Mxin_s,iend_Mxin_s,inum_Mxin_s
   use init_communicator, only: init_communicator_dft
-  use init_sendrecv_sub, only: create_sendrecv_neig_ng
-  use sendrecv_grid,     only: init_sendrecv_grid
+  use sendrecv_grid
   use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
   use salmon_maxwell,    only: ls_fdtd_work
   use salmon_initialization

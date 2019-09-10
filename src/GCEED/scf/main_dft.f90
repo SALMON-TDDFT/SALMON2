@@ -22,7 +22,6 @@ use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
-use init_sendrecv_sub
 use change_order_sub
 use read_pslfile_sub
 use structure_opt_sub
@@ -40,13 +39,11 @@ use salmon_parallel, only: nproc_id_global,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc, only: init_xc, finalize_xc
 use timer
-use set_gridcoordinate_sub
 use scf_iteration_sub
 use rmmdiis_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
-use sendrecv_grid, only: s_sendrecv_grid, init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
@@ -57,7 +54,6 @@ use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
-use init_communicator
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -66,8 +62,6 @@ character(100) :: file_atoms_coo, comment_line
 complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg,nspin
-integer :: neig(1:2, 1:3)
-integer :: neig_ng(1:2, 1:3)
 
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -106,11 +100,7 @@ call setcN(cnmat)
 
 call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 
-call init_communicator_dft(nproc_group_global,info,info_field)
-call init_dft(lg,system,stencil)
-call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
-call init_orbital_parallel_singlecell(system,info)
-if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
 
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
@@ -151,7 +141,6 @@ if(iopt==1)then
     itmg=img
     call set_imesh_oddeven(itmg)
     call old_mesh(lg,mg,ng) ! future work: remove this line
-    call set_gridcoordinate(lg,system)
 
   case(1,3) ! Continue the previous calculation
 
@@ -168,13 +157,6 @@ if(iopt==1)then
   call allocate_mat(ng)
   call set_icoo1d(lg)
   call init_code_optimization
-
-  ! sendrecv_grid object for wavefunction updates
-  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg, mg, info%numo*info%numk, info%icomm_r, neig)
-  ! sendrecv_grid object for scalar potential updates
-  call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
 
   if(ispin==0)then
     nspin=1

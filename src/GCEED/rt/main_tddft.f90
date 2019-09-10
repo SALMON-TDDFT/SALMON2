@@ -18,7 +18,6 @@ use inputoutput
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
-use init_sendrecv_sub
 use new_world_sub
 use read_pslfile_sub
 
@@ -46,12 +45,8 @@ use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use init_poisson_sub
 use salmon_initialization
-use init_communicator
-use set_gridcoordinate_sub
 use density_matrix, only: calc_density
 use writefield
-use init_sendrecv_sub, only: create_sendrecv_neig_mg, create_sendrecv_neig_ng
-use sendrecv_grid, only: init_sendrecv_grid
 use salmon_pp, only: calc_nlcc
 use force_sub, only: calc_force_salmon
 use hpsi_sub, only: update_kvector_nonlocalpt
@@ -90,8 +85,6 @@ real(8),allocatable :: R1(:,:,:)
 character(10):: fileLaser
 integer:: idensity, idiffDensity, ielf
 integer :: is,jspin
-integer :: neig(1:2, 1:3)
-integer :: neig_ng(1:2, 1:3)
 
 real(8)    :: rbox_array(10)
 real(8)    :: rbox_array2(10)
@@ -195,12 +188,7 @@ end select
 
 call timer_end(LOG_INIT_RT)
 
-call init_communicator_dft(nproc_group_global,info,info_field)
-call init_dft(lg,system,stencil)
-call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
-call init_orbital_parallel_singlecell(system,info)
-if(iperiodic==3) call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
-call set_gridcoordinate(lg,system)
+call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
 
 Hgs = system%Hgs ! future work: remove this line
 Hvol = system%Hvol ! future work: remove this line
@@ -382,13 +370,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
   system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
-
-  ! sendrecv_grid object for wavefunction updates
-  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg, mg, info%numo*info%numk, info%icomm_r, neig)
-  ! sendrecv_grid object for scalar potential updates
-  call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
 
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
