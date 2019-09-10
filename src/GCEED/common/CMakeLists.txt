@@ -18,7 +18,6 @@ set(SOURCES
     set_filename.f90
     set_icoo1d.f90
     set_imesh_oddeven.f90
-    set_is.f90
     write_psi.f90
     ylm.f90
     )

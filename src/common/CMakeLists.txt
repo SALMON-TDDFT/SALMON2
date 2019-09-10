@@ -10,9 +10,6 @@ set(SOURCES
    const.f90
    hpsi.f90
    initialization.f90
-   inner_product.f90
-   inner_product3.f90
-   set_isstaend.f90
    stencil.f90
    pseudo_pt.f90
    set_numcpu.f90
@@ -20,7 +17,6 @@ set(SOURCES
    density_matrix.f90
    pack_unpack.f90
    sendrecv_grid.f90
-   set_gridcoordinate.f90
    total_energy.f90
    write_field.f90
    write_file3d.f90

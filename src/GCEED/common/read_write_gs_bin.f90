@@ -421,19 +421,18 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_iobnum_sub
 use calc_myob_sub
 use check_corrkob_sub
-use set_gridcoordinate_sub
 use scf_data
 use new_world_sub
 use allocate_mat_sub
 use salmon_initialization
 implicit none
-type(s_rgrid) :: lg
-type(s_rgrid) :: mg
-type(s_rgrid) :: ng
-type(s_orbital_parallel),intent(inout) :: info
-type(s_field_parallel),intent(inout) :: info_field
-type(s_dft_system) :: system
-type(s_stencil) :: stencil
+type(s_rgrid),intent(in) :: lg
+type(s_rgrid),intent(in) :: mg
+type(s_rgrid),intent(in) :: ng
+type(s_orbital_parallel),intent(in) :: info
+type(s_field_parallel),intent(in) :: info_field
+type(s_dft_system),intent(in) :: system
+type(s_stencil),intent(in) :: stencil
 type(s_mixing),intent(inout) :: mixing
 integer :: NI0,Ndv0,Nps0,Nd0
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik,i,j
@@ -540,7 +539,7 @@ call comm_bcast(iflag_ps,nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
   read(96) iend_Mx_ori(:3)
-  read(96) lg%ie(:3)
+  read(96) lg_end(:3)
   if(ilsda == 0) then
     read(96) MST0(1)
 !    read(96) ifMST(1)
@@ -581,7 +580,7 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 call comm_bcast(iend_Mx_ori,nproc_group_global)
-call comm_bcast(lg%ie,nproc_group_global)
+call comm_bcast(lg_end,nproc_group_global)
 call comm_bcast(MST0,nproc_group_global)
 call comm_bcast(ifMST,nproc_group_global)
 call comm_bcast(Hgs,nproc_group_global)
@@ -624,35 +623,18 @@ case(0)
     select case(imesh_oddeven(jj))
       case(1)
         ista_Mx_ori(jj)=-iend_Mx_ori(jj)
-        lg%is(jj)=-lg%ie(jj)
       case(2)
         ista_Mx_ori(jj)=-iend_Mx_ori(jj)+1
-        lg%is(jj)=-lg%ie(jj)+1
     end select
   end do
 case(3)
   ista_Mx_ori(:)=1-Nd
-  lg%is(:)=1
 end select
 inum_Mx_ori(:)=iend_Mx_ori(:)-ista_Mx_ori(:)+1
-
-lg%num(:)=lg%ie(:)-lg%is(:)+1
-
-if(sum(dl)==0d0 .and. sum(num_rgrid)==0) dl = Hgs ! input variables should not be changed (future work)
-call init_dft(lg,system,stencil)
-call init_grid_parallel(nproc_id_global,nproc_size_global,lg,mg,ng) ! lg --> mg & ng
-
-if(iscfrt==2)then
-#ifdef SALMON_STENCIL_PADDING
-  lg%ie_array(2)=lg%ie_array(2)+1
-#endif
-end if
 
 call old_mesh(lg,mg,ng)
 
 call check_fourier(lg)
-
-call set_gridcoordinate(lg,system)
 
 if(ilsda == 0) then
   itotMST0=MST0(1)
@@ -669,9 +651,6 @@ if(iflag_ps.eq.1)then
   call comm_bcast(MKI,nproc_group_global)
   MI=MI_read
 end if
-
-Hgs = system%Hgs
-Hvol = system%Hvol
 
 if(iflag_ps.eq.1)then
    if(comm_is_root(nproc_id_global))then
@@ -715,23 +694,10 @@ if(ilsda==1)then
   nproc_ob_spin(2)=nproc_ob/2
 end if
 
-if(iSCFRT==2) call make_new_world(info,info_field)
-call init_orbital_parallel_singlecell(system,info)
-
-k_sta = info%ik_s
-k_end = info%ik_e
-k_num = info%numk
-iobnum = info%numo
-
 if(iSCFRT==2)then
   call allocate_mat(ng)
   call set_icoo1d(lg)
 end if
-
-allocate(k_rd0(3,num_kpoints_rd),ksquare0(num_kpoints_rd))
-if(iperiodic==3)then
-end if
-k_rd0 = system%vec_k
 
 allocate( matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
 allocate( cmatbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
