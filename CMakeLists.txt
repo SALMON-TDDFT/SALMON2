@@ -44,7 +44,6 @@ option_set(USE_MPI                 "Use MPI parallelization" OFF)
 option_set(USE_SCALAPACK           "Use ScaLAPACK Library"   OFF)
 
 ## Optimization
-option_set(REDUCE_FOR_MANYCORE     "Enable optimization of reduction for many-core processor" OFF)
 option_set(CURRENT_PREPROCESSING   "Enable preprocessing of the current computation in RT"    OFF)
 option_set(LARGE_BLOCKING          "Enable large blocking for accelerator"                    OFF)
 
@@ -84,7 +83,6 @@ add_compile_definitions_if(DOMAIN_IS_POW2        SALMON_DOMAIN_POWER_OF_TWO)
 add_compile_definitions_if(ARRAY_PADDING         SALMON_STENCIL_PADDING)
 
 add_compile_definitions_if(CURRENT_PREPROCESSING ARTED_CURRENT_PREPROCESSING)
-add_compile_definitions_if(REDUCE_FOR_MANYCORE   ARTED_REDUCE_FOR_MANYCORE)
 add_compile_definitions_if(LARGE_BLOCKING        ARTED_LBLK)
 
 include (${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
