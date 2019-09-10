@@ -105,7 +105,6 @@ contains
 
     mytid = tid
 
-#ifdef ARTED_REDUCE_FOR_MANYCORE
     zrhotmp(:,mytid)=0.d0
 
 !$omp do private(ik,ib,i) collapse(2)
@@ -126,23 +125,6 @@ contains
       i = i/2
 !$omp barrier
     end do
-#else
-    mytid = 0
-
-!$omp single
-    zrhotmp(:,mytid) = 0.d0
-!$omp end single
-
-    do ik=NK_s,NK_e
-    do ib=1,NBoccmax
-!$omp do private(i)
-    do i=0,NL-1
-      zrhotmp(i,mytid)=zrhotmp(i,mytid)+(zfac*occ(ib,ik))*abs(zutmp(i,ib,ik))**2
-    end do
-!$omp end do
-    end do
-    end do
-#endif
   end subroutine
 
   subroutine reduce_acc(zfac, zutmp, zu_NB, zrho)

@@ -82,12 +82,7 @@ contains
     end select
 
     NUMBER_THREADS_POW2 = ceiling_pow2(NUMBER_THREADS)
-#ifdef ARTED_REDUCE_FOR_MANYCORE
-    tid_range = NUMBER_THREADS_POW2 - 1
-#else
-    tid_range = 0
-#endif
-    allocate(zrhotmp(0:NL-1,0:tid_range))
+    allocate(zrhotmp(0:NL-1,0:NUMBER_THREADS_POW2-1))
     zrhotmp(:,:) = 0.0d0
   end subroutine
 
