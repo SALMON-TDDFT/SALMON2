@@ -577,7 +577,8 @@ end do DFT_Iteration
 
 ! for writing GS data
 Vpsl = sVpsl%f
-if(allocated(Vpsl_atom)) Vpsl_atom = ppg%Vpsl_atom
+if(allocated(Vpsl_atom) .and. allocated(ppg%Vpsl_atom)) &
+  Vpsl_atom = ppg%Vpsl_atom
 Vh = sVh%f
 rho = srho%f
 if(ilsda == 1) then
