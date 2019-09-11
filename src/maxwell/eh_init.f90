@@ -15,9 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_init(fs,fw)
-  use inputoutput,          only: nt_em,al_em,dl_em,dt_em,boundary_em,&
-                                  utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
-                                  uenergy_to_au,ulength_to_au,ucharge_to_au,iperiodic,directory,&
+  use salmon_global,        only: nt_em,al_em,dl_em,dt_em,boundary_em,iperiodic,directory,&
                                   imedia_num,shape_file,epsilon,rmu,sigma,type_media,&
                                   pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
                                   iobs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
@@ -25,6 +23,8 @@ subroutine eh_init(fs,fw)
                                   phi_cep1,I_wcm2_1,E_amplitude1,&
                                   source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
                                   phi_cep2,I_wcm2_2,E_amplitude2
+  use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
+                                  uenergy_to_au,ulength_to_au,ucharge_to_au
   use salmon_parallel,      only: nproc_id_global, nproc_group_global
   use salmon_communication, only: comm_is_root, comm_bcast
   use structures,           only: s_fdtd_system
@@ -184,7 +184,7 @@ subroutine eh_init(fs,fw)
       select case(type_media(ii))
       case('lorentz-drude')
         fw%media_ld(icount_ld)=ii
-        icount_ld=icount_ld+1;
+        icount_ld=icount_ld+1
         if(fw%max_pole_num_ld<pole_num_ld(ii)) fw%max_pole_num_ld=pole_num_ld(ii)
         if(pole_num_ld(ii)<=0) then
           if(comm_is_root(nproc_id_global)) &
@@ -1386,9 +1386,9 @@ end subroutine eh_init
 !=========================================================================================
 != input fdtd shape data =================================================================
 subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
+  use salmon_global,        only: shape_file
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
-  use inputoutput,          only: shape_file
   implicit none
   integer,intent(in)      :: ifn,Nd
   integer,intent(in)      :: ng_is(3),ng_ie(3),lg_is(3),lg_ie(3)
@@ -1481,20 +1481,12 @@ end subroutine eh_input_shape
 != (This routine is temporary) ===========================================================
 != (With unifying ARTED and GCEED, this routine will be removed) =========================
 subroutine eh_prep_GCEED(fs,fw)
-  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,num_kgrid,nproc_k,nproc_ob,iperiodic
-  use salmon_parallel,   only: nproc_id_global,nproc_size_global,nproc_group_global
+  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,num_kgrid,iperiodic
+  use salmon_parallel,   only: nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
-  use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_o_mul,nproc_d_g_mul_dm,nproc_d_g_dm,&
-                               k_sta,k_end,k_num,num_kpoints_3d,num_kpoints_rd,&
-                               rLsize,Harray,Hgs,Hvol,imesh_oddeven,&
-                               lg_sta,lg_end,lg_num, &
-                               mg_sta,mg_end,mg_num, &
-                               ng_sta,ng_end,ng_num,&
-                               ista_Mx_ori,iend_Mx_ori,inum_Mx_ori,Nd, &
-                               ista_Mxin,iend_Mxin,inum_Mxin,&
-                               ista_Mxin_s,iend_Mxin_s,inum_Mxin_s
+  use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_g_dm,num_kpoints_3d,num_kpoints_rd
   use init_communicator, only: init_communicator_dft
-  use sendrecv_grid
+  use sendrecv_grid,     only: create_sendrecv_neig_ng,init_sendrecv_grid
   use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
   use salmon_maxwell,    only: ls_fdtd_work
   use salmon_initialization
@@ -1513,7 +1505,8 @@ subroutine eh_prep_GCEED(fs,fw)
   nproc_d_g=nproc_domain_general
   call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
   call init_communicator_dft(nproc_group_global,info,info_field)
-
+  
+  !initialize r-grid
   call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
   call init_grid_parallel(info%id_rko,info%isize_rko,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
   
@@ -1541,7 +1534,7 @@ subroutine eh_prep_GCEED(fs,fw)
   end do
   fs%ng%Nd=fw%Nd
 
-  call create_sendrecv_neig_ng(neig_ng_eh, info_field, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(fs%srg_ng,fs%ng, 1, info_field%icomm_all, neig_ng_eh)
+  call create_sendrecv_neig_ng(neig_ng_eh,info_field,iperiodic) ! neighboring node array
+  call init_sendrecv_grid(fs%srg_ng,fs%ng,1,info_field%icomm_all,neig_ng_eh)
 
 end subroutine eh_prep_GCEED

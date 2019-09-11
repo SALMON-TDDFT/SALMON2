@@ -16,7 +16,6 @@
 MODULE scf_data
 use salmon_global
 use salmon_xc, only: s_xc_functional
-use structures, only: s_pp_info,s_pp_grid
 implicit none
 !-------------------- Parameters
 integer, parameter :: maxntmg=10
@@ -165,8 +164,6 @@ real(8) :: Harray(3,maxntmg)  ! Grid spacing
 real(8) :: rLsize(3,maxntmg)    ! size of the box
 
 ! Pseudopotential
-type(s_pp_info) :: pp
-type(s_pp_grid) :: ppg,ppg_all
 integer,parameter :: Lmax=4
 integer,allocatable :: NRloc(:)
 real(8),allocatable :: Rloc(:)

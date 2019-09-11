@@ -43,8 +43,8 @@ use timer
 use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
-use init_poisson_sub
 use salmon_initialization
+use prep_pp_sub
 use density_matrix, only: calc_density
 use writefield
 use salmon_pp, only: calc_nlcc
@@ -74,6 +74,8 @@ type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
 type(s_sendrecv_grid) :: srg,srg_ng
+type(s_pp_info) :: pp
+type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_vector) :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
@@ -118,8 +120,8 @@ posplane=0.d0
 
 inumcpu_check=0
 
-call convert_input_rt(Ntime,mixing,poisson)
-allocate(system%mass(1:nelem))
+call convert_input_rt(Ntime)
+mixing%num_rho_stock=21
 
 call set_filename
 
@@ -190,6 +192,17 @@ call timer_end(LOG_INIT_RT)
 
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
 
+call allocate_scalar(mg,srho)
+call allocate_scalar(mg,sVh)
+call allocate_scalar(mg,sVpsl)
+allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
+do jspin=1,system%nspin
+  call allocate_scalar(mg,srho_s(jspin))
+  call allocate_scalar(mg,V_local(jspin))
+  call allocate_scalar(mg,sVxc(jspin))
+end do
+allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
+
 Hgs = system%Hgs ! future work: remove this line
 Hvol = system%Hvol ! future work: remove this line
 k_sta = info%ik_s ! future work: remove this line
@@ -212,8 +225,8 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-call read_pslfile(system)
-call init_ps(lg,mg,ng,system,fg,info_field,poisson,info%icomm_r,sVpsl)
+call read_pslfile(system,pp,ppg)
+call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 
 call init_code_optimization
 
@@ -222,9 +235,6 @@ if(ilsda==0)then
 else if(ilsda==1)then
   numspin=2
 end if
-
-if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
-call set_ig_bound(lg,ng,poisson)
 
 call timer_end(LOG_READ_GS_DATA)
 
@@ -409,15 +419,6 @@ allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
 allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
-
-  call allocate_scalar(mg,srho)
-  call allocate_scalar(mg,sVh)
-  allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
-  do jspin=1,system%nspin
-    call allocate_scalar(mg,srho_s(jspin))
-    call allocate_scalar(mg,V_local(jspin))
-    call allocate_scalar(mg,sVxc(jspin))
-  end do
 
   call calc_nlcc(pp, system, mg, ppn)
   if (comm_is_root(nproc_id_global)) then
@@ -679,11 +680,11 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   end if
 end do TE

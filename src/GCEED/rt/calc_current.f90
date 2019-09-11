@@ -38,13 +38,14 @@ subroutine calc_emfields(nspin,curr_in)
 
 end subroutine calc_emfields
 
-subroutine calc_current_ion(lg,system,j_ion)
-  use structures, only: s_rgrid, s_dft_system
+subroutine calc_current_ion(lg,system,pp,j_ion)
+  use structures
   use salmon_global, only: MI,Kion
-  use scf_data, only: pp,Hvol
+  use scf_data, only: Hvol
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system
+  type(s_pp_info) :: pp
   integer :: ia
   real(8) :: j_ion(3)
 

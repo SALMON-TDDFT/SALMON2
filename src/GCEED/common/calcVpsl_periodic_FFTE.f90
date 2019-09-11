@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
-  use structures,      only: s_rgrid,s_dft_system,s_reciprocal_grid,s_field_parallel,s_poisson
+subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson,pp,ppg,sVpsl)
+  use structures
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
@@ -27,6 +27,9 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
+  type(s_pp_info),intent(in) :: pp
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_scalar) :: sVpsl
   
   integer :: ix,iy,iz,ak
   integer :: iix,iiy,iiz
@@ -202,7 +205,7 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson)
   do iz = mg_sta(3),mg_end(3)
   do iy = mg_sta(2),mg_end(2)
   do ix = mg_sta(1),mg_end(1)
-    Vpsl(ix,iy,iz)=matbox_l2(ix,iy,iz)
+    sVpsl%f(ix,iy,iz)=matbox_l2(ix,iy,iz)
   end do
   end do
   end do
