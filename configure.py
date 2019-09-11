@@ -108,16 +108,16 @@ add_option(dict, 'USE_MPI',             options.mpi)
 add_option(dict, 'USE_SCALAPACK',       options.scalapack)
 add_option(dict, 'USE_LIBXC',           options.libxc)
 
-add_option(dict, 'DOMAIN_IS_POW2',      options.domain_two)
-add_option(dict, 'ARRAY_PADDING',       options.padding)
-add_option(dict, 'EXPLICIT_VEC',        options.explicit_vec)
-add_option(dict, 'SW_PREFETCH',         options.swp)
+add_option(dict, 'BUILD_REQUIRED_PACKAGES', options.build_required_packages)
+
+add_option(dict, 'USE_OPT_DOMAIN_IS_POW2',         options.domain_two)
+add_option(dict, 'USE_OPT_ARRAY_PADDING',          options.padding)
+add_option(dict, 'USE_OPT_EXPLICIT_VECTORIZATION', options.explicit_vec)
+add_option(dict, 'USE_OPT_SOFTWARE_PREFETCH',      options.swp)
 
 add_option(dict, 'HPSI_TEST',           options.hpsi_test)
 if options.simd is not None:
   dict['SIMD_SET'] = options.simd.upper()
-
-add_option(dict, 'BUILD_REQUIRED_PACKAGES', options.build_required_packages)
 
 define = ''
 for k,v in dict.items():

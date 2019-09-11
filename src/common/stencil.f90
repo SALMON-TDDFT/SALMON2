@@ -13,6 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+
+#include "config.h"
+
 module stencil_sub
 use math_constants,only : zi
 
@@ -81,7 +84,7 @@ subroutine zstencil(is_array,ie_array,is,ie,idx,idy,idz &
   complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
 
   if (optimized_stencil_is_callable) then
-#ifdef SALMON_EXPLICIT_VECTORIZATION
+#ifdef USE_OPT_EXPLICIT_VECTORIZATION
     ! optimized version with hand-coding vectorization (AVX-512, SVE...)
     if (stencil_is_parallelized_by_omp) then
       call zstencil_tuned_omp(is_array,ie_array,is,ie,modx,mody,modz,tpsi,htpsi,V_local,lap0,lapt,nabt)

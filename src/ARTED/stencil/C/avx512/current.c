@@ -21,7 +21,7 @@
 
 extern int NLx, NLy, NLz;
 
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
 extern int *modx, *mody, *modz;
 #endif
 
@@ -52,7 +52,7 @@ void current_stencil_( double         const           C[restrict 12]
   __m512i nly = _mm512_set1_epi32(NLy);
   __m512i nlz = _mm512_set1_epi32(NLz);
   __m512i nyx = _mm512_mask_blend_epi32(0xF0F0, _mm512_set1_epi32(NLy    ), _mm512_set1_epi32(NLx    ));
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
   __m512i myx = _mm512_mask_blend_epi32(0xF0F0, _mm512_set1_epi32(NLy - 1), _mm512_set1_epi32(NLx - 1));
 #endif
 
@@ -74,7 +74,7 @@ void current_stencil_( double         const           C[restrict 12]
 #endif
   {
     __m512i tix = _mm512_set1_epi32(ix);
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
     __m512i xp = _mm512_loadu_prefetch_epi32(modx + (ix + 1 + NLx));
             xp = _mm512_permute4f128_epi32(xp, _MM_PERM_CDAB);
 #endif
@@ -85,7 +85,7 @@ void current_stencil_( double         const           C[restrict 12]
 #endif
   {
     __m512i tiy = _mm512_set1_epi32(iy);
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
     __m512i yp  = _mm512_loadu_prefetch_epi32(mody + (iy + 1 + NLy));
     __m512i uyx = _mm512_mask_blend_epi32(0xF0F0, yp, xp);
 #endif
@@ -96,7 +96,7 @@ void current_stencil_( double         const           C[restrict 12]
     for(iz = 0 ; iz < NLz ; iz += 4)
     {
       __m512i tiz = _mm512_set1_epi32(iz);
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
       __m512i mm  = _mm512_sub_epi32(tyx, _mm512_and_epi32(_mm512_add_epi32(dnyx, tyx), myx));
 #else
       __m512i mm  = _mm512_sub_epi32(tyx, uyx);
@@ -114,7 +114,7 @@ void current_stencil_( double         const           C[restrict 12]
       /* z-dimension (unit stride) */
       {
         __m512i z0, z2;
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
         z2 = _mm512_load_prefetch_epi64(e + ((iz + 4 + NLz) & (NLz - 1)));
 #else
         z2 = _mm512_load_prefetch_epi64(e + modz[iz + 4 + NLz]);

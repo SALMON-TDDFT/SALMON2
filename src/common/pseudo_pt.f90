@@ -13,6 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+
+#include "config.h"
+
 module pseudo_pt_sub
   implicit none
 
@@ -174,7 +177,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
-#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
+#ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
@@ -270,7 +273,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use salmon_global, only: natom
   use timer
   use salmon_communication, only: comm_summation
-#ifdef SALMON_ENABLE_MPI3
+#ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
   use salmon_communication, only: comm_wait_all
   use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
 #endif
@@ -330,7 +333,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   call timer_end(LOG_UHPSI_PSEUDO)
 
   call timer_begin(LOG_UHPSI_PSEUDO_COMM)
-#ifdef SALMON_ENABLE_MPI3
+#ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
 ! FIXME: This subroutine uses MPI functions directly...
   nreq = 0
   do ia=1,natom
