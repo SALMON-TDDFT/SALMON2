@@ -14,7 +14,10 @@
 !  limitations under the License.
 !
 
+#ifdef __FUJITSU
+#else
 #define LOOP_BLOCKING
+#endif
 
 subroutine zstencil_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
                                ,tpsi,htpsi,V_local,lap0,lapt,nabt &
