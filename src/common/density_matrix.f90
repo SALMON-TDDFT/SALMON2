@@ -15,6 +15,8 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
+#include "config.h"
+
 module density_matrix
   implicit none
   integer,private,parameter :: Nd = 4
@@ -138,7 +140,7 @@ contains
 
     nspin = system%nspin
 
-#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
+#ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: wrk
 #endif
 
@@ -259,7 +261,7 @@ contains
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
 
-#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
+#ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
@@ -376,7 +378,7 @@ contains
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
 
-#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
+#ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 

@@ -17,6 +17,9 @@
 !This file conatain one soubroutine.
 !SUBROUTINE prep_ps_periodic(property)
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
 Subroutine prep_ps_periodic(property)
   use Global_Variables
   use salmon_parallel, only: nproc_id_global
@@ -95,7 +98,7 @@ Subroutine prep_ps_periodic(property)
         deallocate(Jxyz,Jxx,Jyy,Jzz,zJxyz)
         call finalize_jxyz(ppg)
         deallocate(ekr,ekr_omp)
-#ifdef SALMON_STENCIL_PADDING
+#ifdef USE_OPT_ARRAY_PADDING
         deallocate(zKxyz)
 #endif
         flag_alloc1=.true.
@@ -107,7 +110,7 @@ Subroutine prep_ps_periodic(property)
      allocate(Jxyz(Nps,NI),Jxx(Nps,NI),Jyy(Nps,NI),Jzz(Nps,NI),zJxyz(Nps,NI))
      call init_jxyz(ppg)
      allocate(ekr_omp(Nps,NI,NK_s:NK_e),ekr(Nps,NI))
-#ifdef SALMON_STENCIL_PADDING
+#ifdef USE_OPT_ARRAY_PADDING
      allocate(zKxyz(Nps,NI))
 #endif
   endif
@@ -130,7 +133,7 @@ Subroutine prep_ps_periodic(property)
   if(property == 'update_all') then
      zJxyz(1:Nps,1:NI) = Jxyz(1:Nps,1:NI) - 1
 
-#ifdef SALMON_STENCIL_PADDING
+#ifdef USE_OPT_ARRAY_PADDING
      !call init_for_padding
      PNLx = NLx
      PNLy = NLy + 1
@@ -260,7 +263,7 @@ Subroutine prep_ps_periodic(property)
 
 
   if(property == 'update_all') then
-#ifdef SALMON_STENCIL_PADDING
+#ifdef USE_OPT_ARRAY_PADDING
     call init_projector(zKxyz)
 #else
     call init_projector(zJxyz)

@@ -13,6 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+
+#include "config.h"
+
 #if defined(__KNC__) || defined(__AVX512F__) || defined(__HPC_ACE2__)
 # if defined(__AVX512VL__)
 ! The optimization is not efficient under Skylake-SP.
@@ -24,7 +27,7 @@
 
 subroutine total_energy_stencil(A,C,D,E,F)
   use global_variables, only: NLx,NLy,NLz,zI
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
   use opt_variables, only: modx, mody, modz
 #endif
   implicit none
@@ -51,7 +54,7 @@ subroutine total_energy_stencil(A,C,D,E,F)
 !dir$ assume_aligned E:MEM_ALIGN
 #endif
 
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
 # ifdef __INTEL_COMPILER
 !dir$ assume (mod(NLx, VECTOR_SIZE) == 0)
 !dir$ assume (mod(NLy, VECTOR_SIZE) == 0)

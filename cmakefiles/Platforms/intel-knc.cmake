@@ -19,9 +19,9 @@ set(CMAKE_C_COMPILER            "mpiicc")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-O3")
 
-set(USE_MPI_DEFAULT             ON)
-set(EXPLICIT_VEC_DEFAULT        ON)
-set(SW_PREFETCH_DEFAULT         ON)
+set(USE_MPI_DEFAULT                          ON)
+set(USE_OPT_EXPLICIT_VECTORIZATION_DEFAULT   ON)
+set(USE_OPT_SOFTWARE_PREFETCH_DEFAULT        ON)
 
 
 ########

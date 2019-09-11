@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 ! code optimization routines, variables, and others.
+
+#include "config.h"
+
 module code_optimization
   implicit none
 
@@ -31,7 +34,7 @@ contains
     use salmon_global, only: yn_want_stencil_hand_vectorization
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions
-#ifdef SALMON_EXPLICIT_VECTORIZATION
+#ifdef USE_OPT_EXPLICIT_VECTORIZATION
     ! unit-stride direction is should multiple of 4
     optimized_stencil_is_callable = (mod(nlens(1), 4) == 0) &
     &    .and. (yn_want_stencil_hand_vectorization == 'y')

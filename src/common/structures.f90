@@ -14,8 +14,11 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
 module structures
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
   use xc_f90_types_m
   use xc_f90_lib_m
 #endif
@@ -74,7 +77,7 @@ module structures
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
 
-#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
+#ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: dbuf, zbuf
 #endif
   end type s_pcomm_cache
@@ -279,7 +282,7 @@ module structures
     logical :: use_laplacian
     logical :: use_kinetic_energy
     logical :: use_current
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     type(xc_f90_pointer_t) :: func(3)
     type(xc_f90_pointer_t) :: info(3)
 #endif

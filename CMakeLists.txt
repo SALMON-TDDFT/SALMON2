@@ -39,22 +39,21 @@ message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 
 # Bulid options
-## Library
+## For third party libraries
 option_set(USE_MPI                 "Use MPI parallelization" OFF)
 option_set(USE_SCALAPACK           "Use ScaLAPACK Library"   OFF)
+option_set(USE_LIBXC               "Use Libxc library"       OFF)
+
+option_set(BUILD_REQUIRED_PACKAGES "Request build and static link required packages" OFF)
 
 ## Optimization
 option_set(CURRENT_PREPROCESSING   "Enable preprocessing of the current computation in RT"    OFF)
 
 ## Optimization for stencil compitations
-option_set(DOMAIN_IS_POW2          "Enable whether the opimization assumes that a stencil domain size is power of two" OFF)
-option_set(ARRAY_PADDING           "Enable array padding for the stencil"                                              ON)
-option_set(EXPLICIT_VEC            "Enable explicit vectorization for the stencil"                                     OFF)
-option_set(SW_PREFETCH             "Enable software prefetch in the explicit vec of the stencil"                       OFF)
-
-## For third party libraries
-option_set(USE_LIBXC               "Use Libxc library"                               OFF)
-option_set(BUILD_REQUIRED_PACKAGES "Request build and static link required packages" OFF)
+option_set(USE_OPT_DOMAIN_IS_POW2          "Enable whether the opimization assumes that a stencil domain size is power of two" OFF)
+option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"                                              ON)
+option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil"                                     OFF)
+option_set(USE_OPT_SOFTWARE_PREFETCH       "Enable software prefetch in the explicit vec of the stencil"                       OFF)
 
 ## test: joint hpsi subroutine
 option_set(HPSI_TEST               "Use joint hpsi subroutine (test)"   OFF)
@@ -73,13 +72,6 @@ add_definitions("${ADDITIONAL_MACRO}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR})
 include_directories(${CMAKE_BINARY_DIR})
-
-add_compile_definitions_if(USE_MPI               SALMON_USE_MPI)
-
-add_compile_definitions_if(EXPLICIT_VEC          SALMON_EXPLICIT_VECTORIZATION)
-add_compile_definitions_if(SW_PREFETCH           SALMON_ENABLE_SOFTWARE_PREFETCH)
-add_compile_definitions_if(DOMAIN_IS_POW2        SALMON_DOMAIN_POWER_OF_TWO)
-add_compile_definitions_if(ARRAY_PADDING         SALMON_STENCIL_PADDING)
 
 add_compile_definitions_if(CURRENT_PREPROCESSING ARTED_CURRENT_PREPROCESSING)
 
@@ -102,14 +94,6 @@ else ()
 endif ()
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
 set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
-
-if (USE_MPI)
-  find_package(MPI REQUIRED)
-  if ("${MPI_Fortran_VERSION_MAJOR}" VERSION_GREATER_EQUAL "3")
-    add_compile_definitions(SALMON_ENABLE_MPI3)
-    message(STATUS "SALMON will uses the optimization by MPI version 3.")
-  endif ()
-endif ()
 
 
 # Generate configure header
@@ -134,15 +118,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/testsuites) # tests
 
 
 # debug log
-message(STATUS "<<<BEGIN: BUILD ENVIRONMENT SUMMARY>>>")
 message(STATUS "Target executable file  = ${TARGET_NAME}")
 message(STATUS "CMake generated FFLAGS  = ${CMAKE_Fortran_FLAGS}")
 message(STATUS "CMake generated CFLAGS  = ${CMAKE_C_FLAGS}")
 message(STATUS "CMake generated LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS} ${EXTERNAL_LIBS}")
-
-message(STATUS "Enabled macro:")
-get_directory_property(MACRO_LOG COMPILE_DEFINITIONS)
-foreach(_macro ${MACRO_LOG})
-  message(STATUS "  ${_macro}")
-endforeach()
-message(STATUS "<<<END: BUILD ENVIRONMENT SUMMARY>>>")
