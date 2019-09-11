@@ -22,14 +22,14 @@ module input_pp_sub
 contains
 
 subroutine read_pslfile(system,pp,ppg)
-  use salmon_global, only: iperiodic
+  use salmon_global, only: iperiodic,nelem
   use salmon_pp, only: init_pp
   use structures
   use prep_pp_sub, only: init_mps
   implicit none
-  type(s_dft_system),intent(in) :: system
-  type(s_pp_info)               :: pp
-  type(s_pp_grid)               :: ppg
+  type(s_dft_system) :: system
+  type(s_pp_info)    :: pp
+  type(s_pp_grid)    :: ppg
   !
   integer :: nrmax
   integer,parameter :: Lmax=4
@@ -44,6 +44,8 @@ subroutine read_pslfile(system,pp,ppg)
   call init_pp(pp,nrmax,Lmax,flag_nlcc)
   call init_mps(ppg)
   call input_pp(pp,system%hgs(1),system%hgs(2),system%hgs(3))
+
+  system%mass(1:nelem) = pp%rmass(1:nelem)
 
 end subroutine read_pslfile
 
