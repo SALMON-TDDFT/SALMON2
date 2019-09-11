@@ -43,13 +43,13 @@ contains
     integer :: nproc_size_kpoint_ms
 
     write (gs_wfn_directory,'(A,A)') trim(base_directory),'/gs_wfn_k/'
-    if(iflag_read_write == iflag_write) then
-      if(.not. create_directory(gs_wfn_directory)) then
-        stop 'fail: read_write_gs_wfn_k::create_directory'
-      end if
-    end if
-
     if(comm_is_root(nproc_id_global))then
+      if(iflag_read_write == iflag_write) then
+        if(.not. create_directory(gs_wfn_directory)) then
+          stop 'fail: read_write_gs_wfn_k::create_directory'
+        end if
+      end if
+
       occ_file = trim(gs_wfn_directory)//'occupation'
       open(nfile_occ,file=trim(occ_file),form='unformatted')
       select case(iflag_read_write)
@@ -491,12 +491,15 @@ contains
        nfile_md_ms     = nfile_occ_ms
        nfile_other_ms  = nfile_occ_ms
 
+       if(comm_is_root(nproc_id_global)) then
+         if(iflag_read_write_ms==iflag_write_rt) then
+           if (.not. create_directory(rt_wfn_directory)) then
+             stop 'fail: read_write_rt_wfn_k_mx_each_macro_grid::create_directory'
+           end if
+         end if
+       end if
+
        if(comm_is_root(nproc_id_tdks)) then
-          if(iflag_read_write_ms==iflag_write_rt) then
-            if (.not. create_directory(rt_wfn_directory)) then
-              stop 'fail: read_write_rt_wfn_k_mx_each_macro_grid::create_directory'
-            end if
-          end if
 
           occ_file = trim(rt_wfn_directory)//'occupation'
           open(nfile_occ_ms,file=trim(occ_file),form='unformatted')
