@@ -4,7 +4,6 @@ set(SOURCES
     deallocate_mat.f90
     gradient.f90
     new_world.f90
-    read_pslfile.f90
     scf_data.f90
     )
 

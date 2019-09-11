@@ -30,7 +30,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use scf_data
   use new_world_sub
   use allocate_mat_sub
-  use read_pslfile_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree
   use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy
