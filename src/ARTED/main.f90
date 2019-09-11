@@ -34,7 +34,7 @@ End Subroutine Err_finalize
 
 
 subroutine arted
-  use salmon_global,   only: use_ms_maxwell,use_geometry_opt,restart_option
+  use salmon_global,   only: use_ms_maxwell,yn_opt,restart_option
   use control_sc,      only: tddft_sc
   use control_ms,      only: tddft_maxwell_ms
   use control_ms_raman,only: raman_maxwell_ms
@@ -66,7 +66,7 @@ subroutine arted
     case(iflag_calc_mode_gs)
       call calc_ground_state
       call read_write_gs_wfn_k(iflag_write)
-      if(use_geometry_opt=='y') call calc_opt_ground_state
+      if(yn_opt=='y') call calc_opt_ground_state
       if(use_adiabatic_md=='y') call calc_md_ground_state
       return
     case(iflag_calc_mode_rt)

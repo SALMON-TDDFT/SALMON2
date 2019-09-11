@@ -1,7 +1,9 @@
-! md function (with periodic boundary condition) is still trial
+! MD option is still trial
 &calculation
-  calc_mode = 'GS_RT'
-  use_ehrenfest_md = 'y'
+!(first-run: DFT, second-run: TDDFT_pulse(intensity=zero)+md)
+  theory='DFT'
+! theory='TDDFT_pulse'
+! yn_md = 'y'
 /
 
 &control

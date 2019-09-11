@@ -195,7 +195,7 @@ subroutine raman_maxwell_ms
     position_option='asis'
   else if(restart_option == 'new')then
 
-    select case(use_ehrenfest_md)
+    select case(yn_md)
     case('y')
       Rion_update_rt = rion_update_on
     case('n')
@@ -294,7 +294,7 @@ subroutine raman_maxwell_ms
   endif
 
   !(get ion current for initial step)
-  if(use_ehrenfest_md=='y') then 
+  if(yn_md=='y') then 
      do imacro = nmacro_s, nmacro_e
         call current_RT_ion_MS(imacro)
         if (comm_is_root(nproc_id_tdks)) then
@@ -310,7 +310,7 @@ subroutine raman_maxwell_ms
      enddo
   endif
 
-  !if(use_ehrenfest_md=='y') then
+  !if(yn_md=='y') then
     !Enh_gkTlns = 0d0
     !Enh        = 0d0
     !if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
@@ -435,7 +435,7 @@ subroutine raman_maxwell_ms
 
       !===========================================================================
       !! update ion coordinate and velocity in MD option (part-1)
-      if (use_ehrenfest_md == 'y') then
+      if (yn_md == 'y') then
          call dt_evolve_MD_1_MS(iter,imacro)
       endif
       !===========================================================================
@@ -459,7 +459,7 @@ subroutine raman_maxwell_ms
 
       !===========================================================================
 !xx      call current_RT_MS(imacro) ! Timer: LOG_CURRENT
-!xx      if (use_ehrenfest_md == 'y') then
+!xx      if (yn_md == 'y') then
 !xx         call current_RT_ion_MS(imacro)
 !xx      endif
       !===========================================================================
@@ -483,7 +483,7 @@ subroutine raman_maxwell_ms
 !xx        jm_new_m_tmp(1:3, imacro) = jav(1:3)
 !xx      end if
 !xx      javt(iter+1,:) = jav(:)
-!xx      if (use_ehrenfest_md == 'y') then
+!xx      if (yn_md == 'y') then
 !xx         if (comm_is_root(nproc_id_tdks)) then
 !xx            jm_ion_new_m_tmp(1:3, imacro) = jav_ion(1:3)
 !xx         end if
@@ -491,7 +491,7 @@ subroutine raman_maxwell_ms
       call timer_end(LOG_RT_MISC)
       !===========================================================================
 
-      if (use_ehrenfest_md == 'y') then
+      if (yn_md == 'y') then
 
        aforce(:,:) = force_m(:,:,imacro)
        call Ion_Force_ForceField_MS(imacro)
@@ -523,12 +523,12 @@ subroutine raman_maxwell_ms
 
       !===========================================================================
       !! update ion coordinate and velocity in MD option (part-2)
-      if (use_ehrenfest_md == 'y') then
+      if (yn_md == 'y') then
          call dt_evolve_MD_2_MS(aforce,iter,imacro)
       endif
       !(for exporting to file_trj later)
 !xx      if (yn_out_rvf_rt=='y' .and. mod(iter,out_rvf_rt_step)==0)then
-!xx         if(use_ehrenfest_md=='n') &
+!xx         if(yn_md=='n') &
 !xx         &  call Ion_Force_omp(Rion_update_rt,calc_mode_rt,imacro)
 !xx      endif
       !===========================================================================
@@ -549,7 +549,7 @@ subroutine raman_maxwell_ms
     !===========================================================================
     call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
 !xx    call comm_summation(jm_new_m_tmp, Jm_new_m, 3 * nmacro, nproc_group_global)
-!xx    if(use_ehrenfest_md=='y') &
+!xx    if(yn_md=='y') &
 !xx    & call comm_summation(jm_ion_new_m_tmp, Jm_ion_new_m, 3*nmacro,nproc_group_global)
     if (flg_out_ms_next_step) then
       call comm_summation(energy_elec_Matter_new_m_tmp, energy_elec_Matter_new_m, nmacro, nproc_group_global)
@@ -576,7 +576,7 @@ subroutine raman_maxwell_ms
 !xx      !Jm_new_ms(1:3, ix_m, iy_m, iz_m) = Jm_new_ms(1:3, ix_m, iy_m, iz_m) & 
 !xx      !                               & + Jm_new_m(1:3, imacro)
 !xx      Jm_new_ms(1:3, ix_m, iy_m, iz_m) = matmul(trans_inv(1:3,1:3), Jm_new_m(1:3, imacro))
-!xx      if(use_ehrenfest_md=='y') &
+!xx      if(yn_md=='y') &
 !xx      Jm_ion_new_ms(1:3,ix_m,iy_m,iz_m) = matmul(trans_inv(1:3,1:3), Jm_ion_new_m(1:3,imacro))
 !xx    end do
 !xx!$omp end parallel do
@@ -663,7 +663,7 @@ subroutine raman_maxwell_ms
   call write_data_vac_ac()
 
   ! Export last atomic coordinate and velocity & Close file_trj
-  if (use_ehrenfest_md=='y')then
+  if (yn_md=='y')then
      if(flag_ms_ff_LessPrint) then !AY
         do imacro = nmacro_s, nmacro_e
            if(imacro==1) then
@@ -786,7 +786,7 @@ contains
     end do
 !$omp end parallel do
 
-  if(use_ehrenfest_md=='y')then
+  if(yn_md=='y')then
 !$omp parallel do collapse(3) default(shared) private(iix_m, iiy_m, iiz_m)
     do iiz_m = nz1_m, nz2_m
       do iiy_m = ny1_m, ny2_m
@@ -837,7 +837,7 @@ contains
       !! Store data_local_Ac, data_local_Jm
       data_local_Ac(1:3, iimacro, iter) = Ac_m(1:3, iimacro)
       data_local_jm(1:3, iimacro, iter) = Jm_m(1:3, iimacro)
-      if(use_ehrenfest_md=='y') &
+      if(yn_md=='y') &
       &  data_local_jm_ion(1:3,iimacro,iter) = Jm_ion_m(1:3,iimacro)
     end do
 !$omp end parallel do
@@ -908,7 +908,7 @@ contains
       write(fh_ac, '("#",1X,A,":",1X,A)') "Eex", "Electron excitation energy"
       write(fh_ac, '("#",1X,A,":",1X,A)') "Eabs", "Absorbed energy"
       write(fh_ac, '("#",1X,A,":",1X,A)') "Eemf", "Total EM field energy"
-      !if(use_ehrenfest_md=='y') then
+      !if(yn_md=='y') then
       !   write(fh_ac, '("#",1X,A,":",1X,A)') "Jmi", "Matter current density of Ion"
       !   write(fh_ac, '("#",1X,A,":",1X,A)') "Tmp_ion", "Temperature of Ion"
       !endif
@@ -931,7 +931,7 @@ contains
         & 16, "Eex", "a.u./unitcell", & !!, trim(t_unit_current%name), &
         & 17, "Eabs", "a.u./unitcell", & !!, trim(t_unit_current%name), &
         & 18, "Eemf", "a.u./unitcell" !!, trim(t_unit_current%name)
-      !if(use_ehrenfest_md=='y') then
+      !if(yn_md=='y') then
       !  write(fh_ac, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
       !  & 19, "Jmi_x", "a.u.", & !!, trim(t_unit_current%name), &
       !  & 20, "Jmi_y", "a.u.", & !!, trim(t_unit_current%name), &
@@ -948,7 +948,7 @@ contains
             write(fh_ac,'(I6,1X,I6,1X,I6,99(1X,E23.15E3))',advance='no')  &
               & iix_m, iiy_m, iiz_m, &
               & data_out(1:ndata_out_column, iix_m, iiy_m, iiz_m, ipos)
-           !if(use_ehrenfest_md=='y') then
+           !if(yn_md=='y') then
            !    !Add Jm_ion_xyz and Temperature_ion for MD (Later)
            !endif
             write(fh_ac,*)
@@ -1082,7 +1082,7 @@ contains
           write(fh_ac_m, "('#',1X,A,':',3(1X,I6))") "Macropoint", macropoint(1:3, iimacro)
           write(fh_ac_m, '("#",1X,A,":",1X,A)') "Jm", "Matter current density"
           write(fh_ac_m, '("#",1X,A,":",1X,A)') "Ac", "External vector potential field"
-          if(use_ehrenfest_md=='y') then
+          if(yn_md=='y') then
             write(fh_ac_m, '("#",1X,A,":",1X,A)') "Jmi", "Matter current density of Ion"
             write(fh_ac_m, '("#",1X,A,":",1X,A)') "Tmp_ion", "Temperature of Ion"
           endif
@@ -1095,7 +1095,7 @@ contains
           & 5, "Jm_x", trim(t_unit_current%name), &
           & 6, "Jm_y", trim(t_unit_current%name), &
           & 7, "Jm_z", trim(t_unit_current%name)
-          if(use_ehrenfest_md=='y') then
+          if(yn_md=='y') then
             write(fh_ac_m, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
             & 8, "Jmi_x", trim(t_unit_current%name), &
             & 9, "Jmi_y", trim(t_unit_current%name), &
@@ -1108,7 +1108,7 @@ contains
             & iiter * dt * t_unit_time%conv, &
             & data_local_Ac(1:3, iimacro, iiter) * t_unit_ac%conv, &
             & data_local_jm(1:3, iimacro, iiter) * t_unit_current%conv
-            if(use_ehrenfest_md=='y') then
+            if(yn_md=='y') then
               write(fh_ac_m, "(F16.8,6(1X,ES22.14E3,1X))",advance='no') &
               data_local_jm_ion(1:3, iimacro, iiter) * t_unit_current%conv, &
               data_local_Tmp_ion(iimacro, iiter)
@@ -1144,7 +1144,7 @@ contains
           write(fh_ac_m, "('#',1X,A,':',3(1X,I6))") "Macropoint", macropoint(1:3, iimacro)
           write(fh_ac_m, '("#",1X,A,":",1X,A)') "Jm", "Matter current density"
           write(fh_ac_m, '("#",1X,A,":",1X,A)') "Ac", "External vector potential field"
-          if(use_ehrenfest_md=='y') then
+          if(yn_md=='y') then
             write(fh_ac_m, '("#",1X,A,":",1X,A)') "Jmi", "Matter current density of Ion"
             write(fh_ac_m, '("#",1X,A,":",1X,A)') "Tmp_ion", "Temperature of Ion"
           endif
@@ -1157,7 +1157,7 @@ contains
           & 5, "Jm_x", trim(t_unit_current%name), &
           & 6, "Jm_y", trim(t_unit_current%name), &
           & 7, "Jm_z", trim(t_unit_current%name)
-          if(use_ehrenfest_md=='y') then
+          if(yn_md=='y') then
             write(fh_ac_m, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
             & 8, "Jmi_x", trim(t_unit_current%name), &
             & 9, "Jmi_y", trim(t_unit_current%name), &
@@ -1170,7 +1170,7 @@ contains
             & iiter * dt * t_unit_time%conv, &
             & data_local_Ac(1:3, iimacro, iiter) * t_unit_ac%conv, &
             & data_local_jm(1:3, iimacro, iiter) * t_unit_current%conv
-            if(use_ehrenfest_md=='y') then
+            if(yn_md=='y') then
               write(fh_ac_m, "(F16.8,6(1X,E23.15E3,1X))",advance='no') &
               data_local_jm_ion(1:3, iimacro, iiter) * t_unit_current%conv, &
               data_local_Tmp_ion(iimacro, iiter)

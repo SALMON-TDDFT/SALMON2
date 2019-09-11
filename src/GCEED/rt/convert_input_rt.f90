@@ -46,7 +46,7 @@ case('y')
   icalcforce = 1
 end select
 
-select case(use_ehrenfest_md)
+select case(yn_md)
 case('y')
   iflag_md = 1
   icalcforce = 1

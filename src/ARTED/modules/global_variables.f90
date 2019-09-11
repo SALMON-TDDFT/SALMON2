@@ -170,7 +170,7 @@ Module Global_Variables
 
 !  character(2) :: ext_field ! this variable is removed
 !  character(2) :: Longi_Trans ! this variable is replaced by trans_longi
-!  character(1) :: MD_option ! this variable is replaced by use_ehrenfest_md
+!  character(1) :: MD_option ! this variable is replaced by yn_md
 !  character(2) :: AD_RHO !ovlp_option ! This variable is replaced by projection_option
 !yabana
   character(10) :: functional

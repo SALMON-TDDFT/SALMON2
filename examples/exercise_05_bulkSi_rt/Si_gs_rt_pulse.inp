@@ -1,5 +1,7 @@
 &calculation
-  calc_mode = 'GS_RT'
+!(first-run: DFT, second-run: TDDFT_pulse)
+  theory='DFT'
+! theory='TDDFT_pulse'
 /
 
 &control

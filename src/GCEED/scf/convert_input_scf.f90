@@ -103,7 +103,7 @@ else
   write(*,*)"'ispin' should be 0 or 1. "
 end if
 
-select case(use_geometry_opt)
+select case(yn_opt)
 case('y')
   iflag_opt = 1
 case('n')
