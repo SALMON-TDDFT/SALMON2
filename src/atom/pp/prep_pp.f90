@@ -369,15 +369,16 @@ subroutine calc_vpsl_periodic(mg,system,pp,fg,vpsl,ppg)
   integer :: a,i,n,ik,ix,iy,iz
   real(8) :: gd,r(3),matrix_A(3,3),u,v,w
   real(8) :: g2,gr,s,g2sq,r1,dr,vloc_av
-  complex(8) :: vion_g_ia(fg%ng,natom),tmp_exp
+  complex(8) :: dvg_tmp(fg%ng,nelem),vion_tmp(fg%ng,natom),vion(fg%ng,natom),rhoG_tmp(fg%ng),tmp_exp
 
   matrix_A = system%rmatrix_A
+
+  dvg_tmp = 0d0
 
 !$omp parallel
 !$omp do private(ik,n,g2sq,s,r1,dr,i,vloc_av) collapse(2)
   do ik=1,nelem
-!    do n=fg%ig_s,fg%ig_e
-      do n=1,fg%ng
+    do n=fg%ig_s,fg%ig_e
       g2sq=sqrt(fg%gx(n)**2+fg%gy(n)**2+fg%gz(n)**2)
       s=0.d0
       if (n == fg%iGzero) then
@@ -395,59 +396,61 @@ subroutine calc_vpsl_periodic(mg,system,pp,fg,vpsl,ppg)
           s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
         end do
       end if
-      fg%zdVG_ion(n,ik) = s
+      dvg_tmp(n,ik) = s
     end do
   end do
 !$omp end do
 !$omp end parallel
 
+  call comm_summation(dvg_tmp,fg%zdVG_ion,fg%ng*nelem,fg%icomm_G)
+
   !(Local pseudopotential: Vlocal in G-space(=Vion_G))
-  vion_g_ia=0.d0
-  fg%zrhoG_ion =0.d0
+  vion_tmp = 0d0
+  rhog_tmp = 0d0
 !$omp parallel private(a,ik)
   do a=1,natom
     ik=kion(a)
 !$omp do private(n,g2,gd,tmp_exp)
-    do n=1,fg%ng
-!    do n=fg%ig_s,fg%ig_e
+    do n=fg%ig_s,fg%ig_e
       gd = fg%gx(n)*system%rion(1,a) + fg%gy(n)*system%rion(2,a) + fg%gz(n)*system%rion(3,a)
       tmp_exp = exp(-zi*gd)/system%det_A
-      vion_g_ia(n,a)  = vion_g_ia(n,a) + fg%zdVG_ion(n,ik)*tmp_exp
-      fg%zrhoG_ion(n) = fg%zrhoG_ion(n) + pp%zps(ik)*tmp_exp
+      vion_tmp(n,a)  = vion_tmp(n,a) + fg%zdVG_ion(n,ik)*tmp_exp
+      rhoG_tmp(n) = rhoG_tmp(n) + pp%zps(ik)*tmp_exp
       if(n == fg%iGzero) cycle
       !(add coulomb as dvloc_g is given by Vloc - coulomb)
       g2 = fg%gx(n)**2+fg%gy(n)**2+fg%gz(n)**2
-      vion_g_ia(n,a) = vion_g_ia(n,a) -4d0*pi/g2*pp%zps(ik)*tmp_exp
+      vion_tmp(n,a) = vion_tmp(n,a) -4d0*pi/g2*pp%zps(ik)*tmp_exp
     end do
 !$omp end do
   end do
 !$omp end parallel
 
+  call comm_summation(rhog_tmp,fg%zrhoG_ion,fg%ng,fg%icomm_G)
+  call comm_summation(vion_tmp,vion,fg%ng*natom,fg%icomm_G)
+
 !(Local pseudopotential: Vlocal(=Vpsl) in real-space)
   ppg%Vpsl_atom = 0d0
-!$omp parallel private(n)
-  do n=1,fg%ng
-!$omp do private(ix,iy,iz,gr,a,tmp_exp,u,v,w,r)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      u = dble(ix-1)*system%hgs(1)
-      v = dble(iy-1)*system%hgs(2)
-      w = dble(iz-1)*system%hgs(3)
-      r(1) = u*matrix_A(1,1) + v*matrix_A(1,2) + w*matrix_A(1,3)
-      r(2) = u*matrix_A(2,1) + v*matrix_A(2,2) + w*matrix_A(2,3)
-      r(3) = u*matrix_A(3,1) + v*matrix_A(3,2) + w*matrix_A(3,3)
-      gr = fg%gx(n)*r(1) + fg%gy(n)*r(2) + fg%gz(n)*r(3)
-      tmp_exp = exp(zi*gr)
-      do a=1,natom
-        ppg%Vpsl_atom(ix,iy,iz,a) = ppg%Vpsl_atom(ix,iy,iz,a) + vion_g_ia(n,a)*tmp_exp
+!$omp parallel do private(ix,iy,iz,u,v,w,r,a,n,gr,tmp_exp) collapse(2)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    u = dble(ix-1)*system%hgs(1)
+    v = dble(iy-1)*system%hgs(2)
+    w = dble(iz-1)*system%hgs(3)
+    r(1) = u*matrix_A(1,1) + v*matrix_A(1,2) + w*matrix_A(1,3)
+    r(2) = u*matrix_A(2,1) + v*matrix_A(2,2) + w*matrix_A(2,3)
+    r(3) = u*matrix_A(3,1) + v*matrix_A(3,2) + w*matrix_A(3,3)
+    do a=1,natom
+      do n=1,fg%ng
+        gr = fg%gx(n)*r(1) + fg%gy(n)*r(2) + fg%gz(n)*r(3)
+        tmp_exp = exp(zi*gr)
+        ppg%Vpsl_atom(ix,iy,iz,a) = ppg%Vpsl_atom(ix,iy,iz,a) + vion(n,a)*tmp_exp
       end do
     end do
-    end do
-    end do
-!$omp end do
   end do
-!$omp end parallel
+  end do
+  end do
+!$omp end parallel do
 
 !$omp parallel
 !$omp do private(ix,iy,iz) collapse(2)
