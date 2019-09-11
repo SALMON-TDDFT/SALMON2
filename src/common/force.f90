@@ -28,6 +28,7 @@ contains
     use stencil_sub
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
+    use sym_vector_sub, only: sym_vector_xyz
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in) :: pp
@@ -152,6 +153,10 @@ contains
     end do
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
     system%Force = system%Force + F_sum
+
+    do ia=1,nion
+       call sym_vector_xyz( system%Force(:,ia) )
+    end do
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)
     deallocate(F_tmp,F_sum,gtpsi,uVpsibox,uVpsibox2)

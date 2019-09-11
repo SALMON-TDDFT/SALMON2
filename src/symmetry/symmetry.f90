@@ -5,21 +5,22 @@ module sym_sub
   private
   public :: init_sym_sub
 
-  logical,parameter,public :: use_symmetry=.false.
-  !logical,parameter,public :: use_symmetry=.true.
+  !logical,parameter,public :: use_symmetry=.false.
+  logical,parameter,public :: use_symmetry=.true.
 
   real(8),allocatable :: SymMatR(:,:,:)
   real(8),allocatable,public :: SymMatA(:,:,:)
   real(8),allocatable,public :: SymMatB(:,:,:)
+  real(8),public :: Amat(3,3), Ainv(3,3), Bmat(3,3), Binv(3,3)
 
 contains
 
 
-  subroutine init_sym_sub( Amat, Bmat, epdir )
+  subroutine init_sym_sub( Amat_in, Bmat_in, epdir )
     implicit none
-    real(8),intent(in) :: Amat(3,3), Bmat(3,3) ! Lattice vectors
+    real(8),intent(in) :: Amat_in(3,3), Bmat_in(3,3) ! Lattice vectors
     real(8),intent(in) :: epdir(3)
-    real(8) :: Ainv(3,3), Binv(3,3), tmpmat(3,3), pi2
+    real(8) :: tmpmat(3,3), pi2
     real(8),allocatable :: work(:,:,:)
     integer :: nsym, isym, n
     logical :: ok(3)
@@ -65,6 +66,9 @@ contains
     deallocate( work )
 
 ! ---
+
+    Amat=Amat_in
+    Bmat=Bmat_in
 
     allocate( SymMatA(3,4,nsym) ); SymMatA=0.0d0
     allocate( SymMatB(3,4,nsym) ); SymMatB=0.0d0

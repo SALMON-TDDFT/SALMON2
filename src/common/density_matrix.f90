@@ -242,6 +242,7 @@ contains
     use sendrecv_grid, only: update_overlap_complex8
     use salmon_communication, only: comm_summation
     use pseudo_pt_sub, only: calc_uVpsi_rdivided
+    use sym_vector_sub, only: sym_vector_xyz
     implicit none
     integer        ,intent(in) :: nspin,ngrid
     type(s_rgrid)  ,intent(in) :: mg
@@ -300,6 +301,9 @@ contains
       call comm_summation(wrk4,wrk1,3,info%icomm_rko)
 
       curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+
+      call sym_vector_xyz( curr(:,ispin,im) )
+
     end do
     end do
 

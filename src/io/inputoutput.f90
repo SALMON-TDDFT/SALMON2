@@ -1083,8 +1083,10 @@ contains
     call comm_bcast(epdir_re1 ,nproc_group_global)
     call comm_bcast(epdir_im1 ,nproc_group_global)
     norm = sqrt(sum(epdir_re1(:)**2+epdir_im1(:)**2))
+    if ( norm > 0.0d0 ) then
     epdir_re1 = epdir_re1 / norm
     epdir_im1 = epdir_im1 / norm
+    end if
     call comm_bcast(phi_cep1  ,nproc_group_global)
     call comm_bcast(ae_shape2 ,nproc_group_global)
     call comm_bcast(E_amplitude2,nproc_group_global)

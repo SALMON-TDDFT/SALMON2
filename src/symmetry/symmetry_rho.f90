@@ -83,8 +83,8 @@ contains
     end do
     end do
     end do
-    write(*,*) ng,itmp(1:ng)
-    write(*,*) count(icheck/=0),minval(icheck),maxval(icheck)
+    !write(*,*) ng,itmp(1:ng)
+    !write(*,*) count(icheck/=0),minval(icheck),maxval(icheck)
 
     allocate( nl(ng) ); nl=0
 
@@ -118,7 +118,7 @@ contains
        j2=grid_list(2,i2,i1)
        j3=grid_list(3,i2,i1)
        i3=grid_list(4,i2,i1)
-       write(*,'(1x,7i4)') i1,i2,j1,j2,j3,i3,icheck(j1,j2,j3)
+!       write(*,'(1x,7i4)') i1,i2,j1,j2,j3,i3,icheck(j1,j2,j3)
     end do
     end do
 
