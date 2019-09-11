@@ -21,7 +21,7 @@
 
 extern int NLx, NLy, NLz;
 
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
 extern int *modx, *mody, *modz;
 #endif
 
@@ -54,7 +54,7 @@ void total_energy_stencil_( double         const* restrict A_
   __m512i nly = _mm512_set1_epi32(NLy);
   __m512i nlz = _mm512_set1_epi32(NLz);
   __m512i nyx = _mm512_mask_blend_epi32(0xFF00, _mm512_set1_epi32(NLy    ), _mm512_set1_epi32(NLx    ));
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
   __m512i myx = _mm512_mask_blend_epi32(0xFF00, _mm512_set1_epi32(NLy - 1), _mm512_set1_epi32(NLx - 1));
 #endif
 
@@ -79,7 +79,7 @@ void total_energy_stencil_( double         const* restrict A_
 #endif
   {
     __m512i tix = _mm512_set1_epi32(ix);
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
     __m512i mxm = _mm512_loadu_prefetch_epi32(modx + (ix - 4 + NLx));
     __m512i mxp = _mm512_alignr_epi32(mxm, mxm, 1);
     __m512i xmp = _mm512_mask_blend_epi32(0xF0F0, mxm, mxp);
@@ -92,7 +92,7 @@ void total_energy_stencil_( double         const* restrict A_
 #endif
   {
     __m512i tiy = _mm512_set1_epi32(iy);
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
     __m512i mym = _mm512_loadu_prefetch_epi32(mody + (iy - 4 + NLy));
     __m512i myp = _mm512_alignr_epi32(mym, mym, 1);
     __m512i ymp = _mm512_mask_blend_epi32(0xF0F0, mym, myp);
@@ -105,7 +105,7 @@ void total_energy_stencil_( double         const* restrict A_
     for(iz = 0 ; iz < NLz ; iz += 4)
     {
       __m512i tiz = _mm512_set1_epi32(iz);
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
       __m512i mm  = _mm512_sub_epi32(tyx, _mm512_and_epi32(_mm512_add_epi32(dnyx, tyx), myx));
 #else
       __m512i mm  = _mm512_sub_epi32(tyx, uyx);
@@ -126,7 +126,7 @@ void total_energy_stencil_( double         const* restrict A_
       /* z-dimension (unit stride) */
       {
         __m512i z0, z2;
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
         z0 = _mm512_load_prefetch_epi64(e + ((iz - 4 + NLz) & (NLz - 1)));
         z2 = _mm512_load_prefetch_epi64(e + ((iz + 4 + NLz) & (NLz - 1)));
 #else

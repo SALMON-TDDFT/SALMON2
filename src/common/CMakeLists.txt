@@ -27,7 +27,7 @@ set(SOURCES
    zstencil_core/typical/seq.f90
    )
 
-if (EXPLICIT_VEC)
+if (USE_OPT_EXPLICIT_VECTORIZATION)
   set(SOURCES
       ${SOURCES}
       zstencil_core/${SIMD_SET}/omp.c

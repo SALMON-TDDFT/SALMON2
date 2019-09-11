@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
 module inputoutput
   use phys_constants
   use salmon_global
@@ -269,7 +272,7 @@ contains
       & xc, &
       & cname, &
       & xname, &
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
       & alibx, &
       & alibc, &
       & alibxc, &
@@ -1000,7 +1003,7 @@ contains
     call comm_bcast(eta_mask     ,nproc_group_global)
 !! == bcast for &functional
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     if (alibxc .ne. 'none') xc = 'libxc:' // trim(alibxc)
     if (alibx .ne. 'none') xname = 'libxc:' // trim(alibx)
     if (alibc .ne. 'none') cname = 'libxc:' // trim(alibc)
@@ -1008,7 +1011,7 @@ contains
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
     call comm_bcast(xname        ,nproc_group_global)
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     call comm_bcast(alibxc       ,nproc_group_global)
     call comm_bcast(alibx        ,nproc_group_global)
     call comm_bcast(alibc        ,nproc_group_global)
@@ -1647,7 +1650,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibc', trim(alibc)

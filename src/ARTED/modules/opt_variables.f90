@@ -13,6 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+
+#include "config.h"
+
 module opt_variables
   implicit none
 
@@ -80,7 +83,7 @@ contains
     integer :: num(3)
 
     PNLx = NLx
-#ifdef SALMON_STENCIL_PADDING
+#ifdef USE_OPT_ARRAY_PADDING
     PNLy = NLy + 1
 #else
     PNLy = NLy
@@ -118,7 +121,7 @@ contains
       modz(iz) = mod(iz,NLz)
     end do
 
-#ifdef SALMON_STENCIL_PADDING
+#ifdef USE_OPT_ARRAY_PADDING
     call init_for_padding
     call init_projector(zKxyz)
 #else

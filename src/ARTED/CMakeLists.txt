@@ -6,7 +6,6 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/common)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/stencil)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/FDTD)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/control)
-#add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/perfcheck)
 
 set(SOURCES main.f90)
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

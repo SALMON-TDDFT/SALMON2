@@ -13,6 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+
+#include "config.h"
+
 module salmon_initialization
   implicit none
   integer,parameter,private :: Nd=4
@@ -393,7 +396,7 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   end if
 
   if(calc_mode=='RT')then
-#ifdef SALMON_STENCIL_PADDING
+#ifdef USE_OPT_ARRAY_PADDING
     mg%ie_array(2)=mg%ie(2)+nd+1
 #endif
   end if

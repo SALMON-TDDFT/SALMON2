@@ -65,7 +65,6 @@ if (USE_LIBXC)
       EXCLUDE_FROM_ALL on
     )
 
-    add_definitions(-DSALMON_USE_LIBXC)
     add_library(xcf90 STATIC IMPORTED)
     add_library(xc    STATIC IMPORTED)
     set_target_properties(xcf90 PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib64/libxcf90.a)

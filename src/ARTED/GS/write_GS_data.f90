@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
 Subroutine write_GS_data
   use Global_Variables
   use salmon_global, only: yn_out_dos, &
@@ -624,7 +627,7 @@ Subroutine write_GS_data
 
     subroutine u_nab_u_stencil(A,B,C,D)
       use global_variables, only: NLx,NLy,NLz,zI
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
       use opt_variables, only: modx, mody, modz
 #endif
       implicit none
@@ -636,7 +639,7 @@ Subroutine write_GS_data
       integer    :: ix,iy,iz
       complex(8) :: w1,w2,w3
 
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
 # define IDX(dt) iz,iy,and(ix+(dt)+NLx,NLx-1)
 # define IDY(dt) iz,and(iy+(dt)+NLy,NLy-1),ix
 # define IDZ(dt) and(iz+(dt)+NLz,NLz-1),iy,ix

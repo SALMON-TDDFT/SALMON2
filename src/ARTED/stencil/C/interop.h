@@ -16,6 +16,8 @@
 #ifndef ARTED_INTEROP
 #define ARTED_INTEROP
 
+#include "config.h"
+
 /* Stencil computation code with C supports Intel compiler only. */
 
 /* currently Xeon CPUs and Xeon Phi are 64B cacheline. */
@@ -23,7 +25,7 @@
 # define CACHELINE_SIZE 64
 #endif
 
-#ifdef SALMON_ENABLE_SOFTWARE_PREFETCH
+#ifdef USE_OPT_SOFTWARE_PREFETCH
 # define PREFETCH_L1(p, distance)  _mm_prefetch(((char const*)p) + distance, _MM_HINT_T0)
 # define BUSY_PREFETCH_L1(p)       PREFETCH_L1(p, CACHELINE_SIZE)
 #else
@@ -39,7 +41,7 @@
 # define VECTOR_SIZE 2
 #endif
 
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
 # ifdef ENABLE_STENCIL_CODE_WITH_PADDING
 #   define IDX(npt) ((ix - ((ix + (npt) + NLx) & (NLx-1))) * PNLy * PNLz)
 #   define IDY(npt) ((iy - ((iy + (npt) + NLy) & (NLy-1))) * PNLz)
@@ -59,7 +61,7 @@
 #   define IDY(npt) ((iy - mody[iy + (npt) + NLy]) * NLz)
 #   define IDZ(npt) ((iz - modz[iz + (npt) + NLz]))
 # endif
-#endif /* SALMON_DOMAIN_POWER_OF_TWO */
+#endif /* USE_OPT_DOMAIN_IS_POW2 */
 
 #define MIN(n,m) (n < m ? n : m)
 

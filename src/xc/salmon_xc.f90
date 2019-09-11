@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 !-----------------------------------------------------------------------------------------
+
+#include "config.h"
+
 module salmon_xc
   use structures, only: s_xc_functional
   use builtin_pz, only: exc_cor_pz
@@ -21,7 +24,7 @@ module salmon_xc
   use builtin_pzm, only: exc_cor_pzm
   use builtin_pbe, only: exc_cor_pbe
   use builtin_tbmbj, only: exc_cor_tbmbj
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
   use xc_f90_types_m
   use xc_f90_lib_m
 #endif
@@ -36,7 +39,7 @@ module salmon_xc
   integer, parameter :: salmon_xctype_tbmbj = 4
   integer, parameter :: salmon_xctype_tpss  = 5
   integer, parameter :: salmon_xctype_vs98  = 6
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
   integer, parameter :: salmon_xctype_libxc = 101
 #endif
 
@@ -48,7 +51,7 @@ contains
     implicit none
     integer :: vmajor, vminor, vmicro
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     call xc_f90_version(vmajor, vminor, vmicro)
     print '(2X,A,1X,I1,".",I1,".",I1)', "Libxc: [enabled]", vmajor, vminor, vmicro
 #else
@@ -104,7 +107,7 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
       ! Libxc prefix is used...
       if (lower(name(1:6)) == 'libxc:') then
         xc%xctype(1) = salmon_xctype_libxc
@@ -208,7 +211,7 @@ contains
       !   initialization_process_of_functional
       !   return
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
       case('libxc_pz')
         xc%xctype(2) = salmon_xctype_libxc
         xc%xctype(3) = salmon_xctype_libxc
@@ -246,7 +249,7 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
       if (lower(name(1:6)) == 'libxc:') then
         xc%xctype(2) = salmon_xctype_libxc
         call init_libxc(name(7:), 2)
@@ -280,7 +283,7 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
       if (lower(name(1:6)) == 'libxc:') then
         xc%xctype(3) = salmon_xctype_libxc
         call init_libxc(name(7:), 3)
@@ -310,7 +313,7 @@ contains
 
 
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     subroutine init_libxc(libxc_name, ii)
       implicit none
       character(*), intent(in) :: libxc_name
@@ -361,7 +364,7 @@ contains
     implicit none
     type(s_xc_functional), intent(inout) :: xc
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     if (xc%xctype(1) == salmon_xctype_libxc) call xc_f90_func_end(xc%func(1))
     if (xc%xctype(2) == salmon_xctype_libxc) call xc_f90_func_end(xc%func(2))
     if (xc%xctype(3) == salmon_xctype_libxc) call xc_f90_func_end(xc%func(3))
@@ -445,7 +448,7 @@ contains
       call exec_builtin_pbe()
     case(salmon_xctype_tbmbj)
       call exec_builtin_tbmbj()
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     case(salmon_xctype_libxc)
       call exec_libxc(1)
 #endif
@@ -453,7 +456,7 @@ contains
 
     ! Exchange Only
     select case (xc%xctype(2))
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     case(salmon_xctype_libxc)
       call exec_libxc(2)
 #endif
@@ -461,7 +464,7 @@ contains
 
     ! Correlation Only
     select case (xc%xctype(3))
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     case(salmon_xctype_libxc)
       call exec_libxc(3)
 #endif
@@ -633,7 +636,7 @@ contains
 
 
 
-#ifdef SALMON_USE_LIBXC
+#ifdef USE_LIBXC
     subroutine exec_libxc(ii)
       implicit none
       integer, intent(in) :: ii

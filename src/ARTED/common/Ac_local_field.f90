@@ -13,6 +13,9 @@
 !  - Non-local pseudopotential term in KS equation
 !  - Current
 !
+
+#include "config.h"
+
 module Ac_yn_local_field
   implicit none
 
@@ -270,7 +273,7 @@ contains
   !----------------------------------------------------------
   subroutine hpsi1_RT_stencil_add_Ac_local(B,Cx,Cy,Cz,D,E,F)
   use global_variables, only: NLx,NLy,NLz,zI
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
   use opt_variables, only: modx, mody, modz
 #endif
   use opt_variables, only: PNLx,PNLy,PNLz
@@ -286,7 +289,7 @@ contains
   integer    :: ix,iy,iz
   complex(8) :: w1,w2,w3,w,v1,v2,v3,v
 
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
 # define IDX(dt) iz,iy,and(ix+(dt)+NLx,NLx-1)
 # define IDY(dt) iz,and(iy+(dt)+NLy,NLy-1),ix
 # define IDZ(dt) and(iz+(dt)+NLz,NLz-1),iy,ix
@@ -343,7 +346,7 @@ contains
   !---------------------------------------------------------------
   subroutine total_energy_stencil_add_Ac_local(B,Cx,Cy,Cz,D,E,F)
   use global_variables, only: NLx,NLy,NLz,zI
-#ifndef SALMON_DOMAIN_POWER_OF_TWO
+#ifndef USE_OPT_DOMAIN_IS_POW2
   use opt_variables, only: modx, mody, modz
 #endif
   implicit none
@@ -360,7 +363,7 @@ contains
 
   F = 0d0
 
-#ifdef SALMON_DOMAIN_POWER_OF_TWO
+#ifdef USE_OPT_DOMAIN_IS_POW2
 # define IDX(dt) iz,iy,and(ix+(dt)+NLx,NLx-1)
 # define IDY(dt) iz,and(iy+(dt)+NLy,NLy-1),ix
 # define IDZ(dt) and(iz+(dt)+NLz,NLz-1),iy,ix
