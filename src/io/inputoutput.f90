@@ -553,7 +553,8 @@ contains
     base_directory        = './'
     output_buffer_interval= -1
     yn_restart            = 'n'
-    directory_read_data   = 'restart'
+   !directory_read_data   = 'restart'
+    directory_read_data   = './'  !temporaly
     checkpoint_interval   = 0
     time_shutdown         = -1d0
     !remove later
@@ -933,11 +934,15 @@ contains
 !! == bcast for &control
     call comm_bcast(sysname         ,nproc_group_global)
     call comm_bcast(base_directory  ,nproc_group_global)
-    if(base_directory(len_trim(base_directory):len_trim(base_directory)).ne.'/') &
-    &  base_directory = trim(base_directory)//'/'
+    ii = len_trim(base_directory)
+    if(base_directory(ii:ii).ne.'/') &
+       base_directory = trim(base_directory)//'/'
     call comm_bcast(output_buffer_interval,nproc_group_global)
     call comm_bcast(yn_restart            ,nproc_group_global)
     call comm_bcast(directory_read_data   ,nproc_group_global)
+    ii = len_trim(directory_read_data)
+    if(directory_read_data(ii:ii).ne.'/') &
+       directory_read_data = trim(directory_read_data)//'/'
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
     !remove later

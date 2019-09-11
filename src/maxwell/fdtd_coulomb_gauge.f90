@@ -469,7 +469,7 @@ contains
     use salmon_global, only: sysname,base_directory
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use salmon_initialization, only: setbn
+    use initialization_sub, only: set_bn
     use salmon_file, only: open_filehandle
     use inputoutput, only: t_unit_time
     implicit none
@@ -485,7 +485,7 @@ contains
     fw%Energy_poynting = 0d0
     fw%Energy_joule = 0d0
 
-    call setbn(fw%bnmat)
+    call set_bn(fw%bnmat)
     do jj=1,3
       do ii=1,4
         fw%coef_nab(ii,jj) = fw%bnmat(ii,4)/hgs(jj)

@@ -42,7 +42,7 @@ use timer
 use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
-use salmon_initialization
+use initialization_sub
 use input_pp_sub
 use prep_pp_sub
 use density_matrix, only: calc_density
@@ -77,29 +77,22 @@ type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
-type(s_vector) :: j_e ! microscopic electron number current density
+type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
+type(s_ofile) :: ofile
 
-complex(8),parameter :: zi=(0.d0,1.d0)
-integer :: iob,i1,i2,i3,ik,iik
-integer :: nspin
-real(8),allocatable :: R1(:,:,:)
-character(10):: fileLaser
-integer:: idensity, idiffDensity, ielf
-integer :: is,jspin
-
-real(8)    :: rbox_array(10)
-real(8)    :: rbox_array2(10)
-
-real(8),allocatable :: alpha_R(:,:),alpha_I(:,:) 
+integer :: iob, i1,i2,i3, ik,iik, is,jspin,nspin
+integer :: idensity, idiffDensity, ielf
+integer :: jj,nn, iene, nntime, ix,iy,iz
+real(8) :: rbox_array(10), rbox_array2(10)
+real(8),allocatable :: alpha_R(:,:),   alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
-real(8),allocatable :: Sf(:)
-integer :: jj,nn
-integer :: iene,nntime,ix,iy,iz
-character(100):: comment_line
-integer :: ia,ib
-real(8) :: rab
+real(8),allocatable :: R1(:,:,:), Sf(:)
 real(8),allocatable :: tfourier_integrand(:,:)
+complex(8),parameter :: zi=(0.d0,1.d0)
+character(10) :: fileLaser
+character(100):: comment_line
+
 
 call timer_begin(LOG_TOTAL)
 
@@ -190,7 +183,7 @@ end select
 
 call timer_end(LOG_INIT_RT)
 
-call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
+call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
 call allocate_scalar(mg,srho)
 call allocate_scalar(mg,sVh)
@@ -203,16 +196,16 @@ do jspin=1,system%nspin
 end do
 allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 
-Hgs = system%Hgs ! future work: remove this line
+Hgs  = system%Hgs  ! future work: remove this line
 Hvol = system%Hvol ! future work: remove this line
 k_sta = info%ik_s ! future work: remove this line
 k_end = info%ik_e ! future work: remove this line
 k_num = info%numk ! future work: remove this line
-iobnum = info%numo ! future work: remove this line
+iobnum= info%numo ! future work: remove this line
 
 call timer_begin(LOG_READ_GS_DATA)
 ! Read GS data
-call read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
+call read_gs_bin(lg,mg,ng,info,mixing)
 
 if(comm_is_root(nproc_id_global))then
   if(iflag_md==1)then

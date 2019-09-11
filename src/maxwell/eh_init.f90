@@ -1489,7 +1489,7 @@ subroutine eh_prep_GCEED(fs,fw)
   use sendrecv_grid,     only: create_sendrecv_neig_ng,init_sendrecv_grid
   use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
   use salmon_maxwell,    only: ls_fdtd_work
-  use salmon_initialization
+  use initialization_sub
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw

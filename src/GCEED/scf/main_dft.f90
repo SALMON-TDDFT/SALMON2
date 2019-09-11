@@ -50,7 +50,7 @@ use gram_schmidt_orth, only: gram_schmidt
 use write_sub
 use read_gs
 use code_optimization
-use salmon_initialization
+use initialization_sub
 use occupation
 use input_pp_sub
 use prep_pp_sub
@@ -82,6 +82,7 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_cg)  :: cg
 type(s_mixing) :: mixing
+type(s_ofile) :: ofile
 
 logical :: rion_update
 
@@ -97,13 +98,13 @@ call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 inumcpu_check=0
 
-call setbN(bnmat)
-call setcN(cnmat)
+call set_bN(bnmat)
+call set_cN(cnmat)
 
 call convert_input_scf(file_atoms_coo)
 mixing%num_rho_stock=21
 
-call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
+call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
@@ -146,7 +147,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
+    call read_gs_bin(lg,mg,ng,info,mixing)
 
   end select
 
@@ -687,29 +688,34 @@ end do Structure_Optimization_Iteration
 !------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
+! write GS: basic data
 call write_band_information
 call write_eigen
-if(yn_out_psi=='y' ) call write_psi(lg,info)
-if(yn_out_dns=='y' ) call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
-if(yn_out_dos=='y' ) call calc_dos(info)
+call write_info_data(system,energy)
+
+! write GS: analysis option
+if(yn_out_psi =='y') call write_psi(lg,info)
+if(yn_out_dns =='y') call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
+if(yn_out_dos =='y') call calc_dos(info)
 if(yn_out_pdos=='y') call calc_pdos(lg,info,pp)
-if(yn_out_elf=='y' ) then
+if(yn_out_elf =='y') then
   allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   call calc_elf(lg,mg,ng,srg,info,srho,0)
   call write_elf(lg,elf,icoo1d,hgs,iscfrt)
   deallocate(elf)
 end if
+
 call timer_end(LOG_WRITE_GS_RESULTS)
 
-! write GS data
+! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-if( OC==1.or.OC==2.or.OC==3 ) call write_gs_bin(lg,ng,info,mixing)
+if( OC==1.or.OC==2.or.OC==3 ) then
+   call write_gs_bin(ofile%dir_out_restart,lg,ng,info,mixing)
+endif
 call timer_end(LOG_WRITE_GS_DATA)
 
-! write GS information
-call timer_begin(LOG_WRITE_GS_INFO)
-call write_info_data(system,energy)
-call timer_end(LOG_WRITE_GS_INFO)
+!call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
+!call timer_end(LOG_WRITE_GS_INFO)
 
 deallocate(Vlocal)
 call finalize_xc(xc_func)
