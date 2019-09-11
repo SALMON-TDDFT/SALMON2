@@ -225,6 +225,7 @@ Subroutine write_GS_data
              stop 'fail: write_psi_data::create_directory'
            end if
          end if
+         call comm_sync_all ! sync until directory created
 
          do ik=NK_s,NK_e
          do ib=1,NB
@@ -280,6 +281,7 @@ Subroutine write_GS_data
              stop 'fail: write_psi_data::create_directory'
            end if
          end if
+         call comm_sync_all ! sync until directory created
 
          do ik=NK_s,NK_e
          do ib=1,NB

@@ -179,10 +179,13 @@ contains
     
 #ifdef ARTED_USE_FORTRAN2008
     write (process_directory,'(A,A,I5.5,A)') trim(base_directory),'/work_p',nproc_id_global,'/'
-    call create_directory(process_directory)
+    if (comm_is_root(nproc_id_global)) then
+      call create_directory(process_directory)
+    end if
 #else
     process_directory = trim(base_directory)
 #endif
+    call comm_sync_all ! sync until directory created
 
     call comm_bcast(need_backup,nproc_group_global)
     call comm_bcast(file_GS,nproc_group_global)

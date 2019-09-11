@@ -59,6 +59,8 @@ contains
       close(nfile_occ)
     end if
 
+    call comm_sync_all ! sync until directory created
+
     select case(iflag_read_write)
     case(iflag_read )
       call comm_bcast(occ,nproc_group_global)
@@ -309,6 +311,8 @@ contains
       end if
     end if
 
+    call comm_sync_all ! sync until directory created
+
     if(comm_is_root(nproc_id_global))then
       occ_file = trim(rt_wfn_directory)//'occupation'
       open(nfile_occ,file=trim(occ_file),form='unformatted')
@@ -482,6 +486,8 @@ contains
        close(nfile_ae_ms)
     end if
 
+    call comm_sync_all ! sync until directory created
+
     do imacro = nmacro_s, nmacro_e
 
        write (rt_wfn_directory,'(A,A)') trim(dir_ms_M(imacro)),'/rt_wfn_k/'
@@ -498,6 +504,8 @@ contains
            end if
          end if
        end if
+
+       call comm_sync_all ! sync until directory created
 
        if(comm_is_root(nproc_id_tdks)) then
 

@@ -2002,6 +2002,8 @@ contains
        end if
     endif
 
+    call comm_sync_all ! sync until directory created
+
   end subroutine dump_input_common
 
   subroutine check_bad_input
