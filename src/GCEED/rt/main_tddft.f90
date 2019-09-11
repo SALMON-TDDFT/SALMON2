@@ -52,6 +52,7 @@ use force_sub, only: calc_force_salmon
 use hpsi_sub, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
+use read_write_restart_rt_sub, only: write_checkpoint_rt
 implicit none
 
 type(s_rgrid) :: lg
@@ -125,42 +126,38 @@ if(comm_is_root(nproc_id_global))then
   write(*,*) "Field strength[?]    =",Fst
   write(*,*) "Energy range         =",Nenergy
   write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
-  write(*,*) "ikind_eext is           ", ikind_eext
+  write(*,*) "ikind_eext is         ", ikind_eext
   write(*,*) "Step for writing dens=", iwdenstep
   write(*,*) "Plane showing density=", denplane
   write(*,*) "idensum              =", idensum 
   if(idensum==0) write(*,*) "Position of the plane=", posplane
   select case (ikind_eext)
     case(1,6,7,8,15)
-      write(*,'(a21,f5.2,a4)') "Laser frequency     =",       &
-                           romega*au_energy_ev, "[eV]"
-      write(*,'(a21,f16.8,a4)') "Pulse width of laser=",      &
-                           pulse_T*au_time_fs,"[fs]"
-      write(*,'(a21,e16.8,a8)') "Laser intensity      =",      &
-                           rlaser_I, "[W/cm^2]"
-      write(*,'(a21,e16.8,a8)') "tau                  =",      &
-                           tau*au_time_fs, "[fs]"
+      write(*,20) "Laser frequency     =",romega*au_energy_ev,"[eV]"
+      write(*,21) "Pulse width of laser=",pulse_T*au_time_fs, "[fs]"
+      write(*,22) "Laser intensity     =",rlaser_I,       "[W/cm^2]"
+      write(*,22) "tau                 =",tau*au_time_fs, "[fs]"
     case(4,12)
-      write(*,'(a21,2f5.2,a4)') "Laser frequency     =",       &
-                          romega2(1)*au_energy_ev &
-                          ,romega2(2)*au_energy_ev, "[eV]"
-      write(*,'(a21,2f16.8,a4)') "Pulse width of laser=",      &
-                          pulse_T2(1)*au_time_fs&
-                          ,pulse_T2(2)*au_time_fs,"[fs]"
-      write(*,'(a21,2e16.8,a8)') "Laser intensity      =",      &
-                          rlaser_I2(1),rlaser_I2(2), "[W/cm^2]"
-      write(*,'(a21,f16.8,a4)') "delay time           =",      &
-                          delay*au_time_fs, "[fs]"
-      write(*,'(a21,f16.8)') "rcycle                =",rcycle
+      write(*,23) "Laser frequency     =",romega2(1:2)*au_energy_ev,"[eV]"
+      write(*,24) "Pulse width of laser=",pulse_T2(1:2)*au_time_fs, "[fs]"
+      write(*,25) "Laser intensity     =",rlaser_I2(1:2),       "[W/cm^2]"
+      write(*,21) "delay time          =",delay*au_time_fs,     "[fs]"
+      write(*,26) "rcycle              =",rcycle
   end select
+20 format(a21,f5.2, a4)
+21 format(a21,f16.8,a4)
+22 format(a21,e16.8,a8)
+23 format(a21,2f5.2, a4)
+24 format(a21,2f16.8,a4)
+25 format(a21,2e16.8,a8)
+26 format(a21,f16.8)
 
 end if
 
 debye2au = 0.393428d0
 
 select case (ikind_eext)
-  case(0,10)
-    Fst=Fst !/5.14223d1
+  case(0,10) ; Fst=Fst !/5.14223d1
 end select
 dE=dE !/2d0/Ry 
 dt=dt !*fs2eVinv*2.d0*Ry!a.u. ! 1[fs] = 1.51925 [1/eV]  !2.d0*Ry*1.51925d0
@@ -204,6 +201,7 @@ k_num = info%numk ! future work: remove this line
 iobnum= info%numo ! future work: remove this line
 
 call timer_begin(LOG_READ_GS_DATA)
+
 ! Read GS data
 call read_gs_bin(lg,mg,ng,info,mixing)
 
@@ -240,13 +238,12 @@ allocate(Ec_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 do iz=mg_sta(3),mg_end(3)
 do iy=mg_sta(2),mg_end(2)
 do ix=mg_sta(1),mg_end(1)
-  rho0(ix,iy,iz) = rho(ix,iy,iz)
+   rho0(ix,iy,iz) = rho(ix,iy,iz)
 end do
 end do
 end do
 
 allocate( Vh0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
 allocate( Ex_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
 allocate( Ey_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
 allocate( Ez_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
@@ -255,7 +252,7 @@ allocate( Ez_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))
 do iz=mg_sta(3),mg_end(3)
 do iy=mg_sta(2),mg_end(2)
 do ix=mg_sta(1),mg_end(1)
-  Ex_static(ix,iy,iz)=0.d0; Ey_static(ix,iy,iz)=0.d0; Ez_static(ix,iy,iz)=0.d0
+   Ex_static(ix,iy,iz)=0.d0; Ey_static(ix,iy,iz)=0.d0; Ez_static(ix,iy,iz)=0.d0
 end do
 end do
 end do
@@ -275,10 +272,8 @@ call timer_end(LOG_READ_RT_DATA)
 
 
 call timer_begin(LOG_INIT_RT)
-allocate( alpha_R(3,0:Nenergy), & 
-                    alpha_I(3,0:Nenergy), Sf(3) )
-allocate( alphaq_R(3,3,0:Nenergy), & 
-                    alphaq_I(3,3,0:Nenergy) )
+allocate( alpha_R(3,0:Nenergy), alpha_I(3,0:Nenergy), Sf(3) )
+allocate( alphaq_R(3,3,0:Nenergy), alphaq_I(3,3,0:Nenergy) )
 
 ntmg=1
 ! 'Hartree' parameter
@@ -324,9 +319,8 @@ if(comm_is_root(nproc_id_global))then
 
   !(header of SYSname_rt.data)
   select case(iperiodic)
-  case(0)
-  case(3)
-     call write_rt_data_3d(-1,ofl,iflag_md,dt)
+  case(0)!; call write_rt_data_0d --- make in future
+  case(3) ; call write_rt_data_3d(-1,ofl,iflag_md,dt)
   end select
 
   !(header of SYSname_rt_energy.data)
@@ -463,33 +457,33 @@ end select
 select case(imesh_oddeven(1))
   case(1)
     do i1=lg%is(1),lg%ie(1)
-      vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/Hgs(1)
+       vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/Hgs(1)
     end do
   case(2)
     do i1=lg%is(1),lg%ie(1)
-      vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/Hgs(1)
+       vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/Hgs(1)
     end do
 end select
 
 select case(imesh_oddeven(2))
   case(1)
     do i2=lg%is(2),lg%ie(2)
-      vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/Hgs(2)
+       vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/Hgs(2)
     end do
   case(2)
     do i2=lg%is(2),lg%ie(2)
-      vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/Hgs(2)
+       vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/Hgs(2)
     end do
 end select
 
 select case(imesh_oddeven(3))
   case(1)
     do i3=lg%is(3),lg%ie(3)
-      vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/Hgs(3)
+       vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/Hgs(3)
     end do
   case(2)
     do i3=lg%is(3),lg%ie(3)
-      vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/Hgs(3)
+       vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/Hgs(3)
     end do
 end select
 
@@ -518,7 +512,7 @@ if(IC_rt==0)then
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      rbox_array(i1)=rbox_array(i1)+vecR(i1,ix,iy,iz)*rho(ix,iy,iz)
+       rbox_array(i1)=rbox_array(i1)+vecR(i1,ix,iy,iz)*rho(ix,iy,iz)
     end do
     end do
     end do
@@ -527,7 +521,7 @@ if(IC_rt==0)then
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    rbox_array(4)=rbox_array(4)+rho(ix,iy,iz)
+     rbox_array(4)=rbox_array(4)+rho(ix,iy,iz)
   end do
   end do
   end do
@@ -590,8 +584,8 @@ Qp(:,:,0)=0.d0
 do iz=mg_sta(3),mg_end(3)
 do iy=mg_sta(2),mg_end(2)
 do ix=mg_sta(1),mg_end(1)
-  Vh0(ix,iy,iz)=Vh(ix,iy,iz)
-  sVh%f(ix,iy,iz)=Vh(ix,iy,iz)
+   Vh0(ix,iy,iz)=Vh(ix,iy,iz)
+   sVh%f(ix,iy,iz)=Vh(ix,iy,iz)
 end do
 end do
 end do
@@ -621,7 +615,7 @@ if(use_singlescale=='y') then
   call allocate_scalar(mg,system%div_Ac)
   call allocate_vector(mg,system%Ac_micro)
   do ik=info%ik_s,info%ik_e
-    stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik)
+     stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik)
   end do
   call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
 end if
@@ -657,6 +651,7 @@ call timer_end(LOG_INIT_RT)
 
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
+
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
@@ -666,28 +661,34 @@ TE : do itt=Miter_rt+1,itotNtime
      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   end if
+
+  if(checkpoint_interval .ge. 1) then
+     if(mod(itt,checkpoint_interval)==0) call write_checkpoint_rt(itt,ng,info)
+  endif
+
 end do TE
 call timer_end(LOG_RT_ITERATION)
 
-  if(iperiodic==3) deallocate(stencil%vec_kAc)
-
 close(030) ! laser
 
+if(iperiodic==3) deallocate(stencil%vec_kAc)
+if(ikind_eext.ne.0) deallocate (Vbox)
 deallocate (R1)
 deallocate (Vlocal)
-if(ikind_eext.ne.0)then
-  deallocate (Vbox)
-endif
+
 
 !--------------------------------- end of time-evolution
 
 
+!------------ Writing part -----------
+
+! write RT: binary data for restart
 call timer_begin(LOG_WRITE_RT_DATA)
-if(OC_rt==1) call write_rt_bin(ng,info)
+if(OC_rt==1) call write_rt_bin("./",ng,info)
 call timer_end(LOG_WRITE_RT_DATA)
 
 
-! Output after time-evolution
+! write RT: 
 call timer_begin(LOG_WRITE_RT_RESULTS)
 if(iwrite_external==1)then
   if(comm_is_root(nproc_id_global))then
@@ -706,6 +707,7 @@ if(iwrite_external==1)then
   end if
 end if
 
+!
 select case(iperiodic)
 case(0)
 
@@ -730,7 +732,7 @@ case(0)
       close(1)
     end if
 
-  ! Alpha
+    ! Alpha
     if(ae_shape1=='impulse')then
       open(1,file=file_alpha_lr)
       write(1,'(a)') "# energy[eV], Re[alpha](x,y,z)[A**3], Im[alpha](x,y,z)[A**3], df/dE(x,y,z)[1/eV]" 
@@ -782,7 +784,6 @@ case(3)
 
 end select
 call timer_end(LOG_WRITE_RT_RESULTS)
-
 call timer_end(LOG_TOTAL)
 
 call deallocate_mat
@@ -791,24 +792,24 @@ call finalize_xc(xc_func)
 
 contains
 
-subroutine init_code_optimization
-  implicit none
-  integer :: ignum(3)
+  subroutine init_code_optimization
+    implicit none
+    integer :: ignum(3)
 
-  call switch_stencil_optimization(mg%num)
-  call switch_openmp_parallelization(mg%num)
+    call switch_stencil_optimization(mg%num)
+    call switch_openmp_parallelization(mg%num)
 
-  if(iperiodic==3 .and. nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)==1) then
-    ignum = mg%num
-  else
-    ignum = mg%num + (nd*2)
-  end if
-  call set_modulo_tables(ignum)
+    if(iperiodic==3 .and. nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)==1) then
+       ignum = mg%num
+    else
+       ignum = mg%num + (nd*2)
+    end if
+    call set_modulo_tables(ignum)
 
-  if (comm_is_root(nproc_id_global)) then
-    call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
-  end if
-end subroutine
+    if (comm_is_root(nproc_id_global)) then
+       call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
+    end if
+  end subroutine init_code_optimization
 
 end subroutine main_tddft
 

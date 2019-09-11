@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-SUBROUTINE write_rt_bin(ng,info)
+SUBROUTINE write_rt_bin(odir,ng,info)
 use structures,      only: s_rgrid,s_orbital_parallel
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -24,23 +24,24 @@ use allocate_mat_sub
 implicit none
 type(s_rgrid), intent(in) :: ng
 type(s_orbital_parallel), intent(in) :: info
-integer       :: i1,i2,i3,jj,iob,is,it2,iik
-integer       :: ix,iy,iz
-integer :: ibox
-character(100) :: file_out_rt_bin_num_bin
-integer :: ii,j1,j2,j3
+integer :: i1,i2,i3,jj,iob,is,it2,iik, ii,j1,j2,j3
+integer :: ix,iy,iz, ibox
 integer :: nproc_id_global_datafiles
 integer :: ista_Mxin_datafile(3)
 integer :: iend_Mxin_datafile(3)
 integer :: inum_Mxin_datafile(3)
 integer :: nproc_xyz_datafile(3)
+integer :: iob_myob, icorr_p
 character(8) :: fileNumber_data
-integer :: iob_myob
-integer :: icorr_p
+character(100) :: file_out_rt_num_bin, dir_file_out
+character(*) :: odir
 
-if(comm_is_root(nproc_id_global)) open(99,file=file_out_rt_bin,form='unformatted')
 
-if(comm_is_root(nproc_id_global)) write(99) itotNtime
+if(comm_is_root(nproc_id_global)) then
+   dir_file_out = trim(odir)//file_out_rt_bin
+   open(99,file=dir_file_out,form='unformatted')
+   write(99) itotNtime
+endif
 
 if(num_datafiles_OUT>=2.and.num_datafiles_OUT<=nproc_size_global)then
   if(nproc_id_global<num_datafiles_OUT)then
@@ -75,8 +76,9 @@ if(num_datafiles_OUT>=2.and.num_datafiles_OUT<=nproc_size_global)then
     inum_Mxin_datafile(:)=iend_Mxin_datafile(:)-ista_Mxin_datafile(:)+1
 
     write(fileNumber_data, '(i6.6)') nproc_id_global_datafiles
-    file_out_rt_bin_num_bin = trim(adjustl(sysname))//"_rt_"//trim(adjustl(fileNumber_data))//".bin"
-    open(89,file=file_out_rt_bin_num_bin,form='unformatted')
+    file_out_rt_num_bin = trim(adjustl(sysname))//"_rt_"//trim(adjustl(fileNumber_data))//".bin"
+    dir_file_out = trim(odir)//file_out_rt_num_bin
+    open(89,file=dir_file_out,form='unformatted')
 
   end if
 end if

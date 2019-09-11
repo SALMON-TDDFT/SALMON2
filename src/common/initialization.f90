@@ -30,6 +30,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   use sendrecv_grid
   use init_communicator
   use init_poisson_sub
+  use read_write_restart_rt_sub, only: init_dir_out_restart
   implicit none
   integer,intent(in) :: comm
   type(s_orbital_parallel) :: info
@@ -801,27 +802,5 @@ subroutine set_cN(cnmat)
   cNmat(12,12)=-1.d0/194699232.d0
 
 end subroutine set_cN
-
-subroutine init_dir_out_restart(ofile)
-  use structures,    only: s_ofile
-  use inputoutput,   only: theory
-  use misc_routines, only: create_directory
-  implicit none
-  type(s_ofile), intent(inout) :: ofile
-
-  select case(theory)
-  case('DFT','DFT_MD', &
-       'TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT')
-     ofile%dir_out_restart = 'data_for_restart/'
-  end select
-
-  !!! currently, set "./" : change later
-  ofile%dir_out_restart = './'
-
-  if(ofile%dir_out_restart(1:3).ne."./ ") then
-     call create_directory(ofile%dir_out_restart)
-  endif
-
-end subroutine init_dir_out_restart
 
 end module initialization_sub
