@@ -19,7 +19,6 @@ use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
-use read_pslfile_sub
 
 implicit none
 
@@ -44,6 +43,7 @@ use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use salmon_initialization
+use input_pp_sub
 use prep_pp_sub
 use density_matrix, only: calc_density
 use writefield
@@ -237,20 +237,6 @@ else if(ilsda==1)then
 end if
 
 call timer_end(LOG_READ_GS_DATA)
-
-
-call timer_begin(LOG_INIT_RT)
-
-Eion=0.d0
-do ia=1,MI
-do ib=1,ia-1
-  rab=sqrt( (Rion(1,ia)-Rion(1,ib))**2      &
-           +(Rion(2,ia)-Rion(2,ib))**2      &
-           +(Rion(3,ia)-Rion(3,ib))**2)
-  Eion=Eion+Zps(Kion(ia))*Zps(Kion(ib))/rab
-end do
-end do
-call timer_end(LOG_INIT_RT)
 
 
 call timer_begin(LOG_READ_RT_DATA)

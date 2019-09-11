@@ -23,7 +23,6 @@ use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
 use change_order_sub
-use read_pslfile_sub
 use structure_opt_sub
 use salmon_total_energy
 use hpsi_sub
@@ -53,6 +52,7 @@ use read_gs
 use code_optimization
 use salmon_initialization
 use occupation
+use input_pp_sub
 use prep_pp_sub
 implicit none
 integer :: ix,iy,iz,ik,i,j
@@ -198,6 +198,9 @@ if(iopt==1)then
     call read_pslfile(system,pp,ppg)
     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end if
+
+  allocate( Zps(MKI) ) ! future work: remove this line
+  allocate( Rps(MKI) ) ! future work: remove this line
 
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
