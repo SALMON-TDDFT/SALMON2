@@ -35,7 +35,11 @@ contains
     ofile%dir_out_restart = './'
 
     if(ofile%dir_out_restart(1:3).ne."./ ") then
-       call create_directory(ofile%dir_out_restart)
+      if(comm_is_root(nproc_id_global)) then
+        if(.not. create_directory(ofile%dir_out_restart)) then
+          stop 'fail: init_dir_out_restart::create_directory'
+        end if
+      end if
     endif
 
   end subroutine init_dir_out_restart

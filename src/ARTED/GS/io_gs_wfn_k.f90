@@ -21,7 +21,7 @@ module io_gs_wfn_k
   use salmon_communication
   use salmon_parallel
   use global_variables
-  use misc_routines
+  use posix_io, only: create_directory
   implicit none
 
   character(256) :: gs_wfn_directory
@@ -43,7 +43,11 @@ contains
     integer :: nproc_size_kpoint_ms
 
     write (gs_wfn_directory,'(A,A)') trim(base_directory),'/gs_wfn_k/'
-    if(iflag_read_write == iflag_write)call create_directory(gs_wfn_directory)
+    if(iflag_read_write == iflag_write) then
+      if(.not. create_directory(gs_wfn_directory)) then
+        stop 'fail: read_write_gs_wfn_k::create_directory'
+      end if
+    end if
 
     if(comm_is_root(nproc_id_global))then
       occ_file = trim(gs_wfn_directory)//'occupation'
@@ -272,7 +276,7 @@ module io_rt_wfn_k
   use salmon_communication
   use salmon_parallel
   use global_variables
-  use misc_routines
+  use posix_io, only: create_directory
   implicit none
 
   character(256) :: rt_wfn_directory
@@ -299,7 +303,11 @@ contains
     integer :: nproc_size_kpoint_ms
 
     write (rt_wfn_directory,'(A,A)') trim(base_directory),'/rt_wfn_k/'
-    if(iflag_read_write == iflag_write_rt)call create_directory(rt_wfn_directory)
+    if(iflag_read_write == iflag_write_rt) then
+      if (.not. create_directory(rt_wfn_directory)) then
+        stop 'fail: read_write_rt_wfn_k::create_directory'
+      end if
+    end if
 
     if(comm_is_root(nproc_id_global))then
       occ_file = trim(rt_wfn_directory)//'occupation'
@@ -458,7 +466,11 @@ contains
     if (comm_is_root(nproc_id_global)) then
        nfile_ae_ms = 7000
        dir_ae_file_ms = trim(dir_ms)//'rt_ae_field/'
-       if(iflag_read_write_ms==iflag_write_rt) call create_directory(dir_ae_file_ms)
+       if(iflag_read_write_ms==iflag_write_rt) then
+         if(.not. create_directory(dir_ae_file_ms)) then
+           stop 'fail: read_write_rt_wfn_k_mx_each_macro_grid::create_directory'
+         end if
+       end if
        ae_file_ms = trim(dir_ae_file_ms)//'ae_field'
        open(nfile_ae_ms,file=trim(ae_file_ms),form='unformatted')
        select case(iflag_read_write_ms)
@@ -480,7 +492,11 @@ contains
        nfile_other_ms  = nfile_occ_ms
 
        if(comm_is_root(nproc_id_tdks)) then
-          if(iflag_read_write_ms==iflag_write_rt) call create_directory(rt_wfn_directory)
+          if(iflag_read_write_ms==iflag_write_rt) then
+            if (.not. create_directory(rt_wfn_directory)) then
+              stop 'fail: read_write_rt_wfn_k_mx_each_macro_grid::create_directory'
+            end if
+          end if
 
           occ_file = trim(rt_wfn_directory)//'occupation'
           open(nfile_occ_ms,file=trim(occ_file),form='unformatted')

@@ -695,16 +695,23 @@ contains
   
   
   subroutine create_dir_ms
+    use posix_io, only: create_directory
     implicit none
     integer :: imacro
 
-    call create_directory(dir_ms)
-    call create_directory(dir_ms_RT_Ac)
+    if (.not. create_directory(dir_ms)) then
+      stop 'fail: create_dir_ms::create_directory(dir_ms)'
+    end if
+
+    if (.not. create_directory(dir_ms_RT_Ac)) then
+      stop 'fail: create_dir_ms::create_directory(dir_ms_RT_Ac)'
+    end if
 
     do imacro = nmacro_s, nmacro_e
-       call create_directory(dir_ms_M(imacro))
+      if (.not. create_directory(dir_ms_M(imacro))) then
+        stop 'fail: create_dir_ms::create_directory(dir_ms_M(imacr))'
+      end if
     enddo
-
   end subroutine
 
   subroutine write_data_out(index)

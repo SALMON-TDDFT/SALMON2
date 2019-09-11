@@ -208,7 +208,7 @@ Subroutine write_GS_data
   !--------------------------------------------------------------------------------
   !! export all orbital wave functions in cube or vtk format (multiplying phase factor)
     subroutine write_psi_data()
-      use misc_routines
+      use posix_io, only: create_directory
       implicit none
       integer :: fh_psi
       integer :: ik,ib,i,j,ix,iy,iz
@@ -220,7 +220,9 @@ Subroutine write_GS_data
       select case(format_voxel_data)
       case ('cube')
          write(gs_wfn_k_cube_vtk_dir,'(A,A)') trim(base_directory),'/gs_wfn_cube/'
-         call create_directory(gs_wfn_k_cube_vtk_dir)
+         if (.not. create_directory(gs_wfn_k_cube_vtk_dir)) then
+           stop 'fail: write_psi_data::create_directory'
+         end if
 
          do ik=NK_s,NK_e
          do ib=1,NB
@@ -271,7 +273,9 @@ Subroutine write_GS_data
       case ('vtk')
 
          write(gs_wfn_k_cube_vtk_dir,'(A,A)') trim(base_directory),'/gs_wfn_vtk/'
-         call create_directory(gs_wfn_k_cube_vtk_dir)
+         if (.not. create_directory(gs_wfn_k_cube_vtk_dir)) then
+           stop 'fail: write_psi_data::create_directory'
+         end if
 
          do ik=NK_s,NK_e
          do ib=1,NB
