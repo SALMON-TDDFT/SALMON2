@@ -58,6 +58,7 @@ use code_optimization
 use salmon_initialization
 use occupation
 use init_poisson_sub
+use sym_rho_sub, only: init_sym_rho
 implicit none
 integer :: ix,iy,iz,ik,ikoa,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -110,6 +111,7 @@ call convert_input_scf(info,info_field,file_atoms_coo,mixing,poisson)
 call init_dft(lg,system,stencil)
 call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
 call init_orbital_parallel_singlecell(system,info)
+call init_sym_rho( lg%num, mg%is, mg%ie, info%icomm_r )
 
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"

@@ -15,14 +15,57 @@ module sym_sub
 contains
 
 
-  subroutine init_sym_sub( Amat, Bmat )
+  subroutine init_sym_sub( Amat, Bmat, epdir )
     implicit none
     real(8),intent(in) :: Amat(3,3), Bmat(3,3) ! Lattice vectors
+    real(8),intent(in) :: epdir(3)
     real(8) :: Ainv(3,3), Binv(3,3), tmpmat(3,3), pi2
-    integer :: nsym, isym
+    real(8),allocatable :: work(:,:,:)
+    integer :: nsym, isym, n
+    logical :: ok(3)
+
     write(*,'(a60)') repeat("-",40)//" init_sym_sub(start)"
+
     call read_SymMat
     nsym=size(SymMatR,3)
+
+    allocate( work(3,4,nsym) ); work=0.0d0
+
+    n=0
+    do isym=1,nsym
+       ok=.true.
+       if ( epdir(1)/=0.0d0 ) then
+          ok(1)=.false.
+          if ( SymMatR(1,1,isym)==1.0d0 .and. SymMatR(2,1,isym)==0.0d0 .and. SymMatR(3,1,isym)==0.0d0 ) ok(1)=.true.
+       end if
+       if ( epdir(2)/=0.0d0 ) then
+          ok(2)=.false.
+          if ( SymMatR(1,2,isym)==0.0d0 .and. SymMatR(2,2,isym)==1.0d0 .and. SymMatR(3,2,isym)==0.0d0 ) ok(2)=.true.
+       end if
+       if ( epdir(3)/=0.0d0 ) then
+          ok(3)=.false.
+          if ( SymMatR(1,3,isym)==0.0d0 .and. SymMatR(2,3,isym)==0.0d0 .and. SymMatR(3,3,isym)==1.0d0 ) ok(3)=.true.
+       end if
+       if ( all(ok) ) then
+          n=n+1
+          work(:,:,n)=SymMatR(:,:,isym)
+       end if
+    end do
+
+    nsym=n
+    SymMatR=0.0d0
+    SymMatR(:,:,1:nsym)=work(:,:,1:nsym)
+
+    do isym=1,nsym
+       write(*,'(1x,i4,3f10.5,2x,f10.5)') isym,SymMatR(1,:,isym)
+       write(*,'(1x,4x,3f10.5,2x,f10.5)')      SymMatR(2,:,isym)
+       write(*,'(1x,4x,3f10.5,2x,f10.5)')      SymMatR(3,:,isym)
+    end do
+
+    deallocate( work )
+
+! ---
+
     allocate( SymMatA(3,4,nsym) ); SymMatA=0.0d0
     allocate( SymMatB(3,4,nsym) ); SymMatB=0.0d0
     pi2=2.0d0*acos(-1.0d0)

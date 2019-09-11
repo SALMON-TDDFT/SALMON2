@@ -25,7 +25,8 @@ subroutine init_dft(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
-  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin
+  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin &
+  & ,epdir_re1
   use sym_sub, only: init_sym_sub
   implicit none
   type(s_rgrid)      :: lg
@@ -63,7 +64,7 @@ subroutine init_dft(lg,system,stencil)
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
   call init_lattice(system,stencil)
-  call init_sym_sub( system%primitive_a, system%primitive_b )
+  call init_sym_sub( system%primitive_a, system%primitive_b, epdir_re1 )
   call init_kvector(num_kgrid,system)
 
   system%iperiodic = iperiodic
