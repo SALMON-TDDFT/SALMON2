@@ -16,7 +16,7 @@
 !-----------------------------------------------------------------------------------------
 subroutine eh_finalize(fs,fw)
   use salmon_global,        only: dt_em,unit_system,iperiodic,ae_shape1,ae_shape2,e_impulse,sysname, &
-                                  nt_em,nenergy,de,directory,iobs_num_em,iobs_samp_em,obs_plane_em
+                                  nt_em,nenergy,de,base_directory,iobs_num_em,iobs_samp_em,obs_plane_em
   use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
@@ -35,7 +35,7 @@ subroutine eh_finalize(fs,fw)
     if(iperiodic==0) then
       !output time-dependent matter dipole data
       if(comm_is_root(nproc_id_global)) then
-        save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_p.data'
+        save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_p.data'
         open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
@@ -55,7 +55,7 @@ subroutine eh_finalize(fs,fw)
       call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%dip_lr(:,2),fw%fr_lr(:,2),fw%fi_lr(:,2))
       call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr,fw%dip_lr(:,3),fw%fr_lr(:,3),fw%fi_lr(:,3))
       if(comm_is_root(nproc_id_global)) then
-        save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_lr.data'
+        save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_lr.data'
         open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
@@ -74,7 +74,7 @@ subroutine eh_finalize(fs,fw)
     elseif(iperiodic==3) then
       !output time-dependent average  matter current density data and average electric field data
       if(comm_is_root(nproc_id_global)) then
-        save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_current.data'
+        save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_current.data'
         open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
@@ -88,7 +88,7 @@ subroutine eh_finalize(fs,fw)
         end do
         close(fw%ifn)
         
-        save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_e_field.data'
+        save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_e_field.data'
         open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
@@ -112,7 +112,7 @@ subroutine eh_finalize(fs,fw)
       call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr+0.5d0*dt_em,fw%e_lr(:,2),fw%er_lr(:,2),fw%ei_lr(:,2))
       call eh_fourier(nt_em,nenergy,dt_em,de,fw%time_lr+0.5d0*dt_em,fw%e_lr(:,3),fw%er_lr(:,3),fw%ei_lr(:,3))
       if(comm_is_root(nproc_id_global)) then
-        save_name=trim(adjustl(directory))//'/'//trim(adjustl(sysname))//'_lr.data'
+        save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_lr.data'
         open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')
@@ -134,7 +134,7 @@ subroutine eh_finalize(fs,fw)
   if(iobs_num_em>0) then
     if(comm_is_root(nproc_id_global)) then
       !make information file
-      open(fw%ifn,file=trim(directory)//"/obs0_info.data")
+      open(fw%ifn,file=trim(base_directory)//"/obs0_info.data")
       write(fw%ifn,'(A,A14)')                      'unit_system       =',trim(unit_system)
       write(fw%ifn,'(A,I14)')                      'iperiodic         =',iperiodic
       write(fw%ifn,'(A,ES14.5)')                   'dt_em             =',dt_em*utime_from_au

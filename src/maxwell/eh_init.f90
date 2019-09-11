@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_init(fs,fw)
-  use salmon_global,        only: nt_em,al_em,dl_em,dt_em,boundary_em,iperiodic,directory,&
+  use salmon_global,        only: nt_em,al_em,dl_em,dt_em,boundary_em,iperiodic,base_directory,&
                                   imedia_num,shape_file,epsilon,rmu,sigma,type_media,&
                                   pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
                                   iobs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
@@ -435,7 +435,7 @@ subroutine eh_init(fs,fw)
       write(*,*) "**************************"
       do ii=1,iobs_num_em
         write(save_name,*) ii
-        save_name=trim(adjustl(directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
+        save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
         open(fw%ifn,file=save_name)
         select case(unit_system)
         case('au','a.u.')

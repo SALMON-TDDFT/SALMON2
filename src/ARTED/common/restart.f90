@@ -50,9 +50,9 @@ subroutine prep_backup_values(is_backup)
       write(dump_filename,'(A,A,A,I6.6)') 'dump_',trim(SYSname),'_',iter_now
       open(iounit, file=gen_filename(reent_filename))
       write(iounit,"(A)") '&control'
-      write(iounit,"(A)") "restart_option = 'restart'  "
+      write(iounit,"(A)") "yn_restart = 'y'  "
       write(iounit,"(A,e26.16e3)") "Time_shutdown=",Time_shutdown
-      write(iounit,"(A)") "directory = '"//trim(directory)//"'  !directory"
+      write(iounit,"(A)") "base_directory = '"//trim(base_directory)//"'  !base_directory"
       write(iounit,"(A)") "dump_filename = '"//trim(dump_filename)//"'  !dump_filename"
       write(iounit,"(A)") '/'
       write(iounit,"(A)") '&tgrid'
@@ -70,9 +70,9 @@ subroutine prep_backup_values(is_backup)
     gNt = Nt
     call comm_bcast(gNt, nproc_group_global)
 #ifdef ARTED_USE_FORTRAN2008
-    write (process_directory,'(A,A,I5.5,A)') trim(directory),'/work_p',nproc_id_global,'/'
+    write (process_directory,'(A,A,I5.5,A)') trim(base_directory),'/work_p',nproc_id_global,'/'
 #else
-    process_directory = trim(directory)
+    process_directory = trim(base_directory)
 #endif
     open(iounit, status='old', form='unformatted', file=gen_filename(dump_filename, nproc_id_global))
   end if
@@ -92,11 +92,11 @@ subroutine prep_backup_values(is_backup)
   BACKUP(yn_md)
   BACKUP(use_ms_maxwell)
   BACKUP(yn_opt)
-!  BACKUP(restart_option)
-  BACKUP(backup_frequency)
+!  BACKUP(yn_restart)
+  BACKUP(checkpoint_interval)
 !  BACKUP(time_shutdown)
   BACKUP(sysname)
-!  BACKUP(directory)
+!  BACKUP(base_directory)
 !  BACKUP(dump_filename)
   BACKUP(unit_time)
   BACKUP(unit_length)
@@ -677,7 +677,7 @@ contains
       write(cMyrank,'(I5.5)') procid
       gen_filename = trim(process_directory)//trim(base)//'.p'//trim(cMyrank)
     else
-      gen_filename = trim(directory)//trim(base)
+      gen_filename = trim(base_directory)//trim(base)
     end if
   end function
 

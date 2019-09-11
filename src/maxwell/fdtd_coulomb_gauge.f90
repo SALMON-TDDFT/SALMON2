@@ -466,7 +466,7 @@ contains
   end subroutine pulse
 
   subroutine init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
-    use salmon_global, only: sysname,directory
+    use salmon_global, only: sysname,base_directory
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_initialization, only: setbn
@@ -536,7 +536,7 @@ contains
     fw%vec_je_old = 0d0
 
     if(comm_is_root(nproc_id_global)) then
-      write(filename,"(2A,'_rt_micro.data')") trim(directory),trim(SYSname)
+      write(filename,"(2A,'_rt_micro.data')") trim(base_directory),trim(SYSname)
       fw%fh_rt_micro = open_filehandle(filename)
       write(fw%fh_rt_micro, '("#",99(1X,I0,":",A,"[",A,"]"))') &
         & 1, "time", trim(t_unit_time%name), &
@@ -559,11 +559,11 @@ contains
        & 18, "E_joule",         "a.u."
 
     ! for spatial distribution of excitation energy
-      write(filename,"(2A,'_excitation.data')") trim(directory),trim(SYSname)
+      write(filename,"(2A,'_excitation.data')") trim(base_directory),trim(SYSname)
       fw%fh_excitation = open_filehandle(filename)
 
     ! for the vector potential Ac(z,t)
-      write(filename,"(2A,'_Ac_zt.data')") trim(directory),trim(SYSname)
+      write(filename,"(2A,'_Ac_zt.data')") trim(base_directory),trim(SYSname)
       fw%fh_Ac_zt = open_filehandle(filename)
     end if
 

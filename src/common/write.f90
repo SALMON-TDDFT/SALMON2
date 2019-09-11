@@ -599,7 +599,7 @@ contains
     use salmon_parallel,      only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file,          only: open_filehandle
-    use inputoutput,          only: sysname, directory, num_kgrid
+    use inputoutput,          only: sysname, base_directory, num_kgrid
     use band,                 only: calc_kgrid_prod
     implicit none
     type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
@@ -621,7 +621,7 @@ contains
       & 1:system%nk)
 
     ! Export filename: project_directory/sysname_kprod_dk.data
-    file_prod_dk_data = trim(directory) // trim(sysname) // "_prod_dk.data"
+    file_prod_dk_data = trim(base_directory) // trim(sysname) // "_prod_dk.data"
 
     ! If k-point is distributed as uniform rectangular grid:
     if (0 < minval(num_kgrid)) then

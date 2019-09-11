@@ -22,7 +22,7 @@ subroutine write_excited_electron(iter)
   integer iter, imacro, ix_m, iy_m, iz_m, fh
   character(100) file_exc_elec
   
-  write(file_exc_elec,'(A, A,"_exc_elec_",I6.6,".out")') trim(directory), trim(SYSname), iter
+  write(file_exc_elec,'(A, A,"_exc_elec_",I6.6,".out")') trim(base_directory), trim(SYSname), iter
   fh = open_filehandle(file_exc_elec)
   write(fh, '("#",1X,A)') "imacro ix_m iy_m iz_m excited_electron"
   do imacro = 1, nmacro

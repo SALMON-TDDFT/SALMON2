@@ -701,7 +701,7 @@ end subroutine calc_opt_ground_state_useE
     integer :: nproc_id_kpoint_ms
     integer :: nproc_size_kpoint_ms
 
-    write (gs_wfn_directory,'(A,A)') trim(directory),'/gs_wfn_k/'
+    write (gs_wfn_directory,'(A,A)') trim(base_directory),'/gs_wfn_k/'
 
     if(comm_is_root(nproc_id_global))then
        occ_file      = trim(gs_wfn_directory)//'occupation'
