@@ -15,84 +15,84 @@
 !
 !=======================================================================
 
-SUBROUTINE write_gs_bin(lg,ng,info,mixing)
+SUBROUTINE write_gs_bin(odir,lg,ng,info,mixing)
 use structures, only: s_rgrid, s_orbital_parallel, s_mixing
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-use calc_myob_sub
-use check_corrkob_sub
-use scf_data
-use new_world_sub
-use allocate_mat_sub
+use calc_myob_sub, only: calc_myob
+use check_corrkob_sub, only: check_corrkob
+use new_world_sub, only: wrapper_allgatherv_vlocal   !coming from GCEED
+use allocate_mat_sub                                 !coming from GCEED
 implicit none
 type(s_rgrid), intent(in)    :: lg, ng
 type(s_orbital_parallel),intent(in) :: info
 type(s_mixing),intent(inout) :: mixing
-integer :: is,iob,jj,ik
-integer :: ix,iy,iz
-real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
-complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
-character(100) :: file_out_gs_num_bin
-integer :: ibox
-integer :: ii,j1,j2,j3
+
+integer :: is,iob,jj,ik, ix,iy,iz
+integer :: ibox, ii,j1,j2,j3, iu1_w,iu2_w
 integer :: myrank_datafiles
 integer :: ista_Mxin_datafile(3)
 integer :: iend_Mxin_datafile(3)
 integer :: inum_Mxin_datafile(3)
 integer :: nproc_xyz_datafile(3)
+integer :: iob_myob, icorr_p
+real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
+complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
 character(8) :: fileNumber_data
-integer :: iob_myob
-integer :: icorr_p
+character(100) :: file_out_gs_num_bin, dir_file_out
+character(*)   :: odir
+
 
 if(comm_is_root(nproc_id_global))then
 
-  open(97,file=file_out_gs_bin,form='unformatted')
+   iu1_w = 97
+
+   dir_file_out = trim(odir)//file_out_gs_bin
+   open(iu1_w,file=dir_file_out,form='unformatted')
   
 !version number
-  version_num(1)=41
-  version_num(2)=1
-  write(97) version_num(1),version_num(2)
-  write(97) Nd
-  write(97) ilsda
-  write(97) iflag_ps
-  write(97) iend_Mx_ori(:3)
-  write(97) lg%ie(:3)
-  if(ilsda == 0)then
-    write(97) MST(1)
-    write(97) ifMST(1)
-  else if(ilsda == 1)then
-    write(97) (MST(is),is=1,2)
-    write(97) (ifMST(is),is=1,2)
-  end if
-  if(iflag_ps.eq.1)then
-    write(97) MI,MKI
-  end if
-  write(97) (Hgs(jj),jj=1,3)
-  write(97) (rLsize(jj,ntmg),jj=1,3)
-  write(97) Miter
-  write(97) layout_multipole
+   version_num(1)=41
+   version_num(2)=1
+   write(iu1_w) version_num(1),version_num(2)
+   write(iu1_w) Nd
+   write(iu1_w) ilsda
+   write(iu1_w) iflag_ps
+   write(iu1_w) iend_Mx_ori(:3)
+   write(iu1_w) lg%ie(:3)
+   if(ilsda == 0)then
+      write(iu1_w) MST(1)
+      write(iu1_w) ifMST(1)
+   else if(ilsda == 1)then
+      write(iu1_w) (MST(is),is=1,2)
+      write(iu1_w) (ifMST(is),is=1,2)
+   end if
+   if(iflag_ps.eq.1)then
+      write(iu1_w) MI,MKI
+   end if
+   write(iu1_w) (Hgs(jj),jj=1,3)
+   write(iu1_w) (rLsize(jj,ntmg),jj=1,3)
+   write(iu1_w) Miter
+   write(iu1_w) layout_multipole
   
-  if(iflag_ps.eq.1)then
-    write(97) Kion(:MI)
-    write(97) Rion(:,:MI)
-    write(97) iZatom(:MKI)
-    write(97) file_pseudo(:MKI) !ipsfileform(:MKI)
-    write(97) Zps(:MKI),Rps(:MKI)
-    write(97) AtomName(:MI) 
-    write(97) iAtomicNumber(:MI) 
-  end if
+   if(iflag_ps.eq.1)then
+      write(iu1_w) Kion(:MI)
+      write(iu1_w) Rion(:,:MI)
+      write(iu1_w) iZatom(:MKI)
+      write(iu1_w) file_pseudo(:MKI) !ipsfileform(:MKI)
+      write(iu1_w) Zps(:MKI),Rps(:MKI)
+      write(iu1_w) AtomName(:MI) 
+      write(iu1_w) iAtomicNumber(:MI) 
+   end if
   
 end if
 
 if(comm_is_root(nproc_id_global))then
-  if(iflag_ps.eq.1)then
-    write(97) Mlps(:MKI),Lref(:MKI)
-  end if
+   if(iflag_ps.eq.1) write(iu1_w) Mlps(:MKI),Lref(:MKI)
 end if
 
-allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-allocate(cmatbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+allocate(matbox(  lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+allocate(matbox2( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
 if(OC<=2)then
@@ -106,12 +106,12 @@ if(OC<=2)then
       ibox=1
       nproc_xyz_datafile=1
       do ii=1,19
-        do jj=3,1,-1
-          if(ibox<num_datafiles_OUT)then
+      do jj=3,1,-1
+         if(ibox<num_datafiles_OUT)then
             nproc_xyz_datafile(jj)=nproc_xyz_datafile(jj)*2
             ibox=ibox*2
-          end if
-        end do
+         end if
+      end do
       end do
 
       do j3=0,nproc_xyz_datafile(3)-1
@@ -141,7 +141,9 @@ if(OC<=2)then
 
       write(fileNumber_data, '(i6.6)') myrank_datafiles
       file_out_gs_num_bin = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
-      open(87,file=file_out_gs_num_bin,form='unformatted')
+      iu2_w = 87
+      dir_file_out = trim(odir)//file_out_gs_num_bin
+      open(iu2_w,file=dir_file_out,form='unformatted')
     end if
   end if
 end if
@@ -166,13 +168,13 @@ case(0)
   
       if(num_datafiles_OUT==1.or.num_datafiles_OUT>nproc_size_global)then
         if(comm_is_root(nproc_id_global))then
-          write(97) ((( matbox_l2(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+          write(iu1_w) ((( matbox_l2(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
         end if
       else
         if(nproc_id_global<num_datafiles_OUT)then
-          write(87) ((( matbox_l2(ix,iy,iz),ix=ista_Mxin_datafile(1),iend_Mxin_datafile(1)),   &
-                                            iy=ista_Mxin_datafile(2),iend_Mxin_datafile(2)),   &
-                                            iz=ista_Mxin_datafile(3),iend_Mxin_datafile(3))
+          write(iu2_w) ((( matbox_l2(ix,iy,iz),ix=ista_Mxin_datafile(1),iend_Mxin_datafile(1)), &
+                                               iy=ista_Mxin_datafile(2),iend_Mxin_datafile(2)), &
+                                               iz=ista_Mxin_datafile(3),iend_Mxin_datafile(3))
         end if
       end if
     end do
@@ -180,11 +182,12 @@ case(0)
   
   else if(OC==3)then
     do iob=1,iobnum
-      write(87,rec=iob) ((( psi(ix,iy,iz,iob,1),ix=mg_sta(1),mg_end(1)),   &
-                                                iy=mg_sta(2),mg_end(2)),   &
-                                                iz=mg_sta(3),mg_end(3))
+      write(iu2_w,rec=iob) ((( psi(ix,iy,iz,iob,1),ix=mg_sta(1),mg_end(1)), &
+                                                   iy=mg_sta(2),mg_end(2)), &
+                                                   iz=mg_sta(3),mg_end(3))
     end do
   end if
+
 case(3)
   if(OC<=2)then
 
@@ -202,13 +205,13 @@ case(3)
       call comm_summation(cmatbox_l,cmatbox_l2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
       if(num_datafiles_OUT==1.or.num_datafiles_OUT>nproc_size_global)then
       if(comm_is_root(nproc_id_global))then
-        write(97) ((( cmatbox_l2(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+        write(iu1_w) ((( cmatbox_l2(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
       end if
       else
         if(nproc_id_global<num_datafiles_OUT)then
-          write(87) ((( cmatbox_l2(ix,iy,iz),ix=ista_Mxin_datafile(1),iend_Mxin_datafile(1)),   &
-                                             iy=ista_Mxin_datafile(2),iend_Mxin_datafile(2)),   &
-                                             iz=ista_Mxin_datafile(3),iend_Mxin_datafile(3))
+          write(iu2_w) ((( cmatbox_l2(ix,iy,iz),ix=ista_Mxin_datafile(1),iend_Mxin_datafile(1)), &
+                                                iy=ista_Mxin_datafile(2),iend_Mxin_datafile(2)), &
+                                                iz=ista_Mxin_datafile(3),iend_Mxin_datafile(3))
         end if
       end if
     end do
@@ -217,9 +220,9 @@ case(3)
   else if(OC==3)then
     do ik=k_sta,k_end
     do iob=1,iobnum
-      write(87,rec=iob) ((( zpsi(ix,iy,iz,iob,ik),ix=mg_sta(1),mg_end(1)),   &
-                                                  iy=mg_sta(2),mg_end(2)),   &
-                                                  iz=mg_sta(3),mg_end(3))
+      write(iu2_w,rec=iob) ((( zpsi(ix,iy,iz,iob,ik),ix=mg_sta(1),mg_end(1)), &
+                                                     iy=mg_sta(2),mg_end(2)), &
+                                                     iz=mg_sta(3),mg_end(3))
     end do
     end do
   end if
@@ -232,26 +235,26 @@ if(OC<=2)then
     if(comm_is_root(nproc_id_global).and.OC==2) close(67)
   else
     if(nproc_id_global<num_datafiles_OUT)then
-      close(87)
+      close(iu2_w)
       if(OC==2) close(67)
     end if
   end if
 else if(OC==3)then
-  close(87)
+  close(iu2_w)
 end if
 
 matbox2=0.d0
 matbox2(ng%is(1):ng%ie(1),   &
         ng%is(2):ng%ie(2),   &
         ng%is(3):ng%ie(3))   &
-   = rho(ng%is(1):ng%ie(1),   &
+  = rho(ng%is(1):ng%ie(1),   &
         ng%is(2):ng%ie(2),   &
         ng%is(3):ng%ie(3))
 
 call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
-  write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+  write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
 end if
 
 do ii=1,mixing%num_rho_stock+1
@@ -259,14 +262,14 @@ do ii=1,mixing%num_rho_stock+1
   matbox2(ng%is(1):ng%ie(1),   &
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))   &
-     = mixing%srho_in(ii)%f(ng%is(1):ng%ie(1),   &
-          ng%is(2):ng%ie(2),   &
-          ng%is(3):ng%ie(3))
+     = mixing%srho_in(ii)%f(ng%is(1):ng%ie(1), &
+                            ng%is(2):ng%ie(2), &
+                            ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
   if(comm_is_root(nproc_id_global))then
-    write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+    write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
   end if
 end do
 
@@ -275,13 +278,13 @@ do ii=1,mixing%num_rho_stock
   matbox2(ng%is(1):ng%ie(1),   &
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))   &
-     = mixing%srho_out(ii)%f(ng%is(1):ng%ie(1),   &
-          ng%is(2):ng%ie(2),   &
-          ng%is(3):ng%ie(3))
+     = mixing%srho_out(ii)%f(ng%is(1):ng%ie(1), &
+                             ng%is(2):ng%ie(2), &
+                             ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
   if(comm_is_root(nproc_id_global))then
-    write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+    write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
   end if
 end do
 
@@ -298,7 +301,7 @@ if(ilsda == 1)then
     call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
     if(comm_is_root(nproc_id_global))then
-      write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
     end if
 
     do ii=1,mixing%num_rho_stock+1
@@ -306,14 +309,14 @@ if(ilsda == 1)then
       matbox2(ng%is(1):ng%ie(1),   &
               ng%is(2):ng%ie(2),   &
               ng%is(3):ng%ie(3))   &
-        = mixing%srho_s_in(ii,is)%f(ng%is(1):ng%ie(1),   &
-                ng%is(2):ng%ie(2),   &
-                ng%is(3):ng%ie(3))
+        = mixing%srho_s_in(ii,is)%f(ng%is(1):ng%ie(1), &
+                                    ng%is(2):ng%ie(2), &
+                                    ng%is(3):ng%ie(3))
 
       call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
       if(comm_is_root(nproc_id_global))then
-        write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+        write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
       end if
     end do
 
@@ -329,7 +332,7 @@ if(ilsda == 1)then
       call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
       if(comm_is_root(nproc_id_global))then
-        write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+        write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
       end if
     end do
     
@@ -338,7 +341,7 @@ if(ilsda == 1)then
 end if
 
 if(comm_is_root(nproc_id_global))then
-  write(97) esp(:itotMST,:num_kpoints_rd),rocc(:itotMST,:num_kpoints_rd)
+  write(iu1_w) esp(:itotMST,:num_kpoints_rd),rocc(:itotMST,:num_kpoints_rd)
 end if
 
 matbox2=0.d0
@@ -352,7 +355,7 @@ matbox2(ng%is(1):ng%ie(1),   &
 call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
-  write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+  write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
 end if
 
 if(ilsda == 0)then
@@ -360,14 +363,14 @@ if(ilsda == 0)then
   matbox2(ng%is(1):ng%ie(1),   &
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))   &
-     = Vxc(ng%is(1):ng%ie(1),   &
+    = Vxc(ng%is(1):ng%ie(1),   &
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
   if(comm_is_root(nproc_id_global))then
-    write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+    write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
   end if
 else if(ilsda == 1) then
   do is=1,2
@@ -375,14 +378,14 @@ else if(ilsda == 1) then
     matbox2(ng%is(1):ng%ie(1),   &
             ng%is(2):ng%ie(2),   &
             ng%is(3):ng%ie(3))   &
-     = Vxc_s(ng%is(1):ng%ie(1),   &
+    = Vxc_s(ng%is(1):ng%ie(1),   &
             ng%is(2):ng%ie(2),   &
             ng%is(3):ng%ie(3),is)
 
     call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
     if(comm_is_root(nproc_id_global))then
-      write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
     end if
   end do
 end if
@@ -399,11 +402,11 @@ matbox2(ng%is(1):ng%ie(1),   &
   call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
-  write(97) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+  write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
 end if
 
 if(comm_is_root(nproc_id_global))then
-  close(97)
+  close(iu1_w)
 end if
 
 deallocate(matbox,matbox2)
@@ -413,36 +416,31 @@ END SUBROUTINE write_gs_bin
 
 !=======================================================================
 
-SUBROUTINE read_gs_bin(lg,mg,ng,info,info_field,system,stencil,mixing)
+SUBROUTINE read_gs_bin(lg,mg,ng,info,mixing)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-use calc_iobnum_sub
-use calc_myob_sub
-use check_corrkob_sub
-use scf_data
-use new_world_sub
-use allocate_mat_sub
-use salmon_initialization
+use calc_iobnum_sub, only: calc_iobnum
+use calc_myob_sub, only: calc_myob
+use check_corrkob_sub, only: check_corrkob
+use initialization_sub, only: set_bN, set_cN
+use new_world_sub, only: wrapper_allgatherv_vlocal   !coming from GCEED
+use allocate_mat_sub                                 !coming from GCEED
 implicit none
 type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
 type(s_orbital_parallel),intent(in) :: info
-type(s_field_parallel),intent(in) :: info_field
-type(s_dft_system),intent(in) :: system
-type(s_stencil),intent(in) :: stencil
 type(s_mixing),intent(inout) :: mixing
-integer :: NI0,Ndv0,Nps0,Nd0
+
+integer :: NI0,Ndv0,Nps0,Nd0, ix,iy,iz
 integer :: ii,is,iob,jj,ibox,j1,j2,j3,ik,i,j
-integer :: ix,iy,iz
+real(8),allocatable :: esp0(:,:),rocc0(:,:)
 real(8),allocatable :: matbox(:,:,:)
 real(8),allocatable :: matbox2(:,:,:)
 real(8),allocatable :: matbox3(:,:,:)
-real(8),allocatable :: esp0(:,:),rocc0(:,:)
 complex(8),allocatable :: cmatbox(:,:,:)
 complex(8),allocatable :: cmatbox2(:,:,:)
-character(100) :: file_in_gs_num_bin
 character(8) :: cha_version_num(2)
 integer :: version_num_box(2)
 integer :: myrank_datafiles
@@ -450,41 +448,31 @@ integer :: ista_Mxin_datafile(3)
 integer :: iend_Mxin_datafile(3)
 integer :: inum_Mxin_datafile(3)
 integer :: nproc_xyz_datafile(3)
-character(8) :: fileNumber_data
-integer :: maxMdvbox
-integer :: iob_myob
+integer :: maxMdvbox, pstart(2),pend(2)
+integer :: iob_myob, is_sta,is_end
 integer :: icheck_corrkob
-integer :: pstart(2),pend(2)
-integer :: is_sta,is_end
-integer :: p0
-integer :: iobnum0
-integer :: icount
-complex(8),parameter :: zi=(0.d0,1.d0)
-
-integer :: ig_sta(3),ig_end(3),ig_num(3)
+integer :: p0, iobnum0, icount
+integer :: icheck_read, ifilenum_data, icomm
+integer :: ifMST0(2), imesh_oddeven0, itmg, nspin
+integer :: ig_sta(3),ig_end(3),ig_num(3), iu1_r
 real(8),allocatable :: matbox_read(:,:,:)
 real(8),allocatable :: matbox_read2(:,:,:)
+real(8),allocatable :: matbox_read3(:,:,:)
 complex(8),allocatable :: cmatbox_read(:,:,:)
 complex(8),allocatable :: cmatbox_read2(:,:,:)
-real(8),allocatable :: matbox_read3(:,:,:)
 complex(8),allocatable :: cmatbox_read3(:,:,:)
-integer :: icheck_read
-integer :: ifilenum_data
-integer :: icomm
-integer :: ifMST0(2)
-integer :: imesh_oddeven0
-integer :: itmg
+complex(8),parameter :: zi=(0.d0,1.d0)
+character(8) :: fileNumber_data
+character(100) :: file_in_gs_num_bin
 
-integer :: nspin
-
-call setbN(bnmat)
-call setcN(cnmat)
+call set_bN(bnmat)
+call set_cN(cnmat)
 
 if(comm_is_root(nproc_id_global))then
+  iu1_r = 96
   write(*,*) file_in_gs_bin
-  open(96,file=file_in_gs_bin,form='unformatted')
-
-  read(96) version_num_box(1),version_num_box(2)
+  open(iu1_r,file=file_in_gs_bin,form='unformatted')
+  read(iu1_r) version_num_box(1),version_num_box(2)
 end if
 
 call comm_bcast(version_num_box,nproc_group_global)
@@ -493,7 +481,7 @@ if(version_num_box(1)>=40)then
   continue
 else if((version_num_box(1)==17.and.version_num_box(2)>=13).or.version_num_box(1)>=18) then
   if(comm_is_root(nproc_id_global))then
-    read(96) imesh_oddeven0
+    read(iu1_r) imesh_oddeven0
   end if
   call comm_bcast(imesh_oddeven0,nproc_group_global)
 else
@@ -501,15 +489,15 @@ else
 end if
 
 if(comm_is_root(nproc_id_global)) then
-   read(96) Nd0
-   read(96) ilsda
+   read(iu1_r) Nd0
+   read(iu1_r) ilsda
    if(version_num_box(1)<=36)then
-     read(96) iflag_ps,ibox
+     read(iu1_r) iflag_ps,ibox
    else
-     read(96) iflag_ps
+     read(iu1_r) iflag_ps
    end if
    if(version_num_box(1)==17.and.version_num_box(2)<=10)then
-     read(96) NI0,Ndv0,Nps0,Nd0
+     read(iu1_r) NI0,Ndv0,Nps0,Nd0
    end if
 
    write(cha_version_num(1), '(i8)') version_num_box(1)
@@ -537,45 +525,45 @@ call comm_bcast(ilsda,nproc_group_global)
 call comm_bcast(iflag_ps,nproc_group_global)
 
 if(comm_is_root(nproc_id_global))then
-  read(96) iend_Mx_ori(:3)
-  read(96) lg_end(:3)
+  read(iu1_r) iend_Mx_ori(:3)
+  read(iu1_r) lg_end(:3)
   if(ilsda == 0) then
-    read(96) MST0(1)
-!    read(96) ifMST(1)
+    read(iu1_r) MST0(1)
+!    read(iu1_r) ifMST(1)
     if(iSCFRT==2)then
-      read(96) ifMST(1)
+      read(iu1_r) ifMST(1)
     else
-      read(96) ifMST0(1)
+      read(iu1_r) ifMST0(1)
     endif
   else if(ilsda == 1)then
-    read(96) (MST0(is),is=1,2)
-!    read(96) (ifMST(is),is=1,2)
+    read(iu1_r) (MST0(is),is=1,2)
+!    read(iu1_r) (ifMST(is),is=1,2)
     if(iSCFRT==2)then
-      read(96) (ifMST(is),is=1,2)
+      read(iu1_r) (ifMST(is),is=1,2)
     else
-      read(96) (ifMST0(is),is=1,2)
+      read(iu1_r) (ifMST0(is),is=1,2)
     endif
   end if
   if(version_num_box(1)<=31)then
     if(iflag_ps.eq.1)then
-      read(96) MI_read,MKI,maxMdvbox
+      read(iu1_r) MI_read,MKI,maxMdvbox
     end if
   else
     if(iflag_ps.eq.1)then
-      read(96) MI_read,MKI
+      read(iu1_r) MI_read,MKI
     end if
   end if
   if(version_num_box(1)>=35)then
-    read(96) (Hgs(jj),jj=1,3)
+    read(iu1_r) (Hgs(jj),jj=1,3)
   else
-    read(96) Hgs(1)
+    read(iu1_r) Hgs(1)
     Hgs(2)=Hgs(1)
     Hgs(3)=Hgs(1)
   end if
   Hvol=Hgs(1)*Hgs(2)*Hgs(3)
-  read(96) (rLsize(jj,1),jj=1,3)
-  read(96) Miter
-  read(96) ibox
+  read(iu1_r) (rLsize(jj,1),jj=1,3)
+  read(iu1_r) Miter
+  read(iu1_r) ibox
 end if
 
 call comm_bcast(iend_Mx_ori,nproc_group_global)
@@ -654,10 +642,10 @@ end if
 if(iflag_ps.eq.1)then
    if(comm_is_root(nproc_id_global))then
      if(version_num_box(1)<=31)then
-       read(96) 
-       read(96) 
+       read(iu1_r) 
+       read(iu1_r) 
      else if(version_num_box(1)<=40)then
-       read(96) 
+       read(iu1_r) 
      end if
    end if
 
@@ -666,17 +654,17 @@ if(iflag_ps.eq.1)then
   end if
   if(iSCFRT==2) allocate( AtomName(MI), iAtomicNumber(MI) )
   if(comm_is_root(nproc_id_global))then
-    read(96) Kion(:MI_read)
-    read(96) Rion(:,:MI_read)
-    read(96) iZatom(:MKI)
+    read(iu1_r) Kion(:MI_read)
+    read(iu1_r) Rion(:,:MI_read)
+    read(iu1_r) iZatom(:MKI)
     if(version_num_box(1)>=34)then
-      read(96) file_pseudo(:MKI) !ipsfileform(:MKI)
+      read(iu1_r) file_pseudo(:MKI) !ipsfileform(:MKI)
     else
       stop "This version is already invalid."
     end if
-    read(96) 
-    read(96) AtomName(:MI_read)
-    read(96) iAtomicNumber(:MI_read)
+    read(iu1_r) 
+    read(iu1_r) AtomName(:MI_read)
+    read(iu1_r) iAtomicNumber(:MI_read)
   end if
   
   call comm_bcast(Kion,nproc_group_global)
@@ -819,12 +807,12 @@ if(icalcforce==1) allocate( Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(
 if(comm_is_root(nproc_id_global))then
   if(version_num_box(1)>=41)then
     if(iflag_ps.eq.1)then
-      read(96) Mlps(:MKI),Lref(:MKI)
+      read(iu1_r) Mlps(:MKI),Lref(:MKI)
     end if
   else if(version_num_box(1)>=32)then
     if(iflag_ps.eq.1)then
-      read(96) 
-      read(96) Mlps(:MKI),Lref(:MKI)
+      read(iu1_r) 
+      read(iu1_r) Mlps(:MKI),Lref(:MKI)
     end if
   end if
 end if
@@ -838,9 +826,9 @@ end if
 allocate( cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
 
 if(num_datafiles_IN==1)then
-  ifilenum_data=96
+  ifilenum_data = iu1_r
 else
-  ifilenum_data=86
+  ifilenum_data = 86
 end if
 
 !set ista_Mxin_datafile etc.
@@ -881,7 +869,7 @@ if(IC<=2)then
       if(num_datafiles_IN>=2.and.nproc_id_global<num_datafiles_IN)then
         write(fileNumber_data, '(i6.6)') myrank_datafiles
         file_in_gs_num_bin = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
-        open(86,file=file_in_gs_num_bin,form='unformatted')
+        open(ifilenum_data,file=file_in_gs_num_bin,form='unformatted')
       end if
     end if
   end if
@@ -1056,7 +1044,7 @@ if(IC<=2)then
  
   if(version_num_box(1)<=29.or.(version_num_box(1)==30.and.version_num_box(2)<=18))then
     if(comm_is_root(nproc_id_global))then
-      read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+      read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
     end if
     if(iSCFRT==1)then
       call comm_bcast(matbox_read,nproc_group_global)
@@ -1070,7 +1058,7 @@ if(IC<=2)then
     end if
   
     if(comm_is_root(nproc_id_global))then
-      read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+      read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
     end if
     if(iSCFRT==1)then
       call comm_bcast(matbox_read,nproc_group_global)
@@ -1086,7 +1074,7 @@ if(IC<=2)then
     if(ilsda == 1)then
       do is=1,2
         if(comm_is_root(nproc_id_global))then
-          read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+          read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
         do iz=mg%is(3),mg%ie(3)
@@ -1098,7 +1086,7 @@ if(IC<=2)then
         end do
   
         if(comm_is_root(nproc_id_global))then
-          read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+          read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
         do iz=ng%is(3),ng%ie(3)
@@ -1110,7 +1098,7 @@ if(IC<=2)then
         end do
   
         if(comm_is_root(nproc_id_global))then
-          read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+          read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
         do iz=ng%is(3),ng%ie(3)
@@ -1126,7 +1114,7 @@ if(IC<=2)then
   else
     do ii=1,mixing%num_rho_stock+1
       if(comm_is_root(nproc_id_global))then
-        read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+        read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
       end if
       if(iSCFRT==1)then
         call comm_bcast(matbox_read,nproc_group_global)
@@ -1142,7 +1130,7 @@ if(IC<=2)then
   
     do ii=1,mixing%num_rho_stock
       if(comm_is_root(nproc_id_global))then
-        read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+        read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
       end if
       if(iSCFRT==1)then
         call comm_bcast(matbox_read,nproc_group_global)
@@ -1159,7 +1147,7 @@ if(IC<=2)then
     if(ilsda == 1)then
       do is=1,2
         if(comm_is_root(nproc_id_global))then
-          read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+          read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
         end if
         call comm_bcast(matbox_read,nproc_group_global)
         do iz=mg%is(3),mg%ie(3)
@@ -1172,7 +1160,7 @@ if(IC<=2)then
   
         do ii=1,mixing%num_rho_stock+1
           if(comm_is_root(nproc_id_global))then
-            read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+            read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
           end if
           if(iSCFRT==1)then
             call comm_bcast(matbox_read,nproc_group_global)
@@ -1188,7 +1176,7 @@ if(IC<=2)then
     
         do ii=1,mixing%num_rho_stock
           if(comm_is_root(nproc_id_global))then
-            read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+            read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
           end if
           if(iSCFRT==1)then
             call comm_bcast(matbox_read,nproc_group_global)
@@ -1207,7 +1195,7 @@ if(IC<=2)then
 end if
 
 if(comm_is_root(nproc_id_global))then
-  read(96) esp0(:,:),rocc0(:,:)
+  read(iu1_r) esp0(:,:),rocc0(:,:)
   if(itotMST0>=itotMST)then
     if(ilsda == 0)then
       is_sta=1
@@ -1267,7 +1255,7 @@ if(IC<=2)then
   else if(ilsda == 1)then
     do is=1,2
       if(comm_is_root(nproc_id_global))then
-        read(96) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
+        read(iu1_r) ((( matbox_read(ix,iy,iz),ix=ig_sta(1),ig_end(1)),iy=ig_sta(2),ig_end(2)),iz=ig_sta(3),ig_end(3))
       end if
       call comm_bcast(matbox_read,nproc_group_global)
       do iz=mg%is(3),mg%ie(3)
@@ -1286,12 +1274,12 @@ end if
 if(comm_is_root(nproc_id_global))then
   if(version_num_box(1)<=31)then
     if(iflag_ps.eq.1)then
-      read(96) 
-      read(96) Mlps(:MKI),Lref(:MKI)
+      read(iu1_r) 
+      read(iu1_r) Mlps(:MKI),Lref(:MKI)
     end if
   end if
 
-close(96)
+close(iu1_r)
 
 end if
 
@@ -1344,7 +1332,6 @@ end if
 
 
 deallocate( esp0,rocc0 )
-
 deallocate(matbox,matbox2,matbox3)
 deallocate(cmatbox,cmatbox2)
 

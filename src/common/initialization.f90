@@ -16,7 +16,7 @@
 
 #include "config.h"
 
-module salmon_initialization
+module initialization_sub
   implicit none
   integer,parameter,private :: Nd=4
 
@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng)
+subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
   use salmon_global, only: iperiodic,num_multipole_xyz,layout_multipole
   use sendrecv_grid
@@ -40,6 +40,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   type(s_reciprocal_grid) :: fg
   type(s_poisson)    :: poisson
   type(s_sendrecv_grid) :: srg,srg_ng
+  type(s_ofile) :: ofile
   !
   integer,dimension(2,3) :: neig,neig_ng
 
@@ -64,6 +65,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
+  call init_dir_out_restart(ofile)
 
 end subroutine init_dft
 
@@ -149,8 +151,8 @@ subroutine init_dft_system(lg,system,stencil)
     system%rocc(1:nelec/2,:,1:2) = 1d0
   end select
 
-  call setbn(bnmat)
-  call setcn(cnmat)
+  call set_bn(bnmat)
+  call set_cn(cnmat)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
@@ -672,7 +674,7 @@ end subroutine set_gridcoordinate
 
 !===================================================================================================================================
 
-subroutine setbn(bnmat)
+subroutine set_bN(bnmat)
   implicit none
   real(8) :: bnmat(4,4)
 
@@ -690,9 +692,9 @@ subroutine setbn(bnmat)
   bNmat(3,4)=4.d0/105.d0
   bNmat(4,4)=-1.d0/280.d0
 
-end subroutine setbN
+end subroutine set_bN
 
-subroutine setcn(cnmat)
+subroutine set_cN(cnmat)
   implicit none
   real(8) :: cnmat(0:12,12)
 
@@ -798,6 +800,28 @@ subroutine setcn(cnmat)
   cNmat(11,12)=12.d0/81800719.d0
   cNmat(12,12)=-1.d0/194699232.d0
 
-end subroutine setcN
+end subroutine set_cN
 
-end module salmon_initialization
+subroutine init_dir_out_restart(ofile)
+  use structures,    only: s_ofile
+  use inputoutput,   only: theory
+  use misc_routines, only: create_directory
+  implicit none
+  type(s_ofile), intent(inout) :: ofile
+
+  select case(theory)
+  case('DFT','DFT_MD', &
+       'TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT')
+     ofile%dir_out_restart = 'data_for_restart/'
+  end select
+
+  !!! currently, set "./" : change later
+  ofile%dir_out_restart = './'
+
+  if(ofile%dir_out_restart(1:3).ne."./ ") then
+     call create_directory(ofile%dir_out_restart)
+  endif
+
+end subroutine init_dir_out_restart
+
+end module initialization_sub

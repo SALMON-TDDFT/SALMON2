@@ -244,6 +244,7 @@ module structures
   type s_ofile
      integer :: fh_rt, fh_rt_energy
      character(256) :: file_rt_data, file_rt_energy_data
+     character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
 
   type s_poisson

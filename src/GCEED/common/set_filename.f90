@@ -19,14 +19,14 @@ subroutine set_filename
   use scf_data
   implicit none
   
-  file_in_gs_bin =trim(sysname)//"_gs.bin"
+  file_in_gs_bin =trim(directory_read_data)//trim(sysname)//"_gs.bin"
   file_out_gs_bin=trim(sysname)//"_gs.bin"
 
  !file_gs_info=trim(sysname)//"_info.data"
   file_eigen=trim(sysname)//"_eigen.data"
 
+  file_in_rt_bin =trim(directory_read_data)//trim(sysname)//"_rt.bin"
   file_out_rt_bin=trim(sysname)//"_rt.bin"
-  file_in_rt_bin =trim(sysname)//"_rt.bin"
 
   file_RT=trim(sysname)//"_p.data"
   file_alpha_lr=trim(sysname)//"_lr.data"
