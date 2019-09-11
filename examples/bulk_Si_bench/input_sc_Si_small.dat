@@ -10,8 +10,8 @@
 !!	use_ms_maxwell='n'
 /
 &control
-	backup_frequency=0
-	restart_option='new'
+	checkpoint_interval=0
+	yn_restart='n'
 	sysname='Si'
 	time_shutdown=10000000000
 /

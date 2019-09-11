@@ -99,7 +99,7 @@ contains
 
     call read_stdin
     call read_input_common ! Should be renamed properly later
-    if(restart_option == 'restart')return
+    if(yn_restart == 'y')return
     call read_atomic_coordinates
     call dump_input_common ! Should be renamed properly later
     call check_bad_input
@@ -204,23 +204,24 @@ contains
       & yn_opt
 
     namelist/control/ &
-      & restart_option, &
-      & backup_frequency, &
-      & time_shutdown, &
       & sysname, &
-      & directory, &
-      & dump_filename, &
-      & modify_gs_wfn_k, &  !changed from modify_initial_guess
-      & read_gs_wfn_k,   &  !changed from read_initial_guess
-      & read_gs_dns_cube,&
-      & read_rt_wfn_k,   &
-      & write_gs_wfn_k,  &
-      & write_rt_wfn_k,  &
-      & read_gs_wfn_k_ms,  &
-      & read_rt_wfn_k_ms,  &
-      & write_gs_wfn_k_ms, &
-      & write_rt_wfn_k_ms
-
+      & base_directory, &
+      & output_buffer_interval, &
+      & yn_restart, &
+      & directory_read_data, &
+      & checkpoint_interval, &
+      & time_shutdown,       &
+      & dump_filename,     &  !remove later
+      & modify_gs_wfn_k,   &  !remove later
+      & read_gs_wfn_k,     &  !remove later
+      & read_rt_wfn_k,     &  !remove later
+      & read_gs_wfn_k_ms,  &  !remove later
+      & read_rt_wfn_k_ms,  &  !remove later
+      & read_gs_dns_cube,  &  !remove later
+      & write_gs_wfn_k,    &  !remove later
+      & write_rt_wfn_k,    &  !remove later
+      & write_gs_wfn_k_ms, &  !remove later
+      & write_rt_wfn_k_ms     !remove later
 
     namelist/units/ &
       & unit_system
@@ -548,20 +549,23 @@ contains
     yn_md               = 'n'
     yn_opt              = 'n'
 !! == default for &control
-    restart_option   = 'new'
-    backup_frequency = 0
-    time_shutdown    = -1d0
-    sysname          = 'default'
-    directory        = './'
+    sysname               = 'default'
+    base_directory        = './'
+    output_buffer_interval= -1
+    yn_restart            = 'n'
+    directory_read_data   = 'restart'
+    checkpoint_interval   = 0
+    time_shutdown         = -1d0
+    !remove later
     dump_filename    = 'default'
     modify_gs_wfn_k  = 'n'
     read_gs_wfn_k    = 'n'
-    read_gs_dns_cube = 'n'
     read_rt_wfn_k    = 'n'
-    write_gs_wfn_k   = 'n'
-    write_rt_wfn_k   = 'n'
     read_gs_wfn_k_ms = 'n'
     read_rt_wfn_k_ms = 'n'
+    read_gs_dns_cube = 'n'
+    write_gs_wfn_k   = 'n'
+    write_rt_wfn_k   = 'n'
     write_gs_wfn_k_ms= 'n'
     write_rt_wfn_k_ms= 'n'
 
@@ -927,22 +931,25 @@ contains
     call comm_bcast(yn_opt             ,nproc_group_global)
 
 !! == bcast for &control
-    call comm_bcast(restart_option  ,nproc_group_global)
-    call comm_bcast(backup_frequency,nproc_group_global)
-    call comm_bcast(time_shutdown   ,nproc_group_global)
     call comm_bcast(sysname         ,nproc_group_global)
-    call comm_bcast(directory       ,nproc_group_global)
-    if(directory(len_trim(directory):len_trim(directory)).ne.'/') &
-    &  directory = trim(directory)//'/'
+    call comm_bcast(base_directory  ,nproc_group_global)
+    if(base_directory(len_trim(base_directory):len_trim(base_directory)).ne.'/') &
+    &  base_directory = trim(base_directory)//'/'
+    call comm_bcast(output_buffer_interval,nproc_group_global)
+    call comm_bcast(yn_restart            ,nproc_group_global)
+    call comm_bcast(directory_read_data   ,nproc_group_global)
+    call comm_bcast(checkpoint_interval   ,nproc_group_global)
+    call comm_bcast(time_shutdown         ,nproc_group_global)
+    !remove later
     call comm_bcast(dump_filename   ,nproc_group_global)
     call comm_bcast(modify_gs_wfn_k ,nproc_group_global)
     call comm_bcast(read_gs_wfn_k   ,nproc_group_global)
-    call comm_bcast(read_gs_dns_cube,nproc_group_global)
     call comm_bcast(read_rt_wfn_k   ,nproc_group_global)
-    call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
-    call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
+    call comm_bcast(read_gs_dns_cube,nproc_group_global)
     call comm_bcast(read_gs_wfn_k_ms ,nproc_group_global)
     call comm_bcast(read_rt_wfn_k_ms ,nproc_group_global)
+    call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
+    call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
     call comm_bcast(write_gs_wfn_k_ms,nproc_group_global)
     call comm_bcast(write_rt_wfn_k_ms,nproc_group_global)
 
@@ -1557,20 +1564,23 @@ contains
 
       if(inml_control >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', inml_control
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'restart_option', restart_option
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'backup_frequency', backup_frequency
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       write(fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'directory', trim(directory)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
+      write(fh_variables_log, '("#",4X,A,"=",I8)') 'output_buffer_interval', output_buffer_interval
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
+      !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'modify_gs_wfn_k', trim(modify_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_wfn_k', trim(read_gs_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_rt_wfn_k', trim(read_rt_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_wfn_k_ms', trim(read_gs_wfn_k_ms)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_rt_wfn_k_ms', trim(read_rt_wfn_k_ms)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k_ms', trim(write_gs_wfn_k_ms)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k_ms', trim(write_rt_wfn_k_ms)
 
@@ -1977,7 +1987,7 @@ contains
 
     !(create output directory)
     if (comm_is_root(nproc_id_global)) then
-       if(directory(1:3).ne."./ ") call create_directory(directory)
+       if(base_directory(1:3).ne."./ ") call create_directory(base_directory)
     endif
 
   end subroutine dump_input_common

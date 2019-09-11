@@ -45,9 +45,9 @@ subroutine tddft_sc
 
 
 !reentrance
-2 if (restart_option == 'restart') then
+2 if (yn_restart == 'y') then
     position_option='append'
-  else if(restart_option == 'new')then
+  else if(yn_restart == 'n')then
     position_option='rewind'
     entrance_iter=-1
   end if
@@ -66,7 +66,7 @@ subroutine tddft_sc
   end if
 
 !====RT calculation============================
-  if ( .not. (restart_option == 'restart')) call init_Ac
+  if ( .not. (yn_restart == 'restart')) call init_Ac
   iter=entrance_iter+1
   do ixyz=1,3
     kAc(:,ixyz)=kAc0(:,ixyz)+Ac_tot(iter,ixyz)
@@ -378,7 +378,7 @@ subroutine tddft_sc
     call timer_end(LOG_RT_MISC)
 
     ! backup for system failure
-    if (need_backup .and. iter > 0 .and. mod(iter, backup_frequency) == 0) then
+    if (need_backup .and. iter > 0 .and. mod(iter, checkpoint_interval) == 0) then
       call timer_end(LOG_RT_ITERATION)
       call timer_end(LOG_TOTAL)
       iter_now=iter

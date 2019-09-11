@@ -16,7 +16,7 @@
 !-----------------------------------------------------------------------------------------
 subroutine eh_calc(fs,fw)
   use salmon_global,        only: dt_em,pole_num_ld,iobs_num_em,iobs_samp_em,obs_plane_em,&
-                                  directory,t1_t2,t1_start,&
+                                  base_directory,t1_t2,t1_start,&
                                   E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                   E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
   use inputoutput,          only: utime_from_au
@@ -131,7 +131,7 @@ subroutine eh_calc(fs,fw)
         !point
         if(fw%iobs_po_pe(ii)==1) then
           write(save_name,*) ii
-          save_name=trim(adjustl(directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
+          save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
           open(fw%ifn,file=save_name,status='old',position='append')
           write(fw%ifn, '(E13.5)',advance="no") dble(iter)*dt_em*utime_from_au
           write(fw%ifn,'(E16.6e3)',advance="no") &
@@ -773,7 +773,7 @@ end subroutine eh_fd
 !=========================================================================================
 != save plane data =======================================================================
 subroutine eh_save_plane(id,ipl,conv,ng_is,ng_ie,lg_is,lg_ie,Nd,ifn,iobs,iter,f,var)
-  use salmon_global,        only: directory
+  use salmon_global,        only: base_directory
   use salmon_parallel,      only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_summation
   implicit none
@@ -824,7 +824,7 @@ subroutine eh_save_plane(id,ipl,conv,ng_is,ng_ie,lg_is,lg_ie,Nd,ifn,iobs,iter,f,
     if(comm_is_root(nproc_id_global)) then
       write(iobs_name,*) iobs
       write(iter_name,*) iter
-      save_name=trim(adjustl(directory))//'/obs'//trim(adjustl(iobs_name))//'_'//var//&
+      save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(iobs_name))//'_'//var//&
                 '_'//plane_name//'_'//trim(adjustl(iter_name))//'.data'
       open(ifn,file=save_name)
       do i2=lg_is(i2s),lg_ie(i2s)

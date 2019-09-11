@@ -28,12 +28,12 @@ subroutine write_density(it,action)
      if (comm_is_root(nproc_id_global)) then
      select case(format_voxel_data)
      case ('cube')
-        write(file_dns_gs,'(2A,"_dns_gs.cube")') trim(directory),trim(SYSname)
+        write(file_dns_gs,'(2A,"_dns_gs.cube")') trim(base_directory),trim(SYSname)
         fh = open_filehandle(file_dns_gs)
         call write_density_cube(fh, .false.)
         close(fh)
      case ('vtk')
-        write(file_dns_gs,'(2A,"_dns_gs.vtk")') trim(directory),trim(SYSname)
+        write(file_dns_gs,'(2A,"_dns_gs.vtk")') trim(base_directory),trim(SYSname)
         fh = open_filehandle(file_dns_gs)
         call write_density_vtk(fh, .false.)
         close(fh)
@@ -49,8 +49,8 @@ subroutine write_density(it,action)
      if (comm_is_root(nproc_id_global)) then
      select case(format_voxel_data)
      case ('cube')
-        write(file_dns_rt,200) trim(directory),trim(SYSname),"_dns_rt_", it,".cube"
-        write(file_dns_dlt,200)trim(directory),trim(SYSname),"_dns_dlt_",it,".cube"
+        write(file_dns_rt,200) trim(base_directory),trim(SYSname),"_dns_rt_", it,".cube"
+        write(file_dns_dlt,200)trim(base_directory),trim(SYSname),"_dns_dlt_",it,".cube"
         fh = open_filehandle(file_dns_rt)
         call write_density_cube(fh, .false.)
         close(fh)
@@ -59,8 +59,8 @@ subroutine write_density(it,action)
         call write_density_cube(fh, .true.)
         close(fh)
      case ('vtk')          
-        write(file_dns_rt,200) trim(directory),trim(SYSname),"_dns_rt_", it,".vtk"
-        write(file_dns_dlt,200)trim(directory),trim(SYSname),"_dns_dlt_",it,".vtk"
+        write(file_dns_rt,200) trim(base_directory),trim(SYSname),"_dns_rt_", it,".vtk"
+        write(file_dns_dlt,200)trim(base_directory),trim(SYSname),"_dns_dlt_",it,".vtk"
         fh = open_filehandle(file_dns_rt)
         call write_density_vtk(fh, .false.)
         close(fh)

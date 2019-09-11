@@ -43,12 +43,12 @@ contains
     end select
     
 !    namelist/control/ &
-!    entrance_option = trim(restart_option)
+!    entrance_option = trim(yn_restart)
 !    Time_shutdown = time_shutdown
-!    backup_frequency = backup_frequency
+!    checkpoint_interval = checkpoint_interval
 !    entrance_iter = entrance_iter
 !    SYSname = sysname
-!    directory = directory
+!    directory = base_directory
 
 !    namelist/system/ &
     functional = trim(xc)

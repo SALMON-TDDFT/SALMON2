@@ -5,7 +5,7 @@
 /
 
 &control
-  directory = 'result'
+  base_directory = 'result'
 /
 
 &units

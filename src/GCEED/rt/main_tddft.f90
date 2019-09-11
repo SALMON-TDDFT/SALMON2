@@ -320,8 +320,8 @@ call timer_end(LOG_INIT_RT)
 !Open output files and print header parts (Please move and put this kinds here!)
 !(output file names)
 if(comm_is_root(nproc_id_global))then
-   write(ofl%file_rt_data,"(2A,'_rt.data')") trim(directory),trim(SYSname)
-   write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(directory),trim(SYSname)
+   write(ofl%file_rt_data,"(2A,'_rt.data')") trim(base_directory),trim(SYSname)
+   write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
 endif
 call comm_bcast(ofl%file_rt_data,       nproc_group_global)
 call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)

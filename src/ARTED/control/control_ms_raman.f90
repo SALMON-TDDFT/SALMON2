@@ -191,9 +191,9 @@ subroutine raman_maxwell_ms
   call opt_vars_init_t4ppt()
 #endif
 
-  if (restart_option == 'restart') then
+  if (yn_restart == 'y') then
     position_option='asis'
-  else if(restart_option == 'new')then
+  else if(yn_restart == 'n')then
 
     select case(yn_md)
     case('y')
@@ -320,7 +320,7 @@ subroutine raman_maxwell_ms
   !endif
  
 !xx  ! Output filename
-!xx  write(file_energy_transfer, "(A,'energy-transfer.data')") trim(directory)
+!xx  write(file_energy_transfer, "(A,'energy-transfer.data')") trim(base_directory)
   
   call timer_begin(LOG_RT_ITERATION)
   RTiteratopm : do iter=entrance_iter+1, Nt ! sato
@@ -635,7 +635,7 @@ subroutine raman_maxwell_ms
     end if
 
     ! backup for system failure
-    if (need_backup .and. iter > 0 .and. mod(iter, backup_frequency) == 0) then
+    if (need_backup .and. iter > 0 .and. mod(iter, checkpoint_interval) == 0) then
       if (comm_is_root(nproc_id_global)) call timer_show_current_hour('Backup...', LOG_TOTAL)
       call timer_end(LOG_RT_ITERATION)
       call timer_end(LOG_TOTAL)

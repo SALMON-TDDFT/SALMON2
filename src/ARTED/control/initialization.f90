@@ -56,7 +56,7 @@ contains
     Time_start=get_wtime() !reentrance
     call comm_bcast(Time_start,nproc_group_global)
 
-    if(restart_option == 'restart') then
+    if(yn_restart == 'y') then
       if (comm_is_root(nproc_id_global)) call timer_show_current_hour('Restore...', LOG_TOTAL)
       call prep_restart_read
       return
@@ -136,13 +136,13 @@ contains
     
     if(comm_is_root(nproc_id_global))then
        
-       need_backup = (backup_frequency > 0)
+       need_backup = (checkpoint_interval > 0)
        write(*,*) 'need backup?',need_backup
-       if (need_backup) write(*,*) '  frequency (# of iter) :',backup_frequency
+       if (need_backup) write(*,*) '  frequency (# of iter) :',checkpoint_interval
        
        write(*,*) 'entrance_iter=',entrance_iter
        write(*,*) 'SYSname=',trim(SYSname)
-       write(*,*) 'directory=',trim(directory)
+       write(*,*) 'base_directory=',trim(base_directory)
        !yabana
        write(*,*) 'functional=',functional
        if(functional == 'TBmBJ' .or. functional == 'tbmbj') write(*,*) 'cvalue=',cval
@@ -151,24 +151,24 @@ contains
        write(*,*) 'file_pseudo =',(trim(file_pseudo(i)),i=1,NE)
        write(*,*) 'yn_psmask =',yn_psmask
        write(*,*) 'alpha_mask, gamma_mask, eta_mask =',real(alpha_mask), real(gamma_mask), real(eta_mask)
-       write(file_GS,"(2A,'_gs_info.data')") trim(directory),trim(SYSname)
-       write(file_epst,"(2A,'_t.data')") trim(directory),trim(SYSname)
-       write(file_epse,"(2A,'_e.data')") trim(directory),trim(SYSname)
-       write(file_force_dR,"(2A,'_force.data')") trim(directory),trim(SYSname)
-       write(file_j_ac,"(2A,'_j_ac.data')") trim(directory),trim(SYSname)
-       write(file_DoS,"(2A,'_dos.data')") trim(directory),trim(SYSname)
-       write(file_band,"(2A,'_band.data')") trim(directory),trim(SYSname)
-       write(file_dns,"(2A,'_dns.data')") trim(directory),trim(SYSname)
-       write(file_ovlp,"(2A,'_ovlp.data')") trim(directory),trim(SYSname)
-       write(file_nex,"(2A,'_nex.data')") trim(directory),trim(SYSname)
-       write(file_nex_atom,"(2A,'_nex_atom.data')") trim(directory),trim(SYSname)
-       write(file_last_band_map,"(2A,'_last_band_map.data')") trim(directory),trim(SYSname)
-       write(file_k_data,"(2A,'_k.data')") trim(directory),trim(SYSname)
-       write(file_eigen_data,"(2A,'_eigen.data')") trim(directory),trim(SYSname)
-       write(file_tm_data,"(2A,'_tm.data')") trim(directory),trim(SYSname)
-       write(file_rt_data,"(2A,'_rt.data')") trim(directory),trim(SYSname)
-       write(file_lr_data,"(2A,'_lr.data')") trim(directory),trim(SYSname)
-       write(file_rt_energy_data,"(2A,'_rt_energy.data')") trim(directory),trim(SYSname)
+       write(file_GS,"(2A,'_gs_info.data')") trim(base_directory),trim(SYSname)
+       write(file_epst,"(2A,'_t.data')") trim(base_directory),trim(SYSname)
+       write(file_epse,"(2A,'_e.data')") trim(base_directory),trim(SYSname)
+       write(file_force_dR,"(2A,'_force.data')") trim(base_directory),trim(SYSname)
+       write(file_j_ac,"(2A,'_j_ac.data')") trim(base_directory),trim(SYSname)
+       write(file_DoS,"(2A,'_dos.data')") trim(base_directory),trim(SYSname)
+       write(file_band,"(2A,'_band.data')") trim(base_directory),trim(SYSname)
+       write(file_dns,"(2A,'_dns.data')") trim(base_directory),trim(SYSname)
+       write(file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
+       write(file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
+       write(file_nex_atom,"(2A,'_nex_atom.data')") trim(base_directory),trim(SYSname)
+       write(file_last_band_map,"(2A,'_last_band_map.data')") trim(base_directory),trim(SYSname)
+       write(file_k_data,"(2A,'_k.data')") trim(base_directory),trim(SYSname)
+       write(file_eigen_data,"(2A,'_eigen.data')") trim(base_directory),trim(SYSname)
+       write(file_tm_data,"(2A,'_tm.data')") trim(base_directory),trim(SYSname)
+       write(file_rt_data,"(2A,'_rt.data')") trim(base_directory),trim(SYSname)
+       write(file_lr_data,"(2A,'_lr.data')") trim(base_directory),trim(SYSname)
+       write(file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
        
        write(*,*) 'al(1),al(2),al(3)=',real(al(1)),real(al(2)),real(al(3))
        write(*,*) 'Sym=',Sym,'crystal structure=',crystal_structure !sym
@@ -178,10 +178,10 @@ contains
     end if
     
 #ifdef ARTED_USE_FORTRAN2008
-    write (process_directory,'(A,A,I5.5,A)') trim(directory),'/work_p',nproc_id_global,'/'
+    write (process_directory,'(A,A,I5.5,A)') trim(base_directory),'/work_p',nproc_id_global,'/'
     call create_directory(process_directory)
 #else
-    process_directory = trim(directory)
+    process_directory = trim(base_directory)
 #endif
 
     call comm_bcast(need_backup,nproc_group_global)
@@ -564,7 +564,7 @@ contains
        xi_nh = 0d0
     endif
 
-    if(restart_option == 'new') then
+    if(yn_restart == 'n') then
        if(yn_set_ini_velocity=='y' .or. step_velocity_scaling>=1) &
        call set_initial_velocity
        if(yn_set_ini_velocity=='r') call read_initial_velocity
@@ -928,7 +928,7 @@ contains
       ms_angle_z = 0d0
 
       if(comm_is_root(nproc_id_global)) then
-        fh = open_filehandle(trim(directory) // trim(file_macropoint))
+        fh = open_filehandle(trim(base_directory) // trim(file_macropoint))
         read(fh, nml=macroscopic_system)
       end if
       

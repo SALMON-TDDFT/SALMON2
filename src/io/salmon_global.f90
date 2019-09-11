@@ -48,20 +48,23 @@ module salmon_global
   character(1)   :: yn_md
   character(1)   :: yn_opt
 !! &control      
-  character(8)   :: restart_option
-  integer        :: backup_frequency
-  real(8)        :: time_shutdown
   character(256) :: sysname
-  character(256) :: directory
+  character(256) :: base_directory
+  integer        :: output_buffer_interval
+  character(1)   :: yn_restart
+  character(256) :: directory_read_data
+  integer        :: checkpoint_interval
+  real(8)        :: time_shutdown
+  !remove later
   character(256) :: dump_filename
-  character(20)  :: modify_gs_wfn_k
+  character(20)  :: modify_gs_wfn_k  !changed from modify_initial_guess
   character(1)   :: read_gs_wfn_k
-  character(1)   :: read_gs_dns_cube
   character(1)   :: read_rt_wfn_k
-  character(1)   :: write_gs_wfn_k
-  character(1)   :: write_rt_wfn_k
   character(1)   :: read_gs_wfn_k_ms
   character(1)   :: read_rt_wfn_k_ms
+  character(1)   :: read_gs_dns_cube
+  character(1)   :: write_gs_wfn_k
+  character(1)   :: write_rt_wfn_k
   character(1)   :: write_gs_wfn_k_ms
   character(1)   :: write_rt_wfn_k_ms
 

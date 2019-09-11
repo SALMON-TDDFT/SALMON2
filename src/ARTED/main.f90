@@ -34,7 +34,7 @@ End Subroutine Err_finalize
 
 
 subroutine arted
-  use salmon_global,   only: use_ms_maxwell,yn_opt,restart_option
+  use salmon_global,   only: use_ms_maxwell,yn_opt,yn_restart
   use control_sc,      only: tddft_sc
   use control_ms,      only: tddft_maxwell_ms
   use control_ms_raman,only: raman_maxwell_ms
@@ -58,7 +58,7 @@ subroutine arted
 
   call initialize
 
-  if(restart_option == 'new')then
+  if(yn_restart == 'n')then
     select case(iflag_calc_mode)
     case(iflag_calc_mode_gs_rt)
       call calc_ground_state
@@ -79,9 +79,9 @@ subroutine arted
          if(read_rt_wfn_k=='y') call read_write_rt_wfn_k(iflag_read_rt)
       endif
     end select
-  else if(restart_option == 'restart')then
+  else if(yn_restart == 'y')then
   else
-    call Err_finalize("Invalid restart_option!")
+    call Err_finalize("Invalid yn_restart!")
   end if
 
   select case(use_ms_maxwell)

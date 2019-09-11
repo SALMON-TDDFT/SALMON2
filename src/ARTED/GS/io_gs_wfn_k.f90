@@ -42,7 +42,7 @@ contains
     integer :: nproc_id_kpoint_ms
     integer :: nproc_size_kpoint_ms
 
-    write (gs_wfn_directory,'(A,A)') trim(directory),'/gs_wfn_k/'
+    write (gs_wfn_directory,'(A,A)') trim(base_directory),'/gs_wfn_k/'
     if(iflag_read_write == iflag_write)call create_directory(gs_wfn_directory)
 
     if(comm_is_root(nproc_id_global))then
@@ -204,7 +204,7 @@ contains
     real(8),allocatable :: occ_tmp(:,:)
     complex(8),allocatable :: zu_GS1(:,:,:)
 
-    write (gs_wfn_directory,'(A,A)') trim(directory),'/gs_wfn_k/'
+    write (gs_wfn_directory,'(A,A)') trim(base_directory),'/gs_wfn_k/'
 
     if(comm_is_root(nproc_id_global))then
       occ_file = trim(gs_wfn_directory)//'occupation'
@@ -298,7 +298,7 @@ contains
     integer :: nproc_id_kpoint_ms
     integer :: nproc_size_kpoint_ms
 
-    write (rt_wfn_directory,'(A,A)') trim(directory),'/rt_wfn_k/'
+    write (rt_wfn_directory,'(A,A)') trim(base_directory),'/rt_wfn_k/'
     if(iflag_read_write == iflag_write_rt)call create_directory(rt_wfn_directory)
 
     if(comm_is_root(nproc_id_global))then

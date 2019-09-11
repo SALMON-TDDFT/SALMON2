@@ -25,7 +25,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use structures,only : s_pp_info
   use salmon_global,only : file_pseudo
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
-    &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,directory, &
+    &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
     & yn_psmask
   use salmon_parallel, only: nproc_group_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_is_root
@@ -46,7 +46,7 @@ subroutine input_pp(pp,hx,hy,hz)
 ! Nonlinear core correction
   allocate(flag_nlcc_element(nelem)); flag_nlcc_element(:) = .false. ; pp%flag_nlcc = .false.
 
-!      ps_file=trim(directory)//trim(pp%atom_symbol(ik))//trim(ps_postfix)
+!      ps_file=trim(base_directory)//trim(pp%atom_symbol(ik))//trim(ps_postfix)
 
   if (comm_is_root(nproc_id_global)) then
 
@@ -155,7 +155,7 @@ subroutine input_pp(pp,hx,hy,hz)
       pp%upp_f(:,:,ik)=pp%upp(:,:)
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
-      open(4,file=trim(directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//"_"//trim(yn_psmask)//".dat")
+      open(4,file=trim(base_directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//"_"//trim(yn_psmask)//".dat")
       write(4,*) "# Mr=",pp%mr(ik)
       write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
       write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
