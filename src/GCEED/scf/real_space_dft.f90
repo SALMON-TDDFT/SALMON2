@@ -344,7 +344,7 @@ if(iopt==1)then
     else if(ilsda == 1) then
       allocate( Vxc_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
     end if
-    allocate( esp(itotMST,num_kpoints_rd) )
+    allocate( esp(itotMST,num_kpoints_rd) ); esp=0.0d0
 
     call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
 
@@ -361,7 +361,8 @@ if(iopt==1)then
       rion_update = .true. ! it's first calculation
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
-    esp = energy%esp(:,:,1) !++++++++
+
+    esp(:,1:system%nk) = energy%esp(:,:,1) !++++++++
 
   case(1,3) ! Continue the previous calculation
 
@@ -428,7 +429,7 @@ if(comm_is_root(nproc_id_global)) then
   case(3)
     write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
   end select
-  do ik=1,num_kpoints_rd
+  do ik=1,system%nk
     if(ik<=3)then
       if(iperiodic==3) write(*,*) "k=",ik
       do p5=1,(itotMST+3)/4
@@ -522,7 +523,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
-    esp = energy%esp(:,:,1) !++++++++
+    esp(:,1:system%nk) = energy%esp(:,:,1) !++++++++
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
 
@@ -595,7 +596,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x)') Miter,energy%E_tot*2d0*Ry
     end select
-    do ik=1,num_kpoints_rd
+    do ik=1,system%nk
       if(ik<=3)then
         if(iperiodic==3) write(*,*) "k=",ik
         do p5=1,(itotMST+3)/4
