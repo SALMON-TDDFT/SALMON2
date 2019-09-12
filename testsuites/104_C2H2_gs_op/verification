@@ -7,73 +7,89 @@
 
 import sys
 import os
-import re
+import numpy as np
 
 print("#" * 60)
 print("# Verification start")
 
+# file existence check
 filelist = [
     "C2H2_info.data",
+    "C2H2_eigen.data",
 ]
 
-checklist1 = {
-    "eigen energy for io=1": [
-        100,  # Temporary value for result
-        -0.1903576899637143E+002,  # Reference value
-        0.01,  # Permissible error
-    ],
-}
+# test rule
+reference = {}
 
-checklist2 = {
-    "eigen energy for io=5": [
-        100,  # Temporary value for result
-        0.5326406247806535E+001,  # Reference value
-        0.01,  # Permissible error
-    ],
-}
+reference['C2H2_eigen.data'] = [
+    # Row, Col, Reference, Tolerance, Info
+    [1-1, 2-1, -0.1903576899637143E+002, 1e-02, 'Eigenenergy io=1'],
+    [5-1, 2-1, 0.5326406247806535E+001, 1e-02, 'Eigenenergy io=5'],
+]
 
-print("# Checking the existance of outputfile")
-for item in filelist:
-    if not os.path.exists(item):
-        print("File not found: %s" % item)
-        sys.exit(-1)  # Failure
 
-print("# Checking calculated result")
-result1 = {}
-result2 = {}
-linecount = 0
-for line in open("C2H2_info.data"):
-    linecount += 1
-    if linecount == 8: # a line for orbital 1
-        for name1, [resval1, refval1, error1] in checklist1.items():
-            data = line.split()
-            result1[name1] = float(data[1])
-    if linecount == 9: # a line for orbital 5
-        for name2, [resval2, refval2, error2] in checklist2.items():
-            data = line.split()
-            result2[name2] = float(data[1])
 
-for name1, [resval1, refval1, error1] in checklist1.items():
-    if name1 not in result1:
-        print("Result %s (%s) is not found" % (name1, ptn))
-        sys.exit(-1)  # Failure
-    else:
-        print("Result %s = %e (Reference = %e)" % (name1, result1[name1], refval1))
-        if abs(result1[name1] - refval1) > error1:
-            print("Mismatch |%e - %e| > %e)" % (result1[name1], refval1, error1))
-            sys.exit(-1)  # Failure
 
-for name2, [resval2, refval2, error2] in checklist2.items():
-    if name2 not in result2:
-        print("Result %s (%s) is not found" % (name2, ptn))
-        sys.exit(-1)  # Failure
-    else:
-        print("Result %s = %e (Reference = %e)" % (name2, result2[name2], refval2))
-        if abs(result2[name2] - refval2) > error2:
-            print("Mismatch |%e - %e| > %e)" % (result2[name2], refval2, error2))
-            sys.exit(-1)  # Failure
 
-print("# Verification end")
-print("#" * 60)
 
-sys.exit(0)  # Success
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+message = """[{STATUS}] {INFO}
+    {ITEM}[{I:d},{J:d}]: {VAL:+.18e} (ref: {REF:+.4e})
+    err: {ERR:1.4e} {CMP} tol: {TOL:1.4e}"""
+
+def main():
+    print("#" * 60)
+    print("# Verification start")
+
+    return_code = 0
+
+    print("# Checking the existance of outputfile")
+    for item in filelist:
+        if not os.path.exists(item):
+            print("File not found: %s" % item)
+            return_code = -1
+
+    for item, table in reference.items():
+        if os.path.isfile(item):
+            data = np.loadtxt(item)
+            for i, j, ref, tol, info in table:
+                err = np.abs(data[i, j] - ref)
+                if err <= tol:
+                    status, cmp = 'Success', '<='
+                else:
+                    status, cmp = 'Failure', '>'
+                    return_code = -1
+                    
+                print(message.format(
+                    STATUS=status, INFO=info, ITEM=item, I=i, J=j, VAL=data[i, j],
+                    REF=ref, ERR=err, CMP=cmp, TOL=tol
+                ))
+        else:
+            print('[Error] "%s" is not found' % item)
+            return_code = -1
+
+    print("# Verification end")
+    print("#" * 60)
+
+    sys.exit(return_code)
+
+
+if __name__ == "__main__":
+    main()
