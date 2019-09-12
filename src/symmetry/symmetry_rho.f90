@@ -25,6 +25,8 @@ contains
     integer,allocatable :: icheck(:,:,:),itmp(:),icheck1(:,:,:)
     real(8) :: r1,r2,r3,t1,t2,t3,d1,d2,d3
 
+    if ( .not.use_symmetry ) return
+
     num=num_
     is=is_
     ie=ie_

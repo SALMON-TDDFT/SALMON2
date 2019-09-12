@@ -5,13 +5,16 @@ module sym_sub
   private
   public :: init_sym_sub
 
-  !logical,parameter,public :: use_symmetry=.false.
-  logical,parameter,public :: use_symmetry=.true.
+  logical,parameter,public :: use_symmetry=.false.
+  !logical,parameter,public :: use_symmetry=.true.
 
   real(8),allocatable :: SymMatR(:,:,:)
   real(8),allocatable,public :: SymMatA(:,:,:)
   real(8),allocatable,public :: SymMatB(:,:,:)
-  real(8),public :: Amat(3,3), Ainv(3,3), Bmat(3,3), Binv(3,3)
+  real(8),public :: Amat(3,3), Ainv(3,3) ! Each column of Amat (Bmat)
+  real(8),public :: Bmat(3,3), Binv(3,3) !   is the (reciprocal) lattice vector
+
+  logical :: flag_init=.false.
 
 contains
 
@@ -22,8 +25,11 @@ contains
     real(8),intent(in) :: epdir(3)
     real(8) :: tmpmat(3,3), pi2
     real(8),allocatable :: work(:,:,:)
-    integer :: nsym, isym, n
+    integer :: nsym, isym, n, j
     logical :: ok(3)
+
+    if ( .not.use_symmetry ) return
+    if ( flag_init         ) return
 
     write(*,'(a60)') repeat("-",40)//" init_sym_sub(start)"
 
@@ -58,9 +64,9 @@ contains
     SymMatR(:,:,1:nsym)=work(:,:,1:nsym)
 
     do isym=1,nsym
-       write(*,'(1x,i4,3f10.5,2x,f10.5)') isym,SymMatR(1,:,isym)
-       write(*,'(1x,4x,3f10.5,2x,f10.5)')      SymMatR(2,:,isym)
-       write(*,'(1x,4x,3f10.5,2x,f10.5)')      SymMatR(3,:,isym)
+       write(*,'(1x,i4,3f10.5,2x,f10.5)') isym,(SymMatR(1,j,isym),j=1,4)
+       write(*,'(1x,4x,3f10.5,2x,f10.5)')      (SymMatR(2,j,isym),j=1,4)
+       write(*,'(1x,4x,3f10.5,2x,f10.5)')      (SymMatR(3,j,isym),j=1,4)
     end do
 
     deallocate( work )
@@ -85,6 +91,7 @@ contains
        SymMatB(1:3,1:3,isym)=matmul( Binv, tmpmat )
        SymMatB(1:3,4,isym)=SymMatR(1:3,4,isym)
     end do
+    flag_init=.true.
     write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
   end subroutine init_sym_sub
 
