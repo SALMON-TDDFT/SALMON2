@@ -79,9 +79,15 @@ contains
     implicit none
     character(*), intent(in) :: dirpath
     integer :: retcode
-    call posix_mkdir(adjustl(trim(dirpath))//c_null_char, retcode)
-    if (retcode /= 0) then
-      stop 'fail: create_directory'
+    if (file_exists(dirpath)) then
+      print *, trim(dirpath), ' is a regular file.'
+      stop
+    end if
+    if (.not. directory_exists(dirpath)) then
+      call posix_mkdir(adjustl(trim(dirpath))//c_null_char, retcode)
+      if (retcode /= 0) then
+        stop 'fail: create_directory'
+      end if
     end if
   end subroutine
 
