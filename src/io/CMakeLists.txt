@@ -4,7 +4,7 @@ set(SOURCES
     salmon_global.f90
     flops.f90
     perflog.f90
-    posix_io.c
+    posix.c
     filesystem.f90
    )
 
