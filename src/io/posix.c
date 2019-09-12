@@ -20,8 +20,7 @@
 #if defined(SYSTEM_HAS_POSIX) \
     && defined(SYSTEM_HAS_POSIX_STAT) \
     && defined(SYSTEM_HAS_POSIX_ACCESS) \
-    && defined(SYSTEM_HAS_POSIX_MKDIR) \
-    && defined(SYSTEM_HAS_POSIX_RMDIR)
+    && defined(SYSTEM_HAS_POSIX_MKDIR)
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -91,14 +90,20 @@ void posix_mkdir(char const* dirpath, int * retcode) {
   *retcode = mkdir(path_tmp, 0755);
 }
 
+#endif
+
+#if defined(SYSTEM_HAS_STDIO_REMOVE)
+
+#include <stdio.h>
+
 /*
- * remove directory by POSIX
+ * remove file or directory
  *
  * retcode:         0: success
  *          otherwise: error
  */
-void posix_rmdir(char const* dirpath, int * retcode) {
-  *retcode = rmdir(dirpath);
+void stdio_remove(char const* dirpath, int * retcode) {
+  *retcode = remove(dirpath);
 }
 
 #endif

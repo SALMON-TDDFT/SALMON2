@@ -18,6 +18,7 @@ module filesystem
   implicit none
 
   public :: file_exists, directory_exists
+  public :: remove_file
   public :: create_directory, remove_directory
 
   public :: atomic_create_directory ! for multi process
@@ -42,7 +43,7 @@ interface
     integer(c_int),intent(out)        :: retcode
   end subroutine
 
-  subroutine posix_rmdir(dirpath, retcode) bind(C,name='posix_mkdir')
+  subroutine stdio_remove(dirpath, retcode) bind(C,name='stdio_remove')
     use, intrinsic :: iso_c_binding
     character(kind=c_char),intent(in) :: dirpath
     integer(c_int),intent(out)        :: retcode
@@ -91,14 +92,34 @@ contains
     end if
   end subroutine
 
+  ! filepath: file path (relative or absolute)
+  subroutine remove_file(filepath)
+    implicit none
+    character(*), intent(in) :: filepath
+    integer :: retcode
+    if (file_exists(filepath)) then
+      call stdio_remove(adjustl(trim(filepath))//c_null_char, retcode)
+      if (retcode /= 0) then
+        stop 'fail: remove_file'
+      end if
+    else
+      stop 'fail: remove_file: file not exists'
+    end if
+  end subroutine
+
+  ! directory must is empty
   ! dirpath: directory path (relative or absolute)
   subroutine remove_directory(dirpath)
     implicit none
     character(*), intent(in) :: dirpath
     integer :: retcode
-    call posix_rmdir(adjustl(trim(dirpath))//c_null_char, retcode)
-    if (retcode /= 0) then
-      stop 'fail: remove_directory'
+    if (directory_exists(dirpath)) then
+      call stdio_remove(adjustl(trim(dirpath))//c_null_char, retcode)
+      if (retcode /= 0) then
+        stop 'fail: remove_directory'
+      end if
+    else
+      stop 'fail: remove_directory: directory not exists'
     end if
   end subroutine
 
