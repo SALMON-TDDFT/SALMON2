@@ -704,9 +704,11 @@ contains
     call atomic_create_directory(dir_ms_RT_Ac &
                                 ,nproc_group_global,nproc_id_global)
 
-    do imacro = nmacro_s, nmacro_e
-      call create_directory(dir_ms_M(imacro))
-    enddo
+    if (comm_is_root(nproc_id_tdks)) then
+      do imacro = nmacro_s, nmacro_e
+        call create_directory(dir_ms_M(imacro))
+      end do
+    end if
     call comm_sync_all ! sync until directory created
   end subroutine
 
