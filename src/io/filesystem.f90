@@ -20,6 +20,8 @@ module filesystem
   public :: file_exists, directory_exists
   public :: create_directory, remove_directory
 
+  public :: atomic_create_directory ! for multi process
+
 private
 interface 
   subroutine posix_file_exists(filepath, retcode) bind(C,name='posix_file_exists')
@@ -48,6 +50,9 @@ interface
 end interface
 
 contains
+  ! filepath: file path (relative or absolute)
+  ! result: .true.  = file exists
+  !         .false. = file not exists
   function file_exists(filepath) result(ret)
     implicit none
     character(*), intent(in) :: filepath
@@ -57,6 +62,9 @@ contains
     ret = (retcode == 1) ! success
   end function
 
+  ! dirpath: directory path (relative or absolute)
+  ! result: .true.  = directory exists
+  !         .false. = directory not exists
   function directory_exists(dirpath) result(ret)
     implicit none
     character(*), intent(in) :: dirpath
@@ -66,21 +74,46 @@ contains
     ret = (retcode == 1) ! success
   end function
 
-  function create_directory(dirpath) result(ret)
+  ! dirpath: directory path (relative or absolute)
+  subroutine create_directory(dirpath)
     implicit none
     character(*), intent(in) :: dirpath
-    logical :: ret
     integer :: retcode
-    call posix_mkdir(adjustl(trim(dirpath))//c_null_char, retcode)
-    ret = (retcode == 0) ! success
-  end function
+    if (file_exists(dirpath)) then
+      print *, trim(dirpath), ' is a regular file.'
+      stop
+    end if
+    if (.not. directory_exists(dirpath)) then
+      call posix_mkdir(adjustl(trim(dirpath))//c_null_char, retcode)
+      if (retcode /= 0) then
+        stop 'fail: create_directory'
+      end if
+    end if
+  end subroutine
 
-  function remove_directory(dirpath) result(ret)
+  ! dirpath: directory path (relative or absolute)
+  subroutine remove_directory(dirpath)
     implicit none
     character(*), intent(in) :: dirpath
-    logical :: ret
     integer :: retcode
     call posix_rmdir(adjustl(trim(dirpath))//c_null_char, retcode)
-    ret = (retcode == 0) ! success
-  end function
+    if (retcode /= 0) then
+      stop 'fail: remove_directory'
+    end if
+  end subroutine
+
+  ! dirpath:   directory path (relative or absolute)
+  ! igroup:    communicator
+  ! idelegate: A delegate process of creating directory
+  subroutine atomic_create_directory(dirpath, igroup, idelegate)
+    use salmon_communication, only: comm_is_root,comm_sync_all
+    implicit none
+    character(*), intent(in) :: dirpath
+    integer, intent(in)      :: igroup, idelegate
+
+    if (comm_is_root(idelegate)) then
+      call create_directory(dirpath)
+    end if
+    call comm_sync_all(igroup) ! sync until directory created
+  end subroutine
 end module filesystem

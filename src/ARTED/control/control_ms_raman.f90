@@ -874,26 +874,20 @@ contains
   
 
   subroutine create_dir_ms
-    use filesystem, only: create_directory
+    use filesystem, only: create_directory,atomic_create_directory
     implicit none
     integer :: imacro
 
-    if (comm_is_root(nproc_id_global)) then
-      if (.not. create_directory(dir_ms)) then
-        stop 'fail: create_dir_ms::create_directory(dir_ms)'
-      end if
+    call atomic_create_directory(dir_ms &
+                                ,nproc_group_global,nproc_id_global)
+    call atomic_create_directory(dir_ms_RT_Ac &
+                                ,nproc_group_global,nproc_id_global)
 
-      if (.not. create_directory(dir_ms_RT_Ac)) then
-        stop 'fail: create_dir_ms::create_directory(dir_ms_RT_Ac)'
-      end if
+    if (comm_is_root(nproc_id_tdks)) then
+      do imacro = nmacro_s, nmacro_e
+        call create_directory(dir_ms_M(imacro))
+      end do
     end if
-    call comm_sync_all ! sync until directory created
-
-    do imacro = nmacro_s, nmacro_e
-      if (.not. create_directory(dir_ms_M(imacro))) then
-        stop 'fail: create_dir_ms::create_directory(dir_ms_M(imacr))'
-      end if
-    enddo
     call comm_sync_all ! sync until directory created
   end subroutine
 

@@ -68,35 +68,27 @@ void posix_directory_exists(char const* dirpath, int * retcode) {
 
 /*
  * create directory by POSIX
+ * it create a directory recursively.
  *
  * retcode:         0: success
  *          otherwise: error
  */
 void posix_mkdir(char const* dirpath, int * retcode) {
-  int is_exists;
-  posix_directory_exists(dirpath, &is_exists);
-  if (is_exists == 1) {
-    /* directory already exists */
-    *retcode = 0;
-  } else {
-    /* recursive directory create */
-    char path_tmp[PATH_MAX];
-    size_t len;
-    snprintf(path_tmp, sizeof(path_tmp), "%s", dirpath);
-    len = strlen(path_tmp);
-    if(path_tmp[len - 1] == '/')
-      path_tmp[len - 1] = 0;
-    for(char *p = path_tmp + 1; *p; p++) {
-      if(*p == '/') {
-        *p = 0;
-        mkdir(path_tmp, 0755);
-        printf("mkdir: %s\n", path_tmp);
-        *p = '/';
-      }
+  /* recursive directory create */
+  char path_tmp[PATH_MAX];
+  size_t len;
+  snprintf(path_tmp, sizeof(path_tmp), "%s", dirpath);
+  len = strlen(path_tmp);
+  if(path_tmp[len - 1] == '/')
+    path_tmp[len - 1] = 0;
+  for(char *p = path_tmp + 1; *p; p++) {
+    if(*p == '/') {
+      *p = 0;
+      mkdir(path_tmp, 0755);
+      *p = '/';
     }
-    *retcode = mkdir(path_tmp, 0755);
-    printf("mkdir: %s\n", path_tmp);
   }
+  *retcode = mkdir(path_tmp, 0755);
 }
 
 /*
