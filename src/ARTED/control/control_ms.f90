@@ -705,9 +705,7 @@ contains
                                 ,nproc_group_global,nproc_id_global)
 
     do imacro = nmacro_s, nmacro_e
-      if (.not. create_directory(dir_ms_M(imacro))) then
-        stop 'fail: create_dir_ms::create_directory(dir_ms_M(imacr))'
-      end if
+      call create_directory(dir_ms_M(imacro))
     enddo
     call comm_sync_all ! sync until directory created
   end subroutine

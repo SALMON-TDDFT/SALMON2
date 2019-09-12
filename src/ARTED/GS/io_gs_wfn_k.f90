@@ -466,9 +466,7 @@ contains
        nfile_ae_ms = 7000
        dir_ae_file_ms = trim(dir_ms)//'rt_ae_field/'
        if(iflag_read_write_ms==iflag_write_rt) then
-         if(.not. create_directory(dir_ae_file_ms)) then
-           stop 'fail: read_write_rt_wfn_k_mx_each_macro_grid::create_directory'
-         end if
+         call create_directory(dir_ae_file_ms)
        end if
        ae_file_ms = trim(dir_ae_file_ms)//'ae_field'
        open(nfile_ae_ms,file=trim(ae_file_ms),form='unformatted')
