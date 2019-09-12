@@ -141,10 +141,11 @@ Structure_Optimization_Iteration : do iopt=1,iter_opt
 Multigrid_Iteration : do img=1,ntmg
 
 if(iopt==1)then
+
+  call timer_begin(LOG_INIT_GS)
+
   select case( IC )
   case default ! New calculation
-
-    call timer_begin(LOG_INIT_GS)
 
     Hvol = system%Hvol
     Hgs = system%Hgs

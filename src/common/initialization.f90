@@ -90,6 +90,10 @@ subroutine init_dft(lg,system,stencil)
     system%nspin=2
   end if
 
+  if ( allocated(system%Rion) ) deallocate(system%Rion)
+  if ( allocated(system%rocc) ) deallocate(system%rocc)
+  if ( allocated(system%Velocity) ) deallocate(system%Velocity)
+  if ( allocated(system%Force) ) deallocate(system%Force)
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
   system%rion = rion
@@ -153,6 +157,8 @@ subroutine init_orbital_parallel_singlecell(system,info)
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
   info%if_divide_orbit  = nproc_ob.ne.1
 
+  if ( allocated(info%occ) ) deallocate(info%occ)
+  if ( allocated(info%irank_io) ) deallocate(info%irank_io)
   allocate(info%occ(info%io_s:info%io_e, info%ik_s:info%ik_e, 1:system%nspin,1),info%irank_io(1:system%no))
 
 ! process ID corresponding to the orbital index io
@@ -209,6 +215,9 @@ subroutine init_grid_whole(rsize,hgs,lg)
   lg%is_overlap(1:3) = lg%is(1:3)-nd
   lg%ie_overlap(1:3) = lg%ie(1:3)+nd
 
+  if ( allocated(lg%idx) ) deallocate(lg%idx)
+  if ( allocated(lg%idy) ) deallocate(lg%idy)
+  if ( allocated(lg%idz) ) deallocate(lg%idz)
   allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
           ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
           ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
@@ -262,6 +271,10 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   integer :: i1,i2,i3,i4,j1,j2,j3,ibox,j,ii
   integer :: nproc_domain_orbital_mul,ngo(3),ngo_mul
 
+  if ( allocated(mg%is_all) ) deallocate(mg%is_all)
+  if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)
+  if ( allocated(ng%is_all) ) deallocate(ng%is_all)
+  if ( allocated(ng%ie_all) ) deallocate(ng%ie_all)
   allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1),ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
 
 ! +-------------------------------+
@@ -320,6 +333,9 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   mg%is_overlap(1:3) = mg%is(1:3)-nd
   mg%ie_overlap(1:3) = mg%ie(1:3)+nd
 
+  if ( allocated(mg%idx) ) deallocate(mg%idx)
+  if ( allocated(mg%idy) ) deallocate(mg%idy)
+  if ( allocated(mg%idz) ) deallocate(mg%idz)
   allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
           ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
@@ -422,6 +438,9 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   ng%is_array(1:3) = ng%is(1:3)-nd
   ng%ie_array(1:3) = ng%ie(1:3)+nd
 
+  if ( allocated(ng%idx) ) deallocate(ng%idx)
+  if ( allocated(ng%idy) ) deallocate(ng%idy)
+  if ( allocated(ng%idz) ) deallocate(ng%idz)
   allocate(ng%idx(ng%is_overlap(1):ng%ie_overlap(1)) &
           ,ng%idy(ng%is_overlap(2):ng%ie_overlap(2)) &
           ,ng%idz(ng%is_overlap(3):ng%ie_overlap(3)))

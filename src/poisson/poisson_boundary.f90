@@ -72,6 +72,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   integer,allocatable :: ig_num(:)
   integer,allocatable :: ig(:,:,:)
   real(8),allocatable :: coordinate(:,:)
+  integer :: lmax_lmp_tmp !iwata
   
   !------------------------- Boundary condition (multipole expansion)
 
@@ -255,6 +256,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   !$omp end master
   !$omp end parallel
   
+    lmax_lmp_tmp=lmax_lmp !iwata
     rholm2=0.d0
     rholm3=0.d0
     do ii=1,poisson%npole_partial
@@ -264,7 +266,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   !$omp parallel default(none) &
   !$omp          shared(ig,coordinate,center_trho,trho,rholm3) &
   !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz,ylm) &
-  !$omp          firstprivate(ii,pl,cl,lmax_lmp,hvol)
+  !$omp          firstprivate(ii,pl,cl,lmax_lmp_tmp,hvol) !iwata
         tid=omp_get_thread_num()
         rholm3(:,tid)=0.d0
   
@@ -281,7 +283,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
           xxxx=xx*rinv
           yyyy=yy*rinv
           zzzz=zz*rinv
-          do ll=0,lmax_lmp
+          do ll=0,lmax_lmp_tmp !iwata
           do lm=ll**2+1,(ll+1)**2
             call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
             rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm*trho(ixbox,iybox,izbox)*hvol

@@ -110,6 +110,8 @@ SUBROUTINE init_kvector(num_kgrid,system)
 
   nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
   system%nk = nk
+  if ( allocated(system%vec_k) ) deallocate(system%vec_k)
+  if ( allocated(system%wtk)   ) deallocate(system%wtk)
   allocate(system%vec_k(3,nk),system%wtk(nk))
 
   system%wtk  = 1d0/dble(nk)
