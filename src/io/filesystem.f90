@@ -20,6 +20,7 @@ module filesystem
   public :: file_exists, directory_exists
   public :: remove_file
   public :: create_directory, remove_directory
+  public :: force_remove
 
   public :: atomic_create_directory ! for multi process
 
@@ -44,6 +45,13 @@ interface
   end subroutine
 
   subroutine stdio_remove(dirpath, retcode) bind(C,name='stdio_remove')
+    use, intrinsic :: iso_c_binding
+    character(kind=c_char),intent(in) :: dirpath
+    integer(c_int),intent(out)        :: retcode
+  end subroutine
+
+  subroutine posix_remove_directory_tree(dirpath, retcode) &
+      bind(C,name='posix_remove_directory_tree')
     use, intrinsic :: iso_c_binding
     character(kind=c_char),intent(in) :: dirpath
     integer(c_int),intent(out)        :: retcode
@@ -120,6 +128,25 @@ contains
       end if
     else
       stop 'fail: remove_directory: directory not exists'
+    end if
+  end subroutine
+
+  ! ###
+  ! WARNING: This routine performs the same as `rm -rf` of UNIX.
+  !          You must be careful when using it.
+  ! ###
+  ! entry_path: file or directory path (relative or absolute)
+  subroutine force_remove(entry_path)
+    implicit none
+    character(*), intent(in) :: entry_path
+    integer :: retcode
+    if (file_exists(entry_path)) then
+      call remove_file(entry_path)
+    else if (directory_exists(entry_path)) then
+      call posix_remove_directory_tree(entry_path, retcode)
+      if (retcode /= 0) then
+        stop 'fail: force_remove: check file or directory'
+      end if
     end if
   end subroutine
 

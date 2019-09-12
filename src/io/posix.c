@@ -20,13 +20,18 @@
 #if defined(SYSTEM_HAS_POSIX) \
     && defined(SYSTEM_HAS_POSIX_STAT) \
     && defined(SYSTEM_HAS_POSIX_ACCESS) \
-    && defined(SYSTEM_HAS_POSIX_MKDIR)
+    && defined(SYSTEM_HAS_POSIX_MKDIR) \
+    && defined(SYSTEM_HAS_POSIX_NFTW)
+
+#define _XOPEN_SOURCE    500
+#define NFTW_SUPPORT_FD  8
 
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h> /* snprintf */
+#include <ftw.h>
 
 #if defined(SYSTEM_HAS_PATH_MAX_IN_LIMITS_H)
 #include <limits.h>
@@ -35,6 +40,7 @@
 #else
 #define PATH_MAX 1024 /* FIXME */
 #endif
+
 
 /*
  * check file exists by POSIX
@@ -73,7 +79,6 @@ void posix_directory_exists(char const* dirpath, int * retcode) {
  *          otherwise: error
  */
 void posix_mkdir(char const* dirpath, int * retcode) {
-  /* recursive directory create */
   char path_tmp[PATH_MAX];
   size_t len;
   snprintf(path_tmp, sizeof(path_tmp), "%s", dirpath);
@@ -90,7 +95,36 @@ void posix_mkdir(char const* dirpath, int * retcode) {
   *retcode = mkdir(path_tmp, 0755);
 }
 
-#endif
+
+/* it is used by nftw(). */
+int remove_nftw_callback(const char *entry_path, const struct stat *sb, int type, struct FTW *buf)
+{
+  int rv = remove(entry_path);
+  if (rv) {
+      perror(entry_path);
+  }
+  return rv;
+}
+
+/*
+ * remove directory recursively by POSIX with nftw().
+ *
+ * This routine performs the same as `rm -rf` of UNIX.
+ * You must be careful when using it.
+ *
+ * retcode:         0: success
+ *          otherwise: error
+ */
+void posix_remove_directory_tree(char const* dirpath, int * retcode) {
+  *retcode = nftw(dirpath, remove_nftw_callback, NFTW_SUPPORT_FD, FTW_DEPTH | FTW_PHYS);
+}
+
+#else
+
+#error "SALMON requires POSIX API for IO"
+
+#endif /* ifdef POSIX APIs */
+
 
 #if defined(SYSTEM_HAS_STDIO_REMOVE)
 
@@ -106,4 +140,4 @@ void stdio_remove(char const* dirpath, int * retcode) {
   *retcode = remove(dirpath);
 }
 
-#endif
+#endif /* ifdef SYSTEM_HAS_STDIO_REMOVE */
