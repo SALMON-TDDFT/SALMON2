@@ -1547,7 +1547,7 @@ contains
     use salmon_parallel
     use salmon_communication
     use salmon_file, only: get_filehandle
-    use posix_io, only: create_directory
+    use filesystem, only: create_directory
     implicit none
     integer :: i,j,ierr_nml
     ierr_nml = 0

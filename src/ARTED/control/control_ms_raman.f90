@@ -874,7 +874,7 @@ contains
   
 
   subroutine create_dir_ms
-    use posix_io, only: create_directory
+    use filesystem, only: create_directory
     implicit none
     integer :: imacro
 

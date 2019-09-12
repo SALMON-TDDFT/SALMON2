@@ -208,7 +208,7 @@ Subroutine write_GS_data
   !--------------------------------------------------------------------------------
   !! export all orbital wave functions in cube or vtk format (multiplying phase factor)
     subroutine write_psi_data()
-      use posix_io, only: create_directory
+      use filesystem, only: create_directory
       implicit none
       integer :: fh_psi
       integer :: ik,ib,i,j,ix,iy,iz

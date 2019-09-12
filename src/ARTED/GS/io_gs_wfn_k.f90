@@ -21,7 +21,7 @@ module io_gs_wfn_k
   use salmon_communication
   use salmon_parallel
   use global_variables
-  use posix_io, only: create_directory
+  use filesystem, only: create_directory
   implicit none
 
   character(256) :: gs_wfn_directory
@@ -278,7 +278,7 @@ module io_rt_wfn_k
   use salmon_communication
   use salmon_parallel
   use global_variables
-  use posix_io, only: create_directory
+  use filesystem, only: create_directory
   implicit none
 
   character(256) :: rt_wfn_directory

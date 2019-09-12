@@ -21,7 +21,7 @@ contains
   subroutine init_dir_out_restart(ofile)
     use structures,  only: s_ofile
     use inputoutput, only: theory
-    use posix_io,    only: create_directory
+    use filesystem,  only: create_directory
     use salmon_communication, only: comm_is_root,comm_sync_all
     use salmon_parallel,      only: nproc_id_global
     implicit none
@@ -63,7 +63,7 @@ contains
   end subroutine write_checkpoint_rt
 
   subroutine create_checkpoint_dir(itt,dir_checkpoint)
-    use posix_io, only: create_directory
+    use filesystem, only: create_directory
     use salmon_communication, only: comm_is_root,comm_sync_all
     use salmon_parallel,      only: nproc_id_global
     implicit none

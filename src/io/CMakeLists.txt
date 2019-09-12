@@ -5,7 +5,7 @@ set(SOURCES
     flops.f90
     perflog.f90
     posix_io.c
-    posix_io.f90
+    filesystem.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

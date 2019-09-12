@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-module posix_io
+module filesystem
   use, intrinsic :: iso_c_binding
   implicit none
 
@@ -83,4 +83,4 @@ contains
     call posix_rmdir(adjustl(trim(dirpath))//c_null_char, retcode)
     ret = (retcode == 0) ! success
   end function
-end module
+end module filesystem
