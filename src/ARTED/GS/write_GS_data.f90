@@ -208,7 +208,7 @@ Subroutine write_GS_data
   !--------------------------------------------------------------------------------
   !! export all orbital wave functions in cube or vtk format (multiplying phase factor)
     subroutine write_psi_data()
-      use filesystem, only: create_directory
+      use filesystem, only: atomic_create_directory
       implicit none
       integer :: fh_psi
       integer :: ik,ib,i,j,ix,iy,iz
@@ -220,12 +220,8 @@ Subroutine write_GS_data
       select case(format_voxel_data)
       case ('cube')
          write(gs_wfn_k_cube_vtk_dir,'(A,A)') trim(base_directory),'/gs_wfn_cube/'
-         if (comm_is_root(nproc_id_global)) then
-           if (.not. create_directory(gs_wfn_k_cube_vtk_dir)) then
-             stop 'fail: write_psi_data::create_directory'
-           end if
-         end if
-         call comm_sync_all ! sync until directory created
+         call atomic_create_directory(gs_wfn_k_cube_vtk_dir &
+                                     ,nproc_group_global,nproc_id_global)
 
          do ik=NK_s,NK_e
          do ib=1,NB
@@ -276,12 +272,8 @@ Subroutine write_GS_data
       case ('vtk')
 
          write(gs_wfn_k_cube_vtk_dir,'(A,A)') trim(base_directory),'/gs_wfn_vtk/'
-         if (comm_is_root(nproc_id_global)) then
-           if (.not. create_directory(gs_wfn_k_cube_vtk_dir)) then
-             stop 'fail: write_psi_data::create_directory'
-           end if
-         end if
-         call comm_sync_all ! sync until directory created
+         call atomic_create_directory(gs_wfn_k_cube_vtk_dir &
+                                     ,nproc_group_global,nproc_id_global)
 
          do ik=NK_s,NK_e
          do ib=1,NB

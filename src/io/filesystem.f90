@@ -20,6 +20,8 @@ module filesystem
   public :: file_exists, directory_exists
   public :: create_directory, remove_directory
 
+  public :: atomic_create_directory ! for multi process
+
 private
 interface 
   subroutine posix_file_exists(filepath, retcode) bind(C,name='posix_file_exists')
@@ -83,4 +85,22 @@ contains
     call posix_rmdir(adjustl(trim(dirpath))//c_null_char, retcode)
     ret = (retcode == 0) ! success
   end function
+
+  ! dirpath:   directory path
+  ! igroup:    communicator
+  ! idelegate: A delegate process of creating directory
+  subroutine atomic_create_directory(dirpath, igroup, idelegate)
+    use salmon_communication, only: comm_is_root,comm_sync_all
+    implicit none
+    character(*), intent(in) :: dirpath
+    integer, intent(in)      :: igroup, idelegate
+
+    if (comm_is_root(idelegate)) then
+      if (.not. create_directory(dirpath)) then
+        stop 'fail: create_directory_atomic'
+      end if
+    end if
+
+    call comm_sync_all(igroup) ! sync until directory created
+  end subroutine
 end module filesystem
