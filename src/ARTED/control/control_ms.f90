@@ -695,16 +695,27 @@ contains
   
   
   subroutine create_dir_ms
+    use filesystem, only: create_directory
     implicit none
     integer :: imacro
 
-    call create_directory(dir_ms)
-    call create_directory(dir_ms_RT_Ac)
+    if (comm_is_root(nproc_id_global)) then
+      if (.not. create_directory(dir_ms)) then
+        stop 'fail: create_dir_ms::create_directory(dir_ms)'
+      end if
+
+      if (.not. create_directory(dir_ms_RT_Ac)) then
+        stop 'fail: create_dir_ms::create_directory(dir_ms_RT_Ac)'
+      end if
+    end if
+    call comm_sync_all ! sync until directory created
 
     do imacro = nmacro_s, nmacro_e
-       call create_directory(dir_ms_M(imacro))
+      if (.not. create_directory(dir_ms_M(imacro))) then
+        stop 'fail: create_dir_ms::create_directory(dir_ms_M(imacr))'
+      end if
     enddo
-
+    call comm_sync_all ! sync until directory created
   end subroutine
 
   subroutine write_data_out(index)

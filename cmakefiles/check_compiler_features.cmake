@@ -1,5 +1,6 @@
 include(CheckFortranSourceCompiles)
-include(CheckFunctionExists)
+include(CheckIncludeFile)
+include(CheckSymbolExists)
 
 if (USE_MPI)
   find_package(MPI REQUIRED)
@@ -20,5 +21,15 @@ end]]
 FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION SRC_EXT F90)
 
 
-check_function_exists("mkdir" SYSTEM_HAS_POSIX_MKDIR_ROUTINE)
-check_function_exists("rmdir" SYSTEM_HAS_POSIX_RMDIR_ROUTINE)
+check_include_file(unistd.h SYSTEM_HAS_POSIX)
+if (SYSTEM_HAS_POSIX)
+  check_symbol_exists(stat   "sys/stat.h;sys/types.h;unistd.h" SYSTEM_HAS_POSIX_STAT)
+  check_symbol_exists(access "unistd.h"                        SYSTEM_HAS_POSIX_ACCESS)
+  check_symbol_exists(mkdir  "sys/stat.h;sys/types.h;unistd.h" SYSTEM_HAS_POSIX_MKDIR)
+  check_symbol_exists(rmdir  "unistd.h"                        SYSTEM_HAS_POSIX_RMDIR)
+else ()
+  message(FATAL_ERROR "SALMON requires POSIX API for IO access")
+endif ()
+
+check_symbol_exists(PATH_MAX "limits.h"       SYSTEM_HAS_PATH_MAX_IN_LIMITS_H)
+check_symbol_exists(PATH_MAX "linux/limits.h" SYSTEM_HAS_PATH_MAX_IN_LINUX_LIMITS_H)

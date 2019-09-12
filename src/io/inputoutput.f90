@@ -1547,7 +1547,7 @@ contains
     use salmon_parallel
     use salmon_communication
     use salmon_file, only: get_filehandle
-    use misc_routines, only: create_directory
+    use filesystem, only: create_directory
     implicit none
     integer :: i,j,ierr_nml
     ierr_nml = 0
@@ -1995,8 +1995,14 @@ contains
 
     !(create output directory)
     if (comm_is_root(nproc_id_global)) then
-       if(base_directory(1:3).ne."./ ") call create_directory(base_directory)
+       if(base_directory(1:3).ne."./ ") then
+         if (.not. create_directory(base_directory)) then
+           stop 'fail: dump_input_common::create_directory'
+         end if
+       end if
     endif
+
+    call comm_sync_all ! sync until directory created
 
   end subroutine dump_input_common
 
