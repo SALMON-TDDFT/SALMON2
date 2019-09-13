@@ -21,6 +21,8 @@ subroutine gceed
 
   if(cfunction2=="GS")then
     call real_space_dft
+  else if(cfunction2=="BAND")then
+    call real_space_band
   else if(cfunction2=="RT")then
     call real_time_dft
   end if
