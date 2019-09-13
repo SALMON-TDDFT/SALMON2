@@ -556,8 +556,7 @@ contains
     base_directory        = './'
     output_buffer_interval= -1
     yn_restart            = 'n'
-   !directory_read_data   = 'restart'
-    directory_read_data   = './'  !temporaly
+    directory_read_data   = 'restart/'
     checkpoint_interval   = 0
     time_shutdown         = -1d0
     !remove later
