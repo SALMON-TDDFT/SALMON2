@@ -32,12 +32,9 @@ contains
        ofile%dir_out_restart = 'data_for_restart/'
     end select
 
-    !!! currently, set "./" : change later
-    ofile%dir_out_restart = './'
-
     if(ofile%dir_out_restart(1:3).ne."./ ") then
-      call atomic_create_directory(ofile%dir_out_restart &
-                                  ,nproc_group_global,nproc_id_global)
+       call atomic_create_directory(ofile%dir_out_restart &
+                                   ,nproc_group_global,nproc_id_global)
     endif
 
   end subroutine init_dir_out_restart
