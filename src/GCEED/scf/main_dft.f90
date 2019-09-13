@@ -659,7 +659,8 @@ if(iflag_opt==1) then
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
     do iatom=1,MI
-       write(*,20) "'"//trim(AtomName(Kion(iatom)))//"'",  &
+!       write(*,20) "'"//trim(AtomName(Kion(iatom)))//"'",  &
+       write(*,20) "'"//trim(atom_name(iatom))//"'",  &
                    (system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
                    Kion(iatom), flag_opt_atom(iatom)
     end do

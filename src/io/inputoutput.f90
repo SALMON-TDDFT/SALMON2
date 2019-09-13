@@ -1388,7 +1388,8 @@ contains
         select case(iflag_atom_coor)
         case(ntype_atom_coor_cartesian)
            do i=1, natom
-              if(use_geometry_opt == 'y')then
+             !if(use_geometry_opt == 'y')then
+              if(yn_opt == 'y')then
                  read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i), flag_opt_atom(i)
               else
                  read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i)
@@ -1398,7 +1399,8 @@ contains
            rion = rion*ulength_to_au
         case(ntype_atom_coor_reduced)
            do i=1, natom
-              if(use_geometry_opt == 'y')then
+             !if(use_geometry_opt == 'y')then
+              if(yn_opt == 'y')then
                  read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i), flag_opt_atom(i)
               else
                  read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i)
