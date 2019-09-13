@@ -26,7 +26,6 @@ integer :: Ntime
 real(8) :: dip_spacing
 
 ilsda=ispin
-icalcforce=0
 
 if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
@@ -41,20 +40,6 @@ else if(sum(abs(num_rgrid)) == 0d0 .and. sum(abs(dl)) /= 0d0)then
 end if
 
 !===== namelist for group_fundamental =====
-select case(yn_out_rvf_rt)
-case('y')
-  icalcforce = 1
-end select
-
-select case(yn_md)
-case('y')
-  iflag_md = 1
-  icalcforce = 1
-case('n')
-  iflag_md = 0
-case default
-  stop 'invald iflag_md'
-end select
 
 num_kpoints_3d(1:3)=num_kgrid(1:3)
 num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
@@ -141,20 +126,6 @@ end if
 if(iwdenoption==0)then
   iwdenstep=0
 end if
-
-select case(trans_longi)
-case('tr')
-  iflag_indA=0
-case('lo')
-  iflag_indA=1
-end select
-
-select case(yn_ffte)
-case('n')
-  iflag_hartree=2
-case('y')
-  iflag_hartree=4
-end select
 
 if(comm_is_root(nproc_id_global))close(fh_namelist)
 

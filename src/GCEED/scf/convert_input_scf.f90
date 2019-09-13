@@ -30,7 +30,6 @@ character(100) :: file_atoms_coo
 real(8) :: dip_spacing
 
 ilsda = ispin
-icalcforce=0
 
 if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
@@ -102,22 +101,6 @@ else if(ispin == 1)then
 else 
   write(*,*)"'ispin' should be 0 or 1. "
 end if
-
-select case(yn_opt)
-case('y')
-  iflag_opt = 1
-case('n')
-  iflag_opt = 0
-case default
-  stop 'invalid iflag_opt'
-end select
-
-if(iflag_opt==1) then
-   iter_opt = nopt
-   icalcforce = 1
-else
-   iter_opt = 1
-endif
 
 select case(yn_subspace_diagonalization)
 case('y')
@@ -250,69 +233,8 @@ call comm_bcast(Lref,nproc_group_global)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "MI =",MI
 
-!allocate( AtomName(MI),iAtomicNumber(MI) )
-
-!Atomname(:)=atom_name(:)
-!iAtomicNumber(:)=kion(:)
-
-!Atomname(:)='dm' ! dummy
-!iAtomicNumber(:)=0 ! dummy
-!call comm_bcast(AtomName,      nproc_group_global)
-!call comm_bcast(iAtomicNumber, nproc_group_global)
-
-
-select case(yn_out_psi)
-case('y')
-  iflag_write_psi=1
-case('n')
-  iflag_write_psi=0
-case default
-  stop 'invalid iflag_write_psi'
-end select
-
-select case(yn_out_elf_rt)
-case('y')
-  iflag_ELF=1
-case('n')
-  iflag_ELF=0
-case default
-  stop 'invalid iflag_ELF'
-end select
-
-select case(yn_out_dos)
-case('y')
-  iflag_dos=1
-case('n')
-  iflag_dos=0
-case default
-  stop 'invalid iflag_dos'
-end select
-
-select case(yn_out_pdos)
-case('y')
-  iflag_pdos=1
-case('n')
-  iflag_pdos=0
-case default
-  stop 'invalid iflag_pdos'
-end select
-
-call comm_bcast(iflag_write_psi, nproc_group_global)
-call comm_bcast(iflag_ELF,      nproc_group_global)
-call comm_bcast(iflag_dos,      nproc_group_global)
-call comm_bcast(iflag_pdos,     nproc_group_global)
 
 !===== namelist for group_others =====
-if(comm_is_root(nproc_id_global))then
-  if(iflag_dos<=-1.or.iflag_dos>=2)then
-    write(*,*) "iflag_dos must be equal to 0 or 1."
-    stop
-  end if
-  if(iflag_pdos<=-1.or.iflag_pdos>=2)then
-    write(*,*) "iflag_pdos must be equal to 0 or 1."
-    stop
-  end if
-end if
 
 !if(iflag_ps==1)then
 !  do ii=1,3
@@ -324,13 +246,6 @@ end if
 
 nproc_d_o_mul   = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
 nproc_d_g_mul_dm= nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-
-select case(yn_ffte)
-case('n')
-  iflag_hartree=2
-case('y')
-  iflag_hartree=4
-end select
 
 if(comm_is_root(nproc_id_global))close(fh_namelist)
 

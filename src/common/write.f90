@@ -419,15 +419,15 @@ contains
 
   end subroutine write_xyz
 
-  subroutine write_rt_data_3d(it,ofl,iflag_md,dt)
+  subroutine write_rt_data_3d(it,ofl,dt)
     use structures, only: s_ofile
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file, only: open_filehandle
-    use inputoutput, only: t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
+    use inputoutput, only: yn_md,t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
     implicit none
     type(s_ofile) :: ofl
-    integer, intent(in) :: it,iflag_md
+    integer, intent(in) :: it
     integer :: uid
     real(8) :: dt
 
@@ -443,7 +443,7 @@ contains
        write(uid,10) "E_ext", "External electric field"
        write(uid,10) "Ac_tot", "Total vector potential field"
        write(uid,10) "E_tot", "Total electric field"
-       if(iflag_md==1) then
+       if(yn_md=='y') then
           write(uid,10) "Jm", "Matter current density(electrons)"
           write(uid,10) "Jmi","Matter current density(ions)"
        else
@@ -466,7 +466,7 @@ contains
          & 14, "Jm_x", trim(t_unit_current%name), &
          & 15, "Jm_y", trim(t_unit_current%name), &
          & 16, "Jm_z", trim(t_unit_current%name)
-       if(iflag_md==1) then
+       if(yn_md=='y') then
           write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
                & 17, "Jmi_x", trim(t_unit_current%name), &
                & 18, "Jmi_y", trim(t_unit_current%name), &
@@ -487,7 +487,7 @@ contains
 !          & Ac_tot(it, 1:3) * t_unit_ac%conv, &
 !          & E_tot(it, 1:3) * t_unit_elec%conv, &
 !          & javt(it, 1:3) * t_unit_current%conv
-!        if(iflag_md==1) then
+!        if(yn_md=='y') then
 !           write(uid, "(99(1X,E23.15E3))",advance='no') &
 !                & javt_ion(it, 1:3) * t_unit_current%conv
 !        endif
@@ -497,18 +497,18 @@ contains
 
   end subroutine
 
-  subroutine write_rt_energy_data(it,ofl,iflag_md,dt,energy,md)
+  subroutine write_rt_energy_data(it,ofl,dt,energy,md)
     use structures, only: s_ofile,s_dft_energy,s_md
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_global, only: ensemble, thermostat
     use salmon_file, only: open_filehandle
-    use inputoutput, only: t_unit_time,t_unit_energy
+    use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
     type(s_dft_energy) :: energy
     type(s_md) :: md
     type(s_ofile) :: ofl
-    integer, intent(in) :: it,iflag_md
+    integer, intent(in) :: it
     integer :: uid
     real(8) :: dt
 
@@ -522,7 +522,7 @@ contains
        write(uid,10) "Real time calculation",""
        write(uid,10) "Eall", "Total energy"
        write(uid,10) "Eall0", "Initial energy"
-       if(iflag_md==1) then
+       if(yn_md=='y') then
        write(uid,10) "Tion", "Kinetic energy of ions"
        write(uid,10) "Temperature_ion", "Temperature of ions"
        write(uid,10) "E_work", "Work energy of ions(sum f*dr)"
@@ -538,7 +538,7 @@ contains
         & 2, "Eall", trim(t_unit_energy%name), &
         & 3, "Eall-Eall0", trim(t_unit_energy%name)
 
-       if(iflag_md==1) then
+       if(yn_md=='y') then
        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
         & 4, "Tion", trim(t_unit_energy%name), &
         & 5, "Temperature_ion", "K", &
@@ -562,7 +562,7 @@ contains
           & energy%E_tot * t_unit_energy%conv, &
           & energy%E_tot * t_unit_energy%conv     !just temporal
 !          & (Eall_t(it) - Eall0) * t_unit_energy%conv
-       if(iflag_md==1) then
+       if(yn_md=='y') then
        write(uid, "(99(1X,E23.15E3))",advance='no') &
           & md%Tene * t_unit_energy%conv, &
           & md%Temperature,               &
@@ -574,7 +574,7 @@ contains
 !          & it * dt * t_unit_time%conv, &
 !          & Eall_t(it) * t_unit_energy%conv, &
 !          & (Eall_t(it) - Eall0) * t_unit_energy%conv
-!        if(iflag_md==1) then
+!        if(yn_md=='y') then
 !        write(uid, "(99(1X,E23.15E3))",advance='no') &
 !          & Tion_t(it) * t_unit_energy%conv, &
 !          & Temperature_ion_t(it), &

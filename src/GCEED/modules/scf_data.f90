@@ -129,7 +129,6 @@ integer :: Miter_rt    ! Total number of Iteration for RT calculation
 
 integer :: iflag_diisjump
 
-integer :: iflag_write_psi
 real(8),allocatable :: rto(:)
 integer ,allocatable:: idip2int(:)
 real(8),allocatable :: rto_ix(:,:)
@@ -142,20 +141,12 @@ real(8),allocatable :: rbox_array2_dip2e(:)
 
 integer :: ilsda
 
-logical :: flag_opt_conv
-integer :: iflag_opt
-integer :: iter_opt
-integer :: iopt
-
 integer :: MST(2),ifMST(2),itotMST
 integer :: itotfMST
 integer :: MST0(2),itotMST0
 integer :: Mx(3),Mxin(3),Mxin_old(3)
 
 real(8) :: rnetot
-
-!character(8),allocatable :: AtomName(:)   
-!integer,allocatable :: iAtomicNumber(:)   
 
 real(8) :: Hgs(3)        ! Grid spacing
 real(8) :: Hold(3)     ! Grid spacing
@@ -339,9 +330,6 @@ integer,allocatable :: rho_region_nz(:,:)
 
 integer :: numspin
 
-integer :: icalcforce
-integer :: iflag_md
-
 real(8) :: fcN(0:12)
 real(8) :: fbN(0:12)
 
@@ -363,12 +351,6 @@ integer :: MI_read
 real(8) :: absorption(0:100000)
 real(8) :: absorption_d(0:100000)
 real(8) :: absorption_id(0:100000)
-
-integer :: iflag_dos
-integer :: iflag_pdos
-integer :: iflag_ELF
-integer :: iflag_indA
-integer :: iflag_hartree
 
 real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 
@@ -489,12 +471,10 @@ end subroutine old_mesh
 function check_rion_update() result(rion_update)
   implicit none
   logical :: rion_update
-  ! iflag_opt <= calculation%yn_opt (in scf)
-  ! iflag_md  <= calculation%yn_md (in rt)
   if (iscfrt == 1) then
-    rion_update = (iflag_opt == 1)
+    rion_update = (yn_opt == 'y')
   else if (iscfrt == 2) then
-    rion_update = (iflag_md == 1)
+    rion_update = (yn_md == 'y')
   else
     rion_update = .true.
   end if

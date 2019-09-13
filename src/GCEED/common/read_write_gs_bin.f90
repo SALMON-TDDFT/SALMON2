@@ -82,8 +82,6 @@ if(comm_is_root(nproc_id_global))then
       write(iu1_w) Zps(:MKI),Rps(:MKI)
       write(iu1_w) atom_name(:MI)
       write(iu1_w) kion(:MI)   !read twice! remove later
-!      write(iu1_w) AtomName(:MI) 
-!      write(iu1_w) iAtomicNumber(:MI) 
    end if
   
 end if
@@ -654,7 +652,6 @@ if(iflag_ps.eq.1)then
   if(iSCFRT==2) then
 !    allocate( Kion(MI),Rion(3,MI) )
   end if
-!  if(iSCFRT==2) allocate( AtomName(MI), iAtomicNumber(MI) )
   if(comm_is_root(nproc_id_global))then
     read(iu1_r) Kion(:MI_read)
     read(iu1_r) Rion(:,:MI_read)
@@ -667,8 +664,6 @@ if(iflag_ps.eq.1)then
     read(iu1_r) 
     read(iu1_r) atom_name(:MI_read)
     read(iu1_r) Kion(:MI_read)   !read twice! remove later
-!    read(iu1_r) AtomName(:MI_read)
-!    read(iu1_r) iAtomicNumber(:MI_read)
   end if
   
   call comm_bcast(Kion,nproc_group_global)
@@ -676,8 +671,6 @@ if(iflag_ps.eq.1)then
   call comm_bcast(iZatom,nproc_group_global)
   call comm_bcast(file_pseudo,nproc_group_global)
   call comm_bcast(atom_name,nproc_group_global)
-!  call comm_bcast(AtomName,nproc_group_global)
-!  call comm_bcast(iAtomicNumber,nproc_group_global)
 
 end if
 
@@ -807,7 +800,7 @@ if(iscfrt==2.and.propagator=='etrs')then
   allocate( vloc_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin,2) )
 end if
 allocate( Vpsl(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
-if(icalcforce==1) allocate( Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),MI) )
+if(yn_opt=='y') allocate( Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),MI) )
 
 if(comm_is_root(nproc_id_global))then
   if(version_num_box(1)>=41)then

@@ -85,6 +85,8 @@ type(s_mixing) :: mixing
 type(s_ofile) :: ofile
 
 logical :: rion_update
+integer :: iopt,nopt_max
+logical :: flag_opt_conv
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -119,7 +121,7 @@ k_end = info%ik_e ! future work: remove this line
 k_num = info%numk ! future work: remove this line
 iobnum = info%numo ! future work: remove this line
 
-if(iflag_opt==1)then
+if(yn_opt=='y')then
    call structure_opt_ini(MI)
    flag_opt_conv=.false.
    write(comment_line,10) 0
@@ -128,8 +130,11 @@ if(iflag_opt==1)then
 end if
 call timer_end(LOG_INIT_GS)
 
+if(yn_opt=='y') then ; nopt_max = nopt
+else                 ; nopt_max = 1
+endif
 
-Structure_Optimization_Iteration : do iopt=1,iter_opt
+Structure_Optimization_Iteration : do iopt=1,nopt_max
 Multigrid_Iteration : do img=1,ntmg
 
 if(iopt==1)then
@@ -622,8 +627,8 @@ if(yn_out_tm  == 'y') then
 end if
 
 ! force
-!if(iflag_opt==1) then
-if(iperiodic == 3 .and. iflag_hartree == 4) then
+!if(y_opt=='y') then
+if(iperiodic == 3 .and. yn_ffte=='y') then
   ! NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
   ! does not allocate.
 else
@@ -646,7 +651,7 @@ deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
-if(iflag_opt==1) then
+if(yn_opt=='y') then
   call structure_opt_check(MI,iopt,flag_opt_conv,system%Force)
   if(.not.flag_opt_conv) call structure_opt(MI,iopt,system)
   !! Rion is old variables to be removed 
@@ -659,7 +664,6 @@ if(iflag_opt==1) then
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
     do iatom=1,MI
-!       write(*,20) "'"//trim(AtomName(Kion(iatom)))//"'",  &
        write(*,20) "'"//trim(atom_name(iatom))//"'",  &
                    (system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
                    Kion(iatom), flag_opt_atom(iatom)

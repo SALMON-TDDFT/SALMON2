@@ -99,22 +99,22 @@ allocate (lap_wk_s_h(ng%is(1):ng%ie(1),   &
                  ng%is(2):ng%ie(2),   &
                  ng%is(3):ng%ie(3)))
 
-if(iSCFRT==1.and.icalcforce==1)then
-  select case(iperiodic)
-  case(0)
-    allocate(rgrad_wk(mg_sta(1):mg_end(1)+1,   &
-                      mg_sta(2):mg_end(2),     &
-                      mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
-  case(3)
-    allocate(cgrad_wk(mg_sta(1):mg_end(1)+1,   &
-                      mg_sta(2):mg_end(2),     &
-                      mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
-  end select
-else if(iSCFRT==2.and.icalcforce==1)then
-  allocate(cgrad_wk(mg_sta(1):mg_end(1)+1,   &
-                    mg_sta(2):mg_end(2),     &
-                    mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
-end if
+!if(iSCFRT==1.and.yn_opt=='y')then  !necessary??
+!  select case(iperiodic)
+!  case(0)
+!    allocate(rgrad_wk(mg_sta(1):mg_end(1)+1,   &
+!                      mg_sta(2):mg_end(2),     &
+!                      mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
+!  case(3)
+!    allocate(cgrad_wk(mg_sta(1):mg_end(1)+1,   &
+!                      mg_sta(2):mg_end(2),     &
+!                      mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
+!  end select
+!else if(iSCFRT==2.and.(yn_out_rvf_rt=='y'.or.yn_md=='y'))then !necessary??
+!  allocate(cgrad_wk(mg_sta(1):mg_end(1)+1,   &
+!                    mg_sta(2):mg_end(2),     &
+!                    mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end,3))
+!end if
 
 allocate (rho_tmp(ng%num(1), ng%num(2), ng%num(3)))
 allocate (rho_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2))
