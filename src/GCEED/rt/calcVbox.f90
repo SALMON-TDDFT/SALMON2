@@ -49,7 +49,7 @@ SUBROUTINE calcVbox(lg,itt_t)
         end if
       end do
     else
-      if(icalcforce==1.or.iflag_md==1)then
+      if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
         do jj=1,3
           if(lg%is(jj)==mg_sta(jj))then
             ix_sta_Vbox(jj)=mg_sta(jj)

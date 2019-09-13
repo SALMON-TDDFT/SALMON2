@@ -85,7 +85,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   if_use_dmat = (use_singlescale=='y') ! .or. if_metaGGA ! (future work)
 
   ! for calc_total_energy_periodic
-  if(iflag_md==1) then
+  if(yn_md=='y') then
      rion_update = .true.
   else
      rion_update = check_rion_update() .or. (itt == Miter_rt+1)
@@ -128,7 +128,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
   !(MD:part1 & update of pseudopotential)
-  if(iflag_md==1) then
+  if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
      call update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
@@ -282,7 +282,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
     call calc_emfields(nspin,curr_tmp)
     call timer_end(LOG_CALC_CURRENT)
 
-    if(iflag_md==1) then
+    if(yn_md=='y') then
       call timer_begin(LOG_CALC_CURRENT_ION)
       call calc_current_ion(lg,system,pp,curr_ion(:,itt))
       call timer_end(LOG_CALC_CURRENT_ION)
@@ -309,7 +309,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_begin(LOG_WRITE_RT_INFOS)
 
   !(force)
-  if(icalcforce==1)then  ! and or rvf flag in future
+  if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
 
      call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
 
@@ -322,16 +322,16 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   endif
 
   !(MD: part2)
-  if(iflag_md==1) call time_evolution_step_md_part2(system,md)
+  if(yn_md=='y') call time_evolution_step_md_part2(system,md)
 
   ! Output 
   !(Export to SYSname_trj.xyz)
-  if( icalcforce==1 .and. mod(itt,out_rvf_rt_step)==0 )then
+  if( (yn_md=='y'.or.yn_out_rvf_rt=='y') .and. mod(itt,out_rvf_rt_step)==0 )then
      write(comment_line,10) itt, itt*dt
 10   format("#rt   step=",i8,"   time=",e16.6)
-     if(iflag_md==1) write(comment_line,11) trim(comment_line),md%Temperature
+     if(yn_md=='y') write(comment_line,11) trim(comment_line),md%Temperature
 11   format(a,"   T=",f12.4)
-     if(iflag_md==1 .and. ensemble=="NVT" .and. thermostat=="nose-hoover") &
+     if(yn_md=='y' .and. ensemble=="NVT" .and. thermostat=="nose-hoover") &
           &  write(comment_line,12) trim(comment_line), md%xi_nh
 12   format(a,"  xi_nh=",e18.10)
      call write_xyz(comment_line,"add","rvf",system)
@@ -344,11 +344,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
      select case(iperiodic)
      case(0)
      case(3)
-        call write_rt_data_3d(itt,ofl,iflag_md,dt)
+        call write_rt_data_3d(itt,ofl,dt)
      end select
 
      !(Export to SYSname_rt_energy.data)
-     call write_rt_energy_data(itt,ofl,iflag_md,dt,energy,md)
+     call write_rt_energy_data(itt,ofl,dt,energy,md)
 
   endif
 

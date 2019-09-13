@@ -36,11 +36,11 @@ deallocate (cmatbox_l,cmatbox_l2)
 
 deallocate (wk_s_h,wk2_s_h,lap_wk_s_h)
 
-if(iSCFRT==1.and.icalcforce==1)then
-  deallocate(rgrad_wk)
-else if(iSCFRT==2.and.icalcforce==1)then
-  deallocate(cgrad_wk)
-end if
+!if(iSCFRT==1.and.yn_opt=='y')then
+!  deallocate(rgrad_wk)
+!else if(iSCFRT==2.and.(yn_out_rvf_rt=='y'.or.yn_md=='y'))then
+!  deallocate(cgrad_wk)
+!end if
 
 deallocate (rho_tmp)
 deallocate (rho_s_tmp)
