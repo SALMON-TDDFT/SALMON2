@@ -191,13 +191,13 @@ if(iopt==1)then
     &                 ,1:iobnum,k_sta:k_end))
   end if
 
-  if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+  if(.not. allocated(Vpsl))      allocate( Vpsl(     mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
   if(.not. allocated(Vpsl_atom)) allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
   if(iflag_ps.eq.0)then
-    Vpsl=0d0
+     Vpsl=0d0
   else
-    call read_pslfile(system,pp,ppg)
-    call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+     call read_pslfile(system,pp,ppg)
+     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end if
 
   allocate( Zps(MKI) ) ! future work: remove this line
@@ -599,29 +599,31 @@ select case(iperiodic)
 end select
 
 ! output the wavefunctions for next GS calculations
-if(write_gs_wfn_k == 'y') then
-  if(iperiodic==3) then
-    call write_wfn(lg,mg,spsi,info,system)
-    ! Experimental Implementation of Inner-Product Outputs:
-    call write_prod_dk_data(lg, mg, system, info, spsi) 
-  else
-    write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
-  end if
+if(write_gs_wfn_k == 'y') then   !this input keyword is going to be removed....
+   select case(iperiodic)
+   case(3)
+      call write_wfn(lg,mg,spsi,info,system)
+      ! Experimental Implementation of Inner-Product Outputs:
+      call write_prod_dk_data(lg, mg, system, info, spsi) 
+   case(0)
+      write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
+   end select
 end if
 
-! output transition moment
+! output transition moment : --> want to put out of the optmization loop in future
 if(yn_out_tm  == 'y') then
-  if(iperiodic==3) then
-     call write_k_data(system,stencil)
-     call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
-  else
+   select case(iperiodic)
+   case(3)
+      call write_k_data(system,stencil)
+      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
+   case(0)
      write(*,*) "error: yn_out_tm='y' & iperiodic=0"
-  end if
+  end select
 end if
 
 ! force
 !if(iflag_opt==1) then
-if (iperiodic == 3 .and. iflag_hartree == 4) then
+if(iperiodic == 3 .and. iflag_hartree == 4) then
   ! NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
   ! does not allocate.
 else
