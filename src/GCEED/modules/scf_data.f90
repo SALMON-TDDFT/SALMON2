@@ -154,8 +154,8 @@ integer :: Mx(3),Mxin(3),Mxin_old(3)
 
 real(8) :: rnetot
 
-character(8),allocatable :: AtomName(:)   
-integer,allocatable :: iAtomicNumber(:)   
+!character(8),allocatable :: AtomName(:)   
+!integer,allocatable :: iAtomicNumber(:)   
 
 real(8) :: Hgs(3)        ! Grid spacing
 real(8) :: Hold(3)     ! Grid spacing

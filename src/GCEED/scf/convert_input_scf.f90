@@ -250,10 +250,13 @@ call comm_bcast(Lref,nproc_group_global)
 
 if(comm_is_root(nproc_id_global)) write(*,*) "MI =",MI
 
-allocate( AtomName(MI),iAtomicNumber(MI) )
+!allocate( AtomName(MI),iAtomicNumber(MI) )
 
-Atomname(:)='dm' ! dummy
-iAtomicNumber(:)=0 ! dummy
+!Atomname(:)=atom_name(:)
+!iAtomicNumber(:)=kion(:)
+
+!Atomname(:)='dm' ! dummy
+!iAtomicNumber(:)=0 ! dummy
 !call comm_bcast(AtomName,      nproc_group_global)
 !call comm_bcast(iAtomicNumber, nproc_group_global)
 

@@ -17,8 +17,8 @@ module structure_opt_sub
   implicit none
   ! Global variables like below is not allowed by our policy
   ! These should be moved (do it later...)
-  real(8),allocatable :: r1_opt(:),r2_opt(:)
-  real(8),allocatable :: H_opt(:,:),H_opt_temp(:,:)
+  real(8),allocatable :: a_dRion(:), dFion(:)
+  real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
 contains
 
   !==============================================================initilize
@@ -28,11 +28,13 @@ contains
     implicit none
     integer,intent(in) :: natom
 
-    allocate(r1_opt(3*natom),r2_opt(3*natom))
-    allocate(H_opt(3*natom,3*natom),H_opt_temp(3*natom,3*natom))
+    allocate(a_dRion(3*natom),dFion(3*natom))
+    allocate(Hess_mat(3*natom,3*natom),Hess_mat_last(3*natom,3*natom))
 
-    r1_opt(:) =0.0d0; r2_opt(:)=0.0d0;
-    H_opt(:,:)=0.0d0; H_opt_temp(:,:)=0.0d0;
+    a_dRion(:)=0d0
+    dFion(:)  =0d0
+    Hess_mat(:,:)     =0d0
+    Hess_mat_last(:,:)=0d0
     if(comm_is_root(nproc_id_global))then
       write(*,*) "===== Grand State Optimization Start ====="
       write(*,*) "       (Quasi-Newton method using Force only)       "
@@ -54,14 +56,15 @@ contains
     integer :: iatom,iatom_count
     real(8) :: fabs,fmax,fave
 
-    fmax=0.0d0; fave= 0d0;
+    fmax =0d0
+    fave =0d0
     iatom_count=0
     do iatom=1,natom
       if(flag_opt_atom(iatom)=='y') then
-        iatom_count=iatom_count+1
-        fabs= sum(Force(:,iatom)**2.0d0)
-        fave= fave + fabs
-        if(fabs>=fmax) fmax=fabs
+        iatom_count = iatom_count+1
+        fabs = sum(Force(:,iatom)**2d0)
+        fave = fave + fabs
+        if(fabs>=fmax) fmax = fabs
       end if
     enddo
 
@@ -70,15 +73,15 @@ contains
       fmax = sqrt(fmax)
       fave = sqrt(fave/iatom_count)
     case('A_eV_fs')
-      fmax = sqrt(fmax)*2.d0*Ry/a_B
-      fave = sqrt(fave/iatom_count)*2.d0*Ry/a_B
+      fmax = sqrt(fmax)*2d0*Ry/a_B
+      fave = sqrt(fave/iatom_count)*2d0*Ry/a_B
     end select
 
     if(comm_is_root(nproc_id_global))then
       write(*,*) " Max-force=",fmax, "  Mean-force=",fave
       write(*,*) "==================================================="
       write(*,*) "Quasi-Newton Optimization Step = ", iopt
-      if(fmax<=convrg_opt_fmax) flag_opt_conv=.true.;
+      if(fmax<=convrg_opt_fmax) flag_opt_conv=.true.
     end if
     call comm_bcast(flag_opt_conv,nproc_group_global)
 
@@ -94,71 +97,73 @@ contains
     integer,intent(in) :: natom,iopt
     !theta_opt=0.0d0:DFP,theta_opt=1.0d0:BFGS in Quasi_Newton method
     real(8), parameter :: alpha=1.0d0,theta_opt=1.0d0
-    integer :: ii,ij,icount_opt,iatom
-    real(8) :: const1_opt,const2_opt
-    real(8) :: force_1d(3*natom),del_Rion_1d(3*natom),optmat_1d(3*natom)
-    real(8) :: del_Rion(3,natom)
-    real(8) :: optmat1_2d((3*natom),(3*natom)),optmat2_2d((3*natom),(3*natom)),optmat3_2d((3*natom),(3*natom))
+    integer :: ii,ij,icount,iatom, NA3
+    real(8) :: const1,const2
+    real(8) :: dRion(3,natom)
+    real(8) :: force_1d(3*natom),dRion_1d(3*natom),optmat_1d(3*natom)
+    real(8) :: optmat1_2d(3*natom,3*natom),optmat2_2d(3*natom,3*natom),optmat3_2d(3*natom,3*natom)
 
-    icount_opt=1
+    NA3 = 3*natom
+
+    icount=1
     do iatom=1,natom
-      do ii=1,3
-        force_1d(icount_opt)=system%Force(ii,iatom)
-        icount_opt=icount_opt+1
-      end do
+    do ii=1,3
+       force_1d(icount) = system%Force(ii,iatom)
+       icount = icount+1
+    end do
     end do
 
     if(iopt==1)then
-      !update H_opt
-      do ii=1,(3*natom)
-      do ij=1,(3*natom)
+      !update Hess_mat
+      do ii=1,NA3
+      do ij=1,NA3
          if(ii==ij)then
-            H_opt(ii,ij)=1.0d0
+            Hess_mat(ii,ij) = 1d0
          else
-            H_opt(ii,ij)=0.0d0
+            Hess_mat(ii,ij) = 0d0
          end if
-         H_opt_temp(ii,ij)=H_opt(ii,ij)
+         Hess_mat_last(ii,ij) = Hess_mat(ii,ij)
       end do
       end do
     else
-      !update r2_opt
-      r2_opt=-(force_1d-r2_opt)
+      !update dFion
+      dFion=-(force_1d-dFion)
       !prepare const and matrix
-      call dgemm('n','n',1,1,(3*natom),1.0d0,r1_opt,1,r2_opt,(3*natom),0.0d0,const1_opt,1)
-      call dgemm('n','n',(3*natom),1,(3*natom),1.0d0,H_opt,(3*natom),r2_opt,(3*natom),0.0d0,optmat_1d,(3*natom))
-      call dgemm('n','n',1,1,(3*natom),1.0d0,r2_opt,1,optmat_1d,(3*natom),0.0d0,const2_opt,1)
-      call dgemm('n','n',(3*natom),(3*natom),1,1.0d0,r1_opt,(3*natom),r1_opt,1,0.0d0,optmat1_2d,(3*natom))
-      !update H_opt
-      H_opt=H_opt_temp+((const1_opt+theta_opt*const2_opt)/(const1_opt**2.0d0))*optmat1_2d
+      call dgemm('n','n',1,1,NA3,1.0d0,a_dRion,1,dFion,NA3,0d0,const1,1)
+      call dgemm('n','n',NA3,1,NA3,1d0,Hess_mat,NA3,dFion,NA3,0d0,optmat_1d,NA3)
+      call dgemm('n','n',1,1,NA3,1d0,dFion,1,optmat_1d,NA3,0d0,const2,1)
+      call dgemm('n','n',NA3,NA3,1,1d0,a_dRion,NA3,a_dRion,1,0d0,optmat1_2d,NA3)
+      !update Hess_mat
+      Hess_mat = Hess_mat_last + ((const1+theta_opt*const2)/(const1**2d0))*optmat1_2d
       if(theta_opt==0.0d0)then
         !theta_opt=0.0d0:DFP
-        call dgemm('n','n',(3*natom),(3*natom),1,1.0d0,optmat_1d,(3*natom),optmat_1d,1,0.0d0,optmat2_2d,(3*natom))
-        H_opt=H_opt-(1.0d0/const2_opt)*optmat2_2d
+        call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,optmat_1d,1,0d0,optmat2_2d,NA3)
+        Hess_mat = Hess_mat-(1d0/const2)*optmat2_2d
       elseif(theta_opt==1.0d0)then
         !theta_opt=1.0d0:BFGS
-        call dgemm('n','n',(3*natom),(3*natom),1,1.0d0,optmat_1d,(3*natom),r1_opt,1,0.0d0,optmat2_2d,(3*natom))
-        call dgemm('n','n',(3*natom),(3*natom),1,1.0d0,r1_opt,(3*natom),optmat_1d,1,0.0d0,optmat3_2d,(3*natom))
-        H_opt=H_opt-(theta_opt/const1_opt)*(optmat2_2d+optmat3_2d)
+        call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,a_dRion,1,0d0,optmat2_2d,NA3)
+        call dgemm('n','n',NA3,NA3,1,1d0,a_dRion,NA3,optmat_1d,1,0d0,optmat3_2d,NA3)
+        Hess_mat = Hess_mat-(theta_opt/const1)*(optmat2_2d+optmat3_2d)
       endif
-      !update H_opt_temp
-      H_opt_temp=H_opt
+      !update Hess_mat_last
+      Hess_mat_last = Hess_mat
     end if
 
-    !update del_Rion_1d and del_Rion
-    del_Rion_1d(:)=0.0d0;
-    call dgemm('n','n',(3*natom),1,(3*natom),1.0d0,H_opt,(3*natom),force_1d,(3*natom),0.0d0,del_Rion_1d,(3*natom))
+    !update dRion_1d and dRion
+    dRion_1d(:) = 0d0
+    call dgemm('n','n',NA3,1,NA3,1d0,Hess_mat,NA3,force_1d,NA3,0d0,dRion_1d,NA3)
     do iatom=1,natom
-      del_Rion(1:3,iatom)=del_Rion_1d((1+3*(iatom-1)):(3+3*(iatom-1)))
+      dRion(1:3,iatom) = dRion_1d((1+3*(iatom-1)):(3+3*(iatom-1)))
     end do
 
-    !update r1_opt,r2_opt
-    r1_opt = alpha*del_Rion_1d
-    r2_opt = force_1d
+    !update a_dRion,dFion
+    a_dRion = alpha * dRion_1d
+    dFion   = force_1d
 
     !update Rion
     do iatom=1,natom
       if(flag_opt_atom(iatom)=='y') then
-        system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*del_Rion(1:3,iatom)
+        system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*dRion(1:3,iatom)
       end if
     end do
    !call comm_bcast(system%Rion,nproc_group_global) !<-- need?
@@ -170,8 +175,8 @@ contains
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     implicit none
-    deallocate(r1_opt,r2_opt)
-    deallocate(H_opt,H_opt_temp)
+    deallocate(a_dRion,dFion)
+    deallocate(Hess_mat,Hess_mat_last)
     if(comm_is_root(nproc_id_global)) write(*,*) "Optimization Converged"
   end subroutine structure_opt_fin
 

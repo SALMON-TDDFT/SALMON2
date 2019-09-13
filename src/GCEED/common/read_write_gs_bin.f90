@@ -80,8 +80,10 @@ if(comm_is_root(nproc_id_global))then
       write(iu1_w) iZatom(:MKI)
       write(iu1_w) file_pseudo(:MKI) !ipsfileform(:MKI)
       write(iu1_w) Zps(:MKI),Rps(:MKI)
-      write(iu1_w) AtomName(:MI) 
-      write(iu1_w) iAtomicNumber(:MI) 
+      write(iu1_w) atom_name(:MI)
+      write(iu1_w) kion(:MI)   !read twice! remove later
+!      write(iu1_w) AtomName(:MI) 
+!      write(iu1_w) iAtomicNumber(:MI) 
    end if
   
 end if
@@ -652,7 +654,7 @@ if(iflag_ps.eq.1)then
   if(iSCFRT==2) then
 !    allocate( Kion(MI),Rion(3,MI) )
   end if
-  if(iSCFRT==2) allocate( AtomName(MI), iAtomicNumber(MI) )
+!  if(iSCFRT==2) allocate( AtomName(MI), iAtomicNumber(MI) )
   if(comm_is_root(nproc_id_global))then
     read(iu1_r) Kion(:MI_read)
     read(iu1_r) Rion(:,:MI_read)
@@ -663,16 +665,19 @@ if(iflag_ps.eq.1)then
       stop "This version is already invalid."
     end if
     read(iu1_r) 
-    read(iu1_r) AtomName(:MI_read)
-    read(iu1_r) iAtomicNumber(:MI_read)
+    read(iu1_r) atom_name(:MI_read)
+    read(iu1_r) Kion(:MI_read)   !read twice! remove later
+!    read(iu1_r) AtomName(:MI_read)
+!    read(iu1_r) iAtomicNumber(:MI_read)
   end if
   
   call comm_bcast(Kion,nproc_group_global)
   call comm_bcast(Rion,nproc_group_global)
   call comm_bcast(iZatom,nproc_group_global)
   call comm_bcast(file_pseudo,nproc_group_global)
-  call comm_bcast(AtomName,nproc_group_global)
-  call comm_bcast(iAtomicNumber,nproc_group_global)
+  call comm_bcast(atom_name,nproc_group_global)
+!  call comm_bcast(AtomName,nproc_group_global)
+!  call comm_bcast(iAtomicNumber,nproc_group_global)
 
 end if
 
