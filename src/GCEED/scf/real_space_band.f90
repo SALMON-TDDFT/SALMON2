@@ -344,7 +344,7 @@ if(iopt==1)then
     allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
     Vh=0.d0
 
-    call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg,info%icomm_r)
+    call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
     Vh = sVh%f
 
     if(ilsda == 0) then
