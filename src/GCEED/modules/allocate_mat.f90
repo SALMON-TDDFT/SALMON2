@@ -36,10 +36,6 @@ real(8),allocatable :: rgrad_wk(:,:,:,:,:,:)
 complex(8),allocatable :: cgrad_wk(:,:,:,:,:,:)
 
 real(8), allocatable :: rho_tmp(:,:,:)
-real(8), allocatable :: rho_s_tmp(:,:,:,:)
-real(8), allocatable :: vxc_tmp(:,:,:)
-real(8), allocatable :: vxc_s_tmp(:,:,:,:)
-real(8), allocatable :: eexc_tmp(:,:,:)
 real(8), allocatable :: exc_dummy(:,:,:)
 real(8), allocatable :: exc_dummy2(:,:,:,:)
 real(8), allocatable :: exc_dummy3(:,:,:,:)
@@ -117,10 +113,6 @@ allocate (lap_wk_s_h(ng%is(1):ng%ie(1),   &
 !end if
 
 allocate (rho_tmp(ng%num(1), ng%num(2), ng%num(3)))
-allocate (rho_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2))
-allocate (vxc_tmp(ng%num(1), ng%num(2), ng%num(3)))
-allocate (vxc_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2))
-allocate (eexc_tmp(ng%num(1), ng%num(2), ng%num(3)))
 allocate (exc_dummy(ng%num(1), ng%num(2), ng%num(3)))
 allocate (exc_dummy2(ng%num(1), ng%num(2), ng%num(3),2))
 allocate (exc_dummy3(ng%num(1), ng%num(2), ng%num(3),3))
