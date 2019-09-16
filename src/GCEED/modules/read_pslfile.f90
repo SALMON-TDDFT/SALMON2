@@ -85,6 +85,7 @@ module read_pslfile_sub
         step(ak)=pp%rad(2,ak)/pp%rad(1,ak)
       case('ABINITPSP8')
         step(ak)=pp%rad(2,ak)-pp%rad(1,ak)
+      case('ADPACK')
       case default
         write(*,*) "Undifiend ps_format: ps_format(ak=",ak,")=",ps_format(ak)
         stop 'stop@GCEED/modules/read_pslfile.f90'

@@ -163,6 +163,8 @@ module structures
     real(8),allocatable :: rps(:)
     real(8),allocatable :: anorm(:,:)
     integer,allocatable :: inorm(:,:)
+    real(8),allocatable :: anorm_so(:,:) ! '*_so' means what is used in 
+    integer,allocatable :: inorm_so(:,:) !   spin-orbit calculation
     real(8),allocatable :: rad(:,:)
     real(8),allocatable :: radnl(:,:)
     real(8),allocatable :: vloctbl(:,:)
@@ -173,10 +175,13 @@ module structures
     real(8),allocatable :: tau_nlcc_tbl(:,:)
     real(8),allocatable :: upp_f(:,:,:)
     real(8),allocatable :: vpp_f(:,:,:)
+    real(8),allocatable :: vpp_f_so(:,:,:)
     real(8),allocatable :: upp(:,:)
     real(8),allocatable :: dupp(:,:)
     real(8),allocatable :: vpp(:,:)
     real(8),allocatable :: dvpp(:,:)
+    real(8),allocatable :: vpp_so(:,:)
+    real(8),allocatable :: dvpp_so(:,:)
   end type s_pp_info
 
 ! pseudopotential on r-space grid

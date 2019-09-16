@@ -68,6 +68,9 @@ module salmon_pp
           ips_type = n_FHI_psformat
           ps_format(ik) = 'FHI'
           call read_mr_fhi(pp,ik,ps_file)
+        else if(ps_file(max(1,nlen_psf+1-4):nlen_psf) == '.vps')then
+          ips_type = 0
+          ps_format(ik) = 'ADPACK'
         else
           stop 'Unprepared ps_format is required input_pseudopotential_YS'
         end if
@@ -202,6 +205,9 @@ module salmon_pp
     
     allocate(pp%anorm(0:2*lmax+1,nelem)); pp%anorm=0.0d0
     allocate(pp%inorm(0:2*lmax+1,nelem)); pp%inorm=0
+
+    allocate(pp%anorm_so(0:2*lmax+1,nelem)); pp%anorm_so=0.0d0
+    allocate(pp%inorm_so(0:2*lmax+1,nelem)); pp%inorm_so=0
   
     allocate(pp%rad(nrmax,nelem))
     allocate(pp%radnl(nrmax,nelem))
@@ -217,6 +223,10 @@ module salmon_pp
     allocate(pp%vpp(0:nrmax0,0:2*lmax0+2),pp%upp(0:nrmax0,0:2*lmax0+1))
     allocate(pp%dvpp(0:nrmax0,0:2*lmax0+2),pp%dupp(0:nrmax0,0:2*lmax0+1))
     allocate(pp%vpp_f(0:nrmax0,0:2*lmax0+2,nelem),pp%upp_f(0:nrmax0,0:2*lmax0+1,nelem))
+
+    allocate( pp%vpp_so(0:nrmax0,0:2*lmax0+2) ); pp%vpp_so=0.0d0
+    allocate( pp%dvpp_so(0:nrmax0,0:2*lmax0+2) ); pp%dvpp_so=0.0d0
+    allocate( pp%vpp_f_so(0:nrmax0,0:2*lmax0+2,nelem) ); pp%vpp_f_so=0.0d0
   
     pp%flag_nlcc=flag_nlcc
   
