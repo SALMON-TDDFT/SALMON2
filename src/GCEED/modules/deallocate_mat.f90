@@ -43,10 +43,6 @@ deallocate (wk_s_h,wk2_s_h,lap_wk_s_h)
 !end if
 
 deallocate (rho_tmp)
-deallocate (rho_s_tmp)
-deallocate (vxc_tmp)
-deallocate (vxc_s_tmp)
-deallocate (eexc_tmp)
 deallocate (exc_dummy)
 deallocate (exc_dummy2)
 deallocate (exc_dummy3)
