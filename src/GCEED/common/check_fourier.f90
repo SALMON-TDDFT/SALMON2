@@ -25,7 +25,7 @@ subroutine check_fourier(lg)
   integer :: j,ii
   integer :: lg_num_tmp
 
-  if(iflag_hartree==4)then
+  if(yn_ffte=='y')then
     ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
     do j=1,3
       lg_num_tmp=lg%num(j)

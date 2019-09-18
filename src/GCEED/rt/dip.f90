@@ -20,6 +20,7 @@ use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
 use new_world_sub
 use allocate_mat_sub
+use inputoutput, only: yn_md
 use timer
 implicit none
 type(s_rgrid) ,intent(in) :: ng
@@ -83,7 +84,7 @@ call timer_begin(LOG_CALC_DP)
     case(3)
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
         itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
-      if(iflag_md==1) then
+      if(yn_md=='y') then
         write(16,'(f14.8, 6e16.8, f15.8,f18.8)')       &
         dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3),(curr_ion(i1,itt),i1=1,3),rNe, Etot*2d0*Ry
       else

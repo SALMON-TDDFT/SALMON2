@@ -19,14 +19,11 @@ use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
-
 implicit none
 
 integer       :: Ntime
-
 real(8)       :: debye2au   ! [D]  -> [a.u.] 
 integer       :: iii
-
 real(8), allocatable :: alpha2(:,:,:,:)
 
 END MODULE global_variables_rt
@@ -206,7 +203,7 @@ call timer_begin(LOG_READ_GS_DATA)
 call read_gs_bin(lg,mg,ng,info,mixing)
 
 if(comm_is_root(nproc_id_global))then
-  if(iflag_md==1)then
+  if(yn_md=='y')then
     do jj=1,2
       if(idisnum(jj)>MI) then
         write(*,*) "idisnum is larger than MI"
@@ -320,11 +317,11 @@ if(comm_is_root(nproc_id_global))then
   !(header of SYSname_rt.data)
   select case(iperiodic)
   case(0)!; call write_rt_data_0d --- make in future
-  case(3) ; call write_rt_data_3d(-1,ofl,iflag_md,dt)
+  case(3) ; call write_rt_data_3d(-1,ofl,dt)
   end select
 
   !(header of SYSname_rt_energy.data)
-  call write_rt_energy_data(-1,ofl,iflag_md,dt,energy,md)
+  call write_rt_energy_data(-1,ofl,dt,energy,md)
 
   !(header in SYSname_proj.data)
   if(iwrite_projection==1)then
@@ -336,7 +333,7 @@ if(comm_is_root(nproc_id_global))then
   end if
 end if
 
-if(iflag_md==1 .or. icalcforce==1)then
+if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
    call write_xyz(comment_line,"new","rvf",system)
 endif
 
@@ -606,7 +603,7 @@ end do
 
 if(iperiodic==3) call calcAext
 
-if(iflag_md==1) call init_md(system,md)
+if(yn_md=='y') call init_md(system,md)
 
 ! single-scale Maxwell-TDDFT
 if(use_singlescale=='y') then
@@ -623,7 +620,7 @@ end if
 !-------------------------------------------------- Time evolution
 
 !(force at initial step)
-if(iflag_md==1 .or. icalcforce==1)then
+if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
    if(iperiodic==3)then
       do ik=info%ik_s,info%ik_e
         stencil%vec_kAc(1:3,ik) = system%vec_k(1:3,ik)
@@ -760,9 +757,9 @@ case(0)
   
 case(3)
   allocate( tfourier_integrand(1:3,0:Ntime) )
-  if(iflag_indA==1)then
+  if(trans_longi=="lo")then
     tfourier_integrand(1:3,0:Ntime)=A_ind(1:3,0:Ntime)
-  else if(iflag_indA==0)then
+  else if(trans_longi=="tr")then
     tfourier_integrand(1:3,0:Ntime)=curr(1:3,0:Ntime)
   end if
   call Fourier3D(tfourier_integrand,alpha_R,alpha_I)
@@ -848,13 +845,13 @@ do iene=0,Nenergy
   case(3)
     if(ikind_eext==0.or.ikind_eext==10)then
       zalpha=zalpha/Fst*dt
-      if(iflag_indA==0)then
+      if(trans_longi=="tr")then
         if (iene == 0) then ! WARNING: zero divide happens when iene is 0
           zalpha(1:3)=0
         else
           zalpha(1:3)=1.d0+4.d0*Pi*zi*zalpha(1:3)/hw
         end if
-      else if(iflag_indA==1)then
+      else if(trans_longi=="lo")then
         zalpha(1:3)=1.d0/(1.d0-zi*hw*zalpha(1:3))
       end if
     else

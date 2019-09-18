@@ -13,19 +13,23 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
+subroutine exc_cor_ns(sys, xc_func, ng, srg_ng, nspin, ilsda, srho_s, ppn, sVxc, E_xc)
   use salmon_parallel, only: nproc_group_global
   use salmon_communication, only: comm_summation
   use salmon_xc, only: calc_xc
-  use scf_data
-  use new_world_sub
-  use allocate_mat_sub
-  use structures, only: s_pp_nlcc, s_scalar, s_rgrid,s_sendrecv_grid
+  use scf_data, only: bN1, bN2, bN3, bN4
+  ! use new_world_sub
+  ! use allocate_mat_sub
+  use structures, only: s_dft_system, s_pp_nlcc, s_scalar, s_rgrid,s_sendrecv_grid, s_xc_functional
   use sendrecv_grid, only: update_overlap_real8
+  use salmon_xc, only: salmon_xctype_pz, salmon_xctype_pzm, calc_xc
   implicit none
+  type(s_dft_system), intent(in) :: sys
+  type(s_xc_functional), intent(in) :: xc_func
   type(s_rgrid),intent(in) :: ng
   type(s_sendrecv_grid),intent(inout) :: srg_ng
   integer         ,intent(in) :: nspin
+  integer         ,intent(in) :: ilsda
   type(s_scalar)  ,intent(in) :: srho_s(nspin)
   type(s_pp_nlcc), intent(in) :: ppn
   type(s_scalar)              :: sVxc(nspin)
@@ -34,6 +38,15 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
   integer :: ix,iy,iz,is
   real(8) :: tot_exc
   real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:)
+
+  real(8) :: rho_tmp(ng%num(1), ng%num(2), ng%num(3))
+  real(8) :: rho_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
+
+  real(8) :: eexc_tmp(ng%num(1), ng%num(2), ng%num(3))
+  real(8) :: vxc_tmp(ng%num(1), ng%num(2), ng%num(3))
+  real(8) :: vxc_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
+
+
 
   if(ilsda==0)then
     do iz=1,ng%num(3)
@@ -55,9 +68,7 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
     end do
   end if
 
-  if(xc=='pz'.or.xc=='PZ')then
-    continue
-  else
+  if(xc_func%use_gradient) then
     allocate (rhd (ng%is_array(1):ng%ie_array(1), &
                    ng%is_array(2):ng%ie_array(2), &
                    ng%is_array(3):ng%ie_array(3)))
@@ -82,17 +93,17 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-       delr(ix,iy,iz,1)= (1.0d0/Hgs(1))*(   &
+       delr(ix,iy,iz,1)= (1.0d0/sys%hgs(1))*(   &
           bN1*( rhd(ix+1,iy,iz) - rhd(ix-1,iy,iz))  &
         + bN2*( rhd(ix+2,iy,iz) - rhd(ix-2,iy,iz)) &
         + bN3*( rhd(ix+3,iy,iz) - rhd(ix-3,iy,iz)) &
         + bN4*( rhd(ix+4,iy,iz) - rhd(ix-4,iy,iz)))
-       delr(ix,iy,iz,2)= (1.0d0/Hgs(2))*( &
+       delr(ix,iy,iz,2)= (1.0d0/sys%hgs(2))*( &
           bN1*( rhd(ix,iy+1,iz) - rhd(ix,iy-1,iz)) &
         + bN2*( rhd(ix,iy+2,iz) - rhd(ix,iy-2,iz)) &
         + bN3*( rhd(ix,iy+3,iz) - rhd(ix,iy-3,iz)) &
         + bN4*( rhd(ix,iy+4,iz) - rhd(ix,iy-4,iz)))
-       delr(ix,iy,iz,3)= (1.0d0/Hgs(3))*( &
+       delr(ix,iy,iz,3)= (1.0d0/sys%hgs(3))*( &
           bN1*( rhd(ix,iy,iz+1) - rhd(ix,iy,iz-1)) &
         + bN2*( rhd(ix,iy,iz+2) - rhd(ix,iy,iz-2)) &
         + bN3*( rhd(ix,iy,iz+3) - rhd(ix,iy,iz-3)) &
@@ -103,16 +114,26 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
 !$omp end parallel do
   end if
 
-  if( allocated(ppn%rho_nlcc) )then
-  if(xc=='pz'.or.xc=='PZ')then
-    if(ilsda==0)then
-      call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
-    else if(ilsda==1)then
-      call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
+  if (allocated(ppn%rho_nlcc)) then
+    if (xc_func%use_gradient) then
+      call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+    else
+      if(ilsda==0)then
+        call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+      else if(ilsda==1)then
+        call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
+      end if
     end if
-  else
-    call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
-  end if
+  else 
+    if (xc_func%use_gradient) then
+      call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp)
+    else
+      if(ilsda==0)then
+        call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp)
+      else if(ilsda==1)then
+        call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp)
+      end if
+    end if
   end if
 
   if(ilsda==0)then
@@ -143,7 +164,7 @@ subroutine exc_cor_ns(ng, srg_ng, nspin, srho_s, ppn, sVxc, E_xc)
   end do
   end do
   end do
-  tot_exc=tot_exc*hvol
+  tot_exc=tot_exc*sys%hvol
  
   call comm_summation(tot_exc,E_xc,nproc_group_global)
 

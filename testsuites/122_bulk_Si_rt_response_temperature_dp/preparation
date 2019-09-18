@@ -7,7 +7,17 @@
 # the input data for the following calculations.
 
 cp ../pseudo/Si_rps.dat ./
-cp ../121_bulk_Si_gs_temperature_dp/Si_gs.bin ./
+if [ -e data_for_restart/ ]; then
+  rm -rf data_for_restart/
+fi
+if [ -e restart/ ]; then
+  rm restart
+fi
+ln -s ../121_bulk_Si_gs_temperature_dp/data_for_restart ./restart
+
 if [ -e current.data ]; then
   rm current.data
 fi
+
+
+#cp ../121_bulk_Si_gs_temperature_dp/Si_gs.bin ./

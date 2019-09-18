@@ -556,8 +556,7 @@ contains
     base_directory        = './'
     output_buffer_interval= -1
     yn_restart            = 'n'
-   !directory_read_data   = 'restart'
-    directory_read_data   = './'  !temporaly
+    directory_read_data   = 'restart/'
     checkpoint_interval   = 0
     time_shutdown         = -1d0
     !remove later
@@ -1389,7 +1388,8 @@ contains
         select case(iflag_atom_coor)
         case(ntype_atom_coor_cartesian)
            do i=1, natom
-              if(use_geometry_opt == 'y')then
+             !if(use_geometry_opt == 'y')then
+              if(yn_opt == 'y')then
                  read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i), flag_opt_atom(i)
               else
                  read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i)
@@ -1399,7 +1399,8 @@ contains
            rion = rion*ulength_to_au
         case(ntype_atom_coor_reduced)
            do i=1, natom
-              if(use_geometry_opt == 'y')then
+             !if(use_geometry_opt == 'y')then
+              if(yn_opt == 'y')then
                  read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i), flag_opt_atom(i)
               else
                  read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i)
@@ -1547,7 +1548,7 @@ contains
     use salmon_parallel
     use salmon_communication
     use salmon_file, only: get_filehandle
-    use misc_routines, only: create_directory
+    use filesystem, only: atomic_create_directory
     implicit none
     integer :: i,j,ierr_nml
     ierr_nml = 0
@@ -1994,8 +1995,9 @@ contains
     end if
 
     !(create output directory)
-    if (comm_is_root(nproc_id_global)) then
-       if(base_directory(1:3).ne."./ ") call create_directory(base_directory)
+    if(base_directory(1:3).ne."./ ") then
+      call atomic_create_directory(base_directory &
+                                  ,nproc_group_global,nproc_id_global)
     endif
 
   end subroutine dump_input_common

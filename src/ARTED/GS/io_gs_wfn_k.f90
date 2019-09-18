@@ -21,7 +21,7 @@ module io_gs_wfn_k
   use salmon_communication
   use salmon_parallel
   use global_variables
-  use misc_routines
+  use filesystem, only: atomic_create_directory
   implicit none
 
   character(256) :: gs_wfn_directory
@@ -43,7 +43,10 @@ contains
     integer :: nproc_size_kpoint_ms
 
     write (gs_wfn_directory,'(A,A)') trim(base_directory),'/gs_wfn_k/'
-    if(iflag_read_write == iflag_write)call create_directory(gs_wfn_directory)
+    if(iflag_read_write == iflag_write) then
+      call atomic_create_directory(gs_wfn_directory &
+                                  ,nproc_group_global,nproc_id_global)
+    end if
 
     if(comm_is_root(nproc_id_global))then
       occ_file = trim(gs_wfn_directory)//'occupation'
@@ -272,7 +275,6 @@ module io_rt_wfn_k
   use salmon_communication
   use salmon_parallel
   use global_variables
-  use misc_routines
   implicit none
 
   character(256) :: rt_wfn_directory
@@ -290,6 +292,7 @@ module io_rt_wfn_k
 
 contains
   subroutine read_write_rt_wfn_k(iflag_read_write)
+    use filesystem, only: atomic_create_directory
     implicit none
     integer,intent(in) :: iflag_read_write
     integer :: ik
@@ -299,7 +302,10 @@ contains
     integer :: nproc_size_kpoint_ms
 
     write (rt_wfn_directory,'(A,A)') trim(base_directory),'/rt_wfn_k/'
-    if(iflag_read_write == iflag_write_rt)call create_directory(rt_wfn_directory)
+    if(iflag_read_write == iflag_write_rt) then
+      call atomic_create_directory(rt_wfn_directory &
+                                  ,nproc_group_global,nproc_id_global)
+    end if
 
     if(comm_is_root(nproc_id_global))then
       occ_file = trim(rt_wfn_directory)//'occupation'
@@ -446,6 +452,7 @@ contains
   end subroutine read_write_rt_wfn_k
 
   subroutine read_write_rt_wfn_k_ms_each_macro_grid(iflag_read_write_ms)
+    use filesystem, only: create_directory,atomic_create_directory
     implicit none
     integer,intent(in) :: iflag_read_write_ms
     integer :: ik,imacro
@@ -458,7 +465,9 @@ contains
     if (comm_is_root(nproc_id_global)) then
        nfile_ae_ms = 7000
        dir_ae_file_ms = trim(dir_ms)//'rt_ae_field/'
-       if(iflag_read_write_ms==iflag_write_rt) call create_directory(dir_ae_file_ms)
+       if(iflag_read_write_ms==iflag_write_rt) then
+         call create_directory(dir_ae_file_ms)
+       end if
        ae_file_ms = trim(dir_ae_file_ms)//'ae_field'
        open(nfile_ae_ms,file=trim(ae_file_ms),form='unformatted')
        select case(iflag_read_write_ms)
@@ -479,8 +488,12 @@ contains
        nfile_md_ms     = nfile_occ_ms
        nfile_other_ms  = nfile_occ_ms
 
+       if(iflag_read_write_ms==iflag_write_rt) then
+         call atomic_create_directory(rt_wfn_directory &
+                                     ,nproc_group_global,nproc_id_global)
+       end if
+
        if(comm_is_root(nproc_id_tdks)) then
-          if(iflag_read_write_ms==iflag_write_rt) call create_directory(rt_wfn_directory)
 
           occ_file = trim(rt_wfn_directory)//'occupation'
           open(nfile_occ_ms,file=trim(occ_file),form='unformatted')

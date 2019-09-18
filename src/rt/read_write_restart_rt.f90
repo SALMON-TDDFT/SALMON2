@@ -19,9 +19,10 @@ module read_write_restart_rt_sub
 contains
 
   subroutine init_dir_out_restart(ofile)
-    use structures,    only: s_ofile
-    use inputoutput,   only: theory
-    use misc_routines, only: create_directory
+    use structures,  only: s_ofile
+    use inputoutput, only: theory
+    use filesystem,  only: atomic_create_directory
+    use salmon_parallel, only: nproc_id_global,nproc_group_global
     implicit none
     type(s_ofile), intent(inout) :: ofile
 
@@ -31,11 +32,9 @@ contains
        ofile%dir_out_restart = 'data_for_restart/'
     end select
 
-    !!! currently, set "./" : change later
-    ofile%dir_out_restart = './'
-
     if(ofile%dir_out_restart(1:3).ne."./ ") then
-       call create_directory(ofile%dir_out_restart)
+       call atomic_create_directory(ofile%dir_out_restart &
+                                   ,nproc_group_global,nproc_id_global)
     endif
 
   end subroutine init_dir_out_restart
@@ -55,13 +54,15 @@ contains
   end subroutine write_checkpoint_rt
 
   subroutine create_checkpoint_dir(itt,dir_checkpoint)
-    use misc_routines, only: create_directory
+    use filesystem,  only: atomic_create_directory
+    use salmon_parallel, only: nproc_id_global,nproc_group_global
     implicit none
     integer :: itt
     character(256) :: dir_checkpoint
 
     write(dir_checkpoint,'(A,I6.6,A)') "checkpoint_rt_",itt,"/"
-    call create_directory(dir_checkpoint)
+    call atomic_create_directory(dir_checkpoint &
+                                ,nproc_group_global,nproc_id_global)
 
   end subroutine create_checkpoint_dir
 

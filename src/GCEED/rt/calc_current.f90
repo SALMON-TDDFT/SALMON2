@@ -16,7 +16,8 @@
 subroutine calc_emfields(nspin,curr_in)
   use math_constants, only : pi
   use salmon_global, only : ispin
-  use scf_data, only : curr,itt,iflag_indA,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
+  use scf_data, only : curr,itt,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
+  use inputoutput, only: trans_longi
   implicit none
   integer,intent(in) :: nspin
   real(8),intent(in) :: curr_in(3,nspin)
@@ -24,9 +25,9 @@ subroutine calc_emfields(nspin,curr_in)
   curr(1:3,itt) = curr_in(1:3,1)
   if(ispin==1) curr(1:3,itt) = curr(1:3,itt) + curr_in(1:3,2)
 
-  if(iflag_indA==1)then
+  if(trans_longi=="lo")then
     A_ind(:,itt+1)=2.d0*A_ind(:,itt)-A_ind(:,itt-1)-4.d0*Pi*curr(:,itt)*dt**2
-  else if(iflag_indA==0)then
+  else if(trans_longi=="tr")then
     A_ind(:,itt+1)=0.d0
   end if
 

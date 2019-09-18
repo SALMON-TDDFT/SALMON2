@@ -19,7 +19,6 @@ module misc_routines
   public :: floor_pow2, ceiling_pow2
   public :: gen_logfilename
   public :: get_wtime
-  public :: create_directory
 
 private
 contains
@@ -74,19 +73,4 @@ contains
     real(8) :: omp_get_wtime
     get_wtime = omp_get_wtime()
   end function
-
-  ! NOTE: execute_command_line() is standardized at Fortran2008.
-  !       In specification, `Execute command line` is defined this feature.
-  subroutine create_directory(dirpath)
-    use iso_c_binding
-    implicit none
-    character(*), intent(in) :: dirpath
-    interface
-      subroutine system(command) bind(C)
-        use iso_c_binding
-        character(kind=c_char) :: command
-      end subroutine
-    end interface
-    call system('mkdir -p '//adjustl(trim(dirpath))//c_null_char)
-  end subroutine
 end module

@@ -85,6 +85,8 @@ type(s_mixing) :: mixing
 type(s_ofile) :: ofile
 
 logical :: rion_update
+integer :: iopt,nopt_max
+logical :: flag_opt_conv
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -119,7 +121,7 @@ k_end = info%ik_e ! future work: remove this line
 k_num = info%numk ! future work: remove this line
 iobnum = info%numo ! future work: remove this line
 
-if(iflag_opt==1)then
+if(yn_opt=='y')then
    call structure_opt_ini(MI)
    flag_opt_conv=.false.
    write(comment_line,10) 0
@@ -128,8 +130,11 @@ if(iflag_opt==1)then
 end if
 call timer_end(LOG_INIT_GS)
 
+if(yn_opt=='y') then ; nopt_max = nopt
+else                 ; nopt_max = 1
+endif
 
-Structure_Optimization_Iteration : do iopt=1,iter_opt
+Structure_Optimization_Iteration : do iopt=1,nopt_max
 Multigrid_Iteration : do img=1,ntmg
 
 if(iopt==1)then
@@ -191,13 +196,13 @@ if(iopt==1)then
     &                 ,1:iobnum,k_sta:k_end))
   end if
 
-  if(.not. allocated(Vpsl)) allocate( Vpsl(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+  if(.not. allocated(Vpsl))      allocate( Vpsl(     mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
   if(.not. allocated(Vpsl_atom)) allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
   if(iflag_ps.eq.0)then
-    Vpsl=0d0
+     Vpsl=0d0
   else
-    call read_pslfile(system,pp,ppg)
-    call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+     call read_pslfile(system,pp,ppg)
+     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end if
 
   allocate( Zps(MKI) ) ! future work: remove this line
@@ -299,7 +304,7 @@ if(iopt==1)then
     end if
     allocate( esp(itotMST,num_kpoints_rd) )
 
-    call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
+    call exc_cor_ns(system, xc_func, ng, srg_ng, system%nspin, ilsda, srho_s, ppn, sVxc, energy%E_xc)
 
     call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
@@ -443,7 +448,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                        poisson,fg,sVh)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exc_cor_ns(ng, srg_ng, system%nspin, srho_s, ppn, sVxc, energy%E_xc)
+    call exc_cor_ns(system, xc_func, ng, srg_ng, system%nspin, ilsda, srho_s, ppn, sVxc, energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
     call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
@@ -599,29 +604,31 @@ select case(iperiodic)
 end select
 
 ! output the wavefunctions for next GS calculations
-if(write_gs_wfn_k == 'y') then
-  if(iperiodic==3) then
-    call write_wfn(lg,mg,spsi,info,system)
-    ! Experimental Implementation of Inner-Product Outputs:
-    call write_prod_dk_data(lg, mg, system, info, spsi) 
-  else
-    write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
-  end if
+if(write_gs_wfn_k == 'y') then   !this input keyword is going to be removed....
+   select case(iperiodic)
+   case(3)
+      call write_wfn(lg,mg,spsi,info,system)
+      ! Experimental Implementation of Inner-Product Outputs:
+      call write_prod_dk_data(lg, mg, system, info, spsi) 
+   case(0)
+      write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
+   end select
 end if
 
-! output transition moment
+! output transition moment : --> want to put out of the optmization loop in future
 if(yn_out_tm  == 'y') then
-  if(iperiodic==3) then
-     call write_k_data(system,stencil)
-     call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
-  else
+   select case(iperiodic)
+   case(3)
+      call write_k_data(system,stencil)
+      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
+   case(0)
      write(*,*) "error: yn_out_tm='y' & iperiodic=0"
-  end if
+  end select
 end if
 
 ! force
-!if(iflag_opt==1) then
-if (iperiodic == 3 .and. iflag_hartree == 4) then
+!if(y_opt=='y') then
+if(iperiodic == 3 .and. yn_ffte=='y') then
   ! NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
   ! does not allocate.
 else
@@ -644,7 +651,7 @@ deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
-if(iflag_opt==1) then
+if(yn_opt=='y') then
   call structure_opt_check(MI,iopt,flag_opt_conv,system%Force)
   if(.not.flag_opt_conv) call structure_opt(MI,iopt,system)
   !! Rion is old variables to be removed 
@@ -657,7 +664,7 @@ if(iflag_opt==1) then
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
     do iatom=1,MI
-       write(*,20) "'"//trim(AtomName(Kion(iatom)))//"'",  &
+       write(*,20) "'"//trim(atom_name(iatom))//"'",  &
                    (system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
                    Kion(iatom), flag_opt_atom(iatom)
     end do
