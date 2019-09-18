@@ -213,6 +213,21 @@ module structures
     real(8), allocatable :: tau_nlcc(:,:,:)
   end type s_pp_nlcc
 
+! exchange-correlation functional
+  type s_xc_functional
+    integer :: xctype(3)
+    integer :: ispin
+    real(8) :: cval
+    logical :: use_gradient
+    logical :: use_laplacian
+    logical :: use_kinetic_energy
+    logical :: use_current
+#ifdef USE_LIBXC
+    type(xc_f90_pointer_t) :: func(3)
+    type(xc_f90_pointer_t) :: info(3)
+#endif
+  end type
+
   type s_reciprocal_grid
     integer :: icomm_G
     integer :: ng,iG_s,iG_e,iGzero
@@ -220,6 +235,23 @@ module structures
     complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zdVG_ion(:,:)
     complex(8),allocatable :: zrhoG_ion_tmp(:),zrhoG_ele_tmp(:),zdVG_ion_tmp(:,:) ! work arrays
   end type s_reciprocal_grid
+
+  type s_poisson
+! for poisson_cg
+    integer :: iterVh                              ! iteration number for poisson_cg
+    integer :: npole_partial                       ! number of multipoles calculated in each node
+    integer :: npole_total                         ! total number of multipoles
+    integer,allocatable :: ipole_tbl(:)            ! table for multipoles
+    integer,allocatable :: ig_num(:)               ! number of grids for domains to which each multipole belongs
+    integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
+    integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
+    real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
+! for Fourier transformation routines
+    real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
+    complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
+    complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
+    complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
+  end type s_poisson
 
   type s_fdtd_system
     type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
@@ -247,23 +279,6 @@ module structures
      character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
 
-  type s_poisson
-! for poisson_cg
-    integer :: iterVh                              ! iteration number for poisson_cg
-    integer :: npole_partial                       ! number of multipoles calculated in each node
-    integer :: npole_total                         ! total number of multipoles
-    integer,allocatable :: ipole_tbl(:)            ! table for multipoles
-    integer,allocatable :: ig_num(:)               ! number of grids for domains to which each multipole belongs
-    integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
-    integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
-    real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
-! for Fourier transformation routines
-    real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
-    complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
-    complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
-    complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
-  end type s_poisson
-
 ! for DFT ground state calculations
 
   type s_cg
@@ -274,20 +289,6 @@ module structures
     integer :: num_rho_stock
     type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
   end type s_mixing
-
-  type s_xc_functional
-    integer :: xctype(3)
-    integer :: ispin
-    real(8) :: cval
-    logical :: use_gradient
-    logical :: use_laplacian
-    logical :: use_kinetic_energy
-    logical :: use_current
-#ifdef USE_LIBXC
-    type(xc_f90_pointer_t) :: func(3)
-    type(xc_f90_pointer_t) :: info(3)
-#endif
-  end type
 
 !===================================================================================================================================
 

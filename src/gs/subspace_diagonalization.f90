@@ -186,7 +186,7 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use salmon_communication, only: comm_summation,comm_bcast
   use timer
   use hpsi_sub
-  use eigen_subdiag_periodic_sub
+  use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
   implicit none

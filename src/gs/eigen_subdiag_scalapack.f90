@@ -50,6 +50,34 @@ subroutine eigen_subdiag(Rmat,evec,iter,ier2)
   end if
 
 end subroutine eigen_subdiag
+
+subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
+  implicit none
+  character :: JOBZ, UPLO
+  integer :: LWORK
+  integer :: iter,ier2
+  real(8),allocatable :: RWORK(:)
+  real(8) :: W(iter)
+  complex(8) :: Rmat(iter,iter)
+  complex(8),allocatable :: WORK(:)
+  complex(8) :: evec(iter,iter)
+
+  ier2=0
+
+  JOBZ='V'
+  UPLO='U'
+
+  LWORK=2*iter-1
+  allocate(WORK(LWORK))
+  allocate(RWORK(3*iter-2))
+
+  call ZHEEV(JOBZ,UPLO,iter,Rmat,iter,W,WORK,LWORK,RWORK,ier2)
+
+  evec(:,:)=Rmat(:,:)
+
+  deallocate(WORK,RWORK)
+
+end subroutine eigen_subdiag_periodic
  
 !
       subroutine SAMPLE_PDSYEV_CALL(Rmat,evec,iter)
