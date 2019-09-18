@@ -46,6 +46,160 @@ module salmon_xc
 contains
 
 
+! wrapper for calc_xc
+  subroutine exchange_correlation(sys, xc_func, ng, srg_ng, srho_s, ppn, comm, sVxc, E_xc)
+    use salmon_communication, only: comm_summation
+    use structures, only: s_dft_system, s_pp_nlcc, s_scalar, s_rgrid,s_sendrecv_grid
+    use sendrecv_grid, only: update_overlap_real8
+    implicit none
+    type(s_dft_system), intent(in) :: sys
+    type(s_xc_functional), intent(in) :: xc_func
+    type(s_rgrid),intent(in) :: ng
+    type(s_sendrecv_grid),intent(inout) :: srg_ng
+    type(s_scalar)  ,intent(in) :: srho_s(sys%nspin)
+    type(s_pp_nlcc), intent(in) :: ppn
+    integer         ,intent(in) :: comm
+    type(s_scalar)              :: sVxc(sys%nspin)
+    real(8)                     :: E_xc
+
+    integer :: ix,iy,iz,is,nspin
+    real(8) :: tot_exc
+    real(8),parameter :: bN1=4.d0/5.d0  , bN2=-1.d0/5.d0   ! for Nabla
+    real(8),parameter :: bN3=4.d0/105.d0, bN4=-1.d0/280.d0
+    real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:)
+
+    real(8) :: rho_tmp(ng%num(1), ng%num(2), ng%num(3))
+    real(8) :: rho_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
+
+    real(8) :: eexc_tmp(ng%num(1), ng%num(2), ng%num(3))
+    real(8) :: vxc_tmp(ng%num(1), ng%num(2), ng%num(3))
+    real(8) :: vxc_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
+
+    nspin = sys%nspin
+
+    if(nspin==1)then
+      do iz=1,ng%num(3)
+      do iy=1,ng%num(2)
+      do ix=1,ng%num(1)
+        rho_tmp(ix,iy,iz)=srho_s(1)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      end do
+      end do
+      end do
+    else if(nspin==2)then
+      do is=1,2
+      do iz=1,ng%num(3)
+      do iy=1,ng%num(2)
+      do ix=1,ng%num(1)
+        rho_s_tmp(ix,iy,iz,is)=srho_s(is)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      end do
+      end do
+      end do
+      end do
+    end if
+
+    if(xc_func%use_gradient) then
+      allocate (rhd (ng%is_array(1):ng%ie_array(1), &
+                     ng%is_array(2):ng%ie_array(2), &
+                     ng%is_array(3):ng%ie_array(3)))
+      allocate (delr(ng%is(1):ng%ie(1), &
+                     ng%is(2):ng%ie(2), &
+                     ng%is(3):ng%ie(3),3))
+
+  !$OMP parallel do private(ix,iy,iz)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        rhd(ix,iy,iz)=dble(srho_s(1)%f(ix,iy,iz))
+      enddo
+      enddo
+      enddo
+
+  !$omp end parallel do
+      call update_overlap_real8(srg_ng, ng, rhd)
+
+
+  !$OMP parallel do private(ix,iy,iz)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+         delr(ix,iy,iz,1)= (1.0d0/sys%hgs(1))*(   &
+            bN1*( rhd(ix+1,iy,iz) - rhd(ix-1,iy,iz))  &
+          + bN2*( rhd(ix+2,iy,iz) - rhd(ix-2,iy,iz)) &
+          + bN3*( rhd(ix+3,iy,iz) - rhd(ix-3,iy,iz)) &
+          + bN4*( rhd(ix+4,iy,iz) - rhd(ix-4,iy,iz)))
+         delr(ix,iy,iz,2)= (1.0d0/sys%hgs(2))*( &
+            bN1*( rhd(ix,iy+1,iz) - rhd(ix,iy-1,iz)) &
+          + bN2*( rhd(ix,iy+2,iz) - rhd(ix,iy-2,iz)) &
+          + bN3*( rhd(ix,iy+3,iz) - rhd(ix,iy-3,iz)) &
+          + bN4*( rhd(ix,iy+4,iz) - rhd(ix,iy-4,iz)))
+         delr(ix,iy,iz,3)= (1.0d0/sys%hgs(3))*( &
+            bN1*( rhd(ix,iy,iz+1) - rhd(ix,iy,iz-1)) &
+          + bN2*( rhd(ix,iy,iz+2) - rhd(ix,iy,iz-2)) &
+          + bN3*( rhd(ix,iy,iz+3) - rhd(ix,iy,iz-3)) &
+          + bN4*( rhd(ix,iy,iz+4) - rhd(ix,iy,iz-4)))
+      enddo
+      enddo
+      enddo
+  !$omp end parallel do
+    end if
+
+    if (allocated(ppn%rho_nlcc)) then
+      if (xc_func%use_gradient) then
+        call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+      else
+        if(nspin==1)then
+          call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+        else if(nspin==2)then
+          call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
+        end if
+      end if
+    else
+      if (xc_func%use_gradient) then
+        call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp)
+      else
+        if(nspin==1)then
+          call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp)
+        else if(nspin==2)then
+          call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp)
+        end if
+      end if
+    end if
+
+    if(nspin==1)then
+      do iz=1,ng%num(3)
+      do iy=1,ng%num(2)
+      do ix=1,ng%num(1)
+        sVxc(1)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
+      end do
+      end do
+      end do
+    else if(nspin==2)then
+      do is=1,2
+      do iz=1,ng%num(3)
+      do iy=1,ng%num(2)
+      do ix=1,ng%num(1)
+        sVxc(is)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
+      end do
+      end do
+      end do
+      end do
+    end if
+
+    tot_exc=0.d0
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+    do ix=1,ng%num(1)
+      tot_exc=tot_exc+eexc_tmp(ix,iy,iz)
+    end do
+    end do
+    end do
+    tot_exc=tot_exc*sys%hvol
+
+    call comm_summation(tot_exc,E_xc,comm)
+
+    return
+  end subroutine exchange_correlation
+
 
   subroutine print_xc_info()
     implicit none

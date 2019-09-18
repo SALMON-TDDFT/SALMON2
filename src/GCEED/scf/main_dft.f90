@@ -36,7 +36,7 @@ subroutine main_dft
 use structures
 use salmon_parallel, only: nproc_id_global,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-use salmon_xc, only: init_xc, finalize_xc
+use salmon_xc
 use timer
 use scf_iteration_sub
 use rmmdiis_sub
@@ -304,7 +304,7 @@ if(iopt==1)then
     end if
     allocate( esp(itotMST,num_kpoints_rd) )
 
-    call exc_cor_ns(system, xc_func, ng, srg_ng, system%nspin, ilsda, srho_s, ppn, sVxc, energy%E_xc)
+    call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
 
     call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
@@ -448,7 +448,7 @@ DFT_Iteration : do iter=1,iDiter(img)
                        poisson,fg,sVh)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exc_cor_ns(system, xc_func, ng, srg_ng, system%nspin, ilsda, srho_s, ppn, sVxc, energy%E_xc)
+    call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
     call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)

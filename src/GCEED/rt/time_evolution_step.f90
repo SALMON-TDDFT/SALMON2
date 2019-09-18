@@ -40,6 +40,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use hpsi_sub, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   use salmon_pp, only: calc_nlcc !test hoge
+  use salmon_xc
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -241,7 +242,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_end(LOG_CALC_HARTREE)
 
   call timer_begin(LOG_CALC_EXC_COR)
-  call exc_cor_ns(system,xc_func, ng, srg_ng, system%nspin, ilsda, srho_s, ppn, sVxc, energy%E_xc)
+  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
