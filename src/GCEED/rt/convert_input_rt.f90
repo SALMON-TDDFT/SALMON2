@@ -17,8 +17,7 @@ subroutine convert_input_rt(Ntime)
 use salmon_parallel, only: nproc_id_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use inputoutput
-use check_numcpu_sub
-use set_numcpu, only: set_numcpu_rt
+use set_numcpu
 use scf_data
 use new_world_sub
 implicit none

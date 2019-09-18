@@ -1,4 +1,10 @@
 set(SOURCES
+    calc_allob.f90
+    calc_iquotient.f90
+    calc_iroot.f90
+    calc_myob.f90
+    calc_ob_num.f90
+    check_corrkob.f90
     calc_elf.f90
     calc_pmax.f90
     calcVpsl_periodic_FFTE.f90
