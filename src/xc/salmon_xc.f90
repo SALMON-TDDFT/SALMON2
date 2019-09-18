@@ -47,7 +47,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(sys, xc_func, ng, srg_ng, nspin, srho_s, ppn, comm, sVxc, E_xc)
+  subroutine exchange_correlation(sys, xc_func, ng, srg_ng, srho_s, ppn, comm, sVxc, E_xc)
     use salmon_communication, only: comm_summation
     use structures, only: s_dft_system, s_pp_nlcc, s_scalar, s_rgrid,s_sendrecv_grid
     use sendrecv_grid, only: update_overlap_real8
@@ -56,14 +56,13 @@ contains
     type(s_xc_functional), intent(in) :: xc_func
     type(s_rgrid),intent(in) :: ng
     type(s_sendrecv_grid),intent(inout) :: srg_ng
-    integer         ,intent(in) :: nspin
-    type(s_scalar)  ,intent(in) :: srho_s(nspin)
+    type(s_scalar)  ,intent(in) :: srho_s(sys%nspin)
     type(s_pp_nlcc), intent(in) :: ppn
     integer         ,intent(in) :: comm
-    type(s_scalar)              :: sVxc(nspin)
+    type(s_scalar)              :: sVxc(sys%nspin)
     real(8)                     :: E_xc
 
-    integer :: ix,iy,iz,is
+    integer :: ix,iy,iz,is,nspin
     real(8) :: tot_exc
     real(8),parameter :: bN1=4.d0/5.d0  , bN2=-1.d0/5.d0   ! for Nabla
     real(8),parameter :: bN3=4.d0/105.d0, bN4=-1.d0/280.d0
@@ -76,7 +75,7 @@ contains
     real(8) :: vxc_tmp(ng%num(1), ng%num(2), ng%num(3))
     real(8) :: vxc_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
 
-
+    nspin = sys%nspin
 
     if(nspin==1)then
       do iz=1,ng%num(3)
