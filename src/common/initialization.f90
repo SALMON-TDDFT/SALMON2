@@ -41,7 +41,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   type(s_reciprocal_grid) :: fg
   type(s_poisson)    :: poisson
   type(s_sendrecv_grid) :: srg,srg_ng
-  type(s_ofile) :: ofile
+  type(s_ofile)      :: ofile
   !
   integer,dimension(2,3) :: neig,neig_ng
 
@@ -66,6 +66,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
+
   call init_dir_out_restart(ofile)
 
 end subroutine init_dft
