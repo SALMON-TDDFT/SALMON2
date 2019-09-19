@@ -376,3 +376,28 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
 
 END SUBROUTINE time_evolution_step
 
+subroutine calc_current_ion(lg,system,pp,j_ion)
+  use structures
+  use salmon_global, only: MI,Kion
+  use scf_data, only: Hvol
+  implicit none
+  type(s_rgrid),intent(in) :: lg
+  type(s_dft_system) :: system
+  type(s_pp_info) :: pp
+  integer :: ia
+  real(8) :: j_ion(3)
+
+  !AY memo
+  !current of ion: defined by positive charge-->minus sign
+  !This is NOT matter current NOR electric current.... strange definition....
+  !This is defined so as to the total electric current = -(curr + curr_ion)
+  !Should change this ion current but if you change,
+  !please change all part in ARTED, multiscale .....
+  j_ion(:)=0d0
+  do ia=1,MI
+     j_ion(:) = j_ion(:) - pp%Zps(Kion(ia)) * system%Velocity(:,ia)
+  enddo
+  j_ion(:) = j_ion(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*Hvol)
+
+end subroutine calc_current_ion
+

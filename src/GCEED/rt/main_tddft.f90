@@ -50,6 +50,7 @@ use hpsi_sub, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
 use read_write_restart_rt_sub, only: write_checkpoint_rt
+use taylor_sub, only: taylor_coe
 implicit none
 
 type(s_rgrid) :: lg
@@ -635,7 +636,7 @@ call timer_end(LOG_INIT_TIME_PROPAGATION)
 
 
 call timer_begin(LOG_INIT_RT)
-call taylor_coe
+call taylor_coe(N_hamil,dt,zc)
 call timer_end(LOG_INIT_RT)
 
 
