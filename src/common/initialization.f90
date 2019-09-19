@@ -26,7 +26,7 @@ subroutine init_dft(lg,system,stencil)
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nstate &
   & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin &
-  & ,epdir_re1
+  & ,epdir_re1,nstate_spin
   use sym_sub, only: init_sym_sub
   implicit none
   type(s_rgrid)      :: lg
@@ -70,6 +70,12 @@ subroutine init_dft(lg,system,stencil)
   system%iperiodic = iperiodic
   system%nion = natom
 
+  if(ispin==0)then
+    system%nspin=1
+  else
+    system%nspin=2
+  end if
+
   if(calc_mode=='RT'.and.temperature<-1.d-12)then
     if(system%nspin==2.and.sum(nelec_spin(:))>0)then
       system%no = maxval(nelec_spin(:))
@@ -81,13 +87,7 @@ subroutine init_dft(lg,system,stencil)
       end if
     end if
   else
-    system%no = nstate
-  end if
-
-  if(ispin==0)then
-    system%nspin=1
-  else
-    system%nspin=2
+    system%no = max( nstate, maxval(nstate_spin) )
   end if
 
   if ( allocated(system%Rion) ) deallocate(system%Rion)
@@ -104,7 +104,19 @@ subroutine init_dft(lg,system,stencil)
   case(1)
     system%rocc(1:nelec/2,:,1) = 2d0
   case(2)
-    system%rocc(1:nelec/2,:,1:2) = 1d0
+    if ( nelec > 0 ) then
+      if ( mod(nelec,2) == 0 ) then
+        system%rocc(1:nelec/2,:,1:2) = 1d0
+      else
+        system%rocc(1:(nelec-1)/2,:,1:2) = 1d0
+        system%rocc((nelec-1)/2+1,:,1  ) = 1d0
+      end if
+    else if ( any(nelec_spin>0) ) then
+      system%rocc(1:nelec_spin(1),:,1) = 1d0
+      system%rocc(1:nelec_spin(2),:,2) = 1d0
+    else
+      write(*,*) "nelect or nelec_spin should be specified in input"
+    end if
   end select
 
   call setbn(bnmat)

@@ -490,7 +490,12 @@ contains
 
 #ifndef SALMON_DEBUG_NEGLECT_NLCC
       if (present(rho_nlcc)) then
-        rho_s_1d = rho_s_1d + reshape(rho_nlcc, (/nl/)) * 0.5
+        if ( xc%ispin == 0 ) then
+          rho_s_1d = rho_s_1d + reshape(rho_nlcc, (/nl/)) * 0.5
+        else if ( xc%ispin == 1 ) then
+          rho_s_sp_1d(:,1) = rho_s_sp_1d(:,1) + reshape(rho_nlcc, (/nl/)) * 0.5
+          rho_s_sp_1d(:,2) = rho_s_sp_1d(:,2) + reshape(rho_nlcc, (/nl/)) * 0.5
+        end if
       endif
 #endif
 

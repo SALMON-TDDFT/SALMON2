@@ -64,7 +64,7 @@ integer :: ix,iy,iz,ik,ikoa,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
-complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
+!complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg,nspin,n,nn
 integer :: neig(1:2, 1:3)
@@ -89,6 +89,8 @@ type(s_cg)  :: cg
 type(s_mixing) :: mixing
 
 logical :: rion_update
+integer :: io1,io2
+real(8),allocatable :: esp_tmp(:)
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -176,6 +178,7 @@ if(iopt==1)then
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, iobnum * k_num, info%icomm_r, neig)
+  srg%nb=srg%nb*system%nspin
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
@@ -209,12 +212,12 @@ if(iopt==1)then
     call allocate_orbital_complex(system%nspin,mg,info,sttpsi)
   end select
 
-  if(iperiodic==3)then
-    allocate (zpsi_tmp(mg%is_overlap(1):mg%ie_overlap(1) &
-    &                 ,mg%is_overlap(2):mg%ie_overlap(2) &
-    &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
-    &                 ,1:iobnum,k_sta:k_end))
-  end if
+!  if(iperiodic==3)then
+!    allocate (zpsi_tmp(mg%is_overlap(1):mg%ie_overlap(1) &
+!    &                 ,mg%is_overlap(2):mg%ie_overlap(2) &
+!    &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
+!    &                 ,1:iobnum,k_sta:k_end))
+!  end if
 
   if(iperiodic==3 .and. iflag_hartree==4)then
     call init_poisson_fft(lg,ng,system,info_field,poisson)
@@ -237,6 +240,9 @@ if(iopt==1)then
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
   end if
 
+! Setup NLCC term from pseudopotential
+  call calc_nlcc(pp, system, mg, ppn)
+
   if(iperiodic==3) call get_fourier_grid_G(lg,info_field,fg)
 
   select case( IC )
@@ -248,7 +254,7 @@ if(iopt==1)then
         allocate( psi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
       case(3)
         allocate( ttpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-        allocate( zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
+        allocate( zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum*nspin,k_sta:k_end) )
       end select
     end if
     if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
@@ -276,12 +282,14 @@ if(iopt==1)then
       case(3)
         do ik=k_sta,k_end
         do iob=1,info%numo
-          do is=1,nspin
-            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
-            & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
-          end do
+          spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,iob+info%io_s-1,ik,1) &
+          = zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob,ik)
+          if ( nspin == 2 ) then
+            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nspin,iob+info%io_s-1,ik,1) &
+            = spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1    ,iob+info%io_s-1,ik,1)
+          end if
         end do
-      end do
+        end do
       end select
     else
       if(iperiodic==0) stop "error: read_gs_wfn_k='y' & iperiodic=0"
@@ -363,7 +371,11 @@ if(iopt==1)then
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
 
-    esp(:,1:system%nk) = energy%esp(:,:,1) !++++++++
+    do is=1,nspin
+      io1=1+(is-1)*system%no
+      io2=io1+system%no-1
+      esp(io1:io2,1:system%nk) = energy%esp(1:system%no,1:system%nk,is) !++++++++
+    end do
 
   case(1,3) ! Continue the previous calculation
 
@@ -431,12 +443,20 @@ if(comm_is_root(nproc_id_global)) then
     write(*,'(1x,"iter =",i6,5x,"Total Energy =",f19.8)') Miter,energy%E_tot*2d0*Ry
   end select
   do ik=1,system%nk
+    if( .not.allocated(esp_tmp) )then
+      allocate( esp_tmp(itotMST) ); esp_tmp=0.0d0
+    end if
+    do is=1,nspin
+    do iob=1,system%no
+      esp_tmp(iob+(is-1)*system%no)=energy%esp(iob,ik,is)
+    end do
+    end do
     if(ik<=3)then
       if(iperiodic==3) write(*,*) "k=",ik
       do p5=1,(itotMST+3)/4
         p1=4*(p5-1)+1
         p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
-        write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*2d0*Ry,iob=p1,p2)
+        write(*,'(1x,4(i5,f15.4,2x))') (iob,esp_tmp(iob)*2d0*Ry,iob=p1,p2)
       end do
       if(iperiodic==3) write(*,*)
     end if
@@ -474,7 +494,7 @@ end do
 end do
 
 ! Setup NLCC term from pseudopotential
-call calc_nlcc(pp, system, mg, ppn)
+!call calc_nlcc(pp, system, mg, ppn)
 
 if (comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
@@ -496,7 +516,13 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(temperature>=0.d0 .and. Miter>iditer_notemperature) then
     call ne2mu(energy,system,info)
   end if
-  rocc(1:itotMST,1:system%nk) = system%rocc(1:itotMST,1:system%nk,1) ! future work: remove this line
+  do ik=1,system%nk
+  do is=1,nspin
+  do iob=1,info%numo
+    rocc(iob+(is-1)*info%numo,ik) = system%rocc(iob,ik,is)
+  end do
+  end do
+  end do
 
   call copy_density(system%nspin,ng,srho_s,mixing)
 
@@ -524,7 +550,13 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(3)
       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
-    esp(:,1:system%nk) = energy%esp(:,:,1) !++++++++
+    do ik=1,system%nk
+    do is=1,nspin
+    do iob=1,system%no
+      esp(iob+(is-1)*system%no,ik) = energy%esp(iob,ik,is) !++++++++
+    end do
+    end do
+    end do
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
 
@@ -600,10 +632,15 @@ DFT_Iteration : do iter=1,iDiter(img)
     do ik=1,system%nk
       if(ik<=3)then
         if(iperiodic==3) write(*,*) "k=",ik
+        do is=1,nspin
+        do iob=1,system%no
+          esp_tmp(iob+(is-1)*system%no)=energy%esp(iob,ik,is)
+        end do
+        end do
         do p5=1,(itotMST+3)/4
           p1=4*(p5-1)+1
           p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
-          write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*2d0*Ry,iob=p1,p2)
+          write(*,'(1x,4(i5,f15.4,2x))') (iob,esp_tmp(iob)*2d0*Ry,iob=p1,p2)
         end do
         if(iperiodic==3) write(*,*) 
       end if
@@ -871,9 +908,9 @@ if(comm_is_root(nproc_id_global)) then
       case(2)
         write(1,*) "for down-spin"
         do p5=1,(nstate_spin(is)+3)/4
-          p1=4*(p5-1)+1+nstate_spin(1)
-          p2=4*p5+nstate_spin(1) ; if ( p2 > nstate_spin(1)+nstate_spin(2) ) p2=nstate_spin(1)+nstate_spin(2)
-          write(1,'(1x,4(i5,f15.4,2x))') (iob-nstate_spin(1),energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
+          p1=4*(p5-1)+1
+          p2=4*p5+nstate_spin(2) ; if ( p2 > nstate_spin(2) ) p2=nstate_spin(2)
+          write(1,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,1,2)*2d0*Ry,iob=p1,p2)
         end do
       end select
     end do
@@ -928,14 +965,20 @@ contains
 
 subroutine band_information
   implicit none
-  integer :: ik
+  integer :: ik,is,io,no
   real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
   if(comm_is_root(nproc_id_global) .and. itotfMST<itotMST) then
+    no=size(energy%esp,1)
     do ik=1,num_kpoints_rd
-      esp_vb_min(ik)=minval(energy%esp(1:itotfMST,ik,1))
-      esp_vb_max(ik)=maxval(energy%esp(1:itotfMST,ik,1))
-      esp_cb_min(ik)=minval(energy%esp(itotfMST+1:itotMST,ik,1))
-      esp_cb_max(ik)=maxval(energy%esp(itotfMST+1:itotMST,ik,1))
+      do is=1,size(energy%esp,3)
+      do io=1,no
+        esp_tmp(io+(is-1)*no)=energy%esp(io,ik,is)
+      end do
+      end do
+      esp_vb_min(ik)=minval(esp_tmp(1:itotfMST))
+      esp_vb_max(ik)=maxval(esp_tmp(1:itotfMST))
+      esp_cb_min(ik)=minval(esp_tmp(1:itotMST))
+      esp_cb_max(ik)=maxval(esp_tmp(1:itotMST))
     end do
     write(*,*) 'band information-----------------------------------------'
     write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
