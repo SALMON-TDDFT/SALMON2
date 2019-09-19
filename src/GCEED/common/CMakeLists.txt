@@ -8,7 +8,6 @@ set(SOURCES
     calc_elf.f90
     calc_pmax.f90
     calcVpsl_periodic_FFTE.f90
-    check_cep.f90
     check_fourier.f90
     conv_p0.f90
     conv_p.f90

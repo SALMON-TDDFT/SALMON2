@@ -2006,6 +2006,8 @@ contains
     use salmon_parallel
     use salmon_communication
     implicit none
+    integer :: round_phi
+    real(8) :: udp_phi  ! udp: under dicimal point
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -2060,6 +2062,32 @@ contains
         stop 'set out_dos_meshotd to "gaussian" or "lorentzian"'
       end select
     end if
+
+    round_phi=int((phi_cep1-0.25d0)*2.d0)
+    udp_phi=(phi_cep1-0.25d0)*2.d0-round_phi
+    if(ae_shape1=="Ecos2".and.abs(udp_phi)>=1.d-12)then
+      stop "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
+    end if
+
+    round_phi=int((phi_cep2-0.25d0)*2.d0)
+    udp_phi=(phi_cep2-0.25d0)*2.d0-round_phi
+    if(ae_shape2=="Ecos2".and.abs(udp_phi)>=1.d-12)then
+      stop "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
+    end if
+
+    select case(ae_shape1)
+    case("impulse","Ecos2","Acos2")
+      continue
+    case default
+      stop 'set ae_shape1 to "impulse", "Ecos2", or "Acos2"'
+    end select
+
+    select case(ae_shape2)
+    case("none","impulse","Ecos2","Acos2")
+      continue
+    case default
+      stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
+    end select 
 
   end subroutine check_bad_input
 

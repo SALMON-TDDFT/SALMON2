@@ -97,9 +97,6 @@ call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_RT)
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
-call check_cep
-call check_ae_shape
-
 iSCFRT=2
 OC=0
 img=1

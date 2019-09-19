@@ -4,7 +4,6 @@ set(SOURCES
     calcAext.f90
     calcEstatic.f90
     calcVbox.f90
-    check_ae_shape.f90
     convert_input_rt.f90
     dip.f90
     initA.f90
