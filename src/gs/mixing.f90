@@ -195,4 +195,125 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
 
 end subroutine wrapper_broyden
 
+!===================================================================================================================================
+
+subroutine init_mixing(nspin,ng,mixing)
+  use structures
+  implicit none
+  integer      ,intent(in) :: nspin
+  type(s_rgrid),intent(in) :: ng
+  type(s_mixing)           :: mixing
+  !
+  integer :: i,j
+
+  allocate(mixing%srho_in(1:mixing%num_rho_stock+1))
+  allocate(mixing%srho_out(1:mixing%num_rho_stock+1))
+  do i=1,mixing%num_rho_stock+1
+    allocate(mixing%srho_in(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    mixing%srho_in(i)%f(:,:,:) =0.d0
+    mixing%srho_out(i)%f(:,:,:)=0.d0
+  end do
+
+  if(nspin==2)then
+    allocate(mixing%srho_s_in(1:mixing%num_rho_stock+1,2))
+    allocate(mixing%srho_s_out(1:mixing%num_rho_stock+1,2))
+    do j=1,2
+      do i=1,mixing%num_rho_stock+1
+        allocate(mixing%srho_s_in(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+        allocate(mixing%srho_s_out(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+        mixing%srho_s_in(i,j)%f(:,:,:) =0.d0
+        mixing%srho_s_out(i,j)%f(:,:,:)=0.d0
+      end do
+    end do
+  end if
+
+end subroutine init_mixing
+
+!===================================================================================================================================
+
+subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
+  use structures, only: s_rgrid, s_scalar, s_mixing
+  implicit none
+  integer       ,intent(in) :: Miter,nspin
+  type(s_rgrid), intent(in) :: ng
+  type(s_scalar),intent(in) :: srho_s(nspin)
+  type(s_mixing),intent(inout) :: mixing
+  !
+  integer :: iiter
+  integer :: is
+  integer :: ix,iy,iz
+
+  if(Miter==1)then
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    if(nspin==2)then
+  !$OMP parallel do private(iz,iy,ix)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        mixing%srho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+        mixing%srho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz)=srho_s(2)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+    end if
+  end if
+
+  do iiter=1,mixing%num_rho_stock
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      mixing%srho_in(iiter)%f(ix,iy,iz)=mixing%srho_in(iiter+1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end do
+  do iiter=1,mixing%num_rho_stock-1
+  !$OMP parallel do private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      mixing%srho_out(iiter)%f(ix,iy,iz)=mixing%srho_out(iiter+1)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end do
+
+  if(nspin==2)then
+    do iiter=1,mixing%num_rho_stock
+      do is=1,2
+  !$OMP parallel do private(iz,iy,ix)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          mixing%srho_s_in(iiter,is)%f(ix,iy,iz)=mixing%srho_s_in(iiter+1,is)%f(ix,iy,iz)
+        end do
+        end do
+        end do
+      end do
+    end do
+    do iiter=1,mixing%num_rho_stock-1
+      do is=1,2
+  !$OMP parallel do private(iz,iy,ix)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          mixing%srho_s_out(iiter,is)%f(ix,iy,iz)=mixing%srho_s_out(iiter+1,is)%f(ix,iy,iz)
+        end do
+        end do
+        end do
+      end do
+    end do
+  end if
+
+end subroutine copy_density
+
 end module mixing_sub

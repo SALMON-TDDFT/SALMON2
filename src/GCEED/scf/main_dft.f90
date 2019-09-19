@@ -54,6 +54,7 @@ use initialization_sub
 use occupation
 use input_pp_sub
 use prep_pp_sub
+use mixing_sub
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -160,11 +161,7 @@ if(iopt==1)then
   call set_icoo1d(lg)
   call init_code_optimization
 
-  if(ispin==0)then
-    nspin=1
-  else
-    nspin=2
-  end if
+  nspin = system%nspin
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
   allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
@@ -253,27 +250,7 @@ if(iopt==1)then
       allocate( rho_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
     end if
 
-    allocate(mixing%srho_in(1:mixing%num_rho_stock+1))
-    allocate(mixing%srho_out(1:mixing%num_rho_stock+1))
-    do i=1,mixing%num_rho_stock+1
-      allocate(mixing%srho_in(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-      allocate(mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-      mixing%srho_in(i)%f(:,:,:) =0.d0
-      mixing%srho_out(i)%f(:,:,:)=0.d0
-    end do
-
-    if(ilsda==1)then
-      allocate(mixing%srho_s_in(1:mixing%num_rho_stock+1,2))
-      allocate(mixing%srho_s_out(1:mixing%num_rho_stock+1,2))
-      do j=1,2
-        do i=1,mixing%num_rho_stock+1
-          allocate(mixing%srho_s_in(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-          allocate(mixing%srho_s_out(i,j)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-          mixing%srho_s_in(i,j)%f(:,:,:) =0.d0
-          mixing%srho_s_out(i,j)%f(:,:,:)=0.d0
-        end do
-      end do
-    end if
+    call init_mixing(nspin,ng,mixing)
 
     if(read_gs_dns_cube == 'n') then
        call calc_density(system,srho_s,spsi,info,mg)
@@ -435,7 +412,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   end if
   rocc(1:itotMST,1:system%nk) = system%rocc(1:itotMST,1:system%nk,1) ! future work: remove this line
 
-  call copy_density(system%nspin,ng,srho_s,mixing)
+  call copy_density(Miter,system%nspin,ng,srho_s,mixing)
 
   if(iscf_order==1)then
 

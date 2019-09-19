@@ -338,11 +338,7 @@ endif
 
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
-  if(ispin==0)then
-    nspin=1
-  else
-    nspin=2
-  end if
+  nspin = system%nspin
 
   system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
 
