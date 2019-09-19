@@ -2068,7 +2068,8 @@ contains
        select case(iperiodic)
        case(3)
           if( theory/='Maxwell' ) then
-          return ! ARTED
+            return ! ARTED
+          end if
        end select
     end select
 
