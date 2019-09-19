@@ -2063,6 +2063,17 @@ contains
       end select
     end if
 
+    select case(yn_domain_parallel)
+    case('n')
+       select case(iperiodic)
+       case(3)
+          if( theory/='Maxwell' ) then
+          return ! ARTED
+       end select
+    end select
+
+  ! for GCEED
+
     round_phi=int((phi_cep1-0.25d0)*2.d0)
     udp_phi=(phi_cep1-0.25d0)*2.d0-round_phi
     if(ae_shape1=="Ecos2".and.abs(udp_phi)>=1.d-12)then
@@ -2087,7 +2098,7 @@ contains
       continue
     case default
       stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
-    end select 
+    end select
 
   end subroutine check_bad_input
 
