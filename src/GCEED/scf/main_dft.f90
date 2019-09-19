@@ -54,6 +54,7 @@ use occupation
 use input_pp_sub
 use prep_pp_sub
 use mixing_sub
+use change_order_sub
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -437,6 +438,10 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
     esp = energy%esp(:,:,1) !++++++++
     call timer_end(LOG_CALC_TOTAL_ENERGY)
+
+    call timer_begin(LOG_CALC_CHANGE_ORDER)
+    if(iperiodic==0) call change_order(psi,info)
+    call timer_end(LOG_CALC_CHANGE_ORDER)
 
   end if
 
