@@ -22,7 +22,6 @@ use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 use new_world_sub
-use change_order_sub
 use structure_opt_sub
 use salmon_total_energy
 use hpsi_sub
@@ -438,11 +437,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     end select
     esp = energy%esp(:,:,1) !++++++++
     call timer_end(LOG_CALC_TOTAL_ENERGY)
-
-
-    call timer_begin(LOG_CALC_CHANGE_ORDER)
-    if(iperiodic==0) call change_order(psi,info)
-    call timer_end(LOG_CALC_CHANGE_ORDER)
 
   end if
 
