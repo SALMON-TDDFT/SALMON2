@@ -45,10 +45,23 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   !
   integer,dimension(2,3) :: neig,neig_ng
 
-  call init_communicator_dft(comm,info,info_field)
+! electron system
+
   call init_dft_system(lg,system,stencil)
+
+! parallelization
+
+  call init_communicator_dft(comm,info,info_field)
   call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info)
+  ! sendrecv_grid object for wavefunction updates
+  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
+  call init_sendrecv_grid(srg, mg, info%numo*info%numk, info%icomm_r, neig)
+  ! sendrecv_grid object for scalar potential updates
+  call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
+  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
+
+! for Poisson equation
 
   poisson%iterVh = 0 ! Iteration counter
   poisson%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
@@ -60,12 +73,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   end select
   call set_ig_bound(lg,ng,poisson)
 
-  ! sendrecv_grid object for wavefunction updates
-  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg, mg, info%numo*info%numk, info%icomm_r, neig)
-  ! sendrecv_grid object for scalar potential updates
-  call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
+! output files
 
   call init_dir_out_restart(ofile)
 

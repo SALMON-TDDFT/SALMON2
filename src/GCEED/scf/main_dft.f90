@@ -54,7 +54,6 @@ use occupation
 use input_pp_sub
 use prep_pp_sub
 use mixing_sub
-use change_order_sub
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -439,10 +438,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     esp = energy%esp(:,:,1) !++++++++
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
-    call timer_begin(LOG_CALC_CHANGE_ORDER)
-    if(iperiodic==0) call change_order(psi,info)
-    call timer_end(LOG_CALC_CHANGE_ORDER)
-
   end if
 
   call timer_begin(LOG_WRITE_GS_RESULTS)
@@ -672,14 +667,14 @@ end do Structure_Optimization_Iteration
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
 ! write GS: basic data
-call write_band_information
-call write_eigen
+call write_band_information(system,energy)
+call write_eigen(file_eigen,system,energy)
 call write_info_data(system,energy)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,info)
 if(yn_out_dns =='y') call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
-if(yn_out_dos =='y') call calc_dos(info)
+if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call calc_pdos(lg,info,pp)
 if(yn_out_elf =='y') then
   allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
@@ -794,38 +789,6 @@ subroutine copy_zwf_to_zpsi(info,nspin,mg,spsi)
   end do
   end do
 end subroutine copy_zwf_to_zpsi
-
-subroutine write_band_information
-  implicit none
-  integer :: ik
-  real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
-  if(comm_is_root(nproc_id_global) .and. itotfMST<itotMST) then
-    do ik=1,num_kpoints_rd
-      esp_vb_min(ik)=minval(energy%esp(1:itotfMST,ik,1))
-      esp_vb_max(ik)=maxval(energy%esp(1:itotfMST,ik,1))
-      esp_cb_min(ik)=minval(energy%esp(itotfMST+1:itotMST,ik,1))
-      esp_cb_max(ik)=maxval(energy%esp(itotfMST+1:itotMST,ik,1))
-    end do
-    write(*,*) 'band information-----------------------------------------'
-    write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
-    write(*,*) 'Top of VB',maxval(esp_vb_max(:))
-    write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
-    write(*,*) 'Top of CB',maxval(esp_cb_max(:))
-    write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
-    write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
-    write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
-    write(*,*) 'Physicaly upper bound of CB for eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
-    write(*,*) '---------------------------------------------------------'
-    write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*2.0*Ry
-    write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*2.0*Ry
-    write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*2.0*Ry
-    write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*2.0*Ry
-    write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*2.0*Ry
-    write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*2.0*Ry
-    write(*,*) '---------------------------------------------------------'
-  end if
-  return
-end subroutine write_band_information
 
 subroutine init_code_optimization
   implicit none
