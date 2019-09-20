@@ -1,9 +1,7 @@
 set(SOURCES
-    calc_dos.f90
     calc_pdos.f90
     convert_input_scf.f90
     main_dft.f90
-    write_eigen.f90
     )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

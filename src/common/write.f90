@@ -763,4 +763,155 @@ contains
 
   end subroutine write_info_data
 
+  subroutine write_eigen(file_eigen,system,energy)
+    use structures
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use inputoutput, only: uenergy_from_au,iperiodic,unit_energy
+    implicit none
+    character(100)    ,intent(in) :: file_eigen
+    type(s_dft_system),intent(in) :: system
+    type(s_dft_energy),intent(in) :: energy
+    !
+    integer :: iob,iik,is
+
+    if(comm_is_root(nproc_id_global))then
+      open(101,file=file_eigen)
+      write(101,'("# 1 particle energies")')
+      select case(unit_energy)
+      case('au','a.u.')
+        write(101,'("# Orbital   Energy[a.u.]")')
+      case('ev','eV')
+        write(101,'("# Orbital   Energy[eV]")')
+      end select
+      write(101,'("#-----------------------")')
+      do is=1,system%nspin
+      do iik=1,system%nk
+        if(iperiodic==3)then
+          write(101,'("k=",1x,i5,",  spin=",1x,i5)') iik,is
+        end if
+        do iob=1,system%no
+          write(101,'(1x,i5,e26.16e3)') iob, energy%esp(iob,iik,is)*uenergy_from_au
+        end do
+      end do
+      end do
+      close(101)
+    end if
+
+  end subroutine write_eigen
+
+  subroutine write_dos(system,energy)
+    use structures
+    use math_constants, only: pi
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
+                           out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au, unit_energy, &
+                           nelec,nstate
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_dft_energy),intent(in) :: energy
+    !
+    integer :: iob,iik,is
+    real(8) :: dos_l(1:out_dos_nenergy,system%nspin)
+    real(8) :: fk,ww,dw
+    integer :: iw
+    real(8) :: ene_homo,ene_lumo,ene_min,ene_max,efermi,eshift
+
+    ene_min = minval(energy%esp)
+    ene_max = maxval(energy%esp)
+    ene_homo = energy%esp(nelec/2  ,1,1)
+    ene_lumo = energy%esp(nelec/2+1,1,1)
+    if(yn_out_dos_set_fe_origin=='y'.and.nstate>nelec/2) then
+      efermi = (ene_homo+ene_lumo)*0.5d0
+      eshift = efermi
+    else
+      eshift = 0.d0
+    endif
+    out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min))
+    out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min))
+    dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
+
+    dos_l = 0.d0
+
+    do is=1,system%nspin
+    do iik=1,system%nk
+    do iob=1,system%no
+      select case (out_dos_function)
+      case('lorentzian')
+        fk=2.d0*out_dos_width/pi
+        do iw=1,out_dos_nenergy
+          ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,is)
+          dos_l(iw,is)=dos_l(iw,is)+system%wtk(iik)*fk/(ww**2+out_dos_width**2)
+        end do
+      case('gaussian')
+        fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
+        do iw=1,out_dos_nenergy
+          ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,is)
+          dos_l(iw,is)=dos_l(iw,is)+system%wtk(iik)*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)
+        end do
+      end select
+    end do
+    end do
+    end do
+
+    if(comm_is_root(nproc_id_global))then
+      open(101,file="dos.data")
+      write(101,'("# Density of States")')
+      select case(unit_energy)
+      case('au','a.u.')
+        write(101,'("# Energy[a.u.] DOS[a.u.]")')
+      case('ev','eV')
+        write(101,'("# Energy[eV]  DOS[1/eV]")')
+      end select
+      write(101,'("#-----------------------")')
+      do iw=1,out_dos_nenergy
+        ww=out_dos_start+dble(iw-1)*dw+eshift
+        write(101,'(F16.8,99(1X,E23.15E3))') ww*uenergy_from_au, ( dos_l(iw,is)/uenergy_from_au, is=1,system%nspin )
+      end do
+      close(101)
+    end if
+
+  end subroutine write_dos
+
+  subroutine write_band_information(system,energy)
+    use structures
+    use salmon_global, only: nelec
+    use inputoutput, only: au_energy_ev
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_dft_energy),intent(in) :: energy
+    !
+    integer :: ik
+    real(8),dimension(system%nk) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
+    if(comm_is_root(nproc_id_global) .and. nelec/2<system%no) then
+      do ik=1,system%nk
+        esp_vb_min(ik)=minval(energy%esp(1:nelec/2,ik,:))
+        esp_vb_max(ik)=maxval(energy%esp(1:nelec/2,ik,:))
+        esp_cb_min(ik)=minval(energy%esp(nelec/2+1:system%no,ik,:))
+        esp_cb_max(ik)=maxval(energy%esp(nelec/2+1:system%no,ik,:))
+      end do
+      write(*,*) 'band information-----------------------------------------'
+      write(*,*) 'Bottom of VB',minval(esp_vb_min(:))
+      write(*,*) 'Top of VB',maxval(esp_vb_max(:))
+      write(*,*) 'Bottom of CB',minval(esp_cb_min(:))
+      write(*,*) 'Top of CB',maxval(esp_cb_max(:))
+      write(*,*) 'Fundamental gap',minval(esp_cb_min(:))-maxval(esp_vb_max(:))
+      write(*,*) 'BG between same k-point',minval(esp_cb_min(:)-esp_vb_max(:))
+      write(*,*) 'Physicaly upper bound of CB for DOS',minval(esp_cb_max(:))
+      write(*,*) 'Physicaly upper bound of CB for eps(omega)',minval(esp_cb_max(:)-esp_vb_min(:))
+      write(*,*) '---------------------------------------------------------'
+      write(*,*) 'Bottom of VB[eV]',minval(esp_vb_min(:))*au_energy_ev
+      write(*,*) 'Top of VB[eV]',maxval(esp_vb_max(:))*au_energy_ev
+      write(*,*) 'Bottom of CB[eV]',minval(esp_cb_min(:))*au_energy_ev
+      write(*,*) 'Top of CB[eV]',maxval(esp_cb_max(:))*au_energy_ev
+      write(*,*) 'Fundamental gap[eV]',(minval(esp_cb_min(:))-maxval(esp_vb_max(:)))*au_energy_ev
+      write(*,*) 'BG between same k-point[eV]',(minval(esp_cb_min(:)-esp_vb_max(:)))*au_energy_ev
+      write(*,*) '---------------------------------------------------------'
+    end if
+    return
+  end subroutine write_band_information
+
 end module write_sub
