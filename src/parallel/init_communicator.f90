@@ -18,7 +18,8 @@ MODULE init_communicator
 
 CONTAINS
 
-!=======================================================================
+!===================================================================================================================================
+
 subroutine init_communicator_dft(comm,info,info_field)
   use salmon_global, only: process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_ob,nproc_k,ispin
   use structures, only: s_orbital_parallel, s_field_parallel
@@ -426,6 +427,17 @@ subroutine init_communicator_dft(comm,info,info_field)
   info_field%icomm(3) = comm_create_group(comm, icolor, ikey)
   call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
 
+! for sendrecv
+  info%imr = imr
+  info_field%imr = imr
+  info_field%imrs = imrs
+
+! for allgatherv_vlocal
+  info_field%icomm_v = info%icomm_ko
+  info_field%ngo(1:3) = nproc_d_g_dm(1:3)
+  info_field%ngo_xyz = nproc_d_g_mul_dm
+  info_field%nproc_o = nproc_d_o_mul
+
 ! communicators for FFTE routine
   npuy = nproc_d_g_dm(2)*nproc_d_o(2)
   npuz = nproc_d_g_dm(3)*nproc_d_o(3)
@@ -444,11 +456,6 @@ subroutine init_communicator_dft(comm,info,info_field)
   ikey=info_field%id(1)
   info_field%icomm_ffte(1) = comm_create_group(comm, icolor, ikey)
   call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
-
-  info%imr = imr
-
-  info_field%imr = imr
-  info_field%imrs = imrs
 
 end subroutine init_communicator_dft
 
