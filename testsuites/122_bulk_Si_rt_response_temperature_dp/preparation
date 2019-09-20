@@ -13,7 +13,7 @@ fi
 if [ -e restart/ ]; then
   rm restart
 fi
-ln -s ../121_bulk_Si_gs_temperature_dp/data_for_restart ./restart
+ln -s ../121_bulk_Si_gs_temperature_dp_op/data_for_restart ./restart
 
 if [ -e current.data ]; then
   rm current.data
