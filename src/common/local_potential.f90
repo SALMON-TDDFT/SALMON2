@@ -92,9 +92,9 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
               +(i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2))
         ibox2=i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2)
 
-        call copyVlocal(mg,nproc,ista_Mxin_s,iend_Mxin_s, &
+        call copyVlocal(mg,ista_Mxin_s(:,ibox),iend_Mxin_s(:,ibox), &
         & matbox12(idisp(ibox2):(idisp(ibox2)+inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox))-1), &
-        & ibox,Vlocal(is)%f)
+        & Vlocal(is)%f)
 
       end do
       end do
@@ -108,9 +108,9 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
             +(i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2))*info_field%nproc_o
         ibox2=i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2)
 
-        call copyVlocal(mg,nproc,ista_Mxin_s,iend_Mxin_s, &
+        call copyVlocal(mg,ista_Mxin_s(:,ibox),iend_Mxin_s(:,ibox), &
         & matbox12(idisp(ibox2):(idisp(ibox2)+inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox))-1), &
-        & ibox,Vlocal(is)%f)
+        & Vlocal(is)%f)
 
       end do
       end do
@@ -123,22 +123,21 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
 
 end subroutine allgatherv_vlocal
 
-subroutine copyVlocal(mg,nproc,ista_Mxin_s,iend_Mxin_s,matbox,ibox,V)
+subroutine copyVlocal(mg,ista,iend,matbox,V)
   use structures
   implicit none
   type(s_rgrid),intent(in) :: mg
-  integer,intent(in) :: nproc,ista_Mxin_s(3,0:nproc-1),iend_Mxin_s(3,0:nproc-1)
-  integer,intent(in) :: ibox
-  real(8),intent(in) :: matbox(ista_Mxin_s(1,ibox):iend_Mxin_s(1,ibox),     &
-                      ista_Mxin_s(2,ibox):iend_Mxin_s(2,ibox),     &
-                      ista_Mxin_s(3,ibox):iend_Mxin_s(3,ibox))
+  integer,intent(in) :: ista(3),iend(3)
+  real(8),intent(in) :: matbox(ista(1):iend(1),     &
+                               ista(2):iend(2),     &
+                               ista(3):iend(3))
   real(8) :: V(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  V( ista_Mxin_s(1,ibox):iend_Mxin_s(1,ibox),     &
-          ista_Mxin_s(2,ibox):iend_Mxin_s(2,ibox),     &
-          ista_Mxin_s(3,ibox):iend_Mxin_s(3,ibox)) = &
-           matbox(ista_Mxin_s(1,ibox):iend_Mxin_s(1,ibox),     &
-                    ista_Mxin_s(2,ibox):iend_Mxin_s(2,ibox),     &
-                    ista_Mxin_s(3,ibox):iend_Mxin_s(3,ibox))
+  V(ista(1):iend(1),     &
+    ista(2):iend(2),     &
+    ista(3):iend(3)) = &
+  matbox(ista(1):iend(1),     &
+         ista(2):iend(2),     &
+         ista(3):iend(3))
 
   return
 end subroutine copyVlocal
