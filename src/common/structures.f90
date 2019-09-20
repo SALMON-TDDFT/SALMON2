@@ -129,6 +129,7 @@ module structures
                              ! yz-direction is parallel.
     integer :: id_ffte(3), isize_ffte(3)
     integer :: imr(3),imrs(3) ! for sendrecv
+    integer :: icomm_v,ngo(3),ngo_xyz,nproc_o ! for allgatherv_vlocal
   end type s_field_parallel
 
   type s_orbital

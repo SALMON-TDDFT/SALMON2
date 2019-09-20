@@ -21,7 +21,6 @@ use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub, only: calc_myob
 use check_corrkob_sub, only: check_corrkob
-use new_world_sub, only: wrapper_allgatherv_vlocal   !coming from GCEED
 use allocate_mat_sub                                 !coming from GCEED
 implicit none
 type(s_rgrid), intent(in)    :: lg, ng
@@ -416,7 +415,7 @@ END SUBROUTINE write_gs_bin
 
 !=======================================================================
 
-SUBROUTINE read_gs_bin(lg,mg,ng,info,mixing)
+SUBROUTINE read_gs_bin(lg,mg,ng,info,info_field,mixing)
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_size_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -431,6 +430,7 @@ type(s_rgrid),intent(in) :: lg
 type(s_rgrid),intent(in) :: mg
 type(s_rgrid),intent(in) :: ng
 type(s_orbital_parallel),intent(in) :: info
+type(s_field_parallel),intent(in) :: info_field
 type(s_mixing),intent(inout) :: mixing
 
 integer :: NI0,Ndv0,Nps0,Nd0, ix,iy,iz
@@ -1305,7 +1305,7 @@ if(iSCFRT==2)then
   end do
 end if
 
-call wrapper_allgatherv_vlocal(ng,info)
+call wrapper_allgatherv_vlocal(ng,mg,info_field)
 
 if(iscfrt==2.and.propagator=='etrs')then
   if(ilsda==0)then

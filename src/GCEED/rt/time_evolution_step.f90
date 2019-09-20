@@ -41,6 +41,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   use salmon_pp, only: calc_nlcc !test hoge
   use salmon_xc
+  use local_potential, only: allgatherv_vlocal
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -246,7 +247,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_end(LOG_CALC_EXC_COR)
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
-  call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
   call timer_end(LOG_CALC_VLOCAL)
 
 ! result

@@ -257,8 +257,8 @@ end if
 END SUBROUTINE write_rt_bin
 
 !---------------------------------------------------------------------------
-SUBROUTINE read_rt_bin(ng,info,Ntime)
-use structures, only: s_rgrid, s_orbital_parallel
+SUBROUTINE read_rt_bin(ng,mg,info,info_field,Ntime)
+use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
@@ -267,8 +267,9 @@ use scf_data
 use new_world_sub
 use allocate_mat_sub
 implicit none
-type(s_rgrid),           intent(in) :: ng
+type(s_rgrid),           intent(in) :: ng,mg
 type(s_orbital_parallel),intent(in) :: info
+type(s_field_parallel)  ,intent(in) :: info_field
 integer       :: i1,i2,i3,jj,iob,is,it2,iik
 integer       :: ix,iy,iz
 integer       :: Ntime
@@ -477,7 +478,7 @@ end do
 end do
 
 itt=Miter_rt
-call wrapper_allgatherv_vlocal(ng,info)
+call wrapper_allgatherv_vlocal(ng,mg,info_field)
 
 if(comm_is_root(nproc_id_global))then
   read(98) (vecDs(jj),jj=1,3)

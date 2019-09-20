@@ -54,6 +54,7 @@ use occupation
 use input_pp_sub
 use prep_pp_sub
 use mixing_sub
+use local_potential
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -152,7 +153,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call read_gs_bin(lg,mg,ng,info,mixing)
+    call read_gs_bin(lg,mg,ng,info,info_field,mixing)
 
   end select
 
@@ -282,7 +283,7 @@ if(iopt==1)then
 
     call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
 
-    call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
        Vlocal(:,:,:,jspin) = V_local(jspin)%f
     end do
@@ -427,7 +428,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
-    call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)

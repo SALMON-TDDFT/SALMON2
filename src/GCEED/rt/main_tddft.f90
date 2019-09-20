@@ -198,7 +198,7 @@ iobnum= info%numo ! future work: remove this line
 call timer_begin(LOG_READ_GS_DATA)
 
 ! Read GS data
-call read_gs_bin(lg,mg,ng,info,mixing)
+call read_gs_bin(lg,mg,ng,info,info_field,mixing)
 
 if(comm_is_root(nproc_id_global))then
   if(yn_md=='y')then
@@ -261,7 +261,7 @@ if(IC_rt==0) then
   itotNtime=Ntime
   Miter_rt=0
 else if(IC_rt==1) then
-  call read_rt_bin(ng,info,Ntime)
+  call read_rt_bin(ng,mg,info,info_field,Ntime)
 end if
 call timer_end(LOG_READ_RT_DATA)
 
