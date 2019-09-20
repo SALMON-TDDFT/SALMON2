@@ -12,8 +12,8 @@
 
 &parallel
   yn_domain_parallel='y'
-  nproc_k=4
-  nproc_ob=1
+  nproc_k=1
+  nproc_ob=4
   nproc_domain_orbital=1,1,1
   nproc_domain_general=1,2,2
 /
@@ -25,6 +25,7 @@
   nelec = 32
   nelem = 1
   natom = 8
+  temperature_k = 300.d0
 /
 
 &pseudo
@@ -53,7 +54,7 @@
 
 &scf
   ncg = 4
-  nscf = 2
+  nscf = 120
   threshold = 1.d-9
 /
 
