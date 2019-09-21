@@ -33,17 +33,17 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
   use salmon_global, only: dt
   use sendrecv_grid, only: update_overlap_real8
-  use salmon_parallel, only: nproc_id_global, nproc_group_global
+  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation
   use inputoutput, only: t_unit_time
   implicit none
-  integer       ,intent(in) :: itt
+  integer       ,intent(in) :: itt,comm
   type(s_rgrid) ,intent(in) :: lg,mg,ng
   real(8)       ,intent(in) :: hgs(3)
   type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
@@ -56,13 +56,11 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   integer,parameter :: mstep=100
   integer,parameter :: Nd = 4
   integer,dimension(3) :: ng_sta,ng_end,ng_num,mg_sta,mg_end,mg_num,lg_sta,lg_end,lg_num
-  integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3),comm
+  integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
 
   real(8) :: Hvol,dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
   real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
-
-  comm = nproc_group_global ! for comm_summation: ng --> lg
 
   krd = 0
   krd(1,1) = 1; krd(2,2) = 1; krd(3,3) = 1

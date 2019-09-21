@@ -238,7 +238,7 @@ module structures
   end type s_reciprocal_grid
 
   type s_poisson
-! for poisson_cg
+  ! for poisson_cg (conjugate-gradient method)
     integer :: iterVh                              ! iteration number for poisson_cg
     integer :: npole_partial                       ! number of multipoles calculated in each node
     integer :: npole_total                         ! total number of multipoles
@@ -247,7 +247,12 @@ module structures
     integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
     integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
     real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
-! for Fourier transformation routines
+  ! for discrete Fourier transform (general)
+    complex(8),allocatable :: ff1(:,:,:),ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:) &
+                           & ,ff2(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
+    real(8),allocatable    :: trho2z(:,:,:),trho3z(:,:,:)
+    complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
+  ! for FFTE
     real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
     complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
     complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix

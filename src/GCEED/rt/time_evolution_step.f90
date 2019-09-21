@@ -298,7 +298,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
     if(use_singlescale=='y') then
       call calc_microscopic_current(system,mg,stencil,info,spsi_out,dmat,j_e)
       singlescale%E_electron = energy%E_tot
-      call fdtd_singlescale(itt,lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
+      call fdtd_singlescale(itt,info%icomm_rko,lg,mg,ng,system%hgs,srho, &
+      & sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
     end if
 
