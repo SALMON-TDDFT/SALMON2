@@ -107,6 +107,19 @@ subroutine input_pp(pp,hx,hy,hz)
         end do
         l0=l
         end do
+        l0=0
+        do ll=0,pp%mlps(ik)
+        do l=l0,l0+pp%nproj(ll,ik)-1
+          pp%inorm_so(l,ik) = 1
+          if( pp%anorm_so(l,ik) < 0.0d0 )then
+            pp%anorm_so(l,ik) = -pp%anorm_so(l,ik)
+            pp%inorm_so(l,ik) = -1
+          end if
+          if ( abs(pp%anorm_so(l,ik)) < Eps0 ) pp%inorm_so(l,ik)=0
+          pp%anorm_so(l,ik) = sqrt( pp%anorm_so(l,ik) )
+        end do
+        l0=l
+        end do
       else
         do l=0,pp%mlps(ik)
           pp%anorm(l,ik) = 0.d0
@@ -917,7 +930,7 @@ end subroutine making_ps_with_masking
 !====
 subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   use structures,only : s_pp_info
-  use salmon_global, only: nelem
+  use salmon_global, only: nelem, ps_format
   use math_constants, only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -1019,8 +1032,64 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
   end do
 
+  if ( ps_format(ik) == "ADPACK" ) then
+    call making_ps_without_masking_so( pp, ik )
+  end if
+
   return
 end subroutine making_ps_without_masking
+
+subroutine making_ps_without_masking_so( pp, ik )
+  use structures,only : s_pp_info
+  use math_constants, only : pi
+  implicit none
+  type(s_pp_info),intent(inout) :: pp
+  integer,intent(in) :: ik
+  integer :: i,l,l0,ll
+  real(8) :: r1,r2,r3,r4,const
+
+  l0=0
+  do ll=0,pp%mlps(ik)
+  do l=l0,l0+pp%nproj(ll,ik)-1
+    do i=1,pp%mr(ik)-1
+      r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+      r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
+      r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
+      r4 = r1/r2
+      pp%dvpp_so(i,l)=(r4+1.d0)*(pp%vpp_so(i,l)-pp%vpp_so(i-1,l))/r1-(pp%vpp_so(i+1,l)-pp%vpp_so(i-1,l))/r3*r4
+    end do
+    pp%dvpp_so(0,l)=pp%dvpp_so(1,l)
+    pp%dvpp_so(pp%mr(ik),l)=pp%dvpp_so(pp%mr(ik)-1,l)
+  end do
+  l0=l
+  end do
+
+  if( flag_beta_proj_is_given )then
+    l0=0
+    do ll=0,pp%mlps(ik)
+      const=sqrt( (2.0d0*ll+1.0d0)/(4.0d0*pi) )
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=2,pp%mr(ik)
+        pp%udvtbl_so(i,l,ik) =pp%vpp_so(i-1,l)/pp%rad(i,ik)**(ll+1)*const
+        pp%dudvtbl_so(i,l,ik)=pp%dvpp_so(i-1,l)/pp%rad(i,ik)**(ll+1)*const &
+                             +pp%vpp_so(i-1,l)*( -const*(ll+1)/pp%rad(i,ik)**(ll+2) )
+      end do
+      pp%udvtbl_so(1,l,ik) =pp%udvtbl_so(2,l,ik)
+      pp%dudvtbl_so(1,l,ik)=pp%dudvtbl_so(2,l,ik)
+      if (pp%inorm_so(l,ik) == 0) cycle
+      pp%udvtbl_so(1:pp%mr(ik),l,ik) =pp%udvtbl_so(1:pp%mr(ik),l,ik)*pp%anorm_so(l,ik)
+      pp%dudvtbl_so(1:pp%mr(ik),l,ik)=pp%dudvtbl_so(1:pp%mr(ik),l,ik)*pp%anorm_so(l,ik)
+    end do
+    l0=l
+    end do
+  else
+    write(*,*) "so with upp-given pseudopotential has not been implemented"
+    stop "stop@making_ps_without_masking_so"
+  end if
+
+  return
+end subroutine making_ps_without_masking_so
+
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   use structures,only : s_pp_info

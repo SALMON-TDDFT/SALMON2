@@ -25,6 +25,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use structures
   use stencil_sub
   use pseudo_pt_sub
+  use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
+  use nondiagonal_so_sub, only: nondiagonal_so
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use timer
   implicit none
@@ -184,8 +186,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     end if
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
-  ! pseudopotential
-    call pseudo_C(tpsi,htpsi,info,nspin,ppg)
+    if ( SPIN_ORBIT_ON ) then
+      call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
+      call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+    else
+  !   pseudopotential
+      call pseudo_C(tpsi,htpsi,info,nspin,ppg)
+    end if
 
   end if
 
@@ -199,6 +206,7 @@ end subroutine hpsi
 subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   use math_constants,only : zi
   use structures
+  use update_kvector_so_sub, only: update_kvector_so, SPIN_ORBIT_ON
   implicit none
   type(s_pp_grid)    :: ppg
   integer,intent(in) :: ik_s,ik_e
@@ -207,6 +215,10 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   integer :: ilma,iatom,j,ik
   real(8) :: x,y,z,k(3)
   complex(8) :: ekr
+  if ( SPIN_ORBIT_ON ) then
+    call update_kvector_so( ppg, kAc, ik_s, ik_e )
+    return
+  end if
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ik=ik_s,ik_e
     k = kAc(:,ik)

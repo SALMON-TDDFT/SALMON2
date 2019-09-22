@@ -182,6 +182,8 @@ module structures
     real(8),allocatable :: dvpp(:,:)
     real(8),allocatable :: vpp_so(:,:)
     real(8),allocatable :: dvpp_so(:,:)
+    real(8),allocatable :: udvtbl_so(:,:,:)
+    real(8),allocatable :: dudvtbl_so(:,:,:)
   end type s_pp_info
 
 ! pseudopotential on r-space grid
@@ -201,6 +203,10 @@ module structures
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
+    integer,allocatable :: ia_tbl_so(:)
+    complex(8),allocatable :: uv_so(:,:,:,:)
+    complex(8),allocatable :: duv_so(:,:,:,:,:)
+    complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
 
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
@@ -433,6 +439,8 @@ contains
     DEAL(ppg%rinv_uvu)
     DEAL(ppg%zekr_uV)
     DEAL(ppg%Vpsl_atom)
+    DEAL(ppg%uv_so)
+    DEAL(ppg%duv_so)
   end subroutine deallocate_pp_grid
 
   subroutine deallocate_scalar(x)

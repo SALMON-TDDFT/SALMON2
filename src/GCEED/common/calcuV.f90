@@ -19,6 +19,7 @@ use salmon_communication, only: comm_is_root
 use prep_pp_sub, only: set_nlma,init_lma_tbl,init_uv,set_lma_tbl,calc_uv
 use scf_data
 use allocate_psl_sub
+use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
 implicit none
   type(s_rgrid),intent(in) :: lg
 
@@ -99,6 +100,10 @@ implicit none
   call calc_uv(pp,ppg_all,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                lx,ly,lz,nl,hx,hy,hz,  &
                flag_use_grad_wf_on_force,property,Hvol)
+
+  if ( SPIN_ORBIT_ON ) then
+     call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,flag_use_grad_wf_on_force,property,Hvol)
+  end if
 
   rinv_hvol=1.d0/Hvol
 

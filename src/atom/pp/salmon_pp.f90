@@ -206,9 +206,6 @@ module salmon_pp
     allocate(pp%anorm(0:2*lmax+1,nelem)); pp%anorm=0.0d0
     allocate(pp%inorm(0:2*lmax+1,nelem)); pp%inorm=0
 
-    allocate(pp%anorm_so(0:2*lmax+1,nelem)); pp%anorm_so=0.0d0
-    allocate(pp%inorm_so(0:2*lmax+1,nelem)); pp%inorm_so=0
-  
     allocate(pp%rad(nrmax,nelem))
     allocate(pp%radnl(nrmax,nelem))
     
@@ -224,9 +221,12 @@ module salmon_pp
     allocate(pp%dvpp(0:nrmax0,0:2*lmax0+2),pp%dupp(0:nrmax0,0:2*lmax0+1))
     allocate(pp%vpp_f(0:nrmax0,0:2*lmax0+2,nelem),pp%upp_f(0:nrmax0,0:2*lmax0+1,nelem))
 
+    allocate( pp%anorm_so(0:2*lmax+1,nelem) ); pp%anorm_so=0.0d0
+    allocate( pp%inorm_so(0:2*lmax+1,nelem) ); pp%inorm_so=0
     allocate( pp%vpp_so(0:nrmax0,0:2*lmax0+2) ); pp%vpp_so=0.0d0
     allocate( pp%dvpp_so(0:nrmax0,0:2*lmax0+2) ); pp%dvpp_so=0.0d0
-    allocate( pp%vpp_f_so(0:nrmax0,0:2*lmax0+2,nelem) ); pp%vpp_f_so=0.0d0
+    allocate( pp%udvtbl_so(nrmax,0:2*lmax+1,nelem) ); pp%udvtbl_so=0.0d0
+    allocate( pp%dudvtbl_so(nrmax,0:2*lmax+1,nelem) ); pp%dudvtbl_so=0.0d0
   
     pp%flag_nlcc=flag_nlcc
   

@@ -14,6 +14,9 @@
 !  limitations under the License.
 !
 module subspace_diagonalization
+
+  use subspace_diagonalization_so, only: ssdg_periodic_so, SPIN_ORBIT_ON
+
   implicit none
 
 contains
@@ -205,6 +208,11 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   complex(8) :: cbox
   complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   complex(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+
+  if ( SPIN_ORBIT_ON ) then
+    call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+    return
+  end if
   
   call timer_begin(LOG_DIAG_TOTAL)
 

@@ -756,7 +756,7 @@ if(iSCFRT==1)then
     allocate( ttpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     if(iobnum.ge.1)then
       allocate( zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
-      &                    1:iobnum,k_sta:k_end) )
+      &                    1:iobnum*system%nspin,k_sta:k_end) )
     end if
     if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
       allocate( zpsi_mesh(ng%is(1):ng%ie(1),  &
