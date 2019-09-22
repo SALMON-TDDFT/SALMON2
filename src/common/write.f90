@@ -661,20 +661,21 @@ contains
   end subroutine write_prod_dk_data
 
   !! export SYSNAME_info.data file (GS info)
-  subroutine write_info_data(system,energy)
-    use structures,          only: s_dft_system,s_dft_energy
-    use salmon_global,       only: MI,MKI,iZatom
+  subroutine write_info_data(Miter,system,energy,pp)
+    use structures
+    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,ntmg,unit_system
     use salmon_parallel,     only: nproc_id_global
     use salmon_communication,only: comm_is_root
     use salmon_file,         only: open_filehandle
-    use inputoutput,         only: sysname, nstate,nstate_spin,nelec_spin,ntmg,unit_system
-    use scf_data,            only: Miter, ilsda, ifMST,Ry,rLsize,a_B,Lref,Mlps,Rps
+    use inputoutput,         only: au_length_aa,au_energy_ev
     implicit none
-    integer :: fh,is,p1,p2,p5,iob,ii,jj,ik,ikoa,iatom,ix
-    character(100) :: file_gs_info
-
+    integer           ,intent(in) :: Miter
     type(s_dft_energy),intent(in) :: energy
     type(s_dft_system),intent(in) :: system
+    type(s_pp_info)   ,intent(in) :: pp
+    !
+    integer :: fh,is,p1,p2,p5,iob,ii,jj,ik,ikoa,iatom,ix
+    character(100) :: file_gs_info
 
     file_gs_info = trim(sysname)//"_info.data"
     fh = open_filehandle(trim(file_gs_info))
@@ -683,25 +684,25 @@ contains
 
        write(fh,*) "Total number of iteration = ", Miter
        write(fh,*)
-       select case (ilsda)
-       case(0)
-          write(fh,*) "Number of states = ", nstate
-          write(fh,*) "Number of electrons = ", ifMST(1)*2
+       select case (system%nspin)
        case(1)
+          write(fh,*) "Number of states = ", nstate
+          write(fh,*) "Number of electrons = ", nelec
+       case(2)
           write(fh,*) "Number of states = ", (nstate_spin(is),is=1,2)
           write(fh,*) "Number of electrons = ", (nelec_spin(is),is=1,2)
        end select
        write(fh,*)
-       write(fh,*) "Total energy (eV) = ", energy%E_tot*2d0*Ry
+       write(fh,*) "Total energy (eV) = ", energy%E_tot*au_energy_ev
        write(fh,*) "1-particle energies (eV)"
-       select case (ilsda)
-       case(0)
+       select case (system%nspin)
+       case(1)
           do p5=1,(nstate+3)/4
              p1=4*(p5-1)+1
              p2=4*p5 ; if ( p2 > nstate ) p2=nstate
-             write(fh,100) (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
+             write(fh,100) (iob,energy%esp(iob,1,1)*au_energy_ev,iob=p1,p2)
           end do
-       case(1)
+       case(2)
           do is=1,2
              select case(is)
              case(1)
@@ -709,14 +710,14 @@ contains
                 do p5=1,(nstate_spin(is)+3)/4
                    p1=4*(p5-1)+1
                    p2=4*p5 ; if ( p2 > nstate_spin(1) ) p2=nstate_spin(1)
-                   write(fh,100) (iob,energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
+                   write(fh,100) (iob,energy%esp(iob,1,1)*au_energy_ev,iob=p1,p2)
                 end do
              case(2)
                 write(fh,*) "for down-spin"
                 do p5=1,(nstate_spin(is)+3)/4
                    p1=4*(p5-1)+1+nstate_spin(1)
                    p2=4*p5+nstate_spin(1) ; if ( p2 > nstate_spin(1)+nstate_spin(2) ) p2=nstate_spin(1)+nstate_spin(2)
-                   write(fh,100) (iob-nstate_spin(1),energy%esp(iob,1,1)*2d0*Ry,iob=p1,p2)
+                   write(fh,100) (iob-nstate_spin(1),energy%esp(iob,1,1)*au_energy_ev,iob=p1,p2)
                 end do
              end select
           end do
@@ -725,35 +726,35 @@ contains
 100    format(1x,4(i5,f15.4,2x))
 
        do ii=1,ntmg
-          write(fh,200) "Size of the box (A) = ", rLsize(:,ii)*a_B
+          write(fh,200) "Size of the box (A) = ", system%primitive_a*au_length_aa
        end do
-       write(fh,200) "Grid spacing (A)    = ", (system%Hgs(jj)*a_B,jj=1,3)
+       write(fh,200) "Grid spacing (A)    = ", (system%Hgs(jj)*au_length_aa,jj=1,3)
        write(fh,*)
-200    format(1x,a,3f14.8)
+200    format(1x,a,30f14.8)
 
-       write(fh,'(1x,"Number of atoms = ",i8)') MI
-       do ik=1,MKI
+       write(fh,'(1x,"Number of atoms = ",i8)') natom
+       do ik=1,nelem
           write(fh,'(1x,"iZatom(",i3,")     = ",i8)') ik, iZatom(ik)
        end do
        write(fh,*)
        write(fh,*) "Ref. and max angular momentum",  &
                    " and pseudo-core radius of PP (A)"
-       do ikoa=1,MKI
+       do ikoa=1,nelem
           write(fh,'(1x,"(",i3,")  "," Ref, Max, Rps =",2i4,f8.3)') &
-                ikoa,Lref(ikoa),Mlps(ikoa),Rps(ikoa)*a_B
+                ikoa,pp%Lref(ikoa),pp%Mlps(ikoa),pp%Rps(ikoa)*au_length_aa
        end do
        
        write(fh,*)
        select case(unit_system)
        case('au','a.u.')
           write(fh,*) "Force [au] "
-          do iatom=1,MI
+          do iatom=1,natom
              write(fh,300) iatom,(system%Force(ix,iatom),ix=1,3)
           end do
        case('A_eV_fs')
           write(fh,*) "Force [eV/A] "
-          do iatom=1,MI
-             write(fh,300) iatom,(system%Force(ix,iatom)*2.d0*Ry/a_B,ix=1,3)
+          do iatom=1,natom
+             write(fh,300) iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
           end do
        end select
 300    format(i6,3e16.8)
