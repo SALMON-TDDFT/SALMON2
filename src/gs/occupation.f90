@@ -27,17 +27,18 @@ SUBROUTINE ne2mu(energy,system)
   type(s_dft_energy),intent(in) :: energy
   type(s_dft_system)            :: system
   !
-  integer :: jspin,io,ik,nspin,nk,no,iter
-  real(8) :: nein,muout
-  real(8) :: mu1,mu2,mu3,ne1,ne3,ne3o,diff_ne
-  integer :: ii,p5,p1,p2
-  integer :: nc
-  real(8) :: diff_mu,muo
-  real(8) :: diff_ne2
+  integer :: jspin,io,ik,nspin,nk,no,iter,ii,p5,p1,p2,nc
+  real(8) :: nein,muout,mu1,mu2,mu3,ne1,ne3,ne3o,diff_ne,diff_mu,muo,diff_ne2,wspin
 
   nspin = system%nspin
   nk = system%nk
   no = system%no
+  
+  if(nspin==1) then
+    wspin = 2d0
+  else
+    wspin = 1d0
+  end if
 
   nein = dble(nelec)
 
@@ -128,19 +129,35 @@ contains
     real(8) :: fact
     neout=0d0
 
-    do jspin=1,nspin
-    do ik=1,nk
-    do io=1,no
-       fact = (energy%esp(io,ik,jspin)-muin)/temperature
-       if(fact.ge.40.d0) then
-          system%rocc(io,ik,jspin) = 0.d0
-       else
-          system%rocc(io,ik,jspin) = 2d0/( 1.d0 + exp( (energy%esp(io,ik,jspin)-muin)/temperature ) )
-       endif
-       neout = neout + system%rocc(io,ik,jspin)*system%wtk(ik)
-    end do
-    end do
-    end do
+    if(temperature==0d0) then
+      do jspin=1,nspin
+      do ik=1,nk
+      do io=1,no
+         fact = energy%esp(io,ik,jspin) - muin
+         if(fact > 0d0) then
+            system%rocc(io,ik,jspin) = 0d0
+         else
+            system%rocc(io,ik,jspin) = wspin
+         endif
+         neout = neout + system%rocc(io,ik,jspin)*system%wtk(ik)
+      end do
+      end do
+      end do
+    else
+      do jspin=1,nspin
+      do ik=1,nk
+      do io=1,no
+         fact = (energy%esp(io,ik,jspin)-muin)/temperature
+         if(fact.ge.40.d0) then
+            system%rocc(io,ik,jspin) = 0d0
+         else
+            system%rocc(io,ik,jspin) = wspin/( 1d0 + exp( (energy%esp(io,ik,jspin)-muin)/temperature ) )
+         endif
+         neout = neout + system%rocc(io,ik,jspin)*system%wtk(ik)
+      end do
+      end do
+      end do
+    end if
 
   END SUBROUTINE mu2ne
 
