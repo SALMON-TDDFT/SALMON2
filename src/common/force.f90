@@ -28,6 +28,7 @@ contains
     use stencil_sub
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
+    use pseudo_pt_sub, only: calc_uVpsi_rdivided
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in) :: pp
@@ -39,11 +40,11 @@ contains
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital)            :: tpsi
     !
-    integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,norb,iorb,nlma,ik,io,ispin,ilma,j
+    integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
     real(8) :: kAc(3)
     real(8),allocatable :: F_tmp(:,:),F_sum(:,:)
-    complex(8) :: w(3),uVpsi,duVpsi(3)
-    complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:),uVpsibox2(:,:)
+    complex(8) :: w(3),duVpsi(3)
+    complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
@@ -57,7 +58,6 @@ contains
     ik_e = info%ik_e
     io_s = info%io_s
     io_e = info%io_e
-    norb = Nspin* info%numo * info%numk * info%numm
 
     Nlma = ppg%Nlma
 
@@ -80,29 +80,7 @@ contains
                     ,mg%is_array(3):mg%ie_array(3)))
 
   ! uVpsibox2 = < uV | exp(ikr) | psi >
-    allocate(uVpsibox(Nlma,Norb),uVpsibox2(Nlma,Norb))
-    uVpsibox = 0d0
-    iorb = 0
-    do ik=ik_s,ik_e
-    do io=io_s,io_e
-    do ispin=1,Nspin
-      iorb = iorb + 1
-      do ilma=1,Nlma
-        ia = ppg%ia_tbl(ilma)
-        uVpsi = 0.d0
-        do j=1,ppg%mps(ia)
-          ix = ppg%jxyz(1,j,ia)
-          iy = ppg%jxyz(2,j,ia)
-          iz = ppg%jxyz(3,j,ia)
-          uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-        end do
-        uVpsi = uVpsi * ppg%rinv_uvu(ilma)
-        uVpsibox(ilma,iorb) = uVpsi
-      end do
-    end do
-    end do
-    end do
-    call comm_summation(uVpsibox,uVpsibox2,Nlma*Norb,info%icomm_r)
+    call calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
     if(info%if_divide_rspace) then
        call update_overlap_complex8(srg, mg, tpsi%zwf)
@@ -110,11 +88,9 @@ contains
 
     kAc = 0d0
     F_tmp = 0d0
-    iorb = 0
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
-      iorb = iorb + 1
 
     ! gtpsi = (nabla) psi
       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
@@ -146,7 +122,7 @@ contains
           duVpsi = duVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
         end do
         F_tmp(:,ia) = F_tmp(:,ia) - 2d0*system%rocc(io,ik,ispin)*system%wtk(ik) &
-        & * dble( conjg(duVpsi(:)) * uVpsibox2(ilma,iorb) ) * system%Hvol
+        & * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) * system%Hvol
       end do
 
     end do
