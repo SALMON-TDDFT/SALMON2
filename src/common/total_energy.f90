@@ -87,7 +87,7 @@ CONTAINS
     end do
 !$omp end parallel do
     
-    call comm_summation(sum1,sum2,info%icomm_r)
+    call comm_summation(sum1,sum2,info%icomm_rko)
 
     Etot = Etot + sum2*system%Hvol + energy%E_xc + Eion
 
