@@ -24,7 +24,6 @@ use deallocate_mat_sub
 use new_world_sub
 use structure_opt_sub
 use salmon_total_energy
-use hpsi_sub
 implicit none
 
 END MODULE global_variables_scf
@@ -54,7 +53,7 @@ use occupation
 use input_pp_sub
 use prep_pp_sub
 use mixing_sub
-use local_potential
+use hamiltonian
 implicit none
 integer :: ix,iy,iz,ik,i,j
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin

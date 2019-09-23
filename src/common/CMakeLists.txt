@@ -1,9 +1,8 @@
 set(SOURCES
    broyden.f90
    const.f90
-   hpsi.f90
+   hamiltonian.f90
    initialization.f90
-   local_potential.f90
    stencil.f90
    pseudo_pt.f90
    set_numcpu.f90

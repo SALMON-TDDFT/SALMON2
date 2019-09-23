@@ -269,7 +269,7 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
     s_orbital_parallel, s_field_parallel, s_scalar, s_pp_info
   use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
-  use hpsi_sub, only: update_kvector_nonlocalpt
+  use hamiltonian, only: update_kvector_nonlocalpt
   use salmon_pp, only: calc_nlcc
   use prep_pp_sub, only: init_ps,dealloc_init_ps
   implicit none

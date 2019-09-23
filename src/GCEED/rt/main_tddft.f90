@@ -46,7 +46,7 @@ use density_matrix, only: calc_density
 use writefield
 use salmon_pp, only: calc_nlcc
 use force_sub, only: calc_force_salmon
-use hpsi_sub, only: update_kvector_nonlocalpt
+use hamiltonian, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
 use read_write_restart_rt_sub, only: write_checkpoint_rt

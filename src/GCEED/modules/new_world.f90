@@ -27,7 +27,7 @@ CONTAINS
 
 subroutine wrapper_allgatherv_vlocal(ng,mg,info_field) ! --> remove (future works)
   use structures
-  use local_potential
+  use hamiltonian
   implicit none
   type(s_rgrid),         intent(in) :: ng,mg
   type(s_field_parallel),intent(in) :: info_field
