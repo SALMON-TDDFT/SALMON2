@@ -21,6 +21,7 @@ subroutine calcJxyz_all_periodic(lg,al0,matrix_A0)
   use scf_data
   use read_pslfile_sub
   use allocate_psl_sub
+  use calcJxyz_all_plusU_sub, only: calcJxyz_all_plusU, PLUS_U_ON
   implicit none
   type(s_rgrid),intent(in) :: lg
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
@@ -98,6 +99,10 @@ subroutine calcJxyz_all_periodic(lg,al0,matrix_A0)
         write(*,*) "Mps =", ppg_all%mps(iatom)
       end if
     end do
+  end if
+
+  if ( PLUS_U_ON ) then
+    call calcJxyz_all_plusU( lg, al0, matrix_A0 )
   end if
   
   return

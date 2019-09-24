@@ -35,7 +35,7 @@ subroutine input_pp(pp,hx,hy,hz)
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
   real(8),intent(in) :: hx,hy,hz
-  integer :: ik,l,i,l0,ll,nprj
+  integer :: ik,l,i,l0,ll,nprj,i1,nr
   real(8) :: rrc(0:pp%lmax0)
   real(8) :: r1
   real(8),allocatable :: rhor_nlcc(:,:)   !zero in radial index for taking derivative
@@ -74,6 +74,8 @@ subroutine input_pp(pp,hx,hy,hz)
 
       if ( flag_beta_proj_is_given ) flag_potential_is_given=.false.
 
+      if ( all(pp%nproj(:,ik)==0) ) pp%nproj(0:pp%mlps(ik),ik)=1
+
 ! outside mr (needed for isolated systems)
       if(pp%nrmax>pp%mr(ik))then
         do i=pp%mr(ik)+1,pp%nrmax
@@ -92,6 +94,28 @@ subroutine input_pp(pp,hx,hy,hz)
       pp%nrloc(ik)=pp%nrps(ik)
       pp%rloc(ik)=pp%rps(ik)
       pp%radnl(:,ik)=pp%rad(:,ik)
+
+! Set meaning domain in the arrays of radial wave functions
+      i1=0
+      r1=0.0d0
+      nr=ubound(pp%upp,1)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        do i=nr,1,-1
+          if ( abs(pp%upp(i,l)) > 1.d-10 ) then
+            r1=max( r1, pp%rad(i+1,ik) )
+            i1=max(i+1,i1)
+            exit
+          end if
+        end do
+      end do
+      l0=l
+      end do
+!      pp%rps_ao(ik)=r1
+!      pp%nrps_ao(ik)=i1
+      pp%rps_ao(ik)=pp%rps(ik)
+      pp%nrps_ao(ik)=pp%nrps(ik)
 
       if( flag_beta_proj_is_given )then
         l0=0
@@ -939,6 +963,17 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   real(8),intent(in) :: rhor_nlcc(0:pp%nrmax0,0:2)
   integer :: i,l,l0,ll
   real(8) :: r1,r2,r3,r4,const,tmp,dr
+
+! copy the radial wave functions
+  l0=0
+  do ll=0,pp%mlps(ik)
+  do l=l0,l0+pp%nproj(ll,ik)-1
+    do i=0,pp%mr(ik)-1
+      pp%upptbl_ao(i+1,l,ik) = pp%upp(i,l)
+    end do
+  end do
+  l0=l
+  end do
 
 ! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
   do l=0,pp%mlps(ik)

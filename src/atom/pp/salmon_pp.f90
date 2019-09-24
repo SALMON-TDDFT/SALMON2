@@ -227,6 +227,11 @@ module salmon_pp
     allocate( pp%dvpp_so(0:nrmax0,0:2*lmax0+2) ); pp%dvpp_so=0.0d0
     allocate( pp%udvtbl_so(nrmax,0:2*lmax+1,nelem) ); pp%udvtbl_so=0.0d0
     allocate( pp%dudvtbl_so(nrmax,0:2*lmax+1,nelem) ); pp%dudvtbl_so=0.0d0
+
+    allocate( pp%nrps_ao(1:nelem) ); pp%nrps_ao=0
+    allocate( pp%rps_ao(1:nelem) ); pp%rps_ao=0.0d0
+    allocate( pp%upptbl_ao(nrmax,0:2*lmax+1,nelem) ); pp%upptbl_ao=0.0d0
+    allocate( pp%dupptbl_ao(nrmax,0:2*lmax+1,nelem) ); pp%dupptbl_ao=0.0d0
   
     pp%flag_nlcc=flag_nlcc
   

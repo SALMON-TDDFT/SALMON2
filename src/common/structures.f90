@@ -184,6 +184,10 @@ module structures
     real(8),allocatable :: dvpp_so(:,:)
     real(8),allocatable :: udvtbl_so(:,:,:)
     real(8),allocatable :: dudvtbl_so(:,:,:)
+    real(8),allocatable :: rps_ao(:)
+    integer,allocatable :: nrps_ao(:)
+    real(8),allocatable :: upptbl_ao(:,:,:)
+    real(8),allocatable :: dupptbl_ao(:,:,:)
   end type s_pp_info
 
 ! pseudopotential on r-space grid
@@ -203,10 +207,22 @@ module structures
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
+    !
     integer,allocatable :: ia_tbl_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
+    !
+    integer,allocatable :: ia_tbl_ao(:)
+    real(8),allocatable :: phi_ao(:,:)
+    real(8),allocatable :: dphi_ao(:,:,:)
+    integer :: nps_ao
+    integer,allocatable :: mps_ao(:)
+    integer,allocatable :: jxyz_ao(:,:,:)
+    integer,allocatable :: jxx_ao(:,:)
+    integer,allocatable :: jyy_ao(:,:)
+    integer,allocatable :: jzz_ao(:,:)
+    real(8),allocatable :: rxyz_ao(:,:,:)
 
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)

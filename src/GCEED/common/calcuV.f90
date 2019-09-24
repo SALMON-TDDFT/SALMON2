@@ -20,6 +20,7 @@ use prep_pp_sub, only: set_nlma,init_lma_tbl,init_uv,set_lma_tbl,calc_uv
 use scf_data
 use allocate_psl_sub
 use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
+use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
 implicit none
   type(s_rgrid),intent(in) :: lg
 
@@ -102,7 +103,11 @@ implicit none
                flag_use_grad_wf_on_force,property,Hvol)
 
   if ( SPIN_ORBIT_ON ) then
-     call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,flag_use_grad_wf_on_force,property,Hvol)
+    call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,flag_use_grad_wf_on_force,property,Hvol)
+  end if
+
+  if ( PLUS_U_ON ) then
+    call calc_uv_plusU( pp, ppg, flag_use_grad_wf_on_force, property )
   end if
 
   rinv_hvol=1.d0/Hvol
