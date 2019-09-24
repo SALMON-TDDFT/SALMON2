@@ -11,9 +11,6 @@ set(SOURCES
    pack_unpack.f90
    sendrecv_grid.f90
    total_energy.f90
-   write_field.f90
-   write_file3d.f90
-   write.f90
    lattice.f90
    force.f90
    zstencil_core/typical/omp.f90
