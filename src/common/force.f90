@@ -27,7 +27,7 @@ contains
     use stencil_sub, only: calc_gradient_psi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
-    use pseudo_pt_sub, only: calc_uVpsi_rdivided
+    use nonlocal_potential, only: calc_uVpsi_rdivided
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in) :: pp

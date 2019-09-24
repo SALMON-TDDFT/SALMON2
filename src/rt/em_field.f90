@@ -19,6 +19,8 @@ module em_field
 
 contains
 
+!===================================================================================================================================
+
 Subroutine calc_Ac_ext(t,Ac_ext)
   use math_constants,only: zi,pi
   use salmon_global, only: I_wcm2_1,I_wcm2_2,E_amplitude1,E_amplitude2,ae_shape1,ae_shape2, &

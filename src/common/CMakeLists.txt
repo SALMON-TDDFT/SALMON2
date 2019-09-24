@@ -4,8 +4,7 @@ set(SOURCES
    hamiltonian.f90
    initialization.f90
    stencil.f90
-   pseudo_pt.f90
-   set_numcpu.f90
+   nonlocal_potential.f90
    structures.f90
    density_matrix.f90
    pack_unpack.f90

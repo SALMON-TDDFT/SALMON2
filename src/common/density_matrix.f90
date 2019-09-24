@@ -243,7 +243,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_complex8
     use salmon_communication, only: comm_summation
-    use pseudo_pt_sub, only: calc_uVpsi_rdivided
+    use nonlocal_potential, only: calc_uVpsi_rdivided
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
@@ -361,7 +361,7 @@ contains
   subroutine calc_current_use_dmat(system,mg,stencil,info,psi,ppg,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
-    use pseudo_pt_sub, only: calc_uVpsi_rdivided
+    use nonlocal_potential, only: calc_uVpsi_rdivided
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
