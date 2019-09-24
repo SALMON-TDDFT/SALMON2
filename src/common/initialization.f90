@@ -84,8 +84,9 @@ end subroutine init_dft
 subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate &
-  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
+  & nproc_domain_orbital,rion,rion_red,nelec,calc_mode,temperature,nelec_spin, &
+  & iflag_atom_coor,ntype_atom_coor_reduced
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -150,7 +151,11 @@ subroutine init_dft_system(lg,system,stencil)
   allocate(system%mass(1:nelem))
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
-  system%rion = rion
+  
+  if(iflag_atom_coor==ntype_atom_coor_reduced) then
+    Rion = matmul(system%primitive_a,Rion_red) ! [ a1, a2, a3 ] * R_ion
+  end if
+  system%Rion = Rion
 
 ! initial value of occupation
   system%rocc = 0d0
