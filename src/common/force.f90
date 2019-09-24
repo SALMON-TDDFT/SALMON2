@@ -24,8 +24,7 @@ contains
 
   subroutine calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,tpsi)
     use structures
-    use hpsi_sub
-    use stencil_sub
+    use stencil_sub, only: calc_gradient_psi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
     use pseudo_pt_sub, only: calc_uVpsi_rdivided

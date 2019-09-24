@@ -566,7 +566,7 @@ end subroutine
 
 subroutine hpsi_test_diis(stpsi,shtpsi,info_ob,mg,v,nspin_1,stencil,srg_ob_1,ppg)
   use structures
-  use hpsi_sub, only: hpsi
+  use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   type(s_orbital)  :: stpsi

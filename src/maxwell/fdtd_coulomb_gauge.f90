@@ -429,36 +429,15 @@ contains
   end subroutine calc_gradient
 
   subroutine pulse(t,r,A_ext)
-    use salmon_global, only: tw1,omega1,phi_CEP1,E_amplitude1,I_wcm2_1,epdir_re1,ae_shape1
+    use em_field, only: calc_Ac_ext
     implicit none
     real(8),intent(in)  :: t,r
     real(8),intent(out) :: A_ext(3)
     !
-    real(8) :: wrk,theta1,theta2,rr,amplitude
+    real(8) :: tt
 
-    if(E_amplitude1/=0d0) then
-      amplitude = E_amplitude1
-    else
-      amplitude = sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
-    end if
-
-    rr = r - cspeed_au * t
-
-    rr = rr + 0.5d0*tw1*cspeed_au
-
-  !  theta1 = Pi/tw1*(tt-0.5d0*tw1)
-    theta1 = pi * rr / (tw1*cspeed_au)
-  !  theta2 = omega1*(tt-0.5d0*tw1)+phi_cep1*2d0*pi
-    theta2 = omega1 * rr / cspeed_au + phi_CEP1*2d0*pi
-
-    if(ae_shape1=='Acos2')then
-      wrk = cos(theta1)**2 * aimag(exp(zI*theta2)) / omega1
-    end if
-
-    A_ext = 0d0
-    if(abs(rr) < 0.5d0*tw1*cspeed_au)then
-      A_ext(1:3) = amplitude * epdir_re1(1:3) * wrk
-    end if
+    tt = t - r/cspeed_au
+    call calc_Ac_ext(tt,A_ext)
 
     return
   end subroutine pulse

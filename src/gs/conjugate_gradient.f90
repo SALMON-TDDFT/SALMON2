@@ -22,7 +22,7 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use inputoutput, only: ncg
   use structures
   use timer
-  use hpsi_sub
+  use hamiltonian
   use salmon_communication, only: comm_summation
   !$ use omp_lib
   implicit none
@@ -300,7 +300,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use inputoutput, only: ncg
   use structures
   use timer
-  use hpsi_sub
+  use hamiltonian
   use salmon_communication, only: comm_summation
   !$ use omp_lib
   implicit none

@@ -37,11 +37,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
   use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
-  use hpsi_sub, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc
+  use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, allgatherv_vlocal
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   use salmon_pp, only: calc_nlcc !test hoge
   use salmon_xc
-  use local_potential, only: allgatherv_vlocal
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg

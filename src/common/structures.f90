@@ -73,15 +73,16 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
+! for persistent communication
   type s_pcomm_cache
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
-
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: dbuf, zbuf
 #endif
   end type s_pcomm_cache
 
+! for update_overlap
   type s_sendrecv_grid
     ! Number of orbitals (4-th dimension of grid)
     integer :: nb
@@ -145,9 +146,6 @@ module structures
     logical :: if_orthogonal
     real(8) :: coef_f(6) ! for non-orthogonal lattice
     integer,allocatable :: isign(:,:) ! sign(3,4:ndir) (for ndir=4~6)
-
-  ! Experimental implementation of srg
-    type(s_sendrecv_grid) :: srg
   end type s_stencil
 
 ! pseudopotential
@@ -202,7 +200,6 @@ module structures
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
-
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process
@@ -279,6 +276,7 @@ module structures
      real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
+! output files
   type s_ofile
      integer :: fh_rt, fh_rt_energy
      character(256) :: file_rt_data, file_rt_energy_data

@@ -41,8 +41,8 @@ end subroutine calc_emfields
 
 subroutine calcAext
 !$ use omp_lib
-use salmon_communication, only: comm_is_root, comm_summation
-use scf_data
+use em_field, only: calc_Ac_ext
+use scf_data!, only: dt,Miter_rt,itotNtime,A_ext
 implicit none
 integer :: j2
 integer :: ipulse
@@ -75,8 +75,14 @@ select case(ikind_eext)
     end do
 end select
 
-return
+!integer :: itt
+!real(8) :: tt
+!do itt=Miter_rt+1,itotNtime+1
+!  tt = dt*dble(itt)
+!  call calc_Ac_ext(tt,A_ext(:,itt))
+!end do
 
+return
 end subroutine calcAext
 
 subroutine calc_vecAc(vec_Ac,imode)
