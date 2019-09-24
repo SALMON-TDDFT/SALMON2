@@ -16,7 +16,7 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module prep_pp_plusU_sub
 
-  use plusU_global, only: PLUS_U_ON
+  use plusU_global, only: PLUS_U_ON, read_Hubbard_parameters
 
   implicit none
 
@@ -37,6 +37,7 @@ contains
     type(s_pp_grid) :: ppg
     integer :: lma, lm, lm_max
     integer :: a,ik,m,l,ll,l0
+    integer :: lma2,lma1,lma2_0,m1,m2,nproj
 
     lm_max=0
     lma=0
@@ -67,6 +68,59 @@ contains
 
     allocate( ppg%phi_ao(ppg%nps_ao,Nlma_ao)    ); ppg%phi_ao=0.0d0
     allocate( ppg%dphi_ao(ppg%nps_ao,Nlma_ao,3) ); ppg%dphi_ao=0.0d0
+
+    nproj=0
+    lma1=0
+    lma2_0=0
+    do a=1,natom
+      ik=kion(a)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        do m1=-ll,ll
+          lma1=lma1+1
+          lma2=lma2_0
+        do m2=-ll,ll
+          lma2=lma2+1
+          nproj=nproj+1
+          write(*,'(1x,8i6)') nproj,a,ll,l,m1,m2,lma1,lma2
+        end do
+        end do
+        lma2_0=lma2
+      end do
+      l0=l
+      end do
+    end do
+
+    allocate( ppg%proj_pairs_ao(2,nproj) ); ppg%proj_pairs_ao=0
+    allocate( ppg%proj_pairs_info_ao(3,nproj) ); ppg%proj_pairs_info_ao=0
+
+    nproj=0
+    lma1=0
+    lma2_0=0
+    do a=1,natom
+      ik=kion(a)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        do m1=-ll,ll
+          lma1=lma1+1
+          lma2=lma2_0
+        do m2=-ll,ll
+          lma2=lma2+1
+          nproj=nproj+1
+          ppg%proj_pairs_ao(1,nproj)=lma1
+          ppg%proj_pairs_ao(2,nproj)=lma2
+          ppg%proj_pairs_info_ao(1,nproj)=a
+          ppg%proj_pairs_info_ao(2,nproj)=ll
+          ppg%proj_pairs_info_ao(3,nproj)=l
+        end do
+        end do
+        lma2_0=lma2
+      end do
+      l0=l
+      end do
+    end do
 
     write(*,*) "----- set_nlma_ao(end)"
 
@@ -128,6 +182,8 @@ contains
     real(8),external :: Ylm, dYlm
 
 write(*,*) "---------------- calc_uv_plusU(start)"
+
+    call read_Hubbard_parameters
 
     call set_nlma_ao( pp, ppg )
 

@@ -25,6 +25,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use structures
   use stencil_sub
   use pseudo_pt_sub
+  use pseudo_pt_plusU_sub, only: pseudo_plusU, PLUS_U_ON
   use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
   use nondiagonal_so_sub, only: nondiagonal_so
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
@@ -193,6 +194,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   !   pseudopotential
       call pseudo_C(tpsi,htpsi,info,nspin,ppg)
     end if
+    if ( PLUS_U_ON ) then
+      call pseudo_plusU(tpsi,htpsi,info,nspin,ppg)
+    end if
 
   end if
 
@@ -207,6 +211,7 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   use math_constants,only : zi
   use structures
   use update_kvector_so_sub, only: update_kvector_so, SPIN_ORBIT_ON
+  use update_kvector_plusU_sub, only: update_kvector_plusU, PLUS_U_ON
   implicit none
   type(s_pp_grid)    :: ppg
   integer,intent(in) :: ik_s,ik_e
@@ -215,6 +220,9 @@ subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
   integer :: ilma,iatom,j,ik
   real(8) :: x,y,z,k(3)
   complex(8) :: ekr
+  if ( PLUS_U_ON ) then
+    call update_kvector_plusU( ppg, kAc, ik_s, ik_e )
+  end if
   if ( SPIN_ORBIT_ON ) then
     call update_kvector_so( ppg, kAc, ik_s, ik_e )
     return

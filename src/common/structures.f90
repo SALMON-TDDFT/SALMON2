@@ -213,9 +213,12 @@ module structures
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
     !
+    integer,allocatable :: proj_pairs_ao(:,:)
+    integer,allocatable :: proj_pairs_info_ao(:,:)
     integer,allocatable :: ia_tbl_ao(:)
     real(8),allocatable :: phi_ao(:,:)
     real(8),allocatable :: dphi_ao(:,:,:)
+    complex(8),allocatable :: zekr_phi_ao(:,:,:)
     integer :: nps_ao
     integer,allocatable :: mps_ao(:)
     integer,allocatable :: jxyz_ao(:,:,:)
