@@ -22,7 +22,7 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use salmon_communication, only: comm_summation,comm_bcast
   use timer
-  use hamiltonian
+  use hamiltonian, only: hpsi
   use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
@@ -185,7 +185,7 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use salmon_communication, only: comm_summation,comm_bcast
   use timer
-  use hamiltonian
+  use hamiltonian, only: hpsi
   use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data

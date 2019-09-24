@@ -27,7 +27,7 @@ contains
 SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use structures
   use stencil_sub
-  use pseudo_pt_sub
+  use nonlocal_potential
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use salmon_global, only: yn_want_communication_overlapping
   use timer
@@ -489,7 +489,6 @@ subroutine copyVlocal(mg,ista,iend,matbox,V)
   matbox(ista(1):iend(1),     &
          ista(2):iend(2),     &
          ista(3):iend(3))
-
   return
 end subroutine copyVlocal
 

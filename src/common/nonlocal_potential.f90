@@ -16,7 +16,7 @@
 
 #include "config.h"
 
-module pseudo_pt_sub
+module nonlocal_potential
   implicit none
 
 ! WARNING: We must not call these except for hpsi routine.
@@ -360,4 +360,4 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   return
 end subroutine calc_uVpsi_rdivided
 
-end module
+end module nonlocal_potential
