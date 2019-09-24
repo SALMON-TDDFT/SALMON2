@@ -84,8 +84,9 @@ end subroutine init_dft
 subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate &
-  & ,iperiodic,num_kgrid,num_rgrid,dl,nproc_domain_orbital,rion,nelec,calc_mode,temperature,nelec_spin
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
+  & nproc_domain_orbital,rion,rion_red,nelec,calc_mode,temperature,nelec_spin, &
+  & iflag_atom_coor,ntype_atom_coor_reduced
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -150,7 +151,11 @@ subroutine init_dft_system(lg,system,stencil)
   allocate(system%mass(1:nelem))
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
-  system%rion = rion
+  
+  if(iflag_atom_coor==ntype_atom_coor_reduced) then
+    Rion = matmul(system%primitive_a,Rion_red) ! [ a1, a2, a3 ] * R_ion
+  end if
+  system%Rion = Rion
 
 ! initial value of occupation
   system%rocc = 0d0
@@ -501,7 +506,7 @@ end subroutine init_grid_parallel
 
 subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   use inputoutput,     only : nelem,yn_ffte
-  use math_constants,  only : pi
+  use math_constants,  only : pi,zi
   use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_field_parallel,s_poisson
   implicit none
   type(s_rgrid),intent(in) :: lg
@@ -559,6 +564,43 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     enddo
     enddo
     enddo
+    allocate(poisson%ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(poisson%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(poisson%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(poisson%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(poisson%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+    allocate(poisson%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+    allocate(poisson%trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+  !$OMP parallel do private(ix,kx)
+    do ix=lg%is(1),lg%ie(1)
+      do kx=lg%is(1),lg%ie(1)
+        poisson%egx(kx,ix)  = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg%num(1))))
+        poisson%egxc(kx,ix) = conjg(poisson%egx(kx,ix))
+      end do
+    end do
+  !$OMP parallel do private(iy,ky)
+    do iy=lg%is(2),lg%ie(2)
+      do ky=lg%is(2),lg%ie(2)
+        poisson%egy(ky,iy)  = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg%num(2))))
+        poisson%egyc(ky,iy) = conjg(poisson%egy(ky,iy))
+      end do
+    end do
+  !$OMP parallel do private(iz,kz)
+    do iz=lg%is(3),lg%ie(3)
+      do kz=lg%is(3),lg%ie(3)
+        poisson%egz(kz,iz) = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg%num(3))))
+        poisson%egzc(kz,iz) = conjg(poisson%egz(kz,iz))
+      end do
+    end do
   case('y')
     npuy=info_field%isize_ffte(2)
     npuz=info_field%isize_ffte(3)

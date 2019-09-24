@@ -46,7 +46,7 @@ use density_matrix, only: calc_density
 use writefield
 use salmon_pp, only: calc_nlcc
 use force_sub, only: calc_force_salmon
-use hpsi_sub, only: update_kvector_nonlocalpt
+use hamiltonian, only: update_kvector_nonlocalpt
 use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
 use read_write_restart_rt_sub, only: write_checkpoint_rt
@@ -257,7 +257,7 @@ if(IC_rt==0) then
   itotNtime=Ntime
   Miter_rt=0
 else if(IC_rt==1) then
-  call read_rt_bin(ng,info,Ntime)
+  call read_rt_bin(ng,mg,info,info_field,Ntime)
 end if
 call timer_end(LOG_READ_RT_DATA)
 

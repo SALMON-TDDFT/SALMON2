@@ -33,17 +33,17 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
   use salmon_global, only: dt
   use sendrecv_grid, only: update_overlap_real8
-  use salmon_parallel, only: nproc_id_global, nproc_group_global
+  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation
   use inputoutput, only: t_unit_time
   implicit none
-  integer       ,intent(in) :: itt
+  integer       ,intent(in) :: itt,comm
   type(s_rgrid) ,intent(in) :: lg,mg,ng
   real(8)       ,intent(in) :: hgs(3)
   type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
@@ -56,13 +56,11 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   integer,parameter :: mstep=100
   integer,parameter :: Nd = 4
   integer,dimension(3) :: ng_sta,ng_end,ng_num,mg_sta,mg_end,mg_num,lg_sta,lg_end,lg_num
-  integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3),comm
+  integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
 
   real(8) :: Hvol,dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
   real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
-
-  comm = nproc_group_global ! for comm_summation: ng --> lg
 
   krd = 0
   krd(1,1) = 1; krd(2,2) = 1; krd(3,3) = 1
@@ -431,36 +429,15 @@ contains
   end subroutine calc_gradient
 
   subroutine pulse(t,r,A_ext)
-    use salmon_global, only: tw1,omega1,phi_CEP1,E_amplitude1,I_wcm2_1,epdir_re1,ae_shape1
+    use em_field, only: calc_Ac_ext
     implicit none
     real(8),intent(in)  :: t,r
     real(8),intent(out) :: A_ext(3)
     !
-    real(8) :: wrk,theta1,theta2,rr,amplitude
+    real(8) :: tt
 
-    if(E_amplitude1/=0d0) then
-      amplitude = E_amplitude1
-    else
-      amplitude = sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
-    end if
-
-    rr = r - cspeed_au * t
-
-    rr = rr + 0.5d0*tw1*cspeed_au
-
-  !  theta1 = Pi/tw1*(tt-0.5d0*tw1)
-    theta1 = pi * rr / (tw1*cspeed_au)
-  !  theta2 = omega1*(tt-0.5d0*tw1)+phi_cep1*2d0*pi
-    theta2 = omega1 * rr / cspeed_au + phi_CEP1*2d0*pi
-
-    if(ae_shape1=='Acos2')then
-      wrk = cos(theta1)**2 * aimag(exp(zI*theta2)) / omega1
-    end if
-
-    A_ext = 0d0
-    if(abs(rr) < 0.5d0*tw1*cspeed_au)then
-      A_ext(1:3) = amplitude * epdir_re1(1:3) * wrk
-    end if
+    tt = t - r/cspeed_au
+    call calc_Ac_ext(tt,A_ext)
 
     return
   end subroutine pulse

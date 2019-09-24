@@ -22,7 +22,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
                   ppg,V_local,zc)
   use inputoutput, only: n_hamil
   use structures
-  use hpsi_sub
+  use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
   integer,parameter     :: nd=4 

@@ -24,7 +24,6 @@ use deallocate_mat_sub
 use new_world_sub
 use structure_opt_sub
 use salmon_total_energy
-use hpsi_sub
 implicit none
 
 END MODULE global_variables_scf
@@ -55,6 +54,7 @@ use input_pp_sub
 use prep_pp_sub
 use mixing_sub
 use read_write_gs_bin_sub
+use hamiltonian
 implicit none
 integer :: ix,iy,iz,ik
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -283,7 +283,7 @@ if(iopt==1)then
 
     call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
 
-    call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
     do jspin=1,system%nspin
        Vlocal(:,:,:,jspin) = V_local(jspin)%f
     end do
@@ -428,7 +428,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
-    call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
+    call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
@@ -670,7 +670,7 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 ! write GS: basic data
 call write_band_information(system,energy)
 call write_eigen(file_eigen,system,energy)
-call write_info_data(system,energy)
+call write_info_data(Miter,system,energy,pp)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,info)

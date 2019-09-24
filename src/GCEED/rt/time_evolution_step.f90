@@ -37,7 +37,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
   use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
-  use hpsi_sub, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc
+  use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, allgatherv_vlocal
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   use salmon_pp, only: calc_nlcc !test hoge
   use salmon_xc
@@ -246,7 +246,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_end(LOG_CALC_EXC_COR)
 
   call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
-  call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
   call timer_end(LOG_CALC_VLOCAL)
 
 ! result
@@ -297,7 +297,8 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
     if(use_singlescale=='y') then
       call calc_microscopic_current(system,mg,stencil,info,spsi_out,dmat,j_e)
       singlescale%E_electron = energy%E_tot
-      call fdtd_singlescale(itt,lg,mg,ng,system%hgs,srho,sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
+      call fdtd_singlescale(itt,info%icomm_rko,lg,mg,ng,system%hgs,srho, &
+      & sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
     end if
 

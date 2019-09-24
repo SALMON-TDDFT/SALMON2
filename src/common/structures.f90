@@ -73,15 +73,16 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
+! for persistent communication
   type s_pcomm_cache
     real(8), allocatable :: dbuf(:, :, :, :)
     complex(8), allocatable :: zbuf(:, :, :, :)
-
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: dbuf, zbuf
 #endif
   end type s_pcomm_cache
 
+! for update_overlap
   type s_sendrecv_grid
     ! Number of orbitals (4-th dimension of grid)
     integer :: nb
@@ -129,6 +130,7 @@ module structures
                              ! yz-direction is parallel.
     integer :: id_ffte(3), isize_ffte(3)
     integer :: imr(3),imrs(3) ! for sendrecv
+    integer :: icomm_v,ngo(3),ngo_xyz,nproc_o ! for allgatherv_vlocal
   end type s_field_parallel
 
   type s_orbital
@@ -144,9 +146,6 @@ module structures
     logical :: if_orthogonal
     real(8) :: coef_f(6) ! for non-orthogonal lattice
     integer,allocatable :: isign(:,:) ! sign(3,4:ndir) (for ndir=4~6)
-
-  ! Experimental implementation of srg
-    type(s_sendrecv_grid) :: srg
   end type s_stencil
 
 ! pseudopotential
@@ -201,7 +200,6 @@ module structures
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
-
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process
@@ -237,7 +235,7 @@ module structures
   end type s_reciprocal_grid
 
   type s_poisson
-! for poisson_cg
+  ! for poisson_cg (conjugate-gradient method)
     integer :: iterVh                              ! iteration number for poisson_cg
     integer :: npole_partial                       ! number of multipoles calculated in each node
     integer :: npole_total                         ! total number of multipoles
@@ -246,7 +244,12 @@ module structures
     integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
     integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
     real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
-! for Fourier transformation routines
+  ! for discrete Fourier transform (general)
+    complex(8),allocatable :: ff1(:,:,:),ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:) &
+                           & ,ff2(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
+    real(8),allocatable    :: trho2z(:,:,:),trho3z(:,:,:)
+    complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
+  ! for FFTE
     real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
     complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
     complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
@@ -273,6 +276,7 @@ module structures
      real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
+! output files
   type s_ofile
      integer :: fh_rt, fh_rt_energy
      character(256) :: file_rt_data, file_rt_energy_data

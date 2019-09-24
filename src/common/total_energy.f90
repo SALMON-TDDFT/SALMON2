@@ -87,7 +87,7 @@ CONTAINS
     end do
 !$omp end parallel do
     
-    call comm_summation(sum1,sum2,info%icomm_r)
+    call comm_summation(sum1,sum2,info%icomm_rko)
 
     Etot = Etot + sum2*system%Hvol + energy%E_xc + Eion
 
@@ -214,7 +214,7 @@ CONTAINS
   Subroutine calc_eigen_energy(energy,tpsi,htpsi,ttpsi,system,info,mg,V_local,stencil,srg,ppg)
     use structures
     use salmon_communication, only: comm_summation
-    use hpsi_sub
+    use hamiltonian, only: hpsi
     implicit none
     type(s_dft_energy)         :: energy
     type(s_orbital)            :: tpsi,htpsi,ttpsi
