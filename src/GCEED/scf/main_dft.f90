@@ -54,8 +54,9 @@ use occupation
 use input_pp_sub
 use prep_pp_sub
 use mixing_sub
+use read_write_gs_bin_sub
 implicit none
-integer :: ix,iy,iz,ik,i,j
+integer :: ix,iy,iz,ik
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
@@ -152,7 +153,7 @@ if(iopt==1)then
 
   case(1,3) ! Continue the previous calculation
 
-    call read_gs_bin(lg,mg,ng,info,mixing)
+    call read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
 
   end select
 
@@ -687,9 +688,7 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-if( OC==1.or.OC==2.or.OC==3 ) then
-   call write_gs_bin(ofile%dir_out_restart,lg,ng,info,mixing)
-endif
+call write_gs_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,mixing,miter)
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY

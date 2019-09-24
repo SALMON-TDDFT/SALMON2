@@ -51,6 +51,7 @@ use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
 use read_write_restart_rt_sub, only: write_checkpoint_rt
 use taylor_sub, only: taylor_coe
+use read_write_gs_bin_sub
 implicit none
 
 type(s_rgrid) :: lg
@@ -198,7 +199,11 @@ iobnum= info%numo ! future work: remove this line
 call timer_begin(LOG_READ_GS_DATA)
 
 ! Read GS data
-call read_gs_bin(lg,mg,ng,info,mixing)
+call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
+call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
+call allocate_orbital_complex(system%nspin,mg,info,tpsi)
+call allocate_dmatrix(system%nspin,mg,info,dmat)
+call read_gs_bin(lg,mg,ng,system,info,spsi_in,mixing,miter)
 
 if(comm_is_root(nproc_id_global))then
   if(yn_md=='y')then
@@ -228,15 +233,6 @@ call timer_end(LOG_READ_GS_DATA)
 call timer_begin(LOG_READ_RT_DATA)
 allocate(Ex_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(Ec_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg_sta(3),mg_end(3)
-do iy=mg_sta(2),mg_end(2)
-do ix=mg_sta(1),mg_end(1)
-   rho0(ix,iy,iz) = rho(ix,iy,iz)
-end do
-end do
-end do
 
 allocate( Vh0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate( Ex_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
@@ -345,11 +341,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
-  call allocate_orbital_complex(system%nspin,mg,info,tpsi)
-  call allocate_dmatrix(system%nspin,mg,info,dmat)
-
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
   end if
@@ -379,10 +370,12 @@ allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, &
 allocate( elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
                                 lg%is(3):lg%ie(3)))
 
+allocate(rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
 allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
+allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
   call calc_nlcc(pp, system, mg, ppn)
   if (comm_is_root(nproc_id_global)) then
@@ -431,11 +424,11 @@ select case (ikind_eext)
     if(yn_local_field=='y')then
       rlaser_center(1:3)=(rlaserbound_sta(1:3)+rlaserbound_end(1:3))/2.d0
       do jj=1,3
-        select case(imesh_oddeven(jj))
+        select case(mod(lg%num(jj),2))
           case(1)
             ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/Hgs(jj))
             ilasbound_end(jj)=nint(rlaserbound_end(jj)/Hgs(jj))
-          case(2)
+          case(0)
             ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/Hgs(jj)+0.5d0)
             ilasbound_end(jj)=nint(rlaserbound_end(jj)/Hgs(jj)+0.5d0)
         end select
@@ -445,34 +438,34 @@ select case (ikind_eext)
     end if
 end select
 
-select case(imesh_oddeven(1))
+select case(mod(lg%num(1),2))
   case(1)
     do i1=lg%is(1),lg%ie(1)
        vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/Hgs(1)
     end do
-  case(2)
+  case(0)
     do i1=lg%is(1),lg%ie(1)
        vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/Hgs(1)
     end do
 end select
 
-select case(imesh_oddeven(2))
+select case(mod(lg%num(2),2))
   case(1)
     do i2=lg%is(2),lg%ie(2)
        vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/Hgs(2)
     end do
-  case(2)
+  case(0)
     do i2=lg%is(2),lg%ie(2)
        vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/Hgs(2)
     end do
 end select
 
-select case(imesh_oddeven(3))
+select case(mod(lg%num(3),2))
   case(1)
     do i3=lg%is(3),lg%ie(3)
        vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/Hgs(3)
     end do
-  case(2)
+  case(0)
     do i3=lg%is(3),lg%ie(3)
        vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/Hgs(3)
     end do

@@ -38,14 +38,75 @@ else if(sum(abs(num_rgrid)) == 0d0 .and. sum(abs(dl)) /= 0d0)then
   Harray(1:3,1)=dl(1:3)
 end if
 
-!===== namelist for group_fundamental =====
+rLsize(1:3,1)=al(1:3)
+iDiter(1) = nscf
+
+if(ispin == 0)then
+  MST(1)=nstate
+  if(temperature_k>=0.d0)then
+    ifMST(1)=nstate
+    rNetot=dble(nelec)
+  else
+    ifMST(1)=nelec/2
+  end if
+  MST(2)=0
+  ifMST(2)=0
+else if(ispin == 1)then
+  if(nstate /= 0 .and. sum(nstate_spin) ==0)then
+    MST(1:2)=nstate
+    if(temperature_k>=0.d0)then
+      ifMST(1:2)=nstate
+      rNetot=dble(nelec)
+    else
+      ifMST(1)=nelec - nelec/2
+      ifMST(2)=nelec/2
+    end if
+  else if(nstate == 0 .and. sum(nstate_spin) /=0)then
+    MST(1)=maxval(nstate_spin(1:2))
+    MST(2)=maxval(nstate_spin(1:2))
+    if(temperature_k>=0.d0)then
+      ifMST(1)=maxval(nstate_spin(1:2))
+      ifMST(2)=maxval(nstate_spin(1:2))
+      rNetot=dble(nelec_spin(1))+dble(nelec_spin(2))
+    else
+      ifMST(1:2)=nelec_spin(1:2)
+    end if
+  else
+    write(*,*)"'nstate' or 'nstate_spin' should be spacified in input. "
+  end if
+else
+  write(*,*)"'ispin' should be 0 or 1. "
+end if
 
 num_kpoints_3d(1:3)=num_kgrid(1:3)
 num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
-
 allocate(wtk(num_kpoints_rd))
 wtk(:)=1.d0/dble(num_kpoints_rd)
 
+if(ilsda==1)then
+  nproc_ob_spin(1)=(nproc_ob+1)/2
+  nproc_ob_spin(2)=nproc_ob/2
+end if
+
+if(ilsda == 0) then
+  itotMST=MST(1)
+  itotfMST=ifMST(1)
+else if(ilsda == 1) then
+  itotMST=MST(1)+MST(2)
+  itotfMST=ifMST(1)+ifMST(2)
+end if
+
+allocate( rocc(itotMST,num_kpoints_rd) )
+
+rocc(:,:)=0.d0
+if(ilsda == 0) then
+  rocc(:ifMST(1),:num_kpoints_rd) = 2.d0   ! Occupation number
+else if(ilsda == 1) then
+  rocc(:ifMST(1),:num_kpoints_rd) = 1.d0   ! Occupation number
+  rocc(MST(1)+1:MST(1)+ifMST(2),:num_kpoints_rd) = 1.d0   ! Occupation number
+end if
+
+!===== namelist for group_fundamental =====
 if(iwrite_projection==1.and.itwproj==-1)then
   write(*,*) "Please specify itwproj when iwrite_projection=1."
   stop
