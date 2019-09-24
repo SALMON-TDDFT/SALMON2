@@ -59,7 +59,7 @@
 /
 
 &emfield
-  ae_shape1 = 'Ecos2'
+  ae_shape1 = 'Acos2'
   epdir_re1 = 0.d0,0.d0,1.d0
   I_wcm2_1 = 0d0
   omega1=9.28d0
