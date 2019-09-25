@@ -212,17 +212,6 @@ call allocate_orbital_complex(system%nspin,mg,info,tpsi)
 call allocate_dmatrix(system%nspin,mg,info,dmat)
 call read_gs_bin(lg,mg,ng,system,info,spsi_in,mixing,miter)
 
-if(comm_is_root(nproc_id_global))then
-  if(yn_md=='y')then
-    do jj=1,2
-      if(idisnum(jj)>MI) then
-        write(*,*) "idisnum is larger than MI"
-        stop
-      end if
-    end do
-  end if
-end if
-
 call read_pslfile(system,pp,ppg)
 call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 
