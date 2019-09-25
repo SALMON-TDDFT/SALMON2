@@ -347,6 +347,8 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   end if
   
   call comm_bcast(miter,info%icomm_rko)
+  call comm_bcast(mk,info%icomm_rko)
+  call comm_bcast(mo,info%icomm_rko)
   
   !set dg
   call set_dg(lg,mg,dg,num_datafiles_in)
