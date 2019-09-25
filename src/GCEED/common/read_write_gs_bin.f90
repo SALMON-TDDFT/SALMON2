@@ -65,6 +65,9 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   !iteration number
      write(iu1_w) miter
   
+     write(iu1_w) system%nk
+     write(iu1_w) system%no
+
   end if
   
   !!!!!!!!!!!!!!!!!
@@ -305,7 +308,9 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   type(s_orbital), intent(inout)  :: spsi
   type(s_mixing),intent(inout) :: mixing
   integer, intent(out) :: miter
-  
+
+  integer :: mk,mo
+
   type(s_rgrid)                :: dg
   real(8),allocatable :: matbox(:,:,:)
   real(8),allocatable :: matbox2(:,:,:)
@@ -337,6 +342,8 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   
   if(comm_is_root(nproc_id_global)) then
     read(iu1_r) miter
+    read(iu1_r) mk
+    read(iu1_r) mo
   end if
   
   call comm_bcast(miter,info%icomm_rko)
@@ -400,8 +407,8 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
       end do
     end if
   else
-    do ik=1,system%nk
-    do iob=1,system%no
+    do ik=1,mk
+    do iob=1,mo
     do is=1,system%nspin
       if(iperiodic==0)then
         if(num_datafiles_in==1)then
