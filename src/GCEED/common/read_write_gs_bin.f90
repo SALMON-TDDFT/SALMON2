@@ -165,7 +165,7 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            cmatbox(ix,iy,iz) = spsi%rwf(ix,iy,iz,is,iob,ik,1)
+            cmatbox(ix,iy,iz) = spsi%zwf(ix,iy,iz,is,iob,ik,1)
           end do
           end do
           end do

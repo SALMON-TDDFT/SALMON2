@@ -52,6 +52,7 @@ use fdtd_coulomb_gauge, only: ls_singlescale
 use read_write_restart_rt_sub, only: write_checkpoint_rt
 use taylor_sub, only: taylor_coe
 use read_write_gs_bin_sub
+use hartree_sub, only: hartree
 implicit none
 
 type(s_rgrid) :: lg
