@@ -109,6 +109,30 @@ mixing%num_rho_stock=21
 
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
+allocate(energy%esp(system%no,system%nk,system%nspin))
+allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
+call allocate_scalar(mg,srho)
+call allocate_scalar(mg,sVh)
+call allocate_scalar(mg,sVpsl)
+do jspin=1,system%nspin
+  call allocate_scalar(mg,srho_s(jspin))
+  call allocate_scalar(mg,V_local(jspin))
+  call allocate_scalar(mg,sVxc(jspin))
+end do
+allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
+
+select case(iperiodic)
+case(0)
+  call allocate_orbital_real(system%nspin,mg,info,spsi)
+  call allocate_orbital_real(system%nspin,mg,info,shpsi)
+case(3)
+  call allocate_orbital_complex(system%nspin,mg,info,spsi)
+  call allocate_orbital_complex(system%nspin,mg,info,shpsi)
+  call allocate_orbital_complex(system%nspin,mg,info,sttpsi)
+end select
+
+nspin = system%nspin
+
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
 else
@@ -160,31 +184,6 @@ if(iopt==1)then
   call allocate_mat(ng)
   call set_icoo1d(lg)
   call init_code_optimization
-
-  nspin = system%nspin
-
-  allocate(energy%esp(system%no,system%nk,system%nspin))
-  allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
-
-  call allocate_scalar(mg,srho)
-  call allocate_scalar(mg,sVh)
-  call allocate_scalar(mg,sVpsl)
-  do jspin=1,system%nspin
-    call allocate_scalar(mg,srho_s(jspin))
-    call allocate_scalar(mg,V_local(jspin))
-    call allocate_scalar(mg,sVxc(jspin))
-  end do
-  allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
-
-  select case(iperiodic)
-  case(0)
-    call allocate_orbital_real(system%nspin,mg,info,spsi)
-    call allocate_orbital_real(system%nspin,mg,info,shpsi)
-  case(3)
-    call allocate_orbital_complex(system%nspin,mg,info,spsi)
-    call allocate_orbital_complex(system%nspin,mg,info,shpsi)
-    call allocate_orbital_complex(system%nspin,mg,info,sttpsi)
-  end select
 
   if(iperiodic==3)then
     allocate (zpsi_tmp(mg%is_overlap(1):mg%ie_overlap(1) &

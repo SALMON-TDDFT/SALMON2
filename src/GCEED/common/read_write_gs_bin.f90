@@ -25,10 +25,8 @@ contains
 subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   use inputoutput, only: sysname,num_datafiles_out
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing
-  use salmon_parallel, only: nproc_id_global, nproc_group_global
+  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use calc_myob_sub, only: calc_myob
-  use check_corrkob_sub, only: check_corrkob
   use scf_data, only: file_out_gs_bin
   implicit none
   type(s_rgrid), intent(in)    :: lg, mg, ng
@@ -147,7 +145,7 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
           end do
           end do
         end if
-        call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+        call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
            (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
             write(ifilenum_data) ((( matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
@@ -172,7 +170,7 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
           end do
           end do
         end if
-        call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+        call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
            (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
             write(ifilenum_data) ((( cmatbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
@@ -204,7 +202,7 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
                              ng%is(2):ng%ie(2), &
                              ng%is(3):ng%ie(3))
   
-    call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+    call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
   
     if(comm_is_root(nproc_id_global))then
       write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
@@ -220,7 +218,7 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
                               ng%is(2):ng%ie(2), &
                               ng%is(3):ng%ie(3))
   
-    call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+    call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
     if(comm_is_root(nproc_id_global))then
       write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
     end if
@@ -237,7 +235,7 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
                                       ng%is(2):ng%ie(2), &
                                       ng%is(3):ng%ie(3))
   
-        call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+        call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
   
         if(comm_is_root(nproc_id_global))then
           write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
@@ -253,7 +251,7 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
                   ng%is(2):ng%ie(2),   &
                   ng%is(3):ng%ie(3))
   
-        call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+        call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
   
         if(comm_is_root(nproc_id_global))then
           write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
@@ -279,12 +277,8 @@ end subroutine write_gs_bin
 subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   use inputoutput, only: theory,calc_mode,iperiodic,num_datafiles_in
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing
-  use salmon_parallel, only: nproc_id_global, nproc_group_global
+  use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use calc_iobnum_sub, only: calc_iobnum
-  use calc_myob_sub, only: calc_myob
-  use check_corrkob_sub, only: check_corrkob
-  use initialization_sub, only: set_bN, set_cN
   use scf_data, only: file_in_gs_bin
   implicit none
   type(s_rgrid),intent(in) :: lg
@@ -319,7 +313,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   
   end if
   
-  call comm_bcast(version_num_box,nproc_group_global)
+  call comm_bcast(version_num_box,info%icomm_rko)
   
   if(version_num_box(1)<=41)then
     stop 'You cannot use old restart files.'
@@ -329,7 +323,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     read(iu1_r) miter
   end if
   
-  call comm_bcast(miter,nproc_group_global)
+  call comm_bcast(miter,info%icomm_rko)
   
   !set dg
   call set_dg(lg,mg,dg,num_datafiles_in)
@@ -401,14 +395,14 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
                                                      iy=dg%is(2),dg%ie(2)), &
                                                      iz=dg%is(3),dg%ie(3))
           end if
-          call comm_bcast(matbox2,nproc_group_global)
+          call comm_bcast(matbox2,info%icomm_rko)
         else if(num_datafiles_in>1)then
           if(nproc_id_global<num_datafiles_in)then
             read(ifilenum_data) (((matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                     iy=dg%is(2),dg%ie(2)), &
                                                     iz=dg%is(3),dg%ie(3))
           end if
-          call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+          call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         end if
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
@@ -439,14 +433,14 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
                                                       iy=dg%is(2),dg%ie(2)), &
                                                       iz=dg%is(3),dg%ie(3))
           end if
-          call comm_bcast(cmatbox2,nproc_group_global)
+          call comm_bcast(cmatbox2,info%icomm_rko)
         else if(num_datafiles_in>1)then
           if(nproc_id_global<num_datafiles_in)then
             read(ifilenum_data) (((cmatbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                      iy=dg%is(2),dg%ie(2)), &
                                                      iz=dg%is(3),dg%ie(3))
           end if
-          call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+          call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         end if
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
@@ -474,7 +468,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     if(comm_is_root(nproc_id_global))then
       read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
     end if
-    call comm_bcast(matbox,nproc_group_global)
+    call comm_bcast(matbox,info%icomm_rko)
   
   !$omp parallel do collapse(2)  
     do iz=ng%is(3),ng%ie(3)
@@ -488,7 +482,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     if(comm_is_root(nproc_id_global))then
       read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
     end if
-    call comm_bcast(matbox,nproc_group_global)
+    call comm_bcast(matbox,info%icomm_rko)
   
   !$omp parallel do collapse(2)  
     do iz=ng%is(3),ng%ie(3)
@@ -505,7 +499,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
         if(comm_is_root(nproc_id_global))then
           read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
         end if
-        call comm_bcast(matbox,nproc_group_global)
+        call comm_bcast(matbox,info%icomm_rko)
   
   !$omp parallel do collapse(2)  
         do iz=ng%is(3),ng%ie(3)
@@ -521,7 +515,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
         if(comm_is_root(nproc_id_global))then
           read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
         end if
-        call comm_bcast(matbox,nproc_group_global)
+        call comm_bcast(matbox,info%icomm_rko)
   
   !$omp parallel do collapse(2)  
         do iz=ng%is(3),ng%ie(3)

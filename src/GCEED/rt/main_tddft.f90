@@ -34,7 +34,7 @@ subroutine main_tddft
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-use salmon_xc, only: init_xc, finalize_xc
+use salmon_xc
 use timer
 use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
@@ -46,7 +46,7 @@ use density_matrix, only: calc_density
 use writefield
 use salmon_pp, only: calc_nlcc
 use force_sub, only: calc_force_salmon
-use hamiltonian, only: update_kvector_nonlocalpt
+use hamiltonian
 use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
 use read_write_restart_rt_sub, only: write_checkpoint_rt
@@ -337,8 +337,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   nspin = system%nspin
 
-  system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
-
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
   if(iperiodic==3) then
@@ -384,6 +382,13 @@ allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   end if
 
   call calc_density(system,srho_s,spsi_in,info,mg)
+  srho%f = 0d0
+  do jspin=1,nspin
+     srho%f = srho%f + srho_s(jspin)%f
+  end do
+  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
   if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -524,55 +529,29 @@ endif
 if(iperiodic==0)then
   if(IC_rt==0)then
   if(iobnum.ge.1)then
-    do iik=k_sta,k_end
-    do iob=1,iobnum
+    do iik=info%ik_s,info%ik_e
+    do iob=info%io_s,info%io_e
+    do jspin=1,system%nspin
       select case (ikind_eext)
         case(0)
-          zpsi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-             mg_sta(3):mg_end(3),iob,iik)  &
+          spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1) &
           = exp(zi*Fst*R1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
              mg_sta(3):mg_end(3)))   &
-             *  zpsi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                     mg_sta(3):mg_end(3),iob,iik)
+             *  spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1)
       end select
+    end do
     end do
     end do
   end if
   end if
 end if
 
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob -info%io_s+1 +(is-1)*info%numo,ik)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-
-  do is=1,system%nspin
-    V_local(is)%f = Vlocal(:,:,:,is)
-  end do
-
 rIe(0)=rbox_array2(4)*Hvol
 Dp(:,0)=0.d0
 Qp(:,:,0)=0.d0
 
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg_sta(3),mg_end(3)
-do iy=mg_sta(2),mg_end(2)
-do ix=mg_sta(1),mg_end(1)
-   Vh0(ix,iy,iz)=Vh(ix,iy,iz)
-   sVh%f(ix,iy,iz)=Vh(ix,iy,iz)
-end do
-end do
-end do
+Vh0 = sVh%f
+rho0 = srho%f
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
