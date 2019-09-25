@@ -134,6 +134,14 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
       do ik=1,1
       do iob=1,system%no
       do is=1,system%nspin
+  !$omp parallel do collapse(2)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          matbox(ix,iy,iz)=0.d0
+        end do
+        end do
+        end do
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
   !$omp parallel do collapse(2)
@@ -159,6 +167,14 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
       do ik=1,system%nk
       do iob=1,system%no
       do is=1,system%nspin
+  !$omp parallel do collapse(2)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          cmatbox(ix,iy,iz)=0.d0
+        end do
+        end do
+        end do
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
   !$omp parallel do collapse(2)

@@ -569,11 +569,6 @@ if(yn_opt=='y') then
      exit Multigrid_Iteration
   end if
 
-else
-   select case(iperiodic)
-   case(0) ; deallocate(spsi%rwf)
-   case(3) ; deallocate(spsi%zwf)
-   end select
 end if
 call timer_end(LOG_DEINIT_GS_ITERATION)
 
