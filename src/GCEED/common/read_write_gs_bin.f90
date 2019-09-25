@@ -430,7 +430,6 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     do is=1,system%nspin
       if(iperiodic==0)then
         if(num_datafiles_in==1)then
-          write(*,*) nproc_id_global,iob
           if(comm_is_root(nproc_id_global))then
             read(ifilenum_data) (((matbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                      iy=dg%is(2),dg%ie(2)), &
@@ -505,9 +504,9 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   !!!!!!!!!!!!!!
 
   do is=1,system%nspin
-  do ik=1,system%nk
-  do iob=1,system%no
-    write(iu1_r) system%rocc(iob,ik,is)
+  do ik=1,mk
+  do iob=1,mo
+    read(iu1_r) system%rocc(iob,ik,is)
   end do
   end do
   end do
