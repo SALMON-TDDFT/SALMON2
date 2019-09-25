@@ -179,6 +179,8 @@ call timer_end(LOG_INIT_RT)
 
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
+call old_mesh(lg,mg,ng)
+
 call allocate_mat(ng)
 
 call allocate_scalar(mg,srho)
