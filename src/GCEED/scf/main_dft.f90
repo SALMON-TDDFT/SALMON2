@@ -168,6 +168,9 @@ Multigrid_Iteration : do img=1,ntmg
 if(iopt==1)then
 
   call timer_begin(LOG_INIT_GS)
+  
+  call allocate_mat(ng)
+  call set_icoo1d(lg)
 
   call init_code_optimization
 
