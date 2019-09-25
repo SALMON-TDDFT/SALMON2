@@ -208,6 +208,18 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
     close(iu2_w)
   end if
   
+  !!!!!!!!!!!!!!
+  ! occupation !
+  !!!!!!!!!!!!!!
+
+  do is=1,system%nspin
+  do ik=1,system%nk
+  do iob=1,system%no
+    write(iu1_w) system%rocc(iob,ik,is)
+  end do
+  end do
+  end do
+  
   !!!!!!!!!!!!!!!!!!!!!!
   ! rho_in and rho_out !
   !!!!!!!!!!!!!!!!!!!!!!
@@ -303,7 +315,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  type(s_dft_system),intent(in) :: system
+  type(s_dft_system),intent(inout) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital), intent(inout)  :: spsi
   type(s_mixing),intent(inout) :: mixing
@@ -349,6 +361,10 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   call comm_bcast(miter,info%icomm_rko)
   call comm_bcast(mk,info%icomm_rko)
   call comm_bcast(mo,info%icomm_rko)
+  
+  !!!!!!!!!!!!!!!!!
+  ! wave function !
+  !!!!!!!!!!!!!!!!!
   
   !set dg
   call set_dg(lg,mg,dg,num_datafiles_in)
@@ -484,6 +500,19 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     end do
   end if
   
+  !!!!!!!!!!!!!!
+  ! occupation !
+  !!!!!!!!!!!!!!
+
+  do is=1,system%nspin
+  do ik=1,system%nk
+  do iob=1,system%no
+    write(iu1_r) system%rocc(iob,ik,is)
+  end do
+  end do
+  end do
+  call comm_bcast(system%rocc,info%icomm_rko)
+    
   !!!!!!!!!!!!!!!!!!!!!!
   ! rho_in and rho_out !
   !!!!!!!!!!!!!!!!!!!!!!
