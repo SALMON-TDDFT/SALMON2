@@ -148,9 +148,9 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
         call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
            (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
-            write(ifilenum_data) ((( matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
-                                                      iy=dg%is(2),dg%ie(2)), &
-                                                      iz=dg%is(3),dg%ie(3))
+            write(ifilenum_data) ((( matbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+                                                       iy=dg%is(2),dg%ie(2)), &
+                                                       iz=dg%is(3),dg%ie(3))
         end if 
       end do
       end do
@@ -173,9 +173,9 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
         call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
            (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
-            write(ifilenum_data) ((( cmatbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
-                                                       iy=dg%is(2),dg%ie(2)), &
-                                                       iz=dg%is(3),dg%ie(3))
+            write(ifilenum_data) ((( cmatbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+                                                        iy=dg%is(2),dg%ie(2)), &
+                                                        iz=dg%is(3),dg%ie(3))
         end if 
       end do
       end do
