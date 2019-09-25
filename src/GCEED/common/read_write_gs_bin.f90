@@ -212,13 +212,15 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   ! occupation !
   !!!!!!!!!!!!!!
 
-  do is=1,system%nspin
-  do ik=1,system%nk
-  do iob=1,system%no
-    write(iu1_w) system%rocc(iob,ik,is)
-  end do
-  end do
-  end do
+  if(comm_is_root(nproc_id_global))then
+    do is=1,system%nspin
+    do ik=1,system%nk
+    do iob=1,system%no
+      write(iu1_w) system%rocc(iob,ik,is)
+    end do
+    end do
+    end do
+  end if
   
   !!!!!!!!!!!!!!!!!!!!!!
   ! rho_in and rho_out !
@@ -503,13 +505,15 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   ! occupation !
   !!!!!!!!!!!!!!
 
-  do is=1,system%nspin
-  do ik=1,mk
-  do iob=1,mo
-    read(iu1_r) system%rocc(iob,ik,is)
-  end do
-  end do
-  end do
+  if(comm_is_root(nproc_id_global))then
+    do is=1,system%nspin
+    do ik=1,mk
+    do iob=1,mo
+      read(iu1_r) system%rocc(iob,ik,is)
+    end do
+    end do
+    end do
+  end if
   call comm_bcast(system%rocc,info%icomm_rko)
     
   !!!!!!!!!!!!!!!!!!!!!!
