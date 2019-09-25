@@ -145,6 +145,9 @@ k_sta = info%ik_s ! future work: remove this line
 k_end = info%ik_e ! future work: remove this line
 k_num = info%numk ! future work: remove this line
 iobnum = info%numo ! future work: remove this line
+call old_mesh(lg,mg,ng) ! future work: remove this line
+Hvol = system%Hvol ! future work: remove this line
+Hgs = system%Hgs ! future work: remove this line
 
 if(yn_opt=='y')then
    call structure_opt_ini(MI)
@@ -163,37 +166,11 @@ Structure_Optimization_Iteration : do iopt=1,nopt_max
 Multigrid_Iteration : do img=1,ntmg
 
 if(iopt==1)then
-  select case( IC )
-  case default ! New calculation
 
-    call timer_begin(LOG_INIT_GS)
+  call timer_begin(LOG_INIT_GS)
 
-    Hvol = system%Hvol
-    Hgs = system%Hgs
-    Miter = 0        ! Miter: Iteration counter set to zero
-    itmg=img
-    call set_imesh_oddeven(itmg)
-    call old_mesh(lg,mg,ng) ! future work: remove this line
-
-  case(1,3) ! Continue the previous calculation
-
-    call read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
-
-  end select
-
-  call allocate_mat(ng)
-  call set_icoo1d(lg)
   call init_code_optimization
 
-  if(iperiodic==3)then
-    allocate (zpsi_tmp(mg%is_overlap(1):mg%ie_overlap(1) &
-    &                 ,mg%is_overlap(2):mg%ie_overlap(2) &
-    &                 ,mg%is_overlap(3):mg%ie_overlap(3) &
-    &                 ,1:iobnum,k_sta:k_end))
-  end if
-
-  if(.not. allocated(Vpsl))      allocate( Vpsl(     mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-  if(.not. allocated(Vpsl_atom)) allocate( Vpsl_atom(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),MI) )
   if(iflag_ps.eq.0)then
      Vpsl=0d0
   else
@@ -201,117 +178,62 @@ if(iopt==1)then
      call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end if
 
-  allocate( Zps(MKI) ) ! future work: remove this line
-  allocate( Rps(MKI) ) ! future work: remove this line
-
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
     stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
   end if
 
-  select case( IC )
-  case default ! New calculation
-
-    if(iobnum >= 1)then
-      select case(iperiodic)
-      case(0)
-        allocate( psi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
-      case(3)
-        allocate( ttpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-        allocate( zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
-      end select
-    end if
-    if(iswitch_orbital_mesh==1.or.iflag_subspace_diag==1)then
-      select case(iperiodic)
-      case(0)
-        allocate( psi_mesh(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:itotMST,1) )
-      case(3)
-        allocate( zpsi_mesh(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:itotMST,num_kpoints_rd) )
-      end select
-    end if
-
-    if(read_gs_wfn_k=='n') then
-      call init_wf_ns(lg,info,1)
-      select case(iperiodic) ! Store to psi/zpsi
-      case(0) ; call copy_psi_to_rwf(info,nspin,mg,spsi)
-      case(3) ; call copy_zpsi_to_zwf(info,nspin,mg,spsi)
-      end select
-    else
-      if(iperiodic==0) stop "error: read_gs_wfn_k='y' & iperiodic=0"
-      call read_wfn(lg,mg,spsi,info,system)
-    end if
-
-    call gram_schmidt(system, mg, info, spsi)
-
-    allocate( rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-    if(ilsda == 1)then
-      allocate( rho_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
-    end if
-
-    call init_mixing(nspin,ng,mixing)
-
-    if(read_gs_dns_cube == 'n') then
-       call calc_density(system,srho_s,spsi,info,mg)
-    else
-       if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
-       call read_dns(lg,mg,srho_s(1)%f) ! cube file only
-    end if
-
-    srho%f = 0d0
-    do jspin=1,nspin
-       srho%f = srho%f + srho_s(jspin)%f
-    end do
-    rho = srho%f
-
-    allocate( Vlocal(mg_sta(1):mg_end(1),  &
-                     mg_sta(2):mg_end(2),  &
-                     mg_sta(3):mg_end(3),nspin))
-    allocate( Vh(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-    Vh=0.d0
-
-    call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
-    Vh = sVh%f
-
-    if(ilsda == 0) then
-       allocate( Vxc(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-    else if(ilsda == 1) then
-       allocate( Vxc_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2) )
-    end if
-    allocate( esp(itotMST,num_kpoints_rd) )
-
-    call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
-
-    call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
-    do jspin=1,system%nspin
-       Vlocal(:,:,:,jspin) = V_local(jspin)%f
-    end do
-
-    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+  if(iobnum >= 1)then
     select case(iperiodic)
     case(0)
-       call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+      allocate( psi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
     case(3)
-       rion_update = .true. ! it's first calculation
-       call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+      allocate( ttpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
+      allocate( zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
     end select
-    esp = energy%esp(:,:,1) !++++++++
+  end if
 
-  case(1,3) ! Continue the previous calculation
-
-    select case(iperiodic) !Store
-      case(0) ; call copy_psi_to_rwf(info,nspin,mg,spsi)
-      case(3) ; call copy_zpsi_to_zwf(info,nspin,mg,spsi)
+  select case( IC )
+  case default ! New calculation
+    Miter = 0        ! Miter: Iteration counter set to zero
+    itmg=img
+    call init_wf_ns(lg,info,1)
+    select case(iperiodic) ! Store to psi/zpsi
+    case(0) ; call copy_psi_to_rwf(info,nspin,mg,spsi)
+    case(3) ; call copy_zpsi_to_zwf(info,nspin,mg,spsi)
     end select
-    srho%f = rho
-    if(ilsda == 1)then
-       srho_s(1)%f = rho_s(:,:,:,1)
-       srho_s(2)%f = rho_s(:,:,:,2)
-    end if
-    do jspin=1,nspin
-       V_local(jspin)%f = Vlocal(:,:,:,jspin)
-    end do
+  case(1,3)
+    call read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
+  end select
 
+  call gram_schmidt(system, mg, info, spsi)
+
+  call init_mixing(nspin,ng,mixing)
+
+  if(read_gs_dns_cube == 'n') then
+     call calc_density(system,srho_s,spsi,info,mg)
+  else
+     if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
+     call read_dns(lg,mg,srho_s(1)%f) ! cube file only
+  end if
+
+  srho%f = 0d0
+  do jspin=1,nspin
+     srho%f = srho%f + srho_s(jspin)%f
+  end do
+  rho = srho%f
+  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+
+  call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+  select case(iperiodic)
+  case(0)
+     call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+  case(3)
+     rion_update = .true. ! it's first calculation
+     call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
   end select
 
   call timer_end(LOG_INIT_GS)
@@ -693,7 +615,6 @@ call timer_end(LOG_WRITE_GS_DATA)
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
 !call timer_end(LOG_WRITE_GS_INFO)
 
-deallocate(Vlocal)
 call finalize_xc(xc_func)
 
 call timer_end(LOG_TOTAL)
