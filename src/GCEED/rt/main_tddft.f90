@@ -69,7 +69,7 @@ type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_mixing) :: mixing
 type(s_scalar) :: sVpsl
-type(s_scalar) :: srho,sVh
+type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -185,6 +185,8 @@ call allocate_mat(ng)
 
 call allocate_scalar(mg,srho)
 call allocate_scalar(mg,sVh)
+call allocate_scalar(mg,sVh_stock1)
+call allocate_scalar(mg,sVh_stock2)
 call allocate_scalar(mg,sVpsl)
 allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 do jspin=1,system%nspin
@@ -394,6 +396,8 @@ allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+  sVh_stock1%f=sVh%f
+  sVh_stock2%f=sVh%f
 
   if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -622,11 +626,11 @@ TE : do itt=Miter_rt+1,itotNtime
 
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   end if
 
@@ -642,7 +646,6 @@ close(030) ! laser
 if(iperiodic==3) deallocate(stencil%vec_kAc)
 if(ikind_eext.ne.0) deallocate (Vbox)
 deallocate (R1)
-deallocate (Vlocal)
 
 
 !--------------------------------- end of time-evolution
