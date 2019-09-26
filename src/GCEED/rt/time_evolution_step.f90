@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
 &   poisson,j_e,singlescale)
   use structures
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -57,6 +57,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
+  type(s_scalar), intent(inout) :: sVh_stock1,sVh_stock2
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
   type(s_vector) :: j_e ! microscopic electron number current density
@@ -224,19 +225,19 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   call timer_begin(LOG_CALC_HARTREE)
   if(iperiodic==0 .and. itt/=1)then
     if(mod(itt,2)==1)then
-      Vh_stock2 = 2.d0*Vh_stock1 - Vh_stock2
-      sVh%f = Vh_stock2
+      sVh_stock2%f = 2.d0*sVh_stock1%f - sVh_stock2%f
+      sVh%f = sVh_stock2%f
     else
-      Vh_stock1 = 2.d0*Vh_stock2 - Vh_stock1
-      sVh%f = Vh_stock1
+      sVh_stock1%f = 2.d0*sVh_stock2%f - sVh_stock1%f
+      sVh%f = sVh_stock1%f
     end if
   end if
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   if(iperiodic==0 .and. itt/=1)then
     if(mod(itt,2)==1)then
-      Vh_stock2 = sVh%f
+      sVh_stock2%f = sVh%f
     else
-      Vh_stock1 = sVh%f
+      sVh_stock1%f = sVh%f
     end if
   end if
   call timer_end(LOG_CALC_HARTREE)

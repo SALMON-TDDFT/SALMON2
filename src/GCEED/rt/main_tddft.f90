@@ -34,7 +34,7 @@ subroutine main_tddft
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-use salmon_xc, only: init_xc, finalize_xc
+use salmon_xc
 use timer
 use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
@@ -46,11 +46,13 @@ use density_matrix, only: calc_density
 use writefield
 use salmon_pp, only: calc_nlcc
 use force_sub, only: calc_force_salmon
-use hamiltonian, only: update_kvector_nonlocalpt
+use hamiltonian
 use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
 use read_write_restart_rt_sub, only: write_checkpoint_rt
 use taylor_sub, only: taylor_coe
+use read_write_gs_bin_sub
+use hartree_sub, only: hartree
 implicit none
 
 type(s_rgrid) :: lg
@@ -67,7 +69,7 @@ type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_mixing) :: mixing
 type(s_scalar) :: sVpsl
-type(s_scalar) :: srho,sVh
+type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -177,8 +179,14 @@ call timer_end(LOG_INIT_RT)
 
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
+call old_mesh(lg,mg,ng)
+
+call allocate_mat(ng)
+
 call allocate_scalar(mg,srho)
 call allocate_scalar(mg,sVh)
+call allocate_scalar(mg,sVh_stock1)
+call allocate_scalar(mg,sVh_stock2)
 call allocate_scalar(mg,sVpsl)
 allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 do jspin=1,system%nspin
@@ -198,18 +206,11 @@ iobnum= info%numo ! future work: remove this line
 call timer_begin(LOG_READ_GS_DATA)
 
 ! Read GS data
-call read_gs_bin(lg,mg,ng,info,info_field,mixing)
-
-if(comm_is_root(nproc_id_global))then
-  if(yn_md=='y')then
-    do jj=1,2
-      if(idisnum(jj)>MI) then
-        write(*,*) "idisnum is larger than MI"
-        stop
-      end if
-    end do
-  end if
-end if
+call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
+call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
+call allocate_orbital_complex(system%nspin,mg,info,tpsi)
+call allocate_dmatrix(system%nspin,mg,info,dmat)
+call read_gs_bin(lg,mg,ng,system,info,spsi_in,mixing,miter)
 
 call read_pslfile(system,pp,ppg)
 call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
@@ -228,15 +229,6 @@ call timer_end(LOG_READ_GS_DATA)
 call timer_begin(LOG_READ_RT_DATA)
 allocate(Ex_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(Ec_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg_sta(3),mg_end(3)
-do iy=mg_sta(2),mg_end(2)
-do ix=mg_sta(1),mg_end(1)
-   rho0(ix,iy,iz) = rho(ix,iy,iz)
-end do
-end do
-end do
 
 allocate( Vh0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate( Ex_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
@@ -341,14 +333,7 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   nspin = system%nspin
 
-  system%rocc(1:itotMST,1:system%nk,1) = rocc(1:itotMST,1:system%nk)
-
   allocate(energy%esp(system%no,system%nk,system%nspin))
-
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
-  call allocate_orbital_complex(system%nspin,mg,info,tpsi)
-  call allocate_dmatrix(system%nspin,mg,info,dmat)
 
   if(iperiodic==3) then
     allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
@@ -379,10 +364,12 @@ allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, &
 allocate( elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
                                 lg%is(3):lg%ie(3)))
 
+allocate(rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
 allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
+allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
   call calc_nlcc(pp, system, mg, ppn)
   if (comm_is_root(nproc_id_global)) then
@@ -391,6 +378,15 @@ allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2)
   end if
 
   call calc_density(system,srho_s,spsi_in,info,mg)
+  srho%f = 0d0
+  do jspin=1,nspin
+     srho%f = srho%f + srho_s(jspin)%f
+  end do
+  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+  sVh_stock1%f=sVh%f
+  sVh_stock2%f=sVh%f
 
   if(ilsda==0)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -431,11 +427,11 @@ select case (ikind_eext)
     if(yn_local_field=='y')then
       rlaser_center(1:3)=(rlaserbound_sta(1:3)+rlaserbound_end(1:3))/2.d0
       do jj=1,3
-        select case(imesh_oddeven(jj))
+        select case(mod(lg%num(jj),2))
           case(1)
             ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/Hgs(jj))
             ilasbound_end(jj)=nint(rlaserbound_end(jj)/Hgs(jj))
-          case(2)
+          case(0)
             ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/Hgs(jj)+0.5d0)
             ilasbound_end(jj)=nint(rlaserbound_end(jj)/Hgs(jj)+0.5d0)
         end select
@@ -445,34 +441,34 @@ select case (ikind_eext)
     end if
 end select
 
-select case(imesh_oddeven(1))
+select case(mod(lg%num(1),2))
   case(1)
     do i1=lg%is(1),lg%ie(1)
        vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/Hgs(1)
     end do
-  case(2)
+  case(0)
     do i1=lg%is(1),lg%ie(1)
        vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/Hgs(1)
     end do
 end select
 
-select case(imesh_oddeven(2))
+select case(mod(lg%num(2),2))
   case(1)
     do i2=lg%is(2),lg%ie(2)
        vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/Hgs(2)
     end do
-  case(2)
+  case(0)
     do i2=lg%is(2),lg%ie(2)
        vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/Hgs(2)
     end do
 end select
 
-select case(imesh_oddeven(3))
+select case(mod(lg%num(3),2))
   case(1)
     do i3=lg%is(3),lg%ie(3)
        vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/Hgs(3)
     end do
-  case(2)
+  case(0)
     do i3=lg%is(3),lg%ie(3)
        vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/Hgs(3)
     end do
@@ -531,55 +527,29 @@ endif
 if(iperiodic==0)then
   if(IC_rt==0)then
   if(iobnum.ge.1)then
-    do iik=k_sta,k_end
-    do iob=1,iobnum
+    do iik=info%ik_s,info%ik_e
+    do iob=info%io_s,info%io_e
+    do jspin=1,system%nspin
       select case (ikind_eext)
         case(0)
-          zpsi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-             mg_sta(3):mg_end(3),iob,iik)  &
+          spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1) &
           = exp(zi*Fst*R1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
              mg_sta(3):mg_end(3)))   &
-             *  zpsi_in(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-                     mg_sta(3):mg_end(3),iob,iik)
+             *  spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1)
       end select
+    end do
     end do
     end do
   end if
   end if
 end if
 
-!$OMP parallel do private(ik,iob,is,iz,iy,ix) collapse(5)
-  do ik=info%ik_s,info%ik_e
-  do iob=info%io_s,info%io_e
-    do is=1,nspin
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        spsi_in%zwf(ix,iy,iz,is,iob,ik,1)=zpsi_in(ix,iy,iz,iob -info%io_s+1 +(is-1)*info%numo,ik)
-      end do
-      end do
-      end do
-    end do
-  end do
-  end do
-
-  do is=1,system%nspin
-    V_local(is)%f = Vlocal(:,:,:,is)
-  end do
-
 rIe(0)=rbox_array2(4)*Hvol
 Dp(:,0)=0.d0
 Qp(:,:,0)=0.d0
 
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg_sta(3),mg_end(3)
-do iy=mg_sta(2),mg_end(2)
-do ix=mg_sta(1),mg_end(1)
-   Vh0(ix,iy,iz)=Vh(ix,iy,iz)
-   sVh%f(ix,iy,iz)=Vh(ix,iy,iz)
-end do
-end do
-end do
+Vh0 = sVh%f
+rho0 = srho%f
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
@@ -645,11 +615,11 @@ TE : do itt=Miter_rt+1,itotNtime
 
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVxc,sVpsl,dmat,fg,energy,md,ofl &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   end if
 
@@ -665,7 +635,6 @@ close(030) ! laser
 if(iperiodic==3) deallocate(stencil%vec_kAc)
 if(ikind_eext.ne.0) deallocate (Vbox)
 deallocate (R1)
-deallocate (Vlocal)
 
 
 !--------------------------------- end of time-evolution
