@@ -433,11 +433,13 @@ end do
 end subroutine snum_procs
 
 !======================================================================
-subroutine old_mesh(lg,mg,ng)
+subroutine old_mesh(lg,mg,ng,system,info)
 use salmon_parallel, only: nproc_size_global
-use structures, only: s_rgrid
+use structures
 implicit none
 type(s_rgrid),intent(in) :: lg,mg,ng
+type(s_dft_system),intent(in) :: system
+type(s_orbital_parallel),intent(in) :: info
 
 lg_sta(1:3) = lg%is(1:3)
 lg_end(1:3) = lg%ie(1:3)
@@ -465,6 +467,14 @@ inum_mxin = mg%ie_all - mg%is_all + 1
 ista_mxin_s = ng%is_all
 iend_mxin_s = ng%ie_all
 inum_mxin_s = ng%ie_all - ng%is_all + 1
+
+Hvol = system%Hvol ! future work: remove this line
+Hgs = system%Hgs ! future work: remove this line
+
+k_sta = info%ik_s ! future work: remove this line
+k_end = info%ik_e ! future work: remove this line
+k_num = info%numk ! future work: remove this line
+iobnum = info%numo ! future work: remove this line
 
 end subroutine old_mesh
 

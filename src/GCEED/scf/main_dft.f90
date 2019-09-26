@@ -97,7 +97,6 @@ iblacsinit=0
 
 call timer_begin(LOG_TOTAL)
 
-
 call timer_begin(LOG_INIT_GS)
 inumcpu_check=0
 
@@ -107,7 +106,15 @@ call set_cN(cnmat)
 call convert_input_scf(file_atoms_coo)
 mixing%num_rho_stock=21
 
+! +----------------+
+! | initialization |
+! +----------------+
+
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+
+call init_code_optimization
+call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
+call allocate_mat(ng) ! future work: remove this line
 
 allocate(energy%esp(system%no,system%nk,system%nspin))
 allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
@@ -120,6 +127,8 @@ do jspin=1,system%nspin
   call allocate_scalar(mg,sVxc(jspin))
 end do
 allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
+call read_pslfile(system,pp,ppg)
+call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 
 select case(iperiodic)
 case(0)
@@ -141,14 +150,6 @@ end if
 
 call set_filename
 
-k_sta = info%ik_s ! future work: remove this line
-k_end = info%ik_e ! future work: remove this line
-k_num = info%numk ! future work: remove this line
-iobnum = info%numo ! future work: remove this line
-call old_mesh(lg,mg,ng) ! future work: remove this line
-Hvol = system%Hvol ! future work: remove this line
-Hgs = system%Hgs ! future work: remove this line
-
 if(yn_opt=='y')then
    call structure_opt_ini(MI)
    flag_opt_conv=.false.
@@ -169,50 +170,19 @@ if(iopt==1)then
 
   call timer_begin(LOG_INIT_GS)
   
-  call allocate_mat(ng)
   call set_icoo1d(lg)
 
-  call init_code_optimization
-
-  if(iflag_ps.eq.0)then
-     Vpsl=0d0
-  else
-     call read_pslfile(system,pp,ppg)
-     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-  end if
-
-  if(iperiodic==3) then
-    allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-    stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
-    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-  end if
-
-  if(iobnum >= 1)then
-    select case(iperiodic)
-    case(0)
-      allocate( psi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
-    case(3)
-      allocate( ttpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)) )
-      allocate( zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
-    end select
-  end if
+  call init_mixing(nspin,ng,mixing)
 
   select case( IC )
   case default ! New calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
-    call init_wf_ns(lg,info,1)
-    select case(iperiodic) ! Store to psi/zpsi
-    case(0) ; call copy_psi_to_rwf(info,nspin,mg,spsi)
-    case(3) ; call copy_zpsi_to_zwf(info,nspin,mg,spsi)
-    end select
+    call init_wf_ns(lg,mg,nspin,info,1,spsi)
+    call gram_schmidt(system, mg, info, spsi)
   case(1,3)
     call read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   end select
-
-  call gram_schmidt(system, mg, info, spsi)
-
-  call init_mixing(nspin,ng,mixing)
 
   if(read_gs_dns_cube == 'n') then
      call calc_density(system,srho_s,spsi,info,mg)
@@ -225,7 +195,6 @@ if(iopt==1)then
   do jspin=1,nspin
      srho%f = srho%f + srho_s(jspin)%f
   end do
-  rho = srho%f
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
@@ -249,12 +218,6 @@ else if(iopt>=2)then
     call dealloc_init_ps(ppg)
 !    call calc_nlcc(pp, system, mg, ppn) !test
     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-    if(iperiodic==3) then
-       if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-       stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
-       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-    end if
-
   end if
   call timer_end(LOG_INIT_GS)
 end if
@@ -334,7 +297,6 @@ DFT_Iteration : do iter=1,iDiter(img)
   if(temperature>=0.d0 .and. Miter>iditer_notemperature) then
      call ne2mu(energy,system)
   end if
-  rocc(1:itotMST,1:system%nk) = system%rocc(1:itotMST,1:system%nk,1) ! future work: remove this line
 
   call copy_density(Miter,system%nspin,ng,srho_s,mixing)
 
@@ -360,7 +322,6 @@ DFT_Iteration : do iter=1,iDiter(img)
     case(0); call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
     case(3); call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     end select
-    esp = energy%esp(:,:,1) !++++++++
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
   end if
@@ -478,27 +439,6 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 end do DFT_Iteration
 
-! for writing GS data
-Vpsl = sVpsl%f
-if(allocated(Vpsl_atom) .and. allocated(ppg%Vpsl_atom)) &
-  Vpsl_atom = ppg%Vpsl_atom
-Vh = sVh%f
-rho = srho%f
-if(ilsda == 1) then
-  do jspin=1,system%nspin
-     Vxc_s(:,:,:,jspin) = sVxc(jspin)%f
-  end do
-else
-  Vxc = sVxc(1)%f
-end if
-Exc = energy%E_xc
-
-! Store to psi/zpsi
-select case(iperiodic)
-  case(0) ; call copy_rwf_to_psi(info,nspin,mg,spsi)
-  case(3) ; call copy_zwf_to_zpsi(info,nspin,mg,spsi)
-end select
-
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then   !this input keyword is going to be removed....
    select case(iperiodic)
@@ -542,7 +482,6 @@ else
 end if
 !end if
 
-if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 
@@ -618,94 +557,6 @@ call finalize_xc(xc_func)
 call timer_end(LOG_TOTAL)
 
 contains
-
-subroutine copy_psi_to_rwf(info,nspin,mg,spsi)
-  use scf_data, only: psi
-  implicit none
-  integer                 ,intent(in) :: nspin
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_orbital)         ,intent(inout) :: spsi
-  integer :: ik,iob,is
-
-  do ik=k_sta,k_end
-  do iob=1,info%numo
-  do is=1,nspin
-     spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
-         &  psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
-  end do
-  end do
-  end do
-end subroutine copy_psi_to_rwf
-
-subroutine copy_zpsi_to_zwf(info,nspin,mg,spsi)
-  use scf_data, only: zpsi
-  implicit none
-  integer                 ,intent(in) :: nspin
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_orbital)         ,intent(inout) :: spsi
-  integer :: ik,iob,is
-
-  do ik=k_sta,k_end
-  do iob=1,info%numo
-  do is=1,nspin
-     spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
-          & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
-  end do
-  end do
-  end do
-end subroutine copy_zpsi_to_zwf
-
-subroutine copy_rwf_to_psi(info,nspin,mg,spsi)
-  use scf_data, only: psi
-  implicit none
-  integer                 ,intent(in) :: nspin
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_orbital)         ,intent(in) :: spsi
-  integer :: ik,iob,is, ix,iy,iz
-
-  do ik=k_sta,k_end
-  do iob=1,info%numo
-  do is=1,nspin
-     !$OMP parallel do private(iz,iy,ix)
-     do iz=mg%is(3),mg%ie(3)
-     do iy=mg%is(2),mg%ie(2)
-     do ix=mg%is(1),mg%ie(1)
-        psi(ix,iy,iz,iob+(is-1)*info%numo,ik) = spsi%rwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
-     end do
-     end do
-     end do
-  end do
-  end do
-  end do
-end subroutine copy_rwf_to_psi
-
-subroutine copy_zwf_to_zpsi(info,nspin,mg,spsi)
-  use scf_data, only: zpsi
-  implicit none
-  integer                 ,intent(in) :: nspin
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_orbital)         ,intent(in) :: spsi
-  integer :: ik,iob,is, ix,iy,iz
-
-  do ik=k_sta,k_end
-  do iob=1,info%numo
-  do is=1,nspin
-     !$OMP parallel do private(iz,iy,ix)
-     do iz=mg%is(3),mg%ie(3)
-     do iy=mg%is(2),mg%ie(2)
-     do ix=mg%is(1),mg%ie(1)
-        zpsi(ix,iy,iz,iob+(is-1)*info%numo,ik) = spsi%zwf(ix,iy,iz,is,iob+info%io_s-1,ik,1)
-     end do
-     end do
-     end do
-  end do
-  end do
-  end do
-end subroutine copy_zwf_to_zpsi
 
 subroutine init_code_optimization
   implicit none

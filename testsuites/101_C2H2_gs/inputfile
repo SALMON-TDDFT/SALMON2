@@ -10,7 +10,7 @@
 &system
   yn_periodic = 'n'
   al = 16d0, 16d0, 16d0
-  nstate = 5
+  nstate = 10
   nelem = 2
   natom = 4
   nelec = 10

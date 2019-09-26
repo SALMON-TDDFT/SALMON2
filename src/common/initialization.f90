@@ -184,6 +184,8 @@ subroutine init_dft_system(lg,system,stencil)
   end do
 
   call set_gridcoordinate(lg,system)
+  
+  system%vec_Ac = 0d0 ! initial value
 
   return
 end subroutine init_dft_system

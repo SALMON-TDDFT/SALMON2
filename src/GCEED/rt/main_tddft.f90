@@ -82,7 +82,7 @@ type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 type(s_ofile) :: ofile
 
-integer :: iob, i1,i2,i3, ik,iik, is,jspin,nspin
+integer :: iob, i1,i2,i3, ik,iik,jspin
 integer :: idensity, idiffDensity, ielf
 integer :: jj,nn, iene, nntime, ix,iy,iz
 real(8) :: rbox_array(10), rbox_array2(10)
@@ -177,11 +177,17 @@ end select
 
 call timer_end(LOG_INIT_RT)
 
+call timer_begin(LOG_READ_GS_DATA)
+
+! +----------------+
+! | initialization |
+! +----------------+
+
 call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
-call old_mesh(lg,mg,ng)
-
-call allocate_mat(ng)
+call init_code_optimization
+call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
+call allocate_mat(ng) ! future work: remove this line
 
 call allocate_scalar(mg,srho)
 call allocate_scalar(mg,sVh)
@@ -195,42 +201,43 @@ do jspin=1,system%nspin
   call allocate_scalar(mg,sVxc(jspin))
 end do
 allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
+call read_pslfile(system,pp,ppg)
+call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 
-Hgs  = system%Hgs  ! future work: remove this line
-Hvol = system%Hvol ! future work: remove this line
-k_sta = info%ik_s ! future work: remove this line
-k_end = info%ik_e ! future work: remove this line
-k_num = info%numk ! future work: remove this line
-iobnum= info%numo ! future work: remove this line
-
-call timer_begin(LOG_READ_GS_DATA)
-
-! Read GS data
 call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
 call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
 call allocate_orbital_complex(system%nspin,mg,info,tpsi)
 call allocate_dmatrix(system%nspin,mg,info,dmat)
 call read_gs_bin(lg,mg,ng,system,info,spsi_in,mixing,miter)
 
-call read_pslfile(system,pp,ppg)
-call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-
-call init_code_optimization
-
-if(ilsda==0)then
-  numspin=1
-else if(ilsda==1)then
-  numspin=2
+call calc_nlcc(pp, system, mg, ppn)
+if (comm_is_root(nproc_id_global)) then
+  write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
+  write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
 end if
+
+call calc_density(system,srho_s,spsi_in,info,mg)
+srho%f = 0d0
+do jspin=1,system%nspin
+   srho%f = srho%f + srho_s(jspin)%f
+end do
+call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+sVh_stock1%f=sVh%f
+sVh_stock2%f=sVh%f
+
+allocate(energy%esp(system%no,system%nk,system%nspin))
 
 call timer_end(LOG_READ_GS_DATA)
 
+! +-------------+
+! | old fashion |
+! +-------------+
 
 call timer_begin(LOG_READ_RT_DATA)
 allocate(Ex_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(Ec_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
-allocate( Vh0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate( Ex_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
 allocate( Ey_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
 allocate( Ez_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
@@ -331,14 +338,6 @@ endif
 
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
-  nspin = system%nspin
-
-  allocate(energy%esp(system%no,system%nk,system%nspin))
-
-  if(iperiodic==3) then
-    allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-  end if
-
 if(comm_is_root(nproc_id_global).and.iperiodic==3) then
   open(16,file="current.data")
   open(17,file="Etot.data")
@@ -364,62 +363,11 @@ allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, &
 allocate( elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
                                 lg%is(3):lg%ie(3)))
 
-allocate(rho(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 !if(ilsda==1)then
 allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
 !end if
 allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
-  call calc_nlcc(pp, system, mg, ppn)
-  if (comm_is_root(nproc_id_global)) then
-    write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
-    write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
-  end if
-
-  call calc_density(system,srho_s,spsi_in,info,mg)
-  srho%f = 0d0
-  do jspin=1,nspin
-     srho%f = srho%f + srho_s(jspin)%f
-  end do
-  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
-  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
-  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
-  sVh_stock1%f=sVh%f
-  sVh_stock2%f=sVh%f
-
-  if(ilsda==0)then
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      rho(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
-    end do
-    end do
-    end do
-  else if(ilsda==1)then
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      rho_s(ix,iy,iz,1)=srho_s(1)%f(ix,iy,iz)
-      rho_s(ix,iy,iz,2)=srho_s(2)%f(ix,iy,iz)
-      rho(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)+srho_s(2)%f(ix,iy,iz)
-    end do
-    end do
-    end do
-  end if
-
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg_sta(3),mg_end(3)
-do iy=mg_sta(2),mg_end(2)
-do ix=mg_sta(1),mg_end(1)
-  rho0(ix,iy,iz)=rho(ix,iy,iz)
-end do
-end do
-end do
-
-allocate(zc(N_hamil))
 
 ! External Field Direction
 select case (ikind_eext)
@@ -499,7 +447,7 @@ if(IC_rt==0)then
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-       rbox_array(i1)=rbox_array(i1)+vecR(i1,ix,iy,iz)*rho(ix,iy,iz)
+       rbox_array(i1)=rbox_array(i1)+vecR(i1,ix,iy,iz)*srho%f(ix,iy,iz)
     end do
     end do
     end do
@@ -508,7 +456,7 @@ if(IC_rt==0)then
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-     rbox_array(4)=rbox_array(4)+rho(ix,iy,iz)
+     rbox_array(4)=rbox_array(4)+srho%f(ix,iy,iz)
   end do
   end do
   end do
@@ -524,36 +472,28 @@ if(comm_is_root(nproc_id_global))then
 endif
 
 ! Initial wave function
-if(iperiodic==0)then
-  if(IC_rt==0)then
-  if(iobnum.ge.1)then
-    do iik=info%ik_s,info%ik_e
-    do iob=info%io_s,info%io_e
-    do jspin=1,system%nspin
-      select case (ikind_eext)
-        case(0)
-          spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1) &
-          = exp(zi*Fst*R1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-             mg_sta(3):mg_end(3)))   &
-             *  spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1)
-      end select
-    end do
-    end do
-    end do
-  end if
-  end if
+if(iperiodic==0 .and. ikind_eext==0 .and. IC_rt==0)then
+  do iik=info%ik_s,info%ik_e
+  do iob=info%io_s,info%io_e
+  do jspin=1,system%nspin
+        spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1) &
+        = exp(zi*Fst*R1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
+           mg_sta(3):mg_end(3)))   &
+           *  spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1)
+  end do
+  end do
+  end do
 end if
 
 rIe(0)=rbox_array2(4)*Hvol
 Dp(:,0)=0.d0
 Qp(:,:,0)=0.d0
 
-Vh0 = sVh%f
 rho0 = srho%f
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
-      call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
       call calc_elf(lg,mg,ng,srg,info,srho,itt)
@@ -575,22 +515,12 @@ if(use_singlescale=='y') then
   call allocate_vector(mg,j_e)
   call allocate_scalar(mg,system%div_Ac)
   call allocate_vector(mg,system%Ac_micro)
-  do ik=info%ik_s,info%ik_e
-     stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik)
-  end do
-  call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
 end if
 
 !-------------------------------------------------- Time evolution
 
 !(force at initial step)
 if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-   if(iperiodic==3)then
-      do ik=info%ik_s,info%ik_e
-        stencil%vec_kAc(1:3,ik) = system%vec_k(1:3,ik)
-      end do
-      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-   endif
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
 
    !open trj file for coordinate, velocity, and force (rvf) in xyz format
@@ -606,6 +536,7 @@ call timer_end(LOG_INIT_TIME_PROPAGATION)
 
 
 call timer_begin(LOG_INIT_RT)
+allocate(zc(N_hamil))
 call taylor_coe(N_hamil,dt,zc)
 call timer_end(LOG_INIT_RT)
 
@@ -632,7 +563,6 @@ call timer_end(LOG_RT_ITERATION)
 
 close(030) ! laser
 
-if(iperiodic==3) deallocate(stencil%vec_kAc)
 if(ikind_eext.ne.0) deallocate (Vbox)
 deallocate (R1)
 

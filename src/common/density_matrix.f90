@@ -256,7 +256,7 @@ contains
     !
     integer :: ispin,im,ik,io,nspin,ngrid
     real(8),dimension(3) :: wrk1,wrk2,wrk3,wrk4
-    real(8) :: BT(3,3)
+    real(8) :: BT(3,3),kAc(3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
@@ -286,8 +286,9 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
         call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
-                            ,stencil%vec_kAc(:,ik),psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
+                            ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
         wrk2 = matmul(BT,wrk2)
 
         if(info%if_divide_rspace) then
@@ -373,7 +374,7 @@ contains
     real(8) :: curr(3,system%nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io,nspin,ngrid
-    real(8) :: wrk1(3),wrk2(3),wrk3(3),BT(3,3)
+    real(8) :: wrk1(3),wrk2(3),wrk3(3),BT(3,3),kAc(3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
@@ -398,7 +399,8 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),stencil%vec_kAc(:,ik),mg%is_array,mg%ie_array,mg%is,mg%ie)
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),kAc,mg%is_array,mg%ie_array,mg%is,mg%ie)
 
         if(info%if_divide_rspace) then
           uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
@@ -578,6 +580,7 @@ contains
     type(s_vector)             :: curr ! electron number current density (without rho*A/c)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin
+    real(8) :: kAc(3)
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
 
     nspin = system%nspin
@@ -597,7 +600,8 @@ contains
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
-        call kvec_part(mg%is_array,mg%ie_array,is,ie,stencil%vec_kAc(:,ik),psi%zwf(:,:,:,ispin,io,ik,im),wrk)
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        call kvec_part(mg%is_array,mg%ie_array,is,ie,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
         wrk2 = wrk2 + wrk * system%rocc(io,ik,ispin)*system%wtk(ik)
 
 !       call nonlocal_part

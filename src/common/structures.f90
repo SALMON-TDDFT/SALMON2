@@ -141,11 +141,9 @@ module structures
   end type s_orbital
 
   type s_stencil
-    real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
-    real(8),allocatable :: vec_kAc(:,:) ! (1:3,ik_s:ik_e)
     logical :: if_orthogonal
+    real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
     real(8) :: coef_f(6) ! for non-orthogonal lattice
-    integer,allocatable :: isign(:,:) ! sign(3,4:ndir) (for ndir=4~6)
   end type s_stencil
 
 ! pseudopotential
@@ -387,12 +385,6 @@ contains
     DEAL(psi%zwf)
     DEAL(psi%ztmp)
   end subroutine deallocate_orbital
-
-  subroutine deallocate_stencil(stencil)
-    type(s_stencil) :: stencil
-    DEAL(stencil%vec_kAc)
-    DEAL(stencil%isign)
-  end subroutine deallocate_stencil
 
   subroutine deallocate_pp_info(pp)
     type(s_pp_info) :: pp

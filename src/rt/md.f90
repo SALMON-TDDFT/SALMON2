@@ -299,9 +299,7 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
   endif
 
   if(iperiodic==3) then
-     if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-     stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
-     call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
+     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   endif
 
 end subroutine 

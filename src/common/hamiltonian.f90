@@ -29,7 +29,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use stencil_sub
   use nonlocal_potential
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
-  use salmon_global, only: yn_want_communication_overlapping
+  use salmon_global, only: yn_want_communication_overlapping,yn_periodic
   use timer
   implicit none
   type(s_dft_system)      ,intent(in) :: system
@@ -58,7 +58,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   nspin = system%nspin
   norb = Nspin* info%numo * info%numk * info%numm
   
-  if_kAc = allocated(stencil%vec_kAc)
+  if_kAc = (yn_periodic=='y')
   if_singlescale = allocated(system%Ac_micro%v)
 
   ! check: can we execute computation/communication overlapping
@@ -112,7 +112,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       do im=im_s,im_e
       do ik=ik_s,ik_e
         if(if_kAc) then
-          kAc(1:3) = stencil%vec_kAc(1:3,ik)
+          kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
           k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
           k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
@@ -159,7 +159,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         kAc = 0d0
         k_lap0 = 0d0
         if(if_kAc) then
-          kAc(1:3) = stencil%vec_kAc(1:3,ik) ! Cartesian vector k+A/c
+          kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3) ! Cartesian vector k+A/c
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
           kAc(1:3) = matmul(system%rmatrix_B,kAc) ! B* (k+A/c)
         end if
@@ -494,27 +494,27 @@ end subroutine copyVlocal
 
 !===================================================================================================================================
 
-subroutine update_kvector_nonlocalpt(ppg,kAc,ik_s,ik_e)
+subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   use math_constants,only : zi
   use structures
   implicit none
-  type(s_pp_grid)    :: ppg
-  integer,intent(in) :: ik_s,ik_e
-  real(8),intent(in) :: kAc(3,ik_s:ik_e)
+  integer           ,intent(in) :: ik_s,ik_e !,n_max
+  type(s_dft_system),intent(in) :: system
+  type(s_pp_grid)               :: ppg
   !
   integer :: ilma,iatom,j,ik
-  real(8) :: x,y,z,k(3)
+  real(8) :: x,y,z,kAc(3)
   complex(8) :: ekr
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ik=ik_s,ik_e
-    k = kAc(:,ik)
+    kAc = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
       do j=1,ppg%mps(iatom)
         x = ppg%rxyz(1,j,iatom)
         y = ppg%rxyz(2,j,iatom)
         z = ppg%rxyz(3,j,iatom)
-        ekr = exp(zi*(k(1)*x+k(2)*y+k(3)*z))
+        ekr = exp(zi*(kAc(1)*x+kAc(2)*y+kAc(3)*z))
         ppg%zekr_uV(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
       end do
     end do
