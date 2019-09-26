@@ -80,7 +80,10 @@ Subroutine calc_Ac_ext(t,Ac_ext)
     if(phi_CEP1 /= 0.75d0)then
       stop "Error: phi_cep1 should be 0.75 when ae_shape1 is 'Ecos2'."
     end if
-    tt = t - 0.5d0*tw1
+    if(sum(abs(epdir_im1(:)))>1.0d-8)then
+      stop "Error: ae_shape1 should be 'Acos2' when epdir_im1 is used."
+    end if
+    tt = t - 0.5d0*tw1 - t1_start
     if (abs(tt)<0.5d0*tw1) then
       Ac_ext(:) = -epdir_re1(:)*f0_1/(8d0*pi**2*omega1 - 2d0*tw1**2*omega1**3) &
         *( &
@@ -88,6 +91,7 @@ Subroutine calc_Ac_ext(t,Ac_ext)
         +2d0*pi*(2d0*pi*cos(tw1*omega1/2d0) &
         +tw1*omega1*sin(2d0*pi*tt/tw1)*sin(omega1*tt)))
     end if
+    T1_T2 = T1_T2 + t1_start
 
   case('Esin2sin')
   
@@ -162,6 +166,9 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   
     if(phi_CEP2 /= 0.75d0)then
       stop "Error: phi_cep2 should be 0.75 when ae_shape2 is 'Ecos2'."
+    end if
+    if(sum(abs(epdir_im2(:)))>1.0d-8)then
+      stop "Error: ae_shape2 should be 'Acos2' when epdir_im2 is used."
     end if
     tt = t - 0.5d0*tw1 - T1_T2
     if (abs(tt)<0.5d0*tw2) then
