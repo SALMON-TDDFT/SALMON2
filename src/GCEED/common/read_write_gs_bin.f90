@@ -310,7 +310,7 @@ end subroutine write_gs_bin
 subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   use inputoutput, only: theory,calc_mode,iperiodic,num_datafiles_in
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing
-  use salmon_parallel, only: nproc_id_global
+  use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   use scf_data, only: file_in_gs_bin
   implicit none
@@ -330,11 +330,14 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   real(8),allocatable :: matbox2(:,:,:)
   complex(8),allocatable :: cmatbox(:,:,:)
   complex(8),allocatable :: cmatbox2(:,:,:)
+  real(8),allocatable :: roccbox(:,:,:)
   integer :: version_num_box(2)
   integer :: iu1_r, iu2_r
   integer :: ifilenum_data
   integer :: ik,iob,is 
-  integer :: i,ix,iy,iz
+  integer :: i,ix,iy,iz,comm
+  
+  comm = nproc_group_global
  
   iu1_r = 96
   iu2_r = 86
@@ -348,7 +351,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   
   end if
   
-  call comm_bcast(version_num_box,info%icomm_rko)
+  call comm_bcast(version_num_box,comm)
   
   if(version_num_box(1)<=41)then
     stop 'You cannot use old restart files.'
@@ -360,9 +363,9 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     read(iu1_r) mo
   end if
   
-  call comm_bcast(miter,info%icomm_rko)
-  call comm_bcast(mk,info%icomm_rko)
-  call comm_bcast(mo,info%icomm_rko)
+  call comm_bcast(miter,comm)
+  call comm_bcast(mk,comm)
+  call comm_bcast(mo,comm)
   
   !!!!!!!!!!!!!!!!!
   ! wave function !
@@ -383,6 +386,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   allocate(matbox2( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(roccbox(mo,mk,system%nspin))
   
   if(num_datafiles_in==-1)then
     if(iperiodic==0)then
@@ -407,7 +411,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
           do iz=dg%is(3),dg%ie(3)
           do iy=dg%is(3),dg%ie(3)
           do ix=dg%is(3),dg%ie(3)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=matbox(ix,iy,iz)
+            spsi%zwf(ix,iy,iz,is,iob,ik,1)=cmplx(matbox(ix,iy,iz))
           end do
           end do
           end do
@@ -437,14 +441,14 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
                                                      iy=dg%is(2),dg%ie(2)), &
                                                      iz=dg%is(3),dg%ie(3))
           end if
-          call comm_bcast(matbox2,info%icomm_rko)
+          call comm_bcast(matbox2,comm)
         else if(num_datafiles_in>1)then
           if(nproc_id_global<num_datafiles_in)then
             read(ifilenum_data) (((matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                     iy=dg%is(2),dg%ie(2)), &
                                                     iz=dg%is(3),dg%ie(3))
           end if
-          call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+          call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),comm)
         end if
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
@@ -462,7 +466,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,is,iob,ik,1) = matbox2(ix,iy,iz)
+              spsi%zwf(ix,iy,iz,is,iob,ik,1) = cmplx(matbox2(ix,iy,iz))
             end do
             end do
             end do
@@ -475,14 +479,14 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
                                                       iy=dg%is(2),dg%ie(2)), &
                                                       iz=dg%is(3),dg%ie(3))
           end if
-          call comm_bcast(cmatbox2,info%icomm_rko)
+          call comm_bcast(cmatbox2,comm)
         else if(num_datafiles_in>1)then
           if(nproc_id_global<num_datafiles_in)then
             read(ifilenum_data) (((cmatbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                      iy=dg%is(2),dg%ie(2)), &
                                                      iz=dg%is(3),dg%ie(3))
           end if
-          call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+          call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),comm)
         end if
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
@@ -509,12 +513,13 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     do is=1,system%nspin
     do ik=1,mk
     do iob=1,mo
-      read(iu1_r) system%rocc(iob,ik,is)
+      read(iu1_r) roccbox(iob,ik,is)
     end do
     end do
     end do
+    system%rocc(1:system%no,1:system%nk,1:system%nspin) = roccbox(1:system%no,1:system%nk,1:system%nspin)
   end if
-  call comm_bcast(system%rocc,info%icomm_rko)
+  call comm_bcast(system%rocc,comm)
     
   !!!!!!!!!!!!!!!!!!!!!!
   ! rho_in and rho_out !
