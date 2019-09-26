@@ -335,10 +335,6 @@ call timer_begin(LOG_INIT_TIME_PROPAGATION)
 
   allocate(energy%esp(system%no,system%nk,system%nspin))
 
-  if(iperiodic==3) then
-    allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-  end if
-
 if(comm_is_root(nproc_id_global).and.iperiodic==3) then
   open(16,file="current.data")
   open(17,file="Etot.data")
@@ -575,22 +571,12 @@ if(use_singlescale=='y') then
   call allocate_vector(mg,j_e)
   call allocate_scalar(mg,system%div_Ac)
   call allocate_vector(mg,system%Ac_micro)
-  do ik=info%ik_s,info%ik_e
-     stencil%vec_kAc(:,ik) = system%vec_k(1:3,ik)
-  end do
-  call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
 end if
 
 !-------------------------------------------------- Time evolution
 
 !(force at initial step)
 if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-   if(iperiodic==3)then
-      do ik=info%ik_s,info%ik_e
-        stencil%vec_kAc(1:3,ik) = system%vec_k(1:3,ik)
-      end do
-      call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-   endif
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
 
    !open trj file for coordinate, velocity, and force (rvf) in xyz format
@@ -632,7 +618,6 @@ call timer_end(LOG_RT_ITERATION)
 
 close(030) ! laser
 
-if(iperiodic==3) deallocate(stencil%vec_kAc)
 if(ikind_eext.ne.0) deallocate (Vbox)
 deallocate (R1)
 

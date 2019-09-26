@@ -181,12 +181,6 @@ if(iopt==1)then
      call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end if
 
-  if(iperiodic==3) then
-    allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-    stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
-    call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-  end if
-
   if(iobnum >= 1)then
     select case(iperiodic)
     case(0)
@@ -249,12 +243,6 @@ else if(iopt>=2)then
     call dealloc_init_ps(ppg)
 !    call calc_nlcc(pp, system, mg, ppn) !test
     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-    if(iperiodic==3) then
-       if(.not.allocated(stencil%vec_kAc)) allocate(stencil%vec_kAc(3,info%ik_s:info%ik_e))
-       stencil%vec_kAc(:,info%ik_s:info%ik_e) = system%vec_k(:,info%ik_s:info%ik_e)
-       call update_kvector_nonlocalpt(ppg,stencil%vec_kAc,info%ik_s,info%ik_e)
-    end if
-
   end if
   call timer_end(LOG_INIT_GS)
 end if
@@ -542,7 +530,6 @@ else
 end if
 !end if
 
-if(iperiodic==3) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 

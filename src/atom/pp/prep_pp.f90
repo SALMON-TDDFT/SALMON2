@@ -21,6 +21,7 @@ contains
 
 subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use structures
+  use hamiltonian, only: update_kvector_nonlocalpt
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use salmon_global, only: iperiodic,yn_ffte
@@ -125,6 +126,10 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end select
 
   call init_uvpsi_summation(ppg,info%icomm_r)
+  
+  if(iperiodic==3) then
+    call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+  end if
 
 end subroutine init_ps
 

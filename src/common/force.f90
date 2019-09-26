@@ -109,7 +109,7 @@ contains
       end do
 
     ! nonlocal part
-      if(allocated(stencil%vec_kAc)) kAc(1:3) = stencil%vec_kAc(1:3,ik)
+      if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         duVpsi = 0d0
