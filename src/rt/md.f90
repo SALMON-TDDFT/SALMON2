@@ -20,7 +20,7 @@ contains
 
 subroutine init_md(system,md)
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: MI,yn_out_rvf_rt, ensemble, thermostat,yn_set_ini_velocity,step_velocity_scaling
+  use salmon_global, only: natom,yn_out_rvf_rt, ensemble, thermostat,yn_set_ini_velocity,step_velocity_scaling
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   implicit none    
@@ -33,8 +33,8 @@ subroutine init_md(system,md)
      yn_out_rvf_rt='y'
   endif
 
-  allocate(md%Rion_last(3,MI))
-  allocate(md%Force_last(3,MI))
+  allocate(md%Rion_last(3,natom))
+  allocate(md%Force_last(3,natom))
 
   md%E_work = 0d0
 
@@ -57,7 +57,7 @@ end subroutine init_md
 
 subroutine set_initial_velocity(system,md)
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: MI,Kion,temperature0_ion_k
+  use salmon_global, only: natom,Kion,temperature0_ion_k
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_bcast
   use math_constants, only: Pi
@@ -77,7 +77,7 @@ subroutine set_initial_velocity(system,md)
   kB_au = kB/hartree2J  ![au/K]
 
   iseed= 123
-  do ia=1,MI
+  do ia=1,natom
      mass_au = umass * system%Mass(Kion(ia))
      sqrt_kT_im = sqrt( kB_au * temperature0_ion_k / mass_au )
 
@@ -91,10 +91,10 @@ subroutine set_initial_velocity(system,md)
   
   !!(check temperature)
   !Tion=0d0
-  !do ia=1,MI
+  !do ia=1,natom
   !   Tion = Tion + 0.5d0*umass*system%Mass(Kion(ia))*sum(system%Velocity(:,ia)**2d0)
   !enddo
-  !Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
+  !Temperature_ion = Tion * 2d0 / (3d0*natom) / kB_au
   !write(*,*)"  Temperature: random-vel",real(Temperature_ion)
   
  
@@ -103,10 +103,10 @@ subroutine set_initial_velocity(system,md)
   
   !scaling: set temperature exactly to input value
   Tion=0d0
-  do ia=1,MI
+  do ia=1,natom
      Tion = Tion + 0.5d0 * umass*system%Mass(Kion(ia)) * sum(system%Velocity(:,ia)**2d0)
   enddo
-  Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
+  Temperature_ion = Tion * 2d0 / (3d0*natom) / kB_au
   !write(*,*)"    Temperature: befor-scaling",real(Temperature_ion)
  
   scale_v = sqrt(temperature0_ion_k/Temperature_ion)
@@ -115,10 +115,10 @@ subroutine set_initial_velocity(system,md)
  
   !(check)
   Tion=0d0
-  do ia=1,MI
+  do ia=1,natom
      Tion = Tion + 0.5d0 * umass*system%Mass(Kion(ia)) * sum(system%Velocity(:,ia)**2d0)
   enddo
-  Temperature_ion = Tion * 2d0 / (3d0*MI) / kB_au
+  Temperature_ion = Tion * 2d0 / (3d0*natom) / kB_au
   if (comm_is_root(nproc_id_global)) &
        write(*,*)"    Initial Temperature: after-scaling",real(Temperature_ion)
 
@@ -133,12 +133,12 @@ subroutine read_initial_velocity(system,md)
   ! initial velocity for md option can be given by external file 
   ! specified by file_ini_velocity option
   ! format is :
-  ! do i=1,MI
+  ! do i=1,natom
   !    vx(i)  vy(i)  vz(i)
   ! enddo
   ! xi_nh  !only for nose-hoover thermostat option
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: MI,file_ini_velocity, ensemble, thermostat
+  use salmon_global, only: natom,file_ini_velocity, ensemble, thermostat
   use salmon_parallel, only: nproc_id_global,nproc_group_global,end_parallel
   use salmon_communication, only: comm_is_root,comm_bcast
   implicit none
@@ -156,7 +156,7 @@ subroutine read_initial_velocity(system,md)
      endif
 
      open(411, file=file_ini_velocity, status="old")
-     do ia=1,MI
+     do ia=1,natom
         read(411,*) (system%Velocity(ixyz,ia),ixyz=1,3)
      enddo
      if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
@@ -171,7 +171,7 @@ end subroutine read_initial_velocity
 subroutine remove_system_momentum(flag_print_check,system)
   ! remove center of mass and momentum of whole system
   use structures, only: s_dft_system
-  use salmon_global, only: MI,Kion
+  use salmon_global, only: natom,Kion
   use salmon_communication, only: comm_is_root
   use salmon_parallel, only: nproc_id_global
   use const, only: umass
@@ -183,13 +183,13 @@ subroutine remove_system_momentum(flag_print_check,system)
   !velocity of center of mass is removed
   v_com(:)=0d0
   sum_mass=0d0
-  do ia=1,MI
+  do ia=1,natom
      mass_au = umass * system%Mass(Kion(ia))
      v_com(:) = v_com(:) + mass_au * system%Velocity(:,ia)
      sum_mass = sum_mass + mass_au
   enddo
   v_com(:) = v_com(:)/sum_mass
-  do ia=1,MI
+  do ia=1,natom
      system%Velocity(:,ia) = system%Velocity(:,ia) - v_com(:)
   enddo
 
@@ -199,7 +199,7 @@ subroutine remove_system_momentum(flag_print_check,system)
   !(check velocity of center of mass)
   if(flag_print_check==1) then
      v_com(:)=0d0
-     do ia=1,MI
+     do ia=1,natom
         v_com(:) = v_com(:) + umass*system%Mass(Kion(ia)) * system%Velocity(:,ia)
      enddo
      v_com(:) = v_com(:) / sum_mass
@@ -210,7 +210,7 @@ end subroutine remove_system_momentum
 
 subroutine cal_Tion_Temperature_ion(Ene_ion,Temp_ion,system)
   use structures, only: s_dft_system
-  use salmon_global, only: MI,Kion
+  use salmon_global, only: natom,Kion
   use const, only: umass,hartree2J,kB
   implicit none
   type(s_dft_system) :: system
@@ -218,11 +218,11 @@ subroutine cal_Tion_Temperature_ion(Ene_ion,Temp_ion,system)
   real(8) :: mass_au, Ene_ion,Temp_ion
 
   Ene_ion = 0.d0
-  do ia=1,MI
+  do ia=1,natom
      mass_au = umass * system%Mass(Kion(ia))
      Ene_ion = Ene_ion + 0.5d0 * mass_au * sum(system%Velocity(:,ia)**2d0)
   enddo
-  Temp_ion = Ene_ion * 2d0 / (3d0*MI) / (kB/hartree2J)
+  Temp_ion = Ene_ion * 2d0 / (3d0*natom) / (kB/hartree2J)
 
   return
 end subroutine cal_Tion_Temperature_ion
@@ -230,7 +230,7 @@ end subroutine cal_Tion_Temperature_ion
 
 subroutine time_evolution_step_md_part1(itt,system,md)
   use structures, only: s_dft_system, s_md
-  use salmon_global, only: MI,Kion,dt, Rion
+  use salmon_global, only: natom,Kion,dt, Rion
   use const, only: umass,hartree2J,kB
   use inputoutput, only: step_velocity_scaling
   implicit none
@@ -242,7 +242,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   dt_h = dt*0.5d0
 
   !update ion velocity with dt/2
-  do iatom=1,MI
+  do iatom=1,natom
      mass_au = umass * system%Mass(Kion(iatom))
      system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
   enddo
@@ -257,7 +257,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   md%Force_last(:,:)= system%Force(:,:)
 
   !update ion coordinate with dt
-  do iatom=1,MI
+  do iatom=1,natom
      system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
   enddo
   Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
@@ -308,20 +308,20 @@ end subroutine
 
 subroutine time_evolution_step_md_part2(system,md)
   use structures, only: s_dft_system, s_md
-  use salmon_global, only: MI,Kion,dt,yn_stop_system_momt
+  use salmon_global, only: natom,Kion,dt,yn_stop_system_momt
   use const, only: umass,hartree2J,kB
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
   integer :: iatom
-  real(8) :: mass_au,dt_h, aforce(3,MI), dR(3,MI)
+  real(8) :: mass_au,dt_h, aforce(3,natom), dR(3,natom)
 
   dt_h = dt*0.5d0
   aforce(:,:) = 0.5d0*( md%Force_last(:,:) + system%Force(:,:) )
 
   !update ion velocity with dt/2
   dR(:,:) = system%Rion(:,:) - md%Rion_last(:,:)
-  do iatom=1,MI
+  do iatom=1,natom
      mass_au = umass * system%Mass(Kion(iatom))
      system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
      md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
