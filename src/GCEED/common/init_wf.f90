@@ -16,15 +16,17 @@
 !=======================================================================
 !================================================= Initial wave function
 
-SUBROUTINE init_wf_ns(lg,info,ifunc)
-use structures, only: s_rgrid,s_orbital_parallel
+SUBROUTINE init_wf_ns(lg,mg,nspin,info,ifunc,spsi)
+use structures
 use scf_data
 use calc_myob_sub
 use check_corrkob_sub
 implicit none
 
-type(s_rgrid) :: lg
+type(s_rgrid),intent(in) :: lg,mg
+integer,intent(in) :: nspin
 type(s_orbital_parallel),intent(in) :: info
+type(s_orbital) :: spsi
 integer :: ik,iob,iseed,a,ix,iy,iz
 integer :: is,iss,pstart(2),pend(2)
 real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
@@ -32,6 +34,13 @@ integer :: iob_myob
 integer :: icorr_p
 integer :: ifunc
 integer :: icheck
+
+select case(iperiodic)
+case(0)
+  allocate( psi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
+case(3)
+  allocate( zpsi(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),1:iobnum,k_sta:k_end) )
+end select
 
 if(ilsda == 0)then
   iss=1
@@ -110,6 +119,15 @@ case(3)
   end do
   end do
 end select
+
+select case(iperiodic) ! Store to psi/zpsi
+case(0)
+  call copy_psi_to_rwf(info,nspin,mg,spsi)
+  deallocate(psi)
+case(3)
+  call copy_zpsi_to_zwf(info,nspin,mg,spsi)
+  deallocate(zpsi)
+end select
   
 return
 
@@ -143,6 +161,42 @@ CONTAINS
     end if
         
   end subroutine check_init_wf
+  
+  subroutine copy_psi_to_rwf(info,nspin,mg,spsi)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital)         ,intent(inout) :: spsi
+    integer :: ik,iob,is
+
+    do ik=k_sta,k_end
+    do iob=1,info%numo
+    do is=1,nspin
+       spsi%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
+           &  psi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
+    end do
+    end do
+    end do
+  end subroutine copy_psi_to_rwf
+
+  subroutine copy_zpsi_to_zwf(info,nspin,mg,spsi)
+    implicit none
+    integer                 ,intent(in) :: nspin
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_orbital)         ,intent(inout) :: spsi
+    integer :: ik,iob,is
+
+    do ik=k_sta,k_end
+    do iob=1,info%numo
+    do is=1,nspin
+       spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,iob+info%io_s-1,ik,1) = &
+            & zpsi(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),iob+(is-1)*info%numo,ik)
+    end do
+    end do
+    end do
+  end subroutine copy_zpsi_to_zwf
 
 END SUBROUTINE init_wf_ns
 
