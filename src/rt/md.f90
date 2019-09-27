@@ -269,7 +269,6 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
     s_orbital_parallel, s_field_parallel, s_scalar, s_pp_info
   use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
-  use hamiltonian, only: update_kvector_nonlocalpt
   use salmon_pp, only: calc_nlcc
   use prep_pp_sub, only: init_ps,dealloc_init_ps
   implicit none
@@ -296,10 +295,6 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
      call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
      call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-  endif
-
-  if(iperiodic==3) then
-     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   endif
 
 end subroutine 
