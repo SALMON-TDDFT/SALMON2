@@ -83,7 +83,6 @@ parser.add_option_group(group)
 group = OptionGroup(parser, 'Debug options')
 group.add_option('-d', '--debug',   action='store_true',  default=False, dest='debug', help='enable debug build.')
 group.add_option('-r', '--release', action='store_false',                dest='debug', help='enable release build.')
-group.add_option('--hpsi_test',     action='store_true',                 dest='hpsi_test',  help='use joint hpsi subroutine (test).')
 parser.add_option_group(group)
 
 
@@ -115,7 +114,6 @@ add_option(dict, 'USE_OPT_ARRAY_PADDING',          options.padding)
 add_option(dict, 'USE_OPT_EXPLICIT_VECTORIZATION', options.explicit_vec)
 add_option(dict, 'USE_OPT_SOFTWARE_PREFETCH',      options.swp)
 
-add_option(dict, 'HPSI_TEST',           options.hpsi_test)
 if options.simd is not None:
   dict['SIMD_SET'] = options.simd.upper()
 

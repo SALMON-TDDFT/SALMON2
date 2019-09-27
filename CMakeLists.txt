@@ -55,13 +55,6 @@ option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil
 option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil"                                     OFF)
 option_set(USE_OPT_SOFTWARE_PREFETCH       "Enable software prefetch in the explicit vec of the stencil"                       OFF)
 
-## test: joint hpsi subroutine
-option_set(HPSI_TEST               "Use joint hpsi subroutine (test)"   OFF)
-set(HPSI_TEST_SUFFIX "")
-if (HPSI_TEST)
-  set(HPSI_TEST_SUFFIX "_test")
-endif()
-
 
 # variables
 set(TARGET_NAME         "salmon${TARGET_SUFFIX}") # FIXME: TARGET_SUFFIX will remove at version 2 ?
