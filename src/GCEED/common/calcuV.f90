@@ -53,6 +53,8 @@ implicit none
   hy=Hgs(2)
   hz=Hgs(3)
 
+  ppg%Hvol = Hvol
+
   if(iperiodic==0)then
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)

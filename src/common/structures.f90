@@ -57,6 +57,7 @@ module structures
   type s_dft_energy
     real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
+    real(8) :: E_U
   end type s_dft_energy
 
   type s_rgrid
@@ -226,7 +227,7 @@ module structures
     integer,allocatable :: jyy_ao(:,:)
     integer,allocatable :: jzz_ao(:,:)
     real(8),allocatable :: rxyz_ao(:,:,:)
-
+    real(8) :: Hvol
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process

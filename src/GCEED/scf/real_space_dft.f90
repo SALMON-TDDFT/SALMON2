@@ -59,6 +59,7 @@ use salmon_initialization
 use occupation
 use init_poisson_sub
 use sym_rho_sub, only: init_sym_rho
+use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik,ikoa,is,i,j
 integer :: iter,iatom,iob,p1,p2,p5,ii,jj,iflag,jspin
@@ -543,6 +544,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     call allgatherv_vlocal(ng,info,system%nspin,sVh,sVpsl,sVxc,V_local)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
+    if( PLUS_U_ON )then
+      call calc_density_matrix_and_energy_plusU( spsi, ppg, info, energy%E_U )
+    end if
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0)

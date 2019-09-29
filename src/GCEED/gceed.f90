@@ -14,10 +14,12 @@
 !  limitations under the License.
 !
 subroutine gceed
+  use plusU_global, only: read_Hubbard_parameters
   implicit none
   character(30) :: cfunction2
 
   call read_input_gceed(cfunction2)
+  call read_Hubbard_parameters
 
   if(cfunction2=="GS")then
     call real_space_dft

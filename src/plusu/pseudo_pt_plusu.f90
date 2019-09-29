@@ -15,7 +15,7 @@
 !
 module pseudo_pt_plusU_sub
 
-  use plusU_global, only: PLUS_U_ON
+  use plusU_global, only: PLUS_U_ON, V_eff
 
   implicit none
 
@@ -48,7 +48,7 @@ contains
     complex(8),allocatable :: phipsibox(:,:,:,:,:)
     complex(8),allocatable :: phipsibox2(:,:,:,:,:)
 
-    write(*,*) "------------------ pseudo_plusU"
+    if ( .not.allocated(V_eff) ) return
 
     call timer_begin(LOG_UHPSI_PSEUDO)
 
@@ -117,7 +117,7 @@ contains
             phipsi = phipsi + conjg( ppg%zekr_phi_ao(j,ilma,ik) ) &
                             * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           end do
-          phipsi_lma(ilma) = phipsi
+          phipsi_lma(ilma) = phipsi * ppg%Hvol
         end do !ilma
 
         do iprj=1,Nproj_pairs
@@ -128,7 +128,7 @@ contains
             ix = ppg%jxyz_ao(1,j,ia)
             iy = ppg%jxyz_ao(2,j,ia)
             iz = ppg%jxyz_ao(3,j,ia)
-            wrk = vtmp * ppg%zekr_phi_ao(j,ilma,ik) * phipsi_lma(jlma)
+            wrk = V_eff(iprj,ispin) * ppg%zekr_phi_ao(j,ilma,ik) * phipsi_lma(jlma)
             htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
           end do !j
         end do !iprj

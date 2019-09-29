@@ -83,7 +83,7 @@ contains
         do m2=-ll,ll
           lma2=lma2+1
           nproj=nproj+1
-          write(*,'(1x,8i6)') nproj,a,ll,l,m1,m2,lma1,lma2
+          !write(*,'(1x,8i6)') nproj,a,ll,l,m1,m2,lma1,lma2
         end do
         end do
         lma2_0=lma2
@@ -93,7 +93,7 @@ contains
     end do
 
     allocate( ppg%proj_pairs_ao(2,nproj) ); ppg%proj_pairs_ao=0
-    allocate( ppg%proj_pairs_info_ao(3,nproj) ); ppg%proj_pairs_info_ao=0
+    allocate( ppg%proj_pairs_info_ao(5,nproj) ); ppg%proj_pairs_info_ao=0
 
     nproj=0
     lma1=0
@@ -113,7 +113,9 @@ contains
           ppg%proj_pairs_ao(2,nproj)=lma2
           ppg%proj_pairs_info_ao(1,nproj)=a
           ppg%proj_pairs_info_ao(2,nproj)=ll
-          ppg%proj_pairs_info_ao(3,nproj)=l
+          ppg%proj_pairs_info_ao(3,nproj)=l-l0+1
+          ppg%proj_pairs_info_ao(4,nproj)=m1
+          ppg%proj_pairs_info_ao(5,nproj)=m2
         end do
         end do
         lma2_0=lma2
@@ -181,10 +183,6 @@ contains
     real(8) :: xx
     real(8),external :: Ylm, dYlm
 
-write(*,*) "---------------- calc_uv_plusU(start)"
-
-    call read_Hubbard_parameters
-
     call set_nlma_ao( pp, ppg )
 
     if ( property /= 'update_wo_realloc' ) then
@@ -210,7 +208,7 @@ write(*,*) "---------------- calc_uv_plusU(start)"
       end do !a
 
     end if
- write(*,*) "allocated(lma_tbl_ao)",allocated(lma_tbl_ao) 
+
     do a=1,natom
 
       ik=kion(a)
