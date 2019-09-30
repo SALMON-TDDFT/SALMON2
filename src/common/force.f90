@@ -232,14 +232,14 @@ contains
     end do !ispin
     end do !io
     end do !ik
-    do ia=1,nion
-      write(*,'(1x,i4,2f20.10)') ia,real(zF_tmp(1,ia)),aimag(zF_tmp(1,ia))
-      write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
-      write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
-    end do
+    !do ia=1,nion
+    !  write(*,'(1x,i4,2f20.10)') ia,real(zF_tmp(1,ia)),aimag(zF_tmp(1,ia))
+    !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
+    !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
+    !end do
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
     system%Force = system%Force + F_sum
-
+!
     do ia=1,nion
        call sym_vector_xyz( system%Force(:,ia) )
     end do
