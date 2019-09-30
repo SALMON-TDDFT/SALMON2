@@ -457,6 +457,9 @@ system%wtk(:) = 0.0d0
 call get_band_kpt( band_kpt, system )
 
 num_band_kpt = size( band_kpt, 2 )
+write(*,*) "num_band_kpt=",num_band_kpt
+
+open(100,file='band.dat')
 
 Band_Iteration : do iter_band_kpt = 1, num_band_kpt, system%nk
 
@@ -471,6 +474,7 @@ if ( comm_is_root(nproc_id_global) ) then
    write(*,'(1x,3x,2x,a30,2x,a30)') "kpoints","kpoints in Cartesian"
    do ik=iter_band_kpt,iter_band_kpt+system%nk-1
       write(*,'(1x,i3,2x,3f10.5,2x,3f10.5)') ik, band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
+      write(100,'(1x,i3,2x,3f10.5,2x,3f10.5)') ik, band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
    end do
 end if
 
@@ -705,6 +709,12 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 end do DFT_Iteration
 
+do ik=1,size(energy%esp,2)
+do iob=1,size(energy%esp,1)
+  write(100,*) ik,iob,(energy%esp(iob,ik,ispin),ispin=1,system%nspin)
+end do
+end do
+
 
 ! for OUT_data
 Vh = sVh%f
@@ -799,6 +809,8 @@ deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 
 end do Band_Iteration
+
+close(100)
 
 if ( iperiodic == 3 ) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 
