@@ -1,19 +1,21 @@
 module sym_sub
 
+  use salmon_communication, only: comm_get_globalinfo, comm_is_root
+
   implicit none
 
   private
   public :: init_sym_sub
 
-  logical,parameter,public :: use_symmetry=.false.
-  !logical,parameter,public :: use_symmetry=.true.
+  logical,public :: DISPLAY     =.false.
+  logical,public :: use_symmetry=.false.
 
+  character(8)   :: sym_file    ='sym.dat'
   real(8),allocatable :: SymMatR(:,:,:)
   real(8),allocatable,public :: SymMatA(:,:,:)
   real(8),allocatable,public :: SymMatB(:,:,:)
   real(8),public :: Amat(3,3), Ainv(3,3) ! Each column of Amat (Bmat)
   real(8),public :: Bmat(3,3), Binv(3,3) !   is the (reciprocal) lattice vector
-
   logical :: flag_init=.false.
 
 contains
@@ -25,15 +27,18 @@ contains
     real(8),intent(in) :: epdir(3)
     real(8) :: tmpmat(3,3), pi2
     real(8),allocatable :: work(:,:,:)
-    integer :: nsym, isym, n, j
+    integer :: ngid, npid, nprocs
+    integer :: nsym, isym, n, j, ierr
     logical :: ok(3)
 
-    if ( .not.use_symmetry ) return
-    if ( flag_init         ) return
+    if ( flag_init ) return
 
-    write(*,'(a60)') repeat("-",40)//" init_sym_sub(start)"
+    call comm_get_globalinfo( ngid, npid, nprocs )
+    DISPLAY = comm_is_root(npid)
 
-    call read_SymMat
+    if ( DISPLAY ) write(*,'(a60)') repeat("-",40)//" init_sym_sub(start)"
+
+    call read_SymMat( use_symmetry ); if ( .not.use_symmetry ) goto 90
     nsym=size(SymMatR,3)
 
     allocate( work(3,4,nsym) ); work=0.0d0
@@ -63,11 +68,13 @@ contains
     SymMatR=0.0d0
     SymMatR(:,:,1:nsym)=work(:,:,1:nsym)
 
-    do isym=1,nsym
-       write(*,'(1x,i4,3f10.5,2x,f10.5)') isym,(SymMatR(1,j,isym),j=1,4)
-       write(*,'(1x,4x,3f10.5,2x,f10.5)')      (SymMatR(2,j,isym),j=1,4)
-       write(*,'(1x,4x,3f10.5,2x,f10.5)')      (SymMatR(3,j,isym),j=1,4)
-    end do
+    if ( DISPLAY ) then
+       do isym=1,nsym
+         write(*,'(1x,i4,3f10.5,2x,f10.5)') isym,(SymMatR(1,j,isym),j=1,4)
+         write(*,'(1x,4x,3f10.5,2x,f10.5)')      (SymMatR(2,j,isym),j=1,4)
+         write(*,'(1x,4x,3f10.5,2x,f10.5)')      (SymMatR(3,j,isym),j=1,4)
+       end do
+    end if
 
     deallocate( work )
 
@@ -92,16 +99,25 @@ contains
        SymMatB(1:3,4,isym)=SymMatR(1:3,4,isym)
     end do
     flag_init=.true.
-    write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
+90  if ( DISPLAY ) write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
   end subroutine init_sym_sub
 
 
-  subroutine read_SymMat
+  subroutine read_SymMat( flag )
     implicit none
+    logical,intent(out) :: flag
     integer,parameter :: unit=1001
     integer :: i, j, nsym
 
-    open( unit, file='cif_sym.dat', status='old' )
+    inquire( FILE=sym_file, EXIST=flag )
+    if ( .not.flag ) then
+       if ( DISPLAY ) write(*,*) "symmetry-operation file ( "//sym_file//" ) can not be found."
+       return
+    else
+       if ( DISPLAY ) write(*,*) "symmetry-operation file is found ( "//sym_file//" )."
+    end if
+
+    open( unit, file='sym.dat', status='old' )
 
     i=0
     do

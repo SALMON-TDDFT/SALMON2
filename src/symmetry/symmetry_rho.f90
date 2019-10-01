@@ -28,8 +28,8 @@ contains
     if ( .not.use_symmetry ) return
 
     num=num_
-    is=is_
-    ie=ie_
+    is=is_-1
+    ie=ie_-1
     icomm_r=icomm_r_
     nsym=size(SymMatA,3)
 
@@ -177,16 +177,25 @@ write(*,*) "sym_rho(1)"
 
   subroutine sym_rho( rho )
     implicit none
-    real(8),intent(inout) :: rho(0:,0:,0:)
-    integer :: i1,i2,i3,j1,j2,j3,isym
+    real(8),intent(inout) :: rho(:,:,:)
+    integer :: i1,i2,i3,j1,j2,j3,isym,is1,is2,is3
     real(8) :: t1,t2,t3,r1,r2,r3,d1,d2,d3,fac
-    real(8),allocatable :: work(:,:,:)
+    real(8),allocatable :: work(:,:,:),wtmp(:,:,:)
     if ( .not.use_symmetry ) return
+!
     allocate( work(0:num(1)-1,0:num(2)-1,0:num(3)-1) ); work=0.0d0
+    allocate( wtmp(0:num(1)-1,0:num(2)-1,0:num(3)-1) ); wtmp=0.0d0
+    wtmp(is(1):ie(1),is(2):ie(2),is(3):ie(3))=rho(:,:,:)
+    call comm_summation( wtmp, work, size(work), icomm_r )
+    rho=0.0d0
+!
+    is1=is(1)-1
+    is2=is(2)-1
+    is3=is(3)-1
     fac=1.0d0/nsym
-    do i3=0,num(3)-1
-    do i2=0,num(2)-1
-    do i1=0,num(1)-1
+    do i3=is(3),ie(3)
+    do i2=is(2),ie(2)
+    do i1=is(1),ie(1)
        do isym=1,nsym
           t1=i1-num(1)*SymMatA(1,4,isym)
           t2=i2-num(2)*SymMatA(2,4,isym)
@@ -208,14 +217,12 @@ write(*,*) "sym_rho(1)"
              write(*,*) "yyyyy",r1,r2,r3
              stop "yyyyy"
           end if
-          work(i1,i2,i3)=work(i1,i2,i3)+fac*rho(j1,j2,j3)
+          rho(i1-is1,i2-is2,i3-is3)=rho(i1-is1,i2-is2,i3-is3)+fac*work(j1,j2,j3)
        end do
     end do
     end do
     end do
-    rho=work
     deallocate( work )
-write(*,*) "sym_rho(2)"
   end subroutine sym_rho
 #endif
 

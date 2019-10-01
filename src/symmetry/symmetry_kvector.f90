@@ -1,6 +1,6 @@
 module sym_kvector
 
-  use sym_sub, only: SymMatB, use_symmetry 
+  use sym_sub, only: SymMatB, use_symmetry, DISPLAY 
 
   implicit none
 
@@ -21,7 +21,7 @@ contains
 
     if ( .not.use_symmetry ) return
 
-    write(*,'(a60)') repeat("-",36)//" init_sym_kvector(start)"
+    if ( DISPLAY ) write(*,'(a60)') repeat("-",36)//" init_sym_kvector(start)"
 
     allocate( kvec(3,nkvec) ); kvec=0.0d0
 
@@ -66,17 +66,19 @@ contains
     end do
     nkvec=i
 
-    do i=1,nkvec
-       write(*,'(i4,f10.5,2x,3f10.5)') i, weight(i), kvec_io(:,i)
-    end do
-    write(*,*) "sum(weight)=",sum(weight)
+    if ( DISPLAY ) then
+       do i=1,nkvec
+          write(*,'(i4,f10.5,2x,3f10.5)') i, weight(i), kvec_io(:,i)
+       end do
+       write(*,*) "sum(weight)=",sum(weight)
+    end if
 
     deallocate( i_list )
     deallocate( k_list )
     deallocate( Skvec )
     deallocate( kvec )
 
-    write(*,'(a60)') repeat("-",38)//" init_sym_kvector(end)"
+    if ( DISPLAY ) write(*,'(a60)') repeat("-",38)//" init_sym_kvector(end)"
 
   end subroutine init_sym_kvector
 
