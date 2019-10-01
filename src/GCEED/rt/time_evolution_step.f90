@@ -117,7 +117,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
     end if
   case(3)
     if(use_singlescale=='n') then
-      system%vec_Ac(1:3) = A_ext(1:3,itt)
+      system%vec_Ac(1:3) = A_ext(1:3,itt) + A_ind(1:3,itt)
       call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
     end if
   end select
@@ -172,7 +172,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
       if(use_singlescale=='y') then
         stop "etrs mode for single-scale Maxwell-TDDFT is not implemented"
       else
-        system%vec_Ac(1:3) = A_ext(1:3,itt+1)
+        system%vec_Ac(1:3) = A_ext(1:3,itt+1) + A_ind(1:3,itt+1)
         call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
       end if
     end select
