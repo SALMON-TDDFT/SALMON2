@@ -31,6 +31,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use salmon_global, only: yn_want_communication_overlapping,yn_periodic
   use timer
+  use code_optimization, only: stencil_is_parallelized_by_omp
   implicit none
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
@@ -109,34 +110,69 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_begin(LOG_UHPSI_STENCIL)
     if(stencil%if_orthogonal .and. .not.if_singlescale) then
     ! orthogonal lattice (general)
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-        if(if_kAc) then
-          kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-          k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
-          k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
-          k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
-          k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
-        else
-          k_lap0 = stencil%coef_lap0
-          k_nabt = 0d0
-        end if
-
-        if (is_enable_overlapping) then
-          call zstencil_overlapped
-        else
-          do io=io_s,io_e
-          do ispin=1,Nspin
-            call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
-                          ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                          ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
-          end do
-          end do
-        end if
-      end do
-      end do
+    
+      if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
+      
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+          if(if_kAc) then
+            kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+            k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
+            k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
+            k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
+          else
+            k_lap0 = stencil%coef_lap0
+            k_nabt = 0d0
+          end if
+          if (is_enable_overlapping) then
+            call zstencil_overlapped
+          else
+            do io=io_s,io_e
+            do ispin=1,Nspin
+              call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                            ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                            ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+            end do
+            end do
+          end if
+        end do
+        end do
+      
+      else
+      ! OpenMP parallelization: k-point & orbital indices
+      
+!$omp parallel do collapse(4) default(none) &
+!$omp          private(im,ik,io,ispin,kAc,k_lap0,k_nabt) &
+!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          if(if_kAc) then
+            kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+            k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
+            k_nabt(:,1) = kAc(1) * stencil%coef_nab(:,1)
+            k_nabt(:,2) = kAc(2) * stencil%coef_nab(:,2)
+            k_nabt(:,3) = kAc(3) * stencil%coef_nab(:,3)
+          else
+            k_lap0 = stencil%coef_lap0
+            k_nabt = 0d0
+          end if
+          call zstencil(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                            ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                            ,V_local(ispin)%f,k_lap0,stencil%coef_lap,k_nabt)
+        end do
+        end do
+        end do
+        end do
+!$omp end parallel do
+        
+      end if
+      
     else if(stencil%if_orthogonal .and. if_singlescale) then
-    ! orthogonal lattice, sigle-scale Maxwell-TDDFT
+    ! orthogonal lattice, single-scale Maxwell-TDDFT
+    
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -149,8 +185,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end do
       end do
       end do
+      
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
+    
       if(.not.allocated(htpsi%ztmp)) allocate(htpsi%ztmp(mg%is_array(1):mg%ie_array(1) &
                                                         ,mg%is_array(2):mg%ie_array(2) &
                                                         ,mg%is_array(3):mg%ie_array(3),2) )
@@ -172,6 +210,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
       end do
       end do
+      
     end if
     call timer_end(LOG_UHPSI_STENCIL)
 
