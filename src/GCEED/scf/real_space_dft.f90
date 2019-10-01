@@ -973,7 +973,7 @@ subroutine band_information
   real(8),dimension(num_kpoints_rd) :: esp_vb_min,esp_vb_max,esp_cb_min,esp_cb_max
   if(comm_is_root(nproc_id_global) .and. itotfMST<itotMST) then
     no=size(energy%esp,1)
-    do ik=1,num_kpoints_rd
+    do ik=1,size(energy%esp,2)
       do is=1,size(energy%esp,3)
       do io=1,no
         esp_tmp(io+(is-1)*no)=energy%esp(io,ik,is)
