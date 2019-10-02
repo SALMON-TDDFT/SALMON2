@@ -91,8 +91,9 @@ type(s_mixing) :: mixing
 logical :: rion_update
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: tol_esp_diff
-integer :: iter_band_kpt, num_band_kpt
+integer :: iter_band_kpt, num_band_kpt, nref_band
 real(8),allocatable :: band_kpt(:,:)
+logical,allocatable :: check_conv_esp(:,:,:)
 
 if ( iperiodic /= 3 ) return
 
@@ -452,16 +453,27 @@ end if
 
 !---------------------------------------- Band Iteration
 
+
 system%wtk(:) = 0.0d0
 
-call get_band_kpt( band_kpt, system )
+call get_band_kpt( band_kpt, nref_band, system )
 
 num_band_kpt = size( band_kpt, 2 )
-write(*,*) "num_band_kpt=",num_band_kpt
+!write(*,*) "num_band_kpt=",num_band_kpt
 
+allocate( check_conv_esp(nref_band,system%nk,system%nspin) )
+check_conv_esp=.false.
+
+if ( comm_is_root(nproc_id_global) ) then
 open(100,file='band.dat')
+write(100,*) "Number_of_Bands:",system%no
+write(100,*) "Number_of_kpt_in_each_block:",system%nk
+write(100,*) "Number_of_blocks:",num_band_kpt/system%nk
+end if
 
 Band_Iteration : do iter_band_kpt = 1, num_band_kpt, system%nk
+
+check_conv_esp=.false.
 
 do ik=1,system%nk
    if ( info%ik_s <= ik .and. ik <= info%ik_e ) then
@@ -527,7 +539,9 @@ call timer_begin(LOG_GS_ITERATION)
 DFT_Iteration : do iter=1,iDiter(img)
 
 
-  if(sum1<threshold) cycle DFT_Iteration
+  if ( sum1<threshold ) cycle DFT_Iteration
+  if ( all(check_conv_esp) ) cycle DFT_Iteration
+
 
   Miter=Miter+1
 
@@ -569,6 +583,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 
     tol_esp_diff=1.0d-5
     esp_old=abs(esp_old-energy%esp)
+    check_conv_esp(:,:,:)=.false.
     do ispin=1,system%nspin
     do ik=1,system%nk
        i=0
@@ -577,6 +592,7 @@ DFT_Iteration : do iter=1,iDiter(img)
           if ( esp_old(iob,ik,ispin) <= tol_esp_diff ) then
              i=i+1
              j=max(j,iob)
+             if ( iob <= nref_band ) check_conv_esp(iob,ik,ispin)=.true.
           end if
        end do !io
        if ( ispin==1 .and. ik==1 ) then
@@ -709,12 +725,13 @@ DFT_Iteration : do iter=1,iDiter(img)
 
 end do DFT_Iteration
 
+if ( comm_is_root(nproc_id_global) ) then
 do ik=1,size(energy%esp,2)
 do iob=1,size(energy%esp,1)
   write(100,*) ik,iob,(energy%esp(iob,ik,ispin),ispin=1,system%nspin)
 end do
 end do
-
+end if
 
 ! for OUT_data
 Vh = sVh%f
@@ -810,7 +827,9 @@ call timer_end(LOG_GS_ITERATION)
 
 end do Band_Iteration
 
+if ( comm_is_root(nproc_id_global) ) then
 close(100)
+end if
 
 if ( iperiodic == 3 ) deallocate(stencil%vec_kAc,ppg%zekr_uV)
 
@@ -1098,99 +1117,216 @@ subroutine init_code_optimization
   end if
 end subroutine
 
-subroutine get_band_kpt( kpt, system )
+subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label )
+  implicit none
+  character(3),intent(out) :: lattice
+  integer,intent(out) :: nref_band
+  integer,allocatable,intent(inout) :: ndiv_segment(:)
+  real(8),allocatable,intent(inout) :: kpt(:,:)  ! given in reduced coordinates in reciprocal space
+  character(1),allocatable,intent(inout) :: kpt_label(:)
+  integer,parameter :: unit=100
+  integer :: i, num_of_segments, iformat
+  if ( comm_is_root(nproc_id_global) ) then
+     write(*,'(a50)') repeat("-",24)//"read_bandcalc_param(start)"
+  end if
+  open(unit,file='bandcalc.dat',status='old')
+  read(unit,*) lattice; write(*,*) lattice
+  read(unit,*) nref_band
+  if ( lattice == "non" ) then
+  else
+     close(unit)
+     if ( comm_is_root(nproc_id_global) ) then
+        write(*,'(a50)') repeat("-",23)//"read_bandcalc_param(return)"
+     end if
+     return
+  end if
+  read(unit,*) num_of_segments
+  allocate( ndiv_segment(num_of_segments) ); ndiv_segment=0
+  allocate( kpt(3,num_of_segments+1)      ); kpt=0.0d0
+  allocate( kpt_label(num_of_segments+1)  ); kpt_label=""
+  read(unit,*) ndiv_segment(:)
+  call check_data_format( unit, iformat )
+  select case( iformat )
+  case( 0 )
+     do i=1,num_of_segments+1
+        read(unit,*) kpt(1:3,i)
+     end do
+  case( 1 )
+     do i=1,num_of_segments+1
+        read(unit,*) kpt_label(i), kpt(1:3,i)
+     end do
+  end select
+  close(unit)
+  if ( comm_is_root(nproc_id_global) ) then
+     write(*,'(a50)') repeat("-",26)//"read_bandcalc_param(end)"
+  end if
+end subroutine read_bandcalc_param
+
+subroutine check_data_format( unit, iformat )
+  implicit none
+  integer,intent(in) :: unit
+  integer,intent(out) :: iformat
+  character(100) :: ccc
+  character(1) :: b(4)
+  read(unit,'(a)') ccc
+  backspace(unit)
+  read(ccc,*,END=9) b
+  iformat=1 ! 4 data in one line
+  return
+9 iformat=0 ! 3 data
+end subroutine check_data_format
+
+subroutine get_band_kpt( kpt, nref_band, system )
    implicit none
    real(8),allocatable,intent(inout) :: kpt(:,:)
+   integer,intent(out) :: nref_band ! convergence is checked up to nref_band
    type(s_dft_system),intent(in) :: system 
    real(8) :: G(3),X(3),M(3),R(3),L(3),W(3) ! XYZ coordinates of high-symmetry
    real(8) :: H(3),N(3),P(3),A(3),Q(3)      ! points in the 1st Brillouin zone
-   real(8) :: al,cl ! length of the real-space lattice vectors (a- anx c-axis)
-   real(8) :: dk(3),k0(3),pi,c1,c2,c3
-   character(3) :: lattice="fcc" !test
-   integer :: num_kpt_segment(10)
-   integer :: nk,nnk,iseg, max_num_segment,i,ik
-   pi=acos(-1.0d0)
-   select case( lattice )
-   case( "sc" , "SC"  ) ! G -> X -> M -> R -> G -> M
-      al=sqrt(sum(system%primitive_a(:,1)**2))
-      c1=2.0d0*pi/al
-      G=c1*(/ 0.0d0, 0.0d0, 0.0d0 /)
-      X=c1*(/ 0.5d0, 0.0d0, 0.0d0 /)
-      M=c1*(/ 0.5d0, 0.5d0, 0.0d0 /)
-      R=c1*(/ 0.5d0, 0.5d0, 0.5d0 /)
-   case( "fcc", "FCC" ) ! G -> X -> W -> G -> L -> X
-      al=sqrt(sum(system%primitive_a(:,1)**2))*sqrt(2.0d0)
-      c1=2.0d0*pi/al
-      G=c1*(/ 0.0d0, 0.0d0, 0.0d0 /)
-      X=c1*(/ 1.0d0, 0.0d0, 0.0d0 /)
-      W=c1*(/ 1.0d0, 0.5d0, 0.0d0 /)
-      L=c1*(/ 0.5d0, 0.5d0, 0.5d0 /)
-   case( "bcc", "BCC" ) ! G -> H -> N -> P -> G -> N
-      al=sqrt(sum(system%primitive_a(:,1)**2))*2.0d0/sqrt(3.0d0)
-      c1=2.0d0*pi/al
-      G=c1*(/ 0.0d0, 0.0d0, 0.0d0 /)
-      H=c1*(/ 0.0d0, 1.0d0, 0.0d0 /)
-      N=c1*(/ 0.5d0, 0.5d0, 0.0d0 /)
-      P=c1*(/ 0.5d0, 0.5d0, 0.5d0 /)
-   case( "hex", "HEX" ) ! G -> P -> Q -> G -> A -> L -> H -> P
-      al=sqrt(sum(system%primitive_a(:,1)**2))
-      cl=sqrt(sum(system%primitive_a(:,3)**2))
-      c1=2.0d0*pi/al
-      c2=1.0d0*pi/al
-      c3=1.0d0*pi/cl
-      G=(/ 0.0d0, 0.0d0, 0.0d0 /)
-      P=c1*(/ 2.0d0/3.0d0, 0.0d0, 0.0d0 /)
-      Q=c2*(/ 1.0d0, 1.0d0/sqrt(3.0d0), 0.0d0 /)
-      A=c3*(/ 0.0d0, 0.0d0, 1.0d0 /)
-      L=c2*(/ 1.0d0, 1.0d0/sqrt(3.0d0), c3/c2 /)
-      H=c1*(/ 2.0d0/3.0d0, 0.0d0, c3/c1 /)
-   case default
-      ! read from file
-   end select
+   real(8) :: al,cl ! length of the real-space lattice vectors (a- and c-axis)
+   real(8) :: dk(3),k0(3),k1(3),pi,c1,c2,c3
+   character(3) :: lattice
+   integer,allocatable :: ndiv_segment(:)
+   real(8),allocatable :: kpt_(:,:)
+   character(1),allocatable :: kpt_label(:)
+   integer :: nk,nnk,iseg,num_of_segments,i,ik
 
-   num_kpt_segment(:)=0
-   select case( lattice )
-   case( "fcc", "FCC" ) ! G -> X -> W -> G -> L -> X
-      num_kpt_segment(1:5) = (/  10,  10,  10,  10,  10 /)
-   case default
-      stop "@get_band_kpt(GCEED/scf/real_space_band.f90)"
-   end select
+   if ( comm_is_root(nproc_id_global) ) then
+      write(*,'(a60)') repeat("-",41)//"get_band_kpt(start)"
+   end if
+
+   pi=acos(-1.0d0)
+
+   call read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt_, kpt_label )
+
+   if ( allocated(ndiv_segment) ) then
+      if ( comm_is_root(nproc_id_global) ) then
+         write(*,*) "k points are generated from 'bandcalc.dat'"
+      end if
+      do ik=1,size(kpt_,2)
+         k0(:) = matmul( system%primitive_b, kpt_(:,ik) )
+         kpt_(:,ik) = k0(:)
+      end do
+      num_of_segments = size( ndiv_segment )
+   else if ( .not.allocated(ndiv_segment) ) then ! set default
+      if ( comm_is_root(nproc_id_global) ) then
+         write(*,*) "k points are generated by a default setting"
+      end if
+      select case( lattice )
+      case( "sc" , "SC"  ); num_of_segments=5
+      case( "fcc", "FCC" ); num_of_segments=5
+      case( "bcc", "BCC" ); num_of_segments=5
+      case( "hex", "HEX" ); num_of_segments=7
+      case default
+         write(*,*) "lattice=",lattice
+         write(*,*)"default setting is not available for this lattice" 
+         stop "stop@get_band_kpt"
+      end select
+      allocate( ndiv_segment(num_of_segments) ); ndiv_segment=10
+      allocate( kpt_(3,num_of_segments+1)     ); kpt_=0.0d0
+      allocate( kpt_label(num_of_segments+1)  ); kpt_label=""
+      select case( lattice )
+      case( "sc" , "SC"  ) ! G -> X -> M -> R -> G -> M  (5 segments)
+         al=sqrt(sum(system%primitive_a(:,1)**2))
+         c1=2.0d0*pi/al
+         G=c1*(/ 0.0d0, 0.0d0, 0.0d0 /)
+         X=c1*(/ 0.5d0, 0.0d0, 0.0d0 /)
+         M=c1*(/ 0.5d0, 0.5d0, 0.0d0 /)
+         R=c1*(/ 0.5d0, 0.5d0, 0.5d0 /)
+         kpt_(:,1)=G; kpt_label(1)="G"
+         kpt_(:,2)=X; kpt_label(2)="X"
+         kpt_(:,3)=M; kpt_label(3)="M"
+         kpt_(:,4)=R; kpt_label(4)="R"
+         kpt_(:,5)=G; kpt_label(5)="G"
+         kpt_(:,6)=M; kpt_label(6)="M"
+      case( "fcc", "FCC" ) ! G -> X -> W -> G -> L -> X  (5 segments)
+         al=sqrt(sum(system%primitive_a(:,1)**2))*sqrt(2.0d0)
+         c1=2.0d0*pi/al
+         G=c1*(/ 0.0d0, 0.0d0, 0.0d0 /)
+         X=c1*(/ 1.0d0, 0.0d0, 0.0d0 /)
+         W=c1*(/ 1.0d0, 0.5d0, 0.0d0 /)
+         L=c1*(/ 0.5d0, 0.5d0, 0.5d0 /)
+         kpt_(:,1)=G; kpt_label(1)="G"
+         kpt_(:,2)=X; kpt_label(2)="X"
+         kpt_(:,3)=W; kpt_label(3)="W"
+         kpt_(:,4)=G; kpt_label(4)="G"
+         kpt_(:,5)=L; kpt_label(5)="L"
+         kpt_(:,6)=X; kpt_label(6)="X"
+      case( "bcc", "BCC" ) ! G -> H -> N -> P -> G -> N  (5 segments)
+         al=sqrt(sum(system%primitive_a(:,1)**2))*2.0d0/sqrt(3.0d0)
+         c1=2.0d0*pi/al
+         G=c1*(/ 0.0d0, 0.0d0, 0.0d0 /)
+         H=c1*(/ 0.0d0, 1.0d0, 0.0d0 /)
+         N=c1*(/ 0.5d0, 0.5d0, 0.0d0 /)
+         P=c1*(/ 0.5d0, 0.5d0, 0.5d0 /)
+         kpt_(:,1)=G; kpt_label(1)="G"
+         kpt_(:,2)=H; kpt_label(2)="H"
+         kpt_(:,3)=N; kpt_label(3)="N"
+         kpt_(:,4)=P; kpt_label(4)="P"
+         kpt_(:,5)=G; kpt_label(5)="G"
+         kpt_(:,6)=N; kpt_label(6)="N"
+      case( "hex", "HEX" ) ! G -> P -> Q -> G -> A -> L -> H -> P  (7 segments)
+         al=sqrt(sum(system%primitive_a(:,1)**2))
+         cl=sqrt(sum(system%primitive_a(:,3)**2))
+         c1=2.0d0*pi/al
+         c2=1.0d0*pi/al
+         c3=1.0d0*pi/cl
+         G=(/ 0.0d0, 0.0d0, 0.0d0 /)
+         P=c1*(/ 2.0d0/3.0d0, 0.0d0, 0.0d0 /)
+         Q=c2*(/ 1.0d0, 1.0d0/sqrt(3.0d0), 0.0d0 /)
+         A=c3*(/ 0.0d0, 0.0d0, 1.0d0 /)
+         L=c2*(/ 1.0d0, 1.0d0/sqrt(3.0d0), c3/c2 /)
+         H=c1*(/ 2.0d0/3.0d0, 0.0d0, c3/c1 /)
+         kpt_(:,1)=G; kpt_label(1)="G"
+         kpt_(:,2)=P; kpt_label(2)="P"
+         kpt_(:,3)=Q; kpt_label(3)="Q"
+         kpt_(:,4)=G; kpt_label(4)="G"
+         kpt_(:,5)=A; kpt_label(5)="A"
+         kpt_(:,6)=L; kpt_label(6)="L"
+         kpt_(:,7)=H; kpt_label(7)="H"
+         kpt_(:,8)=P; kpt_label(8)="P"
+      end select
+   end if
 
    nk=system%nk
-   max_num_segment=1 ! test
-   nnk=sum( num_kpt_segment(1:max_num_segment) )
+   nnk=sum( ndiv_segment(1:num_of_segments) )
    if ( mod(nnk,nk) /= 0 ) nnk=nnk-mod(nnk,nk)+nk
-
-   write(*,*) "nk,nnk=",nk,nnk
 
    allocate( kpt(3,nnk) ); kpt=0.0d0
 
    i=0
-   do iseg=1,max_num_segment
-
-      k0(:)=G(:)
-      dk(:)=(X(:)-G(:))/num_kpt_segment(iseg)
-
-      do ik=0,num_kpt_segment(iseg)-1
+   do iseg=1,num_of_segments
+      k0(:)=kpt_(:,iseg)
+      k1(:)=kpt_(:,iseg+1)
+      dk(:)=( k1(:) - k0(:) )/ndiv_segment(iseg)
+      do ik=0,ndiv_segment(iseg)-1
          i=i+1
          kpt(:,i)=k0(:)+dk(:)*ik
       end do
-
    end do ! iseg
 
    if ( i < nnk ) then
       i=i+1
-      kpt(:,i)=k0(:)+dk(:)*num_kpt_segment(max_num_segment)
+      kpt(:,i)=kpt(:,i-1)+dk(:)
    end if
    if ( i < nnk ) then
       do ik=i+1,nnk
-         kpt(:,ik)=kpt(:,i-ik+i)
+         kpt(:,ik)=kpt(:,ik-1)+dk(:)
       end do
    end if
 
-   do i=1,size(kpt,2)
-      write(*,'(1x,i4,i4,3f10.5)') i,nnk,kpt(:,i)
-   end do
+   if ( comm_is_root(nproc_id_global) ) then
+      write(*,*) "Number of computed bands:",nref_band
+      write(*,*) "Whole number of bands(system%no):",system%no
+      write(*,*) "array size of wf for k points(system%nk):",nk
+      write(*,*) "Number of segments:",num_of_segments
+      write(*,*) "Total number of k points:",nnk 
+      write(*,*) "k points in Cartesian coordinates:"
+      do i=1,size(kpt,2)
+         write(*,'(1x,i4,3f10.5)') i,kpt(:,i)
+      end do
+      write(*,'(a60)') repeat("-",43)//"get_band_kpt(end)"
+   end if
 
 end subroutine get_band_kpt
 
