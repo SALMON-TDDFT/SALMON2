@@ -60,7 +60,6 @@ integer :: ix,iy,iz,ik
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
 real(8) :: sum0,sum1
 character(100) :: file_atoms_coo, comment_line
-complex(8),allocatable :: zpsi_tmp(:,:,:,:,:)
 real(8) :: rNebox1,rNebox2
 integer :: itmg,nspin
 
@@ -302,17 +301,11 @@ DFT_Iteration : do iter=1,iDiter(img)
 
   if(iscf_order==1)then
 
-    call scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,itotmst,mst, &
+    call scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
                        cg,ppg,V_local,  &
-                       iflag_diisjump,energy, &
-                       norm_diff_psi_stock, &
                        Miter,iDiterYBCG,   &
                        iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter,    &
-                       poisson,fg,sVh)
-
-    call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
-    call timer_end(LOG_CALC_EXC_COR)
+                       poisson,fg,sVh,xc_func,ppn,sVxc,energy)
 
     call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 

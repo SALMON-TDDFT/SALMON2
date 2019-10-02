@@ -19,13 +19,11 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,itotmst,mst, &
+subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
                cg,ppg,vlocal,  &
-               iflag_diisjump,energy, &
-               norm_diff_psi_stock,  &
                miter,iditerybcg,   &
                iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter, &
-               poisson,fg,sVh)
+               poisson,fg,sVh,xc_func,ppn,sVxc,energy)
   use inputoutput, only: iperiodic,method_min,method_mixing,mixrate
   use structures
   use timer
@@ -36,6 +34,7 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
   use density_matrix, only: calc_density
   use mixing_sub
   use hartree_sub, only: hartree
+  use salmon_xc
   implicit none
 
   type(s_rgrid),         intent(in)    :: lg
@@ -51,13 +50,9 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
   type(s_sendrecv_grid), intent(inout) :: srg
   type(s_sendrecv_grid), intent(inout) :: srg_ng
   type(s_pp_grid),       intent(in)    :: ppg
-  integer,               intent(in)    :: itotmst
   integer,               intent(in)    :: mst(2)
   type(s_cg),            intent(inout) :: cg
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
-  integer,               intent(inout) :: iflag_diisjump
-  type(s_dft_energy),    intent(inout) :: energy
-  real(8),               intent(out)   :: norm_diff_psi_stock(itotmst,1)
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditerybcg
   integer,               intent(in)    :: iflag_subspace_diag
@@ -68,6 +63,10 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
   type(s_poisson),       intent(inout) :: poisson
   type(s_reciprocal_grid),intent(inout):: fg
   type(s_scalar),        intent(inout) :: sVh
+  type(s_xc_functional), intent(in)    :: xc_func
+  type(s_pp_nlcc),       intent(in)    :: ppn
+  type(s_scalar),        intent(inout) :: sVxc(system%nspin)
+  type(s_dft_energy),    intent(inout) :: energy
   integer                              :: j
 
 ! solve Kohn-Sham equation by minimization techniques
@@ -130,6 +129,10 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
   call timer_begin(LOG_CALC_HARTREE)
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call timer_end(LOG_CALC_HARTREE)
+
+  call timer_begin(LOG_CALC_EXC_COR)
+  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+  call timer_end(LOG_CALC_EXC_COR)
 
 end subroutine scf_iteration
 
