@@ -208,7 +208,7 @@ module salmon_communication
     module procedure comm_bcast_array5d_dcomplex
   end interface
 
-  interface comm_allgatherv
+  interface comm_allgather
     ! 1-D array
     module procedure comm_allgather_array1d_logical
   end interface
@@ -679,8 +679,9 @@ contains
     integer, intent(out) :: outvalue
     integer, intent(in)  :: ngroup
     integer, optional, intent(in) :: dest
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_integer")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_integer")
     outvalue = invalue
   end subroutine
 
@@ -690,8 +691,9 @@ contains
     real(8), intent(out) :: outvalue
     integer, intent(in)  :: ngroup
     integer, optional, intent(in) :: dest
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_double")
     outvalue = invalue
   end subroutine
 
@@ -701,8 +703,9 @@ contains
     complex(8), intent(out) :: outvalue
     integer, intent(in)     :: ngroup
     integer, optional, intent(in) :: dest
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_dcomplex")
     outvalue = invalue
   end subroutine
 
@@ -713,8 +716,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array1d_integer")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array1d_integer")
     outvalue = invalue
   end subroutine
 
@@ -725,8 +729,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array1d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array1d_double")
     outvalue = invalue
   end subroutine
 
@@ -737,8 +742,9 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array1d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array1d_dcomplex")
     outvalue = invalue
   end subroutine
 
@@ -749,8 +755,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array2d_integer")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array2d_integer")
     outvalue = invalue
   end subroutine
 
@@ -761,8 +768,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array2d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array2d_double")
     outvalue = invalue
   end subroutine
 
@@ -773,8 +781,9 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array2d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array2d_dcomplex")
     outvalue = invalue
   end subroutine
 
@@ -785,8 +794,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array3d_integer")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array3d_integer")
     outvalue = invalue
   end subroutine
 
@@ -797,8 +807,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array3d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array3d_double")
     outvalue = invalue
   end subroutine
 
@@ -809,8 +820,9 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array3d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array3d_dcomplex")
     outvalue = invalue
   end subroutine
 
@@ -821,8 +833,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array4d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array4d_double")
     outvalue = invalue
   end subroutine
 
@@ -833,8 +846,9 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array4d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array4d_dcomplex")
     outvalue = invalue
   end subroutine
 
@@ -845,8 +859,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array5d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array5d_double")
     outvalue = invalue
   end subroutine
 
@@ -857,8 +872,9 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array5d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array5d_dcomplex")
     outvalue = invalue
   end subroutine
 
@@ -869,8 +885,9 @@ contains
     integer, intent(in)  :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array6d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array6d_double")
     outvalue = invalue
   end subroutine
 
@@ -881,8 +898,9 @@ contains
     integer, intent(in)     :: N, ngroup
     integer, optional, intent(in) :: dest
     UNUSED_VARIABLE(N)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(dest)
-    ABORT_MESSAGE(ngroup,"comm_summation_array6d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_summation_array6d_dcomplex")
     outvalue = invalue
   end subroutine
 
@@ -893,8 +911,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_integer")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_integer")
   end subroutine
 
   subroutine comm_bcast_double(val, ngroup, root)
@@ -903,8 +922,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_double")
   end subroutine
 
   subroutine comm_bcast_character(val, ngroup, root)
@@ -913,8 +933,9 @@ contains
     integer,      intent(in)           :: ngroup
     integer,      intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_character")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_character")
   end subroutine
 
   subroutine comm_bcast_logical(val, ngroup, root)
@@ -923,8 +944,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_logical")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_logical")
   end subroutine
 
   subroutine comm_bcast_array1d_integer(val, ngroup, root)
@@ -933,8 +955,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array1d_integer")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array1d_integer")
   end subroutine
 
   subroutine comm_bcast_array1d_double(val, ngroup, root)
@@ -943,8 +966,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array1d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array1d_double")
   end subroutine
 
   subroutine comm_bcast_array2d_integer(val, ngroup, root)
@@ -953,8 +977,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array2d_integer")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array2d_integer")
   end subroutine
 
   subroutine comm_bcast_array2d_double(val, ngroup, root)
@@ -963,8 +988,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array2d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array2d_double")
   end subroutine
 
   subroutine comm_bcast_array3d_double(val, ngroup, root)
@@ -973,8 +999,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array3d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array3d_double")
   end subroutine
   
   subroutine comm_bcast_array4d_double(val, ngroup, root)
@@ -983,8 +1010,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array4d_double")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array4d_double")
   end subroutine
 
   subroutine comm_bcast_array3d_dcomplex(val, ngroup, root)
@@ -993,8 +1021,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
   end subroutine
 
   subroutine comm_bcast_array5d_dcomplex(val, ngroup, root)
@@ -1003,8 +1032,9 @@ contains
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
   end subroutine
 
   subroutine comm_bcast_array1d_character(val, ngroup, root)
@@ -1013,8 +1043,9 @@ contains
     integer,      intent(in)           :: ngroup
     integer,      intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array1d_character")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array1d_character")
   end subroutine
 
   subroutine comm_bcast_array2d_character(val, ngroup, root)
@@ -1023,8 +1054,9 @@ contains
     integer,      intent(in)           :: ngroup
     integer,      intent(in), optional :: root
     UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    ABORT_MESSAGE(ngroup,"comm_bcast_array2d_character")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array2d_character")
   end subroutine
 
 
@@ -1034,7 +1066,8 @@ contains
     logical, intent(out) :: outvalue(:,:)
     integer, intent(in)  :: ngroup
     UNUSED_VARIABLE(ngroup)
-    outvalue(:) = invalue(:)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_allgather_array1d_logical")
+    outvalue(:,1) = invalue(:)
   end subroutine
 
 
@@ -1045,7 +1078,8 @@ contains
     integer, intent(in)  :: ncounts(:)
     integer, intent(in)  :: displs(:)
     integer, intent(in)  :: ngroup
-    ABORT_MESSAGE(ngroup,"comm_allgatherv_array1d_double")
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_allgatherv_array1d_double")
     outvalue(displs(1)+1:displs(1)+ncounts(1)-1) = invalue(1:ncounts(1)-1)
   end subroutine
 
@@ -1056,8 +1090,9 @@ contains
     complex(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: ngroup
     integer, intent(in)  :: ncount
+    UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(ncount)
-    ABORT_MESSAGE(ngroup,"comm_alltoall_array1d_complex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_alltoall_array1d_complex")
     outvalue = invalue
   end subroutine
  
@@ -1068,7 +1103,8 @@ contains
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
     UNUSED_VARIABLE(N)
-    ABORT_MESSAGE(ngroup,"comm_get_min_array1d_double")
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_get_min_array1d_double")
     outvalue = invalue
   end subroutine
 
@@ -1078,7 +1114,8 @@ contains
     real(8), intent(out) :: outvalue(:)
     integer, intent(in)  :: N, ngroup
     UNUSED_VARIABLE(N)
-    ABORT_MESSAGE(ngroup,"comm_get_max_array1d_double")
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_get_max_array1d_double")
     outvalue = invalue
   end subroutine
 
@@ -1087,7 +1124,8 @@ contains
     type(comm_maxloc_type), intent(in)  :: invalue
     type(comm_maxloc_type), intent(out) :: outvalue
     integer, intent(in)                 :: ngroup
-    ABORT_MESSAGE(ngroup,"comm_get_maxloc")
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_get_maxloc")
     outvalue = invalue
   end subroutine
 
@@ -1096,7 +1134,8 @@ contains
     logical, intent(in)  :: invalue
     logical, intent(out) :: outvalue
     integer, intent(in)  :: ngroup
-    ABORT_MESSAGE(ngroup,"comm_logical_and_scalar")
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_logical_and_scalar")
     outvalue = invalue
   end subroutine
 
