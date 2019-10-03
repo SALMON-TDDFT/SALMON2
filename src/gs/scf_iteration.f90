@@ -24,7 +24,7 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
                miter,iditerybcg,   &
                iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter, &
                poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-  use inputoutput, only: iperiodic,method_min,method_mixing,mixrate
+  use inputoutput, only: calc_mode,iperiodic,method_min,method_mixing,mixrate
   use structures
   use timer
   use rmmdiis_sub
@@ -126,13 +126,18 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
     srho%f = srho%f + srho_s(j)%f
   end do
 
-  call timer_begin(LOG_CALC_HARTREE)
-  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
-  call timer_end(LOG_CALC_HARTREE)
 
-  call timer_begin(LOG_CALC_EXC_COR)
-  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
-  call timer_end(LOG_CALC_EXC_COR)
+  if(calc_mode/='DFT_BAND')then
+
+    call timer_begin(LOG_CALC_HARTREE)
+    call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+    call timer_end(LOG_CALC_HARTREE)
+  
+    call timer_begin(LOG_CALC_EXC_COR)
+    call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+    call timer_end(LOG_CALC_EXC_COR)
+
+  end if
 
 end subroutine scf_iteration
 

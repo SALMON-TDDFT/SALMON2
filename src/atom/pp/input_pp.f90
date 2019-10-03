@@ -992,7 +992,7 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   logical,intent(in) :: flag_nlcc_element(nelem)
   real(8),intent(in) :: rhor_nlcc(0:pp%nrmax0,0:2)
   integer :: i,l,l0,ll
-  real(8) :: r1,r2,r3,r4,const,tmp,dr
+  real(8) :: r1,r2,r3,r4,const
 
 ! copy the radial wave functions
   l0=0

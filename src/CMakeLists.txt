@@ -15,6 +15,9 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/maxwell)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/common)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ext)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/misc)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/symmetry)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/so)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/plusu)
 
 # Executable binary
 add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})

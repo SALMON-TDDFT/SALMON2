@@ -41,7 +41,6 @@ contains
     !
     integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e
     integer :: ilma,ia,j,ix,iy,iz,Nlma,jlma,iprj,Nproj_pairs
-    real(8) :: vtmp=(0.0d0,0.0d0)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8) :: phipsi,wrk
     complex(8),allocatable :: phipsi_lma(:)
@@ -149,7 +148,6 @@ contains
 
   subroutine calc_phipsi_rdivided(nspin,info,ppg,tpsi,phipsibox,phipsibox2)
     use structures
-    use salmon_global, only: natom
     use timer
     use salmon_communication, only: comm_summation
 #ifdef SALMON_ENABLE_MPI3
@@ -165,9 +163,8 @@ contains
     complex(8)    ,allocatable :: phipsibox2(:,:,:,:,:)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-    integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns,iproj
+    integer :: ilma,ia,j,ix,iy,iz,Nlma,iproj
     complex(8) :: phipsi
-    integer :: ireqs(natom), nreq
 
     call timer_begin(LOG_UHPSI_PSEUDO)
 

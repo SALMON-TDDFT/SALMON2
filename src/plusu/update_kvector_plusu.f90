@@ -17,7 +17,7 @@ contains
     integer,intent(in) :: ik_s,ik_e
     real(8),intent(in) :: kAc(3,ik_s:ik_e)
     !
-    integer :: ilma,iatom,j,ik,Nlma,jangl,ispin
+    integer :: ilma,iatom,j,ik,Nlma
     real(8) :: x,y,z,k(3),kr
     complex(8) :: conjg_ekr
 

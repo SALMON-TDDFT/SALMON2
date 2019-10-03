@@ -36,8 +36,7 @@ program main
 
   !GCEED: (main)
   select case(theory)
-  case('DFT')                         ; call main_dft
-  case('DFT_BAND')                    ; call real_space_band
+  case('DFT','DFT_BAND')              ; call main_dft
   case('DFT_MD')                      ; call arted      !temporally
   case('TDDFT_response','TDDFT_pulse'); call main_tddft
   case('Single_scale_Maxwell_TDDFT'  ); call main_tddft

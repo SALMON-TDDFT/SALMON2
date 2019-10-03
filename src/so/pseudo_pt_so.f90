@@ -160,7 +160,6 @@ write(*,*) "allocated",allocated(ppg%zekr_uV_so)
 
   subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
-  use salmon_global, only: natom
   use timer
   use salmon_communication, only: comm_summation
 #ifdef SALMON_ENABLE_MPI3
@@ -175,9 +174,8 @@ write(*,*) "allocated",allocated(ppg%zekr_uV_so)
   complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
   complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns
+  integer :: ilma,ia,j,ix,iy,iz,Nlma
   complex(8) :: uVpsi
-  integer :: ireqs(natom), nreq
 
   call timer_begin(LOG_UHPSI_PSEUDO)
 

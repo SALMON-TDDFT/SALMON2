@@ -544,7 +544,7 @@ module sendrecv_grid
   subroutine create_sendrecv_neig_ng(neig_ng, info_field, iperiodic)
     use structures, only: s_field_parallel
     use salmon_communication, only: comm_proc_null
-    use salmon_global, only: process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_ob,nproc_k
+    use salmon_global, only: process_allocation,nproc_domain_orbital,nproc_domain_general
     implicit none
     integer, intent(out) :: neig_ng(1:2, 1:3)
     type(s_field_parallel), intent(in) :: info_field

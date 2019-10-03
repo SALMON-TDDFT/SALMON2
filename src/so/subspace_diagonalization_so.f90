@@ -29,7 +29,7 @@ contains
     use structures
     use salmon_communication, only: comm_summation,comm_bcast
     use timer
-    use hpsi_sub
+    use hamiltonian
     use eigen_subdiag_sub
     use sendrecv_grid, only: s_sendrecv_grid
     use pack_unpack, only: copy_data
@@ -192,8 +192,8 @@ contains
     use structures
     use salmon_communication, only: comm_summation,comm_bcast
     use timer
-    use hpsi_sub
-    use eigen_subdiag_periodic_sub
+    use hamiltonian
+    use eigen_subdiag_sub
     use sendrecv_grid, only: s_sendrecv_grid
     use pack_unpack, only: copy_data
     implicit none
@@ -206,7 +206,7 @@ contains
     type(s_orbital)            :: spsi,shpsi
     type(s_sendrecv_grid)      :: srg
     !
-    integer :: nspin,no,nk,ik,io,io1,io2,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,ierr
+    integer :: nspin,no,nk,ik,io1,io2,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,ierr
     complex(8) :: cbox
     complex(8),allocatable :: mat1(:,:,:), mat2(:,:,:), evec(:,:,:)
     complex(8),allocatable :: wf_io1(:,:,:,:)

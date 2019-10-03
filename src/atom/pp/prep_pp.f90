@@ -34,7 +34,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   type(s_field_parallel)  ,intent(in) :: info_field
   type(s_reciprocal_grid)             :: fg
   type(s_poisson)                     :: poisson
-  type(s_pp_info)         ,intent(in) :: pp
+  type(s_pp_info)         ,intent(inout) :: pp
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: sVpsl
   !
@@ -118,7 +118,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
                flag_use_grad_wf_on_force,property,system%Hvol)
                
   if ( SPIN_ORBIT_ON ) then
-    call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,flag_use_grad_wf_on_force,property,Hvol)
+    call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,flag_use_grad_wf_on_force,property,system%Hvol)
   end if
 
   if ( PLUS_U_ON ) then

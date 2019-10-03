@@ -28,12 +28,13 @@ module density_matrix_and_energy_plusU_sub
 
 contains
 
-  subroutine calc_density_matrix_and_energy_plusU( psi, ppg, info, E_U )
-    use structures, only: s_orbital, s_pp_grid, s_orbital_parallel
+  subroutine calc_density_matrix_and_energy_plusU( psi, ppg, info, system, E_U )
+    use structures, only: s_orbital, s_pp_grid, s_orbital_parallel, s_dft_system
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital_parallel),intent(in) :: info
+    type(s_dft_system),intent(in) :: system
     real(8),intent(out) :: E_U
     integer :: Nlma,Nspin
     integer :: im,ik,io,ispin,ilma,jlma,iprj,Nproj_pairs
@@ -43,7 +44,7 @@ contains
     complex(8),allocatable :: phipsi_lma(:)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
 
-    Nspin=size(info%occ,2)
+    Nspin=system%nspin
     Nproj_pairs=size(ppg%proj_pairs_ao,2)
     Nlma=size(ppg%ia_tbl_ao)
 
@@ -82,7 +83,7 @@ contains
     do io=io_s,io_e
     do ispin=1,Nspin
 
-      if ( abs(info%occ(io,ik,ispin,im)) < 1.d-10 ) cycle
+      if ( abs(system%rocc(io,ik,ispin) * system%wtk(ik)) < 1.d-10 ) cycle
 
       do ilma=1,Nlma
         ia = ppg%ia_tbl_ao(ilma)
@@ -106,7 +107,7 @@ contains
         m1= ppg%proj_pairs_info_ao(4,iprj)
         m2= ppg%proj_pairs_info_ao(5,iprj)
         dm_mms_nla(m1,m2,ispin,n,l,a) = dm_mms_nla(m1,m2,ispin,n,l,a) &
-           + info%occ(io,ik,ispin,im) * phipsi_lma(ilma)*phipsi_lma(jlma)
+           + system%rocc(io,ik,ispin) * system%wtk(ik) * phipsi_lma(ilma)*phipsi_lma(jlma)
       end do
 
     end do !ispin

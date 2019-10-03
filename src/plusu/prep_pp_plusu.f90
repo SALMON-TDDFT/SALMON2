@@ -162,7 +162,7 @@ contains
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
   subroutine calc_uv_plusU(pp,ppg,flag_use_grad_wf_on_force,property)
-    use salmon_global, only : natom, kion, iperiodic
+    use salmon_global, only : natom, kion
     use structures,    only : s_pp_info, s_pp_grid
     implicit none
     type(s_pp_info),intent(inout) :: pp
@@ -174,7 +174,7 @@ contains
     real(8) :: save_upptbl_c(pp%nrmax,0:2*pp%lmax+1,natom)
     real(8) :: save_upptbl_d(pp%nrmax,0:2*pp%lmax+1,natom)
     integer :: a,ik,j,l,lm,m,ll,l0
-    integer :: ilma,intr,ir,lma
+    integer :: ilma,intr,ir
     real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
     real(8) :: dupptbl_a(pp%nrmax,0:2*pp%lmax+1), dupptbl_b(pp%nrmax,0:2*pp%lmax+1)
     real(8) :: dupptbl_c(pp%nrmax,0:2*pp%lmax+1), dupptbl_d(pp%nrmax,0:2*pp%lmax+1)

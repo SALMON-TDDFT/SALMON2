@@ -84,7 +84,6 @@ write(*,*) "----------- set_nlma_so"
     integer,intent(out) :: lma_tbl_so(:,:)
     integer,intent(out) :: ia_tbl_so(:)
     type(s_pp_info) :: pp
-    type(s_pp_grid) :: ppg
     integer :: lm,lma
     integer :: a,ik,m,l,l0,ll
 write(*,*) "----------- set_lma_tbl"
@@ -129,7 +128,7 @@ write(*,*) "----------- set_lma_tbl"
   real(8) :: save_udvtbl_c(pp%nrmax,0:2*pp%lmax+1,natom)
   real(8) :: save_udvtbl_d(pp%nrmax,0:2*pp%lmax+1,natom)
   integer :: a,ik,j,l,lm,m,ll,l0
-  integer :: ilma,intr,ir,lma, j_angular_momentum
+  integer :: ilma,intr,ir,j_angular_momentum
   real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
   real(8) :: dudvtbl_a(pp%nrmax,0:2*pp%lmax+1), dudvtbl_b(pp%nrmax,0:2*pp%lmax+1)
   real(8) :: dudvtbl_c(pp%nrmax,0:2*pp%lmax+1), dudvtbl_d(pp%nrmax,0:2*pp%lmax+1)

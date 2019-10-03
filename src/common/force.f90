@@ -48,10 +48,11 @@ contains
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: phipsibox(:,:),phipsibox2(:,:)
-    complex(8),allocatable :: dphipsi_lma(:,:),phipsi_lma(:)
+    complex(8),allocatable :: dphipsi_lma(:,:)
     complex(8) :: ddm_mms_nla(3), phipsi, dphipsi(3)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
+    integer :: Norb,iorb
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
@@ -68,6 +69,7 @@ contains
     ik_e = info%ik_e
     io_s = info%io_s
     io_e = info%io_e
+    Norb = system%Nspin*info%numo*info%numk
 
     Nlma = ppg%Nlma
 
@@ -191,7 +193,7 @@ contains
           m1 = ppg%proj_pairs_info_ao(4,iprj)
           m2 = ppg%proj_pairs_info_ao(5,iprj)
           ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
-               info%occ(io,ispin,ik,im) &
+               system%rocc(io,ispin,ik)*system%wtk(ik) &
                *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,iorb)) &
                 + phipsibox2(ilma,iorb)*conjg(dphipsi_lma(:,jlma)) )
           if( m1 == m2 )then

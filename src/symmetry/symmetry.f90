@@ -28,7 +28,7 @@ contains
     real(8) :: tmpmat(3,3), pi2
     real(8),allocatable :: work(:,:,:)
     integer :: ngid, npid, nprocs
-    integer :: nsym, isym, n, j, ierr
+    integer :: nsym, isym, n, j
     logical :: ok(3)
 
     if ( flag_init ) return

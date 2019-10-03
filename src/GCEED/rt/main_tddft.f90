@@ -82,7 +82,7 @@ type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 type(s_ofile) :: ofile
 
-integer :: iob, i1,i2,i3, ik,iik,jspin
+integer :: iob, i1,i2,i3, iik,jspin
 integer :: idensity, idiffDensity, ielf
 integer :: jj,nn, iene, nntime, ix,iy,iz
 real(8) :: rbox_array(10), rbox_array2(10)
