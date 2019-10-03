@@ -23,11 +23,11 @@ contains
 !===================================================================================================================================
 
 subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
-  use inputoutput, only: sysname,num_datafiles_out
+  use inputoutput, only: num_datafiles_out
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use scf_data, only: file_out_gs_bin
+  use scf_data, only: file_out_gs_bin, file_out_gs_num_bin
   implicit none
   type(s_rgrid), intent(in)    :: lg, mg, ng
   type(s_dft_system),intent(in) :: system
@@ -39,11 +39,9 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   type(s_rgrid)                :: dg
   integer :: is,iob,ik,ix,iy,iz
   integer :: i,iu1_w,iu2_w
-  integer :: myrank_datafiles
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
   complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
-  character(8) :: fileNumber_data
-  character(100) :: file_out_gs_num_bin, dir_file_out
+  character(100) :: dir_file_out, dir_file_num_out
   character(*)   :: odir
   integer :: ifilenum_data
   integer :: version_num(2)
@@ -93,20 +91,10 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   end if
   
   !open file iu2_w
-  if(num_datafiles_out==1)then
-  !
-  else if(num_datafiles_out==-1)then
-    write(fileNumber_data, '(i6.6)') myrank_datafiles
-    file_out_gs_num_bin = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
-    dir_file_out = trim(odir)//file_out_gs_num_bin
-    open(ifilenum_data,file=dir_file_out,form='unformatted')
-  else
-    if(num_datafiles_out>1.and.nproc_id_global<num_datafiles_out)then
-      write(fileNumber_data, '(i6.6)') myrank_datafiles
-      file_out_gs_num_bin = trim(adjustl(sysname))//"_gs_"//trim(adjustl(fileNumber_data))//".bin"
-      dir_file_out = trim(odir)//file_out_gs_num_bin
-      open(ifilenum_data,file=dir_file_out,form='unformatted')
-    end if
+  if(num_datafiles_out==-1.or.   &
+     (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
+    dir_file_num_out = trim(odir)//file_out_gs_num_bin
+    open(iu2_w,file=dir_file_num_out,form='unformatted')
   end if
   
   !write wavefunction
@@ -312,7 +300,7 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use scf_data, only: file_in_gs_bin
+  use scf_data, only: file_in_gs_bin, file_in_gs_num_bin
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -387,6 +375,12 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(roccbox(mo,mk,system%nspin))
+  
+  !open file iu2_r
+  if(num_datafiles_in==-1.or.   &
+     (num_datafiles_in>1.and.nproc_id_global<num_datafiles_in))then
+    open(ifilenum_data,file=file_in_gs_num_bin,form='unformatted')
+  end if
   
   if(num_datafiles_in==-1)then
     if(iperiodic==0)then
@@ -505,6 +499,12 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     end do
   end if
   
+  !close file iu2_r
+  if(num_datafiles_in==-1.or.   &
+     (num_datafiles_in>1.and.nproc_id_global<num_datafiles_in))then
+    close(iu2_r)
+  end if
+  
   !!!!!!!!!!!!!!
   ! occupation !
   !!!!!!!!!!!!!!
@@ -609,7 +609,6 @@ subroutine set_dg(lg,mg,dg,num_datafiles)
   integer :: i,j,j1,j2,j3
   integer :: ibox
   integer :: nproc_xyz_datafile(3)
-  integer :: myrank_datafiles
 
   if(num_datafiles==1)then
     dg%is(1:3) =lg%is(1:3)
@@ -621,8 +620,6 @@ subroutine set_dg(lg,mg,dg,num_datafiles)
     dg%num(1:3)=mg%num(1:3)
   else
     if(nproc_id_global<num_datafiles)then
-      myrank_datafiles=nproc_id_global
-  
       ibox=1
       nproc_xyz_datafile=1
       do i=1,19
@@ -638,7 +635,7 @@ subroutine set_dg(lg,mg,dg,num_datafiles)
       do j2=0,nproc_xyz_datafile(2)-1
       do j1=0,nproc_xyz_datafile(1)-1
         ibox = j1 + nproc_xyz_datafile(1)*j2 + nproc_xyz_datafile(1)*nproc_xyz_datafile(2)*j3 
-        if(ibox==myrank_datafiles)then
+        if(ibox==nproc_id_global)then
           dg%is(1)=j1*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)
           dg%ie(1)=(j1+1)*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)-1
           dg%is(2)=j2*lg%num(2)/nproc_xyz_datafile(2)+lg%is(2)
