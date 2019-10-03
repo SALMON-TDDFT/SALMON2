@@ -267,7 +267,7 @@ end subroutine
 subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
   use structures, only: s_dft_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
     s_orbital_parallel, s_field_parallel, s_scalar, s_pp_info
-  use salmon_global, only: iperiodic,step_update_ps,step_update_ps2
+  use salmon_global, only: step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
   use salmon_pp, only: calc_nlcc
   use prep_pp_sub, only: init_ps,dealloc_init_ps
@@ -279,7 +279,7 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
   type(s_poisson),intent(inout) :: poisson
   type(s_reciprocal_grid) :: fg
   type(s_stencil),intent(inout) :: stencil
-  type(s_pp_info),intent(in) :: pp
+  type(s_pp_info),intent(inout) :: pp
   type(s_pp_nlcc) :: ppn
   type(s_pp_grid) :: ppg
   type(s_scalar) :: sVpsl

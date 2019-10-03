@@ -25,6 +25,8 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root
   use salmon_global, only: iperiodic,yn_ffte
+  use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
+  use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   implicit none
   type(s_rgrid)           ,intent(in) :: lg,mg,ng
   type(s_dft_system)      ,intent(in) :: system
@@ -32,7 +34,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   type(s_field_parallel)  ,intent(in) :: info_field
   type(s_reciprocal_grid)             :: fg
   type(s_poisson)                     :: poisson
-  type(s_pp_info)         ,intent(in) :: pp
+  type(s_pp_info)         ,intent(inout) :: pp
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: sVpsl
   !
@@ -56,6 +58,8 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
     write(*,*) ''
     write(*,*) '============init_ps=============='
   endif
+  
+  ppg%Hvol = system%Hvol
 
   hx = system%Hgs(1)
   hy = system%Hgs(2)
@@ -112,6 +116,14 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
                lx,ly,lz,nl,hx,hy,hz,  &
                flag_use_grad_wf_on_force,property,system%Hvol)
+               
+  if ( SPIN_ORBIT_ON ) then
+    call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,flag_use_grad_wf_on_force,property,system%Hvol)
+  end if
+
+  if ( PLUS_U_ON ) then
+    call calc_uv_plusU( pp, ppg, flag_use_grad_wf_on_force, property )
+  end if
 
   select case(iperiodic)
   case(0)

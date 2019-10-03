@@ -17,7 +17,8 @@
 module input_pp_sub
   implicit none
 
-  logical,private :: flag_abinitpsp8=.false.
+  logical,private :: flag_potential_is_given=.true.  ! Pseudopotential data is given as the potentitals and the wavefunctions
+  logical,private :: flag_beta_proj_is_given=.false. ! Pseudopotential data is given as projection operators
 
 contains
 
@@ -64,7 +65,7 @@ subroutine input_pp(pp,hx,hy,hz)
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
   real(8),intent(in) :: hx,hy,hz
-  integer :: ik,l,i,l0,ll
+  integer :: ik,l,i,l0,ll,nprj,i1,nr
   real(8) :: rrc(0:pp%lmax0)
   real(8) :: r1
   real(8),allocatable :: rhor_nlcc(:,:)   !zero in radial index for taking derivative
@@ -95,14 +96,20 @@ subroutine input_pp(pp,hx,hy,hz)
         call read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
       case('FHI')
         call read_ps_fhi(pp,rrc,ik,ps_file)
+      case('ADPACK')
+        call read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 !      case('ATOM')      ; call read_ps_ATOM
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'
       end select
 
+      if ( flag_beta_proj_is_given ) flag_potential_is_given=.false.
+
+      if ( all(pp%nproj(:,ik)==0) ) pp%nproj(0:pp%mlps(ik),ik)=1
+
 ! outside mr (needed for isolated systems)
       if(pp%nrmax>pp%mr(ik))then
         do i=pp%mr(ik)+1,pp%nrmax
-          pp%vpp(i,0:pp%mlps(ik))=-pp%zps(ik)/pp%rad(i,ik)
+          if ( pp%rad(i,ik)>0.0d0 ) pp%vpp(i,0:pp%mlps(ik))=-pp%zps(ik)/pp%rad(i,ik) !iwata
           pp%upp(i,0:pp%mlps(ik))=0.d0
         end do
       end if
@@ -118,7 +125,29 @@ subroutine input_pp(pp,hx,hy,hz)
       pp%rloc(ik)=pp%rps(ik)
       pp%radnl(:,ik)=pp%rad(:,ik)
 
-      if( flag_abinitpsp8 )then
+! Set meaning domain in the arrays of radial wave functions
+      i1=0
+      r1=0.0d0
+      nr=ubound(pp%upp,1)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        do i=nr,1,-1
+          if ( abs(pp%upp(i,l)) > 1.d-10 ) then
+            r1=max( r1, pp%rad(i+1,ik) )
+            i1=max(i+1,i1)
+            exit
+          end if
+        end do
+      end do
+      l0=l
+      end do
+!      pp%rps_ao(ik)=r1
+!      pp%nrps_ao(ik)=i1
+      pp%rps_ao(ik)=pp%rps(ik)
+      pp%nrps_ao(ik)=pp%nrps(ik)
+
+      if( flag_beta_proj_is_given )then
         l0=0
         do ll=0,pp%mlps(ik)
         do l=l0,l0+pp%nproj(ll,ik)-1
@@ -129,6 +158,19 @@ subroutine input_pp(pp,hx,hy,hz)
           end if
           if ( abs(pp%anorm(l,ik)) < Eps0 ) pp%inorm(l,ik)=0
           pp%anorm(l,ik) = sqrt( pp%anorm(l,ik) )
+        end do
+        l0=l
+        end do
+        l0=0
+        do ll=0,pp%mlps(ik)
+        do l=l0,l0+pp%nproj(ll,ik)-1
+          pp%inorm_so(l,ik) = 1
+          if( pp%anorm_so(l,ik) < 0.0d0 )then
+            pp%anorm_so(l,ik) = -pp%anorm_so(l,ik)
+            pp%inorm_so(l,ik) = -1
+          end if
+          if ( abs(pp%anorm_so(l,ik)) < Eps0 ) pp%inorm_so(l,ik)=0
+          pp%anorm_so(l,ik) = sqrt( pp%anorm_so(l,ik) )
         end do
         l0=l
         end do
@@ -189,8 +231,9 @@ subroutine input_pp(pp,hx,hy,hz)
       write(4,*) "# Mr=",pp%mr(ik)
       write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
       write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
+      nprj=sum(pp%nproj(:,ik))
       do i=1,pp%nrps(ik)
-        write(4,'(30e21.12)') pp%rad(i,ik),(pp%udvtbl(i,l,ik),l=0,pp%mlps(ik)),(pp%dudvtbl(i,l,ik),l=0,pp%mlps(ik))
+        write(4,'(30e21.12)') pp%rad(i,ik),(pp%udvtbl(i,l,ik),l=0,nprj-1),(pp%dudvtbl(i,l,ik),l=0,nprj-1)
       end do
       close(4)
 
@@ -440,7 +483,7 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   real(8) :: rchrg,fchrg,qchrg,sum_rho_pp,sum_rho_nlcc,rho_tmp,r_tmp
   character(1) :: dummy_text
 
-  flag_abinitpsp8 = .true.
+  flag_beta_proj_is_given = .true.
 
   open(4,file=ps_file,status='old')
 ! header
@@ -609,6 +652,160 @@ subroutine read_ps_fhi(pp,rrc,ik,ps_file)
 
   return
 end subroutine read_ps_fhi
+
+subroutine read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+  use structures,only : s_pp_info
+  use salmon_global,only : nelem
+  implicit none
+  type(s_pp_info),intent(inout) :: pp
+  real(8),intent(out) :: rhor_nlcc(0:pp%nrmax0,0:2)
+  logical,intent(inout) :: flag_nlcc_element(nelem)
+  integer,intent(in) :: ik
+  real(8),intent(out) :: rrc(0:pp%lmax0)
+  character(256),intent(in) :: ps_file
+  character(50) :: cbuf
+  integer :: nprj,iprj,ll,icount,l,l0,i
+  real(8) :: rdummy,r,x1,dx
+  real(8),allocatable :: x(:)
+
+  flag_beta_proj_is_given = .true.
+
+  open(4,file=ps_file,status="old")
+
+  pp%nproj(:,ik)=0
+
+  do
+    read(4,*) cbuf
+    if ( cbuf == "valence.electron" ) then
+      backspace(4)
+      read(4,*) cbuf, pp%zion
+      pp%zps(ik)=nint(pp%zion)
+    end if
+    if ( cbuf == "<project.energies" ) then
+      read(4,*) nprj
+      do iprj=0,nprj-1
+        read(4,*) ll, pp%anorm(iprj,ik), pp%anorm_so(iprj,ik)
+        pp%nproj(ll,ik)=pp%nproj(ll,ik)+1
+      end do
+      pp%mlps(ik)=ll
+      exit
+    end if
+  end do
+
+  pp%lref(ik)=ubound(pp%vpp,2)
+
+  nprj=sum( pp%nproj(:,ik) )
+
+  allocate( x(lbound(pp%rad,1):ubound(pp%rad,1)) ); x=0.0d0
+
+  icount=-1
+  do
+    read(4,*) cbuf
+    if ( cbuf == "<Pseudo.Potentials" ) then
+      icount=0
+      cycle
+    end if
+    if ( icount >= 0 ) then
+      if ( cbuf == "Pseudo.Potentials>" ) then
+        exit
+      else
+        icount=icount+1
+        backspace(4)
+        read(4,*) x(icount), pp%rad(icount,ik), pp%vpp(icount-1,pp%lref(ik)), &
+             ( pp%vpp(icount-1,iprj), pp%vpp_so(icount-1,iprj), iprj=0,nprj-1 )
+      end if
+    end if
+  end do
+
+  do iprj=0,nprj-1
+    do i=icount,1,-1
+      pp%vpp(i,iprj) = pp%vpp(i-1,iprj)
+      pp%vpp_so(i,iprj) = pp%vpp_so(i-1,iprj)
+    end do
+  end do
+  do i=icount,1,-1
+    pp%vpp(i,pp%lref(ik)) = pp%vpp(i-1,pp%lref(ik))
+  end do
+
+  do i=icount+1,2,-1
+    pp%rad(i,ik) = pp%rad(i-1,ik)
+    x(i) = x(i-1)
+  end do
+  pp%rad(1,ik)=0.0d0
+  x(1)=0.0d0
+
+  pp%mr(ik)=icount
+
+  x1=x(2)
+  dx=x(pp%mr(ik)+1)-x(pp%mr(ik))
+  do i=pp%mr(ik)+2,pp%nrmax
+    pp%rad(i,ik) = exp( x1 + dx*(i-1) )
+  end do
+
+!-------------------------------------------------------------
+!
+!  psp%rad(i) == exp( x(i) )
+!
+!  do i=1,pp%mr(ik)+1
+!     write(*,*) i,x(i),pp%rad(i,ik),exp(x(i)),x(i+1)-x(i)
+!  end do
+!  do i=pp%mr(ik)+2,pp%nrmax
+!     write(*,*) i,x1+dx*(i-1),pp%rad(i,ik),exp(x1+dx*(i-1))
+!  end do
+!-------------------------------------------------------------
+
+  deallocate( x )
+
+  l0=0
+  do ll=0,pp%mlps(ik)
+    r=0
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=pp%mr(ik),1,-1
+        if ( abs(pp%vpp(i,l)) > 1.d-12 ) then
+          r=max(r,pp%rad(i+1,ik))
+          exit
+        end if
+      end do
+    end do
+    l0=l
+    rrc(ll)=r
+  end do
+
+  do iprj=0,nprj-1
+    do i=0,pp%mr(ik)
+      pp%vpp(i,iprj) = pp%rad(i+1,ik)*pp%vpp(i,iprj)
+      pp%vpp_so(i,iprj) = pp%rad(i+1,ik)*pp%vpp_so(i,iprj)
+    end do
+  end do
+
+  icount=-1
+  do
+    read(4,*) cbuf
+    if ( cbuf == "<density.PCC" ) then
+      icount=0
+      cycle
+    end if
+    if ( icount >= 0 ) then
+      if ( cbuf == "density.PCC>" ) then
+        exit
+      else
+        icount=icount+1
+        backspace(4)
+        read(4,*) rdummy, r, rhor_nlcc(icount-1,0)
+      end if
+    end if
+  end do
+  if ( icount >= 0 ) flag_nlcc_element(ik)=.true.
+
+  r=0.0d0
+  do i=1,pp%mr(ik)
+     r=r+rhor_nlcc(i,0)*pp%rad(i+1,ik)**2*(pp%rad(i+1,ik)-pp%rad(i,ik))
+  end do
+  write(*,*) "r=",r, r*4.0d0*acos(-1.0d0)
+  close(4)
+
+end subroutine read_ps_adpack
+
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 !    subroutine read_ps_ATOM !.psf format created by ATOM for SIESTA
 !      implicit none
@@ -646,7 +843,7 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
     end if
   end do
 
-  if( flag_abinitpsp8 )then
+  if( flag_beta_proj_is_given )then
     mr=pp%mr(ik)
     vpploc(:) = pp%vpp(:,pp%lref(ik))
     do i=1,mr-1
@@ -740,7 +937,7 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
   l0=l
   end do
 
-  if( flag_abinitpsp8 )then
+  if( flag_beta_proj_is_given )then
     do i=1,pp%mr(ik)
       pp%vloctbl(i,ik)=vpploc(i-1)
       pp%dvloctbl(i,ik)=dvpploc(i-1)
@@ -787,7 +984,7 @@ end subroutine making_ps_with_masking
 !====
 subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   use structures,only : s_pp_info
-  use salmon_global, only: nelem
+  use salmon_global, only: nelem, ps_format
   use math_constants, only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -796,6 +993,17 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   real(8),intent(in) :: rhor_nlcc(0:pp%nrmax0,0:2)
   integer :: i,l,l0,ll
   real(8) :: r1,r2,r3,r4,const
+
+! copy the radial wave functions
+  l0=0
+  do ll=0,pp%mlps(ik)
+  do l=l0,l0+pp%nproj(ll,ik)-1
+    do i=0,pp%mr(ik)-1
+      pp%upptbl_ao(i+1,l,ik) = pp%upp(i,l)
+    end do
+  end do
+  l0=l
+  end do
 
 ! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
   do l=0,pp%mlps(ik)
@@ -829,7 +1037,7 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   l0=l
   end do
 
-  if( flag_abinitpsp8 )then
+  if( flag_beta_proj_is_given )then
     l=pp%lref(ik)
     do i=1,pp%mr(ik)-1
       r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
@@ -842,7 +1050,7 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
     pp%dvpp(pp%mr(ik),l)=pp%dvpp(pp%mr(ik)-1,l)
   end if
 
-  if( flag_abinitpsp8 )then
+  if( flag_beta_proj_is_given )then
     do i=1,pp%mr(ik)
       pp%vloctbl(i,ik)=pp%vpp(i-1,pp%lref(ik))
       pp%dvloctbl(i,ik)=pp%dvpp(i-1,pp%lref(ik))
@@ -859,8 +1067,8 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
       pp%udvtbl(1,l,ik)=pp%udvtbl(2,l,ik)
       pp%dudvtbl(1,l,ik)=pp%dudvtbl(2,l,ik)
       if (pp%inorm(l,ik) == 0) cycle
-      pp%udvtbl(1:pp%mr(ik),l,ik)=pp%udvtbl(1:pp%nrps(ik),l,ik)*pp%anorm(l,ik)
-      pp%dudvtbl(1:pp%mr(ik),l,ik)=pp%dudvtbl(1:pp%nrps(ik),l,ik)*pp%anorm(l,ik)
+      pp%udvtbl(1:pp%mr(ik),l,ik)=pp%udvtbl(1:pp%mr(ik),l,ik)*pp%anorm(l,ik)
+      pp%dudvtbl(1:pp%mr(ik),l,ik)=pp%dudvtbl(1:pp%mr(ik),l,ik)*pp%anorm(l,ik)
     end do
     l0=l
     end do
@@ -889,8 +1097,64 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
   end do
 
+  if ( ps_format(ik) == "ADPACK" ) then
+    call making_ps_without_masking_so( pp, ik )
+  end if
+
   return
 end subroutine making_ps_without_masking
+
+subroutine making_ps_without_masking_so( pp, ik )
+  use structures,only : s_pp_info
+  use math_constants, only : pi
+  implicit none
+  type(s_pp_info),intent(inout) :: pp
+  integer,intent(in) :: ik
+  integer :: i,l,l0,ll
+  real(8) :: r1,r2,r3,r4,const
+
+  l0=0
+  do ll=0,pp%mlps(ik)
+  do l=l0,l0+pp%nproj(ll,ik)-1
+    do i=1,pp%mr(ik)-1
+      r1 = pp%rad(i+1,ik)-pp%rad(i,ik)
+      r2 = pp%rad(i+1,ik)-pp%rad(i+2,ik)
+      r3 = pp%rad(i+2,ik)-pp%rad(i,ik)
+      r4 = r1/r2
+      pp%dvpp_so(i,l)=(r4+1.d0)*(pp%vpp_so(i,l)-pp%vpp_so(i-1,l))/r1-(pp%vpp_so(i+1,l)-pp%vpp_so(i-1,l))/r3*r4
+    end do
+    pp%dvpp_so(0,l)=pp%dvpp_so(1,l)
+    pp%dvpp_so(pp%mr(ik),l)=pp%dvpp_so(pp%mr(ik)-1,l)
+  end do
+  l0=l
+  end do
+
+  if( flag_beta_proj_is_given )then
+    l0=0
+    do ll=0,pp%mlps(ik)
+      const=sqrt( (2.0d0*ll+1.0d0)/(4.0d0*pi) )
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=2,pp%mr(ik)
+        pp%udvtbl_so(i,l,ik) =pp%vpp_so(i-1,l)/pp%rad(i,ik)**(ll+1)*const
+        pp%dudvtbl_so(i,l,ik)=pp%dvpp_so(i-1,l)/pp%rad(i,ik)**(ll+1)*const &
+                             +pp%vpp_so(i-1,l)*( -const*(ll+1)/pp%rad(i,ik)**(ll+2) )
+      end do
+      pp%udvtbl_so(1,l,ik) =pp%udvtbl_so(2,l,ik)
+      pp%dudvtbl_so(1,l,ik)=pp%dudvtbl_so(2,l,ik)
+      if (pp%inorm_so(l,ik) == 0) cycle
+      pp%udvtbl_so(1:pp%mr(ik),l,ik) =pp%udvtbl_so(1:pp%mr(ik),l,ik)*pp%anorm_so(l,ik)
+      pp%dudvtbl_so(1:pp%mr(ik),l,ik)=pp%dudvtbl_so(1:pp%mr(ik),l,ik)*pp%anorm_so(l,ik)
+    end do
+    l0=l
+    end do
+  else
+    write(*,*) "so with upp-given pseudopotential has not been implemented"
+    stop "stop@making_ps_without_masking_so"
+  end if
+
+  return
+end subroutine making_ps_without_masking_so
+
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   use structures,only : s_pp_info

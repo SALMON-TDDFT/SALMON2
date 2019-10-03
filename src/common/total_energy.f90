@@ -215,6 +215,7 @@ CONTAINS
     use structures
     use salmon_communication, only: comm_summation
     use hamiltonian, only: hpsi
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     type(s_dft_energy)         :: energy
     type(s_orbital)            :: tpsi,htpsi,ttpsi
@@ -270,6 +271,11 @@ CONTAINS
         call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
         energy%esp(:,:,ispin) = wrk2
       end do
+
+      if ( SPIN_ORBIT_ON ) then
+        energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
+        energy%esp(:,:,2) = energy%esp(:,:,1)
+      end if
 
     ! kinetic energy (E_kin)
       E_tmp = 0d0

@@ -60,7 +60,6 @@ contains
     use global_variables
     use misc_routines, only: ceiling_pow2
     implicit none
-    integer :: tid_range
 
     select case(functional)
       case('TPSS','VS98')

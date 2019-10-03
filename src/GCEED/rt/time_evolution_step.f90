@@ -50,7 +50,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
-  type(s_pp_info),intent(in) :: pp
+  type(s_pp_info),intent(inout) :: pp
   type(s_pp_grid) :: ppg
 !  type(s_pp_nlcc),intent(in)    :: ppn
   type(s_pp_nlcc),intent(inout)    :: ppn !hoge test
@@ -68,7 +68,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_ofile) :: ofl
 
   integer :: ix,iy,iz,nspin
-  integer :: iatom,ik
+  integer :: iatom
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
   real(8) :: curr_tmp(3,2)
