@@ -5,6 +5,7 @@ program main
   use inputoutput
   use math_constants
   use timer
+  use plusU_global, only: read_Hubbard_parameters
   implicit none
 
 
@@ -17,6 +18,7 @@ program main
   call read_input
   call set_basic_flag(theory)
 
+  call read_Hubbard_parameters
 
   call timer_initialize
 
@@ -35,6 +37,7 @@ program main
   !GCEED: (main)
   select case(theory)
   case('DFT')                         ; call main_dft
+  case('DFT_BAND')                    ; call real_space_band
   case('DFT_MD')                      ; call arted      !temporally
   case('TDDFT_response','TDDFT_pulse'); call main_tddft
   case('Single_scale_Maxwell_TDDFT'  ); call main_tddft

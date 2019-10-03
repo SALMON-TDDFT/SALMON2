@@ -28,6 +28,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use structures
   use stencil_sub
   use nonlocal_potential
+  use pseudo_pt_plusU_sub, only: pseudo_plusU, PLUS_U_ON
+  use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
+  use nondiagonal_so_sub, only: nondiagonal_so
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use salmon_global, only: yn_want_communication_overlapping,yn_periodic
   use timer
@@ -241,8 +244,17 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     end if
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
-  ! pseudopotential
-    call zpseudo(tpsi,htpsi,info,nspin,ppg)
+  ! nonlocal potential
+    if ( SPIN_ORBIT_ON ) then
+      call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
+      call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+    else
+    ! pseudopotential
+      call zpseudo(tpsi,htpsi,info,nspin,ppg)
+    end if
+    if ( PLUS_U_ON ) then
+      call pseudo_plusU(tpsi,htpsi,info,nspin,ppg)
+    end if
 
   end if
 
@@ -536,28 +548,46 @@ end subroutine copyVlocal
 subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   use math_constants,only : zi
   use structures
+  use update_kvector_so_sub, only: update_kvector_so, SPIN_ORBIT_ON
+  use update_kvector_plusU_sub, only: update_kvector_plusU, PLUS_U_ON
   implicit none
   integer           ,intent(in) :: ik_s,ik_e !,n_max
   type(s_dft_system),intent(in) :: system
   type(s_pp_grid)               :: ppg
   !
   integer :: ilma,iatom,j,ik
-  real(8) :: x,y,z,kAc(3)
+  real(8) :: x,y,z
   complex(8) :: ekr
+  real(8),allocatable :: kAc(:,:)
+  
+  allocate(kAc(3,ik_s:ik_e))
+  do ik=ik_s,ik_e
+    kAc(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+  end do
+  
+  if ( PLUS_U_ON ) then
+    call update_kvector_plusU( ppg, kAc, ik_s, ik_e )
+  end if
+  if ( SPIN_ORBIT_ON ) then
+    call update_kvector_so( ppg, kAc, ik_s, ik_e )
+    return
+  end if
+  
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ik=ik_s,ik_e
-    kAc = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
       do j=1,ppg%mps(iatom)
         x = ppg%rxyz(1,j,iatom)
         y = ppg%rxyz(2,j,iatom)
         z = ppg%rxyz(3,j,iatom)
-        ekr = exp(zi*(kAc(1)*x+kAc(2)*y+kAc(3)*z))
+        ekr = exp(zi*(kAc(1,ik)*x+kAc(2,ik)*y+kAc(3,ik)*z))
         ppg%zekr_uV(j,ilma,ik) = conjg(ekr) * ppg%uv(j,ilma)
       end do
     end do
   end do
+  
+  deallocate(kAc)
   return
 end subroutine update_kvector_nonlocalpt
 

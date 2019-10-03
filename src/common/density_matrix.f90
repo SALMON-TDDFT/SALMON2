@@ -127,6 +127,7 @@ contains
     use salmon_parallel, only: get_thread_id,get_nthreads
     use misc_routines, only: ceiling_pow2
     use timer
+    use sym_rho_sub, only: sym_rho
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
@@ -228,6 +229,9 @@ contains
         call timer_begin(LOG_ALLREDUCE_RHO)
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
         call timer_end(LOG_ALLREDUCE_RHO)
+
+        call sym_rho( rho(ispin,im)%f(:,:,:) )
+
       end do
       end do
 
@@ -244,6 +248,7 @@ contains
     use sendrecv_grid, only: update_overlap_complex8
     use salmon_communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
+    use sym_vector_sub, only: sym_vector_xyz
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
@@ -306,6 +311,9 @@ contains
       call comm_summation(wrk4,wrk1,3,info%icomm_rko)
 
       curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+
+      call sym_vector_xyz( curr(:,ispin,im) )
+
     end do
     end do
 

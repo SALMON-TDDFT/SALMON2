@@ -31,6 +31,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   use init_communicator
   use init_poisson_sub
   use read_write_restart_rt_sub, only: init_dir_out_restart
+  use sym_rho_sub, only: init_sym_rho
   implicit none
   integer,intent(in) :: comm
   type(s_orbital_parallel) :: info
@@ -56,10 +57,14 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   call init_orbital_parallel_singlecell(system,info)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg, mg, info%numo*info%numk, info%icomm_r, neig)
+  call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_r, neig)
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
+  
+! symmetry
+
+  call init_sym_rho( lg%num, mg%is, mg%ie, info%icomm_r )
 
 ! for Poisson equation
 
@@ -86,7 +91,8 @@ subroutine init_dft_system(lg,system,stencil)
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
   & nproc_domain_orbital,rion,rion_red,nelec,calc_mode,temperature,nelec_spin, &
-  & iflag_atom_coor,ntype_atom_coor_reduced
+  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
+  use sym_sub, only: init_sym_sub
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -123,10 +129,17 @@ subroutine init_dft_system(lg,system,stencil)
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
   call init_lattice(system,stencil)
+  call init_sym_sub( system%primitive_a, system%primitive_b, epdir_re1 )
   call init_kvector(num_kgrid,system)
 
   system%iperiodic = iperiodic
   system%nion = natom
+
+  if(ispin==0)then
+    system%nspin=1
+  else
+    system%nspin=2
+  end if
 
   if(calc_mode=='RT'.and.temperature<-1.d-12)then
     if(system%nspin==2.and.sum(nelec_spin(:))>0)then
@@ -139,16 +152,14 @@ subroutine init_dft_system(lg,system,stencil)
       end if
     end if
   else
-    system%no = nstate
-  end if
-
-  if(ispin==0)then
-    system%nspin=1
-  else
-    system%nspin=2
+    system%no = max( nstate, maxval(nstate_spin) )
   end if
 
   allocate(system%mass(1:nelem))
+  if ( allocated(system%Rion) ) deallocate(system%Rion)
+  if ( allocated(system%rocc) ) deallocate(system%rocc)
+  if ( allocated(system%Velocity) ) deallocate(system%Velocity)
+  if ( allocated(system%Force) ) deallocate(system%Force)
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
   
@@ -163,7 +174,19 @@ subroutine init_dft_system(lg,system,stencil)
   case(1)
     system%rocc(1:nelec/2,:,1) = 2d0
   case(2)
-    system%rocc(1:nelec/2,:,1:2) = 1d0
+    if ( nelec > 0 ) then
+      if ( mod(nelec,2) == 0 ) then
+        system%rocc(1:nelec/2,:,1:2) = 1d0
+      else
+        system%rocc(1:(nelec-1)/2,:,1:2) = 1d0
+        system%rocc((nelec-1)/2+1,:,1  ) = 1d0
+      end if
+    else if ( any(nelec_spin>0) ) then
+      system%rocc(1:nelec_spin(1),:,1) = 1d0
+      system%rocc(1:nelec_spin(2),:,2) = 1d0
+    else
+      write(*,*) "nelect or nelec_spin should be specified in input"
+    end if
   end select
 
   call set_bn(bnmat)
@@ -220,6 +243,7 @@ subroutine init_orbital_parallel_singlecell(system,info)
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
   info%if_divide_orbit  = nproc_ob.ne.1
 
+  if ( allocated(info%irank_io) ) deallocate(info%irank_io)
   allocate(info%irank_io(1:system%no))
 
 ! process ID corresponding to the orbital index io
@@ -267,6 +291,9 @@ subroutine init_grid_whole(rsize,hgs,lg)
   lg%is_overlap(1:3) = lg%is(1:3)-nd
   lg%ie_overlap(1:3) = lg%ie(1:3)+nd
 
+  if ( allocated(lg%idx) ) deallocate(lg%idx)
+  if ( allocated(lg%idy) ) deallocate(lg%idy)
+  if ( allocated(lg%idz) ) deallocate(lg%idz)
   allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
           ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
           ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
@@ -325,6 +352,10 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   integer :: i1,i2,i3,i4,j1,j2,j3,ibox,j,ii
   integer :: nproc_domain_orbital_mul,ngo(3),ngo_mul
 
+  if ( allocated(mg%is_all) ) deallocate(mg%is_all)
+  if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)
+  if ( allocated(ng%is_all) ) deallocate(ng%is_all)
+  if ( allocated(ng%ie_all) ) deallocate(ng%ie_all)
   allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1),ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
 
 ! +-------------------------------+
@@ -383,6 +414,9 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   mg%is_overlap(1:3) = mg%is(1:3)-nd
   mg%ie_overlap(1:3) = mg%ie(1:3)+nd
 
+  if ( allocated(mg%idx) ) deallocate(mg%idx)
+  if ( allocated(mg%idy) ) deallocate(mg%idy)
+  if ( allocated(mg%idz) ) deallocate(mg%idz)
   allocate(mg%idx(mg%is_overlap(1):mg%ie_overlap(1)) &
           ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
@@ -485,6 +519,9 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   ng%is_array(1:3) = ng%is(1:3)-nd
   ng%ie_array(1:3) = ng%ie(1:3)+nd
 
+  if ( allocated(ng%idx) ) deallocate(ng%idx)
+  if ( allocated(ng%idy) ) deallocate(ng%idy)
+  if ( allocated(ng%idz) ) deallocate(ng%idz)
   allocate(ng%idx(ng%is_overlap(1):ng%ie_overlap(1)) &
           ,ng%idy(ng%is_overlap(2):ng%ie_overlap(2)) &
           ,ng%idz(ng%is_overlap(3):ng%ie_overlap(3)))

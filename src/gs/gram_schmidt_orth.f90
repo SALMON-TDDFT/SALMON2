@@ -17,6 +17,7 @@
 module gram_schmidt_orth
   use structures, only: s_dft_system, s_rgrid, s_orbital_parallel, s_orbital
   use pack_unpack, only: copy_data
+  use gram_schmidt_so_sub, only: gram_schmidt_so, SPIN_ORBIT_ON
   implicit none
 
 contains
@@ -28,6 +29,11 @@ contains
     type(s_rgrid),        intent(in)    :: rg
     type(s_orbital_parallel),      intent(in)    :: wfi
     type(s_orbital), intent(inout) :: wf
+
+    if ( SPIN_ORBIT_ON ) then
+      call gram_schmidt_so(sys, rg, wfi, wf)
+      return
+    end if
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
 

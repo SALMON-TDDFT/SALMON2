@@ -55,6 +55,7 @@ use prep_pp_sub
 use mixing_sub
 use read_write_gs_bin_sub
 use hamiltonian
+use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik
 integer :: iter,iatom,iob,p1,p2,p5,jj,iflag,jspin
@@ -310,6 +311,9 @@ DFT_Iteration : do iter=1,iDiter(img)
     call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY)
+    if( PLUS_U_ON )then
+      call calc_density_matrix_and_energy_plusU( spsi, ppg, info, energy%E_U )
+    end if
     call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
     select case(iperiodic)
     case(0); call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)

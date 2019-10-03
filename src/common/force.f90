@@ -28,6 +28,8 @@ contains
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use salmon_communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
+    use sym_vector_sub, only: sym_vector_xyz
+    use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in) :: pp
@@ -40,14 +42,23 @@ contains
     type(s_orbital)            :: tpsi
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
+    integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
     real(8) :: kAc(3)
     real(8),allocatable :: F_tmp(:,:),F_sum(:,:)
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
+    complex(8),allocatable :: phipsibox(:,:),phipsibox2(:,:)
+    complex(8),allocatable :: dphipsi_lma(:,:),phipsi_lma(:)
+    complex(8) :: ddm_mms_nla(3), phipsi, dphipsi(3)
+    complex(8),parameter :: zero=(0.0d0,0.0d0)
+    complex(8),allocatable :: zF_tmp(:,:)
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
     allocate(F_tmp(3,nion),F_sum(3,nion))
+    if( PLUS_U_ON )then
+      allocate( zF_tmp(3,nion) ); zF_tmp=zero
+    end if
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_force_periodic" !??????
     im = 1
@@ -80,6 +91,34 @@ contains
 
   ! uVpsibox2 = < uV | exp(ikr) | psi >
     call calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
+
+    if( PLUS_U_ON )then
+      Nlma_ao = size(ppg%ia_tbl_ao)
+      allocate( phipsibox(Nlma_ao,Norb)  ); phipsibox=zero
+      allocate( phipsibox2(Nlma_ao,Norb) ); phipsibox2=zero
+      iorb = 0
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
+        iorb = iorb + 1
+        do ilma=1,Nlma_ao
+          ia = ppg%ia_tbl_ao(ilma)
+          phipsi = 0.0d0
+          do j=1,ppg%mps_ao(ia)
+            ix = ppg%jxyz_ao(1,j,ia)
+            iy = ppg%jxyz_ao(2,j,ia)
+            iz = ppg%jxyz_ao(3,j,ia)
+            phipsi = phipsi + conjg(ppg%zekr_phi_ao(j,ilma,ik)) &
+                            * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          end do
+          phipsi = phipsi * ppg%Hvol
+          phipsibox(ilma,iorb) = phipsi
+        end do
+      end do
+      end do
+      end do
+      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
+    end if
 
     if(info%if_divide_rspace) then
        call update_overlap_complex8(srg, mg, tpsi%zwf)
@@ -124,14 +163,71 @@ contains
         & * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) * system%Hvol
       end do
 
-    end do
-    end do
-    end do
+      if( PLUS_U_ON )then
+        if( .not.allocated(dphipsi_lma) )then
+          allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
+        end if
+        do ilma=1,Nlma_ao
+          ia = ppg%ia_tbl_ao(ilma)
+          dphipsi = zero
+          do j=1,ppg%mps_ao(ia)
+            ix = ppg%jxyz_ao(1,j,ia)
+            iy = ppg%jxyz_ao(2,j,ia)
+            iz = ppg%jxyz_ao(3,j,ia)
+            w  = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+            dphipsi(:) = dphipsi(:) + conjg(ppg%zekr_phi_ao(j,ilma,ik)) * w(:)
+          end do
+          dphipsi_lma(:,ilma) = dphipsi(:) * ppg%Hvol
+        end do
+      end if
+      if( PLUS_U_ON )then
+        Nproj_pairs = size(ppg%proj_pairs_ao,2)
+        do iprj=1,Nproj_pairs
+          ilma=ppg%proj_pairs_ao(1,iprj)
+          jlma=ppg%proj_pairs_ao(2,iprj)
+          ia = ppg%proj_pairs_info_ao(1,iprj)
+          l  = ppg%proj_pairs_info_ao(2,iprj)
+          n  = ppg%proj_pairs_info_ao(3,iprj)
+          m1 = ppg%proj_pairs_info_ao(4,iprj)
+          m2 = ppg%proj_pairs_info_ao(5,iprj)
+          ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
+               info%occ(io,ispin,ik,im) &
+               *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,iorb)) &
+                + phipsibox2(ilma,iorb)*conjg(dphipsi_lma(:,jlma)) )
+          if( m1 == m2 )then
+            zF_tmp(:,ia) = zF_tmp(:,ia) &
+                 - 0.5d0*U_eff(n,l,ia)*( 1.0d0 - 2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+                 * ddm_mms_nla(:)
+          else
+            zF_tmp(:,ia) = zF_tmp(:,ia) &
+                 - 0.5d0*U_eff(n,l,ia)*( -2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+                 * ddm_mms_nla(:)
+          end if
+        end do !iprj
+      end if
+
+    end do !ispin
+    end do !io
+    end do !ik
+    !do ia=1,nion
+    !  write(*,'(1x,i4,2f20.10)') ia,real(zF_tmp(1,ia)),aimag(zF_tmp(1,ia))
+    !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
+    !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
+    !end do
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
     system%Force = system%Force + F_sum
+!
+    do ia=1,nion
+       call sym_vector_xyz( system%Force(:,ia) )
+    end do
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)
     deallocate(F_tmp,F_sum,gtpsi,uVpsibox,uVpsibox2)
+    if( PLUS_U_ON )then
+      deallocate( phipsibox, phipsibox2 )
+      deallocate( dphipsi_lma )
+      deallocate( zF_tmp )
+    end if 
     return
   end subroutine calc_force_salmon
 

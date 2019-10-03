@@ -61,6 +61,7 @@ module structures
   type s_dft_energy
     real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
+    real(8) :: E_U
   end type s_dft_energy
 
   type s_rgrid
@@ -165,6 +166,8 @@ module structures
     real(8),allocatable :: rps(:)
     real(8),allocatable :: anorm(:,:)
     integer,allocatable :: inorm(:,:)
+    real(8),allocatable :: anorm_so(:,:) ! '*_so' means what is used in 
+    integer,allocatable :: inorm_so(:,:) !   spin-orbit calculation
     real(8),allocatable :: rad(:,:)
     real(8),allocatable :: radnl(:,:)
     real(8),allocatable :: vloctbl(:,:)
@@ -175,10 +178,19 @@ module structures
     real(8),allocatable :: tau_nlcc_tbl(:,:)
     real(8),allocatable :: upp_f(:,:,:)
     real(8),allocatable :: vpp_f(:,:,:)
+    real(8),allocatable :: vpp_f_so(:,:,:)
     real(8),allocatable :: upp(:,:)
     real(8),allocatable :: dupp(:,:)
     real(8),allocatable :: vpp(:,:)
     real(8),allocatable :: dvpp(:,:)
+    real(8),allocatable :: vpp_so(:,:)
+    real(8),allocatable :: dvpp_so(:,:)
+    real(8),allocatable :: udvtbl_so(:,:,:)
+    real(8),allocatable :: dudvtbl_so(:,:,:)
+    real(8),allocatable :: rps_ao(:)
+    integer,allocatable :: nrps_ao(:)
+    real(8),allocatable :: upptbl_ao(:,:,:)
+    real(8),allocatable :: dupptbl_ao(:,:,:)
   end type s_pp_info
 
 ! pseudopotential on r-space grid
@@ -198,6 +210,26 @@ module structures
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
     real(8),allocatable :: Vpsl_atom(:,:,:,:)
+    !
+    integer,allocatable :: ia_tbl_so(:)
+    complex(8),allocatable :: uv_so(:,:,:,:)
+    complex(8),allocatable :: duv_so(:,:,:,:,:)
+    complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
+    !
+    integer,allocatable :: proj_pairs_ao(:,:)
+    integer,allocatable :: proj_pairs_info_ao(:,:)
+    integer,allocatable :: ia_tbl_ao(:)
+    real(8),allocatable :: phi_ao(:,:)
+    real(8),allocatable :: dphi_ao(:,:,:)
+    complex(8),allocatable :: zekr_phi_ao(:,:,:)
+    integer :: nps_ao
+    integer,allocatable :: mps_ao(:)
+    integer,allocatable :: jxyz_ao(:,:,:)
+    integer,allocatable :: jxx_ao(:,:)
+    integer,allocatable :: jyy_ao(:,:)
+    integer,allocatable :: jzz_ao(:,:)
+    real(8),allocatable :: rxyz_ao(:,:,:)
+    real(8) :: Hvol
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process
@@ -430,6 +462,8 @@ contains
     DEAL(ppg%rinv_uvu)
     DEAL(ppg%zekr_uV)
     DEAL(ppg%Vpsl_atom)
+    DEAL(ppg%uv_so)
+    DEAL(ppg%duv_so)
   end subroutine deallocate_pp_grid
 
   subroutine deallocate_scalar(x)

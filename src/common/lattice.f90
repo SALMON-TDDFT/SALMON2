@@ -100,6 +100,7 @@ end SUBROUTINE calc_inverse
 
 SUBROUTINE init_kvector(num_kgrid,system)
   use structures
+  use sym_kvector, only: init_sym_kvector
   implicit none
   integer,intent(in) :: num_kgrid(3)
   type(s_dft_system) :: system
@@ -110,6 +111,8 @@ SUBROUTINE init_kvector(num_kgrid,system)
 
   nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
   system%nk = nk
+  if ( allocated(system%vec_k) ) deallocate(system%vec_k)
+  if ( allocated(system%wtk)   ) deallocate(system%wtk)
   allocate(system%vec_k(3,nk),system%wtk(nk))
 
   system%wtk  = 1d0/dble(nk)
@@ -127,6 +130,8 @@ SUBROUTINE init_kvector(num_kgrid,system)
     system%vec_k(2,ik) = k(1)*B(2,1) + k(2)*B(2,2) + k(3)*B(2,3)
     system%vec_k(3,ik) = k(1)*B(3,1) + k(2)*B(3,2) + k(3)*B(3,3)
   end do
+
+  call init_sym_kvector( system%vec_k, system%wtk, system%nk, B ) 
 
   return
 end SUBROUTINE init_kvector
