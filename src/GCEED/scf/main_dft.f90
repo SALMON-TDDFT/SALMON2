@@ -264,7 +264,7 @@ else
   iter_band_kpt_stride = 1
 end if
 
-Band_Iteration : do iter_band_kpt = 1, num_band_kpt, system%nk
+Band_Iteration : do iter_band_kpt = 1, iter_band_kpt_end, iter_band_kpt_stride
 
 check_conv_esp=.false.
 
