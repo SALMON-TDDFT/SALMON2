@@ -78,6 +78,8 @@ contains
 
     end if
 
+    call comm_sync_all ! wait: save wfn_gs_k*.wfn files are done
+
     if(iflag_read_write==iflag_write)return
 
     if(use_ms_maxwell == 'y')then
