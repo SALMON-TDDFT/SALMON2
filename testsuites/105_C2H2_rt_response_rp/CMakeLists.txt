@@ -1,1 +1,1 @@
-create_test()
+create_mpi_test()

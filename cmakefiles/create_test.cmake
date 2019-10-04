@@ -1,4 +1,12 @@
 function(create_test)
+  set(MPI_REQUIRED ${ARGV0})
+  if (MPI_REQUIRED)
+    if (USE_MPI)
+    else ()
+      return()
+    endif ()
+  endif ()
+
   get_filename_component(TEST_NAME ${CMAKE_CURRENT_LIST_DIR} NAME)
   set(TEST_EXEC "wrap_mpiexec_${TEST_NAME}.sh")
 
@@ -20,3 +28,7 @@ function(create_test)
   set_tests_properties("run_${TEST_NAME}"    PROPERTIES DEPENDS "prep_${TEST_NAME}")
   set_tests_properties("verify_${TEST_NAME}" PROPERTIES DEPENDS "run_${TEST_NAME}")
 endfunction(create_test)
+
+function(create_mpi_test)
+  create_test(TRUE)
+endfunction()
