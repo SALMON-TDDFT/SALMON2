@@ -17,7 +17,6 @@ subroutine calc_pmax(iobmax,info)
 use structures, only: s_orbital_parallel
 use calc_iobnum_sub
 use scf_data
-use new_world_sub
 implicit none
 integer :: iobmax
 type(s_orbital_parallel),intent(in) :: info

@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng, &
+SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
 &   poisson,j_e,singlescale)
   use structures
@@ -28,7 +28,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   use taylor_sub
   use const, only: umass
   use scf_data
-  use new_world_sub
   use allocate_mat_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree
@@ -49,6 +48,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,srg,srg_n
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
+  type(s_xc_functional),intent(in) :: xc_func
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
   type(s_pp_info),intent(inout) :: pp
   type(s_pp_grid) :: ppg

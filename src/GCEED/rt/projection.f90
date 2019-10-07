@@ -21,7 +21,6 @@ use calc_iroot_sub
 use calc_myob_sub
 use check_corrkob_sub
 use scf_data
-use new_world_sub
 use allocate_mat_sub
 use structures, only: s_rgrid, s_orbital_parallel
 implicit none

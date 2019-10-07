@@ -20,7 +20,6 @@ use salmon_communication, only: comm_is_root, comm_bcast
 use set_numcpu
 use inputoutput
 use scf_data
-use new_world_sub
 implicit none
 integer :: ii  !,iatom
 integer :: ibox2
@@ -124,16 +123,6 @@ if(ilsda == 0) then
 else if(ilsda == 1) then
   itotMST=MST(1)+MST(2)
   itotfMST=ifMST(1)+ifMST(2)
-end if
-
-allocate( rocc(itotMST,num_kpoints_rd) )
-
-rocc(:,:)=0.d0             
-if(ilsda == 0) then
-  rocc(:ifMST(1),:num_kpoints_rd) = 2.d0   ! Occupation number
-else if(ilsda == 1) then
-  rocc(:ifMST(1),:num_kpoints_rd) = 1.d0   ! Occupation number
-  rocc(MST(1)+1:MST(1)+ifMST(2),:num_kpoints_rd) = 1.d0   ! Occupation number
 end if
 
 !===== namelist for group_parallel =====

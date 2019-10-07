@@ -22,7 +22,6 @@ use calc_allob_sub
 use scf_data
 use gradient_sub
 use allocate_mat_sub
-use new_world_sub
 use sendrecv_grid, only: init_sendrecv_grid
 implicit none
 type(s_rgrid),intent(in)            :: lg

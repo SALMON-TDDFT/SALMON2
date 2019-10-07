@@ -18,7 +18,6 @@ use structures, only: s_rgrid,s_scalar,s_poisson
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
-use new_world_sub
 use allocate_mat_sub
 use inputoutput, only: yn_md
 use timer
