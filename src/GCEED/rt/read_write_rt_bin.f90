@@ -264,7 +264,6 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use calc_myob_sub
 use check_corrkob_sub
 use scf_data
-use new_world_sub
 use allocate_mat_sub
 implicit none
 type(s_rgrid),           intent(in) :: ng,mg
@@ -478,7 +477,7 @@ end do
 end do
 
 itt=Miter_rt
-call wrapper_allgatherv_vlocal(ng,mg,info_field)
+!call wrapper_allgatherv_vlocal(ng,mg,info_field)
 
 if(comm_is_root(nproc_id_global))then
   read(98) (vecDs(jj),jj=1,3)

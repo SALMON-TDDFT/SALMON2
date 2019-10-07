@@ -156,7 +156,6 @@ end subroutine calc_env_trigon
 subroutine calcEstatic(lg, ng, info, sVh, srg_ng)
 use salmon_communication, only: comm_summation
 use scf_data
-use new_world_sub
 use structures, only: s_rgrid, s_orbital_parallel, s_scalar, s_sendrecv_grid
 use sendrecv_grid, only: update_overlap_real8
 implicit none

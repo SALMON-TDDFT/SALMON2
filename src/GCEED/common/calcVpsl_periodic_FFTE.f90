@@ -18,7 +18,6 @@ subroutine calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson,pp,ppg,sVps
   use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
   use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
   use scf_data
-  use new_world_sub
   use allocate_mat_sub
   implicit none
   type(s_rgrid),intent(in) :: lg

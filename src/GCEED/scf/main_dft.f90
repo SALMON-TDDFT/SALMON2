@@ -21,9 +21,7 @@ use inputoutput
 use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
-use new_world_sub
 use structure_opt_sub
-use salmon_total_energy
 implicit none
 
 END MODULE global_variables_scf
@@ -55,6 +53,7 @@ use prep_pp_sub
 use mixing_sub
 use read_write_gs_bin_sub
 use hamiltonian
+use salmon_total_energy
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik
@@ -111,9 +110,6 @@ call timer_begin(LOG_TOTAL)
 
 call timer_begin(LOG_INIT_GS)
 inumcpu_check=0
-
-call set_bN(bnmat)
-call set_cN(cnmat)
 
 call convert_input_scf(file_atoms_coo)
 mixing%num_rho_stock=21
@@ -463,7 +459,7 @@ DFT_Iteration : do iter=1,iDiter(img)
 100 format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
 101 format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
 
-    do ik=1,num_kpoints_rd
+    do ik=1,system%nk
       if(ik<=3)then
         if(iperiodic==3) write(*,*) "k=",ik
         do p5=1,(itotMST+3)/4

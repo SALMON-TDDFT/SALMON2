@@ -28,7 +28,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   use taylor_sub
   use const, only: umass
   use scf_data
-  use new_world_sub
   use allocate_mat_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree
