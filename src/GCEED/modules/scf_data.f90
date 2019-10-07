@@ -15,7 +15,6 @@
 !
 MODULE scf_data
 use salmon_global
-use salmon_xc, only: s_xc_functional
 implicit none
 !-------------------- Parameters
 integer, parameter :: maxntmg=10
@@ -103,9 +102,6 @@ real(8),parameter :: cN11_Nd12=12.d0/81800719.d0, cN12_Nd12=-1.d0/194699232.d0
 real(8) :: cnmat(0:12,12),bnmat(4,4)
 
 !-------------------- Global variables
-
-! Exchange Correlation
-type(s_xc_functional) :: xc_func
 
 integer :: iflag_ps
 

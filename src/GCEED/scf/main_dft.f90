@@ -74,6 +74,7 @@ type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
+type(s_xc_functional) :: xc_func
 type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
 type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
 type(s_reciprocal_grid) :: fg

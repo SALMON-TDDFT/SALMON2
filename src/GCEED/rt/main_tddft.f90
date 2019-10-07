@@ -63,6 +63,7 @@ type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
+type(s_xc_functional) :: xc_func
 type(s_reciprocal_grid) :: fg
 type(s_dft_energy) :: energy
 type(s_md) :: md
@@ -545,11 +546,11 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
 
   if(mod(itt,2)==1)then
-    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
+    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   else
-    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil &
+    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
      & ,poisson,j_e,singlescale)
   end if

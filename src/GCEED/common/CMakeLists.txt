@@ -13,7 +13,6 @@ set(SOURCES
     conv_p.f90
     init_wf.f90
     read_write_gs_bin.f90
-    read_copy_pot.f90
     set_filename.f90
     set_icoo1d.f90
     write_psi.f90
