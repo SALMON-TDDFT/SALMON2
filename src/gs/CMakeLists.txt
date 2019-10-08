@@ -2,7 +2,6 @@ set(SOURCES
     eigen_subdiag_${FILE_MATHLIB}.f90
     conjugate_gradient.f90
     mixing.f90
-    rmmdiis.f90
     subspace_diagonalization.f90
     gram_schmidt_orth.f90
     scf_iteration.f90
