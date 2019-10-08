@@ -35,7 +35,6 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
 use scf_iteration_sub
-use rmmdiis_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
