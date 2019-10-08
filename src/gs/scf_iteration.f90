@@ -27,7 +27,7 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
   use inputoutput, only: calc_mode,iperiodic,method_min,method_mixing,mixrate
   use structures
   use timer
-  use rmmdiis_sub
+!  use rmmdiis_sub
   use gram_schmidt_orth, only: gram_schmidt
   use Conjugate_Gradient, only: gscg_isolated,gscg_periodic
   use subspace_diagonalization, only: ssdg_isolated,ssdg_periodic

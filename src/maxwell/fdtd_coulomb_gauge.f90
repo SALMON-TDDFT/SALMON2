@@ -39,6 +39,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   use phys_constants, only: cspeed_au
   use salmon_global, only: dt
   use sendrecv_grid, only: update_overlap_real8
+  use stencil_sub, only: calc_gradient_field
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation
   use inputoutput, only: t_unit_time
@@ -96,7 +97,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
     end do
     end do
     call update_overlap_real8(srg_ng, ng, fw%box)
-    call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh_old)
+    call calc_gradient_field(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh_old)
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -121,7 +122,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 
 ! calculate grad_dVh_dt: gradient of d(Vh)/dt (Vh: Hartree potential)
   call update_overlap_real8(srg_ng, ng, fw%box)
-  call calc_gradient(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh) ! grad[Vh(t+dt/2)]
+  call calc_gradient_field(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh) ! grad[Vh(t+dt/2)]
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=ng_sta(3),ng_end(3)
@@ -389,44 +390,6 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   return
 
 contains
-
-# define DX(dt) (ix+(dt)),iy,iz
-# define DY(dt) ix,(iy+(dt)),iz
-# define DZ(dt) ix,iy,(iz+(dt))
-
-  subroutine calc_gradient(is,ie,nabt,box,grad)
-    implicit none
-    integer      ,intent(in) :: is(3),ie(3)
-    real(8)      ,intent(in) :: nabt(4,3)
-    real(8)      ,intent(in) :: box(is(1)-Nd:ie(1)+Nd,is(2)-Nd:ie(2)+Nd,is(3)-Nd:ie(3)+Nd)
-    real(8)                  :: grad(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
-    !
-    integer :: ix,iy,iz
-    real(8) :: w(3)
-  !$OMP parallel
-  !$OMP do private(iz,iy,ix,w)
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-    do ix=is(1),ie(1)
-      w(1) =  nabt(1,1)*(box(DX(1)) - box(DX(-1))) &
-           & +nabt(2,1)*(box(DX(2)) - box(DX(-2))) &
-           & +nabt(3,1)*(box(DX(3)) - box(DX(-3))) &
-           & +nabt(4,1)*(box(DX(4)) - box(DX(-4)))
-      w(2) =  nabt(1,2)*(box(DY(1)) - box(DY(-1))) &
-           & +nabt(2,2)*(box(DY(2)) - box(DY(-2))) &
-           & +nabt(3,2)*(box(DY(3)) - box(DY(-3))) &
-           & +nabt(4,2)*(box(DY(4)) - box(DY(-4)))
-      w(3) =  nabt(1,3)*(box(DZ(1)) - box(DZ(-1))) &
-           & +nabt(2,3)*(box(DZ(2)) - box(DZ(-2))) &
-           & +nabt(3,3)*(box(DZ(3)) - box(DZ(-3))) &
-           & +nabt(4,3)*(box(DZ(4)) - box(DZ(-4)))
-      grad(:,ix,iy,iz) = w
-    end do
-    end do
-    end do
-  !$OMP end do
-  !$OMP end parallel
-  end subroutine calc_gradient
 
   subroutine pulse(t,r,A_ext)
     use em_field, only: calc_Ac_ext

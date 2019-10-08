@@ -248,7 +248,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(iwrite_projection==1.and.mod(itt,itwproj)==0)then
-    call projection(mg,info,zpsi_out)
+    call projection(itt,mg,system,info,spsi_out,tpsi) ! tpsi must be GS orbital (future work)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
@@ -356,7 +356,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calc_elf(lg,mg,ng,srg,info,srho,itt)
+      call calc_elf(lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out,elf)
       call write_elf(lg,elf,icoo1d,hgs,iscfrt,itt)
     end if
   end if

@@ -398,4 +398,42 @@ end subroutine calc_gradient_psi
 
 !===================================================================================================================================
 
+# define DDX(dt) (ix+(dt)),iy,iz
+# define DDY(dt) ix,(iy+(dt)),iz
+# define DDZ(dt) ix,iy,(iz+(dt))
+
+subroutine calc_gradient_field(is,ie,nabt,box,grad)
+  implicit none
+  integer      ,intent(in) :: is(3),ie(3)
+  real(8)      ,intent(in) :: nabt(4,3)
+  real(8)      ,intent(in) :: box(is(1)-4:ie(1)+4,is(2)-4:ie(2)+4,is(3)-4:ie(3)+4)
+  real(8)                  :: grad(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
+  !
+  integer :: ix,iy,iz
+  real(8) :: w(3)
+!$OMP parallel
+!$OMP do private(iz,iy,ix,w)
+  do iz=is(3),ie(3)
+  do iy=is(2),ie(2)
+  do ix=is(1),ie(1)
+    w(1) =  nabt(1,1)*(box(DDX(1)) - box(DDX(-1))) &
+         & +nabt(2,1)*(box(DDX(2)) - box(DDX(-2))) &
+         & +nabt(3,1)*(box(DDX(3)) - box(DDX(-3))) &
+         & +nabt(4,1)*(box(DDX(4)) - box(DDX(-4)))
+    w(2) =  nabt(1,2)*(box(DDY(1)) - box(DDY(-1))) &
+         & +nabt(2,2)*(box(DDY(2)) - box(DDY(-2))) &
+         & +nabt(3,2)*(box(DDY(3)) - box(DDY(-3))) &
+         & +nabt(4,2)*(box(DDY(4)) - box(DDY(-4)))
+    w(3) =  nabt(1,3)*(box(DDZ(1)) - box(DDZ(-1))) &
+         & +nabt(2,3)*(box(DDZ(2)) - box(DDZ(-2))) &
+         & +nabt(3,3)*(box(DDZ(3)) - box(DDZ(-3))) &
+         & +nabt(4,3)*(box(DDZ(4)) - box(DDZ(-4)))
+    grad(:,ix,iy,iz) = w
+  end do
+  end do
+  end do
+!$OMP end do
+!$OMP end parallel
+end subroutine calc_gradient_field
+
 end module stencil_sub

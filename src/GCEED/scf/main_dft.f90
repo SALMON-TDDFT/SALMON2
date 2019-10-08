@@ -35,7 +35,6 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
 use scf_iteration_sub
-use rmmdiis_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
@@ -622,13 +621,13 @@ call write_eigen(file_eigen,system,energy)
 call write_info_data(Miter,system,energy,pp)
 
 ! write GS: analysis option
-if(yn_out_psi =='y') call write_psi(lg,info)
+if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
 if(yn_out_dns =='y') call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
 if(yn_out_dos =='y') call write_dos(system,energy)
-if(yn_out_pdos=='y') call calc_pdos(lg,info,pp)
+if(yn_out_pdos=='y') call calc_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') then
   allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  call calc_elf(lg,mg,ng,srg,info,srho,0)
+  call calc_elf(lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi,elf)
   call write_elf(lg,elf,icoo1d,hgs,iscfrt)
   deallocate(elf)
 end if
