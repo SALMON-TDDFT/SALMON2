@@ -19,15 +19,7 @@ subroutine set_filename
   use inputoutput
   use scf_data
   implicit none
-  character(8) :: filenumber_data
   
-  file_in_gs_bin =trim(directory_read_data)//trim(sysname)//"_gs.bin"
-  file_out_gs_bin=trim(sysname)//"_gs.bin"
-
-  write(filenumber_data, '(i6.6)') nproc_id_global
-  file_in_gs_num_bin =trim(directory_read_data)//trim(sysname)//"_gs_"//trim(adjustl(filenumber_data))//".bin"
-  file_out_gs_num_bin=trim(sysname)//"_gs_"//trim(adjustl(filenumber_data))//".bin"
-
  !file_gs_info=trim(sysname)//"_info.data"
   file_eigen=trim(sysname)//"_eigen.data"
 
