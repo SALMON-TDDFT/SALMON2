@@ -50,7 +50,7 @@ use occupation
 use input_pp_sub
 use prep_pp_sub
 use mixing_sub
-use read_write_gs_bin_sub
+use checkpoint_restart_sub
 use hamiltonian
 use salmon_total_energy
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON

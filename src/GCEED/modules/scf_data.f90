@@ -351,11 +351,6 @@ real(8) :: absorption_id(0:100000)
 real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 
 !filename
-character(100) :: file_out_gs_bin
-character(100) :: file_in_gs_bin
-character(100) :: file_out_gs_num_bin
-character(100) :: file_in_gs_num_bin
-!character(100) :: file_gs_info
 character(100) :: file_eigen
 character(100) :: file_RT
 character(100) :: file_alpha_lr
