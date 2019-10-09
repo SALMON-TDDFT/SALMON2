@@ -1,7 +1,6 @@
 set(SOURCES
     allocate_mat.f90
     deallocate_mat.f90
-    gradient.f90
     scf_data.f90
     )
 

@@ -5,7 +5,6 @@ set(SOURCES
     dip.f90
     main_tddft.f90
     projection.f90
-    read_write_rt_bin.f90
     set_vonf_sd.f90
     time_evolution_step.f90
     )
