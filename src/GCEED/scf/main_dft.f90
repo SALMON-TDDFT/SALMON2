@@ -41,7 +41,6 @@ use global_variables_scf
 use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
-use gram_schmidt_orth, only: gram_schmidt 
 use write_sub
 use read_gs
 use code_optimization

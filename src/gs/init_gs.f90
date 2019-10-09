@@ -34,6 +34,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
   !
   integer :: ik,io,is,iseed,a,ix,iy,iz
   real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
+  real(8),parameter :: a_B=0.529177d0
 
   select case(yn_periodic)
   case('n')
@@ -45,46 +46,53 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
       if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
     end do
     
+    Xmax=Xmax+1.d0/a_B ; Ymax=Ymax+1.d0/a_B ; Zmax=Zmax+1.d0/a_B
+    
     iseed=123
     do is=1,system%nspin
-    do io=info%io_s,info%io_e
+    do io=1,system%no
       call quickrnd_ns ; x1=Xmax*(2.d0*rnd-1.d0)
       call quickrnd_ns ; y1=Ymax*(2.d0*rnd-1.d0)
       call quickrnd_ns ; z1=Zmax*(2.d0*rnd-1.d0)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
-        rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
-        spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr)**2)
-      end do
-      end do
-      end do
+      if(info%io_s <= io .and. io <= info%io_e) then
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+          rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
+          spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*a_B)**2)*(a_B)**(3/2)
+        end do
+        end do
+        end do
+      end if
     end do
     end do
     
   case('y')
   
-    Xmax = sum(system%primitive_a(1:3,1)**2)
-    Ymax = sum(system%primitive_a(1:3,2)**2)
-    Zmax = sum(system%primitive_a(1:3,3)**2)
+    Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))
+    Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))
+    Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))
 
     iseed=123
     do is=1,system%nspin
-    do ik=info%ik_s,info%ik_e
-    do io=info%io_s,info%io_e
+    do ik=1,system%nk
+    do io=1,system%no
       call quickrnd_ns ; x1=Xmax*rnd
       call quickrnd_ns ; y1=Ymax*rnd
       call quickrnd_ns ; z1=Zmax*rnd
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-        xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
-        rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
-        spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
-      end do
-      end do
-      end do
+      if(info%ik_s <= ik .and. ik <= info%ik_e .and.   &
+         info%io_s <= io .and. io <= info%io_e) then
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+          rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
+          spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
+        end do
+        end do
+        end do
+      end if
     end do
     end do
     end do
