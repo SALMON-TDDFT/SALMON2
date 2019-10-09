@@ -16,7 +16,7 @@
 #define TIMER_BEG(id) call timer_thread_begin(id)
 #define TIMER_END(id) call timer_thread_end(id)
 
-subroutine hamiltonian(zu,flag_current)
+subroutine hamiltonian_arted(zu,flag_current)
   use Global_Variables
   use timer
   use omp_lib

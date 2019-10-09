@@ -124,7 +124,7 @@ Subroutine dt_evolve_omp_KB(zu)
     tjr2_t=tjr2
   end if
 
-  call hamiltonian(zu,.false.)
+  call hamiltonian_arted(zu,.false.)
 
   call psi_rho_RT(zu)
   if(yn_fix_func=='n')then
@@ -155,7 +155,7 @@ Subroutine dt_evolve_omp_KB(zu)
   end select
 ! yabana
 
-  call hamiltonian(zu,.true.)
+  call hamiltonian_arted(zu,.true.)
 
   call psi_rho_RT(zu)
 
@@ -195,7 +195,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
 !Constructing nonlocal part
   call update_projector(kac)
 
-  call hamiltonian(zu,.false.)
+  call hamiltonian_arted(zu,.false.)
 
   Vloc_t=Vloc
   Vloc_new(:) = 3d0*Vloc(:) - 3d0*Vloc_old(:,1) + Vloc_old(:,2)
@@ -218,7 +218,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
         zu_GS(:,ib,ik)=zu(:,ib,ik)
      end do
 
-     call hamiltonian(zu,.false.)
+     call hamiltonian_arted(zu,.false.)
 
      call psi_rho_RT(zu)
 
@@ -242,7 +242,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
   end select
 
 
-  call hamiltonian(zu,.true.)
+  call hamiltonian_arted(zu,.true.)
 
   call psi_rho_RT(zu)
 
@@ -298,7 +298,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
     tjr2_t=tjr2
   end if
 
-  call hamiltonian(zu,.false.)
+  call hamiltonian_arted(zu,.false.)
 
   call psi_rho_RT(zu)
   if(yn_fix_func=='n')then
@@ -328,7 +328,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
   end select
 ! yabana
 
-  call hamiltonian(zu,.true.)
+  call hamiltonian_arted(zu,.true.)
 
   call psi_rho_RT(zu)
 
