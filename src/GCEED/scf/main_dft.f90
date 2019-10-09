@@ -53,6 +53,7 @@ use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
 use salmon_total_energy
+use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik
@@ -188,8 +189,7 @@ if(iopt==1)then
   case default ! New calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
-    call init_wf_ns(lg,mg,nspin,info,1,spsi)
-    call gram_schmidt(system, mg, info, spsi)
+    call init_wf(lg,mg,system,info,spsi)
   case(1,3)
     call read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,miter)
   end select
