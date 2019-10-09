@@ -22,8 +22,9 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing
+subroutine write_bin(odir,lg,mg,ng,system,info,spsi,mixing,sVh_stock,iter)
+  use inputoutput, only: theory,calc_mode
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -32,7 +33,8 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital), intent(in)  :: spsi
   type(s_mixing),intent(inout) :: mixing
-  integer, intent(in)          :: miter
+  type(s_scalar),intent(in)    :: sVh_stock
+  integer, intent(in)          :: iter
   
   integer :: is,iob,ik
   integer :: iu1_w
@@ -42,20 +44,22 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   iu1_w = 97
   
   !system
-  if(comm_is_root(nproc_id_global))then
-    dir_file_out = trim(odir)//"system.bin"
-    open(iu1_w,file=dir_file_out,form='unformatted')
-    write(iu1_w) system%nk
-    write(iu1_w) system%no
+  if(theory=='DFT'.or.calc_mode=='GS')then
+    if(comm_is_root(nproc_id_global))then
+      dir_file_out = trim(odir)//"system.bin"
+      open(iu1_w,file=dir_file_out,form='unformatted')
+      write(iu1_w) system%nk
+      write(iu1_w) system%no
 
-    close(iu1_w)
+      close(iu1_w)
+    end if
   end if
 
-  !iteration number
+  !iteration number (same format for gs and rt calculations)
   if(comm_is_root(nproc_id_global))then
     dir_file_out = trim(odir)//"iteration.bin"
     open(iu1_w,file=dir_file_out,form='unformatted')
-    write(iu1_w) miter
+    write(iu1_w) iter
 
     close(iu1_w)
   end if
@@ -64,29 +68,40 @@ subroutine write_gs_bin(odir,lg,mg,ng,system,info,spsi,mixing,miter)
   call write_wavefunction(odir,lg,mg,system,info,spsi)
 
   !occupation
-  if(comm_is_root(nproc_id_global))then
-    dir_file_out = trim(odir)//"occupation.bin"
-    open(iu1_w,file=dir_file_out,form='unformatted')
-    do is=1,system%nspin
-    do ik=1,system%nk
-    do iob=1,system%no
-      write(iu1_w) system%rocc(iob,ik,is)
-    end do
-    end do
-    end do
-    close(iu1_w)
+  if(theory=='DFT'.or.calc_mode=='GS')then
+    if(comm_is_root(nproc_id_global))then
+      dir_file_out = trim(odir)//"occupation.bin"
+      open(iu1_w,file=dir_file_out,form='unformatted')
+      do is=1,system%nspin
+      do ik=1,system%nk
+      do iob=1,system%no
+        write(iu1_w) system%rocc(iob,ik,is)
+      end do
+      end do
+      end do
+      close(iu1_w)
+    end if
   end if
   
   !rho_inout
-  call write_rho_inout(odir,lg,ng,system,info,mixing)
+  if(theory=='DFT'.or.calc_mode=='GS')then
+    call write_rho_inout(odir,lg,ng,system,info,mixing)
+  end if
 
-end subroutine write_gs_bin
+  !Vh_stock
+  if(theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT')then
+    call write_Vh_stock(odir,lg,ng,info,sVh_stock)
+  end if
+
+  return
+
+end subroutine write_bin
 
 !=======================================================================
 
-subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
-  use inputoutput, only: theory,calc_mode,directory_read_data
-  use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing
+subroutine read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,iter)
+  use inputoutput, only: theory,calc_mode,directory_read_data,read_rt_wfn_k
+  use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -97,7 +112,8 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital), intent(inout)  :: spsi
   type(s_mixing),intent(inout) :: mixing
-  integer, intent(out) :: miter
+  type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
+  integer, intent(out) :: iter
 
   integer :: mk,mo
 
@@ -126,15 +142,19 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
   call comm_bcast(mo,comm)
 
   !iteration
-  if(comm_is_root(nproc_id_global))then
-    dir_file_in =trim(directory_read_data)//"iteration.bin"
-    open(iu1_r,file=dir_file_in,form='unformatted')
-    read(iu1_r) miter
+  if((theory=='DFT'.or.calc_mode=='GS').or.  &
+     ((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.  &
+      read_rt_wfn_k=='y'))then
+    if(comm_is_root(nproc_id_global))then
+      dir_file_in =trim(directory_read_data)//"iteration.bin"
+      open(iu1_r,file=dir_file_in,form='unformatted')
+      read(iu1_r) iter
 
-    close(iu1_r)
+      close(iu1_r)
+    end if
+    call comm_bcast(iter,comm)
   end if
-  call comm_bcast(miter,comm)
-  
+ 
   !wave function
   call read_wavefunction(lg,mg,system,info,spsi,mk,mo)
   
@@ -162,9 +182,19 @@ subroutine read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
     call read_rho_inout(lg,ng,system,info,mixing)
   end if
  
+  !Vh_stock
+  if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.  &
+      read_rt_wfn_k=='y')then
+    if(mod(iter,2)==1)then
+      call read_Vh_stock(lg,ng,info,sVh_stock1)
+    else
+      call read_Vh_stock(lg,ng,info,sVh_stock2)
+    end if
+  end if
+
   return
 
-end subroutine read_gs_bin
+end subroutine read_bin
 
 !=======================================================================
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
@@ -423,6 +453,53 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing)
 end subroutine write_rho_inout
 
 !=======================================================================
+subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock)
+  use structures, only: s_rgrid, s_orbital_parallel, s_scalar
+  use salmon_parallel, only: nproc_id_global
+  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  implicit none
+  character(*)   :: odir
+  type(s_rgrid), intent(in)    :: lg,ng
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_scalar),intent(in) :: sVh_stock
+  character(100) ::  dir_file_out
+  integer :: iu1_w
+  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
+  integer :: ix,iy,iz
+
+  iu1_w = 97
+  
+  if(comm_is_root(nproc_id_global))then
+    dir_file_out = trim(odir)//"Vh_stock.bin"
+    open(iu1_w,file=dir_file_out,form='unformatted')
+  end if
+
+  allocate(matbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+
+  matbox2=0.d0
+  matbox2(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))   &
+     = sVh_stock%f(ng%is(1):ng%ie(1), &
+                   ng%is(2):ng%ie(2), &
+                   ng%is(3):ng%ie(3))
+
+  call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+
+  if(comm_is_root(nproc_id_global))then
+    write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+  end if
+  
+  if(comm_is_root(nproc_id_global))then
+    close(iu1_w)
+  end if
+
+  deallocate(matbox,matbox2)
+  
+end subroutine write_Vh_stock
+
+!=======================================================================
 subroutine read_wavefunction(lg,mg,system,info,spsi,mk,mo)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use inputoutput, only: theory,calc_mode,iperiodic,num_datafiles_in,directory_read_data
@@ -600,6 +677,7 @@ end subroutine read_wavefunction
 
 !=======================================================================
 subroutine read_rho_inout(lg,ng,system,info,mixing)
+  use inputoutput, only: directory_read_data
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -611,9 +689,14 @@ subroutine read_rho_inout(lg,ng,system,info,mixing)
   integer :: iu1_r
   integer :: i,ix,iy,iz
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
- 
+  character(100) :: dir_file_in
 
   iu1_r = 96
+
+  if(comm_is_root(nproc_id_global))then
+    dir_file_in =trim(directory_read_data)//"rho_inout.bin"
+    open(iu1_r,file=dir_file_in,form='unformatted')
+  end if
 
   if(comm_is_root(nproc_id_global))then
     read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
@@ -642,7 +725,6 @@ subroutine read_rho_inout(lg,ng,system,info,mixing)
   end do
   end do
   end do
-
   
   if(system%nspin == 2)then
     do i=1,mixing%num_rho_stock+1
@@ -677,10 +759,58 @@ subroutine read_rho_inout(lg,ng,system,info,mixing)
       end do
     end do
   end if
- 
+
+  if(comm_is_root(nproc_id_global))then
+    close(iu1_r)
+  end if
+
   deallocate(matbox,matbox2)
 
 end subroutine read_rho_inout
+
+!=======================================================================
+subroutine read_Vh_stock(lg,ng,info,sVh_stock)
+  use inputoutput, only: directory_read_data
+  use structures, only: s_rgrid, s_orbital_parallel, s_scalar
+  use salmon_parallel, only: nproc_id_global
+  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  implicit none
+  type(s_rgrid), intent(in)    :: lg,ng
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_scalar),intent(inout) :: sVh_stock
+  integer :: iu1_r
+  integer :: ix,iy,iz
+  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
+  character(100) :: dir_file_in
+
+  iu1_r = 96
+
+  if(comm_is_root(nproc_id_global))then
+    dir_file_in =trim(directory_read_data)//"Vh_stock.bin"
+    open(iu1_r,file=dir_file_in,form='unformatted')
+  end if
+
+  if(comm_is_root(nproc_id_global))then
+    read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+  end if
+  call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)  
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    sVh_stock%f(ix,iy,iz)=matbox(ix,iy,iz)
+  end do
+  end do
+  end do
+  
+  if(comm_is_root(nproc_id_global))then
+    close(iu1_r)
+  end if
+
+  deallocate(matbox,matbox2)
+
+end subroutine read_Vh_stock
 
 !=======================================================================
 subroutine set_dg(lg,mg,dg,num_datafiles)

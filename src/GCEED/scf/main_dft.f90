@@ -80,9 +80,10 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
-type(s_cg)  :: cg
+type(s_cg)     :: cg
 type(s_mixing) :: mixing
-type(s_ofile) :: ofile
+type(s_ofile)  :: ofile
+type(s_scalar) :: sVh_stock,sVh_stock1,sVh_stock2 ! Used only as arguments. if optional sentence is used, this line will be removed.
 
 logical :: rion_update
 integer :: iopt,nopt_max
@@ -190,7 +191,7 @@ if(iopt==1)then
     call init_wf_ns(lg,mg,nspin,info,1,spsi)
     call gram_schmidt(system, mg, info, spsi)
   case(1,3)
-    call read_gs_bin(lg,mg,ng,system,info,spsi,mixing,miter)
+    call read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,miter)
   end select
 
   if(read_gs_dns_cube == 'n') then
@@ -636,7 +637,7 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call write_gs_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,mixing,miter)
+call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,mixing,sVh_stock,miter)
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY

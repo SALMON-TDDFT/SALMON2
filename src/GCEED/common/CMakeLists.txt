@@ -2,7 +2,6 @@ set(SOURCES
     calc_iquotient.f90
     calc_myob.f90
     check_corrkob.f90
-    checkpoint_restart.f90
     calc_elf.f90
     calcVpsl_periodic_FFTE.f90
     check_fourier.f90
