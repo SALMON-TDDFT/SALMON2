@@ -273,8 +273,6 @@ if(IC_rt==0) then
   call initA(Ntime)
   itotNtime=Ntime
   Miter_rt=0
-else if(IC_rt==1) then
-  call read_rt_bin(ng,mg,info,info_field,Ntime)
 end if
 call timer_end(LOG_READ_RT_DATA)
 
@@ -585,12 +583,6 @@ deallocate (R1)
 
 
 !------------ Writing part -----------
-
-! write RT: binary data for restart
-call timer_begin(LOG_WRITE_RT_DATA)
-if(OC_rt==1) call write_rt_bin("./",ng,info)
-call timer_end(LOG_WRITE_RT_DATA)
-
 
 ! write RT: 
 call timer_begin(LOG_WRITE_RT_RESULTS)
