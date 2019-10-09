@@ -49,7 +49,7 @@ contains
     character(256) :: dir_checkpoint
 
     call create_checkpoint_dir(itt,dir_checkpoint)
-    call write_rt_bin(dir_checkpoint,ng,info)
+!    call write_rt_bin(dir_checkpoint,ng,info)
 
   end subroutine write_checkpoint_rt
 

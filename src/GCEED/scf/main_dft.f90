@@ -41,7 +41,6 @@ use global_variables_scf
 use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
-use gram_schmidt_orth, only: gram_schmidt 
 use write_sub
 use read_gs
 use code_optimization
@@ -53,6 +52,7 @@ use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
 use salmon_total_energy
+use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik
@@ -188,8 +188,7 @@ if(iopt==1)then
   case default ! New calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     itmg=img
-    call init_wf_ns(lg,mg,nspin,info,1,spsi)
-    call gram_schmidt(system, mg, info, spsi)
+    call init_wf(lg,mg,system,info,spsi)
   case(1,3)
     call read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,miter)
   end select
@@ -625,7 +624,7 @@ call write_info_data(Miter,system,energy,pp)
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
 if(yn_out_dns =='y') call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
 if(yn_out_dos =='y') call write_dos(system,energy)
-if(yn_out_pdos=='y') call calc_pdos(lg,mg,system,info,pp,energy,spsi)
+if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') then
   allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   call calc_elf(lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi,elf)

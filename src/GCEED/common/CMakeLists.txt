@@ -1,11 +1,7 @@
 set(SOURCES
-    calc_iquotient.f90
-    calc_myob.f90
-    check_corrkob.f90
     calc_elf.f90
     calcVpsl_periodic_FFTE.f90
     check_fourier.f90
-    init_wf.f90
     set_filename.f90
     set_icoo1d.f90
     write_psi.f90

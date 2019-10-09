@@ -9,6 +9,7 @@ set(SOURCES
     read_gs.f90
     band.f90
     occupation.f90
+    init_gs.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

@@ -1,5 +1,4 @@
 set(SOURCES
-    calc_pdos.f90
     convert_input_scf.f90
     main_dft.f90
     )
