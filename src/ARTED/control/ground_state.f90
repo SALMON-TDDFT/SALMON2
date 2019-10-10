@@ -51,7 +51,7 @@ contains
       call psi_rho_GS !sym
       rho_in(1:NL,1)=rho(1:NL)
 
-      call Hartree
+      call Hartree_arted
     
     else if(iflag_gs_init_wf==1) then  !case that initial guess has been already read from files
       rho_in(1:NL,1)=rho(1:NL)
@@ -144,7 +144,7 @@ contains
        
        call psi_rho_GS
        call broyden(rho,rho_in,rho_out,nl,iter,iter,nscf)
-       call Hartree
+       call Hartree_arted
 
 
        ! NOTE:
@@ -281,7 +281,7 @@ contains
 
 
     call psi_rho_GS
-    call Hartree
+    call Hartree_arted
     call Exc_Cor(calc_mode_gs,NBoccmax,zu_t)
 
     Vloc(1:NL)=Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)

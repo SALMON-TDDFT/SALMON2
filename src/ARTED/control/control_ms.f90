@@ -79,7 +79,7 @@ subroutine tddft_maxwell_ms
        call assign_mp_variables_omp()
        do imacro = nmacro_s, nmacro_e
           call psi_rho_RT(zu_t)
-          call Hartree
+          call Hartree_arted
           call Exc_Cor(calc_mode_rt,NBoccmax,zu_t)
           Vloc(1:NL)=Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)
           call Total_Energy_omp(rion_update_on,calc_mode_rt,imacro)

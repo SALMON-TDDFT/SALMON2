@@ -15,9 +15,9 @@
 !
 !This file is "Hartree.f90"
 !This file contain one subroutine.
-!SUBROUTINE Hartree
+!SUBROUTINE Hartree_arted
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-Subroutine Hartree
+Subroutine Hartree_arted
   use Global_Variables
   use timer
   implicit none
@@ -125,6 +125,6 @@ Subroutine Hartree
   call timer_end(LOG_CALC_HARTREE)
 
   return
-End Subroutine Hartree
+End Subroutine Hartree_arted
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120------130
 
