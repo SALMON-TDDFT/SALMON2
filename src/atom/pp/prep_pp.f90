@@ -133,7 +133,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
     case('n')
       call calc_vpsl_periodic(mg,system,pp,fg,sVpsl,ppg)
     case('y')
-      call calcVpsl_periodic_FFTE(lg,ng,system,fg,info_field,poisson,pp,ppg,sVpsl)
+      call calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
     end select
   end select
 
@@ -482,6 +482,220 @@ subroutine calc_vpsl_periodic(mg,system,pp,fg,vpsl,ppg)
 !$omp end parallel
 
 end subroutine calc_vpsl_periodic
+
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+subroutine calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
+  use structures
+  use math_constants, only: pi,zi
+  use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
+  use salmon_global, only: natom, nelem, kion
+  implicit none
+  type(s_rgrid)     ,intent(in) :: lg,mg,ng
+  type(s_dft_system),intent(in) :: system
+  type(s_field_parallel),intent(in) :: info_field
+  type(s_pp_info)   ,intent(in) :: pp
+  type(s_pp_grid)   ,intent(in) :: ppg
+  type(s_poisson)               :: poisson
+  type(s_scalar)                :: sVpsl
+  type(s_reciprocal_grid)       :: fg
+  !
+  integer :: ix,iy,iz,ak
+  integer :: iix,iiy,iiz
+  integer :: iatom
+  integer :: n,nn
+  real(8) :: bLx,bLy,bLz
+  real(8) :: aLxyz
+  integer :: NG_s,NG_e
+  integer :: NG_l_s_para,NG_l_e_para
+  integer :: numtmp
+  real(8) :: G2sq,G2
+  real(8) :: Gd
+  real(8) :: s
+  real(8) :: r
+  integer :: iy_sta,iy_end,iz_sta,iz_end
+  integer :: i,iix2,iiy2,iiz2
+  integer :: npuy,npuz
+  real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: matbox_l,matbox_l2
+
+  npuy=info_field%isize_ffte(2)
+  npuz=info_field%isize_ffte(3)
+  
+  if(.not.allocated(poisson%a_ffte))then
+    allocate(poisson%a_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+    allocate(poisson%b_ffte(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+  end if
+
+!calculate reciprocal lattice vector
+  bLx=2.d0*Pi/(system%hgs(1)*dble(lg%num(1)))
+  bLy=2.d0*Pi/(system%hgs(2)*dble(lg%num(2)))
+  bLz=2.d0*Pi/(system%hgs(3)*dble(lg%num(3)))
+
+  iz_sta=1
+  iz_end=lg%num(3)/npuz
+  iy_sta=1
+  iy_end=lg%num(2)/npuy
+ 
+  NG_s=1
+  NG_e=lg%num(1)*lg%num(2)*lg%num(3)
+  
+  numtmp=(NG_e-NG_s+1)/info_field%isize_all
+  
+  NG_l_s_para = info_field%id_all*numtmp+1
+  NG_l_e_para = (info_field%id_all+1)*numtmp
+  if(info_field%id_all==info_field%isize_all-1) NG_l_e_para=NG_e
+  
+  fg%iGzero=-1
+  
+  do iz=1,lg%num(3)/npuz
+  do iy=1,lg%num(2)/npuy
+  do ix=1,lg%num(1)
+    n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
+    iix2=ix-1+lg%is(1)
+    iiy2=iy-1+info_field%id_ffte(2)*lg%num(2)/npuy+lg%is(2)
+    iiz2=iz-1+info_field%id_ffte(3)*lg%num(3)/npuz+lg%is(3)
+    if(ix==1.and.iy==1.and.iz==1.and.info_field%id_ffte(3)==0.and.info_field%id_ffte(2)==0) then
+      fg%iGzero=n
+    end if
+    iix=ix-1-lg%num(1)*(1+sign(1,(iix2-1-(lg%num(1)+1)/2)))/2
+    iiy=iy-1+info_field%id_ffte(2)*lg%num(2)/npuy-lg%num(2)*(1+sign(1,(iiy2-1-(lg%num(2)+1)/2)))/2
+    iiz=iz-1+info_field%id_ffte(3)*lg%num(3)/npuz-lg%num(3)*(1+sign(1,(iiz2-1-(lg%num(3)+1)/2)))/2
+    fg%Gx(n)=dble(iix)*bLx
+    fg%Gy(n)=dble(iiy)*bLy
+    fg%Gz(n)=dble(iiz)*bLz
+  enddo
+  enddo
+  enddo
+
+  fg%zdVG_ion(:,:)=0.d0
+  do ak=1,nelem
+    do iz=1,lg%num(3)/npuz
+    do iy=1,lg%num(2)/npuy
+    do ix=1,lg%num(1)
+      n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
+      G2sq=sqrt(fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2)
+      s=0.d0
+      if (n == fg%iGzero) then
+        do i=2,pp%nrloc(ak)
+          r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+          s=s+4*Pi*r**2*(pp%vpp_f(i,pp%lref(ak),ak)+pp%zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
+        enddo
+      else
+        do i=2,pp%nrloc(ak)
+          r=pp%rad(i+1,ak) !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
+          s=s+4*Pi*r**2*sin(G2sq*r)/(G2sq*r)*(pp%vpp_f(i,pp%lref(ak),ak)+pp%zps(ak)/r)*(pp%rad(i+2,ak)-pp%rad(i+1,ak))
+        enddo
+      endif
+      fg%zdVG_ion(n,ak)=s
+    enddo
+    enddo
+    enddo
+  enddo
+ 
+  aLxyz=system%hvol*dble(lg%num(1)*lg%num(2)*lg%num(3))
+  fg%zrhoG_ion=0.d0
+  do iatom=1,natom
+    do iz=1,lg%num(3)/npuz
+    do iy=1,lg%num(2)/npuy
+    do ix=1,lg%num(1)
+      n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
+      fg%zrhoG_ion(n)=fg%zrhoG_ion(n)+pp%zps(Kion(iatom))/aLxyz  &
+                          *exp(-zI*(fg%Gx(n)*system%rion(1,iatom)+fg%Gy(n)*system%rion(2,iatom)+fg%Gz(n)*system%rion(3,iatom)))
+    enddo
+    enddo
+    enddo
+  enddo
+
+!initialization
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,0 &
+                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+  poisson%b_ffte=0.d0
+  do iatom=1,natom
+    ak=Kion(iatom)
+    do iz=1,lg%num(3)/npuz
+    do iy=1,lg%num(2)/npuy
+    do ix=1,lg%num(1)
+      n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
+      G2=fg%Gx(n)**2+fg%Gy(n)**2+fg%Gz(n)**2
+      Gd=fg%Gx(n)*system%rion(1,iatom)+fg%Gy(n)*system%rion(2,iatom)+fg%Gz(n)*system%rion(3,iatom)
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)+fg%zdVG_ion(n,ak)*exp(-zI*Gd)/aLxyz
+      if(n == fg%iGzero) cycle
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)-4*Pi/G2*pp%zps(ak)*exp(-zI*Gd)/aLxyz
+    enddo
+    enddo
+    enddo
+  enddo
+  do iz=1,lg%num(3)/npuz
+  do iy=1,lg%num(2)/npuy
+  do ix=1,lg%num(1)
+    poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*dble(lg%num(1)*lg%num(2)*lg%num(3))
+  enddo
+  enddo
+  enddo
+
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3),npuy,npuz,1 &
+                   ,info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+!$OMP parallel do
+  do iz = lg%is(3),lg%ie(3)
+  do iy = lg%is(2),lg%ie(2)
+  do ix = lg%is(1),lg%ie(1)
+    matbox_l(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+  if(info_field%isize_ffte(1)==1)then
+!$OMP parallel do private(iiz,iiy)
+    do iz=iz_sta,iz_end
+      iiz=iz+info_field%id_ffte(3)*lg%num(3)/npuz
+      do iy=iy_sta,iy_end
+        iiy=iy+info_field%id_ffte(2)*lg%num(2)/npuy
+        matbox_l(1:lg%ie(1),iiy,iiz)=poisson%a_ffte(1:lg%ie(1),iy,iz)
+      end do
+    end do
+  else
+!$OMP parallel do private(iiz,iiy,ix)
+    do iz=iz_sta,iz_end
+      iiz=iz+info_field%id_ffte(3)*lg%num(3)/npuz
+      do iy=iy_sta,iy_end
+        iiy=iy+info_field%id_ffte(2)*lg%num(2)/npuy
+        do iix=ng%is(1),ng%ie(1)
+          ix=iix-lg%is(1)+1
+          matbox_l(iix,iiy,iiz)=poisson%a_ffte(ix,iy,iz)
+        end do
+      end do
+    end do
+  end if
+  call comm_summation(matbox_l,matbox_l2,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
+!$OMP parallel do
+  do iz = mg%is(3),mg%ie(3)
+  do iy = mg%is(2),mg%ie(2)
+  do ix = mg%is(1),mg%ie(1)
+    sVpsl%f(ix,iy,iz)=matbox_l2(ix,iy,iz)
+  end do
+  end do
+  end do
+
+! displacement of Gx etc. for total energy calculations
+! Removal of this part is a future work.
+  do iz=1,lg%num(3)/npuz
+  do iy=1,lg%num(2)/npuy
+  do ix=ng%is(1)-lg%is(1)+1,ng%ie(1)-lg%is(1)+1
+     n=(iz-1)*lg%num(2)/npuy*lg%num(1)+(iy-1)*lg%num(1)+ix
+     nn=ix-(ng%is(1)-lg%is(1)+1)+1+(iy-1)*ng%num(1)+(iz-1)*lg%num(2)/npuy*ng%num(1)+fg%ig_s-1
+     fg%Gx(nn)=fg%Gx(n)
+     fg%Gy(nn)=fg%Gy(n)
+     fg%Gz(nn)=fg%Gz(n)
+     fg%zrhoG_ion(nn) = fg%zrhoG_ion(n)
+     fg%zdVG_ion(nn,:) = fg%zdVG_ion(n,:)
+  enddo
+  enddo
+  enddo
+
+  return
+
+end subroutine calc_Vpsl_periodic_FFTE
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_mps(ppg)
