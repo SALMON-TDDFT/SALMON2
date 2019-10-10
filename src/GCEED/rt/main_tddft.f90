@@ -505,15 +505,15 @@ rho0 = srho%f
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,hgs,iscfrt,rho0,itt)
     end if
     if(yn_out_elf_rt=='y')then
       call calc_elf(lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in,elf)
-      call write_elf(lg,elf,icoo1d,hgs,iscfrt,itt)
+      call write_elf(lg,elf,hgs,iscfrt,itt)
     end if
     if(yn_out_estatic_rt=='y')then
       call calcEstatic(lg, ng, info, sVh, srg_ng)
-      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,itt)
+      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,hgs,itt)
     end if
   end do
 

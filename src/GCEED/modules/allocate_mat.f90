@@ -117,8 +117,6 @@ allocate (exc_dummy(ng%num(1), ng%num(2), ng%num(3)))
 allocate (exc_dummy2(ng%num(1), ng%num(2), ng%num(3),2))
 allocate (exc_dummy3(ng%num(1), ng%num(2), ng%num(3),3))
 
-allocate(icoo1d(3,lg_num(1)*lg_num(2)*lg_num(3)))
-
 END SUBROUTINE allocate_mat
 
 !======================================================================

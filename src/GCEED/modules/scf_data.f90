@@ -340,7 +340,6 @@ real(8),allocatable :: E_ind(:,:)
 real(8),allocatable :: E_tot(:,:)
 
 integer,allocatable :: oblist(:)
-integer,allocatable ::icoo1d(:,:)
 
 integer :: MI_read
 

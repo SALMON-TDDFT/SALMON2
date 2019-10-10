@@ -21,7 +21,6 @@ subroutine write_psi(lg,mg,system,info,spsi)
   use salmon_global, only: format_voxel_data
   use salmon_communication, only: comm_summation
   use write_file3d
-  use scf_data, only: icoo1d
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system),intent(in) :: system
@@ -69,8 +68,8 @@ subroutine write_psi(lg,mg,system,info,spsi)
       if(format_voxel_data=='avs')then
         header_unit = "A**(-3/2)"
       ! future work: real & imaginary part
-        call write_avs(lg,103,suffix,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3,icoo1d)
-        call write_avs(lg,103,suffix,header_unit,aimag(cmatbox2)/sqrt(au_length_aa)**3,icoo1d)
+        call write_avs(lg,103,suffix,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
+        call write_avs(lg,103,suffix,header_unit,aimag(cmatbox2)/sqrt(au_length_aa)**3)
       else if(format_voxel_data=='cube')then
       ! future work: real & imaginary part
         call write_cube(lg,103,suffix,phys_quantity,dble(cmatbox2),system%hgs)

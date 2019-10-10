@@ -351,19 +351,19 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,icoo1d,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,hgs,iscfrt,rho0,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call calc_elf(lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out,elf)
-      call write_elf(lg,elf,icoo1d,hgs,iscfrt,itt)
+      call write_elf(lg,elf,hgs,iscfrt,itt)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
       call calcEstatic(lg, ng, info, sVh, srg_ng)
-      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,icoo1d,hgs,itt)
+      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,hgs,itt)
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)
