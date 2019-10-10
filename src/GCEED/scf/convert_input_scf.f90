@@ -48,19 +48,7 @@ select case(method_mixing)
     stop 'Specify either "simple" or "broyden" for method_mixing.'
 end select
     
-Harray(1:3,1:maxntmg)=0.d0
-rLsize(1:3,1:maxntmg)=0.d0
 iDiter(1:maxntmg)=1000
-
-if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) /= 0d0)then
-  call err_finalize('Error: [num_rgrid] and [dl] are incompatible input parameters.')
-else if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) == 0d0)then
-  Harray(1:3,1)=al(1:3)/dble(num_rgrid(1:3))
-else if(sum(abs(num_rgrid)) == 0d0 .and. sum(abs(dl)) /= 0d0)then
-  Harray(1:3,1)=dl(1:3)
-end if
-
-rLsize(1:3,1)=al(1:3)
 iDiter(1) = nscf
 
 if(ispin == 0)then
@@ -119,10 +107,8 @@ end if
 
 if(ilsda == 0) then
   itotMST=MST(1)
-  itotfMST=ifMST(1)
 else if(ilsda == 1) then
   itotMST=MST(1)+MST(2)
-  itotfMST=ifMST(1)+ifMST(2)
 end if
 
 !===== namelist for group_parallel =====
@@ -178,7 +164,6 @@ if(comm_is_root(nproc_id_global))then
 end if
 
 !===== namelist for group_atom =====
-iflag_ps=1
 MI=natom
 MKI=nelem
 !iZatom(:)=0
@@ -195,9 +180,6 @@ end if
 if(comm_is_root(nproc_id_global))then
 !  read(fh_namelist,NML=group_atom) 
 !  rewind(fh_namelist)
-
-  Mlps(:) = Lmax_ps(:)
-  Lref(:) = Lloc_ps(:)
 
 !ps format conversion
 !  do iatom = 1,MKI
@@ -216,21 +198,10 @@ if(comm_is_root(nproc_id_global))then
 !  end do
 end if
 
-call comm_bcast(Mlps,nproc_group_global)
-call comm_bcast(Lref,nproc_group_global)
-
 if(comm_is_root(nproc_id_global)) write(*,*) "MI =",MI
 
 
 !===== namelist for group_others =====
-
-!if(iflag_ps==1)then
-!  do ii=1,3
-!    do iatom=1,MI
-!      Rion(ii,iatom)=Rion(ii,iatom)*ulength_to_au
-!    end do
-!  end do
-!end if
 
 nproc_d_o_mul   = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
 nproc_d_g_mul_dm= nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)

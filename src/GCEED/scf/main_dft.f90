@@ -96,7 +96,7 @@ real(8),allocatable :: band_kpt(:,:)
 logical,allocatable :: check_conv_esp(:,:,:)
 integer :: iter_band_kpt_end, iter_band_kpt_stride
 
-integer :: i,j
+integer :: i,j, img
 
 if(calc_mode=='DFT_BAND'.and.iperiodic/=3) return
 
@@ -109,7 +109,6 @@ iblacsinit=0
 call timer_begin(LOG_TOTAL)
 
 call timer_begin(LOG_INIT_GS)
-inumcpu_check=0
 
 call convert_input_scf(file_atoms_coo)
 mixing%num_rho_stock=21
@@ -222,12 +221,10 @@ if(iopt==1)then
 else if(iopt>=2)then
   call timer_begin(LOG_INIT_GS)
   Miter = 0        ! Miter: Iteration counter set to zero
-  if(iflag_ps/=0) then
-    rion_update = .true.
-    call dealloc_init_ps(ppg)
-!    call calc_nlcc(pp, system, mg, ppn) !test
-    call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-  end if
+  rion_update = .true.
+  call dealloc_init_ps(ppg)
+! call calc_nlcc(pp, system, mg, ppn) !test
+  call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   call timer_end(LOG_INIT_GS)
 end if
 
