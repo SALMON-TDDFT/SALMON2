@@ -179,8 +179,6 @@ Multigrid_Iteration : do img=1,ntmg
 if(iopt==1)then
 
   call timer_begin(LOG_INIT_GS)
-  
-  call set_icoo1d(lg)
 
   call init_mixing(nspin,ng,mixing)
 
@@ -622,15 +620,10 @@ call write_info_data(Miter,system,energy,pp)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,icoo1d,hgs,iscfrt)
+if(yn_out_dns =='y') call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,hgs,iscfrt)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
-if(yn_out_elf =='y') then
-  allocate(elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  call calc_elf(lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi,elf)
-  call write_elf(lg,elf,icoo1d,hgs,iscfrt)
-  deallocate(elf)
-end if
+if(yn_out_elf =='y') call write_elf(iscfrt,0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 

@@ -20,7 +20,7 @@ module write_file3d
 
 contains
 
-subroutine write_avs(lg,fp,suffix,header_unit,rmat,icoo1d)
+subroutine write_avs(lg,fp,suffix,header_unit,rmat)
   use inputoutput, only: nsplit_voxel_data
   use salmon_parallel, only: nproc_id_global
   use structures, only: s_rgrid
@@ -31,13 +31,25 @@ subroutine write_avs(lg,fp,suffix,header_unit,rmat,icoo1d)
   character(20),intent(in) :: header_unit
   real(8),intent(in) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                              lg%is(3):lg%ie(3))
-  integer,intent(in) :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
   character(30),intent(in):: suffix
+  !
   character(30):: filename
   integer::ix,iy,iz
-  integer::jj
+  integer::jj,icount
   integer::jsta,jend
+  integer :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
   character(8)  :: filenumber_data
+  
+  do iz=lg%is(3),lg%ie(3)
+  do iy=lg%is(2),lg%ie(2)
+  do ix=lg%is(1),lg%ie(1)
+    icount=(iz-lg%is(3))*lg%num(2)*lg%num(1)+(iy-lg%is(2))*lg%num(1)+ix-lg%is(1)+1
+    icoo1d(1,icount)=ix
+    icoo1d(2,icount)=iy
+    icoo1d(3,icount)=iz
+  end do
+  end do
+  end do
 
   if(nsplit_voxel_data>=2)then
     if(nproc_id_global<nsplit_voxel_data)then

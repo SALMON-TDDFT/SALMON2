@@ -340,7 +340,6 @@ real(8),allocatable :: E_ind(:,:)
 real(8),allocatable :: E_tot(:,:)
 
 integer,allocatable :: oblist(:)
-integer,allocatable ::icoo1d(:,:)
 
 integer :: MI_read
 
@@ -437,7 +436,6 @@ type(s_orbital_parallel),intent(in) :: info
 lg_sta(1:3) = lg%is(1:3)
 lg_end(1:3) = lg%ie(1:3)
 lg_num(1:3) = lg%num(1:3)
-call check_fourier(lg)
 
 mg_sta(1:3) = mg%is(1:3)
 mg_end(1:3) = mg%ie(1:3)
