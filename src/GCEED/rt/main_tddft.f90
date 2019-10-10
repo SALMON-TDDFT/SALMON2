@@ -102,14 +102,11 @@ call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=2
 OC=0
-img=1
 
 iwdenstep=30 
 denplane='xy'
 idensum=0
 posplane=0.d0
-
-inumcpu_check=0
 
 call convert_input_rt(Ntime)
 mixing%num_rho_stock=21
@@ -250,8 +247,6 @@ call timer_end(LOG_READ_GS_DATA)
 ! +-------------+
 
 call timer_begin(LOG_READ_RT_DATA)
-allocate(Ex_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-allocate(Ec_fast(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 allocate( Ex_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
 allocate( Ey_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
 allocate( Ez_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
@@ -357,8 +352,6 @@ if(comm_is_root(nproc_id_global).and.iperiodic==3) then
   open(19,file="Eind.data")
 end if
 
-cumnum=0.d0
-
 idensity=0
 idiffDensity=1
 fileLaser= "laser.out"
@@ -371,10 +364,6 @@ allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, &
                                        lg%is(3)-Nd:lg%ie(3)+Nd))
 !endif
 
-allocate(rhobox(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-!if(ilsda==1)then
-allocate(rhobox_s(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),2))
-!end if
 allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
 ! External Field Direction

@@ -29,15 +29,6 @@ if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
 end if
 
-if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) /= 0d0)then
-  call err_finalize('Error: [num_rgrid] and [dl] are incompatible input parameters.')
-else if(sum(abs(num_rgrid)) /= 0 .and. sum(abs(dl)) == 0d0)then
-  Harray(1:3,1)=al(1:3)/dble(num_rgrid(1:3))
-else if(sum(abs(num_rgrid)) == 0d0 .and. sum(abs(dl)) /= 0d0)then
-  Harray(1:3,1)=dl(1:3)
-end if
-
-rLsize(1:3,1)=al(1:3)
 iDiter(1) = nscf
 
 if(ispin == 0)then
@@ -89,10 +80,8 @@ end if
 
 if(ilsda == 0) then
   itotMST=MST(1)
-  itotfMST=ifMST(1)
 else if(ilsda == 1) then
   itotMST=MST(1)+MST(2)
-  itotfMST=ifMST(1)+ifMST(2)
 end if
 
 !===== namelist for group_fundamental =====

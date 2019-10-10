@@ -74,7 +74,6 @@ allocate( A_tot(3,0:t_max+1) )
 allocate( E_ext(3,0:t_max) )
 allocate( E_ind(3,0:t_max) )
 allocate( E_tot(3,0:t_max) )
-allocate( rE_ind(3,0:t_max) )
 curr=0.d0
 curr_ion=0.d0
 sumcurr=0.d0
@@ -82,7 +81,6 @@ A_ext=0.d0
 A_ind=0.d0
 A_tot=0.d0
 E_ind=0.d0
-rE_ind=0.d0
 
 E_ext=0.d0
 E_ind(:,0)=0.d0

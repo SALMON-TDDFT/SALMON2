@@ -102,78 +102,44 @@ real(8),parameter :: cN11_Nd12=12.d0/81800719.d0, cN12_Nd12=-1.d0/194699232.d0
 real(8) :: cnmat(0:12,12),bnmat(4,4)
 
 !-------------------- Global variables
-
-integer :: iflag_ps
-
-integer :: inumcpu_check
-
-integer,allocatable :: ob_sta_all_kgrid(:),ob_end_all_kgrid(:),iobnum_all_kgrid(:)
-
 integer :: nproc_d_o(3),nproc_d_o_mul
 integer :: nproc_ob_spin(2)
 integer :: nproc_d_g(3), nproc_d_o_mul_s
 integer :: nproc_d_g_dm(3), nproc_d_g_mul_dm
 
-integer :: ista_Mx_ori(3),iend_Mx_ori(3),inum_Mx_ori(3)
 integer,allocatable :: ista_Mxin(:,:),iend_Mxin(:,:),inum_Mxin(:,:)
-integer,allocatable :: ista_Mxin_old(:,:),iend_Mxin_old(:,:),inum_Mxin_old(:,:)
 integer,allocatable :: ista_Mxin_s(:,:),iend_Mxin_s(:,:),inum_Mxin_s(:,:)
-integer :: max_lg_num
 
 integer :: Miter       ! Total number of Iteration for SCF calculation
 integer :: Miter_rt    ! Total number of Iteration for RT calculation
 
 integer :: iflag_diisjump
 
-real(8),allocatable :: rto(:)
-integer ,allocatable:: idip2int(:)
-real(8),allocatable :: rto_ix(:,:)
 real(8),allocatable :: rbox_array_dip2(:,:)
-real(8),allocatable :: rbox_array2_dip2(:,:)
 real(8),allocatable :: rbox_array_dip2q(:,:,:)
-real(8),allocatable :: rbox_array2_dip2q(:,:,:)
 real(8),allocatable :: rbox_array_dip2e(:)
-real(8),allocatable :: rbox_array2_dip2e(:)
 
 integer :: ilsda
 
 integer :: MST(2),ifMST(2),itotMST
-integer :: itotfMST
-integer :: MST0(2),itotMST0
-integer :: Mx(3),Mxin(3),Mxin_old(3)
+integer :: Mx(3),Mxin(3)
 
 real(8) :: rnetot
 
 real(8) :: Hgs(3)        ! Grid spacing
-real(8) :: Hold(3)     ! Grid spacing
 real(8) :: Hvol
-real(8) :: Harray(3,maxntmg)  ! Grid spacing
-real(8) :: rLsize(3,maxntmg)    ! size of the box
 
 ! Pseudopotential
 integer,parameter :: Lmax=4
-integer,allocatable :: NRloc(:)
-real(8),allocatable :: Rloc(:)
-real(8),allocatable :: Zps(:)              ! Pseudo charge
-real(8),allocatable :: Rps(:)              ! Core radius
-integer :: Mlps(maxMKI),Lref(maxMKI)
-real(8),allocatable :: Vpsl(:,:,:)                 ! Local pseudopotential
-real(8),allocatable :: Vpsl_atom(:,:,:,:)
+real(8),allocatable :: Vpsl(:,:,:)        ! Local pseudopotential
+
 !Nonlinear core correction
 logical :: flag_nlcc = .false.
 
-real(8),allocatable :: rocc(:,:)                    ! Occupation number
-real(8),allocatable :: psi(:,:,:,:,:)              ! Single particle orbitals
-real(8),allocatable :: psi_mesh(:,:,:,:,:)         ! Single particle orbitals
-real(8),allocatable :: zpsi_mesh(:,:,:,:,:)        ! Single particle orbitals
-real(8),allocatable :: psi_old(:,:,:,:,:)
-complex(8),allocatable :: zpsi_old(:,:,:,:,:)
 
 real(8),allocatable :: esp(:,:)         ! Single particle energy
-real(8),allocatable :: esp2(:,:)        ! Single particle energy
 real(8),allocatable :: rho(:,:,:)       ! Single particle density
 real(8),allocatable :: rho0(:,:,:)      ! Single particle density
-real(8),allocatable :: rho_diff(:,:,:)  ! Single particle density
 real(8),allocatable :: rho_s(:,:,:,:)   ! Single particle density for each spin
 real(8),allocatable :: Vh(:,:,:)        ! Hartree potential
 real(8),allocatable :: Vxc(:,:,:)       ! Exchange-Correlation potential
@@ -181,56 +147,28 @@ real(8),allocatable :: Vxc_s(:,:,:,:)   ! Exchange-Correlation potential for eac
 integer :: ihpsieff
 real(8),allocatable :: elf(:,:,:)
 complex(8),allocatable :: zpsi(:,:,:,:,:)
-complex(8),allocatable :: zpsi_in(:,:,:,:,:),zpsi_out(:,:,:,:,:)
-complex(8),allocatable :: zpsi_t0(:,:,:,:,:)
 complex(8),allocatable :: ttpsi(:,:,:)
 integer :: iSCFRT
 
 real(8),allocatable :: Vbox(:,:,:)
 
-real(8),allocatable :: Ex_fast(:,:,:),Ec_fast(:,:,:)
-
 integer, allocatable :: idiis_sd(:)
 
 
-integer :: maxlm
-
-integer :: imesh_oddeven(3)
-
-integer :: version_num(2)
-
 complex(8), allocatable :: zc(:)
-real(8), allocatable :: Dp(:,:), Dp2(:,:,:)
-real(8), allocatable :: Qp(:,:,:), Qp2(:,:,:,:)
-real(8), allocatable :: rIe(:), rIe2(:,:)
+real(8), allocatable :: Dp(:,:), Qp(:,:,:), rIe(:)
 real(8), allocatable :: tene(:)
 real(8) :: vecDs(3)
-real(8),allocatable :: vecDs2(:,:)
-real(8) :: vecQs(3,3)
-real(8),allocatable :: vecQs2(:,:,:)
 
 integer :: itotNtime
-
-integer :: num_datafiles_OUT2
-
-real(8),allocatable :: Gs(:,:,:),Gl(:,:,:)
-complex(8),allocatable :: tx_exp(:,:),ty_exp(:,:),tz_exp(:,:)
 
 integer :: lg_sta(3),lg_end(3),lg_num(3)
 integer :: mg_sta(3),mg_end(3),mg_num(3)
 integer :: ng_sta(3),ng_end(3),ng_num(3)
 
-integer :: lg_old_sta(3),lg_old_end(3),lg_old_num(3)
-integer :: mg_old_sta(3),mg_old_end(3),mg_old_num(3)
-integer :: ng_old_sta(3),ng_old_end(3),ng_old_num(3)
-
-integer :: igc_is,igc_ie
-
 integer :: iobnum
 
 integer :: k_sta,k_end,k_num
-
-integer :: kx_hock_sta(3),kx_hock_end(3),kx_hock_num(3)
 
 integer :: num_kpoints_3d(3)
 integer :: num_kpoints_rd
@@ -246,27 +184,11 @@ integer :: imr(3),imrs(3),igroup
 
 integer :: iflag_subspace_diag
 
-real(8),allocatable :: Vh_stock1(:,:,:)
-real(8),allocatable :: Vh_stock2(:,:,:)
-
-real(8),allocatable :: Vlocal(:,:,:,:)
-real(8),allocatable :: Vlocal2(:,:,:,:)
-
 real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
 
-real(8),allocatable :: rhobox(:,:,:)
-real(8),allocatable :: rhobox_s(:,:,:,:)
-
-integer :: lg_num_fmax(3)
-
-real(8), allocatable :: rhobox1_all(:,:,:), rhobox2_all(:,:,:)
-
 integer :: iDiter(maxntmg)
-integer :: lg_sta_ini(3),lg_end_ini(3),lg_num_ini(3)
-integer :: mg_sta_ini(3),mg_end_ini(3),mg_num_ini(3)
-integer :: img
 
 integer :: itt
 integer :: ikind_eext   !0:No external field, 1: dipoleApprox
@@ -274,7 +196,8 @@ integer :: ikind_eext   !0:No external field, 1: dipoleApprox
 character(3)  :: dir
 character(2)  :: dir2 
 
-real(8) :: Fst,Fst2(2)
+!some of following variables can be removed by small changes
+real(8) :: Fst
 real(8) :: romega, romega2(2)
 real(8) :: pulse_T, pulse_T2(2) 
 real(8) :: rlaser_I, rlaser_I2(2) 
@@ -287,29 +210,17 @@ integer       :: idensum   ! whether density is summed up along direction
 real(8)       :: posplane  ! position of the plane
                            ! (only for idensum = 0)
 
-character(1) :: circular
-
-character(100):: rtOutFile
-character(100):: rtDiffOutFile
-character(100):: rtELFOutFile
 character(100):: file_Projection
 character(20) :: fileNumber
-
-real(8), allocatable :: rho_n(:,:,:)
-real(8), allocatable :: Vh_n(:,:,:)
-real(8), allocatable :: Vh0(:,:,:)
-complex(8), allocatable :: zpsi_n(:,:,:,:,:)
 
 real(8),allocatable :: Ex_static(:,:,:),Ey_static(:,:,:),Ez_static(:,:,:)
 
 real(8),allocatable :: curr(:,:), curr_ion(:,:)
 real(8),allocatable :: sumcurr(:,:)
-real(8),allocatable :: rE_ind(:,:)
+
 
 integer :: ilasbound_sta(3),ilasbound_end(3)
 real(8) :: rlaser_center(3)
-
-complex(8) :: cumnum
 
 real(8) :: Eion
 
@@ -317,35 +228,12 @@ integer :: iblacsinit
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 integer :: DESCA( 50 ), DESCZ( 50 )
 
-real(8) :: rho_region1(100)
-real(8) :: rho_region2(100)
-integer :: num_rho_region(100)
-integer,allocatable :: rho_region_nx(:,:)
-integer,allocatable :: rho_region_ny(:,:)
-integer,allocatable :: rho_region_nz(:,:)
-
-integer :: numspin
-
-real(8) :: fcN(0:12)
-real(8) :: fbN(0:12)
-
-real(8),allocatable :: k_rd(:,:),ksquare(:)
-real(8),allocatable :: k_rd0(:,:),ksquare0(:)
-
 real(8),allocatable :: A_ext(:,:)
 real(8),allocatable :: A_ind(:,:)
 real(8),allocatable :: A_tot(:,:)
 real(8),allocatable :: E_ext(:,:)
 real(8),allocatable :: E_ind(:,:)
 real(8),allocatable :: E_tot(:,:)
-
-integer,allocatable :: oblist(:)
-
-integer :: MI_read
-
-real(8) :: absorption(0:100000)
-real(8) :: absorption_d(0:100000)
-real(8) :: absorption_id(0:100000)
 
 real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 
