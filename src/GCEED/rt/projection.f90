@@ -19,7 +19,6 @@ use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_global, only: dt,iwrite_projnum,iwrite_projection_k,iwrite_projection_ob,num_projection
 use pack_unpack, only: copy_data
-use scf_data, only: iSCFRT
 implicit none
 integer                 ,intent(in) :: itt
 type(s_rgrid)           ,intent(in) :: mg
@@ -36,14 +35,12 @@ complex(8) :: cbox
 character(100) :: projOutFile
 character(20) :: fileNumber
 
-if(iSCFRT==2)then
-  if(iwrite_projnum==1)then
-    write(fileNumber, '(i8)') itt
-    projOutFile = trim("proj.")//adjustl(fileNumber)
-    open(61,file=projOutFile)
-  end if
+if(iwrite_projnum==1)then
+  write(fileNumber, '(i8)') itt
+  projOutFile = trim("proj.")//adjustl(fileNumber)
+  open(61,file=projOutFile)
 end if
-
+  
 if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
 
 nspin = system%nspin
@@ -132,10 +129,8 @@ if(mod(itt,100)==0)then
   end if
 end if
 
-if(iSCFRT==2)then
-  if(iwrite_projnum==1)then
-    close(61)
-  end if
+if(iwrite_projnum==1)then
+  close(61)
 end if
 
 end subroutine projection
