@@ -1,6 +1,5 @@
 set(SOURCES
     calc_elf.f90
-    check_fourier.f90
     set_filename.f90
     set_icoo1d.f90
     write_psi.f90

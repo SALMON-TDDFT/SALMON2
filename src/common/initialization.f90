@@ -261,13 +261,13 @@ end subroutine init_orbital_parallel_singlecell
 
 subroutine init_grid_whole(rsize,hgs,lg)
   use structures
-  use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid,theory,al_em,dl_em
+  use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid,theory,al_em,dl_em,yn_ffte
   implicit none
   real(8),intent(in) :: rsize(3),hgs(3)
   type(s_rgrid) :: lg
   !
   real(8),parameter :: epsilon=1.d-10
-  integer :: j
+  integer :: j,lg_num_tmp,ii
 
   lg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   lg%nd = Nd
@@ -334,6 +334,32 @@ subroutine init_grid_whole(rsize,hgs,lg)
       if( maxval(abs((rsize/dl)-dble(lg%num))) > 1d-4 ) stop "error: abs((rsize/dl)-dble(lg%num)) is too large"
     end if
   end select
+  
+  if(yn_ffte=='y')then
+    ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
+    do j=1,3
+      lg_num_tmp=lg%num(j)
+      do ii=1,26
+        if(mod(lg_num_tmp,2)==0)then
+          lg_num_tmp=lg_num_tmp/2
+        end if
+      end do
+    
+      do ii=1,17
+        if(mod(lg_num_tmp,3)==0)then
+          lg_num_tmp=lg_num_tmp/3
+        end if
+      end do
+    
+      do ii=1,11
+        if(mod(lg_num_tmp,5)==0)then
+          lg_num_tmp=lg_num_tmp/5
+        end if
+      end do
+
+      if(lg_num_tmp/=1) stop "When using FFTE, prime factors for number of grids must be combination of 2, 3 or 5."
+    end do
+  end if
 
   return
 end subroutine init_grid_whole
