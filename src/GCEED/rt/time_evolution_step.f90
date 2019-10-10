@@ -35,7 +35,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   use force_sub, only: calc_force_salmon
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
-  use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
+  use write_sub
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, allgatherv_vlocal
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   use salmon_pp, only: calc_nlcc !test hoge
@@ -72,7 +72,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
   real(8) :: curr_tmp(3,2)
-  complex(8),parameter :: zi=(0.d0,1.d0)
   integer :: is
   character(100) :: comment_line
   logical :: rion_update,if_use_dmat
@@ -356,8 +355,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call calc_elf(lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out,elf)
-      call write_elf(lg,elf,hgs,iscfrt,itt)
+      call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
