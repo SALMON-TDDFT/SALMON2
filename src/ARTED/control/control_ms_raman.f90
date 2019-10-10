@@ -223,7 +223,7 @@ subroutine raman_maxwell_ms
 !xx       call assign_mp_variables_omp()
 !xx       do imacro = nmacro_s, nmacro_e
 !xx          call psi_rho_RT(zu_t)
-!xx          call Hartree
+!xx          call Hartree_arted
 !xx          call Exc_Cor(calc_mode_rt,NBoccmax,zu_t)
 !xx          Vloc(1:NL)=Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)
 !xx          call Total_Energy_omp(rion_update_on,calc_mode_rt,imacro)

@@ -745,7 +745,7 @@ end subroutine calc_opt_ground_state_useE
     Rion_eq=Rion
     !dRion(:,:,-1)=0.d0; dRion(:,:,0)=0.d0
     call psi_rho_GS
-    call Hartree
+    call Hartree_arted
     call Exc_Cor(calc_mode_gs,NBoccmax,zu_t)
 
     Vloc(1:NL)=Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)

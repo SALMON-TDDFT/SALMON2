@@ -95,7 +95,7 @@ contains
     Rion_eq=Rion
     !dRion(:,:,-1)=0.d0; dRion(:,:,0)=0.d0  !moved to initialization
     call psi_rho_GS
-    call Hartree
+    call Hartree_arted
     call Exc_Cor(calc_mode_gs,NBoccmax,zu_t)
 
     Vloc(1:NL)=Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)
@@ -185,7 +185,7 @@ contains
        endif
 
        call psi_rho_GS
-       call Hartree
+       call Hartree_arted
        call Exc_Cor(calc_mode_gs,NBoccmax,zu_t)
 
        Vloc(1:NL) = Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)
@@ -443,7 +443,7 @@ contains
 
     Rion_eq=Rion
     call psi_rho_RT(zu_t)
-    call Hartree
+    call Hartree_arted
     call Exc_Cor(calc_mode_rt,NBoccmax,zu_t)
 
     Vloc(1:NL)=Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)
@@ -558,7 +558,7 @@ contains
           call comm_bcast(Jm_ms,         nproc_group_global)
 
           call psi_rho_RT(zu_t)
-          call Hartree
+          call Hartree_arted
           call Exc_Cor(calc_mode_rt,NBoccmax,zu_t)
 
           Vloc(1:NL)=Vh(1:NL)+Vpsl(1:NL)+Vexc(1:NL)

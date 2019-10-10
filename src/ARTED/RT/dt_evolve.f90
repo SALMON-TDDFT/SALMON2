@@ -128,7 +128,7 @@ Subroutine dt_evolve_omp_KB(zu)
 
   call psi_rho_RT(zu)
   if(yn_fix_func=='n')then
-     call Hartree
+     call Hartree_arted
      call Exc_Cor(calc_mode_rt,NBoccmax,zu)
   endif
 
@@ -160,7 +160,7 @@ Subroutine dt_evolve_omp_KB(zu)
   call psi_rho_RT(zu)
 
   if(yn_fix_func=='n')then
-  call Hartree
+  call Hartree_arted
 
 ! yabana
   call Exc_Cor(calc_mode_rt,NBoccmax,zu)
@@ -223,7 +223,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
      call psi_rho_RT(zu)
 
      if(yn_fix_func=='n')then
-     call Hartree
+     call Hartree_arted
 
      call Exc_Cor(calc_mode_rt,NBoccmax,zu)
      endif
@@ -247,7 +247,7 @@ Subroutine dt_evolve_etrs_omp_KB(zu)
   call psi_rho_RT(zu)
 
   if(yn_fix_func=='n')then
-  call Hartree
+  call Hartree_arted
 
   call Exc_Cor(calc_mode_rt,NBoccmax,zu)
   endif
@@ -302,7 +302,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
 
   call psi_rho_RT(zu)
   if(yn_fix_func=='n')then
-     call Hartree
+     call Hartree_arted
      call Exc_Cor(calc_mode_rt,NBoccmax,zu)
   endif
 
@@ -333,7 +333,7 @@ Subroutine dt_evolve_omp_KB_MS(zu)
   call psi_rho_RT(zu)
 
   if(yn_fix_func=='n')then
-  call Hartree
+  call Hartree_arted
 
 ! yabana
   call Exc_Cor(calc_mode_rt,NBoccmax,zu)
