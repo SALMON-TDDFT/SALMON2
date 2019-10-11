@@ -591,6 +591,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   integer :: kx_sta,kx_end,ky_sta,ky_end,kz_sta,kz_end
   real(8) :: bLx,bLy,bLz
   integer :: ky_shift,kz_shift
+  complex(8) :: tmp
 
   integer :: npuy,npuz
 
@@ -645,25 +646,28 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     allocate(poisson%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
     allocate(poisson%trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
     allocate(poisson%trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-  !$OMP parallel do private(ix,kx)
+!$OMP parallel do private(ix,kx,tmp)
     do ix=lg%is(1),lg%ie(1)
       do kx=lg%is(1),lg%ie(1)
-        poisson%egx(kx,ix)  = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg%num(1))))
-        poisson%egxc(kx,ix) = conjg(poisson%egx(kx,ix))
+        tmp = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg%num(1))))
+        poisson%egx(kx,ix)  = tmp
+        poisson%egxc(kx,ix) = conjg(tmp)
       end do
     end do
-  !$OMP parallel do private(iy,ky)
+!$OMP parallel do private(iy,ky,tmp)
     do iy=lg%is(2),lg%ie(2)
       do ky=lg%is(2),lg%ie(2)
-        poisson%egy(ky,iy)  = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg%num(2))))
-        poisson%egyc(ky,iy) = conjg(poisson%egy(ky,iy))
+        tmp = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg%num(2))))
+        poisson%egy(ky,iy)  = tmp
+        poisson%egyc(ky,iy) = conjg(tmp)
       end do
     end do
-  !$OMP parallel do private(iz,kz)
+!$OMP parallel do private(iz,kz,tmp)
     do iz=lg%is(3),lg%ie(3)
       do kz=lg%is(3),lg%ie(3)
-        poisson%egz(kz,iz) = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg%num(3))))
-        poisson%egzc(kz,iz) = conjg(poisson%egz(kz,iz))
+        tmp = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg%num(3))))
+        poisson%egz(kz,iz)  = tmp
+        poisson%egzc(kz,iz) = conjg(tmp)
       end do
     end do
   case('y')
