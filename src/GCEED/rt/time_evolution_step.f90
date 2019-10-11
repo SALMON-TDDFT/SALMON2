@@ -217,21 +217,12 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
   call timer_begin(LOG_CALC_HARTREE)
   if(iperiodic==0 .and. itt/=1)then
-    if(mod(itt,2)==1)then
-      sVh_stock2%f = 2.d0*sVh_stock1%f - sVh_stock2%f
-      sVh%f = sVh_stock2%f
-    else
-      sVh_stock1%f = 2.d0*sVh_stock2%f - sVh_stock1%f
-      sVh%f = sVh_stock1%f
-    end if
+    sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
+    sVh_stock2%f = sVh_stock1%f
   end if
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   if(iperiodic==0 .and. itt/=1)then
-    if(mod(itt,2)==1)then
-      sVh_stock2%f = sVh%f
-    else
-      sVh_stock1%f = sVh%f
-    end if
+    sVh_stock1%f = sVh%f
   end if
   call timer_end(LOG_CALC_HARTREE)
 
