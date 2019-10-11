@@ -67,7 +67,6 @@ type(s_reciprocal_grid) :: fg
 type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
-type(s_mixing) :: mixing
 type(s_scalar) :: sVpsl
 type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
@@ -109,7 +108,6 @@ idensum=0
 posplane=0.d0
 
 call convert_input_rt(Ntime)
-mixing%num_rho_stock=21
 
 call set_filename
 
@@ -206,7 +204,7 @@ call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
 call allocate_orbital_complex(system%nspin,mg,info,tpsi)
 call allocate_dmatrix(system%nspin,mg,info,dmat)
 
-call read_bin(lg,mg,ng,system,info,spsi_in,mixing,sVh_stock1,sVh_stock2,miter_rt)
+call read_bin(lg,mg,ng,system,info,spsi_in,miter_rt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
 if(read_rt_wfn_k=='n') miter_rt=0
 
 call calc_nlcc(pp, system, mg, ppn)
@@ -663,7 +661,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_out,mixing,sVh_stock1,sVh_stock2,miter)
+  call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_out,miter,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
 end if
 
 call deallocate_mat

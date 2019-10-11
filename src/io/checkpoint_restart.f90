@@ -22,19 +22,19 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_bin(odir,lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,iter)
+subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
   use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
-  type(s_rgrid), intent(in)    :: lg, mg, ng
-  type(s_dft_system),intent(in) :: system
+  type(s_rgrid)           ,intent(in) :: lg, mg, ng
+  type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  type(s_orbital), intent(in)  :: spsi
-  type(s_mixing),intent(inout) :: mixing
-  type(s_scalar),intent(in)    :: sVh_stock1,sVh_stock2
-  integer, intent(in)          :: iter
+  type(s_orbital)         ,intent(in) :: spsi
+  integer                 ,intent(in) :: iter
+  type(s_mixing) ,optional,intent(in) :: mixing
+  type(s_scalar) ,optional,intent(in) :: sVh_stock1,sVh_stock2
   
   integer :: is,iob,ik
   integer :: iu1_w
@@ -99,21 +99,19 @@ end subroutine write_bin
 
 !===================================================================================================================================
 
-subroutine read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,iter)
+subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
   use inputoutput, only: theory,calc_mode,directory_read_data,read_rt_wfn_k
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
-  type(s_dft_system),intent(inout) :: system
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_orbital), intent(inout)  :: spsi
-  type(s_mixing),intent(inout) :: mixing
-  type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
-  integer, intent(out) :: iter
+  type(s_rgrid)             ,intent(in) :: lg, mg, ng
+  type(s_dft_system)     ,intent(inout) :: system
+  type(s_orbital_parallel)  ,intent(in) :: info
+  type(s_orbital)        ,intent(inout) :: spsi
+  integer                  ,intent(out) :: iter
+  type(s_mixing),optional,intent(inout) :: mixing
+  type(s_scalar),optional,intent(inout) :: sVh_stock1,sVh_stock2
 
   integer :: mk,mo
 
@@ -353,11 +351,12 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing)
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
-  character(*)   :: odir
-  type(s_rgrid), intent(in)    :: lg,ng
-  type(s_dft_system),intent(in) :: system
+  character(*)                        :: odir
+  type(s_rgrid)           ,intent(in) :: lg,ng
+  type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  type(s_mixing),intent(inout) :: mixing
+  type(s_mixing)          ,intent(in) :: mixing
+  !
   character(100) ::  dir_file_out
   integer :: i,ix,iy,iz,is
   integer :: iu1_w

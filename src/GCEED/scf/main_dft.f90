@@ -83,7 +83,6 @@ type(s_dft_energy) :: energy
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_ofile)  :: ofile
-type(s_scalar) :: sVh_stock,sVh_stock1,sVh_stock2 ! Used only as arguments. if optional sentence is used, this line will be removed.
 
 logical :: rion_update
 integer :: iopt,nopt_max
@@ -187,7 +186,7 @@ if(iopt==1)then
     itmg=img
     call init_wf(lg,mg,system,info,spsi)
   case(1,3)
-    call read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,miter)
+    call read_bin(lg,mg,ng,system,info,spsi,miter,mixing=mixing)
   end select
 
   if(read_gs_dns_cube == 'n') then
@@ -626,7 +625,7 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,miter)
+call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,miter,mixing=mixing)
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
