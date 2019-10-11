@@ -22,7 +22,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_bin(odir,lg,mg,ng,system,info,spsi,mixing,sVh_stock,iter)
+subroutine write_bin(odir,lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,iter)
   use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global
@@ -33,7 +33,7 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,mixing,sVh_stock,iter)
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital), intent(in)  :: spsi
   type(s_mixing),intent(inout) :: mixing
-  type(s_scalar),intent(in)    :: sVh_stock
+  type(s_scalar),intent(in)    :: sVh_stock1,sVh_stock2
   integer, intent(in)          :: iter
   
   integer :: is,iob,ik
@@ -90,14 +90,14 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,mixing,sVh_stock,iter)
 
   !Vh_stock
   if(theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT')then
-    call write_Vh_stock(odir,lg,ng,info,sVh_stock)
+    call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2)
   end if
 
   return
 
 end subroutine write_bin
 
-!=======================================================================
+!===================================================================================================================================
 
 subroutine read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,iter)
   use inputoutput, only: theory,calc_mode,directory_read_data,read_rt_wfn_k
@@ -185,18 +185,15 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,iter)
   !Vh_stock
   if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.  &
       read_rt_wfn_k=='y')then
-    if(mod(iter,2)==1)then
-      call read_Vh_stock(lg,ng,info,sVh_stock1)
-    else
-      call read_Vh_stock(lg,ng,info,sVh_stock2)
-    end if
+    call read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
   end if
 
   return
 
 end subroutine read_bin
 
-!=======================================================================
+!===================================================================================================================================
+
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
   use inputoutput, only: num_datafiles_out
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
@@ -349,7 +346,8 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
 
 end subroutine write_wavefunction
 
-!=======================================================================
+!===================================================================================================================================
+
 subroutine write_rho_inout(odir,lg,ng,system,info,mixing)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
   use salmon_parallel, only: nproc_id_global
@@ -452,8 +450,9 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing)
   
 end subroutine write_rho_inout
 
-!=======================================================================
-subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock)
+!===================================================================================================================================
+
+subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2)
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -461,7 +460,7 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock)
   character(*)   :: odir
   type(s_rgrid), intent(in)    :: lg,ng
   type(s_orbital_parallel),intent(in) :: info
-  type(s_scalar),intent(in) :: sVh_stock
+  type(s_scalar),intent(in) :: sVh_stock1,sVh_stock2
   character(100) ::  dir_file_out
   integer :: iu1_w
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
@@ -481,12 +480,26 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock)
   matbox2(ng%is(1):ng%ie(1),   &
           ng%is(2):ng%ie(2),   &
           ng%is(3):ng%ie(3))   &
-     = sVh_stock%f(ng%is(1):ng%ie(1), &
+     = sVh_stock1%f(ng%is(1):ng%ie(1), &
                    ng%is(2):ng%ie(2), &
                    ng%is(3):ng%ie(3))
 
   call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
 
+  if(comm_is_root(nproc_id_global))then
+    write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+  end if
+  
+  matbox2=0.d0
+  matbox2(ng%is(1):ng%ie(1),   &
+          ng%is(2):ng%ie(2),   &
+          ng%is(3):ng%ie(3))   &
+     = sVh_stock2%f(ng%is(1):ng%ie(1), &
+                   ng%is(2):ng%ie(2), &
+                   ng%is(3):ng%ie(3))
+
+  call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+  
   if(comm_is_root(nproc_id_global))then
     write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
   end if
@@ -499,7 +512,8 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock)
   
 end subroutine write_Vh_stock
 
-!=======================================================================
+!===================================================================================================================================
+
 subroutine read_wavefunction(lg,mg,system,info,spsi,mk,mo)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use inputoutput, only: theory,calc_mode,iperiodic,num_datafiles_in,directory_read_data
@@ -675,7 +689,8 @@ subroutine read_wavefunction(lg,mg,system,info,spsi,mk,mo)
 
 end subroutine read_wavefunction
 
-!=======================================================================
+!===================================================================================================================================
+
 subroutine read_rho_inout(lg,ng,system,info,mixing)
   use inputoutput, only: directory_read_data
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
@@ -768,8 +783,9 @@ subroutine read_rho_inout(lg,ng,system,info,mixing)
 
 end subroutine read_rho_inout
 
-!=======================================================================
-subroutine read_Vh_stock(lg,ng,info,sVh_stock)
+!===================================================================================================================================
+
+subroutine read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
   use inputoutput, only: directory_read_data
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
   use salmon_parallel, only: nproc_id_global
@@ -777,7 +793,7 @@ subroutine read_Vh_stock(lg,ng,info,sVh_stock)
   implicit none
   type(s_rgrid), intent(in)    :: lg,ng
   type(s_orbital_parallel),intent(in) :: info
-  type(s_scalar),intent(inout) :: sVh_stock
+  type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
   integer :: iu1_r
   integer :: ix,iy,iz
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
@@ -799,7 +815,21 @@ subroutine read_Vh_stock(lg,ng,info,sVh_stock)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    sVh_stock%f(ix,iy,iz)=matbox(ix,iy,iz)
+    sVh_stock1%f(ix,iy,iz)=matbox(ix,iy,iz)
+  end do
+  end do
+  end do
+  
+  if(comm_is_root(nproc_id_global))then
+    read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+  end if
+  call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    sVh_stock2%f(ix,iy,iz)=matbox(ix,iy,iz)
   end do
   end do
   end do
@@ -812,7 +842,8 @@ subroutine read_Vh_stock(lg,ng,info,sVh_stock)
 
 end subroutine read_Vh_stock
 
-!=======================================================================
+!===================================================================================================================================
+
 subroutine set_dg(lg,mg,dg,num_datafiles)
   use structures, only: s_rgrid 
   use salmon_parallel, only: nproc_id_global

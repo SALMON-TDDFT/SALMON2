@@ -206,12 +206,8 @@ call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
 call allocate_orbital_complex(system%nspin,mg,info,tpsi)
 call allocate_dmatrix(system%nspin,mg,info,dmat)
 
-if(read_rt_wfn_k=='y')then
-  call read_bin(lg,mg,ng,system,info,spsi_in,mixing,sVh_stock1,sVh_stock2,miter_rt)
-else
-  call read_bin(lg,mg,ng,system,info,spsi_in,mixing,sVh_stock1,sVh_stock2,miter_rt)
-  miter_rt=0
-end if
+call read_bin(lg,mg,ng,system,info,spsi_in,mixing,sVh_stock1,sVh_stock2,miter_rt)
+if(read_rt_wfn_k=='n') miter_rt=0
 
 call calc_nlcc(pp, system, mg, ppn)
 if (comm_is_root(nproc_id_global)) then
@@ -224,15 +220,15 @@ srho%f = 0d0
 do jspin=1,system%nspin
    srho%f = srho%f + srho_s(jspin)%f
 end do
+if(read_rt_wfn_k=='y')then
+  sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
+  sVh_stock2%f = sVh_stock1%f
+end if
 call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
 call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
 call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 if(read_rt_wfn_k=='y')then
-  if(mod(miter_rt,2)==1)then
-    sVh_stock2%f=sVh%f
-  else
-    sVh_stock1%f=sVh%f
-  end if
+  sVh_stock1%f=sVh%f
 else if(read_rt_wfn_k=='n')then
   sVh_stock1%f=sVh%f
   sVh_stock2%f=sVh%f
@@ -667,11 +663,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  if(mod(itotNtime,2)==1)then
-    call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_out,mixing,sVh_stock1,miter)
-  else
-    call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_in,mixing,sVh_stock2,miter)
-  end if
+  call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_out,mixing,sVh_stock1,sVh_stock2,miter)
 end if
 
 call deallocate_mat

@@ -626,7 +626,7 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,mixing,sVh_stock,miter)
+call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,mixing,sVh_stock1,sVh_stock2,miter)
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
