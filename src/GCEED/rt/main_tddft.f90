@@ -241,18 +241,6 @@ call timer_end(LOG_READ_GS_DATA)
 ! +-------------+
 
 call timer_begin(LOG_READ_RT_DATA)
-allocate( Ex_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
-allocate( Ey_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
-allocate( Ez_static(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3))) 
-
-!$OMP parallel do private(iz,iy,ix)
-do iz=mg_sta(3),mg_end(3)
-do iy=mg_sta(2),mg_end(2)
-do ix=mg_sta(1),mg_end(1)
-   Ex_static(ix,iy,iz)=0.d0; Ey_static(ix,iy,iz)=0.d0; Ez_static(ix,iy,iz)=0.d0
-end do
-end do
-end do
 
 if(IC_rt==0) then
   allocate( rIe(0:Ntime) )
@@ -490,8 +478,7 @@ rho0 = srho%f
       call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
     end if
     if(yn_out_estatic_rt=='y')then
-      call calcEstatic(lg, ng, info, sVh, srg_ng)
-      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,hgs,itt)
+      call write_estatic(lg,ng,system%hgs,stencil,info_field,sVh,srg_ng,itt)
     end if
   end do
 

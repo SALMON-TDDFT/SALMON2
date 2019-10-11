@@ -351,8 +351,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call calcEstatic(lg, ng, info, sVh, srg_ng)
-      call writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,matbox_l,matbox_l2,hgs,itt)
+      call write_estatic(lg,ng,system%hgs,stencil,info_field,sVh,srg_ng,itt)
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)
