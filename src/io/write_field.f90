@@ -324,79 +324,59 @@ end subroutine write_elf
 
 !===================================================================================================================================
 
-subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,hgs,itt)
-  use inputoutput, only: format_voxel_data
-  use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_group_global
+subroutine write_estatic(lg,ng,hgs,stencil,info_field,sVh,srg_ng,itt)
+  use salmon_global, only: format_voxel_data
+  use structures
+  use sendrecv_grid, only: update_overlap_real8
+  use stencil_sub, only: calc_gradient_field
   use salmon_communication, only: comm_summation
   use write_file3d
   implicit none
-  type(s_rgrid),intent(in) :: lg,mg,ng
-  real(8),intent(in) :: ex_static(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(in) :: ey_static(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(in) :: ez_static(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(out) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-  real(8),intent(out) :: rmat2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-  real(8),intent(in) :: hgs(3)
+  type(s_rgrid)   ,intent(in) :: lg,ng
+  real(8)         ,intent(in) :: hgs(3)
+  type(s_stencil) ,intent(in) :: stencil
+  type(s_field_parallel),intent(in) :: info_field
+  type(s_scalar)  ,intent(in) :: sVh
+  type(s_sendrecv_grid)       :: srg_ng
   integer,intent(in),optional :: itt
+  !
   integer :: ix,iy,iz,jj
+  integer,parameter :: Nd=4
   character(30) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
+  real(8) :: grad_Vh(3,ng%is(1):ng%ie(1),   &
+                       ng%is(2):ng%ie(2),   &
+                       ng%is(3):ng%ie(3))
+  real(8) :: box(ng%is(1)-Nd:ng%ie(1)+Nd,   &
+                 ng%is(2)-Nd:ng%ie(2)+Nd,   &
+                 ng%is(3)-Nd:ng%ie(3)+Nd)
+  real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: rmat,rmat2
+  
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    box(ix,iy,iz) = sVh%f(ix,iy,iz)
+  end do
+  end do
+  end do
+
+  call update_overlap_real8(srg_ng, ng, box)
+  call calc_gradient_field(ng%is,ng%ie,stencil%coef_nab,box,grad_Vh)
 
   do jj=1,3
-
-    !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=lg%is(3),lg%ie(3)
-    do iy=lg%is(2),lg%ie(2)
-    do ix=lg%is(1),lg%ie(1)
-      rmat(ix,iy,iz)=0.d0
-    end do
-    end do
-    end do
     
-    if(jj==1)then
-      !$OMP parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        rmat(ix,iy,iz)=ex_static(ix,iy,iz)
-      end do
-      end do
-      end do
-    else if(jj==2)then
-      !$OMP parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        rmat(ix,iy,iz)=ey_static(ix,iy,iz)
-      end do
-      end do
-      end do
-    else if(jj==3)then
-      !$OMP parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        rmat(ix,iy,iz)=ez_static(ix,iy,iz)
-      end do
-      end do
-      end do
-    end if
-   
-    if(format_voxel_data=='avs')then
-      !$OMP parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        rmat(ix,iy,iz)=rmat(ix,iy,iz)*5.14223d1
-      end do
-      end do
-      end do
-    end if
+    rmat = 0d0
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      rmat(ix,iy,iz) = grad_Vh(jj,ix,iy,iz)
+    end do
+    end do
+    end do
  
-    call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
+    call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
   
     write(filenum, '(i6.6)') itt
     if(jj==1)then
@@ -421,7 +401,7 @@ subroutine writeestatic(lg,mg,ng,ex_static,ey_static,ez_static,rmat,rmat2,hgs,it
 
   end do  
  
-end subroutine writeestatic
+end subroutine write_estatic
 
 !===================================================================================================================================
 
