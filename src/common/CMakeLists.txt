@@ -12,9 +12,18 @@ set(SOURCES
    total_energy.f90
    lattice.f90
    force.f90
-   zstencil_core/typical/omp.f90
    zstencil_core/typical/seq.f90
    )
+
+if (IS_FUJITSU_COMPILER)
+  set(SOURCES ${SOURCES}
+      zstencil_core/typical/omp_frt.f90
+      )
+else ()
+  set(SOURCES ${SOURCES}
+      zstencil_core/typical/omp.f90
+      )
+endif ()
 
 if (USE_OPT_EXPLICIT_VECTORIZATION)
   set(SOURCES
