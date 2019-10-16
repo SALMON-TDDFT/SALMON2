@@ -332,16 +332,32 @@ contains
     implicit none
     type(s_rgrid),intent(in) :: rg
     type(s_scalar)           :: field
+    integer :: ix,iy,iz
     allocate(field%f(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
-    field%f = 0d0
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=rg%is(3),rg%ie(3)
+    do iy=rg%is(2),rg%ie(2)
+    do ix=rg%is(1),rg%ie(1)
+      field%f(ix,iy,iz) = 0d0
+    end do
+    end do
+    end do
   end subroutine allocate_scalar
 
   subroutine allocate_vector(rg,field)
     implicit none
     type(s_rgrid),intent(in) :: rg
     type(s_vector)           :: field
+    integer :: ix,iy,iz
     allocate(field%v(3,rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
-    field%v = 0d0
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=rg%is(3),rg%ie(3)
+    do iy=rg%is(2),rg%ie(2)
+    do ix=rg%is(1),rg%ie(1)
+      field%v = 0d0
+    end do
+    end do
+    end do
   end subroutine allocate_vector
 
   subroutine allocate_dmatrix(nspin,mg,info,dmat)
@@ -350,9 +366,21 @@ contains
     type(s_rgrid)           ,intent(in) :: mg
     type(s_orbital_parallel),intent(in) :: info
     type(s_dmatrix)                     :: dmat
+    integer :: im,is,ix,iy,iz
     allocate(dmat%zrho_mat(mg%Nd,mg%ndir,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
     & nspin,info%im_s:info%im_e))
-    dmat%zrho_mat = 0d0
+!$omp parallel do collapse(4) private(im,is,iz,iy,ix)
+    do im=info%im_s,info%im_e
+    do is=1,nspin
+    do iz=mg%is(3)-mg%Nd,mg%ie(3)
+    do iy=mg%is(2)-mg%Nd,mg%ie(2)
+    do ix=mg%is(1)-mg%Nd,mg%ie(1)
+      dmat%zrho_mat(:,:,ix,iy,iz,is,im) = 0d0
+    end do
+    end do
+    end do
+    end do
+    end do
   end subroutine allocate_dmatrix
 
   subroutine allocate_orbital_real(nspin,mg,info,psi)
@@ -361,11 +389,27 @@ contains
     type(s_rgrid)           ,intent(in) :: mg
     type(s_orbital_parallel),intent(in) :: info
     type(s_orbital)                     :: psi
+    integer :: im,ik,io,is,iz,iy,ix
     allocate(psi%rwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-    psi%rwf = 0d0
+!$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do is=1,nspin
+    do iz=mg%is_array(3),mg%ie_array(3)
+    do iy=mg%is_array(2),mg%ie_array(2)
+    do ix=mg%is_array(1),mg%ie_array(1)
+      psi%rwf(ix,iy,iz,is,io,ik,im) = 0d0
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
   end subroutine allocate_orbital_real
 
   subroutine allocate_orbital_complex(nspin,mg,info,psi)
@@ -374,11 +418,27 @@ contains
     type(s_rgrid)           ,intent(in) :: mg
     type(s_orbital_parallel),intent(in) :: info
     type(s_orbital)                     :: psi
+    integer :: im,ik,io,is,iz,iy,ix
     allocate(psi%zwf(mg%is_array(1):mg%ie_array(1),  &
                      mg%is_array(2):mg%ie_array(2),  &
                      mg%is_array(3):mg%ie_array(3),  &
                      nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
-    psi%zwf = 0d0
+!$omp parallel do collapse(6) private(im,ik,io,is,iz,iy,ix)
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do is=1,nspin
+    do iz=mg%is_array(3),mg%ie_array(3)
+    do iy=mg%is_array(2),mg%ie_array(2)
+    do ix=mg%is_array(1),mg%ie_array(1)
+      psi%zwf(ix,iy,iz,is,io,ik,im) = 0d0
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
   end subroutine allocate_orbital_complex
 
 !===================================================================================================================================
