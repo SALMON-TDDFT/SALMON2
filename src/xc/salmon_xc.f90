@@ -78,6 +78,7 @@ contains
     nspin = sys%nspin
 
     if(nspin==1)then
+!$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,ng%num(3)
       do iy=1,ng%num(2)
       do ix=1,ng%num(1)
@@ -85,8 +86,11 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
     else if(nspin==2)then
+!$omp parallel private(is,iz,iy,ix)
       do is=1,2
+!$omp do collapse(2)
       do iz=1,ng%num(3)
       do iy=1,ng%num(2)
       do ix=1,ng%num(1)
@@ -94,7 +98,9 @@ contains
       end do
       end do
       end do
+!$omp end do
       end do
+!$omp end parallel
     end if
 
     if(xc_func%use_gradient) then
@@ -105,7 +111,7 @@ contains
                      ng%is(2):ng%ie(2), &
                      ng%is(3):ng%ie(3),3))
 
-  !$OMP parallel do private(ix,iy,iz)
+!$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
@@ -113,12 +119,12 @@ contains
       enddo
       enddo
       enddo
+!$omp end parallel do
 
-  !$omp end parallel do
       call update_overlap_real8(srg_ng, ng, rhd)
 
 
-  !$OMP parallel do private(ix,iy,iz)
+!$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
@@ -140,7 +146,7 @@ contains
       enddo
       enddo
       enddo
-  !$omp end parallel do
+!$omp end parallel do
     end if
 
     if (allocated(ppn%rho_nlcc)) then
@@ -166,6 +172,7 @@ contains
     end if
 
     if(nspin==1)then
+!$omp parallel do collapse(2) private(iz,iy,ix)
       do iz=1,ng%num(3)
       do iy=1,ng%num(2)
       do ix=1,ng%num(1)
@@ -173,8 +180,11 @@ contains
       end do
       end do
       end do
+!$omp end parallel do
     else if(nspin==2)then
+!$omp parallel private(is,iz,iy,ix)
       do is=1,2
+!$omp do collapse(2)
       do iz=1,ng%num(3)
       do iy=1,ng%num(2)
       do ix=1,ng%num(1)
@@ -182,10 +192,13 @@ contains
       end do
       end do
       end do
+!$omp end do
       end do
+!$omp end parallel
     end if
 
     tot_exc=0.d0
+!$omp parallel do collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
     do iz=1,ng%num(3)
     do iy=1,ng%num(2)
     do ix=1,ng%num(1)
@@ -193,6 +206,7 @@ contains
     end do
     end do
     end do
+!$omp end parallel do
     tot_exc=tot_exc*sys%hvol
 
     call comm_summation(tot_exc,E_xc,comm)
