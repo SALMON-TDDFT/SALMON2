@@ -32,7 +32,7 @@ contains
     ! rho_s=rho*0.5d0
     ! if(flag_nlcc)rho_s = rho_s + 0.5d0*rho_nlcc
     
-    !!$omp parallel do private(i, trho, rs, v_xc, e_xc, rssq, rsln)
+!$omp parallel do private(i,trho,e_xc,de_xc_drho)
     do i=1,NL
       trho=2*rho_s(i)
       call PZxc(trho,e_xc,de_xc_drho)
