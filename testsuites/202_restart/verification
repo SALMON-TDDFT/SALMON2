@@ -16,16 +16,12 @@ restart_iteration = 60
 
 filelist = [ 
     "current.data", 
-] 
+]
 
-checklist = { 
-    # Current
-    "Current": [
-        -100, # Temporary value for result
-        -0.29709077E-03,  # Reference value 
-        1e-8,  # Permissible error 
-    ], 
-} 
+origin_dir = "../201_checkpoint"
+target_dir = "./"
+
+permissible_error =  1e-15
 
 print("# Checking the existance of outputfile") 
 for item in filelist: 
@@ -34,24 +30,31 @@ for item in filelist:
         sys.exit(-1)  # Failure
 
 print("# Checking calculated result")
-result = {}
-linecount = 0
-for line in open("current.data"):
-    linecount += 1
-    if linecount == (160 - restart_iteration): # corresponds to line 160, (0.6192 fs)
-        for name, [resval, refval, error] in checklist.items(): 
-            data = line.split()
-            result[name] = float(data[3])
-            print(result[name])
+for f in filelist:
+    fo = os.path.join(origin_dir, f)
+    ft = os.path.join(target_dir, f)
+    ro = []
+    rt = []
 
-for name, [resval, refval, error] in checklist.items():
-    if name not in result: 
-        print("Result %s is not found" % name) 
-        sys.exit(-1)  # Failure 
-    else:
-        print("Result %s = %e (Reference = %e)" % (name, result[name], refval)) 
-        if abs(result[name] - refval) > error: 
-            print("Mismatch |%e - %e| > %e)" % (result[name], refval, error)) 
+    linecount = 0
+    for line in open(fo):
+        linecount += 1
+        if (linecount > restart_iteration):
+            ro.append(line.split())
+    for line in open(ft):
+        rt.append(line.split())
+
+    print("# Check file: %s" % f)
+
+    if (len(ro) != len(rt)):
+        print("File lines mismatch! %d vs. %d" % (len(ro), len(rt)))
+        sys.exit(-1)
+
+    for i in range(0,len(ro)):
+        s = float(ro[i][3])
+        d = float(rt[i][3])
+        if abs(d - s) > permissible_error:
+            print("Mismatch |%e - %e| > %e)" % (d, s, permissible_error))
             sys.exit(-1)  # Failure 
 
 print("# Verification end") 
