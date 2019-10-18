@@ -39,20 +39,6 @@ contains
 
   end subroutine init_dir_out_restart
   
-  subroutine write_checkpoint_rt(itt,ng,info)
-    use structures, only: s_rgrid,s_orbital_parallel
-    implicit none
-    type(s_rgrid), intent(in) :: ng
-    type(s_orbital_parallel), intent(in) :: info
-
-    integer :: itt
-    character(256) :: dir_checkpoint
-
-    call create_checkpoint_dir(itt,dir_checkpoint)
-!    call write_rt_bin(dir_checkpoint,ng,info)
-
-  end subroutine write_checkpoint_rt
-
   subroutine create_checkpoint_dir(itt,dir_checkpoint)
     use filesystem,  only: atomic_create_directory
     use salmon_parallel, only: nproc_id_global,nproc_group_global
