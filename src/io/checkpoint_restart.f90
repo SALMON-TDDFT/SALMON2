@@ -96,7 +96,7 @@ end subroutine write_bin
 !===================================================================================================================================
 
 subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
-  use inputoutput, only: theory,calc_mode,directory_read_data,read_rt_wfn_k
+  use inputoutput, only: theory,calc_mode,directory_read_data
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -138,8 +138,7 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
 
   !iteration
   if((theory=='DFT'.or.calc_mode=='GS').or.  &
-     ((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.  &
-      (read_rt_wfn_k=='y'.or.yn_restart=='y')))then
+     ((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
     if(comm_is_root(nproc_id_global))then
       dir_file_in =trim(directory_read_data)//"iteration.bin"
       open(iu1_r,file=dir_file_in,form='unformatted')
@@ -178,8 +177,7 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
   end if
  
   !Vh_stock
-  if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.  &
-      (read_rt_wfn_k=='y'.or.yn_restart=='y'))then
+  if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
     call read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
   end if
 
