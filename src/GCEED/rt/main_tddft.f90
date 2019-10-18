@@ -48,7 +48,7 @@ use force_sub, only: calc_force_salmon
 use hamiltonian
 use md_sub, only: init_md
 use fdtd_coulomb_gauge, only: ls_singlescale
-use read_write_restart_rt_sub, only: write_checkpoint_rt
+use read_write_restart_rt_sub, only: create_checkpoint_dir
 use taylor_sub, only: taylor_coe
 use checkpoint_restart_sub
 use hartree_sub, only: hartree
@@ -92,6 +92,7 @@ real(8),allocatable :: tfourier_integrand(:,:)
 complex(8),parameter :: zi=(0.d0,1.d0)
 character(10) :: fileLaser
 character(100):: comment_line
+character(256) :: dir_checkpoint
 
 
 call timer_begin(LOG_TOTAL)
@@ -205,7 +206,7 @@ call allocate_orbital_complex(system%nspin,mg,info,tpsi)
 call allocate_dmatrix(system%nspin,mg,info,dmat)
 
 call read_bin(lg,mg,ng,system,info,spsi_in,miter_rt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
-if(read_rt_wfn_k=='n') miter_rt=0
+if(yn_restart=='n'.and.read_rt_wfn_k=='n') miter_rt=0
 
 call calc_nlcc(pp, system, mg, ppn)
 if (comm_is_root(nproc_id_global)) then
@@ -249,7 +250,7 @@ if(IC_rt==0) then
   allocate( tene(0:Ntime) )
   call initA(Ntime)
   itotNtime=Ntime
-  Miter_rt=0
+  if (yn_restart=='n') Miter_rt=0
 end if
 call timer_end(LOG_READ_RT_DATA)
 
@@ -532,7 +533,14 @@ TE : do itt=Miter_rt+1,itotNtime
   end if
 
   if(checkpoint_interval .ge. 1) then
-     if(mod(itt,checkpoint_interval)==0) call write_checkpoint_rt(itt,ng,info)
+    if(mod(itt,checkpoint_interval)==0) then
+      call create_checkpoint_dir(itt,dir_checkpoint)
+      if (mod(itt,2)==1) then
+        call write_bin(dir_checkpoint,lg,mg,ng,system,info,spsi_out,itt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+      else
+        call write_bin(dir_checkpoint,lg,mg,ng,system,info,spsi_in, itt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+      endif
+    endif
   endif
 
 end do TE

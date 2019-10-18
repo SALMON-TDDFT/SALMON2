@@ -102,7 +102,6 @@ contains
 
     call read_stdin
     call read_input_common ! Should be renamed properly later
-    if(yn_restart == 'y')return
     call read_atomic_coordinates
     call dump_input_common ! Should be renamed properly later
     call check_bad_input

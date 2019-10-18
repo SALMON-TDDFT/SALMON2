@@ -44,15 +44,13 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   iu1_w = 97
   
   !system
-  if(theory=='DFT'.or.calc_mode=='GS')then
-    if(comm_is_root(nproc_id_global))then
-      dir_file_out = trim(odir)//"system.bin"
-      open(iu1_w,file=dir_file_out,form='unformatted')
-      write(iu1_w) system%nk
-      write(iu1_w) system%no
+  if(comm_is_root(nproc_id_global))then
+    dir_file_out = trim(odir)//"system.bin"
+    open(iu1_w,file=dir_file_out,form='unformatted')
+    write(iu1_w) system%nk
+    write(iu1_w) system%no
 
-      close(iu1_w)
-    end if
+    close(iu1_w)
   end if
 
   !iteration number (same format for gs and rt calculations)
@@ -68,19 +66,17 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   call write_wavefunction(odir,lg,mg,system,info,spsi)
 
   !occupation
-  if(theory=='DFT'.or.calc_mode=='GS')then
-    if(comm_is_root(nproc_id_global))then
-      dir_file_out = trim(odir)//"occupation.bin"
-      open(iu1_w,file=dir_file_out,form='unformatted')
-      do is=1,system%nspin
-      do ik=1,system%nk
-      do iob=1,system%no
-        write(iu1_w) system%rocc(iob,ik,is)
-      end do
-      end do
-      end do
-      close(iu1_w)
-    end if
+  if(comm_is_root(nproc_id_global))then
+    dir_file_out = trim(odir)//"occupation.bin"
+    open(iu1_w,file=dir_file_out,form='unformatted')
+    do is=1,system%nspin
+    do ik=1,system%nk
+    do iob=1,system%no
+      write(iu1_w) system%rocc(iob,ik,is)
+    end do
+    end do
+    end do
+    close(iu1_w)
   end if
   
   !rho_inout
@@ -104,6 +100,7 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use salmon_global, only: yn_restart
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
@@ -142,7 +139,7 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
   !iteration
   if((theory=='DFT'.or.calc_mode=='GS').or.  &
      ((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.  &
-      read_rt_wfn_k=='y'))then
+      (read_rt_wfn_k=='y'.or.yn_restart=='y')))then
     if(comm_is_root(nproc_id_global))then
       dir_file_in =trim(directory_read_data)//"iteration.bin"
       open(iu1_r,file=dir_file_in,form='unformatted')
@@ -182,7 +179,7 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
  
   !Vh_stock
   if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.  &
-      read_rt_wfn_k=='y')then
+      (read_rt_wfn_k=='y'.or.yn_restart=='y'))then
     call read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
   end if
 
@@ -795,9 +792,10 @@ subroutine read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
   type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
   integer :: iu1_r
   integer :: ix,iy,iz
-  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
+  real(8),allocatable :: matbox(:,:,:)
   character(100) :: dir_file_in
 
+  allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   iu1_r = 96
 
   if(comm_is_root(nproc_id_global))then
@@ -837,7 +835,7 @@ subroutine read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
     close(iu1_r)
   end if
 
-  deallocate(matbox,matbox2)
+  deallocate(matbox)
 
 end subroutine read_Vh_stock
 
