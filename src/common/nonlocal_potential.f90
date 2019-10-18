@@ -101,6 +101,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi = uVpsibox2(ilma,ispin,io,ik,im)
+!OCL norecurrence
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
@@ -137,6 +138,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
           uVpsi = uVpsi + ppg%uV(j,ilma) * tpsi%rwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+!OCL norecurrence
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
@@ -210,6 +212,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         uVpsi = uVpsibox2(ispin,io,ik,im,ilma)
+!OCL norecurrence
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)
@@ -246,6 +249,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
           uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
         uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+!OCL norecurrence
         do j=1,ppg%mps(ia)
           ix = ppg%jxyz(1,j,ia)
           iy = ppg%jxyz(2,j,ia)

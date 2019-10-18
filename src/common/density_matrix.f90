@@ -332,36 +332,54 @@ contains
       !
       integer :: ix,iy,iz
       real(8) :: rtmp
-      complex(8) :: cpsi,tmp(3)
+      complex(8) :: cpsi,xtmp,ytmp,ztmp
       rtmp = 0d0
-      tmp = 0d0
-!$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,tmp)
+      xtmp = 0d0
+      ytmp = 0d0
+      ztmp = 0d0
+!$omp parallel do collapse(2) private(iz,iy,ix,cpsi) reduction(+:rtmp,xtmp,ytmp,ztmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
+
+!OCL swp
+      do ix=is(1),ie(1)
+        rtmp = rtmp + abs(psi(ix,iy,iz))**2
+      end do
+
+!OCL swp
       do ix=is(1),ie(1)
         cpsi = conjg(psi(ix,iy,iz))
-        rtmp = rtmp + abs(psi(ix,iy,iz))**2
-
-        tmp(1) = tmp(1) + nabt(1,1) * cpsi * psi(idx(ix+1),iy,iz) &
-                        + nabt(2,1) * cpsi * psi(idx(ix+2),iy,iz) &
-                        + nabt(3,1) * cpsi * psi(idx(ix+3),iy,iz) &
-                        + nabt(4,1) * cpsi * psi(idx(ix+4),iy,iz)
-
-        tmp(2) = tmp(2) + nabt(1,2) * cpsi * psi(ix,idy(iy+1),iz) &
-                        + nabt(2,2) * cpsi * psi(ix,idy(iy+2),iz) &
-                        + nabt(3,2) * cpsi * psi(ix,idy(iy+3),iz) &
-                        + nabt(4,2) * cpsi * psi(ix,idy(iy+4),iz)
-
-        tmp(3) = tmp(3) + nabt(1,3) * cpsi * psi(ix,iy,idz(iz+1)) &
-                        + nabt(2,3) * cpsi * psi(ix,iy,idz(iz+2)) &
-                        + nabt(3,3) * cpsi * psi(ix,iy,idz(iz+3)) &
-                        + nabt(4,3) * cpsi * psi(ix,iy,idz(iz+4))
+        xtmp = xtmp + nabt(1,1) * cpsi * psi(idx(ix+1),iy,iz) &
+                    + nabt(2,1) * cpsi * psi(idx(ix+2),iy,iz) &
+                    + nabt(3,1) * cpsi * psi(idx(ix+3),iy,iz) &
+                    + nabt(4,1) * cpsi * psi(idx(ix+4),iy,iz)
       end do
+
+!OCL swp
+      do ix=is(1),ie(1)
+        cpsi = conjg(psi(ix,iy,iz))
+        ytmp = ytmp + nabt(1,2) * cpsi * psi(ix,idy(iy+1),iz) &
+                    + nabt(2,2) * cpsi * psi(ix,idy(iy+2),iz) &
+                    + nabt(3,2) * cpsi * psi(ix,idy(iy+3),iz) &
+                    + nabt(4,2) * cpsi * psi(ix,idy(iy+4),iz)
+      end do
+
+!OCL swp
+      do ix=is(1),ie(1)
+        cpsi = conjg(psi(ix,iy,iz))
+        ztmp = ztmp + nabt(1,3) * cpsi * psi(ix,iy,idz(iz+1)) &
+                    + nabt(2,3) * cpsi * psi(ix,iy,idz(iz+2)) &
+                    + nabt(3,3) * cpsi * psi(ix,iy,idz(iz+3)) &
+                    + nabt(4,3) * cpsi * psi(ix,iy,idz(iz+4))
+      end do
+
       end do
       end do
 !$omp end parallel do
       j1 = kAc(:) * rtmp
-      j2 = aimag(tmp * 2d0)
+      j2(1) = aimag(xtmp * 2d0)
+      j2(2) = aimag(ytmp * 2d0)
+      j2(3) = aimag(ztmp * 2d0)
       return
     end subroutine stencil_current
 
@@ -470,31 +488,44 @@ contains
       real(8)               :: jw(3)
       !
       integer :: ix,iy,iz
-      complex(8) :: tmp(3)
-      tmp = 0d0
-!$omp parallel do collapse(2) private(iz,iy,ix) reduction(+:tmp)
+      complex(8) :: xtmp,ytmp,ztmp
+      xtmp = 0d0
+      ytmp = 0d0
+      ztmp = 0d0
+!$omp parallel do collapse(2) private(iz,iy,ix) reduction(+:xtmp,ytmp,ztmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
+
+!OCL swp
       do ix=is(1),ie(1)
-        tmp(1) = tmp(1) + nabt(1,1) * zdm(1,1,ix,iy,iz) &
-                        + nabt(2,1) * zdm(2,1,ix,iy,iz) &
-                        + nabt(3,1) * zdm(3,1,ix,iy,iz) &
-                        + nabt(4,1) * zdm(4,1,ix,iy,iz)
-
-        tmp(2) = tmp(2) + nabt(1,2) * zdm(1,2,ix,iy,iz) &
-                        + nabt(2,2) * zdm(2,2,ix,iy,iz) &
-                        + nabt(3,2) * zdm(3,2,ix,iy,iz) &
-                        + nabt(4,2) * zdm(4,2,ix,iy,iz)
-
-        tmp(3) = tmp(3) + nabt(1,3) * zdm(1,3,ix,iy,iz) &
-                        + nabt(2,3) * zdm(2,3,ix,iy,iz) &
-                        + nabt(3,3) * zdm(3,3,ix,iy,iz) &
-                        + nabt(4,3) * zdm(4,3,ix,iy,iz)
+        xtmp = xtmp + nabt(1,1) * zdm(1,1,ix,iy,iz) &
+                    + nabt(2,1) * zdm(2,1,ix,iy,iz) &
+                    + nabt(3,1) * zdm(3,1,ix,iy,iz) &
+                    + nabt(4,1) * zdm(4,1,ix,iy,iz)
       end do
+
+!OCL swp
+      do ix=is(1),ie(1)
+        ytmp = ytmp + nabt(1,2) * zdm(1,2,ix,iy,iz) &
+                    + nabt(2,2) * zdm(2,2,ix,iy,iz) &
+                    + nabt(3,2) * zdm(3,2,ix,iy,iz) &
+                    + nabt(4,2) * zdm(4,2,ix,iy,iz)
+      end do
+
+!OCL swp
+      do ix=is(1),ie(1)
+        ztmp = ztmp + nabt(1,3) * zdm(1,3,ix,iy,iz) &
+                    + nabt(2,3) * zdm(2,3,ix,iy,iz) &
+                    + nabt(3,3) * zdm(3,3,ix,iy,iz) &
+                    + nabt(4,3) * zdm(4,3,ix,iy,iz)
+      end do
+
       end do
       end do
 !$omp end parallel do
-      jw = aimag(tmp * 2d0)
+      jw(1) = aimag(xtmp * 2d0)
+      jw(2) = aimag(ytmp * 2d0)
+      jw(3) = aimag(ztmp * 2d0)
       return
     end subroutine stencil_current
 
@@ -657,28 +688,38 @@ contains
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
       !
       integer :: ix,iy,iz
-      complex(8) :: tmp(3)
-!$omp parallel do collapse(2) private(iz,iy,ix,tmp)
+      complex(8) :: xtmp,ytmp,ztmp
+!$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp)
       do iz=is(3),ie(3)
       do iy=is(2),ie(2)
-      do ix=is(1),ie(1)
-        tmp(1) = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,idx(ix-1),iy,iz)) ) & ! dmat(x,-dx)==conjg(dmat(x-dx,dx))
+
+!OCL swp
+        do ix=is(1),ie(1)
+          xtmp = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,idx(ix-1),iy,iz)) ) & ! dmat(x,-dx)==conjg(dmat(x-dx,dx))
                + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,idx(ix-2),iy,iz)) ) &
                + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,idx(ix-3),iy,iz)) ) &
                + nabt(4,1) * ( zdm(4,1,ix,iy,iz) - conjg(zdm(4,1,idx(ix-4),iy,iz)) )
+        end do
 
-        tmp(2) = nabt(1,2) * ( zdm(1,2,ix,iy,iz) - conjg(zdm(1,2,ix,idy(iy-1),iz)) ) &
+!OCL swp
+        do ix=is(1),ie(1)
+          ytmp = nabt(1,2) * ( zdm(1,2,ix,iy,iz) - conjg(zdm(1,2,ix,idy(iy-1),iz)) ) &
                + nabt(2,2) * ( zdm(2,2,ix,iy,iz) - conjg(zdm(2,2,ix,idy(iy-2),iz)) ) &
                + nabt(3,2) * ( zdm(3,2,ix,iy,iz) - conjg(zdm(3,2,ix,idy(iy-3),iz)) ) &
                + nabt(4,2) * ( zdm(4,2,ix,iy,iz) - conjg(zdm(4,2,ix,idy(iy-4),iz)) )
+        end do
 
-        tmp(3) = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,idz(iz-1))) ) &
+!OCL swp
+        do ix=is(1),ie(1)
+          ztmp = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,idz(iz-1))) ) &
                + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,idz(iz-2))) ) &
                + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,idz(iz-3))) ) &
                + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,idz(iz-4))) )
+        end do
 
-        jw(:,ix,iy,iz) = aimag(tmp)
-      end do
+        jw(1,ix,iy,iz) = aimag(xtmp)
+        jw(2,ix,iy,iz) = aimag(ytmp)
+        jw(3,ix,iy,iz) = aimag(ztmp)
       end do
       end do
 !$omp end parallel do
