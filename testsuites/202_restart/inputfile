@@ -7,7 +7,6 @@
   !checkpoint_interval = 60
   directory_read_data = 'checkpoint_rt_000060/'
   yn_restart = 'y'
-  read_rt_wfn_k = 'y' ! old option
 /
 
 &units
