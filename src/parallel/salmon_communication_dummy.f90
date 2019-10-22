@@ -17,7 +17,7 @@
 module salmon_communication
   implicit none
 
-  integer, private, parameter :: DEAD_BEEF       = int(z'DEADBEEF')
+  integer, private, parameter :: DEAD_BEEF       = int(z'7FFFDEAD')
   integer, private, parameter :: COMM_WORLD_ID   = int(z'7FFFFFFF')
 
   integer, public, parameter  :: COMM_GROUP_NULL = DEAD_BEEF
