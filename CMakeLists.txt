@@ -25,6 +25,11 @@ project(SALMON
         LANGUAGES Fortran C
         )
 
+message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
+message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
+message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
+
+
 # cross-compile or native-compile
 if (${CMAKE_CROSSCOMPILING})
   # (For supercomputer systems) cross compile mode, use toolchain file.
@@ -34,10 +39,6 @@ else ()
   message(STATUS "Target platform is Native (${CMAKE_HOST_SYSTEM})")
   include(cmakefiles/find_build_environments.cmake)
 endif ()
-
-message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
-message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
-message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 
 # Bulid options
