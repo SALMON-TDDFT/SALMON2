@@ -35,8 +35,10 @@ unset(CMAKE_REQUIRED_DEFINITIONS)
 
 check_symbol_exists(remove "stdio.h" SYSTEM_HAS_STDIO_REMOVE)
 
-check_symbol_exists(PATH_MAX "limits.h"       SYSTEM_HAS_PATH_MAX_IN_LIMITS_H)
-check_symbol_exists(PATH_MAX "linux/limits.h" SYSTEM_HAS_PATH_MAX_IN_LINUX_LIMITS_H)
+check_symbol_exists(PATH_MAX "limits.h" SYSTEM_HAS_PATH_MAX_IN_LIMITS_H)
+if (NOT DEFINED SYSTEM_HAS_PATH_MAX_IN_LIMITS_H)
+  check_symbol_exists(PATH_MAX "linux/limits.h" SYSTEM_HAS_PATH_MAX_IN_LINUX_LIMITS_H)
+endif ()
 
 
 # Fujitsu compiler detection

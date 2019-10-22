@@ -1,4 +1,15 @@
-set(TARGET_SUFFIX ".cpu")
+include(CheckFortranCompilerFlag)
+set(FORTRAN_PREPROCESSOR_OPTIONS -fpp;-cpp)
+foreach (opt IN LISTS FORTRAN_PREPROCESSOR_OPTIONS)
+  check_fortran_compiler_flag(${opt} FORTRAN_${opt}_OPTIONS)
+  if (FORTRAN_${opt}_OPTIONS)
+    set(FCC_PP_OPTION ${opt})
+    break()
+  endif ()
+endforeach ()
+if (NOT DEFINED FCC_PP_OPTION)
+  message(FATAL_ERROR "SALMON requires fortran preprocessing options (ex. -cpp/-fpp)")
+endif ()
 
 check_mpi_compiler(${CMAKE_Fortran_COMPILER} IS_MPI_COMPILER)
 if (${IS_MPI_COMPILER})
@@ -26,10 +37,11 @@ if (USE_MPI)
 
 endif ()
 
+set(TARGET_SUFFIX ".cpu")
 
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
 set(CMAKE_Fortran_FLAGS_RELEASE "-O3")
-set(Fortran_FLAGS_General       "-cpp ${MPI_Fortran_COMPILE_FLAGS}")
+set(Fortran_FLAGS_General       "${FCC_PP_OPTION} ${MPI_Fortran_COMPILE_FLAGS}")
 
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
 set(CMAKE_C_FLAGS_RELEASE       "-O3")

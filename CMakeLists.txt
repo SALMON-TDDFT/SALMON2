@@ -18,6 +18,8 @@ include(${CMAKE_SOURCE_DIR}/cmakefiles/get_git_info.cmake)
 
 ### Project settings
 enable_testing()
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD          99)
 project(SALMON
         VERSION   2.0.0
         LANGUAGES Fortran C
