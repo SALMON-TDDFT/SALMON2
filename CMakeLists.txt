@@ -18,10 +18,17 @@ include(${CMAKE_SOURCE_DIR}/cmakefiles/get_git_info.cmake)
 
 ### Project settings
 enable_testing()
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD          99)
 project(SALMON
         VERSION   2.0.0
         LANGUAGES Fortran C
         )
+
+message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
+message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
+message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
+
 
 # cross-compile or native-compile
 if (${CMAKE_CROSSCOMPILING})
@@ -32,10 +39,6 @@ else ()
   message(STATUS "Target platform is Native (${CMAKE_HOST_SYSTEM})")
   include(cmakefiles/find_build_environments.cmake)
 endif ()
-
-message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
-message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
-message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 
 # Bulid options
