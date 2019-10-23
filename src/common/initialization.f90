@@ -30,7 +30,7 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   use sendrecv_grid
   use init_communicator
   use init_poisson_sub
-  use read_write_restart_rt_sub, only: init_dir_out_restart
+  use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
   implicit none
   integer,intent(in) :: comm

@@ -211,6 +211,7 @@ contains
       & output_buffer_interval, &
       & yn_restart, &
       & directory_read_data, &
+      & yn_self_checkpoint,  &
       & checkpoint_interval, &
       & time_shutdown,       &
       & dump_filename,     &  !remove later
@@ -556,6 +557,7 @@ contains
     output_buffer_interval= -1
     yn_restart            = 'n'
     directory_read_data   = 'restart/'
+    yn_self_checkpoint    = 'n'
     checkpoint_interval   = 0
     time_shutdown         = -1d0
     !remove later
@@ -944,6 +946,7 @@ contains
     ii = len_trim(directory_read_data)
     if(directory_read_data(ii:ii).ne.'/') &
        directory_read_data = trim(directory_read_data)//'/'
+    call comm_bcast(yn_self_checkpoint    ,nproc_group_global)
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
     !remove later
@@ -1579,6 +1582,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'output_buffer_interval', output_buffer_interval
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       !remove later
