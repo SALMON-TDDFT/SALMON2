@@ -696,7 +696,7 @@ subroutine read_rho_inout(lg,ng,system,info,mixing)
   type(s_orbital_parallel),intent(in) :: info
   type(s_mixing),intent(inout) :: mixing
   integer :: iu1_r
-  integer :: i,ix,iy,iz
+  integer :: i,ix,iy,iz,is
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
   character(100) :: dir_file_in
 
@@ -707,64 +707,70 @@ subroutine read_rho_inout(lg,ng,system,info,mixing)
     open(iu1_r,file=dir_file_in,form='unformatted')
   end if
 
-  if(comm_is_root(nproc_id_global))then
-    read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-  end if
-  call comm_bcast(matbox,info%icomm_rko)
+  do i=1,mixing%num_rho_stock+1
+    if(comm_is_root(nproc_id_global))then
+      read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+    end if
+    call comm_bcast(matbox,info%icomm_rko)
 
-!$omp parallel do collapse(2)  
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)=matbox(ix,iy,iz)
-  end do
-  end do
-  end do
-  
-  if(comm_is_root(nproc_id_global))then
-    read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-  end if
-  call comm_bcast(matbox,info%icomm_rko)
-
-!$omp parallel do collapse(2)  
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)=matbox(ix,iy,iz)
-  end do
-  end do
-  end do
-  
-  if(system%nspin == 2)then
-    do i=1,mixing%num_rho_stock+1
-      if(comm_is_root(nproc_id_global))then
-        read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-      end if
-      call comm_bcast(matbox,info%icomm_rko)
-
-!$omp parallel do collapse(2)  
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
-      end do
-      end do
-      end do
+!$omp parallel do collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
     end do
-  
-    do i=1,mixing%num_rho_stock
-      if(comm_is_root(nproc_id_global))then
-        read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-      end if
-      call comm_bcast(matbox,info%icomm_rko)
+    end do
+    end do
+  end do
 
-!$omp parallel do collapse(2)  
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        mixing%srho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+  do i=1,mixing%num_rho_stock
+    if(comm_is_root(nproc_id_global))then
+      read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+    end if
+    call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      mixing%srho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+    end do
+    end do
+    end do
+  end do
+
+  if(system%nspin == 2)then
+    do is=1,2
+      do i=1,mixing%num_rho_stock+1
+        if(comm_is_root(nproc_id_global))then
+          read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+        end if
+        call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+        end do
+        end do
+        end do
       end do
-      end do
+
+      do i=1,mixing%num_rho_stock
+        if(comm_is_root(nproc_id_global))then
+          read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+        end if
+        call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          mixing%srho_s_out(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+        end do
+        end do
+        end do
       end do
     end do
   end if
