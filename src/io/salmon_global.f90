@@ -53,6 +53,7 @@ module salmon_global
   integer        :: output_buffer_interval
   character(1)   :: yn_restart
   character(256) :: directory_read_data
+  character(1)   :: yn_self_checkpoint
   integer        :: checkpoint_interval
   real(8)        :: time_shutdown
   !remove later

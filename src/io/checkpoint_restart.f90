@@ -22,12 +22,171 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
+subroutine init_dir_out_restart(ofile)
+  use structures,  only: s_ofile
+  use filesystem,  only: atomic_create_directory
+  use salmon_global,   only: theory,write_rt_wfn_k
+  use salmon_parallel, only: nproc_id_global,nproc_group_global
+  implicit none
+  type(s_ofile), intent(inout) :: ofile
+
+  select case(theory)
+    case('DFT','DFT_MD')
+      ofile%dir_out_restart = 'data_for_restart/'
+      call atomic_create_directory(ofile%dir_out_restart,nproc_group_global,nproc_id_global)
+    case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT')
+      if (write_rt_wfn_k == 'y') then
+        ofile%dir_out_restart = 'data_for_restart_rt/'
+        call atomic_create_directory(ofile%dir_out_restart,nproc_group_global,nproc_id_global)
+      end if
+  end select
+
+end subroutine init_dir_out_restart
+
+
+subroutine generate_checkpoint_directory_name(header,iter,gdir,pdir)
+  use salmon_parallel, only: nproc_id_global
+  implicit none
+  character(*),  intent(in)  :: header
+  integer,       intent(in)  :: iter
+  character(256),intent(out) :: gdir
+  character(256),intent(out) :: pdir
+
+  ! global directory
+  write(gdir,'(A,A,A,I6.6,A)') "checkpoint_",trim(header),"_",iter,"/"
+  ! process private directory
+  write(pdir,'(A,A,I6.6,A)')   trim(gdir),'rank_',nproc_id_global,'/'
+end subroutine generate_checkpoint_directory_name
+
+subroutine generate_restart_directory_name(basedir,gdir,pdir)
+  use salmon_parallel, only: nproc_id_global
+  implicit none
+  character(*),  intent(in)  :: basedir
+  character(256),intent(out) :: gdir
+  character(256),intent(out) :: pdir
+
+  ! global directory
+  write(gdir,'(A,I6.6,A)')   trim(basedir)
+  ! process private directory
+  write(pdir,'(A,A,I6.6,A)') trim(gdir),'rank_',nproc_id_global,'/'
+end subroutine generate_restart_directory_name
+
+
+subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing)
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing
+  use filesystem, only: atomic_create_directory,create_directory
+  use salmon_global, only: yn_self_checkpoint
+  use salmon_parallel, only: nproc_group_global,nproc_id_global
+  implicit none
+  type(s_rgrid)           ,intent(in) :: lg, mg, ng
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_orbital)         ,intent(in) :: spsi
+  integer                 ,intent(in) :: iter
+  type(s_mixing)          ,intent(in) :: mixing
+
+  character(256) :: gdir,wdir
+  logical :: iself
+
+  call generate_checkpoint_directory_name('gs',iter,gdir,wdir)
+  call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+
+  iself = (yn_self_checkpoint == 'y')
+  if (iself) then
+    call create_directory(wdir)
+  else
+    wdir = gdir
+  end if
+  call write_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
+end subroutine checkpoint_gs
+
+subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
+  use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_mixing
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+  implicit none
+  type(s_rgrid)             ,intent(in) :: lg, mg, ng
+  type(s_dft_system)     ,intent(inout) :: system
+  type(s_orbital_parallel)  ,intent(in) :: info
+  type(s_orbital)        ,intent(inout) :: spsi
+  integer                  ,intent(out) :: iter
+  type(s_mixing)         ,intent(inout) :: mixing
+
+  character(256) :: gdir,wdir
+  logical :: iself
+
+  call generate_restart_directory_name(directory_read_data,gdir,wdir)
+
+  iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
+  if (.not. iself) then
+    wdir = gdir
+  end if
+  call read_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
+end subroutine restart_gs
+
+
+subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_scalar
+  use filesystem, only: atomic_create_directory,create_directory
+  use salmon_global, only: yn_self_checkpoint
+  use salmon_parallel, only: nproc_group_global,nproc_id_global
+  implicit none
+  type(s_rgrid)           ,intent(in) :: lg, mg, ng
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_orbital)         ,intent(in) :: spsi
+  integer                 ,intent(in) :: iter
+  type(s_scalar)          ,intent(in) :: sVh_stock1,sVh_stock2
+
+  character(256) :: gdir,wdir
+  logical :: iself
+
+  call generate_checkpoint_directory_name('rt',iter,gdir,wdir)
+  call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+
+  iself = (yn_self_checkpoint == 'y')
+  if (iself) then
+    call create_directory(wdir)
+  else
+    wdir = gdir
+  end if
+  call write_bin(wdir,lg,mg,ng,system,info,spsi,iter &
+                ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
+end subroutine checkpoint_rt
+
+subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
+  use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+  implicit none
+  type(s_rgrid)             ,intent(in) :: lg, mg, ng
+  type(s_dft_system)     ,intent(inout) :: system
+  type(s_orbital_parallel)  ,intent(in) :: info
+  type(s_orbital)        ,intent(inout) :: spsi
+  integer                  ,intent(out) :: iter
+  type(s_scalar)         ,intent(inout) :: sVh_stock1,sVh_stock2
+
+  character(256) :: gdir,wdir
+  logical :: iself
+
+  call generate_restart_directory_name(directory_read_data,gdir,wdir)
+
+  iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
+  if (.not. iself) then
+    wdir = gdir
+  end if
+  call read_bin(wdir,lg,mg,ng,system,info,spsi,iter &
+               ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
+end subroutine restart_rt
+
+
+!===================================================================================================================================
+
+subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
+  character(*)            ,intent(in) :: odir
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
@@ -35,18 +194,26 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   integer                 ,intent(in) :: iter
   type(s_mixing) ,optional,intent(in) :: mixing
   type(s_scalar) ,optional,intent(in) :: sVh_stock1,sVh_stock2
-  
+  logical        ,optional,intent(in) :: is_self_checkpoint
+
   integer :: is,iob,ik
   integer :: iu1_w
   character(100) :: dir_file_out
-  character(*)   :: odir
- 
+  logical :: iself
+
+  if (present(is_self_checkpoint)) then
+    iself = is_self_checkpoint
+  else
+    iself = .false.
+  end if
+
   iu1_w = 97
-  
+
   !system
   if(comm_is_root(nproc_id_global))then
     dir_file_out = trim(odir)//"system.bin"
     open(iu1_w,file=dir_file_out,form='unformatted')
+
     write(iu1_w) system%nk
     write(iu1_w) system%no
 
@@ -57,18 +224,17 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   if(comm_is_root(nproc_id_global))then
     dir_file_out = trim(odir)//"iteration.bin"
     open(iu1_w,file=dir_file_out,form='unformatted')
+
     write(iu1_w) iter
 
     close(iu1_w)
   end if
 
-  !wave fucntion
-  call write_wavefunction(odir,lg,mg,system,info,spsi)
-
   !occupation
   if(comm_is_root(nproc_id_global))then
     dir_file_out = trim(odir)//"occupation.bin"
     open(iu1_w,file=dir_file_out,form='unformatted')
+
     do is=1,system%nspin
     do ik=1,system%nk
     do iob=1,system%no
@@ -76,32 +242,35 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
     end do
     end do
     end do
+
     close(iu1_w)
   end if
-  
+
+  !wave fucntion
+  call write_wavefunction(odir,lg,mg,system,info,spsi,iself)
+
   !rho_inout
   if(theory=='DFT'.or.calc_mode=='GS')then
-    call write_rho_inout(odir,lg,ng,system,info,mixing)
+    call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
   end if
 
   !Vh_stock
   if(theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT')then
-    call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2)
+    call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
   end if
-
-  return
 
 end subroutine write_bin
 
 !===================================================================================================================================
 
-subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
-  use inputoutput, only: theory,calc_mode,directory_read_data
+subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
+  use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: yn_restart
   implicit none
+  character(*)              ,intent(in) :: idir
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
   type(s_orbital_parallel)  ,intent(in) :: info
@@ -109,25 +278,33 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
   integer                  ,intent(out) :: iter
   type(s_mixing),optional,intent(inout) :: mixing
   type(s_scalar),optional,intent(inout) :: sVh_stock1,sVh_stock2
+  logical       ,optional,intent(in)    :: is_self_checkpoint
 
   integer :: mk,mo
 
   real(8),allocatable :: roccbox(:,:,:)
   integer :: iu1_r
-  integer :: ik,iob,is 
-  character(100) :: dir_file_in
-  
+  integer :: ik,iob,is
+  character(256) :: dir_file_in
   integer :: comm
-  
+  logical :: iself
+
+  if (present(is_self_checkpoint)) then
+    iself = is_self_checkpoint
+  else
+    iself = .false.
+  end if
+
   comm = nproc_group_global
- 
+
   iu1_r = 96
 
   !system
-  !first to be read 
+  !first to be read
   if(comm_is_root(nproc_id_global))then
-    dir_file_in =trim(directory_read_data)//"system.bin"
+    dir_file_in = trim(idir)//"system.bin"
     open(iu1_r,file=dir_file_in,form='unformatted')
+
     read(iu1_r) mk
     read(iu1_r) mo
 
@@ -140,25 +317,22 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
   if((theory=='DFT'.or.calc_mode=='GS').or.  &
      ((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
     if(comm_is_root(nproc_id_global))then
-      dir_file_in =trim(directory_read_data)//"iteration.bin"
+      dir_file_in = trim(idir)//"iteration.bin"
       open(iu1_r,file=dir_file_in,form='unformatted')
+
       read(iu1_r) iter
 
       close(iu1_r)
     end if
     call comm_bcast(iter,comm)
   end if
- 
-  !wave function
-  call read_wavefunction(lg,mg,system,info,spsi,mk,mo)
-  
-  !occupation 
-  allocate(roccbox(mo,mk,system%nspin))
 
+  !occupation
   if(comm_is_root(nproc_id_global))then
-    dir_file_in =trim(directory_read_data)//"occupation.bin"
+    dir_file_in = trim(idir)//"occupation.bin"
     open(iu1_r,file=dir_file_in,form='unformatted')
 
+    allocate(roccbox(mo,mk,system%nspin))
     do is=1,system%nspin
     do ik=1,mk
     do iob=1,mo
@@ -167,27 +341,30 @@ subroutine read_bin(lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2)
     end do
     end do
     system%rocc(1:system%no,1:system%nk,1:system%nspin) = roccbox(1:system%no,1:system%nk,1:system%nspin)
+    deallocate(roccbox)
+
+    close(iu1_r)
   end if
   call comm_bcast(system%rocc,comm)
-  deallocate(roccbox)  
- 
+
+  !wave function
+  call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
+
   !rho_inout
   if(theory=='DFT'.or.calc_mode=='GS')then
-    call read_rho_inout(lg,ng,system,info,mixing)
-  end if
- 
-  !Vh_stock
-  if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
-    call read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
+    call read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
   end if
 
-  return
+  !Vh_stock
+  if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
+    call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
+  end if
 
 end subroutine read_bin
 
 !===================================================================================================================================
 
-subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
+subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   use inputoutput, only: num_datafiles_out
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use salmon_parallel, only: nproc_id_global
@@ -198,52 +375,51 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital), intent(in) :: spsi
+  logical,intent(in) :: is_self_checkpoint
+
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
   complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
   integer :: iu2_w
-  integer :: ifilenum_data
   type(s_rgrid) :: dg
   integer :: is,iob,ik
   integer :: ix,iy,iz
-  character(100) ::  dir_file_out
-  character(8) :: filenumber_data
- 
+  character(256) ::  dir_file_out
+
   iu2_w = 87
 
   allocate(matbox(  lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(matbox2( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  
+
   matbox=0.d0
   cmatbox=0.d0
- 
-  !filenumber for writing wave function
+
   call set_dg(lg,mg,dg,num_datafiles_out)
-  
-  !filenumber for writing wave function
-  ifilenum_data = iu2_w
-  
-  !open file iu2_w
-  if(num_datafiles_out==1.and.comm_is_root(nproc_id_global))then
+
+  if(num_datafiles_out==1.and.comm_is_root(nproc_id_global)) then
+    ! write root process
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted')
-  else if(num_datafiles_out==-1.or.   &
-          (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
-    write(filenumber_data, '(i6.6)') nproc_id_global
-    dir_file_out = trim(odir)//"wfn"//trim(adjustl(filenumber_data))//".bin"
+  else if(is_self_checkpoint) then
+    ! write all processes (each process dump data)
+    dir_file_out = trim(odir)//"wfn.bin"
+    open(iu2_w,file=dir_file_out,form='unformatted')
+  else if(num_datafiles_out>1.and.nproc_id_global<num_datafiles_out) then
+    ! distributed-write
+    write(dir_file_out, '(A,A,I6.6,A)') trim(odir),'wfn',nproc_id_global,".bin"
     open(iu2_w,file=dir_file_out,form='unformatted')
   end if
-  
+
   !write wavefunction
-  if(num_datafiles_out==-1)then
+  if(is_self_checkpoint)then
     if(allocated(spsi%rwf))then
       do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
       do is=1,system%nspin
-        write(ifilenum_data) ((( spsi%rwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
-                                                                iy=dg%is(2),dg%ie(2)), &
-                                                                iz=dg%is(3),dg%ie(3))
+        write(iu2_w) ((( spsi%rwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
+                                                        iy=dg%is(2),dg%ie(2)), &
+                                                        iz=dg%is(3),dg%ie(3))
       end do
       end do
       end do
@@ -251,9 +427,9 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
       do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
       do is=1,system%nspin
-        write(ifilenum_data) ((( spsi%zwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
-                                                                iy=dg%is(2),dg%ie(2)), &
-                                                                iz=dg%is(3),dg%ie(3))
+        write(iu2_w) ((( spsi%zwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
+                                                        iy=dg%is(2),dg%ie(2)), &
+                                                        iz=dg%is(3),dg%ie(3))
       end do
       end do
       end do
@@ -285,10 +461,10 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
         call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
            (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
-            write(ifilenum_data) ((( matbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
-                                                       iy=dg%is(2),dg%ie(2)), &
-                                                       iz=dg%is(3),dg%ie(3))
-        end if 
+            write(iu2_w) ((( matbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+                                               iy=dg%is(2),dg%ie(2)), &
+                                               iz=dg%is(3),dg%ie(3))
+        end if
       end do
       end do
       end do
@@ -318,30 +494,30 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi)
         call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
         if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
            (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
-            write(ifilenum_data) ((( cmatbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
-                                                        iy=dg%is(2),dg%ie(2)), &
-                                                        iz=dg%is(3),dg%ie(3))
-        end if 
+            write(iu2_w) ((( cmatbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+                                                iy=dg%is(2),dg%ie(2)), &
+                                                iz=dg%is(3),dg%ie(3))
+        end if
       end do
       end do
       end do
-    end if 
-  end if 
-  
+    end if
+  end if
+
   !close file iu2_w
   if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.  &
-     num_datafiles_out==-1.or.   &
+     is_self_checkpoint.or.   &
      (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
     close(iu2_w)
   end if
-  
+
   deallocate(matbox,matbox2,cmatbox,cmatbox2)
 
 end subroutine write_wavefunction
 
 !===================================================================================================================================
 
-subroutine write_rho_inout(odir,lg,ng,system,info,mixing)
+subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -351,6 +527,7 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing)
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_mixing)          ,intent(in) :: mixing
+  logical                 ,intent(in) :: is_self_checkpoint
   !
   character(100) ::  dir_file_out
   integer :: i,ix,iy,iz,is
@@ -358,95 +535,113 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing)
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
 
   iu1_w = 97
-  
-  if(comm_is_root(nproc_id_global))then
-    dir_file_out = trim(odir)//"rho_inout.bin"
+  dir_file_out = trim(odir)//"rho_inout.bin"
+
+  if(is_self_checkpoint) then
+    ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted')
-  end if
-
-  allocate(matbox(  lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  allocate(matbox2( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-
-  do i=1,mixing%num_rho_stock+1
-    matbox2=0.d0
-    matbox2(ng%is(1):ng%ie(1),   &
-            ng%is(2):ng%ie(2),   &
-            ng%is(3):ng%ie(3))   &
-       = mixing%srho_in(i)%f(ng%is(1):ng%ie(1), &
-                             ng%is(2):ng%ie(2), &
-                             ng%is(3):ng%ie(3))
-  
-    call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-  
-    if(comm_is_root(nproc_id_global))then
-      write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-    end if
-  end do
-  
-  do i=1,mixing%num_rho_stock
-    matbox2=0.d0
-    matbox2(ng%is(1):ng%ie(1),   &
-            ng%is(2):ng%ie(2),   &
-            ng%is(3):ng%ie(3))   &
-       = mixing%srho_out(i)%f(ng%is(1):ng%ie(1), &
-                              ng%is(2):ng%ie(2), &
-                              ng%is(3):ng%ie(3))
-  
-    call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-    if(comm_is_root(nproc_id_global))then
-      write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-    end if
-  end do
-  
-  if(system%nspin == 2)then
-    do is=1,2
-      do i=1,mixing%num_rho_stock+1
-        matbox2=0.d0
-        matbox2(ng%is(1):ng%ie(1),   &
-                ng%is(2):ng%ie(2),   &
-                ng%is(3):ng%ie(3))   &
-          = mixing%srho_s_in(i,is)%f(ng%is(1):ng%ie(1), &
-                                      ng%is(2):ng%ie(2), &
-                                      ng%is(3):ng%ie(3))
-  
-        call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-  
-        if(comm_is_root(nproc_id_global))then
-          write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-        end if
-      end do
-  
-      do i=1,mixing%num_rho_stock
-        matbox2=0.d0
-        matbox2(ng%is(1):ng%ie(1),   &
-                ng%is(2):ng%ie(2),   &
-                ng%is(3):ng%ie(3))   &
-          = mixing%srho_s_out(i,is)%f(ng%is(1):ng%ie(1),   &
-                  ng%is(2):ng%ie(2),   &
-                  ng%is(3):ng%ie(3))
-  
-        call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-  
-        if(comm_is_root(nproc_id_global))then
-          write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-        end if
-      end do
-      
+    do i=1,mixing%num_rho_stock+1
+      write(iu1_w) (((mixing%srho_in(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
     end do
-  
-  end if
-  
-  if(comm_is_root(nproc_id_global))then
+    do i=1,mixing%num_rho_stock
+      write(iu1_w) (((mixing%srho_out(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+    end do
+    if(system%nspin==2) then
+      do is=1,2
+        do i=1,mixing%num_rho_stock+1
+          write(iu1_w) (((mixing%srho_s_in(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+        end do
+        do i=1,mixing%num_rho_stock
+          write(iu1_w) (((mixing%srho_s_out(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+        end do
+      end do
+    end if
     close(iu1_w)
+  else
+    ! write root process
+    if(comm_is_root(nproc_id_global))then
+      open(iu1_w,file=dir_file_out,form='unformatted')
+    end if
+
+    allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+
+    do i=1,mixing%num_rho_stock+1
+      matbox2=0.d0
+      matbox2(ng%is(1):ng%ie(1),   &
+              ng%is(2):ng%ie(2),   &
+              ng%is(3):ng%ie(3))   &
+         = mixing%srho_in(i)%f(ng%is(1):ng%ie(1), &
+                               ng%is(2):ng%ie(2), &
+                               ng%is(3):ng%ie(3))
+
+      call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+      if(comm_is_root(nproc_id_global))then
+        write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      end if
+    end do
+
+    do i=1,mixing%num_rho_stock
+      matbox2=0.d0
+      matbox2(ng%is(1):ng%ie(1),   &
+              ng%is(2):ng%ie(2),   &
+              ng%is(3):ng%ie(3))   &
+         = mixing%srho_out(i)%f(ng%is(1):ng%ie(1), &
+                                ng%is(2):ng%ie(2), &
+                                ng%is(3):ng%ie(3))
+
+      call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+      if(comm_is_root(nproc_id_global))then
+        write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      end if
+    end do
+
+    if(system%nspin == 2)then
+      do is=1,2
+        do i=1,mixing%num_rho_stock+1
+          matbox2=0.d0
+          matbox2(ng%is(1):ng%ie(1),   &
+                  ng%is(2):ng%ie(2),   &
+                  ng%is(3):ng%ie(3))   &
+            = mixing%srho_s_in(i,is)%f(ng%is(1):ng%ie(1), &
+                                       ng%is(2):ng%ie(2), &
+                                       ng%is(3):ng%ie(3))
+
+          call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+          if(comm_is_root(nproc_id_global))then
+            write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+          end if
+        end do
+
+        do i=1,mixing%num_rho_stock
+          matbox2=0.d0
+          matbox2(ng%is(1):ng%ie(1),   &
+                  ng%is(2):ng%ie(2),   &
+                  ng%is(3):ng%ie(3))   &
+            = mixing%srho_s_out(i,is)%f(ng%is(1):ng%ie(1),   &
+                                        ng%is(2):ng%ie(2),   &
+                                        ng%is(3):ng%ie(3))
+
+          call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+          if(comm_is_root(nproc_id_global))then
+            write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+          end if
+        end do
+      end do
+    end if
+
+    if(comm_is_root(nproc_id_global))then
+      close(iu1_w)
+    end if
   end if
 
   deallocate(matbox,matbox2)
-  
+
 end subroutine write_rho_inout
 
 !===================================================================================================================================
 
-subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2)
+subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -455,70 +650,74 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2)
   type(s_rgrid), intent(in)    :: lg,ng
   type(s_orbital_parallel),intent(in) :: info
   type(s_scalar),intent(in) :: sVh_stock1,sVh_stock2
-  character(100) ::  dir_file_out
+  logical,intent(in) :: is_self_checkpoint
+
+  character(256) ::  dir_file_out
   integer :: iu1_w
-  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
+  real(8),allocatable :: matbox0(:,:,:),matbox1(:,:,:),matbox2(:,:,:)
   integer :: ix,iy,iz
 
   iu1_w = 97
-  
-  if(comm_is_root(nproc_id_global))then
-    dir_file_out = trim(odir)//"Vh_stock.bin"
+  dir_file_out = trim(odir)//"Vh_stock.bin"
+
+  if (is_self_checkpoint) then
+    ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted')
-  end if
-
-  allocate(matbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-
-  matbox2=0.d0
-  matbox2(ng%is(1):ng%ie(1),   &
-          ng%is(2):ng%ie(2),   &
-          ng%is(3):ng%ie(3))   &
-     = sVh_stock1%f(ng%is(1):ng%ie(1), &
-                   ng%is(2):ng%ie(2), &
-                   ng%is(3):ng%ie(3))
-
-  call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-
-  if(comm_is_root(nproc_id_global))then
-    write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-  end if
-  
-  matbox2=0.d0
-  matbox2(ng%is(1):ng%ie(1),   &
-          ng%is(2):ng%ie(2),   &
-          ng%is(3):ng%ie(3))   &
-     = sVh_stock2%f(ng%is(1):ng%ie(1), &
-                   ng%is(2):ng%ie(2), &
-                   ng%is(3):ng%ie(3))
-
-  call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-  
-  if(comm_is_root(nproc_id_global))then
-    write(iu1_w) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-  end if
-  
-  if(comm_is_root(nproc_id_global))then
+    write(iu1_w) (((sVh_stock1%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+    write(iu1_w) (((sVh_stock2%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
     close(iu1_w)
+  else
+    ! write root process
+    allocate(matbox0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+
+    matbox0=0.d0
+    matbox0(ng%is(1):ng%ie(1),   &
+            ng%is(2):ng%ie(2),   &
+            ng%is(3):ng%ie(3))   &
+      = sVh_stock1%f(ng%is(1):ng%ie(1), &
+                     ng%is(2):ng%ie(2), &
+                     ng%is(3):ng%ie(3))
+    call comm_summation(matbox0,matbox1,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+
+    matbox0=0.d0
+    matbox0(ng%is(1):ng%ie(1),   &
+            ng%is(2):ng%ie(2),   &
+            ng%is(3):ng%ie(3))   &
+       = sVh_stock2%f(ng%is(1):ng%ie(1), &
+                      ng%is(2):ng%ie(2), &
+                      ng%is(3):ng%ie(3))
+    call comm_summation(matbox0,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+
+    if(comm_is_root(nproc_id_global))then
+      open(iu1_w,file=dir_file_out,form='unformatted')
+      write(iu1_w) (((matbox1(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      write(iu1_w) (((matbox2(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      close(iu1_w)
+    end if
+
+    deallocate(matbox0,matbox1,matbox2)
   end if
 
-  deallocate(matbox,matbox2)
-  
 end subroutine write_Vh_stock
 
 !===================================================================================================================================
 
-subroutine read_wavefunction(lg,mg,system,info,spsi,mk,mo)
+subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use inputoutput, only: theory,calc_mode,iperiodic,num_datafiles_in,directory_read_data
+  use inputoutput, only: theory,calc_mode,iperiodic,num_datafiles_in
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
+  character(*),intent(in) :: idir
   type(s_rgrid), intent(in) :: lg, mg
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital), intent(inout) :: spsi
   integer,intent(in) :: mk,mo
+  logical,intent(in) :: is_self_checkpoint
+
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
   complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
   type(s_rgrid)                :: dg
@@ -526,38 +725,34 @@ subroutine read_wavefunction(lg,mg,system,info,spsi,mk,mo)
   integer :: ifilenum_data
   integer :: is,iob,ik
   integer :: ix,iy,iz
-  character(100) :: dir_file_in
-  character(8) :: filenumber_data
+  character(256) :: dir_file_in
   integer :: comm
 
   iu2_r = 86
-
   comm = nproc_group_global
- 
-  !set dg
-  call set_dg(lg,mg,dg,num_datafiles_in)
-  
-  !filenumber for reading wave function
-  ifilenum_data = iu2_r
-  
-  !read wavefunction
+
   allocate(matbox(  lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(matbox2( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  
-  !open file iu2_r
+
+  call set_dg(lg,mg,dg,num_datafiles_in)
+
   if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
-    dir_file_in = trim(directory_read_data)//"wfn.bin"
+    ! read root process
+    dir_file_in = trim(idir)//"wfn.bin"
     open(ifilenum_data,file=dir_file_in,form='unformatted')
-  else if(num_datafiles_in==-1.or.   &
-     (num_datafiles_in>1.and.nproc_id_global<num_datafiles_in))then
-    write(filenumber_data, '(i6.6)') nproc_id_global
-    dir_file_in = trim(directory_read_data)//"wfn"//trim(adjustl(filenumber_data))//".bin"
+  else if(is_self_checkpoint) then
+    ! read all processes (each process load dumped data)
+    dir_file_in = trim(idir)//"wfn.bin"
+    open(ifilenum_data,file=dir_file_in,form='unformatted')
+  else if(num_datafiles_in>1.and.nproc_id_global<num_datafiles_in) then
+    ! distributed-read
+    write(dir_file_in, '(A,A,I6.6,A)') trim(idir),"wfn",nproc_id_global,".bin"
     open(ifilenum_data,file=dir_file_in,form='unformatted')
   end if
-  
-  if(num_datafiles_in==-1)then
+
+  if(is_self_checkpoint)then
     if(iperiodic==0)then
       if(theory=='DFT'.or.calc_mode=='GS')then
         do ik=info%ik_s,info%ik_e
@@ -673,10 +868,10 @@ subroutine read_wavefunction(lg,mg,system,info,spsi,mk,mo)
     end do
     end do
   end if
-  
+
   !close file iu2_r
   if((num_datafiles_in==1.and.comm_is_root(nproc_id_global)).or.  &
-     num_datafiles_in==-1.or.   &
+     is_self_checkpoint.or.   &
      (num_datafiles_in>1.and.nproc_id_global<num_datafiles_in))then
     close(iu2_r)
   end if
@@ -685,98 +880,123 @@ end subroutine read_wavefunction
 
 !===================================================================================================================================
 
-subroutine read_rho_inout(lg,ng,system,info,mixing)
-  use inputoutput, only: directory_read_data
+subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
+  character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,ng
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_mixing),intent(inout) :: mixing
+  logical,intent(in) :: is_self_checkpoint
+
   integer :: iu1_r
   integer :: i,ix,iy,iz,is
   real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
   character(100) :: dir_file_in
 
   iu1_r = 96
+  dir_file_in = trim(idir)//"rho_inout.bin"
 
-  if(comm_is_root(nproc_id_global))then
-    dir_file_in =trim(directory_read_data)//"rho_inout.bin"
+  if(is_self_checkpoint) then
+    ! read all processses
     open(iu1_r,file=dir_file_in,form='unformatted')
-  end if
-
-  do i=1,mixing%num_rho_stock+1
-    if(comm_is_root(nproc_id_global))then
-      read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-    end if
-    call comm_bcast(matbox,info%icomm_rko)
-
-!$omp parallel do collapse(2)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+    do i=1,mixing%num_rho_stock+1
+      read(iu1_r) (((mixing%srho_in(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
     end do
+    do i=1,mixing%num_rho_stock
+      read(iu1_r) (((mixing%srho_out(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
     end do
-    end do
-  end do
-
-  do i=1,mixing%num_rho_stock
-    if(comm_is_root(nproc_id_global))then
-      read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-    end if
-    call comm_bcast(matbox,info%icomm_rko)
-
-!$omp parallel do collapse(2)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      mixing%srho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
-    end do
-    end do
-    end do
-  end do
-
-  if(system%nspin == 2)then
-    do is=1,2
-      do i=1,mixing%num_rho_stock+1
-        if(comm_is_root(nproc_id_global))then
-          read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-        end if
-        call comm_bcast(matbox,info%icomm_rko)
-
-!$omp parallel do collapse(2)
-        do iz=ng%is(3),ng%ie(3)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-          mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+    if(system%nspin==2) then
+      do is=1,2
+        do i=1,mixing%num_rho_stock+1
+          read(iu1_r) (((mixing%srho_s_in(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
         end do
-        end do
+        do i=1,mixing%num_rho_stock
+          read(iu1_r) (((mixing%srho_s_out(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
         end do
       end do
-
-      do i=1,mixing%num_rho_stock
-        if(comm_is_root(nproc_id_global))then
-          read(iu1_r) (((matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-        end if
-        call comm_bcast(matbox,info%icomm_rko)
-
-!$omp parallel do collapse(2)
-        do iz=ng%is(3),ng%ie(3)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-          mixing%srho_s_out(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
-        end do
-        end do
-        end do
-      end do
-    end do
-  end if
-
-  if(comm_is_root(nproc_id_global))then
+    end if
     close(iu1_r)
+  else
+    ! read root process
+    if(comm_is_root(nproc_id_global))then
+      open(iu1_r,file=dir_file_in,form='unformatted')
+    end if
+
+    do i=1,mixing%num_rho_stock+1
+      if(comm_is_root(nproc_id_global))then
+        read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      end if
+      call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+      end do
+      end do
+      end do
+    end do
+
+    do i=1,mixing%num_rho_stock
+      if(comm_is_root(nproc_id_global))then
+        read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      end if
+      call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        mixing%srho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+      end do
+      end do
+      end do
+    end do
+
+    if(system%nspin == 2)then
+      do is=1,2
+        do i=1,mixing%num_rho_stock+1
+          if(comm_is_root(nproc_id_global))then
+            read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+          end if
+          call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+          do iz=ng%is(3),ng%ie(3)
+          do iy=ng%is(2),ng%ie(2)
+          do ix=ng%is(1),ng%ie(1)
+            mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+          end do
+          end do
+          end do
+        end do
+
+        do i=1,mixing%num_rho_stock
+          if(comm_is_root(nproc_id_global))then
+            read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+          end if
+          call comm_bcast(matbox,info%icomm_rko)
+
+!$omp parallel do collapse(2)
+          do iz=ng%is(3),ng%ie(3)
+          do iy=ng%is(2),ng%ie(2)
+          do ix=ng%is(1),ng%ie(1)
+            mixing%srho_s_out(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+          end do
+          end do
+          end do
+        end do
+      end do
+    end if
+
+    if(comm_is_root(nproc_id_global))then
+      close(iu1_r)
+    end if
   end if
 
   deallocate(matbox,matbox2)
@@ -785,61 +1005,66 @@ end subroutine read_rho_inout
 
 !===================================================================================================================================
 
-subroutine read_Vh_stock(lg,ng,info,sVh_stock1,sVh_stock2)
-  use inputoutput, only: directory_read_data
+subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
+  character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,ng
   type(s_orbital_parallel),intent(in) :: info
   type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
+  logical,intent(in) :: is_self_checkpoint
+
   integer :: iu1_r
   integer :: ix,iy,iz
-  real(8),allocatable :: matbox(:,:,:)
+  real(8),allocatable :: matbox1(:,:,:),matbox2(:,:,:)
   character(100) :: dir_file_in
 
-  allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   iu1_r = 96
+  dir_file_in = trim(idir)//"Vh_stock.bin"
 
-  if(comm_is_root(nproc_id_global))then
-    dir_file_in =trim(directory_read_data)//"Vh_stock.bin"
+  allocate(matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+
+  if (is_self_checkpoint) then
+    ! read all processes
     open(iu1_r,file=dir_file_in,form='unformatted')
-  end if
+    read(iu1_r) (((sVh_stock1%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+    read(iu1_r) (((sVh_stock2%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+    close(iu1_r)
+  else
+    ! read root process
+    if(comm_is_root(nproc_id_global))then
+      open(iu1_r,file=dir_file_in,form='unformatted')
+      read(iu1_r) (((matbox1(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      read(iu1_r) (((matbox2(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
+      close(iu1_r)
+    end if
 
-  if(comm_is_root(nproc_id_global))then
-    read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-  end if
-  call comm_bcast(matbox,info%icomm_rko)
-
-!$omp parallel do collapse(2)  
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    sVh_stock1%f(ix,iy,iz)=matbox(ix,iy,iz)
-  end do
-  end do
-  end do
-  
-  if(comm_is_root(nproc_id_global))then
-    read(iu1_r) ((( matbox(ix,iy,iz),ix=lg%is(1),lg%ie(1)),iy=lg%is(2),lg%ie(2)),iz=lg%is(3),lg%ie(3))
-  end if
-  call comm_bcast(matbox,info%icomm_rko)
+    call comm_bcast(matbox1,info%icomm_rko)
+    call comm_bcast(matbox2,info%icomm_rko)
 
 !$omp parallel do collapse(2)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    sVh_stock2%f(ix,iy,iz)=matbox(ix,iy,iz)
-  end do
-  end do
-  end do
-  
-  if(comm_is_root(nproc_id_global))then
-    close(iu1_r)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      sVh_stock1%f(ix,iy,iz)=matbox1(ix,iy,iz)
+    end do
+    end do
+    end do
+
+!$omp parallel do collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      sVh_stock2%f(ix,iy,iz)=matbox2(ix,iy,iz)
+    end do
+    end do
+    end do
   end if
 
-  deallocate(matbox)
+  deallocate(matbox1,matbox2)
 
 end subroutine read_Vh_stock
 
@@ -876,11 +1101,11 @@ subroutine set_dg(lg,mg,dg,num_datafiles)
         end if
       end do
       end do
-  
+
       do j3=0,nproc_xyz_datafile(3)-1
       do j2=0,nproc_xyz_datafile(2)-1
       do j1=0,nproc_xyz_datafile(1)-1
-        ibox = j1 + nproc_xyz_datafile(1)*j2 + nproc_xyz_datafile(1)*nproc_xyz_datafile(2)*j3 
+        ibox = j1 + nproc_xyz_datafile(1)*j2 + nproc_xyz_datafile(1)*nproc_xyz_datafile(2)*j3
         if(ibox==nproc_id_global)then
           dg%is(1)=j1*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)
           dg%ie(1)=(j1+1)*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)-1

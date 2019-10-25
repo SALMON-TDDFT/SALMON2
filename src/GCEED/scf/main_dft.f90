@@ -186,7 +186,7 @@ if(iopt==1)then
     itmg=img
     call init_wf(lg,mg,system,info,spsi)
   case(1,3)
-    call read_bin(lg,mg,ng,system,info,spsi,miter,mixing=mixing)
+    call restart_gs(lg,mg,ng,system,info,spsi,miter,mixing=mixing)
   end select
 
   if(read_gs_dns_cube == 'n') then
