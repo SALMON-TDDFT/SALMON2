@@ -183,7 +183,7 @@ end subroutine restart_rt
 subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
-  use salmon_parallel, only: nproc_id_global
+  use salmon_parallel, only: nproc_id_global, nproc_size_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)            ,intent(in) :: odir
@@ -209,23 +209,16 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
 
   iu1_w = 97
 
-  !system
+  !information
   if(comm_is_root(nproc_id_global))then
-    dir_file_out = trim(odir)//"system.bin"
+    dir_file_out = trim(odir)//"info.bin"
     open(iu1_w,file=dir_file_out,form='unformatted')
 
     write(iu1_w) system%nk
     write(iu1_w) system%no
 
-    close(iu1_w)
-  end if
-
-  !iteration number (same format for gs and rt calculations)
-  if(comm_is_root(nproc_id_global))then
-    dir_file_out = trim(odir)//"iteration.bin"
-    open(iu1_w,file=dir_file_out,form='unformatted')
-
-    write(iu1_w) iter
+    write(iu1_w) iter               ! iteration number (same format for gs and rt calculations)
+    write(iu1_w) nproc_size_global  ! number of process (to debug)
 
     close(iu1_w)
   end if
@@ -266,7 +259,7 @@ end subroutine write_bin
 subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
-  use salmon_parallel, only: nproc_id_global,nproc_group_global
+  use salmon_parallel, only: nproc_id_global,nproc_group_global,nproc_size_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: yn_restart
   implicit none
@@ -286,7 +279,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   integer :: iu1_r
   integer :: ik,iob,is
   character(256) :: dir_file_in
-  integer :: comm
+  integer :: comm,itt,nprocs
   logical :: iself
 
   if (present(is_self_checkpoint)) then
@@ -299,32 +292,35 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
 
   iu1_r = 96
 
-  !system
+  !information
   !first to be read
   if(comm_is_root(nproc_id_global))then
-    dir_file_in = trim(idir)//"system.bin"
+    dir_file_in = trim(idir)//"info.bin"
     open(iu1_r,file=dir_file_in,form='unformatted')
 
     read(iu1_r) mk
     read(iu1_r) mo
 
+    read(iu1_r) itt
+    read(iu1_r) nprocs
+
     close(iu1_r)
   end if
   call comm_bcast(mk,comm)
   call comm_bcast(mo,comm)
+  call comm_bcast(itt,comm)
+  call comm_bcast(nprocs,comm)
 
-  !iteration
   if((theory=='DFT'.or.calc_mode=='GS').or.  &
      ((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
-    if(comm_is_root(nproc_id_global))then
-      dir_file_in = trim(idir)//"iteration.bin"
-      open(iu1_r,file=dir_file_in,form='unformatted')
+    iter = itt
+  end if
 
-      read(iu1_r) iter
-
-      close(iu1_r)
+  !debug check
+  if (yn_restart == 'y') then
+    if (nprocs /= nproc_size_global) then
+      stop 'number of processes do not match!'
     end if
-    call comm_bcast(iter,comm)
   end if
 
   !occupation
