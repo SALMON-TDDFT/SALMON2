@@ -718,7 +718,6 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
   type(s_rgrid)                :: dg
   integer :: iu2_r
-  integer :: ifilenum_data
   integer :: is,iob,ik
   integer :: ix,iy,iz
   character(256) :: dir_file_in
@@ -737,15 +736,15 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
     ! read root process
     dir_file_in = trim(idir)//"wfn.bin"
-    open(ifilenum_data,file=dir_file_in,form='unformatted')
+    open(iu2_r,file=dir_file_in,form='unformatted')
   else if(is_self_checkpoint) then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
-    open(ifilenum_data,file=dir_file_in,form='unformatted')
+    open(iu2_r,file=dir_file_in,form='unformatted')
   else if(num_datafiles_in>1.and.nproc_id_global<num_datafiles_in) then
     ! distributed-read
     write(dir_file_in, '(A,A,I6.6,A)') trim(idir),"wfn",nproc_id_global,".bin"
-    open(ifilenum_data,file=dir_file_in,form='unformatted')
+    open(iu2_r,file=dir_file_in,form='unformatted')
   end if
 
   if(is_self_checkpoint)then
@@ -754,7 +753,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
         do ik=info%ik_s,info%ik_e
         do iob=info%io_s,info%io_e
         do is=1,system%nspin
-          read(ifilenum_data) (((spsi%rwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
+          read(iu2_r) (((spsi%rwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
                                                                 iy=dg%is(2),dg%ie(2)), &
                                                                 iz=dg%is(3),dg%ie(3))
         end do
@@ -764,7 +763,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
         do ik=info%ik_s,info%ik_e
         do iob=info%io_s,info%io_e
         do is=1,system%nspin
-          read(ifilenum_data) (((matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+          read(iu2_r) (((matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                   iy=dg%is(2),dg%ie(2)), &
                                                   iz=dg%is(3),dg%ie(3))
   !$omp parallel do collapse(2)
@@ -783,7 +782,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
       do ik=info%ik_s,info%ik_e
       do iob=info%io_s,info%io_e
       do is=1,system%nspin
-        read(ifilenum_data) (((spsi%zwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
+        read(iu2_r) (((spsi%zwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
                                                               iy=dg%is(2),dg%ie(2)), &
                                                               iz=dg%is(3),dg%ie(3))
       end do
@@ -797,14 +796,14 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
       if(iperiodic==0)then
         if(num_datafiles_in==1)then
           if(comm_is_root(nproc_id_global))then
-            read(ifilenum_data) (((matbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+            read(iu2_r) (((matbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                      iy=dg%is(2),dg%ie(2)), &
                                                      iz=dg%is(3),dg%ie(3))
           end if
           call comm_bcast(matbox2,comm)
         else if(num_datafiles_in>1)then
           if(nproc_id_global<num_datafiles_in)then
-            read(ifilenum_data) (((matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+            read(iu2_r) (((matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                     iy=dg%is(2),dg%ie(2)), &
                                                     iz=dg%is(3),dg%ie(3))
           end if
@@ -835,14 +834,14 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
       else if(iperiodic==3)then
         if(num_datafiles_in==1)then
           if(comm_is_root(nproc_id_global))then
-            read(ifilenum_data) (((cmatbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+            read(iu2_r) (((cmatbox2(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                       iy=dg%is(2),dg%ie(2)), &
                                                       iz=dg%is(3),dg%ie(3))
           end if
           call comm_bcast(cmatbox2,comm)
         else if(num_datafiles_in>1)then
           if(nproc_id_global<num_datafiles_in)then
-            read(ifilenum_data) (((cmatbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
+            read(iu2_r) (((cmatbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
                                                      iy=dg%is(2),dg%ie(2)), &
                                                      iz=dg%is(3),dg%ie(3))
           end if
@@ -890,7 +889,7 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
 
   integer :: iu1_r
   integer :: i,ix,iy,iz,is
-  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
+  real(8),allocatable :: matbox(:,:,:)
   character(100) :: dir_file_in
 
   iu1_r = 96
@@ -921,6 +920,8 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
     if(comm_is_root(nproc_id_global))then
       open(iu1_r,file=dir_file_in,form='unformatted')
     end if
+
+    allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
     do i=1,mixing%num_rho_stock+1
       if(comm_is_root(nproc_id_global))then
@@ -993,9 +994,9 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
     if(comm_is_root(nproc_id_global))then
       close(iu1_r)
     end if
-  end if
 
-  deallocate(matbox,matbox2)
+    deallocate(matbox)
+  end if
 
 end subroutine read_rho_inout
 
