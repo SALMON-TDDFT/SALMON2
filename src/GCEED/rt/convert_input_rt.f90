@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine convert_input_rt(Ntime)
-use salmon_parallel, only: nproc_id_global, nproc_size_global
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use inputoutput
 use set_numcpu
@@ -127,18 +127,6 @@ else if(layout_multipole==3)then
     dip_spacing = 8.d0/au_length_aa  ! approximate spacing of multipoles 
     num_multipole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
   end if
-end if
-
-!===== namelist for group_file =====
-if(ic==0)then
-  ic=1
-end if
-
-if(IC==3.and.num_datafiles_IN/=nproc_size_global)then
-  if(comm_is_root(nproc_id_global))then
-    write(*,*) "num_datafiles_IN is set to nproc."
-  end if
-  num_datafiles_IN=nproc_size_global
 end if
 
 !===== namelist for group_extfield =====

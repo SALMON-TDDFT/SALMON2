@@ -322,6 +322,7 @@ module salmon_global
   integer        :: lmax_lmp
 
 !! &group_file
+!! FIXME: following variables never used in SALMON, please remove these.
   integer        :: ic
   integer        :: oc
   integer        :: ic_rt
