@@ -299,6 +299,8 @@ module structures
   type s_fdtd_field
     type(s_scalar) :: phi, rho_em
     type(s_vector) :: vec_e, vec_h, vec_a, vec_j_em
+    ! Experimental implementation
+    type(s_vector) :: vec_Ac, vec_Ac_old
   end type s_fdtd_field
 
   type s_md

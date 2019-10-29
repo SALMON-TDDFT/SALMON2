@@ -15,12 +15,14 @@
 !
 !-----------------------------------------------------------------------------------------
 module salmon_maxwell
+  use structures, only: s_vector
   implicit none
   
   type ls_fdtd_work
     !share
     
     !weyl
+    type(s_vector) :: vec_Ac_tmp
     
     !coulomb
     

@@ -15,11 +15,19 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine weyl_init(fs,ff,fw)
-  use structures,     only: s_fdtd_system, s_fdtd_field
+  use structures,     only: s_fdtd_system, s_fdtd_field, allocate_vector
   use salmon_maxwell, only: ls_fdtd_work
   implicit none
   type(s_fdtd_system) :: fs
   type(s_fdtd_field)  :: ff
   type(ls_fdtd_work)  :: fw
   
+  ! Allocation of the Vector field components:
+  call allocate_vector(fs%mg, ff%vec_e)
+  call allocate_vector(fs%mg, ff%vec_h)
+  call allocate_vector(fs%mg, ff%vec_j_em)
+  call allocate_vector(fs%mg, ff%vec_Ac)
+  call allocate_vector(fs%mg, ff%vec_Ac_old)
+  call allocate_vector(fs%mg, fw%vec_Ac_tmp)
+  return
 end subroutine weyl_init
