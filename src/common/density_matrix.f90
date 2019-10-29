@@ -699,6 +699,7 @@ contains
                + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,idx(ix-2),iy,iz)) ) &
                + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,idx(ix-3),iy,iz)) ) &
                + nabt(4,1) * ( zdm(4,1,ix,iy,iz) - conjg(zdm(4,1,idx(ix-4),iy,iz)) )
+          jw(1,ix,iy,iz) = aimag(xtmp)
         end do
 
 !OCL swp
@@ -707,6 +708,7 @@ contains
                + nabt(2,2) * ( zdm(2,2,ix,iy,iz) - conjg(zdm(2,2,ix,idy(iy-2),iz)) ) &
                + nabt(3,2) * ( zdm(3,2,ix,iy,iz) - conjg(zdm(3,2,ix,idy(iy-3),iz)) ) &
                + nabt(4,2) * ( zdm(4,2,ix,iy,iz) - conjg(zdm(4,2,ix,idy(iy-4),iz)) )
+          jw(2,ix,iy,iz) = aimag(ytmp)
         end do
 
 !OCL swp
@@ -715,11 +717,9 @@ contains
                + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,idz(iz-2))) ) &
                + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,idz(iz-3))) ) &
                + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,idz(iz-4))) )
+          jw(3,ix,iy,iz) = aimag(ztmp)
         end do
 
-        jw(1,ix,iy,iz) = aimag(xtmp)
-        jw(2,ix,iy,iz) = aimag(ytmp)
-        jw(3,ix,iy,iz) = aimag(ztmp)
       end do
       end do
 !$omp end parallel do
