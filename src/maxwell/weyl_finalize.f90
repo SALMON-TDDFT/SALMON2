@@ -21,14 +21,14 @@ subroutine weyl_finalize(fs,ff,fw)
   type(s_fdtd_system) :: fs
   type(s_fdtd_field)  :: ff
   type(ls_fdtd_work)  :: fw
-  
   deallocate(ff%vec_e%v)
   deallocate(ff%vec_h%v)
   deallocate(ff%vec_j_em%v)
   deallocate(ff%vec_Ac%v)
   deallocate(ff%vec_Ac_old%v)
   deallocate(fw%vec_Ac_tmp%v)
-
+  deallocate(fw%edensity_emfield%f)
+  deallocate(fw%edensity_absorb%f)
   return
 end subroutine weyl_finalize
 

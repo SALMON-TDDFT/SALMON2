@@ -26,8 +26,10 @@ subroutine weyl_init(fs,ff,fw)
   call allocate_vector(fs%mg, ff%vec_e)
   call allocate_vector(fs%mg, ff%vec_h)
   call allocate_vector(fs%mg, ff%vec_j_em)
-  call allocate_vector(fs%mg, ff%vec_Ac)
-  call allocate_vector(fs%mg, ff%vec_Ac_old)
-  call allocate_vector(fs%mg, fw%vec_Ac_tmp)
+  call allocate_vector_array(fs%mg, ff%vec_Ac)
+  call allocate_vector_array(fs%mg, ff%vec_Ac_old)
+  call allocate_vector_array(fs%mg, fw%vec_Ac_tmp)
+  call allocate_scalar(fs%mg, fw%edensity_emfield)
+  call allocate_scalar(fs%mg, fw%edensity_absorb)
   return
 end subroutine weyl_init
