@@ -346,6 +346,22 @@ contains
     end do
   end subroutine allocate_scalar
 
+  subroutine allocate_scalar_array(rg,field)
+    implicit none
+    type(s_rgrid),intent(in) :: rg
+    type(s_scalar)           :: field
+    integer :: ix,iy,iz
+    allocate(field%f(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3)))
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=rg%is_array(3),rg%ie_array(3)
+    do iy=rg%is_array(2),rg%ie_array(2)
+    do ix=rg%is_array(1),rg%ie_array(1)
+      field%f(ix,iy,iz) = 0d0
+    end do
+    end do
+    end do
+  end subroutine allocate_scalar_array
+
   subroutine allocate_vector(rg,field)
     implicit none
     type(s_rgrid),intent(in) :: rg

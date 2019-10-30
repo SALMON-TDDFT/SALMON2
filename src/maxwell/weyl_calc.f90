@@ -43,9 +43,8 @@ subroutine weyl_calc(fs,ff,fw)
   end select
   call calc_vec_e()
 
-  ! call calc_emfield_energy()
-  ! call calc_joule_energy()
-
+  call calc_energy_density()
+  
   return
 
 contains
@@ -340,5 +339,25 @@ contains
     return
   end subroutine calc_vec_h_3d_cylindal
 
+
+  subroutine calc_energy_density()
+    implicit none
+    integer :: i1, i2, i3
+    !$omp parallel do collapse(3) default(shared) private(i1,i2,i3)
+    do i3 = fs%mg%is(3), fs%mg%ie(3)
+      do i2 = fs%mg%is(2), fs%mg%ie(2)
+        do i1 = fs%mg%is(1), fs%mg%ie(1)
+          fw%edensity_emfield%f(i1, i2, i3) = (1d0 / (8d0 * pi)) * ( &
+            & norm2(ff%vec_e%v(:, i1, i2, i3)) + norm2(ff%vec_h%v(:, i1, i2, i3)) &
+            & )
+          fw%edensity_absorb%f(i1, i2, i3) = fw%edensity_absorb(i1, i2, i3) + ( &
+            & dot_product(ff%vec_e%v(:, i1, i2, i3), ff%vec_j_em%v(:, i1, i2, i3)) &
+            & ) * dt_em
+        end do
+      end do
+    end do
+    return
+  end subroutine calc_energy_density
+    
 
 end subroutine weyl_calc
