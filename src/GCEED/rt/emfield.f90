@@ -55,11 +55,12 @@ end subroutine calcAext
 
 subroutine initA(Ntime)
 use scf_data
+use salmon_global, only: yn_restart
 implicit none
 integer :: Ntime
 integer :: t_max
 
-if(IC_rt==0)then
+if(yn_restart /= 'y')then
   t_max=Ntime
 else
   t_max=Ntime+Miter_rt

@@ -155,14 +155,6 @@ else if(layout_multipole==3)then
   end if
 end if
 
-!===== namelist for group_file =====
-if(comm_is_root(nproc_id_global))then
-  if(IC<0.or.IC>=2)then
-    write(*,*) "IC must be equal to 0 or 1."
-    stop
-  end if
-end if
-
 !===== namelist for group_atom =====
 MI=natom
 MKI=nelem
