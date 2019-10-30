@@ -101,7 +101,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   
   select case(iperiodic)
   case(0)
-    if(ikind_eext==1) call calcVbox(lg,itt)
+    if(ikind_eext==1) call calcVbox(lg,itt,system)
     if(ihpsieff==1) then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
       do is=1,nspin
@@ -157,7 +157,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
     select case(iperiodic)
     case(0)
-      if(ikind_eext==1) call calcVbox(lg,itt+1)
+      if(ikind_eext==1) call calcVbox(lg,itt+1,system)
       if(ihpsieff==1)then
   !$OMP parallel do collapse(3) private(is,iz,iy,ix)
         do is=1,nspin
@@ -336,6 +336,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
      !(Export to SYSname_rt.data)
      select case(iperiodic)
      case(0)
+        call write_rt_data_0d(itt,ofl,dt,system,Dp(1:3,itt))
      case(3)
         call write_rt_data_3d(itt,ofl,dt,system,curr_tmp)
      end select

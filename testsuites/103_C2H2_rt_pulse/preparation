@@ -16,8 +16,8 @@ if [ -e restart/ ]; then
 fi
 ln -s ../101_C2H2_gs/data_for_restart ./restart
 
-if [ -e C2H2-RT.data ]; then
-  rm C2H2-RT.data
+if [ -e C2H2_rt.data ]; then
+  rm C2H2_rt.data
 fi
 
 

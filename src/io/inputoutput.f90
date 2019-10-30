@@ -88,6 +88,8 @@ module inputoutput
      real(8)       :: conv
   end type unit_t
 
+  type(unit_t) :: t_unit_length
+  type(unit_t) :: t_unit_length_inv
   type(unit_t) :: t_unit_energy
   type(unit_t) :: t_unit_energy_inv
   type(unit_t) :: t_unit_time
@@ -1481,6 +1483,19 @@ contains
     case default
       stop "Invalid unit for charge."
     end select
+
+!! prepare type(unit_t) :: t_unit_length,t_unit_length_inv
+    t_unit_length%conv = ulength_from_au
+    t_unit_length_inv%conv = 1d0/ulength_from_au
+    if(iflag_unit_length == ntype_unit_length_aa)then
+      t_unit_length%name     = 'Angstrom'
+      t_unit_length_inv%name = '1/Angstrom'
+    else 
+      t_unit_length%name     = 'a.u.'
+      t_unit_length_inv%name = 'a.u.'
+      t_unit_length%conv = 1d0
+      t_unit_length_inv%conv = 1d0
+    end if
 
 !! prepare type(unit_t) :: t_unit_energy,t_unit_energy_inv
     t_unit_energy%conv = uenergy_from_au

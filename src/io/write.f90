@@ -424,6 +424,80 @@ contains
   
 !===================================================================================================================================
 
+  subroutine write_rt_data_0d(it,ofl,dt,system,dm)
+    use structures, only: s_ofile, s_dft_system
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use salmon_file, only: open_filehandle
+    use inputoutput, only: yn_md,t_unit_length,t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
+    implicit none
+    type(s_ofile) :: ofl
+    integer, intent(in) :: it
+    type(s_dft_system), intent(in) :: system
+    real(8),intent(in) :: dm(3,system%nspin)
+    integer :: uid
+    real(8) :: dt
+
+    if (comm_is_root(nproc_id_global)) then
+
+    if(it.lt.0) then  !print header
+       ofl%fh_rt        = open_filehandle(ofl%file_rt_data)
+       uid = ofl%fh_rt
+
+10     format("#",1X,A,":",1X,A)
+       write(uid,10) "Real time calculation",""
+       write(uid,10) "Ac_ext", "External vector potential field"
+       write(uid,10) "E_ext", "External electric field"
+       write(uid,10) "Ac_tot", "Total vector potential field"
+       write(uid,10) "E_tot", "Total electric field"
+       write(uid,10) "dm", "Dipole moment"
+!       if(yn_md=='y') then
+!          write(uid,10) "Jm", "Matter current density(electrons)"
+!          write(uid,10) "Jmi","Matter current density(ions)"
+!       else
+!          write(uid,10) "Jm", "Matter current density"
+!       endif
+       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+         & 1, "Time", trim(t_unit_time%name), &
+         & 2, "Ac_ext_x", trim(t_unit_ac%name), &
+         & 3, "Ac_ext_y", trim(t_unit_ac%name), &
+         & 4, "Ac_ext_z", trim(t_unit_ac%name), &
+         & 5, "E_ext_x", trim(t_unit_elec%name), &
+         & 6, "E_ext_y", trim(t_unit_elec%name), &
+         & 7, "E_ext_z", trim(t_unit_elec%name), &
+         & 8, "Ac_tot_x", trim(t_unit_ac%name), &
+         & 9, "Ac_tot_y", trim(t_unit_ac%name), &
+         & 10, "Ac_tot_z", trim(t_unit_ac%name), &
+         & 11, "E_tot_x", trim(t_unit_elec%name), &
+         & 12, "E_tot_y", trim(t_unit_elec%name), &
+         & 13, "E_tot_z", trim(t_unit_elec%name), &
+         & 14, "dm_x", trim(t_unit_length%name), &
+         & 15, "dm_y", trim(t_unit_length%name), &
+         & 16, "dm_z", trim(t_unit_length%name)
+!       if(yn_md=='y') then
+!          write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+!               & 17, "Jmi_x", trim(t_unit_current%name), &
+!               & 18, "Jmi_y", trim(t_unit_current%name), &
+!               & 19, "Jmi_z", trim(t_unit_current%name)
+!       endif
+       write(uid,*)
+       flush(uid)
+
+    else  !it>=0
+       uid = ofl%fh_rt
+        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+          & it * dt * t_unit_time%conv,    &
+          & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
+          & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
+          & system%vec_Ac(1:3) * t_unit_ac%conv, &
+          & system%vec_Ec(1:3) * t_unit_elec%conv, &
+          & dm(1:3,1) * t_unit_length%conv
+       write(uid,*)
+    endif
+    endif
+
+  end subroutine
+!===================================================================================================================================
   subroutine write_rt_data_3d(it,ofl,dt,system,curr_in)
     use structures, only: s_ofile, s_dft_system
     use salmon_parallel, only: nproc_id_global
