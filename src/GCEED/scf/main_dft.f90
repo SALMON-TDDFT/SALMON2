@@ -257,9 +257,8 @@ end if
 
 Band_Iteration : do iter_band_kpt = 1, iter_band_kpt_end, iter_band_kpt_stride
 
-check_conv_esp=.false.
-
 if(calc_mode=='DFT_BAND')then
+  check_conv_esp=.false.
   do ik=1,system%nk
      if ( info%ik_s <= ik .and. ik <= info%ik_e ) then
         system%vec_k(:,ik) = matmul( system%primitive_b, band_kpt(:,iter_band_kpt+ik-1) )
