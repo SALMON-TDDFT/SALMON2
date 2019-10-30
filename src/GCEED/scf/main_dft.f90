@@ -180,14 +180,15 @@ if(iopt==1)then
 
   call init_mixing(nspin,ng,mixing)
 
-  select case( IC )
-  case default ! New calculation
-    Miter = 0        ! Miter: Iteration counter set to zero
-    itmg=img
-    call init_wf(lg,mg,system,info,spsi)
-  case(1,3)
+  if (yn_restart == 'y') then
+    ! restart from binary
     call restart_gs(lg,mg,ng,system,info,spsi,miter,mixing=mixing)
-  end select
+  else
+    ! new calculation
+    miter = 0        ! Miter: Iteration counter set to zero
+    itmg  = img
+    call init_wf(lg,mg,system,info,spsi)
+  end if
 
   if(read_gs_dns_cube == 'n') then
      call calc_density(system,srho_s,spsi,info,mg)

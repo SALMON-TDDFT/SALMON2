@@ -99,7 +99,6 @@ call timer_begin(LOG_INIT_RT)
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=2
-OC=0
 
 iwdenstep=30 
 denplane='xy'
@@ -241,15 +240,13 @@ call timer_end(LOG_READ_GS_DATA)
 
 call timer_begin(LOG_READ_RT_DATA)
 
-if(IC_rt==0) then
-  allocate( rIe(0:Ntime) )
-  allocate( Dp(3,0:Ntime) )
-  allocate( Qp(3,3,0:Ntime) )
-  allocate( tene(0:Ntime) )
-  call initA(Ntime)
-  itotNtime=Ntime
-  if (yn_restart=='n') Miter_rt=0
-end if
+allocate( rIe(0:Ntime) )
+allocate( Dp(3,0:Ntime) )
+allocate( Qp(3,3,0:Ntime) )
+allocate( tene(0:Ntime) )
+call initA(Ntime)
+itotNtime=Ntime
+if (yn_restart /= 'y') Miter_rt=0
 call timer_end(LOG_READ_RT_DATA)
 
 
@@ -419,7 +416,7 @@ if(num_dipole_source>=1)then
   call set_vonf_sd
 end if
 
-if(IC_rt==0)then
+if(yn_restart /= 'y')then
   rbox_array=0.d0
   do i1=1,3
     do iz=ng%is(3),ng%ie(3)
@@ -450,7 +447,7 @@ if(comm_is_root(nproc_id_global))then
 endif
 
 ! Initial wave function
-if(iperiodic==0 .and. ikind_eext==0 .and. IC_rt==0)then
+if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
   do iik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
   do jspin=1,system%nspin
