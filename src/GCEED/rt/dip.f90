@@ -83,19 +83,6 @@ call timer_begin(LOG_CALC_DP)
     case(3)
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
         itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
-      if(yn_md=='y') then
-        write(16,'(f14.8, 6e16.8, f15.8,f18.8)')       &
-        dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3),(curr_ion(i1,itt),i1=1,3),rNe, Etot*2d0*Ry
-      else
-        write(16,'(f14.8, 3e16.8, f15.8,f18.8)')       &
-        dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
-      endif
-      write(17,'(f14.8, 3e16.8)')       &
-        dble(itt)*dt*2.41888d-2, (E_tot(i1,itt),i1=1,3)
-      write(18,'(f14.8, 3e16.8)')       &
-        dble(itt)*dt*2.41888d-2, (E_ext(i1,itt),i1=1,3)
-      write(19,'(f14.8, 3e16.8)')       &
-        dble(itt)*dt*2.41888d-2, (E_ind(i1,itt),i1=1,3)
     end select
   end if
 
