@@ -16,8 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE calcVbox(lg,itt_t)
-  use structures, only: s_rgrid
+SUBROUTINE calcVbox(lg,itt_t,system)
+  use structures, only: s_rgrid, s_dft_system
   use salmon_communication, only: comm_is_root
   use misc_routines, only: get_wtime
   use inputoutput
@@ -27,6 +27,7 @@ SUBROUTINE calcVbox(lg,itt_t)
   
   type(s_rgrid),intent(in) :: lg
   integer :: itt_t
+  type(s_dft_system),intent(inout) :: system
   integer :: ix,iy,iz,jj
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
@@ -77,7 +78,9 @@ SUBROUTINE calcVbox(lg,itt_t)
   end do
   end do
   end do
-  
+
+  system%vec_Ec_ext(1:3)=0.d0
+   
   if(iperiodic==0)then
     if(ae_shape1 == 'impulse')then
       continue
@@ -99,6 +102,8 @@ SUBROUTINE calcVbox(lg,itt_t)
           end do
           end do
           end do
+          system%vec_Ec_ext(1:3)=system%vec_Ec_ext(1:3)+E_amplitude1*epdir_re1(1:3)*env_trigon_1   &
+                                                       +E_amplitude1*epdir_im1(1:3)*env_trigon_1
         end if
         if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
           ipulse=2
@@ -117,9 +122,14 @@ SUBROUTINE calcVbox(lg,itt_t)
           end do
           end do
           end do
+          system%vec_Ec_ext(1:3)=system%vec_Ec_ext(1:3)+E_amplitude2*epdir_re2(1:3)*env_trigon_2   &
+                                                       +E_amplitude2*epdir_im2(1:3)*env_trigon_2
         end if
     end if
   end if
+  system%vec_Ec(1:3)=system%vec_Ec_ext(1:3) 
+  system%vec_Ac(1:3)=system%vec_Ac(1:3)-system%vec_Ec(1:3)*dt
+  system%vec_Ac_ext(1:3)=system%vec_Ac(1:3) 
    
   if(num_dipole_source>=1)then
     if(dt*dble(itt_t) <= tw1)then

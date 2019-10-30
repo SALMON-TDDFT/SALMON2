@@ -36,7 +36,7 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
 use global_variables_rt
-use write_sub, only: write_xyz,write_rt_data_3d,write_rt_energy_data
+use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data
 use code_optimization
 use initialization_sub
 use input_pp_sub
@@ -298,7 +298,7 @@ if(comm_is_root(nproc_id_global))then
 
   !(header of SYSname_rt.data)
   select case(iperiodic)
-  case(0)!; call write_rt_data_0d --- make in future
+  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,Dp(1:3,0))
   case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_tmp)
   end select
 
@@ -567,15 +567,6 @@ case(0)
 
   call Fourier3D(Dp,alpha_R,alpha_I)
   if(comm_is_root(nproc_id_global))then
-    open(1,file=file_RT)
-    write(1,'(a)') "# time[fs],    dipoleMoment(x,y,z)[A],                        Energy[eV]" 
-     do nntime=1,itotNtime
-        write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-        write(1,'(3e16.8)',advance="no") (Dp(iii,nntime)*a_B, iii=1,3)
-        write(1,'(e16.8)',advance="yes") tene(nntime)*2.d0*Ry
-     end do
-    close(1)
-  
     if(iflag_intelectron==1)then
       open(1,file=file_RT_e)
       write(1,'(a)') "# time[fs],    integrated electron density" 

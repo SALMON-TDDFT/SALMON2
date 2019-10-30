@@ -209,6 +209,10 @@ subroutine init_dft_system(lg,system,stencil)
   call set_gridcoordinate(lg,system)
   
   system%vec_Ac = 0d0 ! initial value
+  
+  system%vec_Ac_ext = 0d0 ! initial value for output
+  system%vec_Ec = 0d0     ! initial value for output
+  system%vec_Ec_ext = 0d0 ! initial value for output
 
   return
 end subroutine init_dft_system
