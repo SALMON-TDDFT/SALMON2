@@ -15,8 +15,8 @@ if [ -e restart/ ]; then
 fi
 ln -s ../111_bulk_Si_gs_dp/data_for_restart ./restart
 
-if [ -e current.data ]; then
-  rm current.data
+if [ -e Si_rt.data ]; then
+  rm Si_rt.data
 fi
 
 

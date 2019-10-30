@@ -117,6 +117,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   case(3)
     if(use_singlescale=='n') then
       system%vec_Ac(1:3) = A_ext(1:3,itt) + A_ind(1:3,itt)
+      system%vec_Ec(1:3) = -((A_ext(1:3,itt) + A_ind(1:3,itt))-(A_ext(1:3,itt-1) + A_ind(1:3,itt-1)))/dt
+      system%vec_Ac_ext(1:3) = A_ext(1:3,itt) 
+      system%vec_Ec_ext(1:3) = -(A_ext(1:3,itt) - A_ext(1:3,itt-1))/dt
       call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
     end if
   end select
@@ -172,6 +175,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
         stop "etrs mode for single-scale Maxwell-TDDFT is not implemented"
       else
         system%vec_Ac(1:3) = A_ext(1:3,itt+1) + A_ind(1:3,itt+1)
+        system%vec_Ec(1:3) = -((A_ext(1:3,itt+1) + A_ind(1:3,itt+1))-(A_ext(1:3,itt) + A_ind(1:3,itt)))/dt
+        system%vec_Ac_ext(1:3) = A_ext(1:3,itt+1) 
+        system%vec_Ec_ext(1:3) = -(A_ext(1:3,itt+1) - A_ext(1:3,itt))/dt
         call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
       end if
     end select
@@ -331,7 +337,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
      select case(iperiodic)
      case(0)
      case(3)
-        call write_rt_data_3d(itt,ofl,dt)
+        call write_rt_data_3d(itt,ofl,dt,system,curr_tmp)
      end select
 
      !(Export to SYSname_rt_energy.data)

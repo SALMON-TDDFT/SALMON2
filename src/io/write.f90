@@ -424,8 +424,8 @@ contains
   
 !===================================================================================================================================
 
-  subroutine write_rt_data_3d(it,ofl,dt)
-    use structures, only: s_ofile
+  subroutine write_rt_data_3d(it,ofl,dt,system,curr_in)
+    use structures, only: s_ofile, s_dft_system
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file, only: open_filehandle
@@ -433,6 +433,8 @@ contains
     implicit none
     type(s_ofile) :: ofl
     integer, intent(in) :: it
+    type(s_dft_system), intent(in) :: system
+    real(8),intent(in) :: curr_in(3,system%nspin)
     integer :: uid
     real(8) :: dt
 
@@ -482,9 +484,13 @@ contains
 
     else  !it>=0
        uid = ofl%fh_rt
-       write(uid,"(F16.8,a)",advance='no') &   !just temporal
-          & it * dt * t_unit_time%conv,    &   !just temporal
-          & "   under construction"            !just temporal
+        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+          & it * dt * t_unit_time%conv,    &
+          & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
+          & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
+          & system%vec_Ac(1:3) * t_unit_ac%conv, &
+          & system%vec_Ec(1:3) * t_unit_elec%conv, &
+          & curr_in(1:3,1) * t_unit_current%conv
 !        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
 !          & it * dt * t_unit_time%conv, &
 !          & Ac_ext(it, 1:3) * t_unit_ac%conv, &

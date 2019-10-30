@@ -15,6 +15,6 @@ if [ -e restart/ ]; then
 fi
 ln -s ../203_checkpoint_self/checkpoint_rt_000060 ./checkpoint_rt_000060
 
-if [ -e current.data ]; then
-  rm current.data
+if [ -e Si_rt.data ]; then
+  rm Si_rt.data
 fi
