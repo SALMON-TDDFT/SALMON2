@@ -15,7 +15,7 @@ print("# Verification start")
 restart_iteration = 60
 
 filelist = [ 
-    "current.data", 
+    "Si_rt.data", 
 ]
 
 origin_dir = "../201_checkpoint"

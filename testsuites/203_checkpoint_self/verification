@@ -20,7 +20,7 @@ dirlist = [
 ]
 
 filelist = [ 
-    "current.data", 
+    "Si_rt.data", 
 ]
 
 origin_dir = "../112_bulk_Si_rt_response_dp"
