@@ -155,9 +155,17 @@ contains
     character(*), intent(in) :: dirpath
     integer, intent(in)      :: igroup, idelegate
 
+
     if (comm_is_root(idelegate)) then
       call create_directory(dirpath)
     end if
-    call comm_sync_all(igroup) ! sync until directory created
+
+    ! busy-wait until all process can read the directory...
+    do while(.true.)
+      if (directory_exists(dirpath)) then
+        exit
+      end if
+    end do
+    call comm_sync_all(igroup)
   end subroutine
 end module filesystem
