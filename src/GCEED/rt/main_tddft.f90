@@ -91,7 +91,7 @@ real(8),allocatable :: tfourier_integrand(:,:)
 complex(8),parameter :: zi=(0.d0,1.d0)
 character(10) :: fileLaser
 character(100):: comment_line
-
+real(8) :: curr_tmp(3,2)
 
 call timer_begin(LOG_TOTAL)
 
@@ -299,7 +299,7 @@ if(comm_is_root(nproc_id_global))then
   !(header of SYSname_rt.data)
   select case(iperiodic)
   case(0)!; call write_rt_data_0d --- make in future
-  case(3) ; call write_rt_data_3d(-1,ofl,dt)
+  case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_tmp)
   end select
 
   !(header of SYSname_rt_energy.data)
@@ -322,13 +322,6 @@ endif
 !---------------------------- time-evolution
 
 call timer_begin(LOG_INIT_TIME_PROPAGATION)
-
-if(comm_is_root(nproc_id_global).and.iperiodic==3) then
-  open(16,file="current.data")
-  open(17,file="Etot.data")
-  open(18,file="Eext.data")
-  open(19,file="Eind.data")
-end if
 
 idensity=0
 idiffDensity=1

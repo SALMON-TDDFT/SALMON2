@@ -13,7 +13,7 @@ print("#" * 60)
 print("# Verification start") 
 
 filelist = [ 
-    "current.data", 
+    "Si_rt.data", 
 ] 
 
 checklist = { 
@@ -34,12 +34,12 @@ for item in filelist:
 print("# Checking calculated result")
 result = {}
 linecount = 0
-for line in open("current.data"):
+for line in open("Si_rt.data"):
     linecount += 1
-    if linecount == 160: # corresponds to line 160, (0.6192 fs)
+    if linecount == 167: # corresponds to line 167, (25.6 a.u.)
         for name, [resval, refval, error] in checklist.items(): 
             data = line.split()
-            result[name] = float(data[3])
+            result[name] = float(data[15])
             print(result[name])
 
 for name, [resval, refval, error] in checklist.items():
