@@ -451,7 +451,7 @@ contains
        write(uid,10) "Ac_tot", "Total vector potential field"
        write(uid,10) "E_tot", "Total electric field"
        write(uid,10) "ddm_e", "Change of dipole moment (electrons)"
-       write(uid,10) "dm_e_ph", "Total dipole moment (electrons and phonons)"
+!       write(uid,10) "dm_e_ph", "Total dipole moment (electrons and phonons)"
 !       if(yn_md=='y') then
 !          write(uid,10) "Jm", "Matter current density(electrons)"
 !          write(uid,10) "Jmi","Matter current density(ions)"
