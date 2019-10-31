@@ -2072,9 +2072,6 @@ contains
     end select
 
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
-      if(ispin==1)then
-        stop "Sorry, yn_out_dos is not implemented for ispin=1."
-      end if
       select case(out_dos_function)
       case("gaussian","lorentzian")
         continue
