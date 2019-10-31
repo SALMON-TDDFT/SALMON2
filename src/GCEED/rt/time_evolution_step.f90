@@ -71,7 +71,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   integer :: iatom
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
-  real(8) :: curr_tmp(3,2)
+  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: is
   character(100) :: comment_line
   logical :: rion_update,if_use_dmat
@@ -267,16 +267,16 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then
-      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_tmp(1:3,1:nspin))
+      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
     else
-      call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_tmp(1:3,1:nspin))
+      call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
     end if
-    call calc_emfields(nspin,curr_tmp)
+    call calc_emfields(nspin,curr_e_tmp)
     call timer_end(LOG_CALC_CURRENT)
 
     if(yn_md=='y') then
       call timer_begin(LOG_CALC_CURRENT_ION)
-      call calc_current_ion(lg,system,pp,curr_ion(:,itt))
+      call calc_current_ion(lg,system,pp,curr_i_tmp)
       call timer_end(LOG_CALC_CURRENT_ION)
     end if
 
@@ -338,7 +338,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
      case(0)
         call write_rt_data_0d(itt,ofl,dt,system,Dp(1:3,itt))
      case(3)
-        call write_rt_data_3d(itt,ofl,dt,system,curr_tmp)
+        call write_rt_data_3d(itt,ofl,dt,system,curr_e_tmp,curr_i_tmp)
      end select
 
      !(Export to SYSname_rt_energy.data)
@@ -367,28 +367,29 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
 END SUBROUTINE time_evolution_step
 
-subroutine calc_current_ion(lg,system,pp,j_ion)
+subroutine calc_current_ion(lg,system,pp,curr_i)
   use structures
-  use salmon_global, only: MI,Kion
+  use salmon_global, only: natom,Kion
   use scf_data, only: Hvol
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system
   type(s_pp_info) :: pp
   integer :: ia
-  real(8) :: j_ion(3)
+  real(8) :: curr_i(3)
 
   !AY memo
-  !current of ion: defined by positive charge-->minus sign
-  !This is NOT matter current NOR electric current.... strange definition....
-  !This is defined so as to the total electric current = -(curr + curr_ion)
-  !Should change this ion current but if you change,
-  !please change all part in ARTED, multiscale .....
-  j_ion(:)=0d0
-  do ia=1,MI
-     j_ion(:) = j_ion(:) - pp%Zps(Kion(ia)) * system%Velocity(:,ia)
+  !current of ion: defined by positive charge-->pulse sign
+  !This is matter current & = electric current.
+  !Be carefull, current by electrons is defined by matter current.
+  !Then, total electric current = -curr + curr_ion
+  !Be carefull, The definition in ARTED & multiscale is different.
+  curr_i(:)=0d0
+  do ia=1,natom
+     curr_i(:) = curr_i(:) + pp%Zps(Kion(ia)) * system%Velocity(:,ia)
+    !curr_i(:) = curr_i(:) - pp%Zps(Kion(ia)) * system%Velocity(:,ia)
   enddo
-  j_ion(:) = j_ion(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*Hvol)
+  curr_i(:) = curr_i(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*Hvol)
 
 end subroutine calc_current_ion
 
