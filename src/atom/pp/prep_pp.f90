@@ -69,6 +69,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   alz = system%Hgs(3)*dble(lg%num(3))
   nl = lg%num(1)*lg%num(2)*lg%num(3)
 
+!$omp parallel do private(iz,iy,ix,i) collapse(2)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
@@ -79,7 +80,9 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end do
   end do
   end do
+!$omp end parallel do
 
+!$omp parallel do private(iz,iy,ix,i) collapse(2)
   do iz=lg%is(3),lg%ie(3)
   do iy=lg%is(2),lg%ie(2)
   do ix=lg%is(1),lg%ie(1)
@@ -90,6 +93,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end do
   end do
   end do
+!$omp end parallel do
 
   call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
@@ -142,6 +146,8 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   if(iperiodic==3) then
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   end if
+  
+  if(comm_is_root(nproc_id_global)) write(*,*) 'end init_ps'
 
 end subroutine init_ps
 
