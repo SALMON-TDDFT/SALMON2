@@ -129,7 +129,6 @@ real(8),allocatable :: rho0(:,:,:)      ! Single particle density
 integer :: ihpsieff
 integer :: iSCFRT
 
-real(8),allocatable :: Vbox(:,:,:)
 
 integer, allocatable :: idiis_sd(:)
 

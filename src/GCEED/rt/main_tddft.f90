@@ -70,7 +70,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_scalar) :: sVpsl
-type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2
+type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2,Vbox
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -188,6 +188,7 @@ call allocate_scalar(mg,srho)
 call allocate_scalar(mg,sVh)
 call allocate_scalar(mg,sVh_stock1)
 call allocate_scalar(mg,sVh_stock2)
+call allocate_scalar_with_shadow(lg,Nd,Vbox)
 call allocate_scalar(mg,sVpsl)
 allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 do jspin=1,system%nspin
@@ -331,11 +332,6 @@ fileLaser= "laser.out"
 
 allocate( R1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
                                lg%is(3):lg%ie(3)))
-
-!if(ikind_eext.ne.0)then
-allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, &
-                                       lg%is(3)-Nd:lg%ie(3)+Nd))
-!endif
 
 allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
 
@@ -514,12 +510,12 @@ TE : do itt=Miter_rt+1,itotNtime
 
   if(mod(itt,2)==1)then
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson,j_e,singlescale)
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   else
     call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson,j_e,singlescale)
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   end if
 
   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
@@ -535,7 +531,6 @@ call timer_end(LOG_RT_ITERATION)
 
 close(030) ! laser
 
-if(ikind_eext.ne.0) deallocate (Vbox)
 deallocate (R1)
 
 

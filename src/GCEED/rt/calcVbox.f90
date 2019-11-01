@@ -16,8 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE calcVbox(lg,itt_t,system)
-  use structures, only: s_rgrid, s_dft_system
+SUBROUTINE calcVbox(lg,itt_t,system,Vbox)
+  use structures, only: s_rgrid, s_dft_system, s_scalar
   use salmon_communication, only: comm_is_root
   use misc_routines, only: get_wtime
   use inputoutput
@@ -28,6 +28,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
   type(s_rgrid),intent(in) :: lg
   integer :: itt_t
   type(s_dft_system),intent(inout) :: system
+  type(s_scalar),intent(inout)     :: Vbox
   integer :: ix,iy,iz,jj
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
@@ -74,7 +75,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
   do iz=mg_sta(3),mg_end(3)
   do iy=mg_sta(2),mg_end(2)
   do ix=mg_sta(1),mg_end(1)
-    Vbox(ix,iy,iz)=0.d0
+    Vbox%f(ix,iy,iz)=0.d0
   end do
   end do
   end do
@@ -92,7 +93,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
           do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+  &
+            Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+  &
                            E_amplitude1*(epdir_re1(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
                                        epdir_re1(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
                                        epdir_re1(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_1  &
@@ -112,7 +113,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
           do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox(ix,iy,iz)=Vbox(ix,iy,iz)   &
+            Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)   &
                           +E_amplitude2*(epdir_re2(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
                                        epdir_re2(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
                                        epdir_re2(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_2  &
@@ -139,7 +140,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
       do iz=mg_sta(3),mg_end(3)
       do iy=mg_sta(2),mg_end(2)
       do ix=mg_sta(1),mg_end(1)
-        Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_1
+        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_1
       end do
       end do
       end do
@@ -151,7 +152,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
       do iz=mg_sta(3),mg_end(3)
       do iy=mg_sta(2),mg_end(2)
       do ix=mg_sta(1),mg_end(1)
-        Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_2
+        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_2
       end do
       end do
       end do
