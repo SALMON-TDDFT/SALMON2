@@ -365,7 +365,7 @@ contains
     end do
   end subroutine allocate_vector
 
-  subroutine allocate_vector_with_hallow(rg,field)
+  subroutine allocate_vector_with_ovlp(rg,field)
     implicit none
     type(s_rgrid),intent(in) :: rg
     type(s_vector)           :: field
@@ -379,7 +379,7 @@ contains
     end do
     end do
     end do
-  end subroutine allocate_vector_with_hallow
+  end subroutine allocate_vector_with_ovlp
 
   subroutine allocate_dmatrix(nspin,mg,info,dmat)
     implicit none
