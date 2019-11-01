@@ -15,12 +15,16 @@
 !
 !-----------------------------------------------------------------------------------------
 module salmon_maxwell
+  use structures, only: s_vector, s_scalar
   implicit none
   
   type ls_fdtd_work
     !share
     
     !weyl
+    type(s_vector) :: vec_Ac_tmp            ! Tempolary variable used in weyl_calc
+    type(s_scalar) :: edensity_emfield      ! Field energy: (E^2 + H^2)
+    type(s_scalar) :: edensity_absorb       ! Loss energy: integrate(E*J)
     
     !coulomb
     
