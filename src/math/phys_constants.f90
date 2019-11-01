@@ -26,6 +26,7 @@ module phys_constants
     public :: au_va      ! Atomic unit of electric field in [V/Ang.] unit
     public :: cspeed_au  ! Speed of light in atomic units
     public :: kB_au      ! Boltzman constant in atomic units
+    public :: Debye_au   ! Debye electric dipole moment (1[D]) in atomic units
 
     public :: atomic_unit_of_1st_hyperpolarizability
     public :: atomic_unit_of_2nd_hyperpolarizability
@@ -397,8 +398,9 @@ module phys_constants
     real(8), parameter :: au_nm = atomic_unit_of_length * 1d+9
     real(8), parameter :: au_va = atomic_unit_of_electric_field * 1d-10
     real(8), parameter :: au_ev = atomic_unit_of_energy / electron_volt
-    real(8), parameter :: cspeed_au = 1d0 / fine_structure_constant
+    real(8), parameter :: cspeed_au = inverse_fine_structure_constant
     real(8), parameter :: kB_au = boltzmann_constant / atomic_unit_of_energy
 
+    real(8), parameter :: debye_au = (1d-21 / speed_of_light_in_vacuum) / (atomic_unit_of_charge * atomic_unit_of_length)
 end module phys_constants
 

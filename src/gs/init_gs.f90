@@ -55,6 +55,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
       call quickrnd_ns ; y1=Ymax*(2.d0*rnd-1.d0)
       call quickrnd_ns ; z1=Zmax*(2.d0*rnd-1.d0)
       if(info%io_s <= io .and. io <= info%io_e) then
+!$OMP parallel do collapse(2) private(iz,iy,ix,xx,yy,zz,rr)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
@@ -83,6 +84,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
       call quickrnd_ns ; z1=Zmax*rnd
       if(info%ik_s <= ik .and. ik <= info%ik_e .and.   &
          info%io_s <= io .and. io <= info%io_e) then
+!$OMP parallel do collapse(2) private(iz,iy,ix,xx,yy,zz,rr)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)

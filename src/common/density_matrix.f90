@@ -249,6 +249,7 @@ contains
     use salmon_communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
+    use code_optimization, only: stencil_is_parallelized_by_omp
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
@@ -265,10 +266,13 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
+    logical :: is_orbital_parallel
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
+
+    is_orbital_parallel = .not. stencil_is_parallelized_by_omp
 
     nspin = system%nspin
     ngrid = system%ngrid
@@ -288,6 +292,10 @@ contains
     do ispin=1,nspin
 
       wrk4 = 0d0
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
+!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
+!$omp             reduction(+:wrk4) if(is_orbital_parallel)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
@@ -307,6 +315,7 @@ contains
 
       end do
       end do
+!$omp end parallel do
 
       call comm_summation(wrk4,wrk1,3,info%icomm_rko)
 
@@ -389,6 +398,7 @@ contains
     use structures
     use salmon_communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
+    use code_optimization, only: stencil_is_parallelized_by_omp
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
@@ -404,10 +414,13 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
+    logical :: is_orbital_parallel
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
+
+    is_orbital_parallel = .not. stencil_is_parallelized_by_omp
 
     nspin = system%nspin
     ngrid = system%ngrid
@@ -422,6 +435,10 @@ contains
     do ispin=1,nspin
 
       wrk3 = 0d0
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(ik,io,kAc,wrk1,wrk2,uVpsi) &
+!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
+!$omp             reduction(+:wrk3) if(is_orbital_parallel)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
@@ -439,6 +456,7 @@ contains
 
       end do
       end do
+!$omp end parallel do
 
       call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
 
