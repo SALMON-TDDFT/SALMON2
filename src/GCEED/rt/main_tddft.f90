@@ -91,7 +91,7 @@ real(8),allocatable :: tfourier_integrand(:,:)
 complex(8),parameter :: zi=(0.d0,1.d0)
 character(10) :: fileLaser
 character(100):: comment_line
-real(8) :: curr_tmp(3,2)
+real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
 
 call timer_begin(LOG_TOTAL)
 
@@ -299,7 +299,7 @@ if(comm_is_root(nproc_id_global))then
   !(header of SYSname_rt.data)
   select case(iperiodic)
   case(0) ; call write_rt_data_0d(-1,ofl,dt,system,Dp(1:3,0))
-  case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_tmp)
+  case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
   end select
 
   !(header of SYSname_rt_energy.data)
