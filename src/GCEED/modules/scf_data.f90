@@ -149,7 +149,6 @@ integer :: k_sta,k_end,k_num
 integer :: num_kpoints_3d(3)
 integer :: num_kpoints_rd
 
-real(8),allocatable :: wtk(:)
 
 real(8),allocatable :: norm_diff_psi_stock(:,:)
 

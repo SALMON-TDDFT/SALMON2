@@ -97,8 +97,6 @@ end select
 
 num_kpoints_3d(1:3)=num_kgrid(1:3)
 num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
-allocate(wtk(num_kpoints_rd))
-wtk(:)=1.d0/dble(num_kpoints_rd)
 
 if(ilsda == 0) then
   itotMST=MST(1)
