@@ -65,6 +65,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
         end do
         end do
         end do
+!$omp end parallel do
       end if
     end do
     end do
@@ -94,6 +95,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
         end do
         end do
         end do
+!$omp end parallel do
       end if
     end do
     end do
