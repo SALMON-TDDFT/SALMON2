@@ -100,11 +100,6 @@ num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
 allocate(wtk(num_kpoints_rd))
 wtk(:)=1.d0/dble(num_kpoints_rd)
 
-if(ilsda==1)then
-  nproc_ob_spin(1)=(nproc_ob+1)/2
-  nproc_ob_spin(2)=nproc_ob/2
-end if
-
 if(ilsda == 0) then
   itotMST=MST(1)
 else if(ilsda == 1) then
@@ -126,19 +121,6 @@ if(comm_is_root(nproc_id_global))then
     stop
   end if
 end if
-
-nproc_d_o = nproc_domain_orbital
-nproc_d_g = nproc_domain_general
-
-if(nproc_ob==0.and.nproc_d_o(1)==0.and.nproc_d_o(2)==0.and.nproc_d_o(3)==0.and.  &
-                   nproc_d_g(1)==0.and.nproc_d_g(2)==0.and.nproc_d_g(3)==0) then
-  call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-else
-  call check_numcpu(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-end if
-
-nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
-nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
 !===== namelist for group_hartree =====
 if(layout_multipole<=0.or.layout_multipole>=4)then
@@ -194,9 +176,6 @@ if(comm_is_root(nproc_id_global)) write(*,*) "MI =",MI
 
 
 !===== namelist for group_others =====
-
-nproc_d_o_mul   = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
-nproc_d_g_mul_dm= nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
 if(comm_is_root(nproc_id_global))close(fh_namelist)
 

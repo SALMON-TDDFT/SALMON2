@@ -38,8 +38,10 @@ contains
     use restart,only: prep_restart_read
     use io_gs_wfn_k,only: modify_initial_guess_copy_1stk_to_all
     use code_optimization, only: optimization_log
+    use structures, only: s_process_info
     implicit none
-!$ integer :: omp_get_max_threads  
+!$ integer :: omp_get_max_threads
+    type(s_process_info) :: pinfo
 
     NUMBER_THREADS=1
 !$  NUMBER_THREADS=omp_get_max_threads()
@@ -96,7 +98,11 @@ contains
 ! initialize for optimization.
     call opt_vars_initialize_p2
     if (comm_is_root(nproc_id_global)) then
-      call optimization_log(nproc_k, nproc_ob, nproc_domain_orbital, nproc_domain_general)
+      pinfo%npk = 1
+      pinfo%nporbital = 1
+      pinfo%npdomain_orbital = 1
+      pinfo%npdomain_general = 1
+      call optimization_log(pinfo)
     end if
 
     if(yn_md=='y' .or. use_adiabatic_md=='y') then

@@ -73,11 +73,6 @@ num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
 allocate(wtk(num_kpoints_rd))
 wtk(:)=1.d0/dble(num_kpoints_rd)
 
-if(ilsda==1)then
-  nproc_ob_spin(1)=(nproc_ob+1)/2
-  nproc_ob_spin(2)=nproc_ob/2
-end if
-
 if(ilsda == 0) then
   itotMST=MST(1)
 else if(ilsda == 1) then
@@ -89,19 +84,6 @@ if(iwrite_projection==1.and.itwproj==-1)then
   write(*,*) "Please specify itwproj when iwrite_projection=1."
   stop
 end if
-
-nproc_d_o = nproc_domain_orbital
-nproc_d_g = nproc_domain_general
-
-if(nproc_ob==0.and.nproc_d_o(1)==0.and.nproc_d_o(2)==0.and.nproc_d_o(3)==0.and.  &
-                   nproc_d_g(1)==0.and.nproc_d_g(2)==0.and.nproc_d_g(3)==0) then
-  call set_numcpu_rt(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-else
-  call check_numcpu(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-end if
-
-nproc_d_o_mul=nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
-nproc_d_g_mul_dm=nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
 
 !===== namelist for group_propagation =====
 Ntime=nt

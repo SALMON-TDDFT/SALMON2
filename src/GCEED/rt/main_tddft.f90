@@ -57,6 +57,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system)  :: system
+type(s_process_info) :: pinfo
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
 type(s_poisson) :: poisson
@@ -176,7 +177,7 @@ call timer_begin(LOG_READ_GS_DATA)
 ! | initialization |
 ! +----------------+
 
-call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
 call init_code_optimization
 call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
@@ -648,7 +649,7 @@ contains
     call switch_stencil_optimization(mg%num)
     call switch_openmp_parallelization(mg%num)
 
-    if(iperiodic==3 .and. nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)==1) then
+    if(iperiodic==3 .and. product(pinfo%npdomain_orbital)==1) then
        ignum = mg%num
     else
        ignum = mg%num + (nd*2)
@@ -656,7 +657,7 @@ contains
     call set_modulo_tables(ignum)
 
     if (comm_is_root(nproc_id_global)) then
-       call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
+       call optimization_log(pinfo)
     end if
   end subroutine init_code_optimization
 

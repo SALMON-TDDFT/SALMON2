@@ -1484,15 +1484,16 @@ subroutine eh_prep_GCEED(fs,fw)
   use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,num_kgrid,iperiodic
   use salmon_parallel,   only: nproc_group_global
   use set_numcpu,        only: set_numcpu_gs
-  use scf_data,          only: nproc_d_o,nproc_d_g,nproc_d_g_dm,num_kpoints_3d,num_kpoints_rd
+  use scf_data,          only: num_kpoints_3d,num_kpoints_rd
   use init_communicator, only: init_communicator_dft
   use sendrecv_grid,     only: create_sendrecv_neig_ng,init_sendrecv_grid
-  use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel
+  use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel, s_process_info
   use salmon_maxwell,    only: ls_fdtd_work
   use initialization_sub
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
+  type(s_process_info)              :: pinfo
   type(s_orbital_parallel)          :: info
   type(s_field_parallel)            :: info_field
   integer                           :: neig_ng_eh(1:2,1:3)
@@ -1501,10 +1502,10 @@ subroutine eh_prep_GCEED(fs,fw)
   !set mpi condition
   num_kpoints_3d(1:3)=num_kgrid(1:3)
   num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
-  nproc_d_o=nproc_domain_orbital
-  nproc_d_g=nproc_domain_general
-  call set_numcpu_gs(nproc_d_o,nproc_d_g,nproc_d_g_dm)
-  call init_communicator_dft(nproc_group_global,info,info_field)
+  pinfo%npdomain_orbital = nproc_domain_orbital
+  pinfo%npdomain_general = nproc_domain_general
+  call set_numcpu_gs(pinfo)
+  call init_communicator_dft(nproc_group_global,pinfo,info,info_field)
   
   !initialize r-grid
   call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)

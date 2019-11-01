@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+subroutine init_dft(calc_mode,comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
   use salmon_global, only: iperiodic,num_multipole_xyz,layout_multipole
   use sendrecv_grid
@@ -33,7 +33,9 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
   implicit none
+  integer,intent(in) :: calc_mode
   integer,intent(in) :: comm
+  type(s_process_info)     :: pinfo
   type(s_orbital_parallel) :: info
   type(s_field_parallel)   :: info_field
   type(s_rgrid)      :: lg,mg,ng
@@ -52,7 +54,8 @@ subroutine init_dft(comm,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,
 
 ! parallelization
 
-  call init_communicator_dft(comm,info,info_field)
+  call init_process_distribution(calc_mode,pinfo)
+  call init_communicator_dft(comm,pinfo,info,info_field)
   call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info)
   ! sendrecv_grid object for wavefunction updates
@@ -216,6 +219,47 @@ subroutine init_dft_system(lg,system,stencil)
 
   return
 end subroutine init_dft_system
+
+!===================================================================================================================================
+
+subroutine init_process_distribution(calc_mode,pinfo)
+  use structures, only: s_process_info
+  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general,ispin
+  use set_numcpu
+  implicit none
+  integer,intent(in)               :: calc_mode
+  type(s_process_info),intent(out) :: pinfo
+
+  if((nproc_ob + sum(nproc_domain_orbital) + sum(nproc_domain_general)) == 0) then
+    ! Process distribution is automatically decided by SALMON.
+    select case(calc_mode)
+    case(1)
+      call set_numcpu_gs(pinfo)
+    case(2)
+      call set_numcpu_rt(pinfo)
+    end select
+  else
+    ! Process distribution is explicitly specified by user.
+    pinfo%npk              = nproc_k
+    pinfo%nporbital        = nproc_ob
+    pinfo%npdomain_orbital = nproc_domain_orbital
+    pinfo%npdomain_general = nproc_domain_general
+  end if
+  call check_numcpu(pinfo)
+
+  if (ispin==1) then
+    pinfo%nporbital_spin(1)=(nproc_ob+1)/2
+    pinfo%nporbital_spin(2)= nproc_ob   /2
+  else
+    pinfo%nporbital_spin = 0
+  end if
+
+  ! Future work: remove these
+  nproc_k              = pinfo%npk
+  nproc_ob             = pinfo%nporbital
+  nproc_domain_orbital = pinfo%npdomain_orbital
+  nproc_domain_general = pinfo%npdomain_general
+end subroutine init_process_distribution
 
 !===================================================================================================================================
 
