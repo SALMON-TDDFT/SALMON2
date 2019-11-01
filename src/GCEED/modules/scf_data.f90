@@ -110,39 +110,23 @@ integer :: Miter_rt    ! Total number of Iteration for RT calculation
 
 integer :: iflag_diisjump
 
-real(8),allocatable :: rbox_array_dip2(:,:)
-real(8),allocatable :: rbox_array_dip2q(:,:,:)
-real(8),allocatable :: rbox_array_dip2e(:)
-
 integer :: ilsda
 
 integer :: MST(2),ifMST(2),itotMST
-integer :: Mx(3),Mxin(3)
 
 real(8) :: rnetot
 
 real(8) :: Hgs(3)        ! Grid spacing
 real(8) :: Hvol
 
-! Pseudopotential
-integer,parameter :: Lmax=4
-real(8),allocatable :: Vpsl(:,:,:)        ! Local pseudopotential
 
 !Nonlinear core correction
 logical :: flag_nlcc = .false.
 
 
-real(8),allocatable :: esp(:,:)         ! Single particle energy
 real(8),allocatable :: rho(:,:,:)       ! Single particle density
 real(8),allocatable :: rho0(:,:,:)      ! Single particle density
-real(8),allocatable :: rho_s(:,:,:,:)   ! Single particle density for each spin
-real(8),allocatable :: Vh(:,:,:)        ! Hartree potential
-real(8),allocatable :: Vxc(:,:,:)       ! Exchange-Correlation potential
-real(8),allocatable :: Vxc_s(:,:,:,:)   ! Exchange-Correlation potential for each spin 
 integer :: ihpsieff
-real(8),allocatable :: elf(:,:,:)
-complex(8),allocatable :: zpsi(:,:,:,:,:)
-complex(8),allocatable :: ttpsi(:,:,:)
 integer :: iSCFRT
 
 real(8),allocatable :: Vbox(:,:,:)
@@ -175,8 +159,6 @@ real(8),allocatable :: norm_diff_psi_stock(:,:)
 real(8) :: Etot
 real(8) :: Exc
 
-integer :: imr(3),imrs(3),igroup
-
 integer :: iflag_subspace_diag
 
 real(8),allocatable :: vloc_t(:,:,:,:)
@@ -188,8 +170,6 @@ integer :: iDiter(maxntmg)
 integer :: itt
 integer :: ikind_eext   !0:No external field, 1: dipoleApprox
 
-character(3)  :: dir
-character(2)  :: dir2 
 
 !some of following variables can be removed by small changes
 real(8) :: Fst
@@ -206,17 +186,13 @@ real(8)       :: posplane  ! position of the plane
                            ! (only for idensum = 0)
 
 character(100):: file_Projection
-character(20) :: fileNumber
 
-real(8),allocatable :: Ex_static(:,:,:),Ey_static(:,:,:),Ez_static(:,:,:)
 
 real(8),allocatable :: curr(:,:)
 
 
 integer :: ilasbound_sta(3),ilasbound_end(3)
 real(8) :: rlaser_center(3)
-
-real(8) :: Eion
 
 integer :: iblacsinit
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
@@ -246,8 +222,6 @@ character(100) :: file_RT_dip2_e
 character(100) :: file_external
 character(100) :: file_out_rt_bin
 character(100) :: file_in_rt_bin
-
-!arrays for isend and irecv
 
 
 CONTAINS
