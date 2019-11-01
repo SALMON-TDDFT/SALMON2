@@ -55,7 +55,6 @@ if(ispin == 0)then
   MST(1)=nstate
   if(temperature_k>=0.d0)then
     ifMST(1)=nstate
-    rNetot=dble(nelec)
   else
     ifMST(1)=nelec/2
   end if
@@ -66,7 +65,6 @@ else if(ispin == 1)then
     MST(1:2)=nstate
     if(temperature_k>=0.d0)then
       ifMST(1:2)=nstate
-      rNetot=dble(nelec)
     else
       ifMST(1)=nelec - nelec/2
       ifMST(2)=nelec/2
@@ -77,7 +75,6 @@ else if(ispin == 1)then
     if(temperature_k>=0.d0)then
       ifMST(1)=maxval(nstate_spin(1:2))
       ifMST(2)=maxval(nstate_spin(1:2))
-      rNetot=dble(nelec_spin(1))+dble(nelec_spin(2))
     else
       ifMST(1:2)=nelec_spin(1:2)
     end if

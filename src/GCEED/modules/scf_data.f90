@@ -114,7 +114,6 @@ integer :: ilsda
 
 integer :: MST(2),ifMST(2),itotMST
 
-real(8) :: rnetot
 
 
 
