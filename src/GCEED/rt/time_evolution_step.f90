@@ -135,7 +135,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   endif
 
   if(propagator=='etrs')then
-    if(iobnum.ge.1)then
+    if(info%numo.ge.1)then
     ! spsi_in --> tpsi, (spsi_out = working array)
       call taylor(mg,system,info,stencil,srg,spsi_in,tpsi,spsi_out,ppg,V_local,zc)
     end if
@@ -182,14 +182,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
       end if
     end select
 
-    if(iobnum.ge.1)then
+    if(info%numo.ge.1)then
     ! tpsi --> spsi_out (spsi_in = working array)
       call taylor(mg,system,info,stencil,srg,tpsi,spsi_out,spsi_in,ppg,V_local,zc)
     end if
 
   else 
 
-    if(iobnum.ge.1)then
+    if(info%numo.ge.1)then
     ! spsi_in --> spsi_out (tpsi = working array)
       call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,zc)
     end if

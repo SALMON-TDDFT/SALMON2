@@ -142,7 +142,6 @@ integer :: lg_sta(3),lg_end(3),lg_num(3)
 integer :: mg_sta(3),mg_end(3),mg_num(3)
 integer :: ng_sta(3),ng_end(3),ng_num(3)
 
-integer :: iobnum
 
 integer :: k_sta,k_end,k_num
 
@@ -263,7 +262,6 @@ Hgs = system%Hgs ! future work: remove this line
 k_sta = info%ik_s ! future work: remove this line
 k_end = info%ik_e ! future work: remove this line
 k_num = info%numk ! future work: remove this line
-iobnum = info%numo ! future work: remove this line
 
 end subroutine old_mesh
 
