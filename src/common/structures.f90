@@ -302,6 +302,8 @@ module structures
   type s_fdtd_field
     type(s_scalar) :: phi, rho_em
     type(s_vector) :: vec_e, vec_h, vec_a, vec_j_em
+    ! Experimental implementation
+    type(s_vector) :: vec_Ac, vec_Ac_old
   end type s_fdtd_field
 
   type s_md
@@ -362,6 +364,22 @@ contains
     end do
     end do
   end subroutine allocate_vector
+
+  subroutine allocate_vector_with_ovlp(rg,field)
+    implicit none
+    type(s_rgrid),intent(in) :: rg
+    type(s_vector)           :: field
+    integer :: ix,iy,iz
+    allocate(field%v(3,rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2),rg%is_array(3):rg%ie_array(3)))
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=rg%is_array(3),rg%ie_array(3)
+    do iy=rg%is_array(2),rg%ie_array(2)
+    do ix=rg%is_array(1),rg%ie_array(1)
+      field%v = 0d0
+    end do
+    end do
+    end do
+  end subroutine allocate_vector_with_ovlp
 
   subroutine allocate_dmatrix(nspin,mg,info,dmat)
     implicit none
