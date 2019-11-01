@@ -16,6 +16,10 @@
 module set_numcpu
   implicit none
 
+  integer,parameter,public :: iprefer_k_distribution        =  1
+  integer,parameter,public :: iprefer_orbital_distribution  =  2
+  integer,parameter,public :: iprefer_domain_distribution   =  3
+
 contains
 
 subroutine check_numcpu(pinfo)
@@ -70,228 +74,222 @@ subroutine check_numcpu(pinfo)
 
 end subroutine check_numcpu
 
-subroutine set_numcpu_gs(pinfo)
+subroutine set_numcpu_general(iprefer_dist,numk,numo,pinfo)
   use structures, only: s_process_info
   use salmon_parallel, only: nproc_size_global
-!  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general
   implicit none
+  integer,intent(in)               :: iprefer_dist,numk,numo
   type(s_process_info),intent(out) :: pinfo
 
-  integer :: ii
+  integer :: ip
+  integer :: nproc_k,nproc_ob
+  integer :: nproc_d_o(3),nproc_d_g(3)
   integer :: nproc_size_global_tmp
-  integer :: nproc_d_o_tmp(3)
 
-  integer :: num_factor2
-  integer :: num_factor3
-  integer :: num_factor5
-
-  integer :: icount
-
-  nproc_size_global_tmp=nproc_size_global
-
-  ! this code treats the situation that nproc_size_global is less than or equal to 48,828,125
-
-  num_factor2=0
-  do ii=1,26
-    if(mod(nproc_size_global_tmp,2)==0)then
-      num_factor2=num_factor2+1
-      nproc_size_global_tmp=nproc_size_global_tmp/2
-    end if
-  end do
-
-  num_factor3=0
-  do ii=1,17
-    if(mod(nproc_size_global_tmp,3)==0)then
-      num_factor3=num_factor3+1
-      nproc_size_global_tmp=nproc_size_global_tmp/3
-    end if
-  end do
-
-  num_factor5=0
-  do ii=1,11
-    if(mod(nproc_size_global_tmp,5)==0)then
-      num_factor5=num_factor5+1
-      nproc_size_global_tmp=nproc_size_global_tmp/5
-    end if
-  end do
-
-  if(nproc_size_global_tmp/=1)then
-    stop "In automatic process assignment, prime factors for number of processes must be combination of 2, 3 or 5."
-  end if
-
-  nproc_d_o_tmp(1:3)=1
-
-  icount=0
-
-  do ii=1,num_factor5
-    icount=icount+1
-    if(mod(icount,3)==1)then
-      nproc_d_o_tmp(3)=nproc_d_o_tmp(3)*5
-    else if(mod(icount,3)==2)then
-      nproc_d_o_tmp(2)=nproc_d_o_tmp(2)*5
-    else
-      nproc_d_o_tmp(1)=nproc_d_o_tmp(1)*5
-    end if
-  end do
-
-  do ii=1,num_factor3
-    icount=icount+1
-    if(mod(icount,3)==1)then
-      nproc_d_o_tmp(3)=nproc_d_o_tmp(3)*3
-    else if(mod(icount,3)==2)then
-      nproc_d_o_tmp(2)=nproc_d_o_tmp(2)*3
-    else
-      nproc_d_o_tmp(1)=nproc_d_o_tmp(1)*3
-    end if
-  end do
-
-  do ii=1,num_factor2
-    icount=icount+1
-    if(mod(icount,3)==1)then
-      nproc_d_o_tmp(3)=nproc_d_o_tmp(3)*2
-    else if(mod(icount,3)==2)then
-      nproc_d_o_tmp(2)=nproc_d_o_tmp(2)*2
-    else
-      nproc_d_o_tmp(1)=nproc_d_o_tmp(1)*2
-    end if
-  end do
-
-  pinfo%npk=1
-  pinfo%nporbital=1
-  pinfo%npdomain_orbital(1:3)=nproc_d_o_tmp(1:3)
-  pinfo%npdomain_general(1:3)=nproc_d_o_tmp(1:3)
-  pinfo%npdomain_general_dm(1:3)=pinfo%npdomain_general(1:3)/pinfo%npdomain_orbital(1:3)
-
-end subroutine set_numcpu_gs
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-
-subroutine set_numcpu_rt(pinfo)
-  use structures, only: s_process_info
-  use salmon_parallel, only: nproc_size_global
-!  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general
-  implicit none
-  type(s_process_info),intent(out) :: pinfo
-
-  integer :: ii
-  integer :: nproc_size_global_tmp
-  integer :: nproc_ob_tmp
-  integer :: nproc_d_o_tmp(3)
-  integer :: nproc_d_g_tmp(3)
-
-  integer :: num_factor2
+  integer :: ii,icount
   integer :: ir_num_factor2  ! ir means ireduced
+  integer :: num_factor2
   integer :: num_factor3
   integer :: num_factor5
 
-  integer :: icount
+  integer :: nk,no
 
   nproc_size_global_tmp=nproc_size_global
 
-  ! this code treats the situation that nproc_size_global is less than or equal to 48,828,125
+  nk = max(numk,1)
+  no = max(numo,1)
 
-  num_factor2=0
-  do ii=1,26
-    if(mod(nproc_size_global_tmp,2)==0)then
-      num_factor2=num_factor2+1
-      nproc_size_global_tmp=nproc_size_global_tmp/2
-    end if
+  nproc_k   = 1
+  nproc_ob  = 1
+  nproc_d_o = 1
+
+  do ip=iprefer_dist,iprefer_domain_distribution
+
+    select case(ip)
+
+    ! k-point
+    case(iprefer_k_distribution)
+      if (1 < nk .and. nk < nproc_size_global_tmp) then
+        if (mod(nproc_size_global_tmp,nk) == 0) then
+          nproc_k               = nproc_size_global_tmp / nk
+          nproc_size_global_tmp = nproc_size_global_tmp / nproc_k
+        end if
+      else
+        nproc_k               = min(nproc_size_global_tmp,nk)
+        nproc_size_global_tmp = nproc_size_global_tmp / nproc_k
+      end if
+
+    ! orbital
+    case(iprefer_orbital_distribution)
+      if (1 < no .and. no < nproc_size_global_tmp) then
+        if (mod(nproc_size_global_tmp,no) == 0) then
+          nproc_ob              = nproc_size_global_tmp / no
+          nproc_size_global_tmp = nproc_size_global_tmp / nproc_ob
+        end if
+      else
+        nproc_ob              = min(nproc_size_global_tmp,no)
+        nproc_size_global_tmp = nproc_size_global_tmp / nproc_ob
+      end if
+
+    ! rgrid
+    case(iprefer_domain_distribution)
+      num_factor2=0
+      do ii=1,26
+        if(mod(nproc_size_global_tmp,2)==0)then
+          num_factor2=num_factor2+1
+          nproc_size_global_tmp=nproc_size_global_tmp/2
+        end if
+      end do
+
+      num_factor3=0
+      do ii=1,17
+        if(mod(nproc_size_global_tmp,3)==0)then
+          num_factor3=num_factor3+1
+          nproc_size_global_tmp=nproc_size_global_tmp/3
+        end if
+      end do
+
+      num_factor5=0
+      do ii=1,11
+        if(mod(nproc_size_global_tmp,5)==0)then
+          num_factor5=num_factor5+1
+          nproc_size_global_tmp=nproc_size_global_tmp/5
+        end if
+      end do
+
+      if(nproc_size_global_tmp/=1)then
+        stop "In automatic process distribution, prime factors for number of processes must be combination of 2, 3 or 5."
+      end if
+
+      if(num_factor2>=3)then
+        nproc_d_o(1)=2
+        nproc_d_o(2)=2
+        nproc_d_o(3)=2
+        icount=0
+        ir_num_factor2=num_factor2-3
+      else if(num_factor2==2)then
+        nproc_d_o(1)=1
+        nproc_d_o(2)=2
+        nproc_d_o(3)=2
+        icount=2
+        ir_num_factor2=num_factor2-2
+      else if(num_factor2==1)then
+        nproc_d_o(1)=1
+        nproc_d_o(2)=1
+        nproc_d_o(3)=2
+        icount=1
+        ir_num_factor2=num_factor2-1
+      else
+        nproc_d_o(1)=1
+        nproc_d_o(2)=1
+        nproc_d_o(3)=1
+        icount=0
+        ir_num_factor2=num_factor2
+      end if
+
+    end select
   end do
 
-  num_factor3=0
-  do ii=1,17
-    if(mod(nproc_size_global_tmp,3)==0)then
-      num_factor3=num_factor3+1
-      nproc_size_global_tmp=nproc_size_global_tmp/3
-    end if
-  end do
+  ! general
+  if (iprefer_dist /= iprefer_domain_distribution) then
+    nproc_size_global_tmp = nproc_size_global
 
-  num_factor5=0
-  do ii=1,11
-    if(mod(nproc_size_global_tmp,5)==0)then
-      num_factor5=num_factor5+1
-      nproc_size_global_tmp=nproc_size_global_tmp/5
-    end if
-  end do
+    num_factor2=0
+    do ii=1,26
+      if(mod(nproc_size_global_tmp,2)==0)then
+        num_factor2=num_factor2+1
+        nproc_size_global_tmp=nproc_size_global_tmp/2
+      end if
+    end do
 
-  if(nproc_size_global_tmp/=1)then
-    stop "In automatic process assignment, prime factors for number of processes must be combination of 2, 3 or 5."
+    num_factor3=0
+    do ii=1,17
+      if(mod(nproc_size_global_tmp,3)==0)then
+        num_factor3=num_factor3+1
+        nproc_size_global_tmp=nproc_size_global_tmp/3
+      end if
+    end do
+
+    num_factor5=0
+    do ii=1,11
+      if(mod(nproc_size_global_tmp,5)==0)then
+        num_factor5=num_factor5+1
+        nproc_size_global_tmp=nproc_size_global_tmp/5
+      end if
+    end do
+
+    if(nproc_size_global_tmp/=1)then
+      stop "In automatic process distribution, prime factors for number of processes must be combination of 2, 3 or 5."
+    end if
+  else
+    nproc_d_g = nproc_d_o
   end if
-
 
   if(num_factor2>=3)then
-    nproc_ob_tmp=nproc_size_global/8
-    nproc_d_o_tmp(1)=2
-    nproc_d_o_tmp(2)=2
-    nproc_d_o_tmp(3)=2
+    nproc_d_g(1)=2
+    nproc_d_g(2)=2
+    nproc_d_g(3)=2
     icount=0
     ir_num_factor2=num_factor2-3
   else if(num_factor2==2)then
-    nproc_ob_tmp=nproc_size_global/4
-    nproc_d_o_tmp(1)=1
-    nproc_d_o_tmp(2)=2
-    nproc_d_o_tmp(3)=2
+    nproc_d_g(1)=1
+    nproc_d_g(2)=2
+    nproc_d_g(3)=2
     icount=2
     ir_num_factor2=num_factor2-2
   else if(num_factor2==1)then
-    nproc_ob_tmp=nproc_size_global/2
-    nproc_d_o_tmp(1)=1
-    nproc_d_o_tmp(2)=1
-    nproc_d_o_tmp(3)=2
+    nproc_d_g(1)=1
+    nproc_d_g(2)=1
+    nproc_d_g(3)=2
     icount=1
     ir_num_factor2=num_factor2-1
   else
-    nproc_ob_tmp=nproc_size_global
-    nproc_d_o_tmp(1)=1
-    nproc_d_o_tmp(2)=1
-    nproc_d_o_tmp(3)=1
+    nproc_d_g(1)=1
+    nproc_d_g(2)=1
+    nproc_d_g(3)=1
     icount=0
     ir_num_factor2=num_factor2
   end if
 
-  nproc_d_g_tmp(1:3)=nproc_d_o_tmp(1:3)
-
   do ii=1,num_factor5
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_d_g_tmp(3)=nproc_d_g_tmp(3)*5
+      nproc_d_g(3)=nproc_d_g(3)*5
     else if(mod(icount,3)==2)then
-      nproc_d_g_tmp(2)=nproc_d_g_tmp(2)*5
+      nproc_d_g(2)=nproc_d_g(2)*5
     else
-      nproc_d_g_tmp(1)=nproc_d_g_tmp(1)*5
+      nproc_d_g(1)=nproc_d_g(1)*5
     end if
   end do
 
   do ii=1,num_factor3
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_d_g_tmp(3)=nproc_d_g_tmp(3)*3
+      nproc_d_g(3)=nproc_d_g(3)*3
     else if(mod(icount,3)==2)then
-      nproc_d_g_tmp(2)=nproc_d_g_tmp(2)*3
+      nproc_d_g(2)=nproc_d_g(2)*3
     else
-      nproc_d_g_tmp(1)=nproc_d_g_tmp(1)*3
+      nproc_d_g(1)=nproc_d_g(1)*3
     end if
   end do
 
   do ii=1,ir_num_factor2
     icount=icount+1
     if(mod(icount,3)==1)then
-      nproc_d_g_tmp(3)=nproc_d_g_tmp(3)*2
+      nproc_d_g(3)=nproc_d_g(3)*2
     else if(mod(icount,3)==2)then
-      nproc_d_g_tmp(2)=nproc_d_g_tmp(2)*2
+      nproc_d_g(2)=nproc_d_g(2)*2
     else
-      nproc_d_g_tmp(1)=nproc_d_g_tmp(1)*2
+      nproc_d_g(1)=nproc_d_g(1)*2
     end if
   end do
 
-  pinfo%npk=1
-  pinfo%nporbital=nproc_ob_tmp
-  pinfo%npdomain_orbital(1:3)=nproc_d_o_tmp(1:3)
-  pinfo%npdomain_general(1:3)=nproc_d_g_tmp(1:3)
-  pinfo%npdomain_general_dm(1:3)=pinfo%npdomain_general(1:3)/pinfo%npdomain_orbital(1:3)
+  pinfo%npk                      = nproc_k
+  pinfo%nporbital                = nproc_ob
+  pinfo%npdomain_orbital(1:3)    = nproc_d_o(1:3)
+  pinfo%npdomain_general(1:3)    = nproc_d_g(1:3)
+  pinfo%npdomain_general_dm(1:3) = pinfo%npdomain_general(1:3)/pinfo%npdomain_orbital(1:3)
 
-end subroutine set_numcpu_rt
-
-
+end subroutine set_numcpu_general
 
 end module set_numcpu
