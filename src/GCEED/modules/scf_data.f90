@@ -149,8 +149,6 @@ integer :: num_kpoints_rd
 
 real(8),allocatable :: norm_diff_psi_stock(:,:)
 
-real(8) :: Etot
-real(8) :: Exc
 
 integer :: iflag_subspace_diag
 

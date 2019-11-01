@@ -13,7 +13,7 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subdip(ng,srho,rNe,poisson)
+subroutine subdip(ng,srho,rNe,poisson,Etot)
 use structures, only: s_rgrid,s_scalar,s_poisson
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
@@ -24,6 +24,7 @@ use timer
 implicit none
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
+real(8),intent(in)        :: Etot
 real(8),intent(out)       :: rNe
 type(s_poisson),intent(in) :: poisson
 integer :: i1,ix,iy,iz
