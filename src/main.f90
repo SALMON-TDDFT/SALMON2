@@ -51,6 +51,8 @@ program main
 
 
   call write_perflog_csv
+  
+  if (nproc_id_global == 0) print '(A)',"end SALMON"
 
   call end_parallel
 contains
