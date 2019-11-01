@@ -57,7 +57,6 @@ module inputoutput
   integer :: inml_md
   integer :: inml_group_fundamental
   integer :: inml_group_hartree
-  integer :: inml_group_file
   integer :: inml_group_others
   integer :: inml_code
 
@@ -473,12 +472,6 @@ contains
     namelist/group_hartree/ &
       & lmax_lmp
 
-    namelist/group_file/ &
-      & ic, &
-      & oc, &
-      & ic_rt, &
-      & oc_rt
-
     namelist/group_others/ &
       & iscf_order, &
       & iswitch_orbital_mesh, &
@@ -808,11 +801,6 @@ contains
     itcalc_ene             = 1
 !! == default for &group_hartree
     lmax_lmp = 4
-!! == default for &group_file
-    ic    = 0
-    oc    = 1
-    ic_rt = 0
-    oc_rt = 0
 !! == default for &group_others
     iscf_order  = 1
     iswitch_orbital_mesh = 0
@@ -906,9 +894,6 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=group_hartree, iostat=inml_group_hartree)
-      rewind(fh_namelist)
-
-      read(fh_namelist, nml=group_file, iostat=inml_group_file)
       rewind(fh_namelist)
 
       read(fh_namelist, nml=group_others, iostat=inml_group_others)
@@ -1268,11 +1253,6 @@ contains
     call comm_bcast(itcalc_ene            ,nproc_group_global)
 !! == bcast for &group_hartree
     call comm_bcast(lmax_lmp,nproc_group_global)
-!! == bcast for &group_file
-    call comm_bcast(ic   ,nproc_group_global)
-    call comm_bcast(oc   ,nproc_group_global)
-    call comm_bcast(ic_rt,nproc_group_global)
-    call comm_bcast(oc_rt,nproc_group_global)
 !! == bcast for &group_others
     call comm_bcast(iscf_order          ,nproc_group_global)
     call comm_bcast(iswitch_orbital_mesh,nproc_group_global)
@@ -1947,13 +1927,6 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_hartree', inml_group_hartree
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_lmp', lmax_lmp
 
-      if(inml_group_file >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_file', inml_group_file
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'ic', ic
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'oc', oc
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'ic_rt', ic_rt
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'oc_rt', oc_rt
-
       if(inml_group_others >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iscf_order', iscf_order
@@ -2072,9 +2045,6 @@ contains
     end select
 
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
-      if(ispin==1)then
-        stop "Sorry, yn_out_dos is not implemented for ispin=1."
-      end if
       select case(out_dos_function)
       case("gaussian","lorentzian")
         continue
