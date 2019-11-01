@@ -117,8 +117,6 @@ integer :: MST(2),ifMST(2),itotMST
 
 
 
-!Nonlinear core correction
-logical :: flag_nlcc = .false.
 
 
 integer :: ihpsieff
