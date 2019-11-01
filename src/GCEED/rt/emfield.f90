@@ -43,6 +43,7 @@ subroutine calcAext
 !$ use omp_lib
 use em_field, only: calc_Ac_ext
 use scf_data, only: dt,Miter_rt,itotNtime,A_ext
+use math_constants, only: pi
 implicit none
 integer :: itt
 real(8) :: tt
@@ -89,6 +90,7 @@ subroutine calc_env_trigon(ipulse,tenv_trigon)
   !$ use omp_lib
   use inputoutput
   use scf_data
+  use math_constants, only: pi
 
   implicit none
   integer,intent(in)  :: ipulse  ! 1: first pulse, 2: second pulse

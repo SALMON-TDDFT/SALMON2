@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 MODULE global_variables_rt
+
 use inputoutput
 use scf_data
 use allocate_mat_sub
@@ -30,6 +31,7 @@ END MODULE global_variables_rt
 !=======================================================================
 
 subroutine main_tddft
+use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -89,7 +91,6 @@ real(8),allocatable :: alpha_R(:,:),   alpha_I(:,:)
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
 real(8),allocatable :: R1(:,:,:), Sf(:)
 real(8),allocatable :: tfourier_integrand(:,:)
-complex(8),parameter :: zi=(0.d0,1.d0)
 character(10) :: fileLaser
 character(100):: comment_line
 real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
@@ -667,12 +668,12 @@ end subroutine main_tddft
 ! Fourier transform for 3D
 
 SUBROUTINE Fourier3D(Dp_t,alpha_R,alpha_I)
+use math_constants, only: pi, zi
 use global_variables_rt
 implicit none
 
 real(8),intent(IN) :: Dp_t(3,0:Ntime)
 real(8),intent(OUT) :: alpha_R(3,0:Nenergy),alpha_I(3,0:Nenergy)
-complex(8),parameter   :: zi=(0.d0,1.d0)
 complex(8),allocatable :: zalpha(:)
 integer :: iene,nntime
 real(8) :: t2,hw,TT

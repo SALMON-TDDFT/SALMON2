@@ -29,6 +29,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine main_dft
+use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
