@@ -426,7 +426,7 @@ if(yn_restart /= 'y')then
   end do
 
   call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
-  vecDs(1:3)=rbox_array2(1:3)*Hgs(1:3)*Hvol
+  vecDs(1:3)=rbox_array2(1:3)*Hgs(1:3)*system%Hvol
 
 end if
 if(comm_is_root(nproc_id_global))then
@@ -449,7 +449,7 @@ if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
   end do
 end if
 
-rIe(0)=rbox_array2(4)*Hvol
+rIe(0)=rbox_array2(4)*system%Hvol
 Dp(:,0)=0.d0
 Qp(:,:,0)=0.d0
 

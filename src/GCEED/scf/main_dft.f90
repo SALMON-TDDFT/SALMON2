@@ -406,9 +406,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       call comm_summation(sum0,sum1,info_field%icomm_all)
       if(ispin==0)then
-         sum1 = sum1*Hvol/(dble(ifMST(1))*2.d0)
+         sum1 = sum1*system%Hvol/(dble(ifMST(1))*2.d0)
       else if(ispin==1)then
-         sum1 = sum1*Hvol/dble(ifMST(1)+ifMST(2))
+         sum1 = sum1*system%Hvol/dble(ifMST(1)+ifMST(2))
       end if
     case('norm_rho','norm_rho_dng')
       sum0=0.d0
@@ -491,7 +491,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   end do
   call comm_summation(rNebox1,rNebox2,info_field%icomm_all)
   if(comm_is_root(nproc_id_global))then
-     write(*,*) "Ne=",rNebox2*Hvol
+     write(*,*) "Ne=",rNebox2*system%Hvol
   end if
   call timer_end(LOG_WRITE_GS_RESULTS)
 

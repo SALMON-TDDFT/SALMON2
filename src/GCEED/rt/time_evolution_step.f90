@@ -294,7 +294,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(ng,srho,rNe,poisson,energy%E_tot)
+  call subdip(ng,srho,rNe,poisson,energy%E_tot,system%Hvol)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)
@@ -368,7 +368,6 @@ END SUBROUTINE time_evolution_step
 subroutine calc_current_ion(lg,system,pp,curr_i)
   use structures
   use salmon_global, only: natom,Kion
-  use scf_data, only: Hvol
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system
@@ -387,7 +386,7 @@ subroutine calc_current_ion(lg,system,pp,curr_i)
      curr_i(:) = curr_i(:) + pp%Zps(Kion(ia)) * system%Velocity(:,ia)
     !curr_i(:) = curr_i(:) - pp%Zps(Kion(ia)) * system%Velocity(:,ia)
   enddo
-  curr_i(:) = curr_i(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*Hvol)
+  curr_i(:) = curr_i(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*system%Hvol)
 
 end subroutine calc_current_ion
 
