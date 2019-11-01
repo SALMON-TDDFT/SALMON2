@@ -140,10 +140,8 @@ integer :: itotNtime
 
 integer :: lg_sta(3),lg_end(3),lg_num(3)
 integer :: mg_sta(3),mg_end(3),mg_num(3)
-integer :: ng_sta(3),ng_end(3),ng_num(3)
 
 
-integer :: k_sta,k_end,k_num
 
 integer :: num_kpoints_3d(3)
 integer :: num_kpoints_rd
@@ -238,10 +236,6 @@ mg_sta(1:3) = mg%is(1:3)
 mg_end(1:3) = mg%ie(1:3)
 mg_num(1:3) = mg%num(1:3)
 
-ng_sta(1:3) = ng%is(1:3)
-ng_end(1:3) = ng%ie(1:3)
-ng_num(1:3) = ng%num(1:3)
-
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
 
@@ -259,9 +253,6 @@ inum_mxin_s = ng%ie_all - ng%is_all + 1
 Hvol = system%Hvol ! future work: remove this line
 Hgs = system%Hgs ! future work: remove this line
 
-k_sta = info%ik_s ! future work: remove this line
-k_end = info%ik_e ! future work: remove this line
-k_num = info%numk ! future work: remove this line
 
 end subroutine old_mesh
 
