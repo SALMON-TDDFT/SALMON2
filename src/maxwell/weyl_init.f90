@@ -15,20 +15,20 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine weyl_init(fs,ff,fw)
-  use structures,     only: s_fdtd_system, s_fdtd_field, allocate_vector
   use salmon_maxwell, only: ls_fdtd_work
+  use structures,     only: s_fdtd_system, s_fdtd_field, allocate_scalar, &
+                          & allocate_vector, allocate_vector_with_hallow
   implicit none
   type(s_fdtd_system) :: fs
   type(s_fdtd_field)  :: ff
   type(ls_fdtd_work)  :: fw
-  
   ! Allocation of the Vector field components:
   call allocate_vector(fs%mg, ff%vec_e)
   call allocate_vector(fs%mg, ff%vec_h)
   call allocate_vector(fs%mg, ff%vec_j_em)
-  call allocate_vector_array(fs%mg, ff%vec_Ac)
-  call allocate_vector_array(fs%mg, ff%vec_Ac_old)
-  call allocate_vector_array(fs%mg, fw%vec_Ac_tmp)
+  call allocate_vector_with_hallow(fs%mg, ff%vec_Ac)
+  call allocate_vector_with_hallow(fs%mg, ff%vec_Ac_old)
+  call allocate_vector_with_hallow(fs%mg, fw%vec_Ac_tmp)
   call allocate_scalar(fs%mg, fw%edensity_emfield)
   call allocate_scalar(fs%mg, fw%edensity_absorb)
   return
