@@ -215,8 +215,7 @@ character(20) :: fileNumber
 
 real(8),allocatable :: Ex_static(:,:,:),Ey_static(:,:,:),Ez_static(:,:,:)
 
-real(8),allocatable :: curr(:,:), curr_ion(:,:)
-real(8),allocatable :: sumcurr(:,:)
+real(8),allocatable :: curr(:,:)
 
 
 integer :: ilasbound_sta(3),ilasbound_end(3)

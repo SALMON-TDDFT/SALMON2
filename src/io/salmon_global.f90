@@ -321,13 +321,6 @@ module salmon_global
 !! &group_hartree
   integer        :: lmax_lmp
 
-!! &group_file
-!! FIXME: following variables never used in SALMON, please remove these.
-  integer        :: ic
-  integer        :: oc
-  integer        :: ic_rt
-  integer        :: oc_rt
-
 !! &group_others
   integer        :: iscf_order
   integer        :: iswitch_orbital_mesh
