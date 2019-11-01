@@ -450,7 +450,8 @@ contains
        write(uid,10) "E_ext", "External electric field"
        write(uid,10) "Ac_tot", "Total vector potential field"
        write(uid,10) "E_tot", "Total electric field"
-       write(uid,10) "dm", "Dipole moment"
+       write(uid,10) "ddm_e", "Change of dipole moment (electrons)"
+!       write(uid,10) "dm_e_ph", "Total dipole moment (electrons and phonons)"
 !       if(yn_md=='y') then
 !          write(uid,10) "Jm", "Matter current density(electrons)"
 !          write(uid,10) "Jmi","Matter current density(ions)"
@@ -474,18 +475,15 @@ contains
          & 14, "dm_x", trim(t_unit_length%name), &
          & 15, "dm_y", trim(t_unit_length%name), &
          & 16, "dm_z", trim(t_unit_length%name)
-!       if(yn_md=='y') then
-!          write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-!               & 17, "Jmi_x", trim(t_unit_current%name), &
-!               & 18, "Jmi_y", trim(t_unit_current%name), &
-!               & 19, "Jmi_z", trim(t_unit_current%name)
-!       endif
+!         & 17, "dm_x", trim(t_unit_length%name), &
+!         & 18, "dm_y", trim(t_unit_length%name), &
+!         & 19, "dm_z", trim(t_unit_length%name)
        write(uid,*)
        flush(uid)
 
     else  !it>=0
        uid = ofl%fh_rt
-        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+       write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
           & it * dt * t_unit_time%conv,    &
           & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
           & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
@@ -498,7 +496,7 @@ contains
 
   end subroutine
 !===================================================================================================================================
-  subroutine write_rt_data_3d(it,ofl,dt,system,curr_in)
+  subroutine write_rt_data_3d(it,ofl,dt,system,curr_e,curr_i)
     use structures, only: s_ofile, s_dft_system
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
@@ -508,7 +506,7 @@ contains
     type(s_ofile) :: ofl
     integer, intent(in) :: it
     type(s_dft_system), intent(in) :: system
-    real(8),intent(in) :: curr_in(3,system%nspin)
+    real(8),intent(in) :: curr_e(3,2), curr_i(3)
     integer :: uid
     real(8) :: dt
 
@@ -558,24 +556,17 @@ contains
 
     else  !it>=0
        uid = ofl%fh_rt
-        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+       write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
           & it * dt * t_unit_time%conv,    &
           & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
           & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
           & system%vec_Ac(1:3) * t_unit_ac%conv, &
           & system%vec_Ec(1:3) * t_unit_elec%conv, &
-          & curr_in(1:3,1) * t_unit_current%conv
-!        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
-!          & it * dt * t_unit_time%conv, &
-!          & Ac_ext(it, 1:3) * t_unit_ac%conv, &
-!          & E_ext(it, 1:3) * t_unit_elec%conv, &
-!          & Ac_tot(it, 1:3) * t_unit_ac%conv, &
-!          & E_tot(it, 1:3) * t_unit_elec%conv, &
-!          & javt(it, 1:3) * t_unit_current%conv
-!        if(yn_md=='y') then
-!           write(uid, "(99(1X,E23.15E3))",advance='no') &
-!                & javt_ion(it, 1:3) * t_unit_current%conv
-!        endif
+          & curr_e(1:3,1) * t_unit_current%conv
+       if(yn_md=='y') then
+          write(uid, "(99(1X,E23.15E3))",advance='no') &
+          & curr_i(1:3) * t_unit_current%conv
+       endif
        write(uid,*)
     endif
     endif
