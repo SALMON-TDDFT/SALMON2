@@ -77,6 +77,15 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
+  type s_process_info
+    integer :: npk
+    integer :: nporbital
+    integer :: nporbital_spin(2)
+    integer :: npdomain_orbital(3)    ! x,y,z
+    integer :: npdomain_general(3)    ! x,y,z
+    integer :: npdomain_general_dm(3) ! x,y,z
+  end type
+
 ! for persistent communication
   type s_pcomm_cache
     real(8), allocatable :: dbuf(:, :, :, :)
@@ -323,7 +332,7 @@ module structures
   type s_cg
     type(s_orbital) :: xk,hxk,gk,pk,pko,hwf
   end type s_cg
-  
+
   type s_mixing
     integer :: num_rho_stock
     type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)

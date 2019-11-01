@@ -102,11 +102,6 @@ real(8),parameter :: cN11_Nd12=12.d0/81800719.d0, cN12_Nd12=-1.d0/194699232.d0
 real(8) :: cnmat(0:12,12),bnmat(4,4)
 
 !-------------------- Global variables
-integer :: nproc_d_o(3),nproc_d_o_mul
-integer :: nproc_ob_spin(2)
-integer :: nproc_d_g(3), nproc_d_o_mul_s
-integer :: nproc_d_g_dm(3), nproc_d_g_mul_dm
-
 integer,allocatable :: ista_Mxin(:,:),iend_Mxin(:,:),inum_Mxin(:,:)
 integer,allocatable :: ista_Mxin_s(:,:),iend_Mxin_s(:,:),inum_Mxin_s(:,:)
 
@@ -256,59 +251,6 @@ character(100) :: file_in_rt_bin
 
 
 CONTAINS
-
-!=========================================================================
-!-------------------------------------------------------------------------
-!-------------------------------------------------------------------------
-!=========================================================================
-subroutine snum_procs
-use salmon_parallel, only: nproc_size_global
-implicit none
-integer :: i,ibox,ipow
-
-nproc_d_o_mul=nproc_size_global/nproc_ob
-
-ibox=1
-ipow=0
-do i=1,29
-  if(ibox<nproc_d_o_mul)then
-    ipow=ipow+1
-    ibox=ibox*2
-  end if
-end do
-
-nproc_d_o(1:3)=1
-do i=1,ipow
-  if(mod(i,3)==1)then
-    nproc_d_o(3)=nproc_d_o(3)*2
-  else if(mod(i,3)==2)then
-    nproc_d_o(2)=nproc_d_o(2)*2
-  else
-    nproc_d_o(1)=nproc_d_o(1)*2
-  end if
-end do
-
-ibox=1
-ipow=0
-do i=1,29
-  if(ibox<nproc_size_global)then
-    ipow=ipow+1
-    ibox=ibox*2
-  end if
-end do
-
-nproc_d_g(1:3)=1
-do i=1,ipow
-  if(mod(i,3)==1)then
-    nproc_d_g(3)=nproc_d_g(3)*2
-  else if(mod(i,3)==2)then
-    nproc_d_g(2)=nproc_d_g(2)*2
-  else
-    nproc_d_g(1)=nproc_d_g(1)*2
-  end if
-end do
-
-end subroutine snum_procs
 
 !======================================================================
 subroutine old_mesh(lg,mg,ng,system,info)

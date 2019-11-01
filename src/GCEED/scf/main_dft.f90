@@ -65,6 +65,7 @@ integer :: itmg,nspin
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
+type(s_process_info) :: pinfo
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
 type(s_sendrecv_grid) :: srg, srg_ng
@@ -116,7 +117,7 @@ mixing%num_rho_stock=21
 ! | initialization |
 ! +----------------+
 
-call init_dft(nproc_group_global,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
 call init_code_optimization
 call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
@@ -644,7 +645,7 @@ subroutine init_code_optimization
   call switch_stencil_optimization(mg%num)
   call switch_openmp_parallelization(mg%num)
 
-  if(iperiodic==3 .and. nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)==1) then
+  if(iperiodic==3 .and. product(pinfo%npdomain_orbital)==1) then
     ignum = mg%num
   else
     ignum = mg%num + (nd*2)
@@ -652,7 +653,7 @@ subroutine init_code_optimization
   call set_modulo_tables(ignum)
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log(nproc_k, nproc_ob, nproc_d_o, nproc_d_g)
+    call optimization_log(pinfo)
   end if
 end subroutine
 

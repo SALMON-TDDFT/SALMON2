@@ -20,18 +20,20 @@ CONTAINS
 
 !===================================================================================================================================
 
-subroutine init_communicator_dft(comm,info,info_field)
-  use salmon_global, only: process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_ob,nproc_k,ispin
-  use structures, only: s_orbital_parallel, s_field_parallel
+subroutine init_communicator_dft(comm,pinfo,info,info_field)
+  use salmon_global, only: process_allocation,ispin
+  use structures, only: s_orbital_parallel, s_field_parallel, s_process_info
   use salmon_communication, only: comm_create_group, comm_get_groupinfo, &
                                   comm_summation
   use misc_routines, only: get_wtime
   implicit none
   integer,      intent(in) :: comm
+  type(s_process_info), intent(in) :: pinfo
   type(s_orbital_parallel) :: info
   type(s_field_parallel)   :: info_field
   !
   integer :: myrank,nproc
+  integer :: nproc_k,nproc_ob
   integer :: nproc_d_o(3),nproc_d_g(3),nproc_d_o_mul,nproc_d_g_dm(3),nproc_d_g_mul_dm,nproc_ob_spin(2)
   integer :: imr(3),imrs(3),igroup
   integer :: i1,i2,i3,i4,i5,ix,iy,iz,ixs,iys,izs
@@ -46,16 +48,14 @@ subroutine init_communicator_dft(comm,info,info_field)
   info%id_rko = myrank
   info%isize_rko = nproc
 
-  nproc_d_o = nproc_domain_orbital
-  nproc_d_g = nproc_domain_general
-  nproc_d_o_mul = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
-  nproc_d_g_dm = nproc_d_g/nproc_d_o
-  nproc_d_g_mul_dm = nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-
-  if(ispin==1)then
-    nproc_ob_spin(1) = (nproc_ob+1)/2
-    nproc_ob_spin(2) = nproc_ob/2
-  end if
+  nproc_k          = pinfo%npk
+  nproc_ob         = pinfo%nporbital
+  nproc_ob_spin    = pinfo%nporbital_spin
+  nproc_d_o        = pinfo%npdomain_orbital
+  nproc_d_g        = pinfo%npdomain_general
+  nproc_d_g_dm     = pinfo%npdomain_general_dm
+  nproc_d_o_mul    = product(nproc_d_o)
+  nproc_d_g_mul_dm = product(nproc_d_g_dm)
 
   !new_world for comm_kgrid
   if(process_allocation=='orbital_sequential')then
