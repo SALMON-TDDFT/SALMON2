@@ -124,8 +124,6 @@ real(8) :: Hvol
 logical :: flag_nlcc = .false.
 
 
-real(8),allocatable :: rho(:,:,:)       ! Single particle density
-real(8),allocatable :: rho0(:,:,:)      ! Single particle density
 integer :: ihpsieff
 integer :: iSCFRT
 

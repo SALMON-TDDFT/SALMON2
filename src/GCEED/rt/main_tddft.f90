@@ -333,8 +333,6 @@ fileLaser= "laser.out"
 allocate( R1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
                                lg%is(3):lg%ie(3)))
 
-allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
 ! External Field Direction
 select case (ikind_eext)
   case(1)
@@ -455,11 +453,9 @@ rIe(0)=rbox_array2(4)*Hvol
 Dp(:,0)=0.d0
 Qp(:,:,0)=0.d0
 
-rho0 = srho%f
-
   do itt=0,0
     if(yn_out_dns_rt=='y')then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,hgs,iscfrt,srho%f,itt)
     end if
     if(yn_out_elf_rt=='y')then
       call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
