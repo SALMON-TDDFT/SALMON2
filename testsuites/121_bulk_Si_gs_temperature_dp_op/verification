@@ -67,6 +67,9 @@ for name1, [resval1, refval1, error1] in checklist1.items():
     if name1 not in result1:
         print("Result %s (%s) is not found" % (name1, ptn))
         sys.exit(-1)  # Failure
+    elif name1 not in result2:
+        print("Result %s (%s) is not found" % (name1, ptn))
+        sys.exit(-1)  # Failure
     else:
         print("Result %s = %e (Reference = %e)" % (name1, result1[name1], refval1))
         if abs(result2[name1] - result1[name1] - refval1) > error1:
@@ -74,7 +77,10 @@ for name1, [resval1, refval1, error1] in checklist1.items():
             sys.exit(-1)  # Failure
 
 for name2, [resval2, refval2, error2] in checklist2.items():
-    if name2 not in result2:
+    if name2 not in result3:
+        print("Result %s (%s) is not found" % (name2, ptn))
+        sys.exit(-1)  # Failure
+    elif name2 not in result4:
         print("Result %s (%s) is not found" % (name2, ptn))
         sys.exit(-1)  # Failure
     else:
