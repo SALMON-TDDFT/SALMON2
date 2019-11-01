@@ -16,12 +16,13 @@
 !=======================================================================
 !=======================================================================
 
-subroutine set_vonf_sd(lg)
+subroutine set_vonf_sd(lg,Hgs)
 !$ use omp_lib
   use structures, only: s_rgrid
   use salmon_communication, only: comm_is_root, comm_summation
   use scf_data
   implicit none
+  real(8),intent(in) :: Hgs(3)
   type(s_rgrid) :: lg
   integer :: i
   integer :: ix,iy,iz,iix,iiy,iiz

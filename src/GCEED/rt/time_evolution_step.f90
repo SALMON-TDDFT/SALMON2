@@ -294,7 +294,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(ng,srho,rNe,poisson,energy%E_tot,system%Hvol)
+  call subdip(ng,srho,rNe,poisson,energy%E_tot,system%Hvol,system%Hgs)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)
@@ -346,7 +346,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,hgs,iscfrt,srho%f,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then

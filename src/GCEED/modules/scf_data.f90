@@ -116,7 +116,6 @@ integer :: MST(2),ifMST(2),itotMST
 
 real(8) :: rnetot
 
-real(8) :: Hgs(3)        ! Grid spacing
 
 
 !Nonlinear core correction
@@ -247,7 +246,6 @@ ista_mxin_s = ng%is_all
 iend_mxin_s = ng%ie_all
 inum_mxin_s = ng%ie_all - ng%is_all + 1
 
-Hgs = system%Hgs ! future work: remove this line
 
 
 end subroutine old_mesh
