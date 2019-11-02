@@ -38,7 +38,8 @@ subroutine set_filename
   file_Projection=trim(sysname)//"_proj.data"
   
  !file_ini=trim(sysname)//"_ini.data" !removed
-
+  
+  ! TODO: add files related to the MS calculation
   return
 
 end subroutine set_filename
