@@ -181,7 +181,6 @@ call timer_begin(LOG_READ_GS_DATA)
 call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
 call init_code_optimization
-call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
 call allocate_mat(ng,mg,lg) ! future work: remove this line
 
 call allocate_scalar(mg,srho)

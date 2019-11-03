@@ -209,22 +209,6 @@ character(100) :: file_in_rt_bin
 CONTAINS
 
 !======================================================================
-subroutine old_mesh(lg,mg,ng,system,info)
-use salmon_parallel, only: nproc_size_global
-use structures
-implicit none
-type(s_rgrid),intent(in) :: lg,mg,ng
-type(s_dft_system),intent(in) :: system
-type(s_orbital_parallel),intent(in) :: info
-
-
-
-
-
-
-
-
-end subroutine old_mesh
 
 function check_rion_update() result(rion_update)
   implicit none
