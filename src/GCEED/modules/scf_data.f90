@@ -102,8 +102,6 @@ real(8),parameter :: cN11_Nd12=12.d0/81800719.d0, cN12_Nd12=-1.d0/194699232.d0
 real(8) :: cnmat(0:12,12),bnmat(4,4)
 
 !-------------------- Global variables
-integer,allocatable :: ista_Mxin(:,:),iend_Mxin(:,:),inum_Mxin(:,:)
-integer,allocatable :: ista_Mxin_s(:,:),iend_Mxin_s(:,:),inum_Mxin_s(:,:)
 
 integer :: Miter       ! Total number of Iteration for SCF calculation
 integer :: Miter_rt    ! Total number of Iteration for RT calculation
@@ -220,19 +218,9 @@ type(s_dft_system),intent(in) :: system
 type(s_orbital_parallel),intent(in) :: info
 
 
-allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
-allocate(inum_Mxin(3,0:nproc_size_global-1))
 
-allocate(ista_Mxin_s(3,0:nproc_size_global-1),iend_Mxin_s(3,0:nproc_size_global-1))
-allocate(inum_Mxin_s(3,0:nproc_size_global-1))
 
-ista_mxin = mg%is_all
-iend_mxin = mg%ie_all
-inum_mxin = mg%ie_all - mg%is_all + 1
 
-ista_mxin_s = ng%is_all
-iend_mxin_s = ng%ie_all
-inum_mxin_s = ng%ie_all - ng%is_all + 1
 
 
 
