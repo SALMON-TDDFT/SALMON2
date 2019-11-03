@@ -56,7 +56,6 @@ integer :: MST(2),ifMST(2),itotMST
 
 
 
-integer :: ihpsieff
 integer :: iSCFRT
 
 

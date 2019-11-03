@@ -104,7 +104,6 @@ if(calc_mode=='DFT_BAND'.and.iperiodic/=3) return
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
-ihpsieff=0
 iblacsinit=0
 
 call timer_begin(LOG_TOTAL)

@@ -75,6 +75,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   integer :: is
   character(100) :: comment_line
   logical :: rion_update,if_use_dmat
+  integer :: ihpsieff
 
   nspin = system%nspin
 
