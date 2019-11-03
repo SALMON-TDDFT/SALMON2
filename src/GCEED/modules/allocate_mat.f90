@@ -45,18 +45,18 @@ CONTAINS
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE allocate_mat(ng,mg)
+SUBROUTINE allocate_mat(ng,mg,lg)
   use structures, only: s_rgrid
   implicit none
-  type(s_rgrid),intent(in) :: ng,mg
+  type(s_rgrid),intent(in) :: ng,mg,lg
 
-allocate (vecR(3,lg_sta(1):lg_end(1),    &
-             lg_sta(2):lg_end(2),      &
-             lg_sta(3):lg_end(3)) )
+allocate (vecR(3,lg%is(1):lg%ie(1),    &
+             lg%is(2):lg%ie(2),      &
+             lg%is(3):lg%ie(3)) )
 
-allocate (vecR_tmp(3,lg_sta(1):lg_end(1),    &
-             lg_sta(2):lg_end(2),      &
-             lg_sta(3):lg_end(3)) )
+allocate (vecR_tmp(3,lg%is(1):lg%ie(1),    &
+             lg%is(2):lg%ie(2),      &
+             lg%is(3):lg%ie(3)) )
 
 allocate (matbox_m(mg%is(1):mg%ie(1),    &
              mg%is(2):mg%ie(2),      &
@@ -72,18 +72,18 @@ allocate (cmatbox_m2(mg%is(1):mg%ie(1),    &
              mg%is(2):mg%ie(2),      &
              mg%is(3):mg%ie(3)) )
 
-allocate (matbox_l(lg_sta(1):lg_end(1),    &
-             lg_sta(2):lg_end(2),      &
-             lg_sta(3):lg_end(3)) )
-allocate (matbox_l2(lg_sta(1):lg_end(1),    &
-             lg_sta(2):lg_end(2),      &
-             lg_sta(3):lg_end(3)) )
-allocate (cmatbox_l(lg_sta(1):lg_end(1),    &
-             lg_sta(2):lg_end(2),      &
-             lg_sta(3):lg_end(3)) )
-allocate (cmatbox_l2(lg_sta(1):lg_end(1),    &
-             lg_sta(2):lg_end(2),      &
-             lg_sta(3):lg_end(3)) )
+allocate (matbox_l(lg%is(1):lg%ie(1),    &
+             lg%is(2):lg%ie(2),      &
+             lg%is(3):lg%ie(3)) )
+allocate (matbox_l2(lg%is(1):lg%ie(1),    &
+             lg%is(2):lg%ie(2),      &
+             lg%is(3):lg%ie(3)) )
+allocate (cmatbox_l(lg%is(1):lg%ie(1),    &
+             lg%is(2):lg%ie(2),      &
+             lg%is(3):lg%ie(3)) )
+allocate (cmatbox_l2(lg%is(1):lg%ie(1),    &
+             lg%is(2):lg%ie(2),      &
+             lg%is(3):lg%ie(3)) )
 
 allocate (wk_s_h(ng%is(1)-Ndh:ng%ie(1)+Ndh,   &
              ng%is(2)-Ndh:ng%ie(2)+Ndh,   &

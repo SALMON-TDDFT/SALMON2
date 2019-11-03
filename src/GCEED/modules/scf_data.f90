@@ -133,7 +133,6 @@ real(8) :: vecDs(3)
 
 integer :: itotNtime
 
-integer :: lg_sta(3),lg_end(3),lg_num(3)
 
 
 
@@ -220,9 +219,6 @@ type(s_rgrid),intent(in) :: lg,mg,ng
 type(s_dft_system),intent(in) :: system
 type(s_orbital_parallel),intent(in) :: info
 
-lg_sta(1:3) = lg%is(1:3)
-lg_end(1:3) = lg%ie(1:3)
-lg_num(1:3) = lg%num(1:3)
 
 allocate(ista_Mxin(3,0:nproc_size_global-1),iend_Mxin(3,0:nproc_size_global-1))
 allocate(inum_Mxin(3,0:nproc_size_global-1))
