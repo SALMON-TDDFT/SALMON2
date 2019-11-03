@@ -27,77 +27,17 @@ real(8),parameter :: fs2eVinv = 1.51925d0
 ! Coefficients of finite-difference
 integer,parameter :: Nd=4       ! (2*Nd+1)-points finite-difference used in Taylor expansion
 integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Hartree routine
-real(8),parameter :: cN0=-205.d0/72.d0                 ! for Laplacian
-real(8),parameter :: cN1=8.d0/5.d0  , cN2=-1.d0/5.d0
-real(8),parameter :: cN3=8.d0/315.d0, cN4=-1.d0/560.d0
-real(8),parameter :: bN1=4.d0/5.d0  , bN2=-1.d0/5.d0   ! for Nabla
-real(8),parameter :: bN3=4.d0/105.d0, bN4=-1.d0/280.d0
 
-real(8),parameter :: cN0_Nd1=-2.d0
-real(8),parameter :: cN1_Nd1=1.d0
-real(8),parameter :: bN1_Nd1=1.d0/2.d0
 
-real(8),parameter :: cN0_Nd2=-5.d0/2.d0
-real(8),parameter :: cN1_Nd2=4.d0/3.d0, cN2_Nd2=-1.d0/12.d0
-real(8),parameter :: bN1_Nd2=2.d0/3.d0, bN2_Nd2=-1.d0/12.d0
 
-real(8),parameter :: cN0_Nd3=-49.d0/18.d0 
-real(8),parameter :: cN1_Nd3=3.d0/2.d0, cN2_Nd3=-3.d0/20.d0
-real(8),parameter :: cN3_Nd3=1.d0/90.d0
-real(8),parameter :: bN1_Nd3=3.d0/4.d0, bN2_Nd3=-3.d0/20.d0 
-real(8),parameter :: bN3_Nd3=1.d0/60.d0
 
-real(8),parameter :: cN0_Nd5=-5269.d0/1800.d0 
-real(8),parameter :: cN1_Nd5=5.d0/3.d0, cN2_Nd5=-5.d0/21.d0
-real(8),parameter :: cN3_Nd5=5.d0/126.d0, cN4_Nd5=-5.d0/1008.d0
-real(8),parameter :: cN5_Nd5=1.d0/3150.d0
 
-real(8),parameter :: cN0_Nd6=-5369.d0/1800.d0 
-real(8),parameter :: cN1_Nd6=12.d0/7.d0, cN2_Nd6=-15.d0/56.d0
-real(8),parameter :: cN3_Nd6=10.d0/189.d0, cN4_Nd6=-1.d0/112.d0
-real(8),parameter :: cN5_Nd6=2.d0/1925.d0, cN6_Nd6=-1.d0/16632.d0
 
-real(8),parameter :: cN0_Nd7=-266681.d0/88200.d0
-real(8),parameter :: cN1_Nd7=7.d0/4.d0, cN2_Nd7=-7.d0/24.d0
-real(8),parameter :: cN3_Nd7=7.d0/108.d0, cN4_Nd7=-7.d0/528.d0
-real(8),parameter :: cN5_Nd7=7.d0/3300.d0, cN6_Nd7=-7.d0/30888.d0
-real(8),parameter :: cN7_Nd7=1.d0/84084.d0
 
-real(8),parameter :: cN0_Nd8=-1077749.d0/352800.d0 
-real(8),parameter :: cN1_Nd8=16.d0/9.d0, cN2_Nd8=-14.d0/45.d0
-real(8),parameter :: cN3_Nd8=112.d0/1485.d0, cN4_Nd8=-7.d0/396.d0
-real(8),parameter :: cN5_Nd8=112.d0/32175.d0, cN6_Nd8=-2.d0/3861.d0
-real(8),parameter :: cN7_Nd8=16.d0/315315.d0, cN8_Nd8=-1.d0/411840.d0
 
-real(8),parameter :: cN0_Nd9=-9778141.d0/3175200.d0
-real(8),parameter :: cN1_Nd9=9.d0/5.d0, cN2_Nd9=-18.d0/55.d0
-real(8),parameter :: cN3_Nd9=14.d0/165.d0, cN4_Nd9=-63.d0/2860.d0
-real(8),parameter :: cN5_Nd9=18.d0/3575.d0, cN6_Nd9=-2.d0/2145.d0
-real(8),parameter :: cN7_Nd9=9.d0/70070.d0, cN8_Nd9=-9.d0/777920.d0
-real(8),parameter :: cN9_Nd9=1.d0/1969110.d0
 
-real(8),parameter :: cN0_Nd10=-1968329.d0/635040.d0
-real(8),parameter :: cN1_Nd10=20.d0/11.d0, cN2_Nd10=-15.d0/44.d0
-real(8),parameter :: cN3_Nd10=40.d0/429.d0, cN4_Nd10=-15.d0/572.d0
-real(8),parameter :: cN5_Nd10=24.d0/3575.d0, cN6_Nd10=-5.d0/3432.d0
-real(8),parameter :: cN7_Nd10=30.d0/119119.d0, cN8_Nd10=-5.d0/155584.d0
-real(8),parameter :: cN9_Nd10=10.d0/3741309.d0, cN10_Nd10=-1.d0/9237800.d0
 
-real(8),parameter :: cN0_Nd11=-239437889.d0/76839840.d0
-real(8),parameter :: cN1_Nd11=11.d0/6.d0, cN2_Nd11=-55.d0/156.d0
-real(8),parameter :: cN3_Nd11=55.d0/546.d0, cN4_Nd11=-11.d0/364.d0
-real(8),parameter :: cN5_Nd11=11.d0/1300.d0, cN6_Nd11=-11.d0/5304.d0
-real(8),parameter :: cN7_Nd11=55.d0/129948.d0, cN8_Nd11=-55.d0/806208.d0
-real(8),parameter :: cN9_Nd11=11.d0/1360476.d0, cN10_Nd11=-11.d0/17635800.d0
-real(8),parameter :: cN11_Nd11=1.d0/42678636.d0
 
-real(8),parameter :: cN0_Nd12=-240505109.d0/76839840.d0
-real(8),parameter :: cN1_Nd12=24.d0/13.d0, cN2_Nd12=-33.d0/91.d0
-real(8),parameter :: cN3_Nd12=88.d0/819.d0, cN4_Nd12=-99.d0/2912.d0
-real(8),parameter :: cN5_Nd12=396.d0/38675.d0, cN6_Nd12=-11.d0/3978.d0
-real(8),parameter :: cN7_Nd12=132.d0/205751.d0, cN8_Nd12=-33.d0/268736.d0
-real(8),parameter :: cN9_Nd12=44.d0/2380833.d0, cN10_Nd12=-3.d0/1469650.d0
-real(8),parameter :: cN11_Nd12=12.d0/81800719.d0, cN12_Nd12=-1.d0/194699232.d0
 
 
 !-------------------- Global variables
