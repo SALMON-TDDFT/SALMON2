@@ -16,14 +16,14 @@
 !=======================================================================
 !=======================================================================
 
-subroutine set_vonf_sd(lg,Hgs)
+subroutine set_vonf_sd(mg,lg,Hgs)
 !$ use omp_lib
   use structures, only: s_rgrid
   use salmon_communication, only: comm_is_root, comm_summation
   use scf_data
   implicit none
   real(8),intent(in) :: Hgs(3)
-  type(s_rgrid) :: lg
+  type(s_rgrid) :: mg,lg
   integer :: i
   integer :: ix,iy,iz,iix,iiy,iiz
   integer :: max_icell
@@ -42,9 +42,9 @@ subroutine set_vonf_sd(lg,Hgs)
     do iiz=-max_icell,max_icell
     do iiy=-max_icell,max_icell
     do iix=-max_icell,max_icell
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         rr=sqrt((lg%coordinate(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg%num(1))*Hgs(1)))**2 &
                +(lg%coordinate(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg%num(2))*Hgs(2)))**2 &
                +(lg%coordinate(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg%num(3))*Hgs(3)))**2)

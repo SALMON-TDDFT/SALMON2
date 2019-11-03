@@ -182,7 +182,7 @@ call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,st
 
 call init_code_optimization
 call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
-call allocate_mat(ng) ! future work: remove this line
+call allocate_mat(ng,mg) ! future work: remove this line
 
 call allocate_scalar(mg,srho)
 call allocate_scalar(mg,sVh)
@@ -398,11 +398,11 @@ end do
 end do
 
 if(num_dipole_source>=1)then
-  allocate(vonf_sd(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-  allocate(eonf_sd(3,mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  allocate(vonf_sd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(eonf_sd(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   vonf_sd=0.d0
   eonf_sd=0.d0
-  call set_vonf_sd(lg,system%Hgs)
+  call set_vonf_sd(mg,lg,system%Hgs)
 end if
 
 if(yn_restart /= 'y')then
@@ -440,10 +440,10 @@ if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
   do iik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
   do jspin=1,system%nspin
-        spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1) &
-        = exp(zi*Fst*R1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-           mg_sta(3):mg_end(3)))   &
-           *  spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1)
+        spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1) &
+        = exp(zi*Fst*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+           mg%is(3):mg%ie(3)))   &
+           *  spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1)
   end do
   end do
   end do

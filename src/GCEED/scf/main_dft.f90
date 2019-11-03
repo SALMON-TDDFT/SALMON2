@@ -122,7 +122,7 @@ call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,st
 
 call init_code_optimization
 call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
-call allocate_mat(ng) ! future work: remove this line
+call allocate_mat(ng,mg) ! future work: remove this line
 
 allocate( energy%esp(system%no,system%nk,system%nspin) ); energy%esp=0.0d0
 allocate( esp_old(system%no,system%nk,system%nspin) ); esp_old=0.0d0
