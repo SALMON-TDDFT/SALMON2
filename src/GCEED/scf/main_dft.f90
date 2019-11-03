@@ -346,7 +346,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
                        cg,ppg,V_local,  &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter,    &
+                       iditer_nosubspace_diag,ifmst,mixing,iter,    &
                        poisson,fg,sVh,xc_func,ppn,sVxc,energy)
 
     call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)

@@ -80,7 +80,6 @@ integer :: num_kpoints_rd
 real(8),allocatable :: norm_diff_psi_stock(:,:)
 
 
-integer :: iflag_subspace_diag
 
 real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)

@@ -85,12 +85,6 @@ else
   write(*,*)"'ispin' should be 0 or 1. "
 end if
 
-select case(yn_subspace_diagonalization)
-case('y')
-  iflag_subspace_diag = 1
-case('n')
-  iflag_subspace_diag = 0
-end select
 
 num_kpoints_3d(1:3)=num_kgrid(1:3)
 num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
