@@ -48,8 +48,6 @@ select case(method_mixing)
     stop 'Specify either "simple" or "broyden" for method_mixing.'
 end select
     
-iDiter(1:maxntmg)=1000
-iDiter(1) = nscf
 
 if(ispin == 0)then
   MST(1)=nstate

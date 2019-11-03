@@ -96,6 +96,7 @@ integer :: iter_band_kpt, num_band_kpt, nref_band
 real(8),allocatable :: band_kpt(:,:)
 logical,allocatable :: check_conv_esp(:,:,:)
 integer :: iter_band_kpt_end, iter_band_kpt_stride
+integer :: iDiter(maxntmg)
 
 integer :: i,j, img
 
@@ -112,6 +113,9 @@ call timer_begin(LOG_INIT_GS)
 
 call convert_input_scf(file_atoms_coo)
 mixing%num_rho_stock=21
+
+iDiter(1:maxntmg)=1000
+iDiter(1) = nscf
 
 ! +----------------+
 ! | initialization |

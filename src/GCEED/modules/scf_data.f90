@@ -84,7 +84,6 @@ real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
 
-integer :: iDiter(maxntmg)
 
 integer :: itt
 integer :: ikind_eext   !0:No external field, 1: dipoleApprox
