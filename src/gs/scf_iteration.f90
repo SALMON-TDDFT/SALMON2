@@ -22,9 +22,10 @@ contains
 subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
                cg,ppg,vlocal,  &
                miter,iditerybcg,   &
-               iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter, &
+               iditer_nosubspace_diag,ifmst,mixing,iter, &
                poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-  use inputoutput, only: calc_mode,iperiodic,method_min,method_mixing,mixrate
+  use inputoutput, only: calc_mode,iperiodic,method_min,method_mixing,mixrate &
+                        ,yn_subspace_diagonalization
   use structures
   use timer
 !  use rmmdiis_sub
@@ -55,7 +56,6 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditerybcg
-  integer,               intent(in)    :: iflag_subspace_diag
   integer,               intent(in)    :: iditer_nosubspace_diag
   integer,               intent(in)    :: ifmst(2)
   type(s_mixing),        intent(inout) :: mixing
@@ -98,7 +98,7 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
   call gram_schmidt(system, mg, info, spsi)
 
 ! subspace diagonalization
-  if(iflag_subspace_diag==1)then
+  if(yn_subspace_diagonalization == 'y')then
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      

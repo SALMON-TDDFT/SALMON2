@@ -17,8 +17,8 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,srg,srg_ng, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl, &
-&   poisson,j_e,singlescale)
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
+&   md,ofl,poisson,j_e,singlescale)
   use structures
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
@@ -57,7 +57,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
-  type(s_scalar), intent(inout) :: sVh_stock1,sVh_stock2
+  type(s_scalar), intent(inout) :: sVh_stock1,sVh_stock2,Vbox
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
   type(s_vector) :: j_e ! microscopic electron number current density
@@ -75,6 +75,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   integer :: is
   character(100) :: comment_line
   logical :: rion_update,if_use_dmat
+  integer :: ihpsieff
 
   nspin = system%nspin
 
@@ -101,14 +102,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   
   select case(iperiodic)
   case(0)
-    if(ikind_eext==1) call calcVbox(lg,itt,system)
+    if(ikind_eext==1) call calcVbox(mg,lg,itt,system,Vbox)
     if(ihpsieff==1) then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
       do is=1,nspin
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + vbox(ix,iy,iz)
+        V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + Vbox%f(ix,iy,iz)
       end do
       end do
       end do
@@ -135,7 +136,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   endif
 
   if(propagator=='etrs')then
-    if(iobnum.ge.1)then
+    if(info%numo.ge.1)then
     ! spsi_in --> tpsi, (spsi_out = working array)
       call taylor(mg,system,info,stencil,srg,spsi_in,tpsi,spsi_out,ppg,V_local,zc)
     end if
@@ -157,14 +158,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
     select case(iperiodic)
     case(0)
-      if(ikind_eext==1) call calcVbox(lg,itt+1,system)
+      if(ikind_eext==1) call calcVbox(mg,lg,itt+1,system,Vbox)
       if(ihpsieff==1)then
   !$OMP parallel do collapse(3) private(is,iz,iy,ix)
         do is=1,nspin
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + vbox(ix,iy,iz)
+          V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + Vbox%f(ix,iy,iz)
         end do
         end do
         end do
@@ -182,14 +183,14 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
       end if
     end select
 
-    if(iobnum.ge.1)then
+    if(info%numo.ge.1)then
     ! tpsi --> spsi_out (spsi_in = working array)
       call taylor(mg,system,info,stencil,srg,tpsi,spsi_out,spsi_in,ppg,V_local,zc)
     end if
 
   else 
 
-    if(iobnum.ge.1)then
+    if(info%numo.ge.1)then
     ! spsi_in --> spsi_out (tpsi = working array)
       call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,zc)
     end if
@@ -259,7 +260,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   case(0)
 
     call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
-    Etot = energy%E_tot
 
   case(3)
 
@@ -282,7 +282,6 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
-    Etot = energy%E_tot
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
     if(use_singlescale=='y') then
@@ -296,7 +295,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(ng,srho,rNe,poisson)
+  call subdip(ng,srho,rNe,poisson,energy%E_tot,system%Hvol,system%Hgs)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)
@@ -348,7 +347,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then
@@ -370,7 +369,6 @@ END SUBROUTINE time_evolution_step
 subroutine calc_current_ion(lg,system,pp,curr_i)
   use structures
   use salmon_global, only: natom,Kion
-  use scf_data, only: Hvol
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_dft_system) :: system
@@ -389,7 +387,7 @@ subroutine calc_current_ion(lg,system,pp,curr_i)
      curr_i(:) = curr_i(:) + pp%Zps(Kion(ia)) * system%Velocity(:,ia)
     !curr_i(:) = curr_i(:) - pp%Zps(Kion(ia)) * system%Velocity(:,ia)
   enddo
-  curr_i(:) = curr_i(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*Hvol)
+  curr_i(:) = curr_i(:)/(dble(lg%num(1)*lg%num(2)*lg%num(3))*system%Hvol)
 
 end subroutine calc_current_ion
 
