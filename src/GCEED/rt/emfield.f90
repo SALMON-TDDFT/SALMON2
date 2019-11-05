@@ -13,29 +13,31 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_emfields(nspin,curr_in)
+subroutine calc_emfields(nspin,rt,curr_in)
+  use structures, only : s_dft_rt
   use math_constants, only : pi
   use salmon_global, only : ispin
-  use scf_data, only : curr,itt,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
+  use scf_data, only : itt,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
   use inputoutput, only: trans_longi
   implicit none
+  type(s_dft_rt),intent(inout) :: rt
   integer,intent(in) :: nspin
-  real(8),intent(in) :: curr_in(3,nspin)
+  real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
 
-  curr(1:3,itt) = curr_in(1:3,1)
-  if(ispin==1) curr(1:3,itt) = curr(1:3,itt) + curr_in(1:3,2)
+  rt%curr(1:3,itt) = curr_in(1:3,1)
+  if(ispin==1) rt%curr(1:3,itt) = rt%curr(1:3,itt) + curr_in(1:3,2)  !<-- only if nspin==2??
 
   if(trans_longi=="lo")then
-    A_ind(:,itt+1)=2.d0*A_ind(:,itt)-A_ind(:,itt-1)-4.d0*Pi*curr(:,itt)*dt**2
+    A_ind(:,itt+1)=2d0*A_ind(:,itt) -A_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
   else if(trans_longi=="tr")then
-    A_ind(:,itt+1)=0.d0
+    A_ind(:,itt+1)=0d0
   end if
 
-  A_tot(:,itt+1)=A_ext(:,itt+1)+A_ind(:,itt+1)
+  A_tot(:,itt+1) = A_ext(:,itt+1) + A_ind(:,itt+1)
 
-  E_ext(:,itt)=-(A_ext(:,itt+1)-A_ext(:,itt-1))/(2.d0*dt)
-  E_ind(:,itt)=-(A_ind(:,itt+1)-A_ind(:,itt-1))/(2.d0*dt)
-  E_tot(:,itt)=-(A_tot(:,itt+1)-A_tot(:,itt-1))/(2.d0*dt)
+  E_ext(:,itt) = -(A_ext(:,itt+1) - A_ext(:,itt-1))/(2d0*dt)
+  E_ind(:,itt) = -(A_ind(:,itt+1) - A_ind(:,itt-1))/(2d0*dt)
+  E_tot(:,itt) = -(A_tot(:,itt+1) - A_tot(:,itt-1))/(2d0*dt)
 
 end subroutine calc_emfields
 
@@ -54,10 +56,12 @@ end do
 return
 end subroutine calcAext
 
-subroutine initA(Ntime)
+subroutine initA(Ntime,rt)
+use structures, only : s_dft_rt
 use scf_data
 use salmon_global, only: yn_restart
 implicit none
+type(s_dft_rt),intent(inout) :: rt
 integer :: Ntime
 integer :: t_max
 
@@ -67,14 +71,14 @@ else
   t_max=Ntime+Miter_rt
 end if
 
-allocate( curr(3,0:t_max) )
+allocate( rt%curr(3,0:t_max) )
 allocate( A_ext(3,0:t_max+1) )
 allocate( A_ind(3,0:t_max+1) )
 allocate( A_tot(3,0:t_max+1) )
 allocate( E_ext(3,0:t_max) )
 allocate( E_ind(3,0:t_max) )
 allocate( E_tot(3,0:t_max) )
-curr=0.d0
+rt%curr=0.d0
 A_ext=0.d0
 A_ind=0.d0
 A_tot=0.d0

@@ -13,8 +13,8 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subdip(ng,srho,rNe,poisson,Etot,Hvol,Hgs)
-use structures, only: s_rgrid,s_scalar,s_poisson
+subroutine subdip(rt,ng,srho,rNe,poisson,Etot,Hvol,Hgs)
+use structures, only: s_dft_rt,s_rgrid,s_scalar,s_poisson
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use scf_data
@@ -24,6 +24,7 @@ use timer
 implicit none
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
+type(s_dft_rt),intent(inout) :: rt
 real(8),intent(in)        :: Etot,Hvol,Hgs(3)
 real(8),intent(out)       :: rNe
 type(s_poisson),intent(in) :: poisson
@@ -69,21 +70,20 @@ call timer_begin(LOG_CALC_DP)
    call timer_end(LOG_ALLREDUCE_DIPOLE)
 
    rNe=rbox_array2(4)*Hvol               ! Number of electrons
-   Dp(1:3,itt)=rbox_array2(1:3)*Hgs(1:3)*Hvol-vecDs(1:3)
+   rt%Dp(1:3,itt)=rbox_array2(1:3)*Hgs(1:3)*Hvol-vecDs(1:3)
    do i1=1,3
-     Qp(1:3,i1,itt)=rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
+     rt%Qp(1:3,i1,itt)=rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
    end do
-   rIe(itt)=rNe
+   rt%rIe(itt)=rNe
 
   if(comm_is_root(nproc_id_global))then
     select case(iperiodic)
     case(0)
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
-          itt,dble(itt)*dt*2.41888d-2, (Dp(i1,itt)*a_B,i1=1,3), rNe, Etot*2d0*Ry,poisson%iterVh
-      tene(itt)=Etot
+          itt,dble(itt)*dt*2.41888d-2, (rt%Dp(i1,itt)*a_B,i1=1,3), rNe, Etot*2d0*Ry,poisson%iterVh
     case(3)
       write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
-        itt,dble(itt)*dt*2.41888d-2, (curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
+        itt,dble(itt)*dt*2.41888d-2, (rt%curr(i1,itt),i1=1,3), rNe, Etot*2d0*Ry
     end select
   end if
 

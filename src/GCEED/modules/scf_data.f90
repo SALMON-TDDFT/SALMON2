@@ -29,17 +29,6 @@ integer,parameter :: Nd=4       ! (2*Nd+1)-points finite-difference used in Tayl
 integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Hartree routine
 
 
-
-
-
-
-
-
-
-
-
-
-
 !-------------------- Global variables
 
 integer :: Miter       ! Total number of Iteration for SCF calculation
@@ -52,42 +41,27 @@ integer :: ilsda
 integer :: MST(2),ifMST(2),itotMST
 
 
-
-
-
-
 integer :: iSCFRT
-
 
 integer, allocatable :: idiis_sd(:)
 
 
 complex(8), allocatable :: zc(:)
-real(8), allocatable :: Dp(:,:), Qp(:,:,:), rIe(:)
-real(8), allocatable :: tene(:)
 real(8) :: vecDs(3)
 
 integer :: itotNtime
 
-
-
-
 integer :: num_kpoints_3d(3)
 integer :: num_kpoints_rd
 
-
 real(8),allocatable :: norm_diff_psi_stock(:,:)
-
-
 
 real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
 
-
 integer :: itt
 integer :: ikind_eext   !0:No external field, 1: dipoleApprox
-
 
 !some of following variables can be removed by small changes
 real(8) :: Fst
@@ -106,7 +80,7 @@ real(8)       :: posplane  ! position of the plane
 character(100):: file_Projection
 
 
-real(8),allocatable :: curr(:,:)
+!real(8),allocatable :: curr(:,:)
 
 
 integer :: ilasbound_sta(3),ilasbound_end(3)
