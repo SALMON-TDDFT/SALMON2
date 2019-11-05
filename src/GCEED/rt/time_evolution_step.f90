@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,srg,srg_ng, &
+SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
 &   md,ofl,poisson,j_e,singlescale)
   use structures
@@ -45,6 +45,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   type(s_dft_system),intent(inout) :: system
+  type(s_dft_rt),intent(inout) :: rt
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
@@ -71,7 +72,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   integer :: iatom
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,MI)
-  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
+  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   integer :: is
   character(100) :: comment_line
   logical :: rion_update,if_use_dmat
@@ -267,11 +268,11 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then
-      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
+      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin)) !curr_e_tmp(1:3,1:2)??
     else
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
     end if
-    call calc_emfields(nspin,curr_e_tmp)
+    call calc_emfields(nspin,rt,curr_e_tmp)
     call timer_end(LOG_CALC_CURRENT)
 
     if(yn_md=='y') then
@@ -295,7 +296,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(ng,srho,rNe,poisson,energy%E_tot,system%Hvol,system%Hgs)
+  call subdip(rt,ng,srho,rNe,poisson,energy%E_tot,system%Hvol,system%Hgs)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)
@@ -335,7 +336,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func,s
      !(Export to SYSname_rt.data)
      select case(iperiodic)
      case(0)
-        call write_rt_data_0d(itt,ofl,dt,system,Dp(1:3,itt))
+        call write_rt_data_0d(itt,ofl,dt,system,rt%Dp(1:3,itt))
      case(3)
         call write_rt_data_3d(itt,ofl,dt,system,curr_e_tmp,curr_i_tmp)
      end select

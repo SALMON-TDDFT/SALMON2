@@ -59,6 +59,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system)  :: system
+type(s_dft_rt) :: rt
 type(s_process_info) :: pinfo
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
@@ -242,11 +243,10 @@ call timer_end(LOG_READ_GS_DATA)
 
 call timer_begin(LOG_READ_RT_DATA)
 
-allocate( rIe(0:Ntime) )
-allocate( Dp(3,0:Ntime) )
-allocate( Qp(3,3,0:Ntime) )
-allocate( tene(0:Ntime) )
-call initA(Ntime)
+allocate( rt%rIe(0:Ntime) )
+allocate( rt%Dp(3,0:Ntime) )
+allocate( rt%Qp(3,3,0:Ntime) )
+call initA(Ntime,rt)
 itotNtime=Ntime
 if (yn_restart /= 'y') Miter_rt=0
 call timer_end(LOG_READ_RT_DATA)
@@ -300,7 +300,7 @@ if(comm_is_root(nproc_id_global))then
 
   !(header of SYSname_rt.data)
   select case(iperiodic)
-  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,Dp(1:3,0))
+  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt%Dp(1:3,0))
   case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
   end select
 
@@ -448,9 +448,9 @@ if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
   end do
 end if
 
-rIe(0)=rbox_array2(4)*system%Hvol
-Dp(:,0)=0.d0
-Qp(:,:,0)=0.d0
+rt%rIe(0)   = rbox_array2(4) * system%Hvol
+rt%Dp(:,0)  = 0d0
+rt%Qp(:,:,0)= 0d0
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
@@ -504,11 +504,11 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
 
   if(mod(itt,2)==1)then
-    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
+    call time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   else
-    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
+    call time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   end if
@@ -557,14 +557,14 @@ end if
 select case(iperiodic)
 case(0)
 
-  call Fourier3D(Dp,alpha_R,alpha_I)
+  call Fourier3D(rt%Dp,alpha_R,alpha_I)
   if(comm_is_root(nproc_id_global))then
     if(iflag_intelectron==1)then
       open(1,file=file_RT_e)
       write(1,'(a)') "# time[fs],    integrated electron density" 
        do nntime=1,itotNtime
           write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-          write(1,'(e16.8)',advance="yes") rIe(nntime)
+          write(1,'(e16.8)',advance="yes") rt%rIe(nntime)
        end do
       close(1)
     end if
@@ -598,9 +598,9 @@ case(0)
 case(3)
   allocate( tfourier_integrand(1:3,0:Ntime) )
   if(trans_longi=="lo")then
-    tfourier_integrand(1:3,0:Ntime)=A_ind(1:3,0:Ntime)
+     tfourier_integrand(1:3,0:Ntime) = A_ind(1:3,0:Ntime)
   else if(trans_longi=="tr")then
-    tfourier_integrand(1:3,0:Ntime)=curr(1:3,0:Ntime)
+     tfourier_integrand(1:3,0:Ntime) = rt%curr(1:3,0:Ntime)
   end if
   call Fourier3D(tfourier_integrand,alpha_R,alpha_I)
   if(comm_is_root(nproc_id_global))then
@@ -612,7 +612,7 @@ case(3)
 !           (F*(F+alpha_R(iii,n))/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
 !      write(1,'(3e16.8)',advance="yes")     &
 !           (-F*alpha_I(iii,n)/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
-      write(1,'(3e16.8)',advance="no") (alpha_R(iii,nn), iii=1,3)
+      write(1,'(3e16.8)',advance="no")  (alpha_R(iii,nn), iii=1,3)
       write(1,'(3e16.8)',advance="yes") (alpha_I(iii,nn), iii=1,3)
     end do
     close(1)

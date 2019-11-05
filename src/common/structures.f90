@@ -77,6 +77,12 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
+  type s_dft_rt
+     real(8), allocatable :: Dp(:,:), Qp(:,:,:)    !rename late
+     real(8), allocatable :: rIe(:)    !rename late
+     real(8), allocatable :: curr(:,:)
+  end type s_dft_rt
+
   type s_process_info
     integer :: npk
     integer :: nporbital
