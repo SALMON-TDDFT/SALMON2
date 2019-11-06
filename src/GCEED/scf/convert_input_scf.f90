@@ -48,14 +48,11 @@ select case(method_mixing)
     stop 'Specify either "simple" or "broyden" for method_mixing.'
 end select
     
-iDiter(1:maxntmg)=1000
-iDiter(1) = nscf
 
 if(ispin == 0)then
   MST(1)=nstate
   if(temperature_k>=0.d0)then
     ifMST(1)=nstate
-    rNetot=dble(nelec)
   else
     ifMST(1)=nelec/2
   end if
@@ -66,7 +63,6 @@ else if(ispin == 1)then
     MST(1:2)=nstate
     if(temperature_k>=0.d0)then
       ifMST(1:2)=nstate
-      rNetot=dble(nelec)
     else
       ifMST(1)=nelec - nelec/2
       ifMST(2)=nelec/2
@@ -77,7 +73,6 @@ else if(ispin == 1)then
     if(temperature_k>=0.d0)then
       ifMST(1)=maxval(nstate_spin(1:2))
       ifMST(2)=maxval(nstate_spin(1:2))
-      rNetot=dble(nelec_spin(1))+dble(nelec_spin(2))
     else
       ifMST(1:2)=nelec_spin(1:2)
     end if
@@ -88,17 +83,9 @@ else
   write(*,*)"'ispin' should be 0 or 1. "
 end if
 
-select case(yn_subspace_diagonalization)
-case('y')
-  iflag_subspace_diag = 1
-case('n')
-  iflag_subspace_diag = 0
-end select
 
 num_kpoints_3d(1:3)=num_kgrid(1:3)
 num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
-allocate(wtk(num_kpoints_rd))
-wtk(:)=1.d0/dble(num_kpoints_rd)
 
 if(ilsda == 0) then
   itotMST=MST(1)

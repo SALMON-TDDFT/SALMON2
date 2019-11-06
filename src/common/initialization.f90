@@ -54,7 +54,7 @@ subroutine init_dft(calc_mode,comm,pinfo,info,info_field,lg,mg,ng,system,stencil
 
 ! parallelization
 
-  call init_process_distribution(calc_mode,pinfo)
+  call init_process_distribution(calc_mode,system,pinfo)
   call init_communicator_dft(comm,pinfo,info,info_field)
   call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info)
@@ -222,22 +222,27 @@ end subroutine init_dft_system
 
 !===================================================================================================================================
 
-subroutine init_process_distribution(calc_mode,pinfo)
-  use structures, only: s_process_info
+subroutine init_process_distribution(calc_mode,system,pinfo)
+  use structures, only: s_process_info,s_dft_system
   use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general,ispin
   use set_numcpu
   implicit none
   integer,intent(in)               :: calc_mode
+  type(s_dft_system),intent(in)    :: system
   type(s_process_info),intent(out) :: pinfo
 
   if((nproc_ob + sum(nproc_domain_orbital) + sum(nproc_domain_general)) == 0) then
     ! Process distribution is automatically decided by SALMON.
-    select case(calc_mode)
-    case(1)
-      call set_numcpu_gs(pinfo)
-    case(2)
-      call set_numcpu_rt(pinfo)
-    end select
+    if (system%ngrid > 16**3) then
+      call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,pinfo)
+    else
+      select case(calc_mode)
+      case(1)
+        call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,pinfo)
+      case(2)
+        call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,pinfo)
+      end select
+    end if
   else
     ! Process distribution is explicitly specified by user.
     pinfo%npk              = nproc_k

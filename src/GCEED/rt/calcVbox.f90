@@ -16,8 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE calcVbox(lg,itt_t,system)
-  use structures, only: s_rgrid, s_dft_system
+SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
+  use structures, only: s_rgrid, s_dft_system, s_scalar
   use salmon_communication, only: comm_is_root
   use misc_routines, only: get_wtime
   use inputoutput
@@ -25,9 +25,10 @@ SUBROUTINE calcVbox(lg,itt_t,system)
   
   implicit none
   
-  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: mg,lg
   integer :: itt_t
   type(s_dft_system),intent(inout) :: system
+  type(s_scalar),intent(inout)     :: Vbox
   integer :: ix,iy,iz,jj
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
@@ -38,13 +39,13 @@ SUBROUTINE calcVbox(lg,itt_t,system)
   if(iperiodic==0)then
     if(yn_local_field=='y')then
       do jj=1,3
-        if(mg_sta(jj)-Nd<ilasbound_sta(jj))then
-          ix_sta_Vbox(jj)=mg_sta(jj)-Nd
+        if(mg%is(jj)-Nd<ilasbound_sta(jj))then
+          ix_sta_Vbox(jj)=mg%is(jj)-Nd
         else
           ix_sta_Vbox(jj)=ilasbound_sta(jj)
         end if
-        if(mg_end(jj)+Nd>ilasbound_sta(jj))then
-          ix_end_Vbox(jj)=mg_end(jj)+Nd
+        if(mg%ie(jj)+Nd>ilasbound_sta(jj))then
+          ix_end_Vbox(jj)=mg%ie(jj)+Nd
         else
           ix_end_Vbox(jj)=ilasbound_end(jj)
         end if
@@ -52,29 +53,29 @@ SUBROUTINE calcVbox(lg,itt_t,system)
     else
       if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
         do jj=1,3
-          if(lg%is(jj)==mg_sta(jj))then
-            ix_sta_Vbox(jj)=mg_sta(jj)
+          if(lg%is(jj)==mg%is(jj))then
+            ix_sta_Vbox(jj)=mg%is(jj)
           else
-            ix_sta_Vbox(jj)=mg_sta(jj)-Nd
+            ix_sta_Vbox(jj)=mg%is(jj)-Nd
           end if
-          if(lg%ie(jj)==mg_end(jj))then
-            ix_end_Vbox(jj)=mg_end(jj)
+          if(lg%ie(jj)==mg%ie(jj))then
+            ix_end_Vbox(jj)=mg%ie(jj)
           else
-            ix_end_Vbox(jj)=mg_end(jj)+Nd
+            ix_end_Vbox(jj)=mg%ie(jj)+Nd
           end if
         end do
       else
-        ix_sta_Vbox(1:3)=mg_sta(1:3)
-        ix_end_Vbox(1:3)=mg_end(1:3)
+        ix_sta_Vbox(1:3)=mg%is(1:3)
+        ix_end_Vbox(1:3)=mg%ie(1:3)
       end if
     end if
   end if
  
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
-    Vbox(ix,iy,iz)=0.d0
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    Vbox%f(ix,iy,iz)=0.d0
   end do
   end do
   end do
@@ -92,7 +93,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
           do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+  &
+            Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+  &
                            E_amplitude1*(epdir_re1(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
                                        epdir_re1(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
                                        epdir_re1(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_1  &
@@ -112,7 +113,7 @@ SUBROUTINE calcVbox(lg,itt_t,system)
           do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox(ix,iy,iz)=Vbox(ix,iy,iz)   &
+            Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)   &
                           +E_amplitude2*(epdir_re2(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
                                        epdir_re2(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
                                        epdir_re2(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_2  &
@@ -136,10 +137,10 @@ SUBROUTINE calcVbox(lg,itt_t,system)
       ipulse=1
       call calc_env_trigon(ipulse,env_trigon_1)
 !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
-        Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_1
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_1
       end do
       end do
       end do
@@ -148,10 +149,10 @@ SUBROUTINE calcVbox(lg,itt_t,system)
       ipulse=2
       call calc_env_trigon(ipulse,env_trigon_2)
 !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iz=mg_sta(3),mg_end(3)
-      do iy=mg_sta(2),mg_end(2)
-      do ix=mg_sta(1),mg_end(1)
-        Vbox(ix,iy,iz)=Vbox(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_2
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_2
       end do
       end do
       end do

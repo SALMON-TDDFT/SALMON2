@@ -29,6 +29,7 @@ END MODULE global_variables_scf
 !=======================================================================
 
 subroutine main_dft
+use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -95,6 +96,7 @@ integer :: iter_band_kpt, num_band_kpt, nref_band
 real(8),allocatable :: band_kpt(:,:)
 logical,allocatable :: check_conv_esp(:,:,:)
 integer :: iter_band_kpt_end, iter_band_kpt_stride
+integer :: iDiter(maxntmg)
 
 integer :: i,j, img
 
@@ -103,7 +105,6 @@ if(calc_mode=='DFT_BAND'.and.iperiodic/=3) return
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
-ihpsieff=0
 iblacsinit=0
 
 call timer_begin(LOG_TOTAL)
@@ -113,6 +114,9 @@ call timer_begin(LOG_INIT_GS)
 call convert_input_scf(file_atoms_coo)
 mixing%num_rho_stock=21
 
+iDiter(1:maxntmg)=1000
+iDiter(1) = nscf
+
 ! +----------------+
 ! | initialization |
 ! +----------------+
@@ -120,8 +124,7 @@ mixing%num_rho_stock=21
 call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
 call init_code_optimization
-call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
-call allocate_mat(ng) ! future work: remove this line
+call allocate_mat(ng,mg,lg) ! future work: remove this line
 
 allocate( energy%esp(system%no,system%nk,system%nspin) ); energy%esp=0.0d0
 allocate( esp_old(system%no,system%nk,system%nspin) ); esp_old=0.0d0
@@ -346,7 +349,7 @@ DFT_Iteration : do iter=1,iDiter(img)
     call scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
                        cg,ppg,V_local,  &
                        Miter,iDiterYBCG,   &
-                       iflag_subspace_diag,iditer_nosubspace_diag,ifmst,mixing,iter,    &
+                       iditer_nosubspace_diag,ifmst,mixing,iter,    &
                        poisson,fg,sVh,xc_func,ppn,sVxc,energy)
 
     call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
@@ -405,9 +408,9 @@ DFT_Iteration : do iter=1,iDiter(img)
       end do
       call comm_summation(sum0,sum1,info_field%icomm_all)
       if(ispin==0)then
-         sum1 = sum1*Hvol/(dble(ifMST(1))*2.d0)
+         sum1 = sum1*system%Hvol/(dble(ifMST(1))*2.d0)
       else if(ispin==1)then
-         sum1 = sum1*Hvol/dble(ifMST(1)+ifMST(2))
+         sum1 = sum1*system%Hvol/dble(ifMST(1)+ifMST(2))
       end if
     case('norm_rho','norm_rho_dng')
       sum0=0.d0
@@ -490,7 +493,7 @@ DFT_Iteration : do iter=1,iDiter(img)
   end do
   call comm_summation(rNebox1,rNebox2,info_field%icomm_all)
   if(comm_is_root(nproc_id_global))then
-     write(*,*) "Ne=",rNebox2*Hvol
+     write(*,*) "Ne=",rNebox2*system%Hvol
   end if
   call timer_end(LOG_WRITE_GS_RESULTS)
 
@@ -617,7 +620,7 @@ call write_info_data(Miter,system,energy,pp)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,ng,rho,matbox_m,matbox_m2,hgs,iscfrt)
+if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') call write_elf(iscfrt,0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)

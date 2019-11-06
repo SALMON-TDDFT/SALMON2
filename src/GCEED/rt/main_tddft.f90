@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 MODULE global_variables_rt
+
 use inputoutput
 use scf_data
 use allocate_mat_sub
@@ -30,6 +31,7 @@ END MODULE global_variables_rt
 !=======================================================================
 
 subroutine main_tddft
+use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -57,6 +59,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system)  :: system
+type(s_dft_rt) :: rt
 type(s_process_info) :: pinfo
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
@@ -68,7 +71,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_scalar) :: sVpsl
-type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2
+type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2,Vbox
 type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -89,7 +92,6 @@ real(8),allocatable :: alpha_R(:,:),   alpha_I(:,:)
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
 real(8),allocatable :: R1(:,:,:), Sf(:)
 real(8),allocatable :: tfourier_integrand(:,:)
-complex(8),parameter :: zi=(0.d0,1.d0)
 character(10) :: fileLaser
 character(100):: comment_line
 real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
@@ -180,13 +182,13 @@ call timer_begin(LOG_READ_GS_DATA)
 call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
 call init_code_optimization
-call old_mesh(lg,mg,ng,system,info) ! future work: remove this line
-call allocate_mat(ng) ! future work: remove this line
+call allocate_mat(ng,mg,lg) ! future work: remove this line
 
 call allocate_scalar(mg,srho)
 call allocate_scalar(mg,sVh)
 call allocate_scalar(mg,sVh_stock1)
 call allocate_scalar(mg,sVh_stock2)
+call allocate_scalar_with_shadow(lg,Nd,Vbox)
 call allocate_scalar(mg,sVpsl)
 allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 do jspin=1,system%nspin
@@ -241,11 +243,10 @@ call timer_end(LOG_READ_GS_DATA)
 
 call timer_begin(LOG_READ_RT_DATA)
 
-allocate( rIe(0:Ntime) )
-allocate( Dp(3,0:Ntime) )
-allocate( Qp(3,3,0:Ntime) )
-allocate( tene(0:Ntime) )
-call initA(Ntime)
+allocate( rt%rIe(0:Ntime) )
+allocate( rt%Dp(3,0:Ntime) )
+allocate( rt%Qp(3,3,0:Ntime) )
+call initA(Ntime,rt)
 itotNtime=Ntime
 if (yn_restart /= 'y') Miter_rt=0
 call timer_end(LOG_READ_RT_DATA)
@@ -299,7 +300,7 @@ if(comm_is_root(nproc_id_global))then
 
   !(header of SYSname_rt.data)
   select case(iperiodic)
-  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,Dp(1:3,0))
+  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt%Dp(1:3,0))
   case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
   end select
 
@@ -331,13 +332,6 @@ fileLaser= "laser.out"
 allocate( R1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
                                lg%is(3):lg%ie(3)))
 
-!if(ikind_eext.ne.0)then
-allocate( Vbox(lg%is(1)-Nd:lg%ie(1)+Nd,lg%is(2)-Nd:lg%ie(2)+Nd, &
-                                       lg%is(3)-Nd:lg%ie(3)+Nd))
-!endif
-
-allocate(rho0(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-
 ! External Field Direction
 select case (ikind_eext)
   case(1)
@@ -346,11 +340,11 @@ select case (ikind_eext)
       do jj=1,3
         select case(mod(lg%num(jj),2))
           case(1)
-            ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/Hgs(jj))
-            ilasbound_end(jj)=nint(rlaserbound_end(jj)/Hgs(jj))
+            ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/system%Hgs(jj))
+            ilasbound_end(jj)=nint(rlaserbound_end(jj)/system%Hgs(jj))
           case(0)
-            ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/Hgs(jj)+0.5d0)
-            ilasbound_end(jj)=nint(rlaserbound_end(jj)/Hgs(jj)+0.5d0)
+            ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/system%Hgs(jj)+0.5d0)
+            ilasbound_end(jj)=nint(rlaserbound_end(jj)/system%Hgs(jj)+0.5d0)
         end select
       end do
     else
@@ -361,33 +355,33 @@ end select
 select case(mod(lg%num(1),2))
   case(1)
     do i1=lg%is(1),lg%ie(1)
-       vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/Hgs(1)
+       vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/system%Hgs(1)
     end do
   case(0)
     do i1=lg%is(1),lg%ie(1)
-       vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/Hgs(1)
+       vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/system%Hgs(1)
     end do
 end select
 
 select case(mod(lg%num(2),2))
   case(1)
     do i2=lg%is(2),lg%ie(2)
-       vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/Hgs(2)
+       vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/system%Hgs(2)
     end do
   case(0)
     do i2=lg%is(2),lg%ie(2)
-       vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/Hgs(2)
+       vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/system%Hgs(2)
     end do
 end select
 
 select case(mod(lg%num(3),2))
   case(1)
     do i3=lg%is(3),lg%ie(3)
-       vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/Hgs(3)
+       vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/system%Hgs(3)
     end do
   case(0)
     do i3=lg%is(3),lg%ie(3)
-       vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/Hgs(3)
+       vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/system%Hgs(3)
     end do
 end select
 
@@ -403,11 +397,11 @@ end do
 end do
 
 if(num_dipole_source>=1)then
-  allocate(vonf_sd(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
-  allocate(eonf_sd(3,mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3)))
+  allocate(vonf_sd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(eonf_sd(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   vonf_sd=0.d0
   eonf_sd=0.d0
-  call set_vonf_sd
+  call set_vonf_sd(mg,lg,system%Hgs)
 end if
 
 if(yn_restart /= 'y')then
@@ -431,7 +425,7 @@ if(yn_restart /= 'y')then
   end do
 
   call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
-  vecDs(1:3)=rbox_array2(1:3)*Hgs(1:3)*Hvol
+  vecDs(1:3)=rbox_array2(1:3)*system%Hgs(1:3)*system%Hvol
 
 end if
 if(comm_is_root(nproc_id_global))then
@@ -445,24 +439,22 @@ if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
   do iik=info%ik_s,info%ik_e
   do iob=info%io_s,info%io_e
   do jspin=1,system%nspin
-        spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1) &
-        = exp(zi*Fst*R1(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),  &
-           mg_sta(3):mg_end(3)))   &
-           *  spsi_in%zwf(mg_sta(1):mg_end(1),mg_sta(2):mg_end(2),mg_sta(3):mg_end(3),jspin,iob,iik,1)
+        spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1) &
+        = exp(zi*Fst*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+           mg%is(3):mg%ie(3)))   &
+           *  spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1)
   end do
   end do
   end do
 end if
 
-rIe(0)=rbox_array2(4)*Hvol
-Dp(:,0)=0.d0
-Qp(:,:,0)=0.d0
-
-rho0 = srho%f
+rt%rIe(0)   = rbox_array2(4) * system%Hvol
+rt%Dp(:,0)  = 0d0
+rt%Qp(:,:,0)= 0d0
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,hgs,iscfrt,rho0,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,itt)
     end if
     if(yn_out_elf_rt=='y')then
       call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
@@ -512,13 +504,13 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Miter_rt+1,itotNtime
 
   if(mod(itt,2)==1)then
-    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson,j_e,singlescale)
+    call time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   else
-    call time_evolution_step(lg,mg,ng,system,info,info_field,stencil,xc_func &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy,md,ofl &
-     & ,poisson,j_e,singlescale)
+    call time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
+     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   end if
 
   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
@@ -534,7 +526,6 @@ call timer_end(LOG_RT_ITERATION)
 
 close(030) ! laser
 
-if(ikind_eext.ne.0) deallocate (Vbox)
 deallocate (R1)
 
 
@@ -566,14 +557,14 @@ end if
 select case(iperiodic)
 case(0)
 
-  call Fourier3D(Dp,alpha_R,alpha_I)
+  call Fourier3D(rt%Dp,alpha_R,alpha_I)
   if(comm_is_root(nproc_id_global))then
     if(iflag_intelectron==1)then
       open(1,file=file_RT_e)
       write(1,'(a)') "# time[fs],    integrated electron density" 
        do nntime=1,itotNtime
           write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-          write(1,'(e16.8)',advance="yes") rIe(nntime)
+          write(1,'(e16.8)',advance="yes") rt%rIe(nntime)
        end do
       close(1)
     end if
@@ -607,9 +598,9 @@ case(0)
 case(3)
   allocate( tfourier_integrand(1:3,0:Ntime) )
   if(trans_longi=="lo")then
-    tfourier_integrand(1:3,0:Ntime)=A_ind(1:3,0:Ntime)
+     tfourier_integrand(1:3,0:Ntime) = A_ind(1:3,0:Ntime)
   else if(trans_longi=="tr")then
-    tfourier_integrand(1:3,0:Ntime)=curr(1:3,0:Ntime)
+     tfourier_integrand(1:3,0:Ntime) = rt%curr(1:3,0:Ntime)
   end if
   call Fourier3D(tfourier_integrand,alpha_R,alpha_I)
   if(comm_is_root(nproc_id_global))then
@@ -621,7 +612,7 @@ case(3)
 !           (F*(F+alpha_R(iii,n))/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
 !      write(1,'(3e16.8)',advance="yes")     &
 !           (-F*alpha_I(iii,n)/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
-      write(1,'(3e16.8)',advance="no") (alpha_R(iii,nn), iii=1,3)
+      write(1,'(3e16.8)',advance="no")  (alpha_R(iii,nn), iii=1,3)
       write(1,'(3e16.8)',advance="yes") (alpha_I(iii,nn), iii=1,3)
     end do
     close(1)
@@ -667,12 +658,12 @@ end subroutine main_tddft
 ! Fourier transform for 3D
 
 SUBROUTINE Fourier3D(Dp_t,alpha_R,alpha_I)
+use math_constants, only: pi, zi
 use global_variables_rt
 implicit none
 
 real(8),intent(IN) :: Dp_t(3,0:Ntime)
 real(8),intent(OUT) :: alpha_R(3,0:Nenergy),alpha_I(3,0:Nenergy)
-complex(8),parameter   :: zi=(0.d0,1.d0)
 complex(8),allocatable :: zalpha(:)
 integer :: iene,nntime
 real(8) :: t2,hw,TT

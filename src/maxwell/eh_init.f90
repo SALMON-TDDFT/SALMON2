@@ -1483,7 +1483,7 @@ end subroutine eh_input_shape
 subroutine eh_prep_GCEED(fs,fw)
   use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,num_kgrid,iperiodic
   use salmon_parallel,   only: nproc_group_global
-  use set_numcpu,        only: set_numcpu_gs
+  use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
   use scf_data,          only: num_kpoints_3d,num_kpoints_rd
   use init_communicator, only: init_communicator_dft
   use sendrecv_grid,     only: create_sendrecv_neig_ng,init_sendrecv_grid
@@ -1504,7 +1504,7 @@ subroutine eh_prep_GCEED(fs,fw)
   num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
   pinfo%npdomain_orbital = nproc_domain_orbital
   pinfo%npdomain_general = nproc_domain_general
-  call set_numcpu_gs(pinfo)
+  call set_numcpu_general(iprefer_domain_distribution,1,1,pinfo)
   call init_communicator_dft(nproc_group_global,pinfo,info,info_field)
   
   !initialize r-grid

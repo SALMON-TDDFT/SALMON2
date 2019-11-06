@@ -77,6 +77,12 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
+  type s_dft_rt
+     real(8), allocatable :: Dp(:,:), Qp(:,:,:)    !rename late
+     real(8), allocatable :: rIe(:)    !rename late
+     real(8), allocatable :: curr(:,:)
+  end type s_dft_rt
+
   type s_process_info
     integer :: npk
     integer :: nporbital
@@ -357,6 +363,25 @@ contains
     end do
     end do
   end subroutine allocate_scalar
+
+  subroutine allocate_scalar_with_shadow(rg,nshadow,field)
+    implicit none
+    type(s_rgrid),intent(in) :: rg
+    integer,intent(in)       :: nshadow
+    type(s_scalar)           :: field
+    integer :: ix,iy,iz
+    allocate(field%f(rg%is(1)-nshadow:rg%ie(1)+nshadow &
+                    ,rg%is(2)-nshadow:rg%ie(2)+nshadow &
+                    ,rg%is(3)-nshadow:rg%ie(3)+nshadow))
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=rg%is(3)-nshadow,rg%ie(3)+nshadow
+    do iy=rg%is(2)-nshadow,rg%ie(2)+nshadow
+    do ix=rg%is(1)-nshadow,rg%ie(1)+nshadow
+      field%f(ix,iy,iz) = 0d0
+    end do
+    end do
+    end do
+  end subroutine allocate_scalar_with_shadow
 
   subroutine allocate_vector(rg,field)
     implicit none
