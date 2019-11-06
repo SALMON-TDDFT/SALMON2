@@ -172,7 +172,6 @@ module sendrecv_grid
   subroutine update_overlap_real8(srg, rg, data, istage)
     use salmon_communication, only: comm_get_groupinfo, &
       & comm_start_all, comm_wait_all, comm_proc_null
-    use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
@@ -196,7 +195,6 @@ module sendrecv_grid
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
     if (.not. srg%if_pcomm_real8_initialized) call alloc_cache()
-    call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(iside, idir) /= comm_proc_null) then
@@ -241,7 +239,6 @@ module sendrecv_grid
         end if
       end do
     end do
-    call timer_end(LOG_SENDRECV_GRID)
 
     if (.not. srg%if_pcomm_real8_initialized) &
       srg%if_pcomm_real8_initialized = .true. ! Update if_pcomm_initialized
@@ -327,7 +324,6 @@ module sendrecv_grid
   subroutine update_overlap_complex8(srg, rg, data, istage)
     use salmon_communication, only: comm_get_groupinfo, &
       & comm_start_all, comm_wait_all, comm_proc_null
-    use timer, only: timer_begin, timer_end, LOG_SENDRECV_GRID
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
@@ -351,7 +347,6 @@ module sendrecv_grid
 
     ! Exchange the overlap region with the neighboring node (or opposite side of itself).
     if (.not. srg%if_pcomm_complex8_initialized) call alloc_cache()
-    call timer_begin(LOG_SENDRECV_GRID)
     do idir = 1, 3 ! 1:x,2:y,3:z
       do iside = 1, 2 ! 1:up,2:down
         if (srg%neig(iside, idir) /= comm_proc_null) then
@@ -395,7 +390,6 @@ module sendrecv_grid
         end if
       end do
     end do
-    call timer_end(LOG_SENDRECV_GRID)
 
     if (.not. srg%if_pcomm_complex8_initialized) &
       srg%if_pcomm_complex8_initialized = .true. ! Update if_pcomm_initialized

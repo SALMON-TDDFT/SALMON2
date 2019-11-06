@@ -238,9 +238,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
   call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
-  call timer_begin(LOG_CALC_VLOCAL) ! FIXME: wrong name
+  call timer_begin(LOG_CALC_ALLGATHERV_VLOCAL) ! FIXME: wrong name
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
-  call timer_end(LOG_CALC_VLOCAL)
+  call timer_end(LOG_CALC_ALLGATHERV_VLOCAL)
 
 ! result
 
@@ -264,7 +264,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
 
   case(3)
 
+    call timer_begin(LOG_CALC_DENSITY_MATRIX)
     if(if_use_dmat) call calc_density_matrix(system,info,mg,srg,spsi_out,dmat)
+    call timer_end(LOG_CALC_DENSITY_MATRIX)
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then

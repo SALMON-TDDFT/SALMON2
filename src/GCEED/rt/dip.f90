@@ -21,7 +21,6 @@ use inputoutput, only: natom, au_time_fs
 use scf_data
 use allocate_mat_sub
 use inputoutput, only: yn_md
-use timer
 implicit none
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
@@ -37,7 +36,6 @@ real(8) :: rbox_array2(10), rbox_arrayq2(3,3)
 real(8) :: rbox1
 real(8) :: fact, time, Hvol,Hgs(3)
 
-call timer_begin(LOG_CALC_DP)
 
 Hvol   = system%Hvol
 Hgs(:) = system%Hgs(:)
@@ -70,10 +68,8 @@ Hgs(:) = system%Hgs(:)
    end do
    rbox_array(4)=rbox1
    
-   call timer_begin(LOG_ALLREDUCE_DIPOLE)
    call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
    call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_global)
-   call timer_end(LOG_ALLREDUCE_DIPOLE)
 
    !(ionic dipole) -- defined as plus charge (ordinary definition))
    rt%Dp_i(:,itt) = 0d0
@@ -126,6 +122,5 @@ Hgs(:) = system%Hgs(:)
       end if
    end if
 
-call timer_end(LOG_CALC_DP)
 
 end subroutine subdip

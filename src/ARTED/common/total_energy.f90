@@ -176,7 +176,6 @@ contains
 !$omp end parallel
     call timer_end(LOG_CALC_TOTAL_ENERGY)
 
-    call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
     !summarize
     if (Rion_update) then
       call comm_summation(Eion_l,Eion_tmp2,nproc_group_tdks)
@@ -198,7 +197,6 @@ contains
     Exc=sum(Eexc)*Hxyz
 
     Eall=Ekin+Eloc+Enl+Exc+Eh+Eion
-    call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
 
   end subroutine
 end subroutine Total_Energy_omp

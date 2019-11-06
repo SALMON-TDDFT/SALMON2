@@ -52,9 +52,7 @@ Subroutine sp_energy_omp
 
   call timer_end(LOG_CALC_ESP)
 
-  call timer_begin(LOG_ALLREDUCE_ESP)
   call comm_summation(esp_l,esp,NB*NK,nproc_group_tdks)
-  call timer_end(LOG_ALLREDUCE_ESP)
 
   return
 End Subroutine sp_energy_omp

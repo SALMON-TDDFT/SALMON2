@@ -440,6 +440,7 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
   integer,allocatable :: idisp(:)
   integer,dimension(3,0:info_field%isize_all-1) :: ista_Mxin_s,iend_Mxin_s,inum_Mxin_s
 
+  call timer_begin(LOG_ALLGATHERV_VLOCAL_CALC)
   myrank = info_field%id_all
   nproc = info_field%isize_all
   ista_mxin_s = ng%is_all
@@ -480,11 +481,13 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
     end do
     end do
     end do
+    call timer_end(LOG_ALLGATHERV_VLOCAL_CALC)
 
-    call timer_begin(LOG_ALLGATHERV_TOTAL)
+    call timer_begin(LOG_ALLGATHERV_VLOCAL_COMM_COLL)
     call comm_allgatherv(matbox11,matbox12,ircnt,idisp,info_field%icomm_v)
-    call timer_end(LOG_ALLGATHERV_TOTAL)
+    call timer_end(LOG_ALLGATHERV_VLOCAL_COMM_COLL)
 
+    call timer_begin(LOG_ALLGATHERV_VLOCAL_CALC)
     if(process_allocation=='orbital_sequential')then
   !$OMP parallel do private(i1,i2,i3,ibox,ibox2) collapse(3)
       do i3=0,info_field%ngo(3)-1
@@ -523,6 +526,7 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
 
   deallocate (ircnt,idisp,matbox11,matbox12)
 
+  call timer_end(LOG_ALLGATHERV_VLOCAL_CALC)
 end subroutine allgatherv_vlocal
 
 subroutine copyVlocal(mg,ista,iend,matbox,V)

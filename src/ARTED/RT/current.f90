@@ -255,17 +255,14 @@ contains
     use Global_Variables, only: jav
     use salmon_parallel, only: nproc_group_tdks
     use salmon_communication, only: comm_summation
-    use timer
     implicit none
     real(8),intent(in) :: jx,jy,jz
     real(8) :: jav_l(3)
 
-    call timer_begin(LOG_ALLREDUCE_CURRENT)
     jav_l(1)=jx
     jav_l(2)=jy
     jav_l(3)=jz
     call comm_summation(jav_l,jav,3,nproc_group_tdks)
-    call timer_end(LOG_ALLREDUCE_CURRENT)
   end subroutine
 end subroutine
 

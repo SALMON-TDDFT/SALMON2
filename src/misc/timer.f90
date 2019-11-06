@@ -59,77 +59,71 @@ module timer
   integer,public,parameter :: LOG_HPSI                  = 52
   integer,public,parameter :: LOG_CALC_DP               = 55
   integer,public,parameter :: LOG_CALC_CURRENT          = 56
-  integer,public,parameter :: LOG_CALC_DENSITY_MATRIX   = 57
-  integer,public,parameter :: LOG_CALC_VLOCAL           = 58 ! FIXME: wrong name
+  integer,public,parameter :: LOG_CALC_ALLGATHERV_VLOCAL = 58
   integer,public,parameter :: LOG_CALC_PROJECTION       = 59
   integer,public,parameter :: LOG_WRITE_ENERGIES        = 61
   integer,public,parameter :: LOG_CALC_CURRENT_ION      = 65
   integer,public,parameter :: LOG_CALC_EIGEN_ENERGY     = 66
   integer,public,parameter :: LOG_CALC_TOTAL_ENERGY_PERIODIC = 67
+  integer,public,parameter :: LOG_CALC_DENSITY_MATRIX   = 68
   integer,public,parameter :: LOG_WRITE_RT_INFOS        = 62
   integer,public,parameter :: LOG_RT_MISC               = 63
   integer,public,parameter :: LOG_RT_ANALYSIS           = 64
 
-  integer,public,parameter :: LOG_ALLREDUCE_RHO             = 101
-  integer,public,parameter :: LOG_ALLREDUCE_HARTREE         = 102
-  integer,public,parameter :: LOG_ALLREDUCE_DIPOLE          = 103
-  integer,public,parameter :: LOG_ALLREDUCE_TOTAL_ENERGY    = 104
-  integer,public,parameter :: LOG_ALLREDUCE_CURRENT         = 105
-  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT3  = 106
-  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT5  = 107
-  integer,public,parameter :: LOG_ALLREDUCE_INNER_PRODUCT7  = 108
-  integer,public,parameter :: LOG_ALLREDUCE_ESP             = 109
-  integer,public,parameter :: LOG_ALLREDUCE_ION_FORCE       = 110
-
-  integer,public,parameter :: LOG_ALLGATHERV_TOTAL          = 120
-
-  integer,public,parameter :: LOG_SENDRECV_TIME_PROPAGATION = 130
-  integer,public,parameter :: LOG_SENDRECV_GRID             = 131
-
+  ! =====================
   ! for specific routines
-  ! total_energy_periodic (GCEED part)
-  integer,public,parameter :: LOG_TEP_TOTAL          = 200
-  integer,public,parameter :: LOG_TEP_SENDRECV       = 201
-  integer,public,parameter :: LOG_TEP_ORBITAL_ENERGY = 202
-  integer,public,parameter :: LOG_TEP_ION_ION        = 203
-  integer,public,parameter :: LOG_TEP_ION_ELECTRON   = 204
-  integer,public,parameter :: LOG_TEP_NONLOCAL_1     = 205
-  integer,public,parameter :: LOG_TEP_NONLOCAL_2     = 206
 
-  ! current (GCEED part)
-  integer,public,parameter :: LOG_CUR_TOTAL               = 210
-  integer,public,parameter :: LOG_CUR_SENDRECV            = 211
-  integer,public,parameter :: LOG_CUR_LOCAL               = 212
-  integer,public,parameter :: LOG_CUR_NONLOCAL1           = 213
-  integer,public,parameter :: LOG_CUR_NONLOCAL1_ALLREDUCE = 214
-  integer,public,parameter :: LOG_CUR_NONLOCAL2           = 215
-  integer,public,parameter :: LOG_CUR_NONLOCAL2_ALLREDUCE = 216
+  ! total_energy module
+  integer,public,parameter :: LOG_TE_ISOLATED_CALC       = 200
+  integer,public,parameter :: LOG_TE_ISOLATED_COMM_COLL  = 201
+  integer,public,parameter :: LOG_TE_PERIODIC_CALC       = 202
+  integer,public,parameter :: LOG_TE_PERIODIC_COMM_COLL  = 203
+  integer,public,parameter :: LOG_EIGEN_ENERGY_CALC      = 204
+  integer,public,parameter :: LOG_EIGEN_ENERGY_HPSI      = 205
+  integer,public,parameter :: LOG_EIGEN_ENERGY_COMM_COLL = 206
 
-  ! conjugate gradient (gscg)
-  integer,public,parameter :: LOG_GSCG_TOTAL          = 220
-  integer,public,parameter :: LOG_GSCG_INIT           = 221
-  integer,public,parameter :: LOG_GSCG_INIT_ITERATION = 222
-  integer,public,parameter :: LOG_GSCG_ITERATION      = 223
-  integer,public,parameter :: LOG_GSCG_DEINIT         = 224
-  integer,public,parameter :: LOG_GSCG_ALLREDUCE      = 225
+  ! density_matrix module
+  integer,public,parameter :: LOG_DENSITY_MATRIX_CALC         = 210
+  integer,public,parameter :: LOG_DENSITY_MATRIX_COMM_COLL    = 211
+  integer,public,parameter :: LOG_DENSITY_MATRIX_COMM_HALO    = 212
+  integer,public,parameter :: LOG_DENSITY_CALC                = 213
+  integer,public,parameter :: LOG_DENSITY_COMM_COLL           = 214
+  integer,public,parameter :: LOG_CURRENT_CALC                = 215
+  integer,public,parameter :: LOG_CURRENT_CALC_UVPSI_RDIVIDED = 216
+  integer,public,parameter :: LOG_CURRENT_COMM_COLL           = 217
+  integer,public,parameter :: LOG_CURRENT_COMM_HALO           = 218
+  integer,public,parameter :: LOG_MCURRENT_CALC               = 219
+  integer,public,parameter :: LOG_MCURRENT_COMM_COLL          = 220
 
-  ! subspace diag
-  integer,public,parameter :: LOG_DIAG_TOTAL       = 230
-  integer,public,parameter :: LOG_DIAG_INIT        = 231
-  integer,public,parameter :: LOG_DIAG_VLOCAL      = 232
-  integer,public,parameter :: LOG_DIAG_AMAT        = 233
-  integer,public,parameter :: LOG_DIAG_ALLREDUCE   = 234
-  integer,public,parameter :: LOG_DIAG_EIGEN       = 235
-  integer,public,parameter :: LOG_DIAG_SET_ORBITAL = 236
-  integer,public,parameter :: LOG_DIAG_UPDATE      = 237
+  ! conjugate_gradient module
+  integer,public,parameter :: LOG_GSCG_ISOLATED_CALC      = 221
+  integer,public,parameter :: LOG_GSCG_ISOLATED_HPSI      = 222
+  integer,public,parameter :: LOG_GSCG_ISOLATED_COMM_COLL = 223
+  integer,public,parameter :: LOG_GSCG_PERIODIC_CALC      = 224
+  integer,public,parameter :: LOG_GSCG_PERIODIC_HPSI      = 225
+  integer,public,parameter :: LOG_GSCG_PERIODIC_COMM_COLL = 226
 
-  ! hpsi (ARTED part)
-  integer,public,parameter :: LOG_HPSI_INIT    = 245
-  integer,public,parameter :: LOG_HPSI_STENCIL = 246
-  integer,public,parameter :: LOG_HPSI_PSEUDO  = 247
-  integer,public,parameter :: LOG_HPSI_UPDATE  = 248
+  ! subspace_diagonalization module
+  integer,public,parameter :: LOG_SSDG_ISOLATED_CALC      = 227
+  integer,public,parameter :: LOG_SSDG_ISOLATED_HPSI      = 228
+  integer,public,parameter :: LOG_SSDG_ISOLATED_COMM_COLL = 229
+  integer,public,parameter :: LOG_SSDG_PERIODIC_CALC      = 230
+  integer,public,parameter :: LOG_SSDG_PERIODIC_HPSI      = 231
+  integer,public,parameter :: LOG_SSDG_PERIODIC_COMM_COLL = 232
 
-  ! hpsi (unified)
+  ! subspace_diagonalization_so module
+  integer,public,parameter :: LOG_SSDG_SO_ISOLATED_CALC      = 233
+  integer,public,parameter :: LOG_SSDG_SO_ISOLATED_HPSI      = 234
+  integer,public,parameter :: LOG_SSDG_SO_ISOLATED_COMM_COLL = 235
+  integer,public,parameter :: LOG_SSDG_SO_PERIODIC_CALC      = 236
+  integer,public,parameter :: LOG_SSDG_SO_PERIODIC_HPSI      = 237
+  integer,public,parameter :: LOG_SSDG_SO_PERIODIC_COMM_COLL = 238
+
+  ! FIXME: modify later
+  ! hamiltonian module
+  integer,public,parameter :: LOG_ALLGATHERV_VLOCAL_CALC      = 240
+  integer,public,parameter :: LOG_ALLGATHERV_VLOCAL_COMM_COLL = 241
+
   integer,public,parameter :: LOG_UHPSI_ALL            = 250
   integer,public,parameter :: LOG_UHPSI_UPDATE_OVERLAP = 251
   integer,public,parameter :: LOG_UHPSI_STENCIL        = 252
@@ -142,6 +136,14 @@ module timer
   integer,public,parameter :: LOG_UHPSI_OVL_PHASE2_COMM= 258
   integer,public,parameter :: LOG_UHPSI_OVL_PHASE3     = 259
   integer,public,parameter :: LOG_UHPSI_OVL_PHASE4     = 260
+
+
+  ! FIXME: remove later
+  ! hpsi (ARTED part)
+  integer,public,parameter :: LOG_HPSI_INIT    = 245
+  integer,public,parameter :: LOG_HPSI_STENCIL = 246
+  integer,public,parameter :: LOG_HPSI_PSEUDO  = 247
+  integer,public,parameter :: LOG_HPSI_UPDATE  = 248
 
   ! ===============================================================
 

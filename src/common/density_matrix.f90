@@ -45,9 +45,8 @@ contains
     complex(8) :: pocc
     complex(8),allocatable :: wrk(:,:,:,:,:)
 
+    call timer_begin(LOG_DENSITY_MATRIX_CALC)
     nspin = system%nspin
-
-    call timer_begin(LOG_CALC_DENSITY_MATRIX)
 
     is = mg%is
     ie = mg%ie
@@ -62,14 +61,18 @@ contains
                       ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
       psi%zwf = cmplx(psi%rwf)
     end if
+    call timer_end(LOG_DENSITY_MATRIX_CALC)
 
   ! overlap region communication
+    call timer_begin(LOG_DENSITY_MATRIX_COMM_HALO)
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, psi%zwf)
     end if
+    call timer_end(LOG_DENSITY_MATRIX_COMM_HALO)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
+      call timer_begin(LOG_DENSITY_MATRIX_CALC)
 !$omp parallel private(ik,io,iz,iy,ix,ii,pocc,ix1,iy1,iz1)
 !$omp do collapse(2)
       do iz=is(3)-Nd,ie(3)
@@ -108,15 +111,19 @@ contains
       end do
       end do
 !$omp end parallel
+      call timer_end(LOG_DENSITY_MATRIX_CALC)
+
+      call timer_begin(LOG_DENSITY_MATRIX_COMM_COLL)
       call comm_summation(wrk(:,:,:,:,:),dmat%zrho_mat(:,:,:,:,:,ispin,im),nsize,info%icomm_ko)
+      call timer_end(LOG_DENSITY_MATRIX_COMM_COLL)
     end do
     end do
 
+    call timer_begin(LOG_DENSITY_MATRIX_CALC)
     if(allocated(psi%rwf)) deallocate(psi%zwf)
 
     deallocate(wrk)
-
-    call timer_end(LOG_CALC_DENSITY_MATRIX)
+    call timer_end(LOG_DENSITY_MATRIX_CALC)
   end subroutine calc_density_matrix
 
 !===================================================================================================================================
@@ -139,6 +146,7 @@ contains
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
 
+    call timer_begin(LOG_DENSITY_CALC)
     nspin = system%nspin
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
@@ -151,11 +159,13 @@ contains
     nthreads = get_nthreads()
 
     allocate(wrk(is(1):ie(1),is(2):ie(2),is(3):ie(3),0:ceiling_pow2(nthreads)-1))
+    call timer_end(LOG_DENSITY_CALC)
 
     if(allocated(psi%rwf)) then
 
       do im=info%im_s,info%im_e
       do ispin=1,nspin
+        call timer_begin(LOG_DENSITY_CALC)
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
@@ -186,9 +196,11 @@ contains
         end do
 
 !$omp end parallel
-        call timer_begin(LOG_ALLREDUCE_RHO)
+        call timer_end(LOG_DENSITY_CALC)
+
+        call timer_begin(LOG_DENSITY_COMM_COLL)
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
-        call timer_end(LOG_ALLREDUCE_RHO)
+        call timer_end(LOG_DENSITY_COMM_COLL)
       end do
       end do
 
@@ -196,6 +208,7 @@ contains
 
       do im=info%im_s,info%im_e
       do ispin=1,nspin
+        call timer_begin(LOG_DENSITY_CALC)
         tid = 0
 !$omp parallel private(ik,io,iz,iy,ix,wrk2) firstprivate(tid)
 !$      tid = get_thread_id()
@@ -226,12 +239,15 @@ contains
         end do
 
 !$omp end parallel
-        call timer_begin(LOG_ALLREDUCE_RHO)
+        call timer_end(LOG_DENSITY_CALC)
+
+        call timer_begin(LOG_DENSITY_COMM_COLL)
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
-        call timer_end(LOG_ALLREDUCE_RHO)
+        call timer_end(LOG_DENSITY_COMM_COLL)
 
+        call timer_begin(LOG_DENSITY_CALC)
         call sym_rho( rho(ispin,im)%f(:,:,:) )
-
+        call timer_end(LOG_DENSITY_CALC)
       end do
       end do
 
@@ -250,6 +266,7 @@ contains
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
     use code_optimization, only: stencil_is_parallelized_by_omp
+    use timer
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
@@ -268,6 +285,7 @@ contains
     complex(8),allocatable :: uVpsi(:)
     logical :: is_orbital_parallel
 
+    call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
@@ -278,19 +296,25 @@ contains
     ngrid = system%ngrid
 
     BT = transpose(system%rmatrix_B)
+    call timer_end(LOG_CURRENT_CALC)
+
+    call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
     if(info%if_divide_rspace) then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
     end if
+    call timer_end(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
 
   ! overlap region communication
+    call timer_begin(LOG_CURRENT_COMM_HALO)
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, psi%zwf)
     end if
+    call timer_end(LOG_CURRENT_COMM_HALO)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
-
+      call timer_begin(LOG_CURRENT_CALC)
       wrk4 = 0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
@@ -316,13 +340,17 @@ contains
       end do
       end do
 !$omp end parallel do
+      call timer_end(LOG_CURRENT_CALC)
 
+      call timer_begin(LOG_CURRENT_COMM_COLL)
       call comm_summation(wrk4,wrk1,3,info%icomm_rko)
 
       curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      call timer_end(LOG_CURRENT_COMM_COLL)
 
+      call timer_begin(LOG_CURRENT_CALC)
       call sym_vector_xyz( curr(:,ispin,im) )
-
+      call timer_end(LOG_CURRENT_CALC)
     end do
     end do
 
@@ -399,6 +427,7 @@ contains
     use salmon_communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use code_optimization, only: stencil_is_parallelized_by_omp
+    use timer
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
@@ -416,6 +445,7 @@ contains
     complex(8),allocatable :: uVpsi(:)
     logical :: is_orbital_parallel
 
+    call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
@@ -426,14 +456,18 @@ contains
     ngrid = system%ngrid
 
     BT = transpose(system%rmatrix_B)
+    call timer_end(LOG_CURRENT_CALC)
+
+    call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
     if(info%if_divide_rspace) then
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
     end if
+    call timer_end(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
 
     do im=info%im_s,info%im_e
     do ispin=1,nspin
-
+      call timer_begin(LOG_CURRENT_CALC)
       wrk3 = 0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,uVpsi) &
@@ -459,13 +493,16 @@ contains
 !$omp end parallel do
 
       call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
+      call timer_end(LOG_CURRENT_CALC)
 
+      call timer_begin(LOG_CURRENT_COMM_COLL)
       call comm_summation(wrk3,wrk1,3,info%icomm_ko)
 
       wrk2 = wrk1 + matmul(BT,wrk2)
       call comm_summation(wrk2,wrk1,3,info%icomm_r)
 
       curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      call timer_end(LOG_CURRENT_COMM_COLL)
     end do
     end do
 
@@ -627,6 +664,7 @@ contains
   subroutine calc_microscopic_current(system,mg,stencil,info,psi,dmat,curr)
     use structures
     use salmon_communication, only: comm_summation
+    use timer
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
@@ -640,6 +678,7 @@ contains
     real(8) :: kAc(3)
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
 
+    call timer_begin(LOG_MCURRENT_CALC)
     nspin = system%nspin
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im_s, im_e @ calc_microscopic_current"
@@ -651,8 +690,10 @@ contains
     nsize = 3* mg%num(1) * mg%num(2) * mg%num(3)
 
     curr%v = 0d0
-    do ispin=1,nspin
+    call timer_end(LOG_MCURRENT_CALC)
 
+    do ispin=1,nspin
+      call timer_begin(LOG_MCURRENT_CALC)
       wrk2 = 0d0
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -665,11 +706,17 @@ contains
 
       end do
       end do
-      call comm_summation(wrk2,wrk,nsize,info%icomm_ko)
+      call timer_end(LOG_MCURRENT_CALC)
 
+      call timer_begin(LOG_MCURRENT_COMM_COLL)
+      call comm_summation(wrk2,wrk,nsize,info%icomm_ko)
+      call timer_end(LOG_MCURRENT_COMM_COLL)
+
+      call timer_begin(LOG_MCURRENT_CALC)
       call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz,mg%ndir)
 
       curr%v = curr%v + wrk + wrk2
+      call timer_end(LOG_MCURRENT_CALC)
     end do
 
     deallocate(wrk,wrk2)

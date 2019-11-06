@@ -27,7 +27,6 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
   use poisson_boundary_sub
-  use timer
   
   implicit none
   integer,parameter :: ndh=4
@@ -117,9 +116,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   
   if(info_field%isize_all==1)then
   else
-    call timer_begin(LOG_ALLREDUCE_HARTREE)
     call comm_summation(sum1,sum2,info_field%icomm_all)
-    call timer_end(LOG_ALLREDUCE_HARTREE)
     sum1=sum2
   end if
   
@@ -141,9 +138,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
     if(info_field%isize_all==1)then
       tottmp=totbox
     else
-      call timer_begin(LOG_ALLREDUCE_HARTREE)
       call comm_summation(totbox,tottmp,info_field%icomm_all)
-      call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
     ak=sum1/tottmp/system%hvol
@@ -171,9 +166,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
     if(info_field%isize_all==1)then
       tottmp=totbox
     else
-      call timer_begin(LOG_ALLREDUCE_HARTREE)
       call comm_summation(totbox,tottmp,info_field%icomm_all)
-      call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
     sum2=tottmp*system%hvol
