@@ -119,9 +119,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
   case(3)
     if(use_singlescale=='n') then
       system%vec_Ac(1:3) = A_ext(1:3,itt) + A_ind(1:3,itt)
-      system%vec_Ec(1:3) = -((A_ext(1:3,itt) + A_ind(1:3,itt))-(A_ext(1:3,itt-1) + A_ind(1:3,itt-1)))/dt
+      system%vec_E(1:3) = -((A_ext(1:3,itt) + A_ind(1:3,itt))-(A_ext(1:3,itt-1) + A_ind(1:3,itt-1)))/dt
       system%vec_Ac_ext(1:3) = A_ext(1:3,itt) 
-      system%vec_Ec_ext(1:3) = -(A_ext(1:3,itt) - A_ext(1:3,itt-1))/dt
+      system%vec_E_ext(1:3) = -(A_ext(1:3,itt) - A_ext(1:3,itt-1))/dt
       call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
     end if
   end select
@@ -177,9 +177,9 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
         stop "etrs mode for single-scale Maxwell-TDDFT is not implemented"
       else
         system%vec_Ac(1:3) = A_ext(1:3,itt+1) + A_ind(1:3,itt+1)
-        system%vec_Ec(1:3) = -((A_ext(1:3,itt+1) + A_ind(1:3,itt+1))-(A_ext(1:3,itt) + A_ind(1:3,itt)))/dt
+        system%vec_E(1:3) = -((A_ext(1:3,itt+1) + A_ind(1:3,itt+1))-(A_ext(1:3,itt) + A_ind(1:3,itt)))/dt
         system%vec_Ac_ext(1:3) = A_ext(1:3,itt+1) 
-        system%vec_Ec_ext(1:3) = -(A_ext(1:3,itt+1) - A_ext(1:3,itt))/dt
+        system%vec_E_ext(1:3) = -(A_ext(1:3,itt+1) - A_ext(1:3,itt))/dt
         call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
       end if
     end select
