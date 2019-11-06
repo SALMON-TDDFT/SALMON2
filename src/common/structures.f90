@@ -65,6 +65,7 @@ module structures
     real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
     real(8) :: E_U
+    real(8) :: E_tot0 ! total energy @ t=0
   end type s_dft_energy
 
   type s_rgrid

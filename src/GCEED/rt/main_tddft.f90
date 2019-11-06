@@ -53,6 +53,7 @@ use fdtd_coulomb_gauge, only: ls_singlescale
 use taylor_sub, only: taylor_coe
 use checkpoint_restart_sub
 use hartree_sub, only: hartree
+use salmon_Total_Energy
 implicit none
 
 type(s_rgrid) :: lg
@@ -236,6 +237,16 @@ end if
 allocate(energy%esp(system%no,system%nk,system%nspin))
 
 call timer_end(LOG_READ_GS_DATA)
+
+! calculation of GS total energy
+call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
+select case(iperiodic)
+case(0)
+   call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+case(3)
+   call calc_Total_Energy_periodic(energy,system,pp,fg,.true.)
+end select
+energy%E_tot0 = energy%E_tot
 
 ! +-------------+
 ! | old fashion |
