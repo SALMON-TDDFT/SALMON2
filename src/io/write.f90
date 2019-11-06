@@ -486,9 +486,9 @@ contains
        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
           & it * dt * t_unit_time%conv,    &
           & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
-          & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
+          & system%vec_E_ext(1:3) * t_unit_elec%conv, &
           & system%vec_Ac(1:3) * t_unit_ac%conv, &
-          & system%vec_Ec(1:3) * t_unit_elec%conv, &
+          & system%vec_E(1:3) * t_unit_elec%conv, &
           & dm(1:3,1) * t_unit_length%conv
        write(uid,*)
     endif
@@ -579,9 +579,9 @@ contains
        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
           & it * dt * t_unit_time%conv,    &
           & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
-          & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
+          & system%vec_E_ext(1:3) * t_unit_elec%conv, &
           & system%vec_Ac(1:3) * t_unit_ac%conv, &
-          & system%vec_Ec(1:3) * t_unit_elec%conv
+          & system%vec_E(1:3) * t_unit_elec%conv
        if(system%nspin==1) then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
           & curr_e(1:3,1) * t_unit_current%conv
