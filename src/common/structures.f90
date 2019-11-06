@@ -57,14 +57,15 @@ module structures
     type(s_vector) :: Ac_micro ! A/c (microscopic)      ! for single-scale Maxwell-TDDFT
     type(s_scalar) :: div_Ac   ! divergence of Ac_micro ! for single-scale Maxwell-TDDFT
     real(8) :: vec_Ac_ext(3) ! external vector potential for output
-    real(8) :: vec_Ec(3) ! total electric field for output
-    real(8) :: vec_Ec_ext(3) ! external electric potential for output
+    real(8) :: vec_E(3)      ! total electric field for output
+    real(8) :: vec_E_ext(3)  ! external electric potential for output
   end type s_dft_system
 
   type s_dft_energy
     real(8),allocatable :: esp(:,:,:) ! (1:no,1:nk,1:nspin), single-particle energy
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
     real(8) :: E_U
+    real(8) :: E_tot0 ! total energy @ t=0
   end type s_dft_energy
 
   type s_rgrid

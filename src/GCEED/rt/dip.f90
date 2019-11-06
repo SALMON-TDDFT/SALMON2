@@ -75,13 +75,13 @@ Hgs(:) = system%Hgs(:)
    call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_global)
    call timer_end(LOG_ALLREDUCE_DIPOLE)
 
-   !(ionic dipole)
+   !(ionic dipole) -- defined as plus charge (ordinary definition))
    rt%Dp_i(:,itt) = 0d0
    do ia=1,natom
       rt%Dp_i(:,itt) = rt%Dp_i(:,itt) + pp%Zps(Kion(ia)) * system%Rion(:,ia)
    enddo
 
-   !(electronic dipole/quadrapole)
+   !(electronic dipole/quadrapole) -- defined as plus charge (opposite definition))
    rt%Dp_e(1:3,itt)  = rbox_array2(1:3) * Hgs(1:3) * Hvol
    rt%dDp_e(1:3,itt) = rt%Dp_e(1:3,itt) - rt%Dp0_e(1:3)
    do i1=1,3
