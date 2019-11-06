@@ -26,6 +26,7 @@ CONTAINS
     use structures
     use salmon_global, only: kion
     use salmon_communication, only: comm_summation
+    use timer
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
@@ -37,6 +38,9 @@ CONTAINS
     integer :: io,ik,ispin,Nspin
     integer :: ix,iy,iz,ia,ib
     real(8) :: sum1,sum2,Eion,Etot,r
+
+    call timer_begin(LOG_TE_ISOLATED_CALC)
+
     Nspin = system%Nspin
 
 !    if (Rion_update) then
@@ -86,13 +90,18 @@ CONTAINS
       end do
     end do
 !$omp end parallel do
-    
+    call timer_end(LOG_TE_ISOLATED_CALC)
+
+    call timer_begin(LOG_TE_ISOLATED_COMM_COLL)
+
     call comm_summation(sum1,sum2,info%icomm_rko)
 
     Etot = Etot + sum2*system%Hvol + energy%E_xc + Eion
 
     energy%E_ion_ion = Eion
     energy%E_tot = Etot
+
+    call timer_end(LOG_TE_ISOLATED_COMM_COLL)
 
     return
   end SUBROUTINE calc_Total_Energy_isolated
@@ -104,6 +113,7 @@ CONTAINS
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
     use salmon_communication, only: comm_summation
+    use timer
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_pp_info)    ,intent(in) :: pp
@@ -114,6 +124,8 @@ CONTAINS
     integer :: ix,iy,iz,ia,ib,ig
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
     complex(8) :: rho_e,rho_i
+
+    call timer_begin(LOG_TE_PERIODIC_CALC)
 
     sysvol = system%det_a
 
@@ -186,6 +198,9 @@ CONTAINS
       end do
     enddo
 !$omp end parallel do
+    call timer_end(LOG_TE_PERIODIC_CALC)
+
+    call timer_begin(LOG_TE_PERIODIC_COMM_COLL)
 
     if (rion_update) then
       E_wrk(4) = E_tmp_l
@@ -205,6 +220,8 @@ CONTAINS
   ! total energy
     energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion
 
+    call timer_end(LOG_TE_PERIODIC_COMM_COLL)
+
     return
   end SUBROUTINE calc_Total_Energy_periodic
 
@@ -216,6 +233,7 @@ CONTAINS
     use salmon_communication, only: comm_summation
     use hamiltonian, only: hpsi
     use spin_orbit_global, only: SPIN_ORBIT_ON
+    use timer
     implicit none
     type(s_dft_energy)         :: energy
     type(s_orbital)            :: tpsi,htpsi,ttpsi
@@ -231,6 +249,7 @@ CONTAINS
     real(8) :: E_tmp,E_local(2),E_sum(2)
     real(8),allocatable :: wrk1(:,:),wrk2(:,:)
 
+    call timer_begin(LOG_EIGEN_ENERGY_CALC)
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_eigen_energy"
     im = 1
 
@@ -241,23 +260,32 @@ CONTAINS
     nk = system%nk
     allocate(wrk1(no,nk),wrk2(no,nk))
     wrk1 = 0d0
+    call timer_end(LOG_EIGEN_ENERGY_CALC)
+
+    call timer_begin(LOG_EIGEN_ENERGY_HPSI)
     call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
+    call timer_end(LOG_EIGEN_ENERGY_HPSI)
 
     if(allocated(tpsi%rwf)) then
-
       do ispin=1,Nspin
+        call timer_begin(LOG_EIGEN_ENERGY_CALC)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           wrk1(io,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
                         * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
+        call timer_end(LOG_EIGEN_ENERGY_CALC)
+
+        call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
         call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
         energy%esp(:,:,ispin) = wrk2
+        call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
       end do
     else
     ! eigen energies (esp)
       do ispin=1,Nspin
+        call timer_begin(LOG_EIGEN_ENERGY_CALC)
 !$omp parallel do collapse(2) default(none) &
 !$omp          private(ik,io) &
 !$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
@@ -268,10 +296,15 @@ CONTAINS
         end do
         end do
 !$omp end parallel do
+        call timer_end(LOG_EIGEN_ENERGY_CALC)
+
+        call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
         call comm_summation(wrk1,wrk2,no*nk,info%icomm_rko)
         energy%esp(:,:,ispin) = wrk2
+        call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
       end do
 
+      call timer_begin(LOG_EIGEN_ENERGY_CALC)
       if ( SPIN_ORBIT_ON ) then
         energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
         energy%esp(:,:,2) = energy%esp(:,:,1)
@@ -320,11 +353,14 @@ CONTAINS
       end do
 !$omp end parallel do
       E_local(2) = E_tmp
+      call timer_end(LOG_EIGEN_ENERGY_CALC)
 
+      call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
       call comm_summation(E_local,E_sum,2,info%icomm_rko)
 
       energy%E_kin      = E_sum(1)
       energy%E_ion_nloc = E_sum(2)
+      call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
     end if
 

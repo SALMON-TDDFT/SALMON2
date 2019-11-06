@@ -25,7 +25,6 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson
   use salmon_communication, only: comm_summation
-  use timer
   
   use omp_lib, only: omp_get_num_threads, omp_get_thread_num, omp_get_max_threads
   use misc_routines, only: ceiling_pow2
@@ -235,9 +234,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
     center_trho_nume_deno2(4,poisson%ipole_tbl(ii))=sum1
   end do
   
-  call timer_begin(LOG_ALLREDUCE_HARTREE)
   call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,info_field%icomm_all)
-  call timer_end(LOG_ALLREDUCE_HARTREE)
   
   do ii=1,poisson%npole_total
     if(center_trho_nume_deno(4,ii)*hvol>=1.d-12)then
@@ -344,9 +341,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
       rholm(:,icen)=rholm2(:,icen)
     end do
   else
-    call timer_begin(LOG_ALLREDUCE_HARTREE)
     call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,info_field%icomm_all)
-    call timer_end(LOG_ALLREDUCE_HARTREE)
   end if
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -453,12 +448,10 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
         poisson%wkbound(jj)=poisson%wkbound2(jj)
       end do
     else
-      call timer_begin(LOG_ALLREDUCE_HARTREE)
       call comm_summation( &
         poisson%wkbound2,              poisson%wkbound,              icount/2, info_field%icomm(k), 0                    )
       call comm_summation( &
         poisson%wkbound2(icount/2+1:), poisson%wkbound(icount/2+1:), icount/2, info_field%icomm(k), info_field%isize(k)-1)
-      call timer_end(LOG_ALLREDUCE_HARTREE)
     end if
   
     if(info_field%id(k)==0) then

@@ -73,9 +73,7 @@ subroutine psi_rho_impl(zutmp,zu_NB)
   end select
   call timer_end(LOG_CALC_RHO)
 
-  call timer_begin(LOG_ALLREDUCE_RHO)
   call comm_summation(rho_l,rho,NL,nproc_group_tdks)
-  call timer_end(LOG_ALLREDUCE_RHO)
 
 
 contains

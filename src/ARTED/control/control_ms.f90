@@ -384,7 +384,6 @@ subroutine tddft_maxwell_ms
     end do Macro_loop !end of Macro_loop iteraction========================
 
     !===========================================================================
-    call timer_begin(LOG_ALLREDUCE_TOTAL_ENERGY)
     call comm_summation(jm_new_m_tmp, Jm_new_m, 3 * nmacro, nproc_group_global)
     if(yn_md=='y') &
     & call comm_summation(jm_ion_new_m_tmp, Jm_ion_new_m, 3*nmacro,nproc_group_global)
@@ -395,7 +394,6 @@ subroutine tddft_maxwell_ms
       call comm_summation(excited_electron_new_m_tmp, excited_electron_new_m, nmacro, nproc_group_global)
       if(comm_is_root(nproc_id_global)) call write_excited_electron(iter+1)
     end if
-    call timer_end(LOG_ALLREDUCE_TOTAL_ENERGY)
     !===========================================================================
 
     

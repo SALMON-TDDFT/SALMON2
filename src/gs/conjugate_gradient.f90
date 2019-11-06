@@ -41,11 +41,9 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: iter
   real(8),dimension(system%nspin,system%no) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
-  call timer_begin(LOG_GSCG_TOTAL)
-  call timer_begin(LOG_GSCG_INIT)
-
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 
+  call timer_begin(LOG_GSCG_ISOLATED_CALC)
   nspin = system%nspin
   is = mg%is
   ie = mg%ie
@@ -71,13 +69,15 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   end do
   end do
   end do
+  call timer_end(LOG_GSCG_ISOLATED_CALC)
 
+  call timer_begin(LOG_GSCG_ISOLATED_HPSI)
   call hpsi(cg%xk,cg%hxk,info,mg,vlocal,system,stencil,srg,ppg)
+  call timer_end(LOG_GSCG_ISOLATED_HPSI)
+
+  call timer_begin(LOG_GSCG_ISOLATED_CALC)
   call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
 
-  call timer_end(LOG_GSCG_INIT)
-
-  call timer_begin(LOG_GSCG_ITERATION)
   Iteration : do iter=1,Ncg
 
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
@@ -143,9 +143,13 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
     end do
+    call timer_end(LOG_GSCG_ISOLATED_CALC)
 
+    call timer_begin(LOG_GSCG_ISOLATED_HPSI)
     call hpsi(cg%pko,cg%hwf,info,mg,vlocal,system,stencil,srg,ppg)
+    call timer_end(LOG_GSCG_ISOLATED_HPSI)
 
+    call timer_begin(LOG_GSCG_ISOLATED_CALC)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
@@ -189,9 +193,7 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
 
   end do Iteration
-  call timer_end(LOG_GSCG_ITERATION)
-
-  call timer_end(LOG_GSCG_TOTAL)
+  call timer_end(LOG_GSCG_ISOLATED_CALC)
 
   return
 contains
@@ -235,9 +237,13 @@ subroutine orthogonalization(mg,system,info,psi,gk)
       end do
     end do
   end do
-  call timer_begin(LOG_GSCG_ALLREDUCE)
+  call timer_end(LOG_GSCG_ISOLATED_CALC)
+
+  call timer_begin(LOG_GSCG_ISOLATED_COMM_COLL)
   call comm_summation(sum_obmat0,sum_obmat1,no**2*nspin,info%icomm_rko)
-  call timer_end(LOG_GSCG_ALLREDUCE)
+  call timer_end(LOG_GSCG_ISOLATED_COMM_COLL)
+
+  call timer_begin(LOG_GSCG_ISOLATED_CALC)
 !$omp parallel do private(ispin,io1,io2,iz,iy,ix) collapse(2)
   do ispin=1,nspin
     do io1=io_s,io_e
@@ -287,9 +293,13 @@ subroutine inner_product(mg,system,info,psi1,psi2,rbox)
     rbox2(ispin,io) = sum0 * system%hvol
   end do
   end do
+  call timer_end(LOG_GSCG_ISOLATED_CALC)
 
+  call timer_begin(LOG_GSCG_ISOLATED_COMM_COLL)
   call comm_summation(rbox2,rbox,nspin*system%no,info%icomm_r)
+  call timer_end(LOG_GSCG_ISOLATED_COMM_COLL)
 
+  call timer_begin(LOG_GSCG_ISOLATED_CALC)
 end subroutine inner_product
 
 end subroutine gscg_isolated
@@ -319,11 +329,9 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: iter
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
 
-  call timer_begin(LOG_GSCG_TOTAL)
-  call timer_begin(LOG_GSCG_INIT)
-
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 
+  call timer_begin(LOG_GSCG_PERIODIC_CALC)
   nspin = system%nspin
   is = mg%is
   ie = mg%ie
@@ -353,13 +361,15 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   end do
   end do
   end do
+  call timer_end(LOG_GSCG_PERIODIC_CALC)
 
+  call timer_begin(LOG_GSCG_PERIODIC_HPSI)
   call hpsi(cg%xk,cg%hxk,info,mg,vlocal,system,stencil,srg,ppg)
+  call timer_end(LOG_GSCG_PERIODIC_HPSI)
+
+  call timer_begin(LOG_GSCG_PERIODIC_CALC)
   call inner_product(mg,system,info,cg%xk,cg%hxk,xkHxk)
 
-  call timer_end(LOG_GSCG_INIT)
-
-  call timer_begin(LOG_GSCG_ITERATION)
   Iteration : do iter=1,Ncg
 
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
@@ -433,9 +443,13 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
     end do
     end do
+    call timer_end(LOG_GSCG_PERIODIC_CALC)
 
+    call timer_begin(LOG_GSCG_PERIODIC_HPSI)
     call hpsi(cg%pko,cg%hwf,info,mg,vlocal,system,stencil,srg,ppg)
+    call timer_end(LOG_GSCG_PERIODIC_HPSI)
 
+    call timer_begin(LOG_GSCG_PERIODIC_CALC)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
@@ -483,9 +497,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     end do
 
   end do Iteration
-  call timer_end(LOG_GSCG_ITERATION)
-
-  call timer_end(LOG_GSCG_TOTAL)
+  call timer_end(LOG_GSCG_PERIODIC_CALC)
 
   return
 contains
@@ -534,9 +546,13 @@ subroutine orthogonalization(mg,system,info,psi,gk)
     end do
   end do
   end do
-  call timer_begin(LOG_GSCG_ALLREDUCE)
+  call timer_end(LOG_GSCG_PERIODIC_CALC)
+
+  call timer_begin(LOG_GSCG_PERIODIC_COMM_COLL)
   call comm_summation(sum_obmat0,sum_obmat1,no**2*nspin*nk,info%icomm_rko)
-  call timer_end(LOG_GSCG_ALLREDUCE)
+  call timer_end(LOG_GSCG_PERIODIC_COMM_COLL)
+
+  call timer_begin(LOG_GSCG_PERIODIC_CALC)
 !$omp parallel do private(ik,ispin,io1,io2,iz,iy,ix) collapse(3)
   do ik=ik_s,ik_e
   do ispin=1,nspin
@@ -590,11 +606,15 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   end do
   end do
   end do
+  call timer_end(LOG_GSCG_PERIODIC_CALC)
 
+  call timer_begin(LOG_GSCG_PERIODIC_COMM_COLL)
   call comm_summation(zbox2,zbox,nspin*system%no*system%nk,info%icomm_r)
+  call timer_end(LOG_GSCG_PERIODIC_COMM_COLL)
 
+  call timer_begin(LOG_GSCG_PERIODIC_CALC)
 end subroutine inner_product
-  
+
 end subroutine gscg_periodic
 
 end module Conjugate_Gradient

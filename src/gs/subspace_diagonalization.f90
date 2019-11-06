@@ -46,28 +46,36 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   real(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   real(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
 
-  call timer_begin(LOG_DIAG_TOTAL)
-
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ subspace_diag"
 
+  call timer_begin(LOG_SSDG_ISOLATED_CALC)
   nspin = system%nspin
   no = system%no
   is = mg%is
   ie = mg%ie
   io_s = info%io_s
   io_e = info%io_e
+  call timer_end(LOG_SSDG_ISOLATED_CALC)
 
+  call timer_begin(LOG_SSDG_ISOLATED_HPSI)
   call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+  call timer_end(LOG_SSDG_ISOLATED_HPSI)
 
+  call timer_begin(LOG_SSDG_ISOLATED_CALC)
   mat1 = 0d0
-
   if(info%if_divide_orbit) then
     do ispin = 1, nspin
       do io1 = 1, no
         if (io_s<= io1 .and. io1 <= io_e) then
           call copy_data(spsi%rwf(:, :, :, ispin, io1, 1, 1),wf_io1)
         end if
+        call timer_end(LOG_SSDG_ISOLATED_CALC)
+
+        call timer_begin(LOG_SSDG_ISOLATED_COMM_COLL)
         call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
+        call timer_end(LOG_SSDG_ISOLATED_COMM_COLL)
+
+        call timer_begin(LOG_SSDG_ISOLATED_CALC)
         do io2 = 1, no
           if (io_s<= io2 .and. io2 <= io_e) then
             cbox = 0d0
@@ -102,29 +110,34 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end do
     end do
   end if
+  call timer_end(LOG_SSDG_ISOLATED_CALC)
 
-  call timer_begin(LOG_DIAG_ALLREDUCE)
+  call timer_begin(LOG_SSDG_ISOLATED_COMM_COLL)
   call comm_summation(mat1,mat2,no**2*nspin,info%icomm_rko)
-  call timer_end(LOG_DIAG_ALLREDUCE)
+  call timer_end(LOG_SSDG_ISOLATED_COMM_COLL)
 
+  call timer_begin(LOG_SSDG_ISOLATED_CALC)
   do ispin=1,nspin
-    call timer_begin(LOG_DIAG_EIGEN)
     call eigen_subdiag(mat2(:,:,ispin),evec(:,:,ispin),no,ierr)
-    call timer_end(LOG_DIAG_EIGEN)
   end do
 
 !$omp workshare
   shpsi%rwf = 0d0
 !$omp end workshare
 
-  call timer_begin(LOG_DIAG_UPDATE)
   if(info%if_divide_orbit) then
     do ispin=1,nspin
     do io2 = 1, no
       if (io_s<= io2 .and. io2 <= io_e) then
         call copy_data(spsi%rwf(:, :, :, ispin, io2, 1, 1),wf_io2)
       end if
+      call timer_end(LOG_SSDG_ISOLATED_CALC)
+
+      call timer_begin(LOG_SSDG_ISOLATED_COMM_COLL)
       call comm_bcast(wf_io2, info%icomm_o, info%irank_io(io2))
+      call timer_end(LOG_SSDG_ISOLATED_COMM_COLL)
+
+      call timer_begin(LOG_SSDG_ISOLATED_CALC)
       !$omp parallel do private(io1,iz,iy,ix) collapse(3)
       do io1=io_s,io_e
         do iz=is(3),ie(3)
@@ -162,8 +175,13 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end do
   end do
   end do
-  call comm_summation(rbox1,rbox2,nspin*no,info%icomm_rko)
+  call timer_end(LOG_SSDG_ISOLATED_CALC)
 
+  call timer_begin(LOG_SSDG_ISOLATED_COMM_COLL)
+  call comm_summation(rbox1,rbox2,nspin*no,info%icomm_rko)
+  call timer_end(LOG_SSDG_ISOLATED_COMM_COLL)
+
+  call timer_begin(LOG_SSDG_ISOLATED_CALC)
   !$omp parallel do private(io,ispin,iz,iy,ix)
   do io=io_s,io_e
   do ispin=1,nspin
@@ -176,9 +194,7 @@ subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end do
   end do
   end do
-  call timer_end(LOG_DIAG_UPDATE)
-
-  call timer_end(LOG_DIAG_TOTAL)
+  call timer_end(LOG_SSDG_ISOLATED_CALC)
 
 end subroutine ssdg_isolated
 
@@ -213,11 +229,10 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     return
   end if
-  
-  call timer_begin(LOG_DIAG_TOTAL)
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ subspace_diag"
 
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
   nspin = system%nspin
   no = system%no
   nk = system%nk
@@ -227,11 +242,14 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
+  call timer_end(LOG_SSDG_PERIODIC_CALC)
 
+  call timer_begin(LOG_SSDG_PERIODIC_HPSI)
   call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+  call timer_end(LOG_SSDG_PERIODIC_HPSI)
 
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
   mat1 = 0d0
-
   if(info%if_divide_orbit) then
     do ik=ik_s,ik_e
     do ispin = 1, nspin
@@ -239,7 +257,13 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
         if (io_s<= io1 .and. io1 <= io_e) then
           call copy_data(spsi%zwf(:, :, :, ispin, io1, ik, 1),wf_io1)
         end if
+        call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+        call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
         call comm_bcast(wf_io1, info%icomm_o, info%irank_io(io1))
+        call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+        call timer_begin(LOG_SSDG_PERIODIC_CALC)
         do io2 = 1, no
           if (io_s<= io2 .and. io2 <= io_e) then
             cbox = 0d0
@@ -277,16 +301,16 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end do
     end do
   end if
+  call timer_end(LOG_SSDG_PERIODIC_CALC)
 
-  call timer_begin(LOG_DIAG_ALLREDUCE)
+  call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
   call comm_summation(mat1,mat2,no**2*nspin*nk,info%icomm_rko)
-  call timer_end(LOG_DIAG_ALLREDUCE)
- 
+  call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
   do ik=ik_s,ik_e
   do ispin=1,nspin
-    call timer_begin(LOG_DIAG_EIGEN)
     call eigen_subdiag_periodic(mat2(:,:,ispin,ik),evec(:,:,ispin,ik),no,ierr)
-    call timer_end(LOG_DIAG_EIGEN)
   end do
   end do
 
@@ -294,8 +318,6 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   shpsi%zwf = 0d0
 !$omp end workshare
 
-  call timer_begin(LOG_DIAG_UPDATE)
-  
   if(info%if_divide_orbit) then
     do ik=ik_s,ik_e
     do ispin=1,nspin
@@ -303,7 +325,13 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
       if (io_s<= io2 .and. io2 <= io_e) then
         call copy_data(spsi%zwf(:, :, :, ispin, io2, ik, 1),wf_io2)
       end if
+      call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+      call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
       call comm_bcast(wf_io2, info%icomm_o, info%irank_io(io2))
+      call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+      call timer_begin(LOG_SSDG_PERIODIC_CALC)
       !$omp parallel do private(io1,iz,iy,ix) collapse(3)
       do io1=io_s,io_e
         do iz=is(3),ie(3)
@@ -346,8 +374,13 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   end do
   end do
   end do
-  call comm_summation(rbox1,rbox2,nspin*no*nk,info%icomm_rko)
+  call timer_end(LOG_SSDG_PERIODIC_CALC)
 
+  call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+  call comm_summation(rbox1,rbox2,nspin*no*nk,info%icomm_rko)
+  call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
   !$omp parallel do private(ik,io,ispin,iz,iy,ix) collapse(2)
   do ik=ik_s,ik_e
   do io=io_s,io_e
@@ -362,9 +395,7 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   end do
   end do
   end do
-  call timer_end(LOG_DIAG_UPDATE)
-
-  call timer_end(LOG_DIAG_TOTAL)
+  call timer_end(LOG_SSDG_PERIODIC_CALC)
 
 end subroutine ssdg_periodic
 
