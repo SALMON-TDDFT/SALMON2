@@ -658,6 +658,20 @@ contains
 
        write(uid,*)
        flush(uid)
+       
+       write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+           & 0d0,        &
+           & energy%E_tot0 * t_unit_energy%conv, &
+           & 0d0
+       if(yn_md=='y') then
+         write(uid, "(99(1X,E23.15E3))",advance='no') &
+             & md%Tene * t_unit_energy%conv, &
+             & md%Temperature,               &
+             & md%E_work * t_unit_energy%conv
+       endif
+       
+       write(uid,*)
+       flush(uid)
 
     else  !it>=0
        uid = ofl%fh_rt_energy
