@@ -47,7 +47,6 @@ integer, allocatable :: idiis_sd(:)
 
 
 complex(8), allocatable :: zc(:)
-real(8) :: vecDs(3)
 
 integer :: itotNtime
 

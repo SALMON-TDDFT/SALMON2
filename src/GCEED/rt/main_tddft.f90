@@ -255,8 +255,10 @@ energy%E_tot0 = energy%E_tot
 call timer_begin(LOG_READ_RT_DATA)
 
 allocate( rt%rIe(0:Ntime) )
-allocate( rt%Dp(3,0:Ntime) )
-allocate( rt%Qp(3,3,0:Ntime) )
+allocate( rt%dDp_e(3,0:Ntime) )
+allocate( rt%Dp_e(3,0:Ntime) )
+allocate( rt%Dp_i(3,0:Ntime) )
+allocate( rt%Qp_e(3,3,0:Ntime) )
 call initA(Ntime,rt)
 itotNtime=Ntime
 if (yn_restart /= 'y') Miter_rt=0
@@ -311,7 +313,7 @@ if(comm_is_root(nproc_id_global))then
 
   !(header of SYSname_rt.data)
   select case(iperiodic)
-  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt%Dp(1:3,0))
+  case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
   case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
   end select
 
@@ -416,12 +418,12 @@ if(num_dipole_source>=1)then
 end if
 
 if(yn_restart /= 'y')then
-  rbox_array=0.d0
+  rbox_array=0d0
   do i1=1,3
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-       rbox_array(i1)=rbox_array(i1)+vecR(i1,ix,iy,iz)*srho%f(ix,iy,iz)
+       rbox_array(i1) = rbox_array(i1) + vecR(i1,ix,iy,iz) * srho%f(ix,iy,iz)
     end do
     end do
     end do
@@ -430,18 +432,18 @@ if(yn_restart /= 'y')then
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-     rbox_array(4)=rbox_array(4)+srho%f(ix,iy,iz)
+     rbox_array(4) = rbox_array(4) + srho%f(ix,iy,iz)
   end do
   end do
   end do
 
   call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
-  vecDs(1:3)=rbox_array2(1:3)*system%Hgs(1:3)*system%Hvol
+  rt%Dp0_e(1:3) = rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
 
 end if
 if(comm_is_root(nproc_id_global))then
   write(*,'(a30)', advance="no") "Static dipole moment(xyz) ="
-  write(*,'(3e15.8)') (vecDs(i1)*a_B, i1=1,3)
+  write(*,'(3e20.10)') (rt%Dp0_e(i1)*a_B, i1=1,3)
   write(*,*)
 endif
 
@@ -459,9 +461,11 @@ if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
   end do
 end if
 
-rt%rIe(0)   = rbox_array2(4) * system%Hvol
-rt%Dp(:,0)  = 0d0
-rt%Qp(:,:,0)= 0d0
+rt%rIe(0)     = rbox_array2(4) * system%Hvol
+rt%dDp_e(:,0) = 0d0
+rt%Dp_e(:,0)  = 0d0
+rt%Dp_i(:,0)  = 0d0
+rt%Qp_e(:,:,0)= 0d0
 
   do itt=0,0
     if(yn_out_dns_rt=='y')then
@@ -568,7 +572,7 @@ end if
 select case(iperiodic)
 case(0)
 
-  call Fourier3D(rt%Dp,alpha_R,alpha_I)
+  call Fourier3D(rt%dDp_e,alpha_R,alpha_I)
   if(comm_is_root(nproc_id_global))then
     if(iflag_intelectron==1)then
       open(1,file=file_RT_e)
@@ -668,12 +672,12 @@ end subroutine main_tddft
 !=======================================================================
 ! Fourier transform for 3D
 
-SUBROUTINE Fourier3D(Dp_t,alpha_R,alpha_I)
+SUBROUTINE Fourier3D(dDp_e_t,alpha_R,alpha_I)
 use math_constants, only: pi, zi
 use global_variables_rt
 implicit none
 
-real(8),intent(IN) :: Dp_t(3,0:Ntime)
+real(8),intent(IN)  :: dDp_e_t(3,0:Ntime)
 real(8),intent(OUT) :: alpha_R(3,0:Nenergy),alpha_I(3,0:Nenergy)
 complex(8),allocatable :: zalpha(:)
 integer :: iene,nntime
@@ -687,7 +691,7 @@ TT = dt*itotNtime ! [a.u.]
 do iene=0,Nenergy
   hw=iene*dE ; zalpha=(0.d0,0.d0)  ! [a.u.]
   do nntime=1,itotNtime
-     t2=nntime*dt ; zalpha(:)=zalpha(:)+exp(zi*hw*t2)*Dp_t(:,nntime) & !hw*t is unitless      
+     t2=nntime*dt ; zalpha(:)=zalpha(:)+exp(zi*hw*t2)*dDp_e_t(:,nntime) & !hw*t is unitless      
                        *(1-3*(t2/TT)**2+2*(t2/TT)**3)
   end do
   select case(iperiodic)

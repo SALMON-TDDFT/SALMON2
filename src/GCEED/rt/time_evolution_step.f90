@@ -296,7 +296,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(rt,ng,srho,rNe,poisson,energy%E_tot,system%Hvol,system%Hgs)
+  call subdip(rt,ng,srho,rNe,poisson,energy%E_tot,system,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)
@@ -336,7 +336,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
      !(Export to SYSname_rt.data)
      select case(iperiodic)
      case(0)
-        call write_rt_data_0d(itt,ofl,dt,system,rt%Dp(1:3,itt))
+        call write_rt_data_0d(itt,ofl,dt,system,rt)
      case(3)
         call write_rt_data_3d(itt,ofl,dt,system,curr_e_tmp,curr_i_tmp)
      end select
