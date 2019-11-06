@@ -424,19 +424,27 @@ contains
   
 !===================================================================================================================================
 
-  subroutine write_rt_data_0d(it,ofl,dt,system,dm)
-    use structures, only: s_ofile, s_dft_system
+  subroutine write_rt_data_0d(it,ofl,dt,system,rt)
+    use structures, only: s_ofile, s_dft_system, s_dft_rt
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file, only: open_filehandle
-    use inputoutput, only: yn_md,t_unit_length,t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
+    use inputoutput, only: t_unit_length,t_unit_time,t_unit_ac,t_unit_elec
     implicit none
-    type(s_ofile) :: ofl
     integer, intent(in) :: it
+    type(s_ofile) :: ofl
     type(s_dft_system), intent(in) :: system
-    real(8),intent(in) :: dm(3,system%nspin)
-    integer :: uid
-    real(8) :: dt
+    type(s_dft_rt),intent(in) :: rt
+    integer :: uid, jt
+    real(8) :: dm_e(3,system%nspin),ddm_e(3,system%nspin), dm(3), dt
+
+    jt = it
+    if(it.lt.0) jt=0
+    ddm_e(:,1)= rt%dDp_e(:,jt)
+    dm_e(:,1) = rt%Dp_e(:,jt)
+!    dm(:)     = rt%Dp_e(:,jt) + rt%Dp_i(:,jt)
+    dm(:)     = -rt%Dp_e(:,jt) + rt%Dp_i(:,jt)  !test
+
 
     if (comm_is_root(nproc_id_global)) then
 
@@ -451,13 +459,8 @@ contains
        write(uid,10) "Ac_tot", "Total vector potential field"
        write(uid,10) "E_tot", "Total electric field"
        write(uid,10) "ddm_e", "Change of dipole moment (electrons)"
-!       write(uid,10) "dm_e_ph", "Total dipole moment (electrons and phonons)"
-!       if(yn_md=='y') then
-!          write(uid,10) "Jm", "Matter current density(electrons)"
-!          write(uid,10) "Jmi","Matter current density(ions)"
-!       else
-!          write(uid,10) "Jm", "Matter current density"
-!       endif
+       write(uid,10) "dm",    "Total dipole moment (electrons + ions)"
+
        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
          & 1, "Time", trim(t_unit_time%name), &
          & 2, "Ac_ext_x", trim(t_unit_ac%name), &
@@ -472,12 +475,12 @@ contains
          & 11, "E_tot_x", trim(t_unit_elec%name), &
          & 12, "E_tot_y", trim(t_unit_elec%name), &
          & 13, "E_tot_z", trim(t_unit_elec%name), &
-         & 14, "dm_x", trim(t_unit_length%name), &
-         & 15, "dm_y", trim(t_unit_length%name), &
-         & 16, "dm_z", trim(t_unit_length%name)
-!         & 17, "dm_x", trim(t_unit_length%name), &
-!         & 18, "dm_y", trim(t_unit_length%name), &
-!         & 19, "dm_z", trim(t_unit_length%name)
+         & 14, "ddm_e_x", trim(t_unit_length%name), &
+         & 15, "ddm_e_y", trim(t_unit_length%name), &
+         & 16, "ddm_e_z", trim(t_unit_length%name), &
+         & 17, "dm_x", trim(t_unit_length%name), &
+         & 18, "dm_y", trim(t_unit_length%name), &
+         & 19, "dm_z", trim(t_unit_length%name)
        write(uid,*)
        flush(uid)
 
@@ -489,7 +492,8 @@ contains
           & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
           & system%vec_Ac(1:3) * t_unit_ac%conv, &
           & system%vec_Ec(1:3) * t_unit_elec%conv, &
-          & dm(1:3,1) * t_unit_length%conv
+          & ddm_e(1:3,1) * t_unit_length%conv, &
+          & dm(1:3)      * t_unit_length%conv
        write(uid,*)
     endif
     endif

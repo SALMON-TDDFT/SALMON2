@@ -78,8 +78,9 @@ module structures
   end type s_rgrid
 
   type s_dft_rt
-     real(8), allocatable :: Dp(:,:), Qp(:,:,:)    !rename late
-     real(8), allocatable :: rIe(:)    !rename late
+     real(8) :: Dp0_e(3)     !rename later
+     real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
+     real(8), allocatable :: rIe(:)    !rename later
      real(8), allocatable :: curr(:,:)
   end type s_dft_rt
 
