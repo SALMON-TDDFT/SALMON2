@@ -522,11 +522,14 @@ contains
        write(uid,10) "E_ext", "External electric field"
        write(uid,10) "Ac_tot", "Total vector potential field"
        write(uid,10) "E_tot", "Total electric field"
+       if(system%nspin==1) then
+         write(uid,10) "Jm", "Matter current density (electrons)"
+       else if(system%nspin==2) then
+         write(uid,10) "Jm_u", "Matter current density for spin-up electrons"
+         write(uid,10) "Jm_d", "Matter current density for spin-down electrons"
+       end if
        if(yn_md=='y') then
-          write(uid,10) "Jm", "Matter current density(electrons)"
-          write(uid,10) "Jmi","Matter current density(ions)"
-       else
-          write(uid,10) "Jm", "Matter current density"
+         write(uid,10) "Jmi","Matter current density (ions)"
        endif
        write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
          & 1, "Time", trim(t_unit_time%name), &
@@ -541,16 +544,33 @@ contains
          & 10, "Ac_tot_z", trim(t_unit_ac%name), &
          & 11, "E_tot_x", trim(t_unit_elec%name), &
          & 12, "E_tot_y", trim(t_unit_elec%name), &
-         & 13, "E_tot_z", trim(t_unit_elec%name), &
+         & 13, "E_tot_z", trim(t_unit_elec%name)
+       if(system%nspin==1) then
+         write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
          & 14, "Jm_x", trim(t_unit_current%name), &
          & 15, "Jm_y", trim(t_unit_current%name), &
          & 16, "Jm_z", trim(t_unit_current%name)
-       if(yn_md=='y') then
-          write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
-               & 17, "Jmi_x", trim(t_unit_current%name), &
-               & 18, "Jmi_y", trim(t_unit_current%name), &
-               & 19, "Jmi_z", trim(t_unit_current%name)
-       endif
+         if(yn_md=='y') then
+            write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+                 & 17, "Jmi_x", trim(t_unit_current%name), &
+                 & 18, "Jmi_y", trim(t_unit_current%name), &
+                 & 19, "Jmi_z", trim(t_unit_current%name)
+         endif
+       else if(system%nspin==2) then
+         write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+         & 14, "Jm_u_x", trim(t_unit_current%name), &
+         & 15, "Jm_u_y", trim(t_unit_current%name), &
+         & 16, "Jm_u_z", trim(t_unit_current%name), &
+         & 17, "Jm_d_x", trim(t_unit_current%name), &
+         & 18, "Jm_d_y", trim(t_unit_current%name), &
+         & 19, "Jm_d_z", trim(t_unit_current%name)
+         if(yn_md=='y') then
+            write(uid, '(99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+                 & 20, "Jmi_x", trim(t_unit_current%name), &
+                 & 21, "Jmi_y", trim(t_unit_current%name), &
+                 & 22, "Jmi_z", trim(t_unit_current%name)
+         endif
+       end if
        write(uid,*)
        flush(uid)
 
@@ -561,8 +581,15 @@ contains
           & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
           & system%vec_Ec_ext(1:3) * t_unit_elec%conv, &
           & system%vec_Ac(1:3) * t_unit_ac%conv, &
-          & system%vec_Ec(1:3) * t_unit_elec%conv, &
+          & system%vec_Ec(1:3) * t_unit_elec%conv
+       if(system%nspin==1) then
+          write(uid, "(99(1X,E23.15E3))",advance='no') &
           & curr_e(1:3,1) * t_unit_current%conv
+       else if(system%nspin==2) then
+          write(uid, "(99(1X,E23.15E3))",advance='no') &
+          & curr_e(1:3,1) * t_unit_current%conv, &
+          & curr_e(1:3,2) * t_unit_current%conv
+       end if
        if(yn_md=='y') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
           & curr_i(1:3) * t_unit_current%conv
