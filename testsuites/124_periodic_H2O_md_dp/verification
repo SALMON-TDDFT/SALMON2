@@ -36,7 +36,7 @@ result = {}
 linecount = 0
 for line in open("H2O_rt_energy.data"):
     linecount += 1
-    if linecount == 1007: # corresponds to line 160, (0.6192 fs)
+    if linecount == 1008: # corresponds to line 1008
         for name, [resval, refval, error] in checklist.items(): 
             data = line.split()
             result[name] = float(data[1])
