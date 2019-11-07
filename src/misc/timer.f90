@@ -70,6 +70,11 @@ module timer
   integer,public,parameter :: LOG_RT_MISC               = 63
   integer,public,parameter :: LOG_RT_ANALYSIS           = 64
 
+  integer,public,parameter :: LOG_CHECKPOINT_SELF       = 80
+  integer,public,parameter :: LOG_CHECKPOINT_SYNC       = 81
+  integer,public,parameter :: LOG_RESTART_SELF          = 82
+  integer,public,parameter :: LOG_RESTART_SYNC          = 83
+
   ! =====================
   ! for specific routines
 
