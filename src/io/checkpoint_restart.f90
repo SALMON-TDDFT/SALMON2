@@ -391,14 +391,14 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   matbox=0.d0
   cmatbox=0.d0
 
-  call set_dg(lg,mg,dg,num_datafiles_out)
+  call set_dg(lg,mg,dg,num_datafiles_out,is_self_checkpoint)
 
-  if(num_datafiles_out==1.and.comm_is_root(nproc_id_global)) then
-    ! write root process
+  if(is_self_checkpoint) then
+    ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted')
-  else if(is_self_checkpoint) then
-    ! write all processes (each process dump data)
+  else if(num_datafiles_out==1.and.comm_is_root(nproc_id_global)) then
+    ! write root process
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted')
   else if(num_datafiles_out>1.and.nproc_id_global<num_datafiles_out) then
@@ -731,14 +731,14 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
-  call set_dg(lg,mg,dg,num_datafiles_in)
+  call set_dg(lg,mg,dg,num_datafiles_in,is_self_checkpoint)
 
-  if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
-    ! read root process
+  if(is_self_checkpoint) then
+    ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted')
-  else if(is_self_checkpoint) then
-    ! read all processes (each process load dumped data)
+  else if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
+    ! read root process
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted')
   else if(num_datafiles_in>1.and.nproc_id_global<num_datafiles_in) then
@@ -1067,25 +1067,26 @@ end subroutine read_Vh_stock
 
 !===================================================================================================================================
 
-subroutine set_dg(lg,mg,dg,num_datafiles)
+subroutine set_dg(lg,mg,dg,num_datafiles,is_self_checkpoint)
   use structures, only: s_rgrid 
   use salmon_parallel, only: nproc_id_global
   implicit none 
   type(s_rgrid),intent(in)     :: lg,mg
   type(s_rgrid),intent(inout)  :: dg
   integer,intent(in)           :: num_datafiles
+  logical,intent(in)           :: is_self_checkpoint
   integer :: i,j,j1,j2,j3
   integer :: ibox
   integer :: nproc_xyz_datafile(3)
 
-  if(num_datafiles==1)then
-    dg%is(1:3) =lg%is(1:3)
-    dg%ie(1:3) =lg%ie(1:3)
-    dg%num(1:3)=lg%num(1:3)
-  else if(num_datafiles==-1)then
+  if(is_self_checkpoint)then
     dg%is(1:3) =mg%is(1:3)
     dg%ie(1:3) =mg%ie(1:3)
     dg%num(1:3)=mg%num(1:3)
+  else if(num_datafiles==1)then
+    dg%is(1:3) =lg%is(1:3)
+    dg%ie(1:3) =lg%ie(1:3)
+    dg%num(1:3)=lg%num(1:3)
   else
     if(nproc_id_global<num_datafiles)then
       ibox=1
