@@ -388,9 +388,6 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
-  matbox=0.d0
-  cmatbox=0.d0
-
   call set_dg(lg,mg,dg,num_datafiles_out,is_self_checkpoint)
 
   if(is_self_checkpoint) then
@@ -410,27 +407,25 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   !write wavefunction
   if(is_self_checkpoint)then
     if(allocated(spsi%rwf))then
-      do ik=info%ik_s,info%ik_e
-      do iob=info%io_s,info%io_e
-      do is=1,system%nspin
-        write(iu2_w) ((( spsi%rwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
-                                                        iy=dg%is(2),dg%ie(2)), &
-                                                        iz=dg%is(3),dg%ie(3))
-      end do
-      end do
-      end do
+      write (iu2_w) spsi%rwf(dg%is(1):dg%ie(1),   &
+                             dg%is(2):dg%ie(2),   &
+                             dg%is(3):dg%ie(3),   &
+                             1:system%nspin,      &
+                             info%io_s:info%io_e, &
+                             info%ik_s:info%ik_e, &
+                             1)
     else if(allocated(spsi%zwf))then
-      do ik=info%ik_s,info%ik_e
-      do iob=info%io_s,info%io_e
-      do is=1,system%nspin
-        write(iu2_w) ((( spsi%zwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
-                                                        iy=dg%is(2),dg%ie(2)), &
-                                                        iz=dg%is(3),dg%ie(3))
-      end do
-      end do
-      end do
+      write (iu2_w) spsi%zwf(dg%is(1):dg%ie(1),   &
+                             dg%is(2):dg%ie(2),   &
+                             dg%is(3):dg%ie(3),   &
+                             1:system%nspin,      &
+                             info%io_s:info%io_e, &
+                             info%ik_s:info%ik_e, &
+                             1)
     end if
   else
+    matbox=0.d0
+    cmatbox=0.d0
     if(allocated(spsi%rwf))then
       do ik=1,1
       do iob=1,system%no
@@ -537,18 +532,18 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted')
     do i=1,mixing%num_rho_stock+1
-      write(iu1_w) (((mixing%srho_in(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+      write(iu1_w) mixing%srho_in (i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     end do
     do i=1,mixing%num_rho_stock
-      write(iu1_w) (((mixing%srho_out(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+      write(iu1_w) mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     end do
     if(system%nspin==2) then
       do is=1,2
         do i=1,mixing%num_rho_stock+1
-          write(iu1_w) (((mixing%srho_s_in(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+          write(iu1_w) mixing%srho_s_in (i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
         end do
         do i=1,mixing%num_rho_stock
-          write(iu1_w) (((mixing%srho_s_out(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+          write(iu1_w) mixing%srho_s_out(i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
         end do
       end do
     end if
@@ -659,8 +654,8 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoi
   if (is_self_checkpoint) then
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted')
-    write(iu1_w) (((sVh_stock1%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
-    write(iu1_w) (((sVh_stock2%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+    write(iu1_w) sVh_stock1%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    write(iu1_w) sVh_stock2%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     close(iu1_w)
   else
     ! write root process
@@ -702,7 +697,7 @@ end subroutine write_Vh_stock
 
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use inputoutput, only: theory,calc_mode,iperiodic,num_datafiles_in
+  use inputoutput, only: iperiodic,num_datafiles_in
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -748,46 +743,22 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   end if
 
   if(is_self_checkpoint)then
-    if(iperiodic==0)then
-      if(theory=='DFT'.or.calc_mode=='GS')then
-        do ik=info%ik_s,info%ik_e
-        do iob=info%io_s,info%io_e
-        do is=1,system%nspin
-          read(iu2_r) (((spsi%rwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
-                                                                iy=dg%is(2),dg%ie(2)), &
-                                                                iz=dg%is(3),dg%ie(3))
-        end do
-        end do
-        end do
-      else
-        do ik=info%ik_s,info%ik_e
-        do iob=info%io_s,info%io_e
-        do is=1,system%nspin
-          read(iu2_r) (((matbox(ix,iy,iz),ix=dg%is(1),dg%ie(1)), &
-                                                  iy=dg%is(2),dg%ie(2)), &
-                                                  iz=dg%is(3),dg%ie(3))
-  !$omp parallel do collapse(2)
-          do iz=dg%is(3),dg%ie(3)
-          do iy=dg%is(3),dg%ie(3)
-          do ix=dg%is(3),dg%ie(3)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1)=cmplx(matbox(ix,iy,iz))
-          end do
-          end do
-          end do
-        end do
-        end do
-        end do
-      end if
-    else if(iperiodic==3)then
-      do ik=info%ik_s,info%ik_e
-      do iob=info%io_s,info%io_e
-      do is=1,system%nspin
-        read(iu2_r) (((spsi%zwf(ix,iy,iz,is,iob,ik,1),ix=dg%is(1),dg%ie(1)), &
-                                                              iy=dg%is(2),dg%ie(2)), &
-                                                              iz=dg%is(3),dg%ie(3))
-      end do
-      end do
-      end do
+    if (allocated(spsi%rwf)) then
+      read (iu2_r) spsi%rwf(dg%is(1):dg%ie(1),   &
+                            dg%is(2):dg%ie(2),   &
+                            dg%is(3):dg%ie(3),   &
+                            1:system%nspin,      &
+                            info%io_s:info%io_e, &
+                            info%ik_s:info%ik_e, &
+                            1)
+    else if (allocated(spsi%zwf)) then
+      read (iu2_r) spsi%zwf(dg%is(1):dg%ie(1),   &
+                            dg%is(2):dg%ie(2),   &
+                            dg%is(3):dg%ie(3),   &
+                            1:system%nspin,      &
+                            info%io_s:info%io_e, &
+                            info%ik_s:info%ik_e, &
+                            1)
     end if
   else
     do ik=1,mk
@@ -899,18 +870,18 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
     ! read all processses
     open(iu1_r,file=dir_file_in,form='unformatted')
     do i=1,mixing%num_rho_stock+1
-      read(iu1_r) (((mixing%srho_in(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+      read(iu1_r) mixing%srho_in (i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     end do
     do i=1,mixing%num_rho_stock
-      read(iu1_r) (((mixing%srho_out(i)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+      read(iu1_r) mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     end do
     if(system%nspin==2) then
       do is=1,2
         do i=1,mixing%num_rho_stock+1
-          read(iu1_r) (((mixing%srho_s_in(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+          read(iu1_r) mixing%srho_s_in (i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
         end do
         do i=1,mixing%num_rho_stock
-          read(iu1_r) (((mixing%srho_s_out(i,is)%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+          read(iu1_r) mixing%srho_s_out(i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
         end do
       end do
     end if
@@ -1027,8 +998,8 @@ subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoin
   if (is_self_checkpoint) then
     ! read all processes
     open(iu1_r,file=dir_file_in,form='unformatted')
-    read(iu1_r) (((sVh_stock1%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
-    read(iu1_r) (((sVh_stock2%f(ix,iy,iz),ix=ng%is(1),ng%ie(1)),iy=ng%is(2),ng%ie(2)),iz=ng%is(3),ng%ie(3))
+    read(iu1_r) sVh_stock1%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    read(iu1_r) sVh_stock2%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     close(iu1_r)
   else
     ! read root process
