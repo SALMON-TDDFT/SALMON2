@@ -34,7 +34,7 @@ subroutine main_tddft
 use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global, nproc_group_global
-use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use salmon_communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
 use global_variables_rt
@@ -206,7 +206,12 @@ call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
 call allocate_orbital_complex(system%nspin,mg,info,tpsi)
 call allocate_dmatrix(system%nspin,mg,info,dmat)
 
+call timer_begin(LOG_RESTART_SYNC)
+call timer_begin(LOG_RESTART_SELF)
 call restart_rt(lg,mg,ng,system,info,spsi_in,miter_rt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+call timer_end(LOG_RESTART_SELF)
+call comm_sync_all
+call timer_end(LOG_RESTART_SYNC)
 if(yn_restart=='n') miter_rt=0
 
 call calc_nlcc(pp, system, mg, ppn)
@@ -529,11 +534,16 @@ TE : do itt=Miter_rt+1,itotNtime
   end if
 
   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
+    call timer_begin(LOG_CHECKPOINT_SYNC)
+    call timer_begin(LOG_CHECKPOINT_SELF)
     if (mod(itt,2)==1) then
       call checkpoint_rt(lg,mg,ng,system,info,spsi_out,itt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
     else
       call checkpoint_rt(lg,mg,ng,system,info,spsi_in, itt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
     endif
+    call timer_end(LOG_CHECKPOINT_SELF)
+    call comm_sync_all
+    call timer_end(LOG_CHECKPOINT_SYNC)
   endif
 
 end do TE

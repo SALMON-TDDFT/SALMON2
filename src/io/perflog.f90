@@ -279,6 +279,13 @@ contains
     call set(5, LOG_UHPSI_OVL_PHASE4,      'halo computation')
     call write_loadbalance(fd, 5, tsrc, headers, mode)
 
+    call set(0, 0, 'checkpoint/restart')
+    call set(1, LOG_RESTART_SELF,         'restart self')
+    call set(2, LOG_RESTART_SYNC,         'restart sync')
+    call set(3, LOG_CHECKPOINT_SELF,      'checkpoint self')
+    call set(4, LOG_CHECKPOINT_SYNC,      'checkpoint sync')
+    call write_loadbalance(fd, 4, tsrc, headers, mode)
+
     call write_root(fd, '=== performance [GFLOPS] ===')
     call write_flops(fd, mode)
   contains

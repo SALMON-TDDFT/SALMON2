@@ -393,7 +393,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   if(is_self_checkpoint) then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
-    open(iu2_w,file=dir_file_out,form='unformatted')
+    open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
   else if(num_datafiles_out==1.and.comm_is_root(nproc_id_global)) then
     ! write root process
     dir_file_out = trim(odir)//"wfn.bin"
@@ -530,7 +530,7 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
 
   if(is_self_checkpoint) then
     ! write all processes
-    open(iu1_w,file=dir_file_out,form='unformatted')
+    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
       write(iu1_w) mixing%srho_in (i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     end do
@@ -653,7 +653,7 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoi
 
   if (is_self_checkpoint) then
     ! write all processes
-    open(iu1_w,file=dir_file_out,form='unformatted')
+    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
     write(iu1_w) sVh_stock1%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     write(iu1_w) sVh_stock2%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     close(iu1_w)
@@ -731,7 +731,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   if(is_self_checkpoint) then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
-    open(iu2_r,file=dir_file_in,form='unformatted')
+    open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
   else if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
     ! read root process
     dir_file_in = trim(idir)//"wfn.bin"
@@ -868,7 +868,7 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
 
   if(is_self_checkpoint) then
     ! read all processses
-    open(iu1_r,file=dir_file_in,form='unformatted')
+    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
       read(iu1_r) mixing%srho_in (i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     end do
@@ -997,7 +997,7 @@ subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoin
 
   if (is_self_checkpoint) then
     ! read all processes
-    open(iu1_r,file=dir_file_in,form='unformatted')
+    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
     read(iu1_r) sVh_stock1%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     read(iu1_r) sVh_stock2%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     close(iu1_r)
