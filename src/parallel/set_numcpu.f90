@@ -22,57 +22,58 @@ module set_numcpu
 
 contains
 
-subroutine check_numcpu(pinfo)
+  function check_numcpu(pinfo) result(iok)
   use structures, only: s_process_info
   use salmon_parallel, only: nproc_size_global
   implicit none
   type(s_process_info),intent(inout) :: pinfo
+  logical :: iok
 
   integer :: j
   integer :: nproc_k, nproc_ob
   integer,dimension(3) :: nproc_d_o,nproc_d_g
+  integer :: nproc_total_wf,nproc_total_g
 
   nproc_k   = pinfo%npk
   nproc_ob  = pinfo%nporbital
   nproc_d_o = pinfo%npdomain_orbital
   nproc_d_g = pinfo%npdomain_general
 
-  if(nproc_k*nproc_ob*nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)/=nproc_size_global)then
-    write(*,*) "inumcpu_check error!"
-    write(*,*) "number of cpu is not correct!"
-    stop
+  nproc_total_wf = nproc_k * nproc_ob * product(nproc_d_o(:))
+  nproc_total_g  = product(nproc_d_g(:))
+
+  iok = .true.
+
+  if(nproc_total_wf/=nproc_size_global)then
+    print "(A)",   'number of MPI process is not correct'
+    print "(A,I7)", '  nproc_k * nproc_ob * product(nproc_domain_orbital) =', nproc_total_wf
+    print "(A,I7)", '  number of MPI process                              =', nproc_size_global
+    iok = .false.
   end if
+
+  if(nproc_total_g/=nproc_size_global)then
+    print "(A)",    'product of nproc_domain_general is not correct'
+    print "(A,3I5)", '  product(nproc_domain_general) =', nproc_total_g
+    print "(A,3I5)", '  number of MPI process         =', nproc_size_global
+    iok = .false.
+  end if
+
   do j=1,3
     if(nproc_d_g(j)<nproc_d_o(j))then
-      write(*,*) "inumcpu_check error!"
-      write(*,*) "nproc_domain_general is smaller than nproc_domain_orbital."
-      stop
+      print "('nproc_domain_general(',I1,') is smaller than nproc_domain_orbital(',I1,')')",j,j
+      print "('  nproc_domain_general(',I1,') = ',I5)", j, nproc_d_g(j)
+      print "('  nproc_domain_orbital(',I1,') = ',I5)", j, nproc_d_o(j)
+      iok = .false.
+    end if
+
+    if(mod(nproc_d_g(j),nproc_d_o(j))/=0)then
+      print "('nproc_domain_general(',I1,') is not mutiple of nproc_domain_orbital(',I1,')')",j,j
+      print "('  nproc_domain_general(',I1,') = ',I5)", j, nproc_d_g(j)
+      print "('  nproc_domain_orbital(',I1,') = ',I5)", j, nproc_d_o(j)
+      iok = .false.
     end if
   end do
-  if(nproc_d_g(1)*nproc_d_g(2)*nproc_d_g(3)>nproc_size_global)then
-    write(*,*) "inumcpu_check error!"
-    write(*,*) "product of nproc_domain_general is larger than nproc."
-    stop
-  end if
-  if(mod(nproc_d_g(1),nproc_d_o(1))/=0)then
-    write(*,*) "inumcpu_check error!"
-    write(*,*) "nproc_domain_general(1) is not mutiple of nproc_domain_orbital(1)."
-    stop
-  end if
-  if(mod(nproc_d_g(2),nproc_d_o(2))/=0)then
-    write(*,*) "inumcpu_check error!"
-    write(*,*) "nproc_domain_general(2) is not mutiple of nproc_domain_orbital(2)."
-    stop
-  end if
-  if(mod(nproc_d_g(3),nproc_d_o(3))/=0)then
-    write(*,*) "inumcpu_check error!"
-    write(*,*) "nproc_domain_general(3) is not mutiple of nproc_domain_orbital(3)."
-    stop
-  end if
-
-  pinfo%npdomain_general_dm(1:3)=nproc_d_g(1:3)/nproc_d_o(1:3)
-
-end subroutine check_numcpu
+end function check_numcpu
 
 subroutine set_numcpu_general(iprefer_dist,numk,numo,pinfo)
   use structures, only: s_process_info
