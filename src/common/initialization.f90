@@ -225,11 +225,14 @@ end subroutine init_dft_system
 subroutine init_process_distribution(calc_mode,system,pinfo)
   use structures, only: s_process_info,s_dft_system
   use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general,ispin
+  use salmon_parallel, only: nproc_id_global,nproc_group_global
+  use salmon_communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
   integer,intent(in)               :: calc_mode
   type(s_dft_system),intent(in)    :: system
   type(s_process_info),intent(out) :: pinfo
+  logical :: if_stop
 
   if((nproc_ob + sum(nproc_domain_orbital) + sum(nproc_domain_general)) == 0) then
     ! Process distribution is automatically decided by SALMON.
@@ -250,7 +253,12 @@ subroutine init_process_distribution(calc_mode,system,pinfo)
     pinfo%npdomain_orbital = nproc_domain_orbital
     pinfo%npdomain_general = nproc_domain_general
   end if
-  call check_numcpu(pinfo)
+
+  if (comm_is_root(nproc_id_global)) then
+    if_stop = .not. check_numcpu(pinfo)
+  end if
+  call comm_bcast(if_stop, nproc_group_global)
+  if (if_stop) stop 'fail: check_numcpu'
 
   if (ispin==1) then
     pinfo%nporbital_spin(1)=(nproc_ob+1)/2
@@ -258,6 +266,7 @@ subroutine init_process_distribution(calc_mode,system,pinfo)
   else
     pinfo%nporbital_spin = 0
   end if
+  pinfo%npdomain_general_dm(1:3)=pinfo%npdomain_general(1:3)/pinfo%npdomain_orbital(1:3)
 
   ! Future work: remove these
   nproc_k              = pinfo%npk
