@@ -418,7 +418,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
       end do
       end do
 
-      do ik=1,1
+      do ik=1,system%nk
       do iob=1,system%no
       do is=1,system%nspin
 !$omp parallel do collapse(2)
