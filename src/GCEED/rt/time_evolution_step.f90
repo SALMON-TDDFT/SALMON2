@@ -71,7 +71,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
   integer :: ix,iy,iz,nspin
   integer :: iatom
   integer :: idensity, idiffDensity, ielf
-  real(8) :: rNe, FionE(3,MI)
+  real(8) :: rNe, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   integer :: is
   character(100) :: comment_line
@@ -309,7 +309,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
      call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
 
      !force on ion directly from field --- should put in calc_force_salmon?
-     do iatom=1,MI
+     do iatom=1,system%nion
         FionE(:,iatom) = pp%Zps(Kion(iatom)) * E_tot(:,itt)
      enddo
      system%Force(:,:) = system%Force(:,:) + FionE(:,:)
