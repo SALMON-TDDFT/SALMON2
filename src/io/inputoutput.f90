@@ -96,6 +96,7 @@ module inputoutput
   type(unit_t) :: t_unit_current
   type(unit_t) :: t_unit_ac
   type(unit_t) :: t_unit_elec
+  type(unit_t) :: t_unit_conductivity
 
 contains
   subroutine read_input
@@ -1540,6 +1541,16 @@ contains
       t_unit_elec%conv     = 1d0
     end if
 
+!! prepare type(unit_t) :: t_unit_conductivity
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_conductivity%name  = '1/fs*V*Angstrom'
+      t_unit_conductivity%conv = 1.d0/utime_from_au/51.42206707d0/ulength_from_au
+    else 
+      t_unit_conductivity%name  = 'a.u.'
+      t_unit_conductivity%conv  = 1d0
+    end if
 
   end subroutine initialize_inputoutput_units
 

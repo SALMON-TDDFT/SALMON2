@@ -15,7 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module write_sub
-  use math_constants,only : zi
+  use math_constants,only : zi,pi
   implicit none
 
 contains
@@ -715,6 +715,76 @@ contains
 
   end subroutine
   
+!===================================================================================================================================
+  subroutine write_response_3d(ofl,rt)
+    use inputoutput, only: e_impulse, trans_longi, nt, dt, nenergy, de
+    use inputoutput, only: t_unit_time,t_unit_energy,t_unit_conductivity
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_dft_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zsigma(3),zeps(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_response        = open_filehandle(ofl%file_response_data)
+      uid = ofl%fh_response
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "sigma", "Conductivity"
+      write(uid,10) "eps", "Dielectric constant"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+        & 1, "Time", trim(t_unit_time%name), &
+        & 2, "Re(sigma_x)", trim(t_unit_conductivity%name), &
+        & 3, "Im(sigma_x)", trim(t_unit_conductivity%name), &
+        & 4, "Re(sigma_y)", trim(t_unit_conductivity%name), &
+        & 5, "Im(sigma_y)", trim(t_unit_conductivity%name), &
+        & 6, "Re(sigma_z)", trim(t_unit_conductivity%name), &
+        & 7, "Im(sigma_z)", trim(t_unit_conductivity%name), &
+        & 8, "Re(eps_x)", "none", &
+        & 9, "Im(eps_x)", "none", &
+        & 10, "Re(eps_y)", "none", &
+        & 11, "Im(eps_y)", "none", &
+        & 12, "Re(eps_z)", "none", &
+        & 13, "Im(eps_z)", "none"
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de ; zsigma(:)=(0.d0,0.d0)  
+        do n=1,nt
+          t2=dble(n)*dt ; zsigma(:)=zsigma(:)+exp(zi*hw*t2)*rt%curr(:,n) & 
+                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+
+        zsigma(:)=zsigma(:)/e_impulse*dt
+        if(trans_longi=="tr")then
+          zeps(:)=1.d0+4.d0*pi*zi*zsigma(:)/hw
+        else if(trans_longi=="lo")then
+          zeps(:)=1.d0/(1.d0-zi*hw*zsigma(:))
+        end if
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zsigma(ixyz)),ixyz=1,3)&
+             &,(aimag(zsigma(ixyz)),ixyz=1,3)&
+             &,(real(zeps(ixyz)),ixyz=1,3)&
+             &,(aimag(zeps(ixyz)),ixyz=1,3)
+
+      end do
+
+      flush(uid)  !for debug
+
+    end if
+
+  end subroutine
+
 !===================================================================================================================================
 
   subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
