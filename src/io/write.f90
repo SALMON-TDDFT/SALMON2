@@ -721,7 +721,7 @@ contains
                            t_unit_time,t_unit_energy,t_unit_polarizability
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use structures, only: s_ofile, s_dft_rt
     use salmon_file, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
@@ -784,7 +784,7 @@ contains
                            t_unit_time,t_unit_energy,t_unit_conductivity
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use structures, only: s_ofile, s_dft_rt
     use salmon_file, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
@@ -849,6 +849,66 @@ contains
   end subroutine
 
 !===================================================================================================================================
+  subroutine write_pulse_0d(ofl,rt)
+    use inputoutput, only: nt, dt, nenergy, de,  &
+                           t_unit_energy,  &
+                           t_unit_spectrum_dipole,  &
+                           t_unit_spectrum_dipole_square
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_dft_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_dft_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zdDp_e(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_pulse           = open_filehandle(ofl%file_pulse_data)
+      uid = ofl%fh_pulse
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "energy", "Frequency"
+      write(uid,10) "dm", "Dopile moment"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "energy", trim(t_unit_energy%name), &
+        & 2, "Re(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 3, "Im(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 4, "|dm_x|^2", trim(t_unit_spectrum_dipole%name), &
+        & 5, "Re(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 6, "Im(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 7, "|dm_y|^2", trim(t_unit_spectrum_dipole%name), &
+        & 8, "Re(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
+        & 9, "Im(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
+        & 10, "|dm_z|^2", trim(t_unit_spectrum_dipole_square%name)
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de 
+        zdDp_e(:)=(0.d0,0.d0) 
+        do n=1,nt
+          t2=dble(n)*dt ; zdDp_e(:)=zdDp_e(:)+exp(zi*hw*t2)*rt%dDp_e(:,n) & 
+                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+        zdDp_e(:)=zdDp_e(:)*dt
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zdDp_e(ixyz))*t_unit_spectrum_dipole%conv,ixyz=1,3)&
+             &,(aimag(zdDp_e(ixyz))*t_unit_spectrum_dipole%conv,ixyz=1,3)&
+             &,(abs(zdDp_e(ixyz))**2*t_unit_spectrum_dipole_square%conv,ixyz=1,3)
+      end do
+
+    end if
+
+  end subroutine
+
+!===================================================================================================================================
   subroutine write_pulse_3d(ofl,rt)
     use inputoutput, only: nt, dt, nenergy, de,  &
                            t_unit_energy,  &
@@ -858,7 +918,7 @@ contains
                            t_unit_spectrum_elec_square
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use structures, only: s_ofile, s_dft_rt
     use salmon_file, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl

@@ -93,6 +93,8 @@ module inputoutput
   type(unit_t) :: t_unit_energy_inv
   type(unit_t) :: t_unit_time
   type(unit_t) :: t_unit_time_inv
+  type(unit_t) :: t_unit_spectrum_dipole
+  type(unit_t) :: t_unit_spectrum_dipole_square
   type(unit_t) :: t_unit_current
   type(unit_t) :: t_unit_spectrum_current
   type(unit_t) :: t_unit_spectrum_current_square
@@ -1507,6 +1509,28 @@ contains
       t_unit_time_inv%name = 'a.u.'
       t_unit_time%conv = 1d0
       t_unit_time_inv%conv = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole
+    t_unit_spectrum_dipole%conv = utime_from_au*ulength_from_au
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole%name  = 'fs*Angstrom'
+    else 
+      t_unit_spectrum_dipole%name  = 'a.u.'
+      t_unit_spectrum_dipole%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole_square
+    t_unit_spectrum_dipole_square%conv = utime_from_au**2*ulength_from_au**2
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole_square%name  = 'fs^2*Angstrom^2'
+    else 
+      t_unit_spectrum_dipole_square%name  = 'a.u.'
+      t_unit_spectrum_dipole_square%conv  = 1d0
     end if
 
 !! prepare type(unit_t) :: t_unit_current
