@@ -39,7 +39,7 @@ use salmon_xc
 use timer
 use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
-                     write_response_3d
+                     write_response_0d,write_response_3d
 use code_optimization
 use initialization_sub
 use input_pp_sub
@@ -584,31 +584,23 @@ end if
 !
 select case(iperiodic)
 case(0)
+  
+  if(theory=="TDDFT_response")then
+    call write_response_0d(ofl,rt)
+  else
 
-  call Fourier3D(rt%dDp_e,alpha_R,alpha_I)
-  if(comm_is_root(nproc_id_global))then
-    if(iflag_intelectron==1)then
-      open(1,file=file_RT_e)
-      write(1,'(a)') "# time[fs],    integrated electron density" 
-       do nntime=1,itotNtime
-          write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-          write(1,'(e16.8)',advance="yes") rt%rIe(nntime)
-       end do
-      close(1)
-    end if
-
-    ! Alpha
-    if(ae_shape1=='impulse')then
-      open(1,file=file_alpha_lr)
-      write(1,'(a)') "# energy[eV], Re[alpha](x,y,z)[A**3], Im[alpha](x,y,z)[A**3], df/dE(x,y,z)[1/eV]" 
-      do iene=0,Nenergy
-        Sf(:)=2*iene*dE/(Pi)*alpha_I(:,iene)
-        write(1,'(e13.5)',advance="no") iene*dE*2d0*Ry
-        write(1,'(3e16.8)',advance="no") (alpha_R(iii,iene)*(a_B)**3, iii=1,3)
-        write(1,'(3e16.8)',advance="no") (alpha_I(iii,iene)*(a_B)**3, iii=1,3)
-        write(1,'(3e16.8)',advance="yes") (Sf(iii)/2d0/Ry, iii=1,3)
-      end do
-    else
+    call Fourier3D(rt%dDp_e,alpha_R,alpha_I)
+    if(comm_is_root(nproc_id_global))then
+      if(iflag_intelectron==1)then
+        open(1,file=file_RT_e)
+        write(1,'(a)') "# time[fs],    integrated electron density" 
+         do nntime=1,itotNtime
+            write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
+            write(1,'(e16.8)',advance="yes") rt%rIe(nntime)
+         end do
+        close(1)
+      end if
+  
       open(1,file=file_alpha_pulse)
       write(1,'(a)') "# energy[eV], Re[d(w)](x,y,z)[A*fs],  Im[d(w)](x,y,z)[A*fs],  |d(w)|^2(x,y,z)[A**2*fs**2]"
       do iene=0,Nenergy
@@ -618,9 +610,9 @@ case(0)
         write(1,'(3e16.8)',advance="yes") ((alpha_R(iii,iene)**2+alpha_I(iii,iene)**2)   &
                                                *(a_B)**2*(2.d0*Ry*fs2eVinv)**2, iii=1,3)
       end do
-    end if 
-    close(1)
+      close(1)
 
+    end if
   end if
   
 case(3)

@@ -716,9 +716,72 @@ contains
   end subroutine
   
 !===================================================================================================================================
+  subroutine write_response_0d(ofl,rt)
+    use inputoutput, only: e_impulse, nt, dt, nenergy, de,  &
+                           t_unit_time,t_unit_energy,t_unit_polarizability
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_dft_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zalpha(3)
+    real(8) :: sf(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_response        = open_filehandle(ofl%file_response_data)
+      uid = ofl%fh_response
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "alpha", "Polarizability"
+      write(uid,10) "df/dE", "Strength function"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "Time", trim(t_unit_time%name), &
+        & 2, "Re(alpha_x)", trim(t_unit_polarizability%name), &
+        & 3, "Im(alpha_x)", trim(t_unit_polarizability%name), &
+        & 4, "Re(alpha_y)", trim(t_unit_polarizability%name), &
+        & 5, "Im(alpha_y)", trim(t_unit_polarizability%name), &
+        & 6, "Re(alpha_z)", trim(t_unit_polarizability%name), &
+        & 7, "Im(alpha_z)", trim(t_unit_polarizability%name), &
+        & 8, "df_x/dE", "none", &
+        & 9, "df_y/dE", "none", &
+        & 10, "df_z/dE", "none"
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de ; zalpha(:)=(0.d0,0.d0)  
+        do n=1,nt
+          t2=dble(n)*dt ; zalpha(:)=zalpha(:)+exp(zi*hw*t2)*rt%dDp_e(:,n) & 
+                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+
+        zalpha(:)=zalpha(:)/e_impulse*dt
+        sf(:)=2*hw/pi*aimag(zalpha(:))
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zalpha(ixyz)),ixyz=1,3)&
+             &,(aimag(zalpha(ixyz)),ixyz=1,3)&
+             &,(sf(ixyz),ixyz=1,3)
+
+      end do
+
+      flush(uid)  !for debug
+
+    end if
+
+  end subroutine
+
+!===================================================================================================================================
   subroutine write_response_3d(ofl,rt)
-    use inputoutput, only: e_impulse, trans_longi, nt, dt, nenergy, de
-    use inputoutput, only: t_unit_time,t_unit_energy,t_unit_conductivity
+    use inputoutput, only: e_impulse, trans_longi, nt, dt, nenergy, de,  &
+                           t_unit_time,t_unit_energy,t_unit_conductivity
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use structures, only: s_ofile, s_dft_system, s_dft_rt
