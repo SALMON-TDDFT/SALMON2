@@ -740,7 +740,7 @@ contains
       write(uid,10) "sigma", "Conductivity"
       write(uid,10) "eps", "Dielectric constant"
 
-      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no') &
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
         & 1, "Time", trim(t_unit_time%name), &
         & 2, "Re(sigma_x)", trim(t_unit_conductivity%name), &
         & 3, "Im(sigma_x)", trim(t_unit_conductivity%name), &
