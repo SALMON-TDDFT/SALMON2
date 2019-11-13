@@ -39,7 +39,7 @@ use salmon_xc
 use timer
 use global_variables_rt
 use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
-                     write_response_0d,write_response_3d
+                     write_response_0d,write_response_3d,write_pulse_3d
 use code_optimization
 use initialization_sub
 use input_pp_sub
@@ -88,12 +88,11 @@ type(s_ofile) :: ofile
 
 integer :: iob, i1,i2,i3, iik,jspin
 integer :: idensity, idiffDensity
-integer :: jj,nn, iene, nntime, ix,iy,iz
+integer :: jj, iene, nntime, ix,iy,iz
 real(8) :: rbox_array(10), rbox_array2(10)
 real(8),allocatable :: alpha_R(:,:),   alpha_I(:,:) 
 real(8),allocatable :: alphaq_R(:,:,:),alphaq_I(:,:,:)
 real(8),allocatable :: R1(:,:,:), Sf(:)
-real(8),allocatable :: tfourier_integrand(:,:)
 character(10) :: fileLaser
 character(100):: comment_line
 real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
@@ -297,10 +296,12 @@ if(comm_is_root(nproc_id_global))then
    write(ofl%file_rt_data,"(2A,'_rt.data')") trim(base_directory),trim(SYSname)
    write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
    write(ofl%file_response_data,"(2A,'_response.data')") trim(base_directory),trim(SYSname)
+   write(ofl%file_pulse_data,"(2A,'_pulse.data')") trim(base_directory),trim(SYSname)
 endif
 call comm_bcast(ofl%file_rt_data,       nproc_group_global)
 call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)
 call comm_bcast(ofl%file_response_data, nproc_group_global)
+call comm_bcast(ofl%file_pulse_data,    nproc_group_global)
 
 !(write header)
 if(comm_is_root(nproc_id_global))then
@@ -619,30 +620,10 @@ case(3)
   if(theory=="TDDFT_response")then
     call write_response_3d(ofl,rt)
   else
-    allocate( tfourier_integrand(1:3,0:Ntime) )
-    if(trans_longi=="lo")then
-       tfourier_integrand(1:3,0:Ntime) = A_ind(1:3,0:Ntime)
-    else if(trans_longi=="tr")then
-       tfourier_integrand(1:3,0:Ntime) = rt%curr(1:3,0:Ntime)
-    end if
-    call Fourier3D(tfourier_integrand,alpha_R,alpha_I)
-    if(comm_is_root(nproc_id_global))then
-      open(1,file=file_alpha_lr)
-      write(1,*) "# energy[eV], Re[epsilon](x,y,z), Im[epsilon](x,y,z)" 
-      do nn=1,Nenergy
-        write(1,'(e13.5)',advance="no") nn*dE*2d0*Ry
-  !      write(1,'(3e16.8)',advance="no")      &
-  !           (F*(F+alpha_R(iii,n))/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
-  !      write(1,'(3e16.8)',advance="yes")     &
-  !           (-F*alpha_I(iii,n)/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
-        write(1,'(3e16.8)',advance="no")  (alpha_R(iii,nn), iii=1,3)
-        write(1,'(3e16.8)',advance="yes") (alpha_I(iii,nn), iii=1,3)
-      end do
-      close(1)
-    end if 
-    deallocate( tfourier_integrand )
+    call write_pulse_3d(ofl,rt)
   end if
 end select
+
 call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 

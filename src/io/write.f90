@@ -766,8 +766,8 @@ contains
         sf(:)=2*hw/pi*aimag(zalpha(:))
 
         write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
-             &,(real(zalpha(ixyz)),ixyz=1,3)&
-             &,(aimag(zalpha(ixyz)),ixyz=1,3)&
+             &,(real(zalpha(ixyz))*t_unit_polarizability%conv,ixyz=1,3)&
+             &,(aimag(zalpha(ixyz))*t_unit_polarizability%conv,ixyz=1,3)&
              &,(sf(ixyz),ixyz=1,3)
 
       end do
@@ -835,10 +835,110 @@ contains
         end if
 
         write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
-             &,(real(zsigma(ixyz)),ixyz=1,3)&
-             &,(aimag(zsigma(ixyz)),ixyz=1,3)&
+             &,(real(zsigma(ixyz))*t_unit_conductivity%conv,ixyz=1,3)&
+             &,(aimag(zsigma(ixyz))*t_unit_conductivity%conv,ixyz=1,3)&
              &,(real(zeps(ixyz)),ixyz=1,3)&
              &,(aimag(zeps(ixyz)),ixyz=1,3)
+
+      end do
+
+      flush(uid)  !for debug
+
+    end if
+
+  end subroutine
+
+!===================================================================================================================================
+  subroutine write_pulse_3d(ofl,rt)
+    use inputoutput, only: nt, dt, nenergy, de,  &
+                           t_unit_energy,  &
+                           t_unit_spectrum_current,  &
+                           t_unit_spectrum_current_square,  &
+                           t_unit_spectrum_elec,  &
+                           t_unit_spectrum_elec_square
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_dft_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zcurr(3),zE_ext(3),zE_tot(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_pulse           = open_filehandle(ofl%file_pulse_data)
+      uid = ofl%fh_pulse
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "energy", "Frequency"
+      write(uid,10) "Jm", "Matter current"
+      write(uid,10) "E_ext", "External electric field"
+      write(uid,10) "E_tot", "Total electric field"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "energy", trim(t_unit_energy%name), &
+        & 2, "Re(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 3, "Im(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 4, "|Jm_x|^2", trim(t_unit_spectrum_current%name), &
+        & 5, "Re(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 6, "Im(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 7, "|Jm_y|^2", trim(t_unit_spectrum_current%name), &
+        & 8, "Re(Jm_z)", trim(t_unit_spectrum_current_square%name), &
+        & 9, "Im(Jm_z)", trim(t_unit_spectrum_current_square%name), &
+        & 10, "|Jm_z|^2", trim(t_unit_spectrum_current_square%name), &
+        & 11, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 12, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 13, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
+        & 14, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 15, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 16, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
+        & 17, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 18, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 19, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 20, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 21, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 22, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
+        & 23, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 24, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 25, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
+        & 26, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 27, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 28, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name)
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de 
+        zcurr(:)=(0.d0,0.d0) 
+        zE_ext(:)=(0.d0,0.d0)  
+        zE_tot(:)=(0.d0,0.d0)  
+        do n=1,nt
+          t2=dble(n)*dt 
+          zcurr(:)=zcurr(:)+exp(zi*hw*t2)*rt%curr(:,n) & 
+                                      *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          zE_ext(:)=zE_ext(:)+exp(zi*hw*t2)*rt%E_ext(:,n) & 
+                                      *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          zE_tot(:)=zE_tot(:)+exp(zi*hw*t2)*rt%E_tot(:,n) & 
+                                      *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+        zcurr(:)=zcurr(:)*dt
+        zE_ext(:)=zE_ext(:)*dt
+        zE_tot(:)=zE_tot(:)*dt
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zcurr(ixyz))*t_unit_spectrum_current%conv,ixyz=1,3)&
+             &,(aimag(zcurr(ixyz))*t_unit_spectrum_current%conv,ixyz=1,3)&
+             &,(abs(zcurr(ixyz))**2*t_unit_spectrum_current_square%conv,ixyz=1,3)&
+             &,(real(zE_ext(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(aimag(zE_ext(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(abs(zE_ext(ixyz))**2*t_unit_spectrum_elec_square%conv,ixyz=1,3)&
+             &,(real(zE_tot(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(aimag(zE_tot(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(abs(zE_tot(ixyz))**2*t_unit_spectrum_elec_square%conv,ixyz=1,3)
 
       end do
 
