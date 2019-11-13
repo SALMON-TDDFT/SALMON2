@@ -39,6 +39,9 @@ subroutine calc_emfields(nspin,rt,curr_in)
   E_ind(:,itt) = -(A_ind(:,itt+1) - A_ind(:,itt-1))/(2d0*dt)
   E_tot(:,itt) = -(A_tot(:,itt+1) - A_tot(:,itt-1))/(2d0*dt)
 
+  rt%E_ext(1:3,itt)=E_ext(1:3,itt)
+  rt%E_tot(1:3,itt)=E_tot(1:3,itt)
+
 end subroutine calc_emfields
 
 subroutine calcAext
@@ -72,6 +75,8 @@ else
 end if
 
 allocate( rt%curr(3,0:t_max) )
+allocate( rt%E_ext(3,0:t_max) )
+allocate( rt%E_tot(3,0:t_max) )
 allocate( A_ext(3,0:t_max+1) )
 allocate( A_ind(3,0:t_max+1) )
 allocate( A_tot(3,0:t_max+1) )
@@ -79,6 +84,8 @@ allocate( E_ext(3,0:t_max) )
 allocate( E_ind(3,0:t_max) )
 allocate( E_tot(3,0:t_max) )
 rt%curr=0.d0
+rt%E_ext=0.d0
+rt%E_tot=0.d0
 A_ext=0.d0
 A_ind=0.d0
 A_tot=0.d0

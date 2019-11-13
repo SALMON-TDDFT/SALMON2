@@ -100,8 +100,6 @@ real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 
 !filename
 character(100) :: file_eigen
-character(100) :: file_alpha_lr
-character(100) :: file_alpha_pulse
 character(100) :: file_RT_q
 character(100) :: file_alpha_q
 character(100) :: file_RT_e

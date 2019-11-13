@@ -82,7 +82,7 @@ module structures
      real(8) :: Dp0_e(3)     !rename later
      real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
      real(8), allocatable :: rIe(:)    !rename later
-     real(8), allocatable :: curr(:,:)
+     real(8), allocatable :: curr(:,:), E_ext(:,:), E_tot(:,:)
   end type s_dft_rt
 
   type s_process_info
@@ -330,9 +330,9 @@ module structures
 
 ! output files
   type s_ofile
-     integer :: fh_rt, fh_rt_energy, fh_response
+     integer :: fh_rt, fh_rt_energy, fh_response, fh_pulse
      character(256) :: file_rt_data, file_rt_energy_data
-     character(256) :: file_response_data
+     character(256) :: file_response_data, file_pulse_data
      character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
 

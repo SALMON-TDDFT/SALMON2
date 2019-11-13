@@ -93,9 +93,15 @@ module inputoutput
   type(unit_t) :: t_unit_energy_inv
   type(unit_t) :: t_unit_time
   type(unit_t) :: t_unit_time_inv
+  type(unit_t) :: t_unit_spectrum_dipole
+  type(unit_t) :: t_unit_spectrum_dipole_square
   type(unit_t) :: t_unit_current
+  type(unit_t) :: t_unit_spectrum_current
+  type(unit_t) :: t_unit_spectrum_current_square
   type(unit_t) :: t_unit_ac
   type(unit_t) :: t_unit_elec
+  type(unit_t) :: t_unit_spectrum_elec
+  type(unit_t) :: t_unit_spectrum_elec_square
   type(unit_t) :: t_unit_polarizability
   type(unit_t) :: t_unit_conductivity
 
@@ -1505,6 +1511,28 @@ contains
       t_unit_time_inv%conv = 1d0
     end if
 
+!! prepare type(unit_t) :: t_unit_spectrum_dipole
+    t_unit_spectrum_dipole%conv = utime_from_au*ulength_from_au
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole%name  = 'fs*Angstrom'
+    else 
+      t_unit_spectrum_dipole%name  = 'a.u.'
+      t_unit_spectrum_dipole%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole_square
+    t_unit_spectrum_dipole_square%conv = utime_from_au**2*ulength_from_au**2
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole_square%name  = 'fs^2*Angstrom^2'
+    else 
+      t_unit_spectrum_dipole_square%name  = 'a.u.'
+      t_unit_spectrum_dipole_square%conv  = 1d0
+    end if
+
 !! prepare type(unit_t) :: t_unit_current
     t_unit_current%conv = (ulength_from_au/utime_from_au)/ulength_from_au**3
     if(iflag_unit_time == ntype_unit_time_fs .and. &
@@ -1514,6 +1542,26 @@ contains
     else 
       t_unit_current%name  = 'a.u.'
       t_unit_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current
+    t_unit_spectrum_current%conv = 1d0/ulength_from_au**2
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current%name  = '1/Angstrom^2'
+    else 
+      t_unit_spectrum_current%name  = 'a.u.'
+      t_unit_spectrum_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current_square
+    t_unit_spectrum_current_square%conv = 1d0/ulength_from_au**4
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current_square%name  = '1/Angstrom^4'
+    else 
+      t_unit_spectrum_current_square%name  = 'a.u.'
+      t_unit_spectrum_current_square%conv  = 1d0
     end if
 
 !! prepare type(unit_t) :: t_unit_ac
@@ -1540,6 +1588,32 @@ contains
     else 
       t_unit_elec%name     = 'a.u.'
       t_unit_elec%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_spectrum_elec
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec%name     = 'fs*V/Angstrom'
+      t_unit_spectrum_elec%conv     = utime_from_au*51.42206707d0
+    else 
+      t_unit_spectrum_elec%name     = 'a.u.'
+      t_unit_spectrum_elec%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_spectrum_elec_square
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec_square%name     = 'fs^2*V^2/Angstrom^2'
+      t_unit_spectrum_elec_square%conv     = utime_from_au**2*51.42206707d0**2
+    else 
+      t_unit_spectrum_elec_square%name     = 'a.u.'
+      t_unit_spectrum_elec_square%conv     = 1d0
     end if
 
 !! prepare type(unit_t) :: t_unit_polarizability
