@@ -38,7 +38,8 @@ use salmon_communication, only: comm_is_root, comm_summation, comm_bcast, comm_s
 use salmon_xc
 use timer
 use global_variables_rt
-use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data
+use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
+                     write_response_0d,write_response_3d
 use code_optimization
 use initialization_sub
 use input_pp_sub
@@ -295,9 +296,11 @@ call timer_end(LOG_INIT_RT)
 if(comm_is_root(nproc_id_global))then
    write(ofl%file_rt_data,"(2A,'_rt.data')") trim(base_directory),trim(SYSname)
    write(ofl%file_rt_energy_data,"(2A,'_rt_energy.data')") trim(base_directory),trim(SYSname)
+   write(ofl%file_response_data,"(2A,'_response.data')") trim(base_directory),trim(SYSname)
 endif
 call comm_bcast(ofl%file_rt_data,       nproc_group_global)
 call comm_bcast(ofl%file_rt_energy_data,nproc_group_global)
+call comm_bcast(ofl%file_response_data, nproc_group_global)
 
 !(write header)
 if(comm_is_root(nproc_id_global))then
@@ -581,31 +584,23 @@ end if
 !
 select case(iperiodic)
 case(0)
+  
+  if(theory=="TDDFT_response")then
+    call write_response_0d(ofl,rt)
+  else
 
-  call Fourier3D(rt%dDp_e,alpha_R,alpha_I)
-  if(comm_is_root(nproc_id_global))then
-    if(iflag_intelectron==1)then
-      open(1,file=file_RT_e)
-      write(1,'(a)') "# time[fs],    integrated electron density" 
-       do nntime=1,itotNtime
-          write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-          write(1,'(e16.8)',advance="yes") rt%rIe(nntime)
-       end do
-      close(1)
-    end if
-
-    ! Alpha
-    if(ae_shape1=='impulse')then
-      open(1,file=file_alpha_lr)
-      write(1,'(a)') "# energy[eV], Re[alpha](x,y,z)[A**3], Im[alpha](x,y,z)[A**3], df/dE(x,y,z)[1/eV]" 
-      do iene=0,Nenergy
-        Sf(:)=2*iene*dE/(Pi)*alpha_I(:,iene)
-        write(1,'(e13.5)',advance="no") iene*dE*2d0*Ry
-        write(1,'(3e16.8)',advance="no") (alpha_R(iii,iene)*(a_B)**3, iii=1,3)
-        write(1,'(3e16.8)',advance="no") (alpha_I(iii,iene)*(a_B)**3, iii=1,3)
-        write(1,'(3e16.8)',advance="yes") (Sf(iii)/2d0/Ry, iii=1,3)
-      end do
-    else
+    call Fourier3D(rt%dDp_e,alpha_R,alpha_I)
+    if(comm_is_root(nproc_id_global))then
+      if(iflag_intelectron==1)then
+        open(1,file=file_RT_e)
+        write(1,'(a)') "# time[fs],    integrated electron density" 
+         do nntime=1,itotNtime
+            write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
+            write(1,'(e16.8)',advance="yes") rt%rIe(nntime)
+         end do
+        close(1)
+      end if
+  
       open(1,file=file_alpha_pulse)
       write(1,'(a)') "# energy[eV], Re[d(w)](x,y,z)[A*fs],  Im[d(w)](x,y,z)[A*fs],  |d(w)|^2(x,y,z)[A**2*fs**2]"
       do iene=0,Nenergy
@@ -615,35 +610,38 @@ case(0)
         write(1,'(3e16.8)',advance="yes") ((alpha_R(iii,iene)**2+alpha_I(iii,iene)**2)   &
                                                *(a_B)**2*(2.d0*Ry*fs2eVinv)**2, iii=1,3)
       end do
-    end if 
-    close(1)
+      close(1)
 
+    end if
   end if
   
 case(3)
-  allocate( tfourier_integrand(1:3,0:Ntime) )
-  if(trans_longi=="lo")then
-     tfourier_integrand(1:3,0:Ntime) = A_ind(1:3,0:Ntime)
-  else if(trans_longi=="tr")then
-     tfourier_integrand(1:3,0:Ntime) = rt%curr(1:3,0:Ntime)
+  if(theory=="TDDFT_response")then
+    call write_response_3d(ofl,rt)
+  else
+    allocate( tfourier_integrand(1:3,0:Ntime) )
+    if(trans_longi=="lo")then
+       tfourier_integrand(1:3,0:Ntime) = A_ind(1:3,0:Ntime)
+    else if(trans_longi=="tr")then
+       tfourier_integrand(1:3,0:Ntime) = rt%curr(1:3,0:Ntime)
+    end if
+    call Fourier3D(tfourier_integrand,alpha_R,alpha_I)
+    if(comm_is_root(nproc_id_global))then
+      open(1,file=file_alpha_lr)
+      write(1,*) "# energy[eV], Re[epsilon](x,y,z), Im[epsilon](x,y,z)" 
+      do nn=1,Nenergy
+        write(1,'(e13.5)',advance="no") nn*dE*2d0*Ry
+  !      write(1,'(3e16.8)',advance="no")      &
+  !           (F*(F+alpha_R(iii,n))/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
+  !      write(1,'(3e16.8)',advance="yes")     &
+  !           (-F*alpha_I(iii,n)/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
+        write(1,'(3e16.8)',advance="no")  (alpha_R(iii,nn), iii=1,3)
+        write(1,'(3e16.8)',advance="yes") (alpha_I(iii,nn), iii=1,3)
+      end do
+      close(1)
+    end if 
+    deallocate( tfourier_integrand )
   end if
-  call Fourier3D(tfourier_integrand,alpha_R,alpha_I)
-  if(comm_is_root(nproc_id_global))then
-    open(1,file=file_alpha_lr)
-    write(1,*) "# energy[eV], Re[epsilon](x,y,z), Im[epsilon](x,y,z)" 
-    do nn=1,Nenergy
-      write(1,'(e13.5)',advance="no") nn*dE*2d0*Ry
-!      write(1,'(3e16.8)',advance="no")      &
-!           (F*(F+alpha_R(iii,n))/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
-!      write(1,'(3e16.8)',advance="yes")     &
-!           (-F*alpha_I(iii,n)/((F+alpha_R(iii,n))**2+alpha_I(iii,n)**2), iii=1,3)
-      write(1,'(3e16.8)',advance="no")  (alpha_R(iii,nn), iii=1,3)
-      write(1,'(3e16.8)',advance="yes") (alpha_I(iii,nn), iii=1,3)
-    end do
-    close(1)
-  end if 
-  deallocate( tfourier_integrand )
-
 end select
 call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)

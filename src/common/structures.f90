@@ -330,8 +330,9 @@ module structures
 
 ! output files
   type s_ofile
-     integer :: fh_rt, fh_rt_energy
+     integer :: fh_rt, fh_rt_energy, fh_response
      character(256) :: file_rt_data, file_rt_energy_data
+     character(256) :: file_response_data
      character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
 
