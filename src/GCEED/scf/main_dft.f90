@@ -108,72 +108,33 @@ iSCFRT=1
 iblacsinit=0
 
 call timer_begin(LOG_TOTAL)
-
 call timer_begin(LOG_INIT_GS)
 
 call convert_input_scf(file_atoms_coo)
-mixing%num_rho_stock=21
+mixing%num_rho_stock = 21
 
-iDiter(1:maxntmg)=1000
+iDiter(1:maxntmg) = 1000
 iDiter(1) = nscf
 
-! +----------------+
-! | initialization |
-! +----------------+
 
+! please move folloings into initialization_dft 
 call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+allocate( esp_old(system%no,system%nk,system%nspin) ); esp_old=0d0
+allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
-call init_code_optimization
-call allocate_mat(ng,mg,lg) ! future work: remove this line
 
-allocate( energy%esp(system%no,system%nk,system%nspin) ); energy%esp=0.0d0
-allocate( esp_old(system%no,system%nk,system%nspin) ); esp_old=0.0d0
+call initialization_dft( system, energy, stencil, fg, poisson,  &
+                         lg, mg, ng,  &
+                         pinfo, info, info_field,  &
+                         srg, srg_ng,  &
+                         srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
+                         spsi, shpsi, sttpsi,  &
+                         pp, ppg,  &
+                         ofile,  &
+                         nspin, flag_opt_conv, nopt_max )
 
-allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
-call allocate_scalar(mg,srho)
-call allocate_scalar(mg,sVh)
-call allocate_scalar(mg,sVpsl)
-do jspin=1,system%nspin
-  call allocate_scalar(mg,srho_s(jspin))
-  call allocate_scalar(mg,V_local(jspin))
-  call allocate_scalar(mg,sVxc(jspin))
-end do
-allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
-call read_pslfile(system,pp,ppg)
-call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-
-select case(iperiodic)
-case(0)
-  call allocate_orbital_real(system%nspin,mg,info,spsi)
-  call allocate_orbital_real(system%nspin,mg,info,shpsi)
-case(3)
-  call allocate_orbital_complex(system%nspin,mg,info,spsi)
-  call allocate_orbital_complex(system%nspin,mg,info,shpsi)
-  call allocate_orbital_complex(system%nspin,mg,info,sttpsi)
-end select
-
-nspin = system%nspin
-
-if(stencil%if_orthogonal) then
-  if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
-else
-  if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
-end if
-
-call set_filename
-
-if(yn_opt=='y')then
-   call structure_opt_ini(MI)
-   flag_opt_conv=.false.
-   write(comment_line,10) 0
-   call write_xyz(comment_line,"new","r  ",system)
-10 format("#opt iteration step=",i5)
-end if
 call timer_end(LOG_INIT_GS)
 
-if(yn_opt=='y') then ; nopt_max = nopt
-else                 ; nopt_max = 1
-endif
 
 Structure_Optimization_Iteration : do iopt=1,nopt_max
 Multigrid_Iteration : do img=1,ntmg
@@ -583,6 +544,7 @@ if(yn_opt=='y') then
 
   write(comment_line,10) iopt
   call write_xyz(comment_line,"add","r  ",system)
+10 format("#opt iteration step=",i5)
 
   if(comm_is_root(nproc_id_global))then
     write(*,*) "atomic coordinate"
@@ -640,25 +602,6 @@ call finalize_xc(xc_func)
 call timer_end(LOG_TOTAL)
 
 contains
-
-subroutine init_code_optimization
-  implicit none
-  integer :: ignum(3)
-
-  call switch_stencil_optimization(mg%num)
-  call switch_openmp_parallelization(mg%num)
-
-  if(iperiodic==3 .and. product(pinfo%npdomain_orbital)==1) then
-    ignum = mg%num
-  else
-    ignum = mg%num + (nd*2)
-  end if
-  call set_modulo_tables(ignum)
-
-  if (comm_is_root(nproc_id_global)) then
-    call optimization_log(pinfo)
-  end if
-end subroutine
 
 subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label )
   implicit none

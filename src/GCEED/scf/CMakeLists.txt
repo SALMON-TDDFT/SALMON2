@@ -1,6 +1,7 @@
 set(SOURCES
     convert_input_scf.f90
     main_dft.f90
+    initialization_dft.f90
     )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
