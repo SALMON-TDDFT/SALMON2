@@ -805,7 +805,7 @@ contains
     iwrite_projection      = 0
     itwproj                = -1
     iwrite_projnum         = 0
-    itcalc_ene             = 1
+    itcalc_ene             = 10
 !! == default for &group_hartree
     lmax_lmp = 4
 !! == default for &group_others
