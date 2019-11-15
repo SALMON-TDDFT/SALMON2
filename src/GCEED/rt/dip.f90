@@ -78,10 +78,10 @@ Hgs(:) = system%Hgs(:)
    enddo
 
    !(electronic dipole/quadrapole) -- defined as plus charge (opposite definition))
-   rt%Dp_e(1:3,itt)  = rbox_array2(1:3) * Hgs(1:3) * Hvol
+   rt%Dp_e(1:3,itt)  = -rbox_array2(1:3) * Hgs(1:3) * Hvol
    rt%dDp_e(1:3,itt) = rt%Dp_e(1:3,itt) - rt%Dp0_e(1:3)
    do i1=1,3
-      rt%Qp_e(1:3,i1,itt) = rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
+      rt%Qp_e(1:3,i1,itt) = -rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
    end do
 
    !(Number of electrons)
