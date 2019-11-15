@@ -447,7 +447,7 @@ if(yn_restart /= 'y')then
   end do
 
   call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
-  rt%Dp0_e(1:3) = rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
+  rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
 
 end if
 if(comm_is_root(nproc_id_global))then
