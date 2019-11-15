@@ -442,7 +442,7 @@ contains
     if(it.lt.0) jt=0
     ddm_e(:,1)= rt%dDp_e(:,jt)
     dm_e(:,1) = rt%Dp_e(:,jt)
-    dm(:)     = - rt%Dp_e(:,jt) + rt%Dp_i(:,jt)  !(ordinary definition)
+    dm(:)     = rt%Dp_e(:,jt) + rt%Dp_i(:,jt) 
 
 
     if (comm_is_root(nproc_id_global)) then
@@ -763,7 +763,7 @@ contains
         end do
 
         zalpha(:)=zalpha(:)/e_impulse*dt
-        sf(:)=2*hw/pi*aimag(zalpha(:))
+        sf(:)=-2*hw/pi*aimag(zalpha(:))
 
         write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
              &,(real(zalpha(ixyz))*t_unit_polarizability%conv,ixyz=1,3)&
