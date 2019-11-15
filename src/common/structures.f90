@@ -78,12 +78,12 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
-  type s_dft_rt
+  type s_rt
      real(8) :: Dp0_e(3)     !rename later
      real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
      real(8), allocatable :: rIe(:)    !rename later
      real(8), allocatable :: curr(:,:), E_ext(:,:), E_tot(:,:)
-  end type s_dft_rt
+  end type s_rt
 
   type s_process_info
     integer :: npk

@@ -14,13 +14,13 @@
 !  limitations under the License.
 !
 subroutine calc_emfields(nspin,rt,curr_in)
-  use structures, only : s_dft_rt
+  use structures, only : s_rt
   use math_constants, only : pi
   use salmon_global, only : ispin
   use scf_data, only : itt,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
   use inputoutput, only: trans_longi
   implicit none
-  type(s_dft_rt),intent(inout) :: rt
+  type(s_rt),intent(inout) :: rt
   integer,intent(in) :: nspin
   real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
 
@@ -60,11 +60,11 @@ return
 end subroutine calc_Aext
 
 subroutine init_A(Ntime,Mit,rt)
-use structures, only : s_dft_rt
+use structures, only : s_rt
 use scf_data
 use salmon_global, only: yn_restart
 implicit none
-type(s_dft_rt),intent(inout) :: rt
+type(s_rt),intent(inout) :: rt
 integer :: Ntime,Mit
 integer :: t_max
 

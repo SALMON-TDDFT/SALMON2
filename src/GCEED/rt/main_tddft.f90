@@ -43,7 +43,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system)  :: system
-type(s_dft_rt) :: rt
+type(s_rt) :: rt
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
 type(s_poisson) :: poisson
@@ -72,9 +72,15 @@ integer :: nntime
 
 call timer_begin(LOG_TOTAL)
 
-call initialization_rt(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
+call initialization_rt( Mit, system, energy, rt, md, singlescale,  &
+                        stencil, fg, poisson,  &
+                        lg, mg, ng,  &
+                        info, info_field,  &
+                        xc_func, dmat, ofl, j_e,  &
+                        srg, srg_ng,  &
+                        spsi_in, spsi_out, tpsi, srho, srho_s,  &
+                        V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
+                        pp, ppg, ppn )
 
 
 call timer_begin(LOG_RT_ITERATION)

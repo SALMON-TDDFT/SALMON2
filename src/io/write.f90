@@ -425,7 +425,7 @@ contains
 !===================================================================================================================================
 
   subroutine write_rt_data_0d(it,ofl,dt,system,rt)
-    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use structures, only: s_ofile, s_dft_system, s_rt
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file, only: open_filehandle
@@ -434,7 +434,7 @@ contains
     integer, intent(in) :: it
     type(s_ofile) :: ofl
     type(s_dft_system), intent(in) :: system
-    type(s_dft_rt),intent(in) :: rt
+    type(s_rt),intent(in) :: rt
     integer :: uid, jt
     real(8) :: dm_e(3,system%nspin),ddm_e(3,system%nspin), dm(3), dt
 
@@ -721,11 +721,11 @@ contains
                            t_unit_time,t_unit_energy,t_unit_polarizability
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use structures, only: s_ofile, s_dft_rt
+    use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
-    type(s_dft_rt),intent(in) :: rt
+    type(s_rt),intent(in) :: rt
     integer :: uid
     integer :: ihw,n,ixyz
     real(8) :: tt,hw,t2
@@ -784,11 +784,11 @@ contains
                            t_unit_time,t_unit_energy,t_unit_conductivity
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use structures, only: s_ofile, s_dft_rt
+    use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
-    type(s_dft_rt),intent(in) :: rt
+    type(s_rt),intent(in) :: rt
     integer :: uid
     integer :: ihw,n,ixyz
     real(8) :: tt,hw,t2
@@ -856,11 +856,11 @@ contains
                            t_unit_spectrum_dipole_square
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use structures, only: s_ofile, s_dft_rt
+    use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
-    type(s_dft_rt),intent(in) :: rt
+    type(s_rt),intent(in) :: rt
     integer :: uid
     integer :: ihw,n,ixyz
     real(8) :: tt,hw,t2
@@ -918,11 +918,11 @@ contains
                            t_unit_spectrum_elec_square
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use structures, only: s_ofile, s_dft_rt
+    use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
-    type(s_dft_rt),intent(in) :: rt
+    type(s_rt),intent(in) :: rt
     integer :: uid
     integer :: ihw,n,ixyz
     real(8) :: tt,hw,t2
