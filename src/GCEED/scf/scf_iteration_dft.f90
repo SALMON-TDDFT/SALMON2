@@ -15,7 +15,7 @@
 !
 !=======================================================================
 
-subroutine scf_iteration_dft( img,iDiter,Miter,rion_update,sum1,  &
+subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,  &
                               lg,mg,ng,  &
                               info,info_field,  &
@@ -28,7 +28,7 @@ subroutine scf_iteration_dft( img,iDiter,Miter,rion_update,sum1,  &
                               V_local,sVh,sVxc,sVpsl,xc_func,  &
                               pp,ppg,ppn,  &
                               rho_old,Vlocal_old,  &
-                              nref_band,check_conv_esp )
+                              band )
 use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global
@@ -82,27 +82,25 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
+type(s_band_dft) :: band
 
 logical :: rion_update
+integer :: i,j
 
-integer :: nref_band
-!logical,allocatable :: check_conv_esp(:,:,:)
-logical :: check_conv_esp(nref_band,system%nk,system%nspin)
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: tol_esp_diff
 
-integer :: iDiter(maxntmg)
-integer :: i,j, img
+
 
 
 allocate( esp_old(system%no,system%nk,system%nspin) ); esp_old=0d0
 
 
-DFT_Iteration : do iter=1,iDiter(img)
+DFT_Iteration : do iter=1,nscf
 
    if(sum1<threshold) cycle DFT_Iteration
    if(calc_mode=='DFT_BAND')then
-      if(all(check_conv_esp)) cycle DFT_Iteration
+      if(all(band%check_conv_esp)) cycle DFT_Iteration
    end if
 
    Miter=Miter+1
@@ -143,7 +141,7 @@ DFT_Iteration : do iter=1,iDiter(img)
    if(calc_mode=='DFT_BAND')then
       tol_esp_diff=1.0d-5
       esp_old=abs(esp_old-energy%esp)
-      check_conv_esp(:,:,:)=.false.
+      band%check_conv_esp(:,:,:)=.false.
       do ispin=1,system%nspin
       do ik=1,system%nk
          i=0
@@ -152,7 +150,7 @@ DFT_Iteration : do iter=1,iDiter(img)
             if ( esp_old(iob,ik,ispin) <= tol_esp_diff ) then
                i=i+1
                j=max(j,iob)
-               if ( iob <= nref_band ) check_conv_esp(iob,ik,ispin)=.true.
+               if( iob <= band%nref_band ) band%check_conv_esp(iob,ik,ispin)=.true.
             end if
          end do !io
          if ( ispin==1 .and. ik==1 ) then
