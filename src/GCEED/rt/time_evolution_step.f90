@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
+SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
 &   md,ofl,poisson,j_e,singlescale)
   use structures
@@ -68,12 +68,10 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
   type(s_md) :: md
   type(s_ofile) :: ofl
 
-  integer :: ix,iy,iz,nspin
-  integer :: iatom
+  integer :: ix,iy,iz,iatom,is,nspin,Mit
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
-  integer :: is
   character(100) :: comment_line
   logical :: rion_update,if_use_dmat
   integer :: ihpsieff
@@ -91,7 +89,7 @@ SUBROUTINE time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_fun
   if(yn_md=='y') then
      rion_update = .true.
   else
-     rion_update = check_rion_update() .or. (itt == Miter_rt+1)
+     rion_update = check_rion_update() .or. (itt == Mit+1)
   endif
 
   select case(ikind_eext)

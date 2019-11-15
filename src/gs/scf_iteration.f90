@@ -19,7 +19,8 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
+subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
+               srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
                cg,ppg,vlocal,  &
                miter,iditerybcg,   &
                iditer_nosubspace_diag,ifmst,mixing,iter, &
@@ -139,6 +140,6 @@ subroutine scf_iteration(lg,mg,ng,system,info,info_field,stencil,srg,srg_ng,spsi
 
   end if
 
-end subroutine scf_iteration
+end subroutine scf_iteration_step
 
 end module scf_iteration_sub
