@@ -15,14 +15,14 @@
 !
 !=======================================================================
 
-subroutine initialization_dft( system, energy, stencil, fg, poisson,  &
-                               lg, mg, ng,  &
-                               pinfo, info, info_field,  &
-                               srg, srg_ng,  &
-                               srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
-                               spsi, shpsi, sttpsi,  &
-                               pp, ppg,  &
-                               ofile )
+subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
+                                lg, mg, ng,  &
+                                pinfo, info, info_field,  &
+                                srg, srg_ng,  &
+                                srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
+                                spsi, shpsi, sttpsi,  &
+                                pp, ppg,  &
+                                ofile )
 use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global !,nproc_group_global
@@ -126,4 +126,105 @@ subroutine init_code_optimization
   end if
 end subroutine
 
-end subroutine initialization_dft
+end subroutine initialization1_dft
+
+
+subroutine initialization2_dft( Miter, nspin, rion_update,  &
+                                system,energy,stencil,fg,poisson,  &
+                                lg,mg,ng,  &
+                                info,info_field,  &
+                                srg,srg_ng,  &
+                                srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
+                                spsi,shpsi,sttpsi,  &
+                                pp,ppg,ppn,  &
+                                xc_func,mixing )
+use math_constants, only: pi, zi
+use structures
+use salmon_parallel, only: nproc_id_global
+use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use salmon_xc
+use timer
+use scf_iteration_sub
+use density_matrix, only: calc_density
+use writefield
+use global_variables_scf
+use salmon_pp, only: calc_nlcc
+use hartree_sub, only: hartree
+use force_sub
+use write_sub
+use read_gs
+use code_optimization
+use initialization_sub
+use occupation
+use input_pp_sub
+use prep_pp_sub
+use mixing_sub
+use checkpoint_restart_sub
+use hamiltonian
+use salmon_total_energy
+use band_dft_sub
+use init_gs, only: init_wf
+implicit none
+type(s_rgrid) :: lg
+type(s_rgrid) :: mg
+type(s_rgrid) :: ng
+type(s_orbital_parallel) :: info
+type(s_field_parallel) :: info_field
+type(s_sendrecv_grid) :: srg, srg_ng
+type(s_orbital) :: spsi,shpsi,sttpsi
+type(s_dft_system) :: system
+type(s_poisson) :: poisson
+type(s_stencil) :: stencil
+type(s_xc_functional) :: xc_func
+type(s_scalar) :: srho,sVh,sVpsl
+!type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
+type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
+type(s_reciprocal_grid) :: fg
+type(s_pp_info) :: pp
+type(s_pp_grid) :: ppg
+type(s_pp_nlcc) :: ppn
+type(s_dft_energy) :: energy
+type(s_mixing) :: mixing
+
+logical :: rion_update
+integer :: Miter,jspin, nspin
+
+nspin = system%nspin
+
+  call init_mixing(nspin,ng,mixing)
+
+  if (yn_restart == 'y') then
+    ! restart from binary
+    call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
+  else
+    ! new calculation
+    Miter = 0        ! Miter: Iteration counter set to zero
+    call init_wf(lg,mg,system,info,spsi)
+  end if
+
+  if(read_gs_dns_cube == 'n') then
+     call calc_density(system,srho_s,spsi,info,mg)
+  else
+     if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
+     call read_dns(lg,mg,srho_s(1)%f) ! cube file only
+  end if
+
+  srho%f = 0d0
+  do jspin=1,nspin
+     srho%f = srho%f + srho_s(jspin)%f
+  end do
+  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+
+  call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+  select case(iperiodic)
+  case(0)
+     call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+  case(3)
+     rion_update = .true. ! it's first calculation
+     call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+  end select
+
+
+end subroutine initialization2_dft

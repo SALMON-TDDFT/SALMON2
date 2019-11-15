@@ -3,6 +3,7 @@ set(SOURCES
     main_dft.f90
     initialization_dft.f90
     scf_iteration_dft.f90
+    band_dft.f90
     )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
