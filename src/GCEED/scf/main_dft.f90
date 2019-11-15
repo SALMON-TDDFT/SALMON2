@@ -88,7 +88,7 @@ type(s_band_dft) ::band
 logical :: rion_update
 logical :: flag_opt_conv
 integer :: iopt,nopt_max
-integer :: iter_band_kpt
+integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 
 if(calc_mode=='DFT_BAND'.and.iperiodic/=3) return
 
@@ -161,14 +161,14 @@ end if
 
 if(calc_mode=='DFT_BAND')then
    call init_band_dft(system,band)
-   band%iter_band_kpt_end    = band%num_band_kpt
-   band%iter_band_kpt_stride = system%nk
+   iter_band_kpt_end    = band%num_band_kpt
+   iter_band_kpt_stride = system%nk
 else
-   band%iter_band_kpt_end    = 1
-   band%iter_band_kpt_stride = 1
+   iter_band_kpt_end    = 1
+   iter_band_kpt_stride = 1
 end if
 
-Band_Iteration : do iter_band_kpt= 1, band%iter_band_kpt_end, band%iter_band_kpt_stride
+Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 
 if(calc_mode=='DFT_BAND')then
    call calc_band_write(iter_band_kpt,system,band,info)

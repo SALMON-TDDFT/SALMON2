@@ -349,7 +349,6 @@ module structures
 
   type s_band_dft
      integer :: num_band_kpt, nref_band
-     integer :: iter_band_kpt_end, iter_band_kpt_stride
      real(8),allocatable :: band_kpt(:,:)
      logical,allocatable :: check_conv_esp(:,:,:)
   end type s_band_dft
