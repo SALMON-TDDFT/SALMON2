@@ -45,7 +45,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   type(s_dft_system),intent(inout) :: system
-  type(s_dft_rt),intent(inout) :: rt
+  type(s_rt),intent(inout) :: rt
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel),intent(in) :: info_field
   type(s_stencil),intent(inout) :: stencil
