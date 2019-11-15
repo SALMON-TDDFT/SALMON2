@@ -31,9 +31,6 @@ integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Har
 
 !-------------------- Global variables
 
-integer :: Miter       ! Total number of Iteration for SCF calculation
-integer :: Miter_rt    ! Total number of Iteration for RT calculation
-
 integer :: iflag_diisjump
 
 integer :: ilsda

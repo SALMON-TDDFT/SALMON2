@@ -22,21 +22,16 @@ subroutine initialization_dft( system, energy, stencil, fg, poisson,  &
                                srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                                spsi, shpsi, sttpsi,  &
                                pp, ppg,  &
-                               ofile,  &
-                               nspin, flag_opt_conv, nopt_max )
+                               ofile )
 use math_constants, only: pi, zi
 use structures
-use salmon_parallel, only: nproc_id_global,nproc_group_global
+use salmon_parallel, only: nproc_id_global !,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
 use scf_iteration_sub
-!use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
-!use salmon_pp, only: calc_nlcc
-!use hartree_sub, only: hartree
-!use force_sub
 use write_sub
 use read_gs
 use code_optimization
@@ -44,21 +39,10 @@ use initialization_sub
 use occupation
 use input_pp_sub
 use prep_pp_sub
-!use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
 use salmon_total_energy
-!use init_gs, only: init_wf
-!use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
-integer :: jspin,nspin
-!integer :: ix,iy,iz,ik
-!integer :: iter,iatom,iob,p1,p2,p5,jj,iflag
-!real(8) :: sum0,sum1
-character(100) :: file_atoms_coo, comment_line
-!real(8) :: rNebox1,rNebox2
-!integer :: itmg
-
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
@@ -77,18 +61,10 @@ type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
-!type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
-!type(s_cg)     :: cg
-!type(s_mixing) :: mixing
 type(s_ofile)  :: ofile
 
-integer :: nopt_max
-logical :: flag_opt_conv
-
-!real(8),allocatable :: esp_old(:,:,:)
-!integer :: i,j
-
+integer :: jspin
 
 !call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 
@@ -96,7 +72,6 @@ call init_code_optimization
 call allocate_mat(ng,mg,lg) ! future work: remove this line
 
 allocate( energy%esp(system%no,system%nk,system%nspin) ); energy%esp=0.0d0
-!allocate( esp_old(system%no,system%nk,system%nspin) ); esp_old=0.0d0
 
 !allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
 call allocate_scalar(mg,srho)
@@ -121,8 +96,6 @@ case(3)
   call allocate_orbital_complex(system%nspin,mg,info,sttpsi)
 end select
 
-nspin = system%nspin
-
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"
 else
@@ -131,18 +104,6 @@ end if
 
 call set_filename
 
-if(yn_opt=='y')then
-   call structure_opt_ini(natom)  !check later MI->natom
-!   call structure_opt_ini(MI)
-   flag_opt_conv=.false.
-   write(comment_line,10) 0
-   call write_xyz(comment_line,"new","r  ",system)
-10 format("#opt iteration step=",i5)
-end if
-
-if(yn_opt=='y') then ; nopt_max = nopt
-else                 ; nopt_max = 1
-endif
 
 contains
 

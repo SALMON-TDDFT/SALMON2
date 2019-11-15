@@ -86,7 +86,7 @@ type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 type(s_ofile) :: ofile
 
-integer :: iob, i1,i2,i3, iik,jspin
+integer :: iob, i1,i2,i3, iik,jspin, Mit
 integer :: idensity, idiffDensity
 integer :: jj, nntime, ix,iy,iz
 real(8) :: rbox_array(10), rbox_array2(10)
@@ -208,11 +208,11 @@ call allocate_dmatrix(system%nspin,mg,info,dmat)
 
 call timer_begin(LOG_RESTART_SYNC)
 call timer_begin(LOG_RESTART_SELF)
-call restart_rt(lg,mg,ng,system,info,spsi_in,miter_rt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+call restart_rt(lg,mg,ng,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
 call timer_end(LOG_RESTART_SELF)
 call comm_sync_all
 call timer_end(LOG_RESTART_SYNC)
-if(yn_restart=='n') miter_rt=0
+if(yn_restart=='n') Mit=0
 
 call calc_nlcc(pp, system, mg, ppn)
 if (comm_is_root(nproc_id_global)) then
@@ -259,14 +259,14 @@ energy%E_tot0 = energy%E_tot
 
 call timer_begin(LOG_READ_RT_DATA)
 
-allocate( rt%rIe(0:Ntime) )
-allocate( rt%dDp_e(3,0:Ntime) )
-allocate( rt%Dp_e(3,0:Ntime) )
-allocate( rt%Dp_i(3,0:Ntime) )
+allocate( rt%rIe(     0:Ntime) )
+allocate( rt%dDp_e( 3,0:Ntime) )
+allocate( rt%Dp_e(  3,0:Ntime) )
+allocate( rt%Dp_i(  3,0:Ntime) )
 allocate( rt%Qp_e(3,3,0:Ntime) )
-call initA(Ntime,rt)
-itotNtime=Ntime
-if (yn_restart /= 'y') Miter_rt=0
+call init_A(Ntime,Mit,rt)
+itotNtime = Ntime
+if (yn_restart /= 'y') Mit=0
 call timer_end(LOG_READ_RT_DATA)
 
 
@@ -488,7 +488,7 @@ rt%Qp_e(:,:,0)= 0d0
     end if
   end do
 
-if(iperiodic==3) call calcAext
+if(iperiodic==3) call calc_Aext(Mit)
 
 if(yn_md=='y') call init_md(system,md)
 
@@ -525,14 +525,14 @@ call timer_end(LOG_INIT_RT)
 
 
 call timer_begin(LOG_RT_ITERATION)
-TE : do itt=Miter_rt+1,itotNtime
+TE : do itt=Mit+1,itotNtime
 
   if(mod(itt,2)==1)then
-    call time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
+    call time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   else
-    call time_evolution_step(lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
+    call time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
   end if
@@ -602,7 +602,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_out,miter,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+  call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_out,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
 end if
 
 call deallocate_mat
