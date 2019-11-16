@@ -31,7 +31,7 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   real(8)            :: Ac_ext(3)
   !
   integer :: npower
-  real(8) :: f0_1,f0_2,tt
+  real(8) :: f0_1,f0_2,tt,T1_T2_tmp
   
   Ac_ext = 0d0
   if(t < 0d0) return
@@ -46,6 +46,8 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   else
     f0_2=5.338d-9*sqrt(I_wcm2_2)      ! electric field in a.u.
   end if
+  
+  T1_T2_tmp = T1_T2
 
   select case(AE_shape1)
   case('impulse')
@@ -73,7 +75,7 @@ Subroutine calc_Ac_ext(t,Ac_ext)
         *exp(zI*(omega1*tt+phi_CEP1*2d0*pi))  &
         )
     end if
-    T1_T2 = T1_T2 + t1_start
+    T1_T2_tmp = T1_T2 + t1_start
 
   case('Ecos2')
   
@@ -91,7 +93,7 @@ Subroutine calc_Ac_ext(t,Ac_ext)
         +2d0*pi*(2d0*pi*cos(tw1*omega1/2d0) &
         +tw1*omega1*sin(2d0*pi*tt/tw1)*sin(omega1*tt)))
     end if
-    T1_T2 = T1_T2 + t1_start
+    T1_T2_tmp = T1_T2 + t1_start
 
   case('Esin2sin')
   
@@ -135,7 +137,8 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   select case(ae_shape2)
   case('impulse')
   
-    if(t > T1_T2)then
+    tt = t - 0.5d0*tw1 - T1_T2_tmp
+    if(tt > 0d0)then
       Ac_ext(1) = Ac_ext(1) + epdir_re2(1)*e_impulse
       Ac_ext(2) = Ac_ext(2) + epdir_re2(2)*e_impulse
       Ac_ext(3) = Ac_ext(3) + epdir_re2(3)*e_impulse
@@ -153,7 +156,7 @@ Subroutine calc_Ac_ext(t,Ac_ext)
       stop 'Error in init_Ac.f90'
     end select
 
-    tt = t - 0.5d0*tw1 - T1_T2
+    tt = t - 0.5d0*tw1 - T1_T2_tmp
     if (abs(tt)<0.5d0*tw2) then
       Ac_ext(:)=Ac_ext(:) &
         -f0_2/omega2*(cos(pi*tt/tw2))**npower &
@@ -170,7 +173,7 @@ Subroutine calc_Ac_ext(t,Ac_ext)
     if(sum(abs(epdir_im2(:)))>1.0d-8)then
       stop "Error: ae_shape2 should be 'Acos2' when epdir_im2 is used."
     end if
-    tt = t - 0.5d0*tw1 - T1_T2
+    tt = t - 0.5d0*tw1 - T1_T2_tmp
     if (abs(tt)<0.5d0*tw2) then
       Ac_ext(:)=Ac_ext(:) &
         -epdir_re2(:)*f0_2/(8d0*pi**2*omega2 - 2d0*tw2**2*omega2**3) &
@@ -189,9 +192,9 @@ Subroutine calc_Ac_ext(t,Ac_ext)
       ! pulse shape : A(t)=f0/omega*sin(Pi t/T)**2 *cos (omega t+phi_CEP*2d0*pi) 
     ! probe laser
     tt = t
-    if ( (tt-T1_T2>0d0) .and. (tt-T1_T2<tw2) ) then
+    if ( (tt-T1_T2_tmp>0d0) .and. (tt-T1_T2_tmp<tw2) ) then
       Ac_ext(:) = Ac_ext(:) &
-        &-Epdir_re2(:)*f0_2/omega2*(sin(pi*(tt-T1_T2)/tw2))**2*cos(omega2*(tt-T1_T2)+phi_CEP2*2d0*pi)
+        &-Epdir_re2(:)*f0_2/omega2*(sin(pi*(tt-T1_T2_tmp)/tw2))**2*cos(omega2*(tt-T1_T2_tmp)+phi_CEP2*2d0*pi)
     endif
 
   case('input')
