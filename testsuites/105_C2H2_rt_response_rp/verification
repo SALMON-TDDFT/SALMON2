@@ -20,7 +20,7 @@ checklist = {
     # Dipole moment
     "Dipole moment (z-direction)": [
         -100, # Temporary value for result
-        0.25540063E-01,  # Reference value 
+        -0.25540063E-01,  # Reference value 
         1e-3,  # Permissible error 
     ], 
 } 

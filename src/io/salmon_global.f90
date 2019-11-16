@@ -322,7 +322,6 @@ module salmon_global
   integer        :: lmax_lmp
 
 !! &group_others
-  integer        :: iscf_order
   integer        :: iswitch_orbital_mesh
   integer        :: iflag_psicube
   real(8)        :: lambda1_diis

@@ -15,7 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module write_sub
-  use math_constants,only : zi
+  use math_constants,only : zi,pi
   implicit none
 
 contains
@@ -425,7 +425,7 @@ contains
 !===================================================================================================================================
 
   subroutine write_rt_data_0d(it,ofl,dt,system,rt)
-    use structures, only: s_ofile, s_dft_system, s_dft_rt
+    use structures, only: s_ofile, s_dft_system, s_rt
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use salmon_file, only: open_filehandle
@@ -434,7 +434,7 @@ contains
     integer, intent(in) :: it
     type(s_ofile) :: ofl
     type(s_dft_system), intent(in) :: system
-    type(s_dft_rt),intent(in) :: rt
+    type(s_rt),intent(in) :: rt
     integer :: uid, jt
     real(8) :: dm_e(3,system%nspin),ddm_e(3,system%nspin), dm(3), dt
 
@@ -442,7 +442,7 @@ contains
     if(it.lt.0) jt=0
     ddm_e(:,1)= rt%dDp_e(:,jt)
     dm_e(:,1) = rt%Dp_e(:,jt)
-    dm(:)     = - rt%Dp_e(:,jt) + rt%Dp_i(:,jt)  !(ordinary definition)
+    dm(:)     = rt%Dp_e(:,jt) + rt%Dp_i(:,jt) 
 
 
     if (comm_is_root(nproc_id_global)) then
@@ -715,6 +715,299 @@ contains
 
   end subroutine
   
+!===================================================================================================================================
+  subroutine write_response_0d(ofl,rt)
+    use inputoutput, only: e_impulse, nt, dt, nenergy, de,  &
+                           t_unit_time,t_unit_energy,t_unit_polarizability
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zalpha(3)
+    real(8) :: sf(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_response        = open_filehandle(ofl%file_response_data)
+      uid = ofl%fh_response
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "alpha", "Polarizability"
+      write(uid,10) "df/dE", "Strength function"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "Time", trim(t_unit_time%name), &
+        & 2, "Re(alpha_x)", trim(t_unit_polarizability%name), &
+        & 3, "Im(alpha_x)", trim(t_unit_polarizability%name), &
+        & 4, "Re(alpha_y)", trim(t_unit_polarizability%name), &
+        & 5, "Im(alpha_y)", trim(t_unit_polarizability%name), &
+        & 6, "Re(alpha_z)", trim(t_unit_polarizability%name), &
+        & 7, "Im(alpha_z)", trim(t_unit_polarizability%name), &
+        & 8, "df_x/dE", "none", &
+        & 9, "df_y/dE", "none", &
+        & 10, "df_z/dE", "none"
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de ; zalpha(:)=(0.d0,0.d0)  
+        do n=1,nt
+          t2=dble(n)*dt ; zalpha(:)=zalpha(:)+exp(zi*hw*t2)*rt%dDp_e(:,n) & 
+                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+
+        zalpha(:)=zalpha(:)/e_impulse*dt
+        sf(:)=-2*hw/pi*aimag(zalpha(:))
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zalpha(ixyz))*t_unit_polarizability%conv,ixyz=1,3)&
+             &,(aimag(zalpha(ixyz))*t_unit_polarizability%conv,ixyz=1,3)&
+             &,(sf(ixyz),ixyz=1,3)
+
+      end do
+
+      flush(uid)  !for debug
+
+    end if
+
+  end subroutine
+
+!===================================================================================================================================
+  subroutine write_response_3d(ofl,rt)
+    use inputoutput, only: e_impulse, trans_longi, nt, dt, nenergy, de,  &
+                           t_unit_time,t_unit_energy,t_unit_conductivity
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zsigma(3),zeps(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_response        = open_filehandle(ofl%file_response_data)
+      uid = ofl%fh_response
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "sigma", "Conductivity"
+      write(uid,10) "eps", "Dielectric constant"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "Time", trim(t_unit_time%name), &
+        & 2, "Re(sigma_x)", trim(t_unit_conductivity%name), &
+        & 3, "Im(sigma_x)", trim(t_unit_conductivity%name), &
+        & 4, "Re(sigma_y)", trim(t_unit_conductivity%name), &
+        & 5, "Im(sigma_y)", trim(t_unit_conductivity%name), &
+        & 6, "Re(sigma_z)", trim(t_unit_conductivity%name), &
+        & 7, "Im(sigma_z)", trim(t_unit_conductivity%name), &
+        & 8, "Re(eps_x)", "none", &
+        & 9, "Im(eps_x)", "none", &
+        & 10, "Re(eps_y)", "none", &
+        & 11, "Im(eps_y)", "none", &
+        & 12, "Re(eps_z)", "none", &
+        & 13, "Im(eps_z)", "none"
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de ; zsigma(:)=(0.d0,0.d0)  
+        do n=1,nt
+          t2=dble(n)*dt ; zsigma(:)=zsigma(:)+exp(zi*hw*t2)*rt%curr(:,n) & 
+                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+
+        zsigma(:)=zsigma(:)/e_impulse*dt
+        if(trans_longi=="tr")then
+          zeps(:)=1.d0+4.d0*pi*zi*zsigma(:)/hw
+        else if(trans_longi=="lo")then
+          zeps(:)=1.d0/(1.d0-zi*hw*zsigma(:))
+        end if
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zsigma(ixyz))*t_unit_conductivity%conv,ixyz=1,3)&
+             &,(aimag(zsigma(ixyz))*t_unit_conductivity%conv,ixyz=1,3)&
+             &,(real(zeps(ixyz)),ixyz=1,3)&
+             &,(aimag(zeps(ixyz)),ixyz=1,3)
+
+      end do
+
+      flush(uid)  !for debug
+
+    end if
+
+  end subroutine
+
+!===================================================================================================================================
+  subroutine write_pulse_0d(ofl,rt)
+    use inputoutput, only: nt, dt, nenergy, de,  &
+                           t_unit_energy,  &
+                           t_unit_spectrum_dipole,  &
+                           t_unit_spectrum_dipole_square
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zdDp_e(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_pulse           = open_filehandle(ofl%file_pulse_data)
+      uid = ofl%fh_pulse
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "energy", "Frequency"
+      write(uid,10) "dm", "Dopile moment"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "energy", trim(t_unit_energy%name), &
+        & 2, "Re(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 3, "Im(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 4, "|dm_x|^2", trim(t_unit_spectrum_dipole%name), &
+        & 5, "Re(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 6, "Im(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 7, "|dm_y|^2", trim(t_unit_spectrum_dipole%name), &
+        & 8, "Re(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
+        & 9, "Im(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
+        & 10, "|dm_z|^2", trim(t_unit_spectrum_dipole_square%name)
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de 
+        zdDp_e(:)=(0.d0,0.d0) 
+        do n=1,nt
+          t2=dble(n)*dt ; zdDp_e(:)=zdDp_e(:)+exp(zi*hw*t2)*rt%dDp_e(:,n) & 
+                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+        zdDp_e(:)=zdDp_e(:)*dt
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zdDp_e(ixyz))*t_unit_spectrum_dipole%conv,ixyz=1,3)&
+             &,(aimag(zdDp_e(ixyz))*t_unit_spectrum_dipole%conv,ixyz=1,3)&
+             &,(abs(zdDp_e(ixyz))**2*t_unit_spectrum_dipole_square%conv,ixyz=1,3)
+      end do
+
+    end if
+
+  end subroutine
+
+!===================================================================================================================================
+  subroutine write_pulse_3d(ofl,rt)
+    use inputoutput, only: nt, dt, nenergy, de,  &
+                           t_unit_energy,  &
+                           t_unit_spectrum_current,  &
+                           t_unit_spectrum_current_square,  &
+                           t_unit_spectrum_elec,  &
+                           t_unit_spectrum_elec_square
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root
+    use structures, only: s_ofile, s_rt
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_rt),intent(in) :: rt
+    integer :: uid
+    integer :: ihw,n,ixyz
+    real(8) :: tt,hw,t2
+    complex(8) :: zcurr(3),zE_ext(3),zE_tot(3)
+
+    if (comm_is_root(nproc_id_global)) then
+      ofl%fh_pulse           = open_filehandle(ofl%file_pulse_data)
+      uid = ofl%fh_pulse
+
+10    format("#",1X,A,":",1X,A)
+      write(uid,10) "Fourier-transform spectra",""
+      write(uid,10) "energy", "Frequency"
+      write(uid,10) "Jm", "Matter current"
+      write(uid,10) "E_ext", "External electric field"
+      write(uid,10) "E_tot", "Total electric field"
+
+      write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        & 1, "energy", trim(t_unit_energy%name), &
+        & 2, "Re(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 3, "Im(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 4, "|Jm_x|^2", trim(t_unit_spectrum_current%name), &
+        & 5, "Re(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 6, "Im(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 7, "|Jm_y|^2", trim(t_unit_spectrum_current%name), &
+        & 8, "Re(Jm_z)", trim(t_unit_spectrum_current_square%name), &
+        & 9, "Im(Jm_z)", trim(t_unit_spectrum_current_square%name), &
+        & 10, "|Jm_z|^2", trim(t_unit_spectrum_current_square%name), &
+        & 11, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 12, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 13, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
+        & 14, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 15, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 16, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
+        & 17, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 18, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 19, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 20, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 21, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
+        & 22, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
+        & 23, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 24, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 25, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
+        & 26, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 27, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 28, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name)
+
+      tt = dt*dble(nt)
+
+      do ihw=1,nenergy
+        hw=dble(ihw)*de 
+        zcurr(:)=(0.d0,0.d0) 
+        zE_ext(:)=(0.d0,0.d0)  
+        zE_tot(:)=(0.d0,0.d0)  
+        do n=1,nt
+          t2=dble(n)*dt 
+          zcurr(:)=zcurr(:)+exp(zi*hw*t2)*rt%curr(:,n) & 
+                                      *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          zE_ext(:)=zE_ext(:)+exp(zi*hw*t2)*rt%E_ext(:,n) & 
+                                      *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          zE_tot(:)=zE_tot(:)+exp(zi*hw*t2)*rt%E_tot(:,n) & 
+                                      *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+        end do
+        zcurr(:)=zcurr(:)*dt
+        zE_ext(:)=zE_ext(:)*dt
+        zE_tot(:)=zE_tot(:)*dt
+
+        write(uid,'(F16.8,99(1X,E23.15E3))') hw * t_unit_energy%conv &
+             &,(real(zcurr(ixyz))*t_unit_spectrum_current%conv,ixyz=1,3)&
+             &,(aimag(zcurr(ixyz))*t_unit_spectrum_current%conv,ixyz=1,3)&
+             &,(abs(zcurr(ixyz))**2*t_unit_spectrum_current_square%conv,ixyz=1,3)&
+             &,(real(zE_ext(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(aimag(zE_ext(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(abs(zE_ext(ixyz))**2*t_unit_spectrum_elec_square%conv,ixyz=1,3)&
+             &,(real(zE_tot(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(aimag(zE_tot(ixyz))*t_unit_spectrum_elec%conv,ixyz=1,3)&
+             &,(abs(zE_tot(ixyz))**2*t_unit_spectrum_elec_square%conv,ixyz=1,3)
+
+      end do
+
+      flush(uid)  !for debug
+
+    end if
+
+  end subroutine
+
 !===================================================================================================================================
 
   subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)

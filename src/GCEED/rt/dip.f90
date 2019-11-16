@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine subdip(rt,ng,srho,rNe,poisson,Etot,system,pp)
-use structures, only: s_dft_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
+use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: natom, au_time_fs
@@ -24,7 +24,7 @@ use inputoutput, only: yn_md
 implicit none
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
-type(s_dft_rt),intent(inout) :: rt
+type(s_rt),intent(inout) :: rt
 real(8),intent(in)        :: Etot
 real(8),intent(out)       :: rNe
 type(s_poisson),intent(in) :: poisson
@@ -78,10 +78,10 @@ Hgs(:) = system%Hgs(:)
    enddo
 
    !(electronic dipole/quadrapole) -- defined as plus charge (opposite definition))
-   rt%Dp_e(1:3,itt)  = rbox_array2(1:3) * Hgs(1:3) * Hvol
+   rt%Dp_e(1:3,itt)  = -rbox_array2(1:3) * Hgs(1:3) * Hvol
    rt%dDp_e(1:3,itt) = rt%Dp_e(1:3,itt) - rt%Dp0_e(1:3)
    do i1=1,3
-      rt%Qp_e(1:3,i1,itt) = rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
+      rt%Qp_e(1:3,i1,itt) = -rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
    end do
 
    !(Number of electrons)

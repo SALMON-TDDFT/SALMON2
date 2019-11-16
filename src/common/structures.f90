@@ -78,12 +78,12 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
-  type s_dft_rt
+  type s_rt
      real(8) :: Dp0_e(3)     !rename later
      real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
      real(8), allocatable :: rIe(:)    !rename later
-     real(8), allocatable :: curr(:,:)
-  end type s_dft_rt
+     real(8), allocatable :: curr(:,:), E_ext(:,:), E_tot(:,:)
+  end type s_rt
 
   type s_process_info
     integer :: npk
@@ -330,8 +330,9 @@ module structures
 
 ! output files
   type s_ofile
-     integer :: fh_rt, fh_rt_energy
+     integer :: fh_rt, fh_rt_energy, fh_response, fh_pulse
      character(256) :: file_rt_data, file_rt_energy_data
+     character(256) :: file_response_data, file_pulse_data
      character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
 
@@ -345,6 +346,12 @@ module structures
     integer :: num_rho_stock
     type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
   end type s_mixing
+
+  type s_band_dft
+     integer :: num_band_kpt, nref_band
+     real(8),allocatable :: band_kpt(:,:)
+     logical,allocatable :: check_conv_esp(:,:,:)
+  end type s_band_dft
 
 !===================================================================================================================================
 

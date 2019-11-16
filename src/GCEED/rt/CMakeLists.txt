@@ -3,6 +3,7 @@ set(SOURCES
     calcVbox.f90
     convert_input_rt.f90
     dip.f90
+    initialization_rt.f90
     main_tddft.f90
     set_vonf_sd.f90
     time_evolution_step.f90

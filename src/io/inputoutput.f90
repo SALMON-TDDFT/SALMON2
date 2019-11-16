@@ -93,9 +93,17 @@ module inputoutput
   type(unit_t) :: t_unit_energy_inv
   type(unit_t) :: t_unit_time
   type(unit_t) :: t_unit_time_inv
+  type(unit_t) :: t_unit_spectrum_dipole
+  type(unit_t) :: t_unit_spectrum_dipole_square
   type(unit_t) :: t_unit_current
+  type(unit_t) :: t_unit_spectrum_current
+  type(unit_t) :: t_unit_spectrum_current_square
   type(unit_t) :: t_unit_ac
   type(unit_t) :: t_unit_elec
+  type(unit_t) :: t_unit_spectrum_elec
+  type(unit_t) :: t_unit_spectrum_elec_square
+  type(unit_t) :: t_unit_polarizability
+  type(unit_t) :: t_unit_conductivity
 
 contains
   subroutine read_input
@@ -473,7 +481,6 @@ contains
       & lmax_lmp
 
     namelist/group_others/ &
-      & iscf_order, &
       & iswitch_orbital_mesh, &
       & iflag_psicube, &
       & lambda1_diis, &
@@ -798,11 +805,10 @@ contains
     iwrite_projection      = 0
     itwproj                = -1
     iwrite_projnum         = 0
-    itcalc_ene             = 1
+    itcalc_ene             = 10
 !! == default for &group_hartree
     lmax_lmp = 4
 !! == default for &group_others
-    iscf_order  = 1
     iswitch_orbital_mesh = 0
     iflag_psicube        = 0
     lambda1_diis         = 0.5d0
@@ -1254,7 +1260,6 @@ contains
 !! == bcast for &group_hartree
     call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_others
-    call comm_bcast(iscf_order          ,nproc_group_global)
     call comm_bcast(iswitch_orbital_mesh,nproc_group_global)
     call comm_bcast(iflag_psicube       ,nproc_group_global)
     call comm_bcast(lambda1_diis        ,nproc_group_global)
@@ -1503,6 +1508,28 @@ contains
       t_unit_time_inv%conv = 1d0
     end if
 
+!! prepare type(unit_t) :: t_unit_spectrum_dipole
+    t_unit_spectrum_dipole%conv = utime_from_au*ulength_from_au
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole%name  = 'fs*Angstrom'
+    else 
+      t_unit_spectrum_dipole%name  = 'a.u.'
+      t_unit_spectrum_dipole%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole_square
+    t_unit_spectrum_dipole_square%conv = utime_from_au**2*ulength_from_au**2
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole_square%name  = 'fs^2*Angstrom^2'
+    else 
+      t_unit_spectrum_dipole_square%name  = 'a.u.'
+      t_unit_spectrum_dipole_square%conv  = 1d0
+    end if
+
 !! prepare type(unit_t) :: t_unit_current
     t_unit_current%conv = (ulength_from_au/utime_from_au)/ulength_from_au**3
     if(iflag_unit_time == ntype_unit_time_fs .and. &
@@ -1512,6 +1539,26 @@ contains
     else 
       t_unit_current%name  = 'a.u.'
       t_unit_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current
+    t_unit_spectrum_current%conv = 1d0/ulength_from_au**2
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current%name  = '1/Angstrom^2'
+    else 
+      t_unit_spectrum_current%name  = 'a.u.'
+      t_unit_spectrum_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current_square
+    t_unit_spectrum_current_square%conv = 1d0/ulength_from_au**4
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current_square%name  = '1/Angstrom^4'
+    else 
+      t_unit_spectrum_current_square%name  = 'a.u.'
+      t_unit_spectrum_current_square%conv  = 1d0
     end if
 
 !! prepare type(unit_t) :: t_unit_ac
@@ -1540,6 +1587,57 @@ contains
       t_unit_elec%conv     = 1d0
     end if
 
+    !! prepare type(unit_t) :: t_unit_spectrum_elec
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec%name     = 'fs*V/Angstrom'
+      t_unit_spectrum_elec%conv     = utime_from_au*51.42206707d0
+    else 
+      t_unit_spectrum_elec%name     = 'a.u.'
+      t_unit_spectrum_elec%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_spectrum_elec_square
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec_square%name     = 'fs^2*V^2/Angstrom^2'
+      t_unit_spectrum_elec_square%conv     = utime_from_au**2*51.42206707d0**2
+    else 
+      t_unit_spectrum_elec_square%name     = 'a.u.'
+      t_unit_spectrum_elec_square%conv     = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_polarizability
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_polarizability%name  = 'Augstrom^2/V'
+      t_unit_polarizability%conv = ulength_from_au**2/51.42206707d0
+    else 
+      t_unit_polarizability%name  = 'a.u.'
+      t_unit_polarizability%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_conductivity
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_conductivity%name  = '1/fs*V*Angstrom'
+      t_unit_conductivity%conv = 1.d0/utime_from_au/51.42206707d0/ulength_from_au
+    else 
+      t_unit_conductivity%name  = 'a.u.'
+      t_unit_conductivity%conv  = 1d0
+    end if
 
   end subroutine initialize_inputoutput_units
 
@@ -1929,7 +2027,6 @@ contains
 
       if(inml_group_others >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iscf_order', iscf_order
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iswitch_orbital_mesh', iswitch_orbital_mesh
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_psicube', iflag_psicube
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda1_diis', lambda1_diis

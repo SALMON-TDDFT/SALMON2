@@ -17,7 +17,6 @@ MODULE scf_data
 use salmon_global
 implicit none
 !-------------------- Parameters
-integer, parameter :: maxntmg=10
 
 ! Physical constants
 real(8),parameter :: E2=14.4d0, H2M=3.81d0, a_B=0.529177d0
@@ -31,23 +30,12 @@ integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Har
 
 !-------------------- Global variables
 
-integer :: Miter       ! Total number of Iteration for SCF calculation
-integer :: Miter_rt    ! Total number of Iteration for RT calculation
-
 integer :: iflag_diisjump
-
 integer :: ilsda
-
 integer :: MST(2),ifMST(2),itotMST
-
-
 integer :: iSCFRT
-
 integer, allocatable :: idiis_sd(:)
-
-
 complex(8), allocatable :: zc(:)
-
 integer :: itotNtime
 
 integer :: num_kpoints_3d(3)
@@ -100,8 +88,6 @@ real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
 
 !filename
 character(100) :: file_eigen
-character(100) :: file_alpha_lr
-character(100) :: file_alpha_pulse
 character(100) :: file_RT_q
 character(100) :: file_alpha_q
 character(100) :: file_RT_e

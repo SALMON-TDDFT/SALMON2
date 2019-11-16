@@ -26,9 +26,6 @@ subroutine set_filename
   file_in_rt_bin =trim(directory_read_data)//trim(sysname)//"_rt.bin"
   file_out_rt_bin=trim(sysname)//"_rt.bin"
 
-  file_alpha_lr=trim(sysname)//"_lr.data"
-  file_alpha_pulse=trim(sysname)//"_ps.data"
-
   file_RT_q=trim(sysname)//"_q.data"
   file_alpha_q=trim(sysname)//"_q_ps.data"
   file_RT_e=trim(sysname)//"_q_e.data"

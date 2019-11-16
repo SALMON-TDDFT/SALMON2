@@ -346,8 +346,8 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
       ie = ppg%irange_atom(2,ia)
       ns = ie - is + 1
       nreq = nreq + 1
-      call MPI_Iallreduce( uvpsibox (Nspin,io_s,ik_s,im_s,is) &
-                         , uvpsibox2(Nspin,io_s,ik_s,im_s,is) &
+      call MPI_Iallreduce( uvpsibox (1,io_s,ik_s,im_s,is) &
+                         , uvpsibox2(1,io_s,ik_s,im_s,is) &
                          , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
                          , ireqs(nreq), ierr )
     !else

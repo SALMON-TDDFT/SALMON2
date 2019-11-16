@@ -14,13 +14,13 @@
 !  limitations under the License.
 !
 subroutine calc_emfields(nspin,rt,curr_in)
-  use structures, only : s_dft_rt
+  use structures, only : s_rt
   use math_constants, only : pi
   use salmon_global, only : ispin
   use scf_data, only : itt,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
   use inputoutput, only: trans_longi
   implicit none
-  type(s_dft_rt),intent(inout) :: rt
+  type(s_rt),intent(inout) :: rt
   integer,intent(in) :: nspin
   real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
 
@@ -39,56 +39,65 @@ subroutine calc_emfields(nspin,rt,curr_in)
   E_ind(:,itt) = -(A_ind(:,itt+1) - A_ind(:,itt-1))/(2d0*dt)
   E_tot(:,itt) = -(A_tot(:,itt+1) - A_tot(:,itt-1))/(2d0*dt)
 
+  rt%E_ext(1:3,itt)=E_ext(1:3,itt)
+  rt%E_tot(1:3,itt)=E_tot(1:3,itt)
+
 end subroutine calc_emfields
 
-subroutine calcAext
+subroutine calc_Aext(Mit)
 !$ use omp_lib
 use em_field, only: calc_Ac_ext
-use scf_data, only: dt,Miter_rt,itotNtime,A_ext
+use scf_data, only: dt,itotNtime,A_ext
 use math_constants, only: pi
 implicit none
-integer :: itt
+integer :: itt,Mit
 real(8) :: tt
-do itt=Miter_rt+1,itotNtime+1
-  tt = dt*dble(itt)
-  call calc_Ac_ext(tt,A_ext(:,itt))
+do itt=Mit+1,itotNtime+1
+   tt = dt*dble(itt)
+   call calc_Ac_ext(tt,A_ext(:,itt))
 end do
 return
-end subroutine calcAext
+end subroutine calc_Aext
 
-subroutine initA(Ntime,rt)
-use structures, only : s_dft_rt
+subroutine init_A(Ntime,Mit,rt)
+use structures, only : s_rt
 use scf_data
 use salmon_global, only: yn_restart
 implicit none
-type(s_dft_rt),intent(inout) :: rt
-integer :: Ntime
+type(s_rt),intent(inout) :: rt
+integer :: Ntime,Mit
 integer :: t_max
 
 if(yn_restart /= 'y')then
-  t_max=Ntime
+  t_max = Ntime
 else
-  t_max=Ntime+Miter_rt
+  t_max = Ntime + Mit
 end if
 
-allocate( rt%curr(3,0:t_max) )
+allocate( rt%curr( 3,0:t_max) )
+allocate( rt%E_ext(3,0:t_max) )
+allocate( rt%E_tot(3,0:t_max) )
 allocate( A_ext(3,0:t_max+1) )
 allocate( A_ind(3,0:t_max+1) )
 allocate( A_tot(3,0:t_max+1) )
 allocate( E_ext(3,0:t_max) )
 allocate( E_ind(3,0:t_max) )
 allocate( E_tot(3,0:t_max) )
-rt%curr=0.d0
-A_ext=0.d0
-A_ind=0.d0
-A_tot=0.d0
-E_ind=0.d0
 
-E_ext=0.d0
-E_ind(:,0)=0.d0
-E_tot(:,0)=0.d0
+rt%curr =0d0
+rt%E_ext=0d0
+rt%E_tot=0d0
 
-end subroutine initA
+A_ext   =0d0
+A_ind   =0d0
+A_tot   =0d0
+
+E_ind     =0d0
+E_ext     =0d0
+E_ind(:,0)=0d0
+E_tot(:,0)=0d0
+
+end subroutine init_A
 
 subroutine calc_env_trigon(ipulse,tenv_trigon)
   !$ use omp_lib
