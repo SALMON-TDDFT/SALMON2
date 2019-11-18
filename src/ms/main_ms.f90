@@ -28,8 +28,9 @@ END MODULE global_variables_ms
 subroutine main_ms
 use math_constants, only: pi
 use structures
-use salmon_parallel, only: nproc_id_global
-use salmon_communication, only: comm_is_root, comm_sync_all
+use inputoutput, only: nx_m, ny_m, nz_m
+use salmon_parallel, only: nproc_group_global, nproc_size_global, nproc_id_global
+use salmon_communication, only: comm_is_root, comm_sync_all, comm_create_group, comm_get_groupinfo
 use salmon_xc, only: finalize_xc
 use timer
 use global_variables_ms
@@ -67,10 +68,34 @@ type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 type(s_ofile) :: ofile
 
+integer :: nmacro
+integer :: nproc_group_macropoint
+integer :: nproc_size_macropoint
+integer :: nproc_id_macropoint
+integer :: nmacro_mygrp
+integer :: imacro_mygrp_s
+integer :: imacro_mygrp_e
+
+
 integer :: Mit
 integer :: nntime
 
 call timer_begin(LOG_TOTAL)
+
+nmacro = nx_m * ny_m * nz_m
+
+
+
+
+! call initialization_ms( Mit, system, energy, rt, md, singlescale,  &
+!                         stencil, fg, poisson,  &
+!                         lg, mg, ng,  &
+!                         info, info_field,  &
+!                         xc_func, dmat, ofl, j_e,  &
+!                         srg, srg_ng,  &
+!                         spsi_in, spsi_out, tpsi, srho, srho_s,  &
+!                         V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
+!                         pp, ppg, ppn )
 
 ! call initialization_rt( Mit, system, energy, rt, md, singlescale,  &
 !                         stencil, fg, poisson,  &
