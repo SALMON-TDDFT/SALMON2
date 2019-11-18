@@ -324,7 +324,7 @@ module structures
   end type s_fdtd_field
 
   type s_md
-     real(8) :: Tene, Temperature, E_work, xi_nh
+     real(8) :: Tene,Uene,E_tot,E_work, Temperature, xi_nh
      real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 

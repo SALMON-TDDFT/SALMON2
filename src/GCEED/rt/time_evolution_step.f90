@@ -308,7 +308,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
 
      !force on ion directly from field --- should put in calc_force_salmon?
      do iatom=1,system%nion
-        FionE(:,iatom) = pp%Zps(Kion(iatom)) * E_tot(:,itt)
+        FionE(:,iatom) = pp%Zps(Kion(iatom)) * rt%E_tot(:,itt)
      enddo
      system%Force(:,:) = system%Force(:,:) + FionE(:,:)
 

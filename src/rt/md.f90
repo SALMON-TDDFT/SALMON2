@@ -241,6 +241,12 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 
   dt_h = dt*0.5d0
 
+!  !NHC act on velocity with dt/2
+!  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
+!     call apply_nose_hoover_velocity(dt_h)
+!  endif
+
+
   !update ion velocity with dt/2
   do iatom=1,natom
      mass_au = umass * system%Mass(Kion(iatom))
@@ -261,6 +267,16 @@ subroutine time_evolution_step_md_part1(itt,system,md)
      system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
   enddo
   Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
+
+  !put SHAKE here in future (if needed)
+
+!  !NHC act on thermostat with dt
+!  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
+!     call cal_Tion_Temperature_ion(Tion,Temperature_ion,velocity)
+!     call apply_nose_hoover_thermostat(Temperature_ion,dt)
+!     Enh_gkTlns = Enh_gkTlns + gkT * xi_nh*dt
+!     Enh        = Enh_gkTlns + 0.5d0 * Qnh * xi_nh*xi_nh
+!  endif
 
 end subroutine 
 
@@ -319,6 +335,11 @@ subroutine time_evolution_step_md_part2(system,md)
      system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
      md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
   enddo
+
+!  !NHC act on velocity with dt/2
+!  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
+!     call apply_nose_hoover_velocity(dt_h)
+!  endif
 
 
   if (yn_stop_system_momt=='y') call remove_system_momentum(0,system)
