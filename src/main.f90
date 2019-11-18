@@ -18,7 +18,7 @@ program main
   call read_input
   call set_basic_flag(theory)
 
-  call read_Hubbard_parameters
+  call read_Hubbard_parameters  !should move into read_input subroutine!
 
   call timer_initialize
 
@@ -37,7 +37,7 @@ program main
   !GCEED: (main)
   select case(theory)
   case('DFT','DFT_BAND')              ; call main_dft
-  case('DFT_MD')                      ; call arted      !temporally
+  case('DFT_MD')                      ; call main_dft_md
   case('TDDFT_response','TDDFT_pulse'); call main_tddft
   case('Single_scale_Maxwell_TDDFT'  ); call main_tddft
   case('Multi_scale_Maxwell_TDDFT'   ); call arted      !temporally
