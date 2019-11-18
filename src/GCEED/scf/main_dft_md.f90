@@ -76,13 +76,12 @@ real(8) :: sum1
 character(100) :: file_atoms_coo, comment_line
 
 logical :: rion_update
-integer :: it, Miter
+integer :: it, Miter,i
 real(8),allocatable :: FionE(:,:)
 
-!xxx
-real(8) :: dt_h, Uene0
-real(8) :: Htot, Enh, Enh_gkTlns, gkT, Qnh
-!xxx
+real(8) :: dt_h, Uene0, E_tot0
+real(8) :: Htot, Enh, Enh_gkTlns, gkT, Qnh  !NHC xxx 
+
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -142,8 +141,6 @@ dt_h       = dt*0.5d0
 
 !  Enh_gkTlns = 0d0
 !  Enh        = 0d0
-
-!xxx
 !  if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
 !     gkT = 3d0*NI * kB/hartree2J*temperature0_ion_k
 !     Qnh = gkT * thermostat_tau**2d0
@@ -152,7 +149,9 @@ dt_h       = dt*0.5d0
 allocate( FionE(3,system%nion) )
 
 if(comm_is_root(nproc_id_global)) then
-   write(*,'(a)') "# time, Tene(ion), Uene(gs), Ework, Enh, Etot, Etot-Etot0, Htot, Temperature_ion [all in a.u.]"
+   write(*,'(3a)')"# 1.time[au], 2.Tene(ion)[au], 3.Uene(gs)[au], 4.Ework[au], ",&
+                    "5.Etot[au], 6.Etot-Etot0[au], 7.Enh[au], 8.Htot[au], ", &
+                    "9.Temperature_ion[K], 10.convergency[au]"
 endif
 
 rion_update = .true.
@@ -164,31 +163,17 @@ MD_Loop : do it=1,nt
 
    call time_evolution_step_md_part1(it,system,md)
 
-
-   call dealloc_init_ps(ppg)
-   ! call calc_nlcc(pp, system, mg, ppn) !test
-   call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-
+   !if( mod(it,step_update_ps)==0 ) then
+!   call dealloc_init_ps(ppg)
+!   call calc_nlcc(pp, system, mg, ppn)
+!   call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+   !endif
    
    !(this is from RT: can I use it?)
-   !call update_pseudo_rt(it,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
-
-   !this is from ARTED (old style) (as reference)
-   !!update force (electric state) with updated coordinate
-   !aforce(:,:) = force(:,:)
-   !call prep_ps_periodic('update_all       ')
-   !call read_write_gs_wfn_k(iflag_read)
-   !call calc_ground_state
-   !call read_write_gs_wfn_k(iflag_write)
-   !call Ion_Force_omp(Rion_update_rt,calc_mode_gs)
-   !call Total_Energy_omp(Rion_update_rt,calc_mode_gs)
-
-
-!xxxxxxxxxxxxxxxxxx
+   call update_pseudo_rt(it,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
 
 
    poisson%iterVh=1000
-   sum1=1.0d9
    iflag_diisjump=0
 
    if(.not.allocated(idiis_sd)) allocate(idiis_sd(itotMST))
@@ -197,11 +182,10 @@ MD_Loop : do it=1,nt
    if(.not.allocated(norm_diff_psi_stock)) then
       if(it==1) allocate(norm_diff_psi_stock(itotMST,1))
    end if
-   norm_diff_psi_stock=1.0d9
+   norm_diff_psi_stock = 1d9
 
    if(allocated(rho_old%f))    deallocate(rho_old%f)
    if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
-
    call allocate_scalar(ng,rho_old)
    call allocate_scalar(ng,Vlocal_old)
 
@@ -209,20 +193,19 @@ MD_Loop : do it=1,nt
    do iz=ng%is(3),ng%ie(3)
    do iy=ng%is(2),ng%ie(2)
    do ix=ng%is(1),ng%ie(1)
-      rho_old%f(ix,iy,iz)=srho%f(ix,iy,iz)
+      rho_old%f(ix,iy,iz)   =srho%f(ix,iy,iz)
       Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
    end do
    end do
    end do
 
-   ! Setup NLCC term from pseudopotential
-   call calc_nlcc(pp, system, mg, ppn)
+ !  ! Setup NLCC term from pseudopotential
+!   call calc_nlcc(pp, system, mg, ppn)
 
-   if(comm_is_root(nproc_id_global)) then
-      write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
-      write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
-   end if
-
+   !if(comm_is_root(nproc_id_global)) then
+   !   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
+   !   write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+   !end if
 
 
    !-------------- SCF Iteration ----------------
@@ -241,19 +224,19 @@ MD_Loop : do it=1,nt
                            V_local,sVh,sVxc,sVpsl,xc_func,  &
                            pp,ppg,ppn,  &
                            rho_old,Vlocal_old,  &
-                           band )
+                           band,1 )
 
-   ! output the wavefunctions for next GS calculations
-   if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
-      select case(iperiodic)
-      case(3)
-         call write_wfn(lg,mg,spsi,info,system)
-         ! Experimental Implementation of Inner-Product Outputs:
-         call write_prod_dk_data(lg, mg, system, info, spsi) 
-      case(0)
-         write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
-      end select
-   end if
+!   ! output the wavefunctions for next GS calculations
+!   if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
+!      select case(iperiodic)
+!      case(3)
+!         call write_wfn(lg,mg,spsi,info,system)
+!         ! Experimental Implementation of Inner-Product Outputs:
+!         call write_prod_dk_data(lg, mg, system, info, spsi) 
+!      case(0)
+!         write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
+!      end select
+!   end if
 
    !! output transition moment (currently no support in dft_md)
    !if(yn_out_tm == 'y') then
@@ -280,27 +263,27 @@ MD_Loop : do it=1,nt
    enddo
    system%Force(:,:) = system%Force(:,:) + FionE(:,:)
 
-
    deallocate(idiis_sd)
 
-!xxxxxxxxxxxxxx
+
    call time_evolution_step_md_part2(system,md)
 
    if(it==1) then
-      Uene0 = energy%E_tot0
+      Uene0 = energy%E_tot
+      E_tot0= energy%E_tot + md%Tene
    endif
    md%Uene  = energy%E_tot
    md%E_tot = energy%E_tot + md%Tene  !??
-   Htot     = energy%E_tot + Enh      !??
+   Htot     = energy%E_tot + Enh      !for NHC
    !how about field energy??
 
 
    !---Write section---
    ! Export to standard log file
    if(comm_is_root(nproc_id_global)) then
-      write(*,120) it*dt, md%Tene, md%Uene, md%E_work, Enh,  &
-                   md%E_tot, md%Uene-Uene0, Htot, md%Temperature
-120   format(1x,f10.4, 7e20.10E3,f12.3)
+      write(*,120) it*dt, md%Tene, md%Uene, md%E_work, md%E_tot, md%E_tot-E_tot0,&
+                   Enh, Htot, md%Temperature, sum1
+120   format(1x,f10.4, 7e20.10E3,f12.3,e15.8)
    endif
 
 

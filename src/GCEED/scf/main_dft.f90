@@ -233,7 +233,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         V_local,sVh,sVxc,sVpsl,xc_func,  &
                         pp,ppg,ppn,  &
                         rho_old,Vlocal_old,  &
-                        band )
+                        band, 2 )
 
 
 if(theory=='DFT_BAND')then

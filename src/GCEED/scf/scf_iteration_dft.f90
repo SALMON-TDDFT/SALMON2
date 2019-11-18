@@ -28,7 +28,7 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               V_local,sVh,sVxc,sVpsl,xc_func,  &
                               pp,ppg,ppn,  &
                               rho_old,Vlocal_old,  &
-                              band )
+                              band,ilevel_print )
 use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global
@@ -57,6 +57,7 @@ use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik
+integer :: ilevel_print !=2:print-all, =1:print-minimum, =1:no-print
 integer :: iter,Miter,iob,p1,p2,p5
 real(8) :: sum0,sum1
 real(8) :: rNebox1,rNebox2
@@ -84,7 +85,7 @@ type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
 
-logical :: rion_update
+logical :: rion_update, flag_conv
 integer :: i,j
 
 real(8),allocatable :: esp_old(:,:,:)
@@ -92,13 +93,23 @@ real(8) :: tol_esp_diff
 
 
 
+if(calc_mode=='DFT_BAND') then
+   allocate( esp_old(system%no,system%nk,system%nspin) )
+   esp_old=0d0
+endif
 
-allocate( esp_old(system%no,system%nk,system%nspin) ); esp_old=0d0
-
+flag_conv = .false.
+sum1=1d9
 
 DFT_Iteration : do iter=1,nscf
 
-   if(sum1<threshold) cycle DFT_Iteration
+   if(sum1<threshold) then
+      flag_conv = .true.
+      if( ilevel_print.ge.1 .and. comm_is_root(nproc_id_global)) then
+         write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
+      endif
+      exit DFT_Iteration
+   endif
    if(calc_mode=='DFT_BAND')then
       if(all(band%check_conv_esp)) cycle DFT_Iteration
    end if
@@ -153,132 +164,145 @@ DFT_Iteration : do iter=1,nscf
                if( iob <= band%nref_band ) band%check_conv_esp(iob,ik,ispin)=.true.
             end if
          end do !io
-         if ( ispin==1 .and. ik==1 ) then
+         if( ilevel_print.ge.2 ) then
+         if( ispin==1 .and. ik==1 ) then
             write(*,'(/,1x,"ispin","   ik",2x,"converged bands (total, maximum band index)")')
          end if
          write(*,'(1x,2i5,2x,2i5)') ispin,ik,i,j
+         end if
       end do !ik
       end do !ispin
 
       esp_old=energy%esp
-  end if
+   end if
 
-  call timer_begin(LOG_WRITE_GS_RESULTS)
+   call timer_begin(LOG_WRITE_GS_RESULTS)
 
-  select case(convergence)
-  case('rho_dne')
-     sum0=0.d0
+   select case(convergence)
+   case('rho_dne')
+      sum0=0d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-     do iz=ng%is(3),ng%ie(3) 
-     do iy=ng%is(2),ng%ie(2)
-     do ix=ng%is(1),ng%ie(1)
-        sum0 = sum0 + abs(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
-     end do
-     end do
-     end do
-     call comm_summation(sum0,sum1,info_field%icomm_all)
-     if(ispin==0)then
-        sum1 = sum1*system%Hvol/(dble(ifMST(1))*2.d0)
-     else if(ispin==1)then
-        sum1 = sum1*system%Hvol/dble(ifMST(1)+ifMST(2))
-     end if
-  case('norm_rho','norm_rho_dng')
-     sum0=0.d0
+      do iz=ng%is(3),ng%ie(3) 
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+         sum0 = sum0 + abs(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      end do
+      end do
+      end do
+      call comm_summation(sum0,sum1,info_field%icomm_all)
+      if(ispin==0)then
+         sum1 = sum1*system%Hvol/(dble(ifMST(1))*2.d0)
+      else if(ispin==1)then
+         sum1 = sum1*system%Hvol/dble(ifMST(1)+ifMST(2))
+      end if
+   case('norm_rho','norm_rho_dng')
+      sum0=0.d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-     do iz=ng%is(3),ng%ie(3) 
-     do iy=ng%is(2),ng%ie(2)
-     do ix=ng%is(1),ng%ie(1)
-        sum0 = sum0 + (srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
-     end do
-     end do
-     end do
-     call comm_summation(sum0,sum1,info_field%icomm_all)
-     if(convergence=='norm_rho_dng')then
-        sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
-     end if
-  case('norm_pot','norm_pot_dng')
-     sum0=0.d0
+      do iz=ng%is(3),ng%ie(3) 
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+         sum0 = sum0 + (srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
+      end do
+      end do
+      end do
+      call comm_summation(sum0,sum1,info_field%icomm_all)
+      if(convergence=='norm_rho_dng')then
+         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
+      end if
+   case('norm_pot','norm_pot_dng')
+      sum0=0.d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-     do iz=ng%is(3),ng%ie(3) 
-     do iy=ng%is(2),ng%ie(2)
-     do ix=ng%is(1),ng%ie(1)
-        sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
-     end do
-     end do
-     end do
-     call comm_summation(sum0,sum1,info_field%icomm_all)
-     if(convergence=='norm_pot_dng')then
-        sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
-     end if
-  end select
+      do iz=ng%is(3),ng%ie(3) 
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+         sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
+      end do
+      end do
+      end do
+      call comm_summation(sum0,sum1,info_field%icomm_all)
+      if(convergence=='norm_pot_dng')then
+         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
+      end if
+   end select
+  
+   if( ilevel_print.ge.2 ) then
+   if(comm_is_root(nproc_id_global)) then
+      write(*,*) '-----------------------------------------------'
+      select case(iperiodic)
+      case(0)
+         if(iflag_diisjump == 1) then
+            write(*,'("Diisjump occured. Steepest descent was used.")')
+         end if
+         write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
+      case(3)
+         write(*,101) Miter,energy%E_tot*2d0*Ry
+      end select
+100   format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
+101   format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
 
-  if(comm_is_root(nproc_id_global)) then
-     write(*,*) '-----------------------------------------------'
-     select case(iperiodic)
-     case(0)
-        if(iflag_diisjump == 1) then
-           write(*,'("Diisjump occured. Steepest descent was used.")')
-        end if
-        write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
-     case(3)
-        write(*,101) Miter,energy%E_tot*2d0*Ry
-     end select
-100  format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
-101  format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
+      do ik=1,system%nk
+         if(ik<=3)then
+            if(iperiodic==3) write(*,*) "k=",ik
+            do p5=1,(itotMST+3)/4
+               p1=4*(p5-1)+1
+               p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
+               write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*2d0*Ry,iob=p1,p2)
+            end do
+            if(iperiodic==3) write(*,*) 
+         end if
+      end do
 
-     do ik=1,system%nk
-        if(ik<=3)then
-           if(iperiodic==3) write(*,*) "k=",ik
-           do p5=1,(itotMST+3)/4
-              p1=4*(p5-1)+1
-              p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
-              write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*2d0*Ry,iob=p1,p2)
-           end do
-           if(iperiodic==3) write(*,*) 
-        end if
-     end do
+      select case(convergence)
+      case('rho_dne' )     ; write(*,200) Miter, sum1
+      case('norm_rho')     ; write(*,201) Miter, sum1/a_B**6
+      case('norm_rho_dng') ; write(*,202) Miter, sum1/a_B**6
+      case('norm_pot')     ; write(*,203) Miter, sum1*(2.d0*Ry)**2/a_B**6
+      case('norm_pot_dng') ; write(*,204) Miter, sum1*(2.d0*Ry)**2/a_B**6
+      end select
+200   format("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
+201   format("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)
+202   format("iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
+203   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2             = ",i6,e15.8)
+204   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids)= ",i6,e15.8)
 
-     select case(convergence)
-     case('rho_dne' )     ; write(*,200) Miter, sum1
-     case('norm_rho')     ; write(*,201) Miter, sum1/a_B**6
-     case('norm_rho_dng') ; write(*,202) Miter, sum1/a_B**6
-     case('norm_pot')     ; write(*,203) Miter, sum1*(2.d0*Ry)**2/a_B**6
-     case('norm_pot_dng') ; write(*,204) Miter, sum1*(2.d0*Ry)**2/a_B**6
-     end select
-200  format("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
-201  format("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)
-202  format("iter and ||rho_i(ix)-rho_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
-203  format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2              = ",i6,e15.8)
-204  format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids) = ",i6,e15.8)
+   end if
+   end if
 
-  end if
-
-  rNebox1 = 0d0 
+   rNebox1 = 0d0 
 !$OMP parallel do reduction(+:rNebox1) private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-     rNebox1 = rNebox1 + srho%f(ix,iy,iz)
-  end do
-  end do
-  end do
-  call comm_summation(rNebox1,rNebox2,info_field%icomm_all)
-  if(comm_is_root(nproc_id_global))then
-     write(*,*) "Ne=",rNebox2*system%Hvol
-  end if
-  call timer_end(LOG_WRITE_GS_RESULTS)
+   do iz=ng%is(3),ng%ie(3)
+   do iy=ng%is(2),ng%ie(2)
+   do ix=ng%is(1),ng%ie(1)
+      rNebox1 = rNebox1 + srho%f(ix,iy,iz)
+   end do
+   end do
+   end do
+   call comm_summation(rNebox1,rNebox2,info_field%icomm_all)
+   if( ilevel_print.ge.2 ) then
+   if(comm_is_root(nproc_id_global))then
+      write(*,*) "Ne=",rNebox2*system%Hvol
+   end if
+   end if
+   call timer_end(LOG_WRITE_GS_RESULTS)
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-     rho_old%f(ix,iy,iz)    = srho%f(ix,iy,iz)
-     Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
-  end do
-  end do
-  end do
+   do iz=ng%is(3),ng%ie(3)
+   do iy=ng%is(2),ng%ie(2)
+   do ix=ng%is(1),ng%ie(1)
+      rho_old%f(ix,iy,iz)    = srho%f(ix,iy,iz)
+      Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
+   end do
+   end do
+   end do
 
 end do DFT_Iteration
+
+if(.not.flag_conv) then
+   if( ilevel_print.ge.1 .and. comm_is_root(nproc_id_global)) then
+      write(*,'(a,e15.8)') "  #GS does not converged :",sum1
+   endif
+endif
+
 
 
 end subroutine scf_iteration_dft

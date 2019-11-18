@@ -106,20 +106,20 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      vecr(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+       vecr(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
 
     do i=1,mixing%num_rho_stock+1
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        vecr_in(ix,iy,iz,i)=mixing%srho_in(i)%f(ix,iy,iz)
-        vecr_out(ix,iy,iz,i)=mixing%srho_out(i)%f(ix,iy,iz)
-      end do
-      end do
-      end do
+       do iz=ng%is(3),ng%ie(3)
+       do iy=ng%is(2),ng%ie(2)
+       do ix=ng%is(1),ng%ie(1)
+          vecr_in(ix,iy,iz,i)=mixing%srho_in(i)%f(ix,iy,iz)
+          vecr_out(ix,iy,iz,i)=mixing%srho_out(i)%f(ix,iy,iz)
+       end do
+       end do
+       end do
     end do
 
     call broyden(vecr,vecr_in,vecr_out,ng%num(1)*ng%num(2)*ng%num(3),  &
@@ -128,20 +128,20 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      srho_s(1)%f(ix,iy,iz)= vecr(ix,iy,iz)
+       srho_s(1)%f(ix,iy,iz)= vecr(ix,iy,iz)
     end do
     end do
     end do
 
     do i=1,mixing%num_rho_stock+1
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        mixing%srho_in(i)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
-        mixing%srho_out(i)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
-      end do
-      end do
-      end do
+       do iz=ng%is(3),ng%ie(3)
+       do iy=ng%is(2),ng%ie(2)
+       do ix=ng%is(1),ng%ie(1)
+          mixing%srho_in(i)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
+          mixing%srho_out(i)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
+       end do
+       end do
+       end do
     end do
 
   else if(system%nspin==2)then
@@ -151,7 +151,7 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
-          vecr(ix,iy,iz)=srho_s(is)%f(ix,iy,iz)
+           vecr(ix,iy,iz)=srho_s(is)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -160,8 +160,8 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
           do iz=ng%is(3),ng%ie(3)
           do iy=ng%is(2),ng%ie(2)
           do ix=ng%is(1),ng%ie(1)
-            vecr_in(ix,iy,iz,i)=mixing%srho_s_in(i,is)%f(ix,iy,iz)
-            vecr_out(ix,iy,iz,i)=mixing%srho_s_out(i,is)%f(ix,iy,iz)
+             vecr_in(ix,iy,iz,i)=mixing%srho_s_in(i,is)%f(ix,iy,iz)
+             vecr_out(ix,iy,iz,i)=mixing%srho_s_out(i,is)%f(ix,iy,iz)
           end do
           end do
           end do
@@ -173,7 +173,7 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
-          srho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
+           srho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
         end do
         end do
         end do
@@ -182,8 +182,8 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
           do iz=ng%is(3),ng%ie(3)
           do iy=ng%is(2),ng%ie(2)
           do ix=ng%is(1),ng%ie(1)
-            mixing%srho_s_in(i,is)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
-            mixing%srho_s_out(i,is)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
+             mixing%srho_s_in(i,is)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
+             mixing%srho_s_out(i,is)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
           end do
           end do
           end do
