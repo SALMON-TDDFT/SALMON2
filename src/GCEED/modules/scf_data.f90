@@ -109,7 +109,7 @@ function check_rion_update() result(rion_update)
   implicit none
   logical :: rion_update
   if (iscfrt == 1) then
-    rion_update = (yn_opt == 'y')
+    rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
   else if (iscfrt == 2) then
     rion_update = (yn_md == 'y')
   else

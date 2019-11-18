@@ -38,7 +38,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: sVpsl
   !
-  integer :: ix,iy,iz,i,nl
+  integer :: ix,iy,iz,i,nl, ilevel_print
   integer :: mmx(mg%num(1)*mg%num(2)*mg%num(3))
   integer :: mmy(mg%num(1)*mg%num(2)*mg%num(3))
   integer :: mmz(mg%num(1)*mg%num(2)*mg%num(3))
@@ -54,7 +54,12 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   real(8),allocatable :: save_udVtbl_d(:,:,:)
   logical :: flag_use_grad_wf_on_force
 
-  if(comm_is_root(nproc_id_global))then
+  ilevel_print = 0
+  if(abs(ppg%Hvol).lt.1d-99) ilevel_print=2 !judge the first init_ps or not
+     
+
+
+  if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1)then
     write(*,*) ''
     write(*,*) '============init_ps=============='
   endif
@@ -73,10 +78,10 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    i=(iz-mg%is(3))*mg%num(1)*mg%num(2)+(iy-mg%is(2))*mg%num(1)+ix-mg%is(1)+1
-    mmx(i)=ix
-    mmy(i)=iy
-    mmz(i)=iz
+     i=(iz-mg%is(3))*mg%num(1)*mg%num(2)+(iy-mg%is(2))*mg%num(1)+ix-mg%is(1)+1
+     mmx(i)=ix
+     mmy(i)=iy
+     mmz(i)=iz
   end do
   end do
   end do
@@ -86,10 +91,10 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   do iz=lg%is(3),lg%ie(3)
   do iy=lg%is(2),lg%ie(2)
   do ix=lg%is(1),lg%ie(1)
-    i=(iz-lg%is(3))*lg%num(1)*lg%num(2)+(iy-lg%is(2))*lg%num(1)+ix-lg%is(1)+1
-    lx(i)=ix
-    ly(i)=iy
-    lz(i)=iz
+     i=(iz-lg%is(3))*lg%num(1)*lg%num(2)+(iy-lg%is(2))*lg%num(1)+ix-lg%is(1)+1
+     lx(i)=ix
+     ly(i)=iy
+     lz(i)=iz
   end do
   end do
   end do
@@ -147,7 +152,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   end if
   
-  if(comm_is_root(nproc_id_global)) write(*,*) 'end init_ps'
+  if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1) write(*,*)'end init_ps'
 
 end subroutine init_ps
 
