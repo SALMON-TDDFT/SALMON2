@@ -97,22 +97,32 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%gk,cg%gk,sum)
 
     if(iter==1)then
-      uk = 0d0
+!$omp parallel do private(io,ispin,iz,iy) collapse(4)
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      end do
+      end do
+      end do
+      end do
     else
       uk=sum/gkgk
-    end if
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-      & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-      & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-    end do
-    end do
-    end do
-    end do
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+        & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+        & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+      end do
+      end do
+      end do
+      end do
+    end if
 
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
@@ -391,24 +401,36 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%gk,cg%gk,sum)
 
     if(iter==1)then
-      uk = 0d0
-    else
-      uk=sum/gkgk
-    end if
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
-    do ik=ik_s,ik_e
-    do io=io_s,io_e
-    do ispin=1,nspin
-    do iz=is(3),ie(3)
-    do iy=is(2),ie(2)
-      cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-      & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-      & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
-    end do
-    end do
-    end do
-    end do
-    end do
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+        & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+      end do
+      end do
+      end do
+      end do
+      end do
+    else
+      uk = sum/gkgk
+!$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,nspin
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+        cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+        & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+        & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+      end do
+      end do
+      end do
+      end do
+      end do
+    end if
 
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
