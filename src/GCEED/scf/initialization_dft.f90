@@ -28,6 +28,7 @@ use structures
 use salmon_parallel, only: nproc_id_global !,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
+use salmon_pp, only: calc_nlcc
 use timer
 use scf_iteration_sub
 use writefield
@@ -61,6 +62,7 @@ type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
+type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_ofile)  :: ofile
 
@@ -85,6 +87,11 @@ end do
 allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
 call read_pslfile(system,pp,ppg)
 call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
+if(comm_is_root(nproc_id_global)) then
+  write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
+  write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+end if    
 
 select case(iperiodic)
 case(0)
@@ -148,7 +155,6 @@ use scf_iteration_sub
 use density_matrix, only: calc_density
 use writefield
 use global_variables_scf
-use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
 use write_sub

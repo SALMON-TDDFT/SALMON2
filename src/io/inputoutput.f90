@@ -790,6 +790,9 @@ contains
     thermostat            = 'nose-hoover'
     step_velocity_scaling = -1
     step_update_ps        = 10
+    select case(theory)
+    case('DFT_MD'); step_update_ps = 1
+    end select
     step_update_ps2       = 1
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'
