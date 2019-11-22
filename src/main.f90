@@ -35,12 +35,14 @@ program main
   end select
 
   !GCEED: (main)
+  write(*,*) theory
   select case(theory)
   case('DFT','DFT_BAND')              ; call main_dft
   case('DFT_MD')                      ; call main_dft_md
   case('TDDFT_response','TDDFT_pulse'); call main_tddft
   case('Single_scale_Maxwell_TDDFT'  ); call main_tddft
   case('Multi_scale_Maxwell_TDDFT'   ); call arted      !temporally
+  case('MULTISCALE_EXPERIMENT' )      ; call main_ms    ! experimental
   case('Maxwell')                     ; call classic_em !--> should be main_maxwell?
  !case('SBE')                         ; call main_sbe
  !case('Maxwell_SBE')                 ; call main_maxwell_sbe

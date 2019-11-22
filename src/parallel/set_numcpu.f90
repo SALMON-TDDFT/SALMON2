@@ -22,10 +22,11 @@ module set_numcpu
 
 contains
 
-  function check_numcpu(pinfo) result(iok)
+  function check_numcpu(icomm1, pinfo) result(iok)
   use structures, only: s_process_info
-  use salmon_parallel, only: nproc_size_global
+  use salmon_communication, only: comm_get_groupinfo
   implicit none
+  integer, intent(in) :: icomm1 ! Communicator for a single grid system
   type(s_process_info),intent(inout) :: pinfo
   logical :: iok
 
@@ -33,6 +34,9 @@ contains
   integer :: nproc_k, nproc_ob
   integer,dimension(3) :: nproc_d_o,nproc_d_g
   integer :: nproc_total_wf,nproc_total_g
+  integer :: nproc_id_comm1, nproc_size_comm1
+
+  call comm_get_groupinfo(icomm1, nproc_id_comm1, nproc_size_comm1)
 
   nproc_k   = pinfo%npk
   nproc_ob  = pinfo%nporbital
@@ -44,17 +48,17 @@ contains
 
   iok = .true.
 
-  if(nproc_total_wf/=nproc_size_global)then
+  if(nproc_total_wf/=nproc_size_comm1)then
     print "(A)",   'number of MPI process is not correct'
     print "(A,I7)", '  nproc_k * nproc_ob * product(nproc_domain_orbital) =', nproc_total_wf
-    print "(A,I7)", '  number of MPI process                              =', nproc_size_global
+    print "(A,I7)", '  number of MPI process                              =', nproc_size_comm1
     iok = .false.
   end if
 
-  if(nproc_total_g/=nproc_size_global)then
+  if(nproc_total_g/=nproc_size_comm1)then
     print "(A)",    'product of nproc_domain_general is not correct'
     print "(A,3I5)", '  product(nproc_domain_general) =', nproc_total_g
-    print "(A,3I5)", '  number of MPI process         =', nproc_size_global
+    print "(A,3I5)", '  number of MPI process         =', nproc_size_comm1
     iok = .false.
   end if
 
@@ -75,17 +79,18 @@ contains
   end do
 end function check_numcpu
 
-subroutine set_numcpu_general(iprefer_dist,numk,numo,pinfo)
+subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
   use structures, only: s_process_info
-  use salmon_parallel, only: nproc_size_global
+  use salmon_communication, only: comm_get_groupinfo
   implicit none
-  integer,intent(in)               :: iprefer_dist,numk,numo
+  integer,intent(in)               :: iprefer_dist,numk,numo,icomm1
   type(s_process_info),intent(out) :: pinfo
+  integer :: nproc_size_comm1, nproc_id_comm1
 
   integer :: ip
   integer :: nproc_k,nproc_ob
   integer :: nproc_d_o(3),nproc_d_g(3)
-  integer :: nproc_size_global_tmp
+  integer :: nproc_size_comm1_tmp
 
   integer :: ii,icount
   integer :: ir_num_factor2  ! ir means ireduced
@@ -95,7 +100,8 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,pinfo)
 
   integer :: nk,no
 
-  nproc_size_global_tmp=nproc_size_global
+  call comm_get_groupinfo(icomm1, nproc_id_comm1, nproc_size_comm1)
+  nproc_size_comm1_tmp=nproc_size_comm1
 
   nk = max(numk,1)
   no = max(numo,1)
@@ -110,55 +116,55 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,pinfo)
 
     ! k-point
     case(iprefer_k_distribution)
-      if (1 < nk .and. nk < nproc_size_global_tmp) then
-        if (mod(nproc_size_global_tmp,nk) == 0) then
-          nproc_k               = nproc_size_global_tmp / nk
-          nproc_size_global_tmp = nproc_size_global_tmp / nproc_k
+      if (1 < nk .and. nk < nproc_size_comm1_tmp) then
+        if (mod(nproc_size_comm1_tmp,nk) == 0) then
+          nproc_k               = nproc_size_comm1_tmp / nk
+          nproc_size_comm1_tmp = nproc_size_comm1_tmp / nproc_k
         end if
       else
-        nproc_k               = min(nproc_size_global_tmp,nk)
-        nproc_size_global_tmp = nproc_size_global_tmp / nproc_k
+        nproc_k               = min(nproc_size_comm1_tmp,nk)
+        nproc_size_comm1_tmp = nproc_size_comm1_tmp / nproc_k
       end if
 
     ! orbital
     case(iprefer_orbital_distribution)
-      if (1 < no .and. no < nproc_size_global_tmp) then
-        if (mod(nproc_size_global_tmp,no) == 0) then
-          nproc_ob              = nproc_size_global_tmp / no
-          nproc_size_global_tmp = nproc_size_global_tmp / nproc_ob
+      if (1 < no .and. no < nproc_size_comm1_tmp) then
+        if (mod(nproc_size_comm1_tmp,no) == 0) then
+          nproc_ob              = nproc_size_comm1_tmp / no
+          nproc_size_comm1_tmp = nproc_size_comm1_tmp / nproc_ob
         end if
       else
-        nproc_ob              = min(nproc_size_global_tmp,no)
-        nproc_size_global_tmp = nproc_size_global_tmp / nproc_ob
+        nproc_ob              = min(nproc_size_comm1_tmp,no)
+        nproc_size_comm1_tmp = nproc_size_comm1_tmp / nproc_ob
       end if
 
     ! rgrid
     case(iprefer_domain_distribution)
       num_factor2=0
       do ii=1,26
-        if(mod(nproc_size_global_tmp,2)==0)then
+        if(mod(nproc_size_comm1_tmp,2)==0)then
           num_factor2=num_factor2+1
-          nproc_size_global_tmp=nproc_size_global_tmp/2
+          nproc_size_comm1_tmp=nproc_size_comm1_tmp/2
         end if
       end do
 
       num_factor3=0
       do ii=1,17
-        if(mod(nproc_size_global_tmp,3)==0)then
+        if(mod(nproc_size_comm1_tmp,3)==0)then
           num_factor3=num_factor3+1
-          nproc_size_global_tmp=nproc_size_global_tmp/3
+          nproc_size_comm1_tmp=nproc_size_comm1_tmp/3
         end if
       end do
 
       num_factor5=0
       do ii=1,11
-        if(mod(nproc_size_global_tmp,5)==0)then
+        if(mod(nproc_size_comm1_tmp,5)==0)then
           num_factor5=num_factor5+1
-          nproc_size_global_tmp=nproc_size_global_tmp/5
+          nproc_size_comm1_tmp=nproc_size_comm1_tmp/5
         end if
       end do
 
-      if(nproc_size_global_tmp/=1)then
+      if(nproc_size_comm1_tmp/=1)then
         stop "In automatic process distribution, prime factors for number of processes must be combination of 2, 3 or 5."
       end if
 
@@ -205,33 +211,33 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,pinfo)
   if (iprefer_dist == iprefer_domain_distribution) then
     nproc_d_g = nproc_d_o
   else
-    nproc_size_global_tmp = nproc_size_global
+    nproc_size_comm1_tmp = nproc_size_comm1
 
     num_factor2=0
     do ii=1,26
-      if(mod(nproc_size_global_tmp,2)==0)then
+      if(mod(nproc_size_comm1_tmp,2)==0)then
         num_factor2=num_factor2+1
-        nproc_size_global_tmp=nproc_size_global_tmp/2
+        nproc_size_comm1_tmp=nproc_size_comm1_tmp/2
       end if
     end do
 
     num_factor3=0
     do ii=1,17
-      if(mod(nproc_size_global_tmp,3)==0)then
+      if(mod(nproc_size_comm1_tmp,3)==0)then
         num_factor3=num_factor3+1
-        nproc_size_global_tmp=nproc_size_global_tmp/3
+        nproc_size_comm1_tmp=nproc_size_comm1_tmp/3
       end if
     end do
 
     num_factor5=0
     do ii=1,11
-      if(mod(nproc_size_global_tmp,5)==0)then
+      if(mod(nproc_size_comm1_tmp,5)==0)then
         num_factor5=num_factor5+1
-        nproc_size_global_tmp=nproc_size_global_tmp/5
+        nproc_size_comm1_tmp=nproc_size_comm1_tmp/5
       end if
     end do
 
-    if(nproc_size_global_tmp/=1)then
+    if(nproc_size_comm1_tmp/=1)then
       stop "In automatic process distribution, prime factors for number of processes must be combination of 2, 3 or 5."
     end if
 
