@@ -54,7 +54,7 @@ subroutine init_dft(calc_mode,comm,pinfo,info,info_field,lg,mg,ng,system,stencil
 
 ! parallelization
 
-  call init_process_distribution(calc_mode,system,pinfo)
+  call init_process_distribution(calc_mode,system,comm,pinfo)
   call init_communicator_dft(comm,pinfo,info,info_field)
   call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info)
@@ -222,28 +222,29 @@ end subroutine init_dft_system
 
 !===================================================================================================================================
 
-subroutine init_process_distribution(calc_mode,system,pinfo)
+subroutine init_process_distribution(calc_mode,system,icomm1,pinfo)
   use structures, only: s_process_info,s_dft_system
+  use salmon_parallel, only: nproc_id_global, nproc_group_global
   use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general,ispin
-  use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
   integer,intent(in)               :: calc_mode
   type(s_dft_system),intent(in)    :: system
+  integer, intent(in)              :: icomm1 ! Communicator for single DFT system.
   type(s_process_info),intent(out) :: pinfo
   logical :: if_stop
 
   if((nproc_ob + sum(nproc_domain_orbital) + sum(nproc_domain_general)) == 0) then
     ! Process distribution is automatically decided by SALMON.
     if (system%ngrid > 16**3) then
-      call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,pinfo)
+      call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,pinfo)
     else
       select case(calc_mode)
       case(1)
-        call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,pinfo)
+        call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,icomm1,pinfo)
       case(2)
-        call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,pinfo)
+        call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,pinfo)
       end select
     end if
   else
@@ -255,7 +256,7 @@ subroutine init_process_distribution(calc_mode,system,pinfo)
   end if
 
   if (comm_is_root(nproc_id_global)) then
-    if_stop = .not. check_numcpu(pinfo)
+    if_stop = .not. check_numcpu(icomm1, pinfo)
   end if
   call comm_bcast(if_stop, nproc_group_global)
   if (if_stop) stop 'fail: check_numcpu'

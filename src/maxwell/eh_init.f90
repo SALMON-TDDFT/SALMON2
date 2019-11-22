@@ -1504,7 +1504,7 @@ subroutine eh_prep_GCEED(fs,fw)
   num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
   pinfo%npdomain_orbital = nproc_domain_orbital
   pinfo%npdomain_general = nproc_domain_general
-  call set_numcpu_general(iprefer_domain_distribution,1,1,pinfo)
+  call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,pinfo)
   call init_communicator_dft(nproc_group_global,pinfo,info,info_field)
   
   !initialize r-grid

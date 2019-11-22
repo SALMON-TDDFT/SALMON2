@@ -25,6 +25,11 @@ subroutine weyl_calc(fs,ff,fw)
   type(s_fdtd_system) :: fs
   type(s_fdtd_field)  :: ff
   type(ls_fdtd_work)  :: fw
+  integer :: is(1:3), ie(1:3), nd
+
+  is(1:3) = fs%mg%is(1:3)
+  ie(1:3) = fs%mg%ie(1:3)
+  nd = fs%mg%nd
 
   ! Update electromagnetic field
   select case(trim(fdtddim))
@@ -54,6 +59,12 @@ contains
     integer :: i1, i2, i3
     real(8) :: rot2_Ac(3) ! rot rot Ac
     real(8) :: r_inv_h(3)
+    real(8) :: Ac_tmp( &
+      & 1:3, &
+      & is(1)-nd:ie(1)+nd, &
+      & is(2)-nd:ie(2)+nd, &
+      & is(3)-nd:ie(3)+nd)
+    
     i2 = fs%mg%is(2)
     i3 = fs%mg%is(3)
     r_inv_h(1) = 1d0 / fs%hgs(1)
@@ -65,13 +76,34 @@ contains
         & -2d0 * ff%vec_Ac%v(2:3, i1,   i2, i3) &
         &      + ff%vec_Ac%v(2:3, i1-1, i2, i3) &
         & ) * r_inv_h(1) ** 2
-      fw%vec_Ac_tmp%v(:,i1, i2, i3) = (2 * ff%vec_Ac%v(:,i1, i2, i3) - ff%vec_Ac_old%v(:,i1, i2, i3) &
+      Ac_tmp(:, i1, i2, i3) = (2 * ff%vec_Ac%v(:,i1, i2, i3) - ff%vec_Ac_old%v(:,i1, i2, i3) &
         & + ff%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (dt_em**2) - rot2_Ac(:) * (cspeed_au * dt_em)**2 )
     end do
     !$omp end parallel do
+
+    ! Impose Boundary Condition (Left end)
+    select case (fs%a_bc(1, 1))
+    case('periodic')
+      Ac_tmp(:, (is(1)-nd):(is(1)-1), i2, i3) = &
+        & Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3)
+    case('pec')
+      Ac_tmp(:, (is(1)-nd):(is(1)-1), i2, i3) = &
+        & ff%vec_Ac%v(:, (is(1)-nd):(is(1)-1), i2, i3)
+    end select
+
+    ! Impose Boundary Condition (Right end)
+    select case (fs%a_bc(1, 2))
+    case('periodic')
+      Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3) = &
+        & Ac_tmp(:, is(1):(is(1)+nd-1), i2, i3)
+    case('pec')
+      Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3) = &
+        & ff%vec_Ac%v(:, (ie(1)-nd+1):ie(1), i2, i3)
+    end select
+
     ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
     call copy_data(ff%vec_Ac%v, ff%vec_Ac_old%v)
-    call copy_data(fw%vec_Ac_tmp%v, ff%vec_Ac%v)
+    call copy_data(Ac_tmp, ff%vec_Ac%v)
     return
   end subroutine dt_evolve_Ac_1d
 
@@ -81,6 +113,12 @@ contains
     integer :: i1, i2, i3
     real(8) :: rot2_Ac(3) ! rot rot Ac
     real(8) :: r_inv_h(3)
+    real(8) :: Ac_tmp( &
+      & 1:3, &
+      & is(1)-nd:ie(1)+nd, &
+      & is(2)-nd:ie(2)+nd, &
+      & is(3)-nd:ie(3)+nd)
+    
     r_inv_h(1:2) = 1d0 / fs%hgs(1:2)
     i3 = fs%mg%is(3)
     !$omp parallel do collapse(2) default(shared) private(i1, i2, rot2_Ac)
@@ -105,14 +143,55 @@ contains
           & +(+2.00d0 * r_inv_h(2)**2 +2.00d0 * r_inv_h(1)**2) * ff%vec_Ac%v(3, i1, i2, i3) &
           & +(-1.00d0 * r_inv_h(2)**2) * ff%vec_Ac%v(3, i1, i2+1, i3) &
           & +(-1.00d0 * r_inv_h(1)**2) * ff%vec_Ac%v(3, i1+1, i2, i3)
-        fw%vec_Ac_tmp%v(:,i1, i2, i3) = (2 * ff%vec_Ac%v(:,i1, i2, i3) - ff%vec_Ac_old%v(:,i1, i2, i3) &
+        Ac_tmp(:, i1, i2, i3) = (2 * ff%vec_Ac%v(:,i1, i2, i3) - ff%vec_Ac_old%v(:,i1, i2, i3) &
           & + ff%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (dt_em**2) - rot2_Ac(:)* (cspeed_au * dt_em)**2 )
       end do
     end do
     !$omp end parallel do
+
+    ! impose boundary condition for x-lower side
+    select case (fs%a_bc(1, 1))
+    case('periodic')
+      Ac_tmp(1:3, is(1)-nd:is(1)-1, is(2):ie(2), i3) = &
+        & Ac_tmp(1:3, ie(1)-nd+1:ie(1), is(2):ie(2), i3)
+    case('pec')
+      Ac_tmp(1:3, is(1)-nd:is(1)-1, is(2):ie(2), i3) = &
+        & ff%vec_Ac%v(1:3, is(1)-nd:is(1)-1, is(2):ie(2), i3)
+    end select
+
+    ! impose boundary condition for x-upper side
+    select case (fs%a_bc(1, 2))
+    case('periodic')
+      Ac_tmp(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), i3) = &
+        & Ac_tmp(1:3, is(1):is(1)+nd-1, is(2):ie(2), i3)
+    case('pec')
+      Ac_tmp(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), i3) = &
+        & ff%vec_Ac%v(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), i3)
+    end select
+
+    ! impose boundary condition for y-lower side
+    select case (fs%a_bc(2, 1))
+    case('periodic')
+      Ac_tmp(1:3, is(1):ie(1), is(2)-nd:is(2)-1, i3) = &
+        & Ac_tmp(1:3, is(1):ie(1), ie(2)-nd+1:ie(2), i3)
+    case('pec')
+      Ac_tmp(1:3, is(1):ie(1), is(2)-nd:is(2)-1, i3) = &
+        & ff%vec_Ac%v(1:3, is(1):ie(1), is(2)-nd:is(2)-1, i3)
+    end select
+
+    ! impose boundary condition for y-upper side
+    select case (fs%a_bc(2, 2))
+    case('periodic')
+      Ac_tmp(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, i3) = &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):is(2)+nd-1, i3)
+    case('pec')
+      Ac_tmp(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, i3) = &
+        & ff%vec_Ac%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, i3)
+    end select
+    
     ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
     call copy_data(ff%vec_Ac%v, ff%vec_Ac_old%v)
-    call copy_data(fw%vec_Ac_tmp%v, ff%vec_Ac%v)
+    call copy_data(Ac_tmp, ff%vec_Ac%v)
     return
   end subroutine dt_evolve_Ac_2d
 
@@ -122,7 +201,14 @@ contains
     integer :: i1, i2, i3
     real(8) :: rot2_Ac(3) ! rot rot Ac
     real(8) :: r_inv_h(3)
+    real(8) :: Ac_tmp( &
+      & 1:3, &
+      & is(1)-nd:ie(1)+nd, &
+      & is(2)-nd:ie(2)+nd, &
+      & is(3)-nd:ie(3)+nd)
+
     r_inv_h(:) = 1.00 / fs%hgs(:)
+
     !$omp parallel do collapse(3) default(shared) private(i1,i2,i3,rot2_Ac)
     do i3 = fs%mg%is(3), fs%mg%ie(3)
       do i2 = fs%mg%is(2), fs%mg%ie(2)
@@ -167,16 +253,89 @@ contains
             & + (2d0 * (r_inv_h(1)**2 + r_inv_h(2)**2)) * ff%vec_Ac%v(3, i1+0, i2+0, i3+0) &
             & - (r_inv_h(2)**2) * ff%vec_Ac%v(3, i1+0, i2+1, i3+0) &
             & - (r_inv_h(1)**2) * ff%vec_Ac%v(3, i1+1, i2+0, i3+0)
-          fw%vec_Ac_tmp%v(:,i1, i2, i3) = &
+          Ac_tmp(:,i1, i2, i3) = &
             & + (2 * ff%vec_Ac%v(:,i1, i2, i3) - ff%vec_Ac_old%v(:,i1, i2, i3) &
             & + ff%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (dt_em**2) - rot2_Ac(:) * (cspeed_au * dt_em)**2)
         end do
       end do
     end do
     !$omp end parallel do
+
+    ! impose boundary condition for x-lower side
+    select case (fs%a_bc(1, 1))
+    case('periodic')
+      call copy_data( &
+        & Ac_tmp(1:3, ie(1)-nd+1:ie(1), is(2):ie(2), is(3):ie(3)), &
+        & Ac_tmp(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)))
+    case('pec')
+      call copy_data( &
+        & ff%vec_Ac%v(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)), &
+        & Ac_tmp(1:3, is(1)-nd:is(1)-1, is(2):ie(2), is(3):ie(3)))
+    end select
+
+    ! impose boundary condition for x-upper side
+    select case (fs%a_bc(1, 2))
+    case('periodic')
+      call copy_data( &
+        & Ac_tmp(1:3, is(1):is(1)+nd-1, is(2):ie(2), is(3):ie(3)), &
+        & Ac_tmp(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)))
+    case('pec')
+      call copy_data( &
+        & ff%vec_Ac%v(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)), &
+        & Ac_tmp(1:3, ie(1)+1:ie(1)+nd, is(2):ie(2), is(3):ie(3)))
+    end select
+
+    ! impose boundary condition for y-lower side
+    select case (fs%a_bc(2, 1))
+    case('periodic')
+      call copy_data( &
+        & Ac_tmp(1:3, is(1):ie(1), ie(2)-nd+1:ie(2), is(3):ie(3)), &
+        & Ac_tmp(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)))
+    case('pec')
+      call copy_data( &
+        & ff%vec_Ac%v(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)), &
+        & Ac_tmp(1:3, is(1):ie(1), is(2)-nd:is(2)-1, is(3):ie(3)))
+    end select
+
+    ! impose boundary condition for y-upper side
+    select case (fs%a_bc(2, 2))
+    case('periodic')
+      call copy_data( &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):is(2)+nd-1, is(3):ie(3)), &
+        & Ac_tmp(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)))
+    case('pec')
+      call copy_data( &
+        & ff%vec_Ac%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)), &
+        & Ac_tmp(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, is(3):ie(3)))
+    end select
+
+    ! impose boundary condition for z-lower side
+    select case (fs%a_bc(3, 1))
+    case('periodic')
+      call copy_data( &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)-nd+1:ie(3)), &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1))
+    case('pec')
+      call copy_data( &
+        & ff%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1), &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), is(3)-nd:is(3)-1))
+    end select
+
+    ! impose boundary condition for z-upper side
+    select case (fs%a_bc(3, 2))
+    case('periodic')
+      call copy_data( &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), is(3):is(3)+nd-1), &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd))
+    case('pec')
+      call copy_data( &
+        & ff%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd), &
+        & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd))
+    end select
+
     ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
     call copy_data(ff%vec_Ac%v, ff%vec_Ac_old%v)
-    call copy_data(fw%vec_Ac_tmp%v, ff%vec_Ac%v)
+    call copy_data(Ac_tmp, ff%vec_Ac%v)
     return
   end subroutine dt_evolve_Ac_3d
 
@@ -187,6 +346,12 @@ contains
     integer :: i3
     real(8) :: Y, rot2_Ac(3) ! rot rot Ac
     real(8) :: r_inv_h(3)
+    real(8) :: Ac_tmp( &
+      & 1:3, &
+      & is(1)-nd:ie(1)+nd, &
+      & is(2)-nd:ie(2)+nd, &
+      & is(3)-nd:ie(3)+nd)
+
     r_inv_h(:) = 1d0 / fs%hgs(:)
     i3 = fs%mg%is(3)
     !$omp parallel do collapse(2) default(shared) private(i1, i2, rot2_Ac,Y)
@@ -214,14 +379,14 @@ contains
           & +(+(1.00d0/Y**2)+2.00d0* (1.00d0 * r_inv_h(1)**2)+2.00d0* (1.00d0 * r_inv_h(2)**2))*ff%vec_Ac%v(3,i1+0,i2+0,i3) &
           & +(-0.50d0* (1.00d0 * r_inv_h(2))* (1.00d0/Y)-(1.00d0 * r_inv_h(2)**2))*ff%vec_Ac%v(3,i1+0,i2+1,i3) &
           & -(1.00d0 * r_inv_h(1)**2)*ff%vec_Ac%v(3,i1+1,i2+0,i3)
-        fw%vec_Ac_tmp%v(:,i1, i2, i3) = (2 * ff%vec_Ac%v(:,i1, i2, i3) - ff%vec_Ac_old%v(:,i1, i2, i3) &
+        Ac_tmp(:,i1, i2, i3) = (2 * ff%vec_Ac%v(:,i1, i2, i3) - ff%vec_Ac_old%v(:,i1, i2, i3) &
           & + ff%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (dt_em**2) - rot2_Ac(:)* (cspeed_au * dt_em)**2)
       end do
     end do
     !$omp end parallel do
     ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
     call copy_data(ff%vec_Ac%v, ff%vec_Ac_old%v)
-    call copy_data(fw%vec_Ac_tmp%v, ff%vec_Ac%v)
+    call copy_data(Ac_tmp, ff%vec_Ac%v)
     return
   end subroutine dt_evolve_Ac_3d_cylindal
 
@@ -360,6 +525,7 @@ contains
     !$omp end parallel do
     return
   end subroutine calc_energy_density
-    
+  
+  
 
 end subroutine weyl_calc
