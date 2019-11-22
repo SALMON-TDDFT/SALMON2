@@ -57,7 +57,7 @@ use band_dft_sub
 use init_gs, only: init_wf
 implicit none
 integer :: ix,iy,iz
-integer :: Miter,iatom,jj,iflag,nspin
+integer :: Miter,iatom,jj,nspin
 real(8) :: sum1
 character(100) :: file_atoms_coo, comment_line
 
@@ -115,7 +115,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           srg, srg_ng,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
-                          pp, ppg,  &
+                          pp, ppg, ppn,  &
                           ofile )
 
 call initialization2_dft( Miter, nspin, rion_update,  &
@@ -152,8 +152,8 @@ if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   rion_update = .true.
   call dealloc_init_ps(ppg)
-! call calc_nlcc(pp, system, mg, ppn) !test
   call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+  call calc_nlcc(pp, system, mg, ppn)
   call timer_end(LOG_INIT_GS)
 end if
 
@@ -176,19 +176,10 @@ end if
 
 
 call timer_begin(LOG_INIT_GS_ITERATION)
-iflag=1
-poisson%iterVh=1000
-sum1=1.0d9
-iflag_diisjump=0
-
-if(.not.allocated(norm_diff_psi_stock)) then
-   if(iopt==1) allocate(norm_diff_psi_stock(itotMST,1))
-end if
-norm_diff_psi_stock=1.0d9
+poisson%iterVh=1000   ! what's this? necessary?
 
 if(allocated(rho_old%f))    deallocate(rho_old%f)
 if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
-
 call allocate_scalar(ng,rho_old)
 call allocate_scalar(ng,Vlocal_old)
 
@@ -196,25 +187,16 @@ call allocate_scalar(ng,Vlocal_old)
 do iz=ng%is(3),ng%ie(3)
 do iy=ng%is(2),ng%ie(2)
 do ix=ng%is(1),ng%ie(1)
-   rho_old%f(ix,iy,iz)=srho%f(ix,iy,iz)
-   Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
+   rho_old%f(ix,iy,iz)   = srho%f(ix,iy,iz)
+   Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
 end do
 end do
 end do
-
-! Setup NLCC term from pseudopotential
-call calc_nlcc(pp, system, mg, ppn)
-
-if(comm_is_root(nproc_id_global)) then
-  write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
-  write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
-end if    
 
 call timer_end(LOG_INIT_GS_ITERATION)
 
 
 call timer_begin(LOG_GS_ITERATION)
-
 !------------------------------------ SCF Iteration
 !Iteration loop for SCF (DFT_Iteration)
 call scf_iteration_dft( Miter,rion_update,sum1,  &

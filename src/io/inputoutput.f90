@@ -468,7 +468,6 @@ contains
       & yn_stop_system_momt
 
     namelist/group_fundamental/ &
-      & iditerybcg, &
       & iditer_nosubspace_diag, &
       & ntmg, &
       & idisnum, &
@@ -483,8 +482,6 @@ contains
     namelist/group_others/ &
       & iswitch_orbital_mesh, &
       & iflag_psicube, &
-      & lambda1_diis, &
-      & lambda2_diis, &
       & num_projection, &
       & iwrite_projection_ob, &
       & iwrite_projection_k, &
@@ -790,6 +787,9 @@ contains
     thermostat            = 'nose-hoover'
     step_velocity_scaling = -1
     step_update_ps        = 10
+    select case(theory)
+    case('DFT_MD'); step_update_ps = 1
+    end select
     step_update_ps2       = 1
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'
@@ -798,7 +798,6 @@ contains
     friction              =  0d0
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
-    iditerybcg             = 20
     iditer_nosubspace_diag = 10
     ntmg                   = 1
     idisnum                = (/1,2/)
@@ -811,8 +810,6 @@ contains
 !! == default for &group_others
     iswitch_orbital_mesh = 0
     iflag_psicube        = 0
-    lambda1_diis         = 0.5d0
-    lambda2_diis         = 0.3d0
     num_projection       = 1
     do ii=1,200
       iwrite_projection_ob(ii) = ii
@@ -1249,7 +1246,6 @@ contains
     call comm_bcast(friction               ,nproc_group_global)
     call comm_bcast(yn_stop_system_momt    ,nproc_group_global)
 !! == bcast for &group_fundamental
-    call comm_bcast(iditerybcg            ,nproc_group_global)
     call comm_bcast(iditer_nosubspace_diag,nproc_group_global)
     call comm_bcast(ntmg                  ,nproc_group_global)
     call comm_bcast(idisnum               ,nproc_group_global)
@@ -1262,8 +1258,6 @@ contains
 !! == bcast for &group_others
     call comm_bcast(iswitch_orbital_mesh,nproc_group_global)
     call comm_bcast(iflag_psicube       ,nproc_group_global)
-    call comm_bcast(lambda1_diis        ,nproc_group_global)
-    call comm_bcast(lambda2_diis        ,nproc_group_global)
     call comm_bcast(num_projection      ,nproc_group_global)
     call comm_bcast(iwrite_projection_ob,nproc_group_global)
     call comm_bcast(iwrite_projection_k ,nproc_group_global)
@@ -2011,7 +2005,6 @@ contains
 
       if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iditerybcg', iditerybcg
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iditer_nosubspace_diag', iditer_nosubspace_diag
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'ntmg', ntmg
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'idisnum(1)', idisnum(1)
@@ -2029,8 +2022,6 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iswitch_orbital_mesh', iswitch_orbital_mesh
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_psicube', iflag_psicube
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda1_diis', lambda1_diis
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda2_diis', lambda2_diis
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)

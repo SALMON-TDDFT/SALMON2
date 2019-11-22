@@ -76,7 +76,7 @@ real(8) :: sum1
 character(100) :: file_atoms_coo, comment_line
 
 logical :: rion_update
-integer :: it, Miter,i
+integer :: it, Miter
 real(8),allocatable :: FionE(:,:)
 
 real(8) :: dt_h, Uene0, E_tot0
@@ -106,7 +106,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           srg, srg_ng,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
-                          pp, ppg,  &
+                          pp, ppg, ppn,  &
                           ofile )
 
 call initialization2_dft( it, nspin, rion_update,  &
@@ -160,26 +160,12 @@ call timer_begin(LOG_GS_ITERATION)
 
 MD_Loop : do it=1,nt
 
-
    call time_evolution_step_md_part1(it,system,md)
 
-   !if( mod(it,step_update_ps)==0 ) then
-!   call dealloc_init_ps(ppg)
-!   call calc_nlcc(pp, system, mg, ppn)
-!   call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
-   !endif
-   
-   !(this is from RT: can I use it?)
    call update_pseudo_rt(it,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
 
 
-   poisson%iterVh=1000
-   iflag_diisjump=0
-
-   if(.not.allocated(norm_diff_psi_stock)) then
-      if(it==1) allocate(norm_diff_psi_stock(itotMST,1))
-   end if
-   norm_diff_psi_stock = 1d9
+   poisson%iterVh=1000   ! what's this? necessary?
 
    if(allocated(rho_old%f))    deallocate(rho_old%f)
    if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
@@ -190,20 +176,11 @@ MD_Loop : do it=1,nt
    do iz=ng%is(3),ng%ie(3)
    do iy=ng%is(2),ng%ie(2)
    do ix=ng%is(1),ng%ie(1)
-      rho_old%f(ix,iy,iz)   =srho%f(ix,iy,iz)
-      Vlocal_old%f(ix,iy,iz)=V_local(1)%f(ix,iy,iz)
+      rho_old%f(ix,iy,iz)   = srho%f(ix,iy,iz)
+      Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
    end do
    end do
    end do
-
- !  ! Setup NLCC term from pseudopotential
-!   call calc_nlcc(pp, system, mg, ppn)
-
-   !if(comm_is_root(nproc_id_global)) then
-   !   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
-   !   write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
-   !end if
-
 
    !-------------- SCF Iteration ----------------
    !Iteration loop for SCF (DFT_Iteration)
@@ -300,9 +277,6 @@ MD_Loop : do it=1,nt
    if(yn_out_dns_rt=='y' .and. mod(it,out_dns_rt_step)==0) then
       call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,it)
    end if
-
-
-!xxxxxxxxx
 
 end do MD_Loop
 

@@ -309,7 +309,6 @@ module salmon_global
   character(1)   :: yn_stop_system_momt
 
 !! &group_fundamental
-  integer        :: iditerybcg
   integer        :: iditer_nosubspace_diag
   integer        :: ntmg
   integer        :: idisnum(2)
@@ -324,8 +323,6 @@ module salmon_global
 !! &group_others
   integer        :: iswitch_orbital_mesh
   integer        :: iflag_psicube
-  real(8)        :: lambda1_diis
-  real(8)        :: lambda2_diis
   integer        :: num_projection
   integer        :: iwrite_projection_ob(200)
   integer        :: iwrite_projection_k(200)
