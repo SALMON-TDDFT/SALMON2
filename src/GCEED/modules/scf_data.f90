@@ -34,7 +34,6 @@ integer :: iflag_diisjump
 integer :: ilsda
 integer :: MST(2),ifMST(2),itotMST
 integer :: iSCFRT
-integer, allocatable :: idiis_sd(:)
 complex(8), allocatable :: zc(:)
 integer :: itotNtime
 
