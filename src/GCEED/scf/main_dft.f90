@@ -95,14 +95,11 @@ if(theory=='DFT_BAND'.and.iperiodic/=3) return
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
-iblacsinit=0
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
 call convert_input_scf(file_atoms_coo)
-mixing%num_rho_stock = 21
-
 
 ! please move folloings into initialization_dft 
 call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
@@ -176,7 +173,6 @@ end if
 
 
 call timer_begin(LOG_INIT_GS_ITERATION)
-poisson%iterVh=1000   ! what's this? necessary?
 
 if(allocated(rho_old%f))    deallocate(rho_old%f)
 if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
