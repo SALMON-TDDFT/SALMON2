@@ -29,25 +29,11 @@ real(8) :: dip_spacing
 
 ilsda = ispin
 
-if(comm_is_root(nproc_id_global))then
-   open(fh_namelist, file='.namelist.tmp', status='old')
-end if
+!if(comm_is_root(nproc_id_global))then
+!   open(fh_namelist, file='.namelist.tmp', status='old')
+!end if
 !===== namelist for group_fundamental =====
 
-select case(method_min)
-  case('cg')
-    continue
-  case default
-    stop 'Specify "cg" for method_min.'
-end select
-
-select case(method_mixing)
-  case ('simple','broyden')
-    continue
-  case default
-    stop 'Specify either "simple" or "broyden" for method_mixing.'
-end select
-    
 
 if(ispin == 0)then
   MST(1)=nstate
@@ -138,7 +124,7 @@ end if
 
 !Lmax_ps(:)=-1
 !Lloc_ps(:)=-1
-if(comm_is_root(nproc_id_global))then
+!if(comm_is_root(nproc_id_global))then
 !  read(fh_namelist,NML=group_atom) 
 !  rewind(fh_namelist)
 
@@ -157,14 +143,14 @@ if(comm_is_root(nproc_id_global))then
 !    stop
 !    end select
 !  end do
-end if
+!end if
 
-if(comm_is_root(nproc_id_global)) write(*,*) "MI =",MI
+!if(comm_is_root(nproc_id_global)) write(*,*) "MI =",MI
 
 
 !===== namelist for group_others =====
 
-if(comm_is_root(nproc_id_global))close(fh_namelist)
+!if(comm_is_root(nproc_id_global))close(fh_namelist)
 
 return
 

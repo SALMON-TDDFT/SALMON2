@@ -86,13 +86,11 @@ real(8) :: Htot, Enh, Enh_gkTlns, gkT, Qnh  !NHC xxx
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 iSCFRT=1
-iblacsinit=0
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
 call convert_input_scf(file_atoms_coo)
-mixing%num_rho_stock = 21
 
 
 ! please move folloings into initialization_dft 
@@ -163,9 +161,6 @@ MD_Loop : do it=1,nt
    call time_evolution_step_md_part1(it,system,md)
 
    call update_pseudo_rt(it,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
-
-
-   poisson%iterVh=1000   ! what's this? necessary?
 
    if(allocated(rho_old%f))    deallocate(rho_old%f)
    if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)

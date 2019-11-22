@@ -25,7 +25,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 ofile )
 use math_constants, only: pi, zi
 use structures
-use salmon_parallel, only: nproc_id_global !,nproc_group_global
+use salmon_parallel, only: nproc_id_global!,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use salmon_pp, only: calc_nlcc
@@ -195,8 +195,21 @@ type(s_mixing) :: mixing
 logical :: rion_update
 integer :: Miter,jspin, nspin
 
-nspin = system%nspin
+  !moved from convert_input_scf (necessary?)
+  select case(method_min)
+  case('cg')   ; continue
+  case default ; stop 'Specify "cg" for method_min.'
+  end select
 
+  select case(method_mixing)
+  case ('simple','broyden') ; continue
+  case default ; stop 'Specify either "simple" or "broyden" for method_mixing.'
+  end select
+
+
+  nspin = system%nspin
+
+  mixing%num_rho_stock = 21
   call init_mixing(nspin,ng,mixing)
 
   if (yn_restart == 'y') then
