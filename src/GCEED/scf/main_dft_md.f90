@@ -176,9 +176,6 @@ MD_Loop : do it=1,nt
    poisson%iterVh=1000
    iflag_diisjump=0
 
-   if(.not.allocated(idiis_sd)) allocate(idiis_sd(itotMST))
-   idiis_sd=0
-
    if(.not.allocated(norm_diff_psi_stock)) then
       if(it==1) allocate(norm_diff_psi_stock(itotMST,1))
    end if
@@ -262,8 +259,6 @@ MD_Loop : do it=1,nt
       FionE(:,iatom) = pp%Zps(Kion(iatom)) * rt%E_tot(:,it)
    enddo
    system%Force(:,:) = system%Force(:,:) + FionE(:,:)
-
-   deallocate(idiis_sd)
 
 
    call time_evolution_step_md_part2(system,md)
