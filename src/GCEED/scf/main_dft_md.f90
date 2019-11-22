@@ -166,12 +166,6 @@ MD_Loop : do it=1,nt
 
 
    poisson%iterVh=1000   ! what's this? necessary?
-   iflag_diisjump=0
-
-   if(.not.allocated(norm_diff_psi_stock)) then
-      if(it==1) allocate(norm_diff_psi_stock(itotMST,1))
-   end if
-   norm_diff_psi_stock = 1d9
 
    if(allocated(rho_old%f))    deallocate(rho_old%f)
    if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)

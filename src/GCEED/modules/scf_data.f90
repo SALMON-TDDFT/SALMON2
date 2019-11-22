@@ -30,7 +30,6 @@ integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Har
 
 !-------------------- Global variables
 
-integer :: iflag_diisjump
 integer :: ilsda
 integer :: MST(2),ifMST(2),itotMST
 integer :: iSCFRT
@@ -39,8 +38,6 @@ integer :: itotNtime
 
 integer :: num_kpoints_3d(3)
 integer :: num_kpoints_rd
-
-real(8),allocatable :: norm_diff_psi_stock(:,:)
 
 real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)
