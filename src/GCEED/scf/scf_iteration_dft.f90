@@ -105,7 +105,7 @@ DFT_Iteration : do iter=1,nscf
 
    if(sum1<threshold) then
       flag_conv = .true.
-      if( ilevel_print.ge.1 .and. comm_is_root(nproc_id_global)) then
+      if( ilevel_print.ge.2 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
       endif
       exit DFT_Iteration

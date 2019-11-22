@@ -181,9 +181,6 @@ poisson%iterVh=1000
 sum1=1.0d9
 iflag_diisjump=0
 
-if(.not.allocated(idiis_sd)) allocate(idiis_sd(itotMST))
-idiis_sd=0
-
 if(.not.allocated(norm_diff_psi_stock)) then
    if(iopt==1) allocate(norm_diff_psi_stock(itotMST,1))
 end if
@@ -264,10 +261,10 @@ if(yn_out_tm  == 'y') then
 end if
 
 ! force
-if(iperiodic == 3 .and. yn_ffte=='y') then
-  ! NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
-  ! does not allocate.
-else
+!if(iperiodic == 3 .and. yn_ffte=='y') then
+!  ! NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
+!  ! does not allocate.
+!else
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
@@ -279,9 +276,8 @@ else
       end do
 300   format(i6,3e16.8)
    end if
-end if
+!end if
 
-deallocate(idiis_sd)
 call timer_end(LOG_GS_ITERATION)
 
 end do Band_Iteration
