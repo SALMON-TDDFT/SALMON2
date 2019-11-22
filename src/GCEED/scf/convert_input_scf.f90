@@ -35,10 +35,10 @@ end if
 !===== namelist for group_fundamental =====
 
 select case(method_min)
-  case('cg','diis','cg-diis')
+  case('cg')
     continue
   case default
-    stop 'Specify either "cg", "diis", or "cg-diis" for method_min.'
+    stop 'Specify "cg" for method_min.'
 end select
 
 select case(method_mixing)

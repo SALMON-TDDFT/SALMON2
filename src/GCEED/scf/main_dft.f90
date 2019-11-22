@@ -177,12 +177,6 @@ end if
 
 call timer_begin(LOG_INIT_GS_ITERATION)
 poisson%iterVh=1000   ! what's this? necessary?
-iflag_diisjump=0
-
-if(.not.allocated(norm_diff_psi_stock)) then
-   if(iopt==1) allocate(norm_diff_psi_stock(itotMST,1))
-end if
-norm_diff_psi_stock=1.0d9
 
 if(allocated(rho_old%f))    deallocate(rho_old%f)
 if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)

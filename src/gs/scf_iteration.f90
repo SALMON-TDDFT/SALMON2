@@ -22,14 +22,13 @@ contains
 subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
                srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
                cg,ppg,vlocal,  &
-               miter,iditerybcg,   &
+               miter,   &
                iditer_nosubspace_diag,ifmst,mixing,iter, &
                poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-  use inputoutput, only: calc_mode,iperiodic,method_min,method_mixing,mixrate &
+  use inputoutput, only: calc_mode,iperiodic,method_mixing,mixrate &
                         ,yn_subspace_diagonalization
   use structures
   use timer
-!  use rmmdiis_sub
   use gram_schmidt_orth, only: gram_schmidt
   use Conjugate_Gradient, only: gscg_isolated,gscg_periodic
   use subspace_diagonalization, only: ssdg_isolated,ssdg_periodic
@@ -56,7 +55,6 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
   type(s_cg),            intent(inout) :: cg
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
   integer,               intent(in)    :: miter
-  integer,               intent(in)    :: iditerybcg
   integer,               intent(in)    :: iditer_nosubspace_diag
   integer,               intent(in)    :: ifmst(2)
   type(s_mixing),        intent(inout) :: mixing
@@ -73,25 +71,12 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
 ! solve Kohn-Sham equation by minimization techniques
   call timer_begin(LOG_CALC_MINIMIZATION)
 
-  if( method_min == 'cg' .or.       &
-    ( method_min == 'cg-diis' .and. Miter <= iDiterYBCG) ) then
-    select case(iperiodic)
-    case(0)
-      call gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-    case(3)
-      call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-    end select
-  else if( method_min  == 'diis' .or. method_min == 'cg-diis' ) then
-    select case(iperiodic)
-    case(0)
-      stop "rmmdiis method is not implemented."
-!      call rmmdiis(mg,system,info,stencil,srg_ob_1,spsi,energy,itotmst,mst,   &
-!                   iflag_diisjump, &
-!                   norm_diff_psi_stock,info_ob,ppg,vlocal)
-    case(3)
-      stop "rmmdiis method is not implemented for periodic systems."
-    end select
-  end if
+  select case(iperiodic)
+  case(0)
+    call gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+  case(3)
+    call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+  end select
 
   call timer_end(LOG_CALC_MINIMIZATION)
 

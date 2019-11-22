@@ -130,7 +130,7 @@ DFT_Iteration : do iter=1,nscf
    call scf_iteration_step(lg,mg,ng,system,info,info_field,stencil,  &
                      srg,srg_ng,spsi,shpsi,srho,srho_s,mst,  &
                      cg,ppg,V_local,  &
-                     Miter,iDiterYBCG,  &
+                     Miter,  &
                      iditer_nosubspace_diag,ifmst,mixing,iter,  &
                      poisson,fg,sVh,xc_func,ppn,sVxc,energy)
 
@@ -230,9 +230,6 @@ DFT_Iteration : do iter=1,nscf
       write(*,*) '-----------------------------------------------'
       select case(iperiodic)
       case(0)
-         if(iflag_diisjump == 1) then
-            write(*,'("Diisjump occured. Steepest descent was used.")')
-         end if
          write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
       case(3)
          write(*,101) Miter,energy%E_tot*2d0*Ry
