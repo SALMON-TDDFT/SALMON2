@@ -97,32 +97,32 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%gk,cg%gk,sum)
 
     if(iter==1)then
-!$omp parallel do private(io,ispin,iz,iy) collapse(4)
-      do io=io_s,io_e
-      do ispin=1,nspin
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-      end do
-      end do
-      end do
-      end do
+      uk = 0d0
     else
-      uk=sum/gkgk
-!$omp parallel do private(io,ispin,iz,iy) collapse(4)
+!$omp parallel do private(io,ispin)
       do io=io_s,io_e
       do ispin=1,nspin
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-        cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
-        & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
-        & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
-      end do
-      end do
+        if (abs(gkgk(ispin,io)) > 1d-16) then
+          uk(ispin,io) = sum(ispin,io) / gkgk(ispin,io)
+        else
+          uk(ispin,io) = 0d0
+        end if
       end do
       end do
     end if
+
+!$omp parallel do private(io,ispin,iz,iy) collapse(4)
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
+      & cg%gk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) &
+      & + uk(ispin,io) * cg%pk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1)
+    end do
+    end do
+    end do
+    end do
 
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
@@ -163,11 +163,21 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
-    ev=0.5d0*((xkHxk+pkHpk)   &
-             -sqrt((xkHxk-pkHpk)**2+4.d0*abs(xkHpk)**2))
-    cx=xkHpk/(ev-xkHxk)
-    cp=1.d0/sqrt(1.d0+abs(cx)**2)
-    cx=cx*cp
+!$omp parallel do private(io,ispin)
+    do io=io_s,io_e
+    do ispin=1,nspin
+      ev(ispin,io)=0.5d0*((xkHxk(ispin,io)+pkHpk(ispin,io))   &
+                     -sqrt((xkHxk(ispin,io)-pkHpk(ispin,io))**2+4.d0*abs(xkHpk(ispin,io))**2))
+      if (abs(ev(ispin,io) - xkHxk(ispin,io)) > 1d-16) then
+        cx(ispin,io)=xkHpk(ispin,io)/(ev(ispin,io)-xkHxk(ispin,io))
+        cp(ispin,io)=1.d0/sqrt(1.d0+abs(cx(ispin,io))**2)
+        cx(ispin,io)=cx(ispin,io)*cp(ispin,io)
+      else
+        cx(ispin,io) = 1d0
+        cp(ispin,io) = 0d0
+      end if
+    end do
+    end do
 
 !$omp parallel do private(io,ispin,iz,iy) collapse(4)
     do io=io_s,io_e
@@ -193,7 +203,7 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-      if(abs(xkxk(ispin,io))<=1.d30)then
+      if(1d-16 < abs(xkxk(ispin,io)) .and. abs(xkxk(ispin,io)) <= 1d30) then
         spsi%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) = &
         & cg%xk%rwf(is(1):ie(1),iy,iz,ispin,io,1,1) / sqrt(xkxk(ispin,io))
       end if
@@ -401,36 +411,36 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%gk,cg%gk,sum)
 
     if(iter==1)then
-!$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,nspin
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-        cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-        & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
-      end do
-      end do
-      end do
-      end do
-      end do
+      uk = 0d0
     else
-      uk = sum/gkgk
-!$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+!$omp parallel do private(ik,io,ispin) collapse(2)
       do ik=ik_s,ik_e
       do io=io_s,io_e
       do ispin=1,nspin
-      do iz=is(3),ie(3)
-      do iy=is(2),ie(2)
-        cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
-        & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
-        & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
-      end do
-      end do
+        if (abs(gkgk(ispin,io,ik)) > 1d-16) then
+          uk(ispin,io,ik) = sum(ispin,io,ik) / gkgk(ispin,io,ik)
+        else
+          uk(ispin,io,ik) = 0d0
+        end if
       end do
       end do
       end do
     end if
+
+!$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+      cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
+      & cg%gk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) &
+      & + uk(ispin,io,ik) * cg%pk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1)
+    end do
+    end do
+    end do
+    end do
+    end do
 
     gkgk = sum
     call inner_product(mg,system,info,cg%xk,cg%pk,zs)
@@ -475,11 +485,23 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     call inner_product(mg,system,info,cg%xk,cg%hwf,xkHpk)
     call inner_product(mg,system,info,cg%pko,cg%hwf,pkHpk)
 
-    ev=0.5d0*((xkHxk+pkHpk)   &
-             -sqrt((xkHxk-pkHpk)**2+4.d0*abs(xkHpk)**2))
-    cx=xkHpk/(ev-xkHxk)
-    cp=1.d0/sqrt(1.d0+abs(cx)**2)
-    cx=cx*cp
+!$omp parallel do private(ik,io,ispin) collapse(2)
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,nspin
+      ev(ispin,io,ik)=0.5d0*((xkHxk(ispin,io,ik)+pkHpk(ispin,io,ik))   &
+                     -sqrt((xkHxk(ispin,io,ik)-pkHpk(ispin,io,ik))**2+4.d0*abs(xkHpk(ispin,io,ik))**2))
+      if (abs(ev(ispin,io,ik) - xkHxk(ispin,io,ik)) > 1d-16) then
+        cx(ispin,io,ik)=xkHpk(ispin,io,ik)/(ev(ispin,io,ik)-xkHxk(ispin,io,ik))
+        cp(ispin,io,ik)=1.d0/sqrt(1.d0+abs(cx(ispin,io,ik))**2)
+        cx(ispin,io,ik)=cx(ispin,io,ik)*cp(ispin,io,ik)
+      else
+        cx(ispin,io,ik) = 1d0
+        cp(ispin,io,ik) = 0d0
+      end if
+    end do
+    end do
+    end do
 
 !$omp parallel do private(ik,io,ispin,iz,iy) collapse(5)
     do ik=ik_s,ik_e
@@ -508,7 +530,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
     do ispin=1,nspin
     do iz=is(3),ie(3)
     do iy=is(2),ie(2)
-      if(abs(xkxk(ispin,io,ik))<=1.d30)then
+      if(1d-16 < abs(xkxk(ispin,io,ik)) .and. abs(xkxk(ispin,io,ik)) <= 1d30) then
         spsi%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) = &
         & cg%xk%zwf(is(1):ie(1),iy,iz,ispin,io,ik,1) / sqrt(xkxk(ispin,io,ik))
       end if
