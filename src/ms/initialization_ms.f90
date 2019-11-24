@@ -126,7 +126,7 @@ use deallocate_mat_sub
   
   call timer_begin(LOG_INIT_RT)
 
-  if (.not. (0 < nmacro)) then
+  if (.not. 0 < nmacro) then
     stop "nmacro must be larger than 1"
   end if
 
@@ -157,23 +157,23 @@ use deallocate_mat_sub
   call comm_get_groupinfo(nproc_group_macropoint, nproc_id_macropoint, nproc_size_macropoint)
 
   ! DEBUG
-  write(nproc_id_global+1000,*) "# initialization_ms (section 1)"
-  write(nproc_id_global+1000,*) "# nmacro=", nmacro
-  write(nproc_id_global+1000,*) "# nmacro_mygrp=", nmacro_mygrp 
-  write(nproc_id_global+1000,*) "# imacro_mygrp_s=", imacro_mygrp_s 
-  write(nproc_id_global+1000,*) "# imacro_mygrp_e=", imacro_mygrp_e 
-  write(nproc_id_global+1000,*) "# nproc_mygrp=", nproc_mygrp 
-  write(nproc_id_global+1000,*) "# nproc_group_global=", nproc_group_global
-  write(nproc_id_global+1000,*) "# nproc_size_global=", nproc_size_global
-  write(nproc_id_global+1000,*) "# nproc_id_global=", nproc_id_global
-  write(nproc_id_global+1000,*) "# nproc_group_macropoint=", nproc_group_macropoint
-  write(nproc_id_global+1000,*) "# nproc_size_macropoint=", nproc_size_macropoint
-  write(nproc_id_global+1000,*) "# nproc_id_macropoint=", nproc_id_macropoint
-  write(nproc_id_global+1000,*) "# -----------------------------------"
-  flush(nproc_id_global+1000)
+  write(1000+nproc_id_global,*) "# initialization_ms (section 1)"
+  write(1000+nproc_id_global,*) "# nmacro=", nmacro
+  write(1000+nproc_id_global,*) "# nmacro_mygrp=", nmacro_mygrp 
+  write(1000+nproc_id_global,*) "# imacro_mygrp_s=", imacro_mygrp_s 
+  write(1000+nproc_id_global,*) "# imacro_mygrp_e=", imacro_mygrp_e 
+  write(1000+nproc_id_global,*) "# nproc_mygrp=", nproc_mygrp 
+  write(1000+nproc_id_global,*) "# nproc_group_global=", nproc_group_global
+  write(1000+nproc_id_global,*) "# nproc_size_global=", nproc_size_global
+  write(1000+nproc_id_global,*) "# nproc_id_global=", nproc_id_global
+  write(1000+nproc_id_global,*) "# nproc_group_macropoint=", nproc_group_macropoint
+  write(1000+nproc_id_global,*) "# nproc_size_macropoint=", nproc_size_macropoint
+  write(1000+nproc_id_global,*) "# nproc_id_macropoint=", nproc_id_macropoint
+  write(1000+nproc_id_global,*) "# -----------------------------------"
+  flush(1000+nproc_id_global)
 
   if (nmacro_mygrp > 1) &
-      stop "Error: Type-I parallelization (nmacro > nproc) have been not supported yet!"
+      stop "ERROR! Type-I parallelization (nmacro > nproc) have been not supported yet!"
 
   call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
   
@@ -184,7 +184,7 @@ use deallocate_mat_sub
   idensum=0
   posplane=0.d0
   
-  call convert_input_rt(Ntime)
+  call convert_input_ms(Ntime)
   
   call set_filename
   
@@ -192,34 +192,34 @@ use deallocate_mat_sub
     write(*,*)
     write(*,*) "Total time step      =",Ntime
     write(*,*) "Time step[fs]        =",dt*au_time_fs
-    write(*,*) "Field strength[?]    =",Fst
-    write(*,*) "Energy range         =",Nenergy
-    write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
-    write(*,*) "ikind_eext is         ", ikind_eext
-    write(*,*) "Step for writing dens=", iwdenstep
-    write(*,*) "Plane showing density=", denplane
-    write(*,*) "idensum              =", idensum 
-    if(idensum==0) write(*,*) "Position of the plane=", posplane
-    select case (ikind_eext)
-      case(1,6,7,8,15)
-        write(*,20) "Laser frequency     =",romega*au_energy_ev,"[eV]"
-        write(*,21) "Pulse width of laser=",pulse_T*au_time_fs, "[fs]"
-        write(*,22) "Laser intensity     =",rlaser_I,       "[W/cm^2]"
-        write(*,22) "tau                 =",tau*au_time_fs, "[fs]"
-      case(4,12)
-        write(*,23) "Laser frequency     =",romega2(1:2)*au_energy_ev,"[eV]"
-        write(*,24) "Pulse width of laser=",pulse_T2(1:2)*au_time_fs, "[fs]"
-        write(*,25) "Laser intensity     =",rlaser_I2(1:2),       "[W/cm^2]"
-        write(*,21) "delay time          =",delay*au_time_fs,     "[fs]"
-        write(*,26) "rcycle              =",rcycle
-    end select
-  20 format(a21,f5.2, a4)
-  21 format(a21,f16.8,a4)
-  22 format(a21,e16.8,a8)
-  23 format(a21,2f5.2, a4)
-  24 format(a21,2f16.8,a4)
-  25 format(a21,2e16.8,a8)
-  26 format(a21,f16.8)
+    ! write(*,*) "Field strength[?]    =",Fst
+    ! write(*,*) "Energy range         =",Nenergy
+    ! write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
+    ! write(*,*) "ikind_eext is         ", ikind_eext
+    ! write(*,*) "Step for writing dens=", iwdenstep
+    ! write(*,*) "Plane showing density=", denplane
+    ! write(*,*) "idensum              =", idensum 
+    ! if(idensum==0) write(*,*) "Position of the plane=", posplane
+    ! select case (ikind_eext)
+    !   case(1,6,7,8,15)
+    !     write(*,20) "Laser frequency     =",romega*au_energy_ev,"[eV]"
+    !     write(*,21) "Pulse width of laser=",pulse_T*au_time_fs, "[fs]"
+    !     write(*,22) "Laser intensity     =",rlaser_I,       "[W/cm^2]"
+    !     write(*,22) "tau                 =",tau*au_time_fs, "[fs]"
+    !   case(4,12)
+    !     write(*,23) "Laser frequency     =",romega2(1:2)*au_energy_ev,"[eV]"
+    !     write(*,24) "Pulse width of laser=",pulse_T2(1:2)*au_time_fs, "[fs]"
+    !     write(*,25) "Laser intensity     =",rlaser_I2(1:2),       "[W/cm^2]"
+    !     write(*,21) "delay time          =",delay*au_time_fs,     "[fs]"
+    !     write(*,26) "rcycle              =",rcycle
+    ! end select
+  ! 20 format(a21,f5.2, a4)
+  ! 21 format(a21,f16.8,a4)
+  ! 22 format(a21,e16.8,a8)
+  ! 23 format(a21,2f5.2, a4)
+  ! 24 format(a21,2f16.8,a4)
+  ! 25 format(a21,2e16.8,a8)
+  ! 26 format(a21,f16.8)
   
   end if
     
@@ -377,23 +377,30 @@ use deallocate_mat_sub
   !(write header)
   if(comm_is_root(nproc_id_global))then
     !(header of standard output)
-    select case(iperiodic)
+    ! select case(iperiodic)
     ! case(0)
     !   write(*,'(1x,a10,a11,a48,a15,a18,a10)') &
     !               "time-step ", "time[fs]",   &
     !               "Dipole moment(xyz)[A]"     &
     !              ,"electrons", "Total energy[eV]", "iterVh"
-    case(3)
-      write(*,'(1x,a10,a11,a48,a15,a18)')   &
-                  "time-step", "time[fs] ", &
-                  "Current(xyz)[a.u.]",     &
-                  "electrons", "Total energy[eV] "
-    end select
+    ! case(3)
+    !   write(*,'(1x,a10,a11,a48,a15,a18)')   &
+    !               "time-step", "time[fs] ", &
+    !               "Current(xyz)[a.u.]",     &
+    !               "electrons", "Total energy[eV] "
+    ! end select
+
+    write(*,'(1x,a10,a10,a10,a10,a10)')   &
+      "time-step", &
+      "time[fs] ", &
+      "field energy", &
+      "absorbed energy" 
+    
     write(*,'("#",7("----------"))')
   
     !(header of SYSname_rt.data)
     select case(iperiodic)
-    case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
+    ! case(0) ; call write_rt_data_0d(-1,ofl,dt,system,rt)
     case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
     end select
   
@@ -528,18 +535,18 @@ use deallocate_mat_sub
   ! endif
   
   ! Initial wave function
-  if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
-    do iik=info%ik_s,info%ik_e
-    do iob=info%io_s,info%io_e
-    do jspin=1,system%nspin
-          spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1) &
-          = exp(zi*Fst*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
-             mg%is(3):mg%ie(3)))   &
-             *  spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1)
-    end do
-    end do
-    end do
-  end if
+  ! if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
+  !   do iik=info%ik_s,info%ik_e
+  !   do iob=info%io_s,info%io_e
+  !   do jspin=1,system%nspin
+  !         spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1) &
+  !         = exp(zi*Fst*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+  !            mg%is(3):mg%ie(3)))   &
+  !            *  spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1)
+  !   end do
+  !   end do
+  !   end do
+  ! end if
   
   rt%rIe(0)     = rbox_array2(4) * system%Hvol
   rt%dDp_e(:,0) = 0d0
@@ -547,21 +554,21 @@ use deallocate_mat_sub
   rt%Dp_i(:,0)  = 0d0
   rt%Qp_e(:,:,0)= 0d0
   
-    do itt=0,0
-      if(yn_out_dns_rt=='y')then
-        call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,itt)
-      end if
-      if(yn_out_elf_rt=='y')then
-        call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
-      end if
-      if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,ng,system%hgs,stencil,info_field,sVh,srg_ng,itt)
-      end if
-    end do
+    ! do itt=0,0
+    !   if(yn_out_dns_rt=='y')then
+    !     call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,itt)
+    !   end if
+    !   if(yn_out_elf_rt=='y')then
+    !     call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
+    !   end if
+    !   if(yn_out_estatic_rt=='y')then
+    !     call write_estatic(lg,ng,system%hgs,stencil,info_field,sVh,srg_ng,itt)
+    !   end if
+    ! end do
   
-  if(iperiodic==3) call calc_Aext(Mit)
+  ! if(iperiodic==3) call calc_Aext(Mit)
   
-  if(yn_md=='y') call init_md(system,md)
+  ! if(yn_md=='y') call init_md(system,md)
   
   ! single-scale Maxwell-TDDFT
   ! if(use_singlescale=='y') then
@@ -574,17 +581,17 @@ use deallocate_mat_sub
   !-------------------------------------------------- Time evolution
   
   !(force at initial step)
-  if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
+  ! if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
+  !    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
   
-     !open trj file for coordinate, velocity, and force (rvf) in xyz format
-     write(comment_line,10) -1, 0.0d0
-     if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
-          &  write(comment_line,12) trim(comment_line), md%xi_nh
-     call write_xyz(comment_line,"add","rvf",system)
-  10 format("#rt   step=",i8,"   time",e16.6)
-  12 format(a,"  xi_nh=",e18.10)
-  end if
+  !    !open trj file for coordinate, velocity, and force (rvf) in xyz format
+  !    write(comment_line,10) -1, 0.0d0
+  !    if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
+  !         &  write(comment_line,12) trim(comment_line), md%xi_nh
+  !    call write_xyz(comment_line,"add","rvf",system)
+  ! 10 format("#rt   step=",i8,"   time",e16.6)
+  ! 12 format(a,"  xi_nh=",e18.10)
+  ! end if
   
   call timer_end(LOG_INIT_TIME_PROPAGATION)
   

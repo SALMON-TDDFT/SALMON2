@@ -108,8 +108,8 @@ nmacro = nx_m * ny_m * nz_m
 !                         pp, ppg, ppn )
 
 
-! call timer_begin(LOG_RT_ITERATION)
-! TE : do itt=Mit+1,itotNtime
+call timer_begin(LOG_RT_ITERATION)
+TE : do itt=Mit+1,itotNtime
 
 !   if(mod(itt,2)==1)then
 !     call time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
@@ -134,8 +134,8 @@ nmacro = nx_m * ny_m * nz_m
 !     call timer_end(LOG_CHECKPOINT_SYNC)
 !   endif
 
-! end do TE
-! call timer_end(LOG_RT_ITERATION)
+end do TE
+call timer_end(LOG_RT_ITERATION)
 
 ! close(030) ! laser
 
