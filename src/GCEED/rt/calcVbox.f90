@@ -37,37 +37,22 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
 
 
   if(iperiodic==0)then
-    if(yn_local_field=='y')then
+    if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
       do jj=1,3
-        if(mg%is(jj)-Nd<ilasbound_sta(jj))then
+        if(lg%is(jj)==mg%is(jj))then
+          ix_sta_Vbox(jj)=mg%is(jj)
+        else
           ix_sta_Vbox(jj)=mg%is(jj)-Nd
-        else
-          ix_sta_Vbox(jj)=ilasbound_sta(jj)
         end if
-        if(mg%ie(jj)+Nd>ilasbound_sta(jj))then
-          ix_end_Vbox(jj)=mg%ie(jj)+Nd
+        if(lg%ie(jj)==mg%ie(jj))then
+          ix_end_Vbox(jj)=mg%ie(jj)
         else
-          ix_end_Vbox(jj)=ilasbound_end(jj)
+          ix_end_Vbox(jj)=mg%ie(jj)+Nd
         end if
       end do
     else
-      if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-        do jj=1,3
-          if(lg%is(jj)==mg%is(jj))then
-            ix_sta_Vbox(jj)=mg%is(jj)
-          else
-            ix_sta_Vbox(jj)=mg%is(jj)-Nd
-          end if
-          if(lg%ie(jj)==mg%ie(jj))then
-            ix_end_Vbox(jj)=mg%ie(jj)
-          else
-            ix_end_Vbox(jj)=mg%ie(jj)+Nd
-          end if
-        end do
-      else
-        ix_sta_Vbox(1:3)=mg%is(1:3)
-        ix_end_Vbox(1:3)=mg%ie(1:3)
-      end if
+      ix_sta_Vbox(1:3)=mg%is(1:3)
+      ix_end_Vbox(1:3)=mg%ie(1:3)
     end if
   end if
  
@@ -94,12 +79,12 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
             Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+  &
-                           E_amplitude1*(epdir_re1(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
-                                       epdir_re1(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
-                                       epdir_re1(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_1  &
-                          +E_amplitude1*(epdir_im1(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
-                                       epdir_im1(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
-                                       epdir_im1(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_1
+                           E_amplitude1*(epdir_re1(1)*lg%coordinate(ix,1)+   &
+                                       epdir_re1(2)*lg%coordinate(iy,2)+   &
+                                       epdir_re1(3)*lg%coordinate(iz,3))*env_trigon_1  &
+                          +E_amplitude1*(epdir_im1(1)*lg%coordinate(ix,1)+   &
+                                       epdir_im1(2)*lg%coordinate(iy,2)+   &
+                                       epdir_im1(3)*lg%coordinate(iz,3))*env_trigon_1
           end do
           end do
           end do
@@ -114,12 +99,12 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
             Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)   &
-                          +E_amplitude2*(epdir_re2(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
-                                       epdir_re2(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
-                                       epdir_re2(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_2  &
-                          +E_amplitude2*(epdir_im2(1)*(lg%coordinate(ix,1)-rlaser_center(1))+   &
-                                       epdir_im2(2)*(lg%coordinate(iy,2)-rlaser_center(2))+   &
-                                       epdir_im2(3)*(lg%coordinate(iz,3)-rlaser_center(3)))*env_trigon_2
+                          +E_amplitude2*(epdir_re2(1)*lg%coordinate(ix,1)+   &
+                                       epdir_re2(2)*lg%coordinate(iy,2)+   &
+                                       epdir_re2(3)*lg%coordinate(iz,3))*env_trigon_2  &
+                          +E_amplitude2*(epdir_im2(1)*lg%coordinate(ix,1)+   &
+                                       epdir_im2(2)*lg%coordinate(iy,2)+   &
+                                       epdir_im2(3)*lg%coordinate(iz,3))*env_trigon_2
           end do
           end do
           end do
