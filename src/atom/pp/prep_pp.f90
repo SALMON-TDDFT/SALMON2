@@ -464,6 +464,24 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
 
 !$OMP parallel do private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
+    do iy=lg%is(2),lg%ie(2)
+    do ix=lg%is(1),lg%ie(1)
+      poisson%ff1(ix,iy,iz) = 0d0
+    end do
+    end do
+    end do
+
+!$OMP parallel do private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=lg%is(2),lg%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      poisson%ff1y(ix,iy,iz) = 0d0
+    end do
+    end do
+    end do
+
+!$OMP parallel do private(iz,iy,ix)
+    do iz=lg%is(3),lg%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
       poisson%ff1z(ix,iy,iz)=0.d0
