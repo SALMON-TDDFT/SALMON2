@@ -426,55 +426,37 @@ use deallocate_mat_sub
                                  lg%is(3):lg%ie(3)))
   
   ! External Field Direction
-  select case (ikind_eext)
-    case(1)
-      if(yn_local_field=='y')then
-        rlaser_center(1:3)=(rlaserbound_sta(1:3)+rlaserbound_end(1:3))/2.d0
-        do jj=1,3
-          select case(mod(lg%num(jj),2))
-            case(1)
-              ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/system%Hgs(jj))
-              ilasbound_end(jj)=nint(rlaserbound_end(jj)/system%Hgs(jj))
-            case(0)
-              ilasbound_sta(jj)=nint(rlaserbound_sta(jj)/system%Hgs(jj)+0.5d0)
-              ilasbound_end(jj)=nint(rlaserbound_end(jj)/system%Hgs(jj)+0.5d0)
-          end select
-        end do
-      else
-        rlaser_center(1:3)=0.d0
-      end if
-  end select
   
   select case(mod(lg%num(1),2))
     case(1)
       do i1=lg%is(1),lg%ie(1)
-         vecR(1,i1,:,:)=dble(i1)-rlaser_center(1)/system%Hgs(1)
+         vecR(1,i1,:,:)=dble(i1)
       end do
     case(0)
       do i1=lg%is(1),lg%ie(1)
-         vecR(1,i1,:,:)=dble(i1)-0.5d0-rlaser_center(1)/system%Hgs(1)
+         vecR(1,i1,:,:)=dble(i1)-0.5d0
       end do
   end select
   
   select case(mod(lg%num(2),2))
     case(1)
       do i2=lg%is(2),lg%ie(2)
-         vecR(2,:,i2,:)=dble(i2)-rlaser_center(2)/system%Hgs(2)
+         vecR(2,:,i2,:)=dble(i2)
       end do
     case(0)
       do i2=lg%is(2),lg%ie(2)
-         vecR(2,:,i2,:)=dble(i2)-0.5d0-rlaser_center(2)/system%Hgs(2)
+         vecR(2,:,i2,:)=dble(i2)-0.5d0
       end do
   end select
   
   select case(mod(lg%num(3),2))
     case(1)
       do i3=lg%is(3),lg%ie(3)
-         vecR(3,:,:,i3)=dble(i3)-rlaser_center(3)/system%Hgs(3)
+         vecR(3,:,:,i3)=dble(i3)
       end do
     case(0)
       do i3=lg%is(3),lg%ie(3)
-         vecR(3,:,:,i3)=dble(i3)-0.5d0-rlaser_center(3)/system%Hgs(3)
+         vecR(3,:,:,i3)=dble(i3)-0.5d0
       end do
   end select
   

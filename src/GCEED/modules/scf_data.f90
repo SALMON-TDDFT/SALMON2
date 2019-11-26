@@ -66,9 +66,6 @@ character(100):: file_Projection
 !real(8),allocatable :: curr(:,:)
 
 
-integer :: ilasbound_sta(3),ilasbound_end(3)
-real(8) :: rlaser_center(3)
-
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 integer :: DESCA( 50 ), DESCZ( 50 )
 
