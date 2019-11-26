@@ -38,7 +38,7 @@ subroutine eh_init(fs,fw)
   character(1)                      :: dir
   character(128)                    :: save_name
   
-  !set initial parameter and value
+  !*** set initial parameter and value **********************************************************************!
   fw%c_0        = 1.370359991378353d2
   fw%Nd         = 1
   fw%iter_sta   = 1
@@ -84,10 +84,10 @@ subroutine eh_init(fs,fw)
     fw%uAperm_from_au=fw%uVperm_from_au
   end select
   
-  !prepare GCEED(set mpi condition, gird, and sendrecv environment)
-  call eh_prep_GCEED(fs,fw)
+  !*** prepare mpi, gird, and sendrecv environments *********************************************************!
+  call eh_mpi_grid_sr(fs,fw)
   
-  !set coordinate
+  !*** set coordinate ***************************************************************************************!
   do ii=1,3
     if(mod(int(fs%rlsize(ii)/fs%hgs(ii)+1.d-12),2)==1)then
       fw%ioddeven(ii)=1
@@ -98,7 +98,7 @@ subroutine eh_init(fs,fw)
   allocate(fw%coo(minval(fs%lg%is(:))-fw%Nd:maxval(fs%lg%ie(:))+fw%Nd,3))
   call set_coo_em(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo(:,:))
   
-  !set and check dt
+  !*** set and check dt *************************************************************************************!
   dt_cfl=1.0d0/( &
          fw%c_0*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
          )
@@ -128,10 +128,10 @@ subroutine eh_init(fs,fw)
   end if
   call comm_bcast(dt_em,nproc_group_global)
   
-  !basic allocation in eh-FDTD
+  !*** basic allocation in eh-FDTD **************************************************************************!
   call eh_allocate
   
-  !input fdtd shape
+  !*** input fdtd shape *************************************************************************************!
   allocate(fs%imedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
                      fs%ng%is_array(2):fs%ng%ie_array(2),&
                      fs%ng%is_array(3):fs%ng%ie_array(3)))
@@ -167,7 +167,7 @@ subroutine eh_init(fs,fw)
     if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
   end if
   
-  !prepare Lorentz-Drude
+  !*** prepare Lorentz-Drude ********************************************************************************!
   fw%num_ld=0
   do ii=0,imedia_num
     select case(type_media(ii))
@@ -254,7 +254,7 @@ subroutine eh_init(fs,fw)
     fw%c1_j_ld(:,:)=0.0d0; fw%c2_j_ld(:,:)=0.0d0; fw%c3_j_ld(:,:)=0.0d0;
   end if
   
-  !set fdtd coeffient and write media information
+  !*** set fdtd coeffient and write media information *******************************************************!
   allocate(fw%rep(0:imedia_num),fw%rmu(0:imedia_num),fw%sig(0:imedia_num))
   fw%rep(:)=1.0d0; fw%rmu(:)=1.0d0; fw%sig(:)=0.0d0;
   do ii=0,imedia_num
@@ -310,7 +310,7 @@ subroutine eh_init(fs,fw)
     write(*,*) "**************************"
   end if
   
-  !set calculation area
+  !*** set calculation area *********************************************************************************!
   fw%iex_y_is(:)=fs%ng%is(:); fw%iex_y_ie(:)=fs%ng%ie(:);
   fw%iex_z_is(:)=fs%ng%is(:); fw%iex_z_ie(:)=fs%ng%ie(:);
   fw%iey_z_is(:)=fs%ng%is(:); fw%iey_z_ie(:)=fs%ng%ie(:);
@@ -351,7 +351,7 @@ subroutine eh_init(fs,fw)
     fw%ihy_z_ie(3)=fs%ng%ie(3)-1; fw%ihy_x_ie(3)=fs%ng%ie(3)-1;
   end if
   
-  !set pml
+  !*** set pml **********************************************************************************************!
   call eh_set_pml(1,fw%c1_ey_x,fw%c2_ey_x,fw%c1_ez_x,fw%c2_ez_x,&
                     fw%c1_hy_x,fw%c2_hy_x,fw%c1_hz_x,fw%c2_hz_x) !x direction
   call eh_set_pml(2,fw%c1_ez_y,fw%c2_ez_y,fw%c1_ex_y,fw%c2_ex_y,&
@@ -383,7 +383,7 @@ subroutine eh_init(fs,fw)
     end if
   end if
   
-  !prepare observation
+  !*** prepare observation **********************************************************************************!
   if(iobs_num_em>0) then
     !set initial
     allocate(fw%ex_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
@@ -448,7 +448,7 @@ subroutine eh_init(fs,fw)
     end if
   end if
   
-  !check incident current source condition
+  !*** check incident current source condition **************************************************************!
   select case(wave_input)
   case('source')
     !linear response
@@ -559,7 +559,7 @@ subroutine eh_init(fs,fw)
     end if
   end select
   
-  !prepare incident current source
+  !*** prepare incident current source **********************************************************************!
   if((fw%inc_dist1=='none').and.(fw%inc_dist2=='none')) then
     fw%inc_num=0
   else
@@ -645,7 +645,7 @@ subroutine eh_init(fs,fw)
     end if
   end if
   
-  !prepare linear response
+  !*** prepare linear response ******************************************************************************!
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
     !check condition
     iflag_lr=0
@@ -767,7 +767,7 @@ subroutine eh_init(fs,fw)
     end if
   end if
   
-  !write strat
+  !*** write strat ******************************************************************************************!
   if(comm_is_root(nproc_id_global)) then
     write(*,*)
     write(*,*) "**************************"
@@ -1477,14 +1477,12 @@ subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
 end subroutine eh_input_shape
 
 !=========================================================================================
-!= prepare GCEED =========================================================================
-!= (This routine is temporary) ===========================================================
-!= (With unifying ARTED and GCEED, this routine will be removed) =========================
-subroutine eh_prep_GCEED(fs,fw)
-  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,num_kgrid,iperiodic
+!= prepare mpi, grid, and sendrecv enviroments============================================
+subroutine eh_mpi_grid_sr(fs,fw)
+  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,iperiodic, &
+                               nproc_k,nproc_ob
   use salmon_parallel,   only: nproc_group_global
   use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
-  use scf_data,          only: num_kpoints_3d,num_kpoints_rd
   use init_communicator, only: init_communicator_dft
   use sendrecv_grid,     only: create_sendrecv_neig_ng,init_sendrecv_grid
   use structures,        only: s_fdtd_system, s_orbital_parallel, s_field_parallel, s_process_info
@@ -1500,24 +1498,32 @@ subroutine eh_prep_GCEED(fs,fw)
   integer                           :: ii
   
   !set mpi condition
-  num_kpoints_3d(1:3)=num_kgrid(1:3)
-  num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
   pinfo%npdomain_orbital = nproc_domain_orbital
   pinfo%npdomain_general = nproc_domain_general
   call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,pinfo)
   call init_communicator_dft(nproc_group_global,pinfo,info,info_field)
+  !### This process about nproc_** is temporal. ###################!
+  !### When init_grid_parallel(&others) does not need nproc_**, ###!
+  !### this process will be removed. ##############################!
+  nproc_k              = pinfo%npk
+  nproc_ob             = pinfo%nporbital
+  nproc_domain_orbital = pinfo%npdomain_orbital
+  nproc_domain_general = pinfo%npdomain_general
+  !################################################################!
   
   !initialize r-grid
   call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
   call init_grid_parallel(info%id_rko,info%isize_rko,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
-  
-  !set sendrecv environment
-  !This process about ng is temporal. 
-  !With modifying set_ng to be applied to arbitrary Nd, this process will be removed.
+  !### This process about ng is temporal. #####################!
+  !### With modifying set_ng to be applied to arbitrary Nd, ###!
+  !### this process will be removed.###########################!
   fs%ng%is_overlap(1:3)=fs%ng%is(1:3)-fw%Nd
   fs%ng%ie_overlap(1:3)=fs%ng%ie(1:3)+fw%Nd
   fs%ng%is_array(1:3)  =fs%ng%is(1:3)-fw%Nd
   fs%ng%ie_array(1:3)  =fs%ng%ie(1:3)+fw%Nd
+  !############################################################!
+  
+  !prepare for setting sendrecv environment
   if(allocated(fs%ng%idx)) deallocate(fs%ng%idx)
   if(allocated(fs%ng%idy)) deallocate(fs%ng%idy)
   if(allocated(fs%ng%idz)) deallocate(fs%ng%idz)
@@ -1534,8 +1540,9 @@ subroutine eh_prep_GCEED(fs,fw)
     fs%ng%idz(ii)=ii
   end do
   fs%ng%Nd=fw%Nd
-
+  
+  !set sendrecv environment
   call create_sendrecv_neig_ng(neig_ng_eh,info_field,iperiodic) ! neighboring node array
   call init_sendrecv_grid(fs%srg_ng,fs%ng,1,info_field%icomm_all,neig_ng_eh)
-
-end subroutine eh_prep_GCEED
+  
+end subroutine eh_mpi_grid_sr
