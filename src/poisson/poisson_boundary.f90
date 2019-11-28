@@ -40,9 +40,9 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   real(8) :: trho(mg%is(1):mg%ie(1),    &
                  mg%is(2):mg%ie(2),      &
                  mg%is(3):mg%ie(3))
-  real(8) :: wk2(ng%is(1)-ndh:ng%ie(1)+ndh,    &
-                 ng%is(2)-ndh:ng%ie(2)+ndh,      &
-                 ng%is(3)-ndh:ng%ie(3)+ndh)
+  real(8) :: wk2(ng%is_array(1):ng%ie_array(1),    &
+                 ng%is_array(2):ng%ie_array(2),      &
+                 ng%is_array(3):ng%ie_array(3))
   integer,parameter :: maxiter=1000
   integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
   integer :: ixbox,iybox,izbox
@@ -345,9 +345,9 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   end if
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
-  do iz=ng%is(3)-ndh,ng%ie(3)+ndh
-  do iy=ng%is(2)-ndh,ng%ie(2)+ndh
-  do ix=ng%is(1)-ndh,ng%ie(1)+ndh
+  do iz=ng%is_array(3),ng%ie_array(3)
+  do iy=ng%is_array(2),ng%ie_array(2)
+  do ix=ng%is_array(1),ng%ie_array(1)
     wk2(ix,iy,iz)=0.d0
   end do
   end do

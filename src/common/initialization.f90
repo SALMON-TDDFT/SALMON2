@@ -431,12 +431,12 @@ end subroutine init_grid_whole
 
 subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
   use salmon_communication, only: comm_is_root
-  use salmon_global, only: calc_mode,iperiodic,process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_k,nproc_ob
+  use salmon_global, only: yn_periodic,process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_k,nproc_ob
   use structures, only: s_rgrid
   implicit none
-  integer      ,intent(in) :: myrank,nproc
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid)            :: mg,ng
+  integer      ,intent(in)    :: myrank,nproc
+  type(s_rgrid),intent(inout) :: lg
+  type(s_rgrid),intent(inout) :: mg,ng
   !
   integer :: i1,i2,i3,i4,j1,j2,j3,ibox,j,ii
   integer :: nproc_domain_orbital_mul,ngo(3),ngo_mul
@@ -510,7 +510,7 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
           ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
 
-  if(iperiodic==3 .and. nproc_domain_orbital_mul==1) then
+  if(yn_periodic=='y' .and. nproc_domain_orbital_mul==1) then
     if(comm_is_root(myrank)) write(*,*) "r-space parallelization: off"
     mg%is_array(1:3) = mg%is(1:3)
     mg%ie_array(1:3) = mg%ie(1:3)
@@ -535,12 +535,6 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
     do j=mg%is_overlap(3),mg%ie_overlap(3)
       mg%idz(j) = j
     end do
-  end if
-
-  if(calc_mode=='RT')then
-#ifdef USE_OPT_ARRAY_PADDING
-    mg%ie_array(2)=mg%ie(2)+nd+1
-#endif
   end if
 
   if(mg%num(1)<nd .or.mg%num(2)<nd .or.mg%num(3)<nd)then
@@ -624,9 +618,15 @@ subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
     ng%idz(j) = j
   end do
 
-  if(iperiodic==0.and.(ng%num(1)<nd.or.ng%num(2)<nd.or.ng%num(3)<nd))then
+  if(yn_periodic=='n'.and.(ng%num(1)<nd.or.ng%num(2)<nd.or.ng%num(3)<nd))then
     stop "The system is small. Please use less number of processors."
   end if
+
+#ifdef USE_OPT_ARRAY_PADDING
+  lg%ie_array(2)=lg%ie_array(2) + 1
+  mg%ie_array(2)=mg%ie_array(2) + 1
+  ng%ie_array(2)=ng%ie_array(2) + 1
+#endif
 
 end subroutine init_grid_parallel
 
