@@ -124,10 +124,10 @@ contains
     use salmon_file, only: get_filehandle
     implicit none
 
-    integer :: cur 
+    integer :: cur
     integer :: ret = 0
     character(100) :: buff, text
-        
+
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -141,7 +141,7 @@ contains
       open(fh_atomic_red_coor, file='.atomic_red_coor.tmp', status='replace')
       fh_reentrance = get_filehandle()
       open(fh_reentrance, file='.reenetrance.tmp', status='replace')
-      
+
       cur = fh_namelist
       do while (.true.)
         read(*, '(a)', iostat=ret) buff
@@ -177,7 +177,7 @@ contains
             cur = fh_namelist
             cycle
           end if
-          
+
           write(cur, '(a)') text
         end if
       end do
@@ -516,7 +516,7 @@ contains
     end if
 
     call comm_bcast(unit_system,nproc_group_global)
-    
+
     select case(unit_system)
     case('au','a.u.','A_eV_fs')
       continue
@@ -908,9 +908,6 @@ contains
       close(fh_namelist)
     end if
 
-    ! maybe should call check subroutine of yn_xxxx keyword here
-    ! to correct 'Y' and 'N' to be 'y' and 'n', also error check too
-
 ! Broad cast
 !! == bcast for &calculation
     call comm_bcast(theory             ,nproc_group_global)
@@ -1175,7 +1172,7 @@ contains
     call comm_bcast(obs_loc_em   ,nproc_group_global)
     obs_loc_em = obs_loc_em * ulength_to_au
     call comm_bcast(obs_plane_em ,nproc_group_global)
-    
+
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
     call comm_bcast(projection_decomp   ,nproc_group_global)
@@ -2093,6 +2090,38 @@ contains
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
 
+    ! to correct 'Y' and 'N' to be 'y' and 'n', also error check too
+    call yn_argument_check(yn_md)
+    call yn_argument_check(yn_opt)
+    call yn_argument_check(yn_restart)
+    call yn_argument_check(yn_self_checkpoint)
+    call yn_argument_check(yn_domain_parallel)
+    call yn_argument_check(yn_ffte)
+    call yn_argument_check(yn_periodic)
+    call yn_argument_check(yn_psmask)
+    call yn_argument_check(yn_fix_func)
+    call yn_argument_check(yn_subspace_diagonalization)
+    call yn_argument_check(yn_local_field)
+    call yn_argument_check(yn_out_psi)
+    call yn_argument_check(yn_out_dos)
+    call yn_argument_check(yn_out_dos_set_fe_origin)
+    call yn_argument_check(yn_out_pdos)
+    call yn_argument_check(yn_out_dns)
+    call yn_argument_check(yn_out_dns_rt)
+    call yn_argument_check(yn_out_dns_trans)
+    call yn_argument_check(yn_out_elf)
+    call yn_argument_check(yn_out_elf_rt)
+    call yn_argument_check(yn_out_estatic_rt)
+    call yn_argument_check(yn_out_rvf_rt)
+    call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_set_ini_velocity)
+    call yn_argument_check(yn_stop_system_momt)
+    call yn_argument_check(yn_want_stencil_openmp_parallelization)
+    call yn_argument_check(yn_want_stencil_hand_vectorization)
+    call yn_argument_check(yn_force_stencil_openmp_parallelization)
+    call yn_argument_check(yn_force_stencil_sequential_computation)
+    call yn_argument_check(yn_want_communication_overlapping)
+
     if(iperiodic==0.or.(iperiodic==3.and.yn_domain_parallel=='y')) then
       select case(convergence)
       case('rho_dne')
@@ -2203,5 +2232,19 @@ contains
     stop
   end subroutine stop_by_bad_input2
 
+  subroutine yn_argument_check(str)
+    use misc_routines, only: string_lowercase
+    use salmon_parallel, only: end_parallel
+    implicit none
+    character(*), intent(inout) :: str
+
+    call string_lowercase(str)
+
+    if (str /= 'y' .and. str /= 'n') then
+      write (*,*) "Bad input: yn_* option only accepts 'y' or 'n'."
+      call end_parallel
+      stop
+    end if
+  end subroutine yn_argument_check
 
 end module inputoutput
