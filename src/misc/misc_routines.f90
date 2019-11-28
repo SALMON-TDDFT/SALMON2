@@ -16,12 +16,32 @@
 module misc_routines
   implicit none
 
+  public :: string_lowercase
   public :: floor_pow2, ceiling_pow2
   public :: gen_logfilename
   public :: get_wtime
 
 private
 contains
+  subroutine string_lowercase(str)
+    ! Original code was written by David Frank  dave_frank@hotmail.com
+    ! http://home.earthlink.net/~dave_gemini/strings.f90
+    implicit none
+    character(*),intent(inout) :: str
+
+    integer,parameter :: dc = ichar('A') - ichar('a')
+    character :: ch
+    integer   :: i
+
+    do i = 1,len(str)
+      ch = str(i:i)
+      if ('A' <= ch .and. ch <= 'Z') then
+        ch = char(ichar(ch) - dc)
+      end if
+      str(i:i) = ch
+    end do
+  end subroutine
+
   function floor_pow2(n)
     implicit none
     integer            :: floor_pow2
