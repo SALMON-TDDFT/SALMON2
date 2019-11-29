@@ -64,9 +64,6 @@ else
   write(*,*)"'ispin' should be 0 or 1. "
 end if
 
-num_kpoints_3d(1:3)=num_kgrid(1:3)
-num_kpoints_rd=num_kpoints_3d(1)*num_kpoints_3d(2)*num_kpoints_3d(3)
-
 if(ilsda == 0) then
   itotMST=MST(1)
 else if(ilsda == 1) then

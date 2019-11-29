@@ -31,9 +31,6 @@ integer :: iSCFRT
 complex(8), allocatable :: zc(:)
 integer :: itotNtime
 
-integer :: num_kpoints_3d(3)
-integer :: num_kpoints_rd
-
 real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
