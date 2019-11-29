@@ -937,7 +937,7 @@ end subroutine read_Vh_stock
 subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,rw_mode)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
-  use salmon_global, only: yn_periodic
+  use salmon_global, only: yn_periodic, datafiles_dist
   use mpi
   implicit none
   character(*),            intent(in)    :: iodir
@@ -949,14 +949,33 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,rw_mod
   integer,                 intent(in)    :: rw_mode
 
   character(256) :: iofile
+  integer :: comm
   integer :: gsize(3), lsize(3), lstart(3)
   integer :: wfn_gsize(7), wfn_lsize(7), wfn_lstart(7)
   integer :: stype, rtype, ftype
   integer :: iopen_flag, minfo, mfile
   integer :: ierr
-  type(s_orbital) :: dummy
 
-  iofile = trim(iodir)//"wfn.bin"
+  type(s_orbital) :: dummy
+  integer :: io,io_e,iro,ico
+  integer :: lno,gno
+
+  select case(datafiles_dist)
+    case('none')
+    ! create single shared file
+      comm = info%icomm_rko
+      io_e = info%io_s
+      lno  = info%numo
+      gno  = mo
+    case('orbital')
+    ! create shared file per orbital
+      comm = info%icomm_r
+      io_e = info%io_e
+      lno  = 1
+      gno  = 1
+    case default
+      stop 'datafiles_dist'
+  end select
 
   select case(rw_mode)
     case (write_mode)
@@ -982,65 +1001,83 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,rw_mod
       iopen_flag = MPI_MODE_RDONLY
 
       minfo = MPI_INFO_NULL
+
+      if (yn_periodic == 'n' .and. allocated(spsi%zwf)) then
+        call allocate_orbital_real(system%nspin,mg,info,dummy)
+      end if
   end select
 
-  gsize(:)  = mg%ie_array(:) - mg%is_array(:) + 1
-  lsize(:)  = mg%ie(:)       - mg%is(:)       + 1
-  lstart(:) = mg%is(:)       - mg%is_array(:) + 1
+  do io=info%io_s,io_e
+    select case(datafiles_dist)
+      case('none')
+        iofile = trim(iodir)//"wfn.bin"
+        iro = 1
+        ico = io
+      case('orbital')
+        write (iofile,'(A,A,I6.6,A)') trim(iodir),"wfn_orbital_",io,".bin"
+        iro = io - info%io_s + 1
+        ico = 1
+    end select
 
-  wfn_gsize  = [gsize (1:3), system%nspin, info%numo, info%numk, 1]
-  wfn_lsize  = [lsize (1:3), system%nspin, info%numo, info%numk, 1]
-  wfn_lstart = [lstart(1:3), 1,            1,         1,         1] - 1
+    gsize(:)  = mg%ie_array(:) - mg%is_array(:) + 1
+    lsize(:)  = mg%ie(:)       - mg%is(:)       + 1
+    lstart(:) = mg%is(:)       - mg%is_array(:) + 1
 
-  MPI_CHECK(MPI_Type_create_subarray(7, wfn_gsize, wfn_lsize, wfn_lstart, MPI_ORDER_FORTRAN, stype, rtype, ierr))
-  MPI_CHECK(MPI_Type_commit(rtype, ierr))
+    wfn_gsize  = [gsize (1:3), system%nspin, info%numo, info%numk, 1]
+    wfn_lsize  = [lsize (1:3), system%nspin, lno,       info%numk, 1]
+    wfn_lstart = [lstart(1:3), 1,            iro,       1,         1] - 1
 
-  gsize(:)  = lg%ie(:) - lg%is(:) + 1
-  lstart(:) = mg%is(:)
-  if (yn_periodic == 'n') then
-    lstart(:) = lstart(:) + lg%num(:)/2
-  end if
+    MPI_CHECK(MPI_Type_create_subarray(7, wfn_gsize, wfn_lsize, wfn_lstart, MPI_ORDER_FORTRAN, stype, rtype, ierr))
+    MPI_CHECK(MPI_Type_commit(rtype, ierr))
 
-  wfn_gsize  = [gsize (1:3), system%nspin, mo,        mk,        1]
-  wfn_lstart = [lstart(1:3), 1,            info%io_s, info%ik_s, 1] - 1
+    gsize(:)  = lg%ie(:) - lg%is(:) + 1
+    lstart(:) = mg%is(:)
+    if (yn_periodic == 'n') then
+      lstart(:) = lstart(:) + lg%num(:)/2
+    end if
 
-  MPI_CHECK(MPI_Type_create_subarray(7, wfn_gsize, wfn_lsize, wfn_lstart, MPI_ORDER_FORTRAN, stype, ftype, ierr))
-  MPI_CHECK(MPI_Type_commit(ftype, ierr))
+    wfn_gsize  = [gsize (1:3), system%nspin, gno, mk,        1]
+    wfn_lstart = [lstart(1:3), 1,            ico, info%ik_s, 1] - 1
 
-  MPI_CHECK(MPI_File_open(MPI_COMM_WORLD, iofile, iopen_flag, minfo, mfile, ierr))
-  MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, rtype, ftype, 'native', MPI_INFO_NULL, ierr))
+    MPI_CHECK(MPI_Type_create_subarray(7, wfn_gsize, wfn_lsize, wfn_lstart, MPI_ORDER_FORTRAN, stype, ftype, ierr))
+    MPI_CHECK(MPI_Type_commit(ftype, ierr))
 
-  select case(rw_mode)
-    case (write_mode)
-      if (allocated(spsi%rwf)) then
-        MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
-      else if (allocated(spsi%zwf)) then
-        MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
-      end if
-    case (read_mode)
-      if (allocated(spsi%rwf)) then
-        if (stype /= MPI_DOUBLE) stop 'unsupported: stype /= MPI_DOUBLE'
-        MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
-      else if (allocated(spsi%zwf)) then
-        if (stype == MPI_DOUBLE) then
-          ! read double, convert to double complex
-          ! NOTE: When simulating large-scale isolated system, it's possible that
-          !       SALMON hangs by failing memory allocation.
-          call allocate_orbital_real(system%nspin, mg, info, dummy)
-          MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
-          spsi%zwf = cmplx(dummy%rwf)
-          call deallocate_orbital(dummy)
-        else
-          ! read double complex
-          MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
+    MPI_CHECK(MPI_File_open(comm, iofile, iopen_flag, minfo, mfile, ierr))
+    MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, rtype, ftype, 'native', MPI_INFO_NULL, ierr))
+
+    select case(rw_mode)
+      case (write_mode)
+        if (allocated(spsi%rwf)) then
+          MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
+        else if (allocated(spsi%zwf)) then
+          MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
         end if
-      end if
-  end select
+      case (read_mode)
+        if (allocated(spsi%rwf)) then
+          if (stype /= MPI_DOUBLE) stop 'unsupported: stype /= MPI_DOUBLE'
+          MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
+        else if (allocated(spsi%zwf)) then
+          if (stype == MPI_DOUBLE) then
+            ! read double, convert to double complex
+            ! NOTE: When simulating large-scale isolated system, it's possible that
+            !       SALMON hangs by failing memory allocation.
+            MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
+            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,io:io+lno-1,:,:) &
+              = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,io:io+lno-1,:,:))
+          else
+            ! read double complex
+            MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf, 1, rtype, MPI_STATUS_IGNORE, ierr))
+          end if
+        end if
+    end select
 
-  MPI_CHECK(MPI_File_close(mfile, ierr))
+    MPI_CHECK(MPI_File_close(mfile, ierr))
 
-  MPI_CHECK(MPI_Type_free(ftype, ierr))
-  MPI_CHECK(MPI_Type_free(rtype, ierr))
+    MPI_CHECK(MPI_Type_free(ftype, ierr))
+    MPI_CHECK(MPI_Type_free(rtype, ierr))
+  end do
+
+  call deallocate_orbital(dummy)
 
   select case(rw_mode)
     case (write_mode)
@@ -1064,26 +1101,6 @@ contains
   end subroutine
 end subroutine
 #endif
-
-!===================================================================================================================================
-
-subroutine set_ndfiles(datafiles_dist, num_datafiles)
-  use salmon_communication, only: comm_get_globalinfo
-  implicit none
-  character(*), intent(in)  :: datafiles_dist
-  integer,      intent(out) :: num_datafiles
-  integer :: comm, irank, nprocs
-
-  call comm_get_globalinfo(comm,irank,nprocs)
-  select case(datafiles_dist)
-    case('none')
-      num_datafiles = 1
-    case('orbital')
-      num_datafiles = nprocs
-    case default
-      stop 'datafiles_dist'
-  end select
-end subroutine
 
 !===================================================================================================================================
 
