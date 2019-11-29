@@ -53,9 +53,6 @@ real(8) :: pulse_T, pulse_T2(2)
 real(8) :: rlaser_I, rlaser_I2(2) 
 real(8) :: tau, tau2(2), delay, rcycle
 
-integer       :: idensum   ! whether density is summed up along direction
-                           ! perpendicular to the plane
-                           ! (0: not summed, 1: summed)
 real(8)       :: posplane  ! position of the plane
                            ! (only for idensum = 0)
 

@@ -108,7 +108,6 @@ use deallocate_mat_sub
   iSCFRT=2
   
   iwdenstep=30 
-  idensum=0
   posplane=0.d0
   
   call convert_input_rt(Ntime)
@@ -124,8 +123,6 @@ use deallocate_mat_sub
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
     write(*,*) "ikind_eext is         ", ikind_eext
     write(*,*) "Step for writing dens=", iwdenstep
-    write(*,*) "idensum              =", idensum 
-    if(idensum==0) write(*,*) "Position of the plane=", posplane
     select case (ikind_eext)
       case(1,6,7,8,15)
         write(*,20) "Laser frequency     =",romega*au_energy_ev,"[eV]"
@@ -156,8 +153,6 @@ use deallocate_mat_sub
   end select
   dE=dE !/2d0/Ry 
   dt=dt !*fs2eVinv*2.d0*Ry!a.u. ! 1[fs] = 1.51925 [1/eV]  !2.d0*Ry*1.51925d0
-  
-  if(idensum==0) posplane=posplane/a_B 
   
   select case (ikind_eext)
     case(1)
