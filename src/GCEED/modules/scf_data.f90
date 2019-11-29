@@ -53,9 +53,6 @@ real(8) :: pulse_T, pulse_T2(2)
 real(8) :: rlaser_I, rlaser_I2(2) 
 real(8) :: tau, tau2(2), delay, rcycle
 
-real(8)       :: posplane  ! position of the plane
-                           ! (only for idensum = 0)
-
 character(100):: file_Projection
 
 

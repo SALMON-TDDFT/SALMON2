@@ -108,7 +108,6 @@ use deallocate_mat_sub
   iSCFRT=2
   
   iwdenstep=30 
-  posplane=0.d0
   
   call convert_input_rt(Ntime)
   
