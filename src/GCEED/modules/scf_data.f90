@@ -47,7 +47,7 @@ integer :: itt
 integer :: ikind_eext   !0:No external field, 1: dipoleApprox
 
 !some of following variables can be removed by small changes
-real(8) :: tau, tau2(2), delay, rcycle
+real(8) :: delay, rcycle
 
 character(100):: file_Projection
 

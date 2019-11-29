@@ -128,7 +128,6 @@ use deallocate_mat_sub
         write(*,20) "Laser frequency     =",omega1*au_energy_ev,"[eV]"
         write(*,21) "Pulse width of laser=",tw1*au_time_fs, "[fs]"
         write(*,22) "Laser intensity     =",I_wcm2_1,       "[W/cm^2]"
-        write(*,22) "tau                 =",tau*au_time_fs, "[fs]"
       case(4,12)
         write(*,23) "Laser frequency     =",omega1*au_energy_ev,omega2*au_energy_ev,"[eV]"
         write(*,24) "Pulse width of laser=",tw1*au_time_fs,tw2*au_time_fs, "[fs]"
