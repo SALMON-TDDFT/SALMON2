@@ -122,22 +122,6 @@ close(030) ! laser
 
 ! write RT: 
 call timer_begin(LOG_WRITE_RT_RESULTS)
-if(iwrite_external==1)then
-  if(comm_is_root(nproc_id_global))then
-    open(1,file=file_external)
-    if(ikind_eext==1)then
-      do nntime=0,itotNtime
-        write(1,'(e13.5)',advance="no") nntime*dt/2.d0/Ry/fs2eVinv
-        if(dt*itt <= tau)then
-          write(1,'(e16.8)',advance="yes") Fst*sin(romega*dble(nntime)*dt)*sin(Pi*dble(nntime)*dt/pulse_T)**2
-        else
-          write(1,'(e16.8)',advance="yes") 0.d0
-        end if
-      end do
-    end if
-    close(1)
-  end if
-end if
 
 !
 select case(iperiodic)

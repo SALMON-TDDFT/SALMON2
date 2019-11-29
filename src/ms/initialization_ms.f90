@@ -189,12 +189,13 @@ use deallocate_mat_sub
     write(*,*)
     write(*,*) "Total time step      =",Ntime
     write(*,*) "Time step[fs]        =",dt*au_time_fs
-    write(*,*) "Field strength[?]    =",Fst
     write(*,*) "Energy range         =",Nenergy
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
     write(*,*) "ikind_eext is         ", ikind_eext
     write(*,*) "Step for writing dens=", iwdenstep
     select case (ikind_eext)
+      case(0)
+        write(*,*) "Field strength[a.u.] =",e_impulse
       case(1,6,7,8,15)
         write(*,20) "Laser frequency     =",romega*au_energy_ev,"[eV]"
         write(*,21) "Pulse width of laser=",pulse_T*au_time_fs, "[fs]"
@@ -217,12 +218,6 @@ use deallocate_mat_sub
   
   end if
     
-  select case (ikind_eext)
-    case(0,10) ; Fst=Fst !/5.14223d1
-  end select
-  dE=dE !/2d0/Ry 
-  dt=dt !*fs2eVinv*2.d0*Ry!a.u. ! 1[fs] = 1.51925 [1/eV]  !2.d0*Ry*1.51925d0
-  
   select case (ikind_eext)
     case(1)
       if(I_wcm2_1>=1.d-12)then
@@ -507,7 +502,7 @@ use deallocate_mat_sub
     do iob=info%io_s,info%io_e
     do jspin=1,system%nspin
           spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1) &
-          = exp(zi*Fst*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+          = exp(zi*e_impulse*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
              mg%is(3):mg%ie(3)))   &
              *  spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1)
     end do
