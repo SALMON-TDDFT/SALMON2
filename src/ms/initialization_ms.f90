@@ -180,7 +180,6 @@ use deallocate_mat_sub
   iSCFRT=2
   
   iwdenstep=30 
-  denplane='xy'
   idensum=0
   posplane=0.d0
   
@@ -197,7 +196,6 @@ use deallocate_mat_sub
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
     write(*,*) "ikind_eext is         ", ikind_eext
     write(*,*) "Step for writing dens=", iwdenstep
-    write(*,*) "Plane showing density=", denplane
     write(*,*) "idensum              =", idensum 
     if(idensum==0) write(*,*) "Position of the plane=", posplane
     select case (ikind_eext)

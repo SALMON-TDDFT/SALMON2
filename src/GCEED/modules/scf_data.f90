@@ -53,7 +53,6 @@ real(8) :: pulse_T, pulse_T2(2)
 real(8) :: rlaser_I, rlaser_I2(2) 
 real(8) :: tau, tau2(2), delay, rcycle
 
-character(2)  :: denplane  ! plane for writing density (xy, yz, xz)
 integer       :: idensum   ! whether density is summed up along direction
                            ! perpendicular to the plane
                            ! (0: not summed, 1: summed)
