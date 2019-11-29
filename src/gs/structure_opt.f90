@@ -46,14 +46,13 @@ contains
   subroutine structure_opt_check(natom,iopt,flag_opt_conv,Force)
     use structures
     use salmon_global, only: convrg_opt_fmax,unit_system,flag_opt_atom
-    use inputoutput, only: au_length_aa
+    use inputoutput, only: au_length_aa, au_energy_ev
     use salmon_parallel, only: nproc_id_global,nproc_group_global
     use salmon_communication, only: comm_is_root,comm_bcast
     implicit none
     integer,intent(in) :: natom,iopt
     real(8),intent(in) :: Force(3,natom)
     logical,intent(inout) :: flag_opt_conv
-    real(8),parameter :: Ry=13.6058d0
     integer :: iatom,iatom_count
     real(8) :: fabs,fmax,fave
 
@@ -74,8 +73,8 @@ contains
       fmax = sqrt(fmax)
       fave = sqrt(fave/iatom_count)
     case('A_eV_fs')
-      fmax = sqrt(fmax)*2d0*Ry/au_length_aa
-      fave = sqrt(fave/iatom_count)*2d0*Ry/au_length_aa
+      fmax = sqrt(fmax)*au_energy_ev/au_length_aa
+      fave = sqrt(fave/iatom_count)*au_energy_ev/au_length_aa
     end select
 
     if(comm_is_root(nproc_id_global))then

@@ -19,7 +19,6 @@ implicit none
 !-------------------- Parameters
 
 ! Physical constants
-real(8),parameter :: Ry=13.6058d0
 real(8),parameter :: fs2eVinv = 1.51925d0
 
 ! Coefficients of finite-difference

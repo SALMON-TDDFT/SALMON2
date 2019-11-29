@@ -31,7 +31,7 @@ END MODULE global_variables_scf
 subroutine main_dft
 use math_constants, only: pi, zi
 use structures
-use inputoutput, only: au_length_aa
+use inputoutput, only: au_length_aa, au_energy_ev
 use salmon_parallel, only: nproc_id_global,nproc_group_global
 use salmon_parallel, only: nproc_id_global,nproc_group_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -251,7 +251,7 @@ end if
       do iatom=1,natom
          select case(unit_system)
          case('au','a.u.'); write(*,300)iatom,(system%Force(ix,iatom),ix=1,3)
-         case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*2.d0*Ry/au_length_aa,ix=1,3)
+         case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
          end select
       end do
 300   format(i6,3e16.8)

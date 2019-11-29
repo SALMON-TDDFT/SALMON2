@@ -31,7 +31,7 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               band,ilevel_print )
 use math_constants, only: pi, zi
 use structures
-use inputoutput, only: au_length_aa
+use inputoutput, only: au_length_aa, au_energy_ev
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
@@ -231,9 +231,9 @@ DFT_Iteration : do iter=1,nscf
       write(*,*) '-----------------------------------------------'
       select case(iperiodic)
       case(0)
-         write(*,100) Miter,energy%E_tot*2d0*Ry, poisson%iterVh
+         write(*,100) Miter,energy%E_tot*au_energy_ev, poisson%iterVh
       case(3)
-         write(*,101) Miter,energy%E_tot*2d0*Ry
+         write(*,101) Miter,energy%E_tot*au_energy_ev
       end select
 100   format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
 101   format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
@@ -244,7 +244,7 @@ DFT_Iteration : do iter=1,nscf
             do p5=1,(itotMST+3)/4
                p1=4*(p5-1)+1
                p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
-               write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*2d0*Ry,iob=p1,p2)
+               write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*au_energy_ev,iob=p1,p2)
             end do
             if(iperiodic==3) write(*,*) 
          end if
@@ -254,8 +254,8 @@ DFT_Iteration : do iter=1,nscf
       case('rho_dne' )     ; write(*,200) Miter, sum1
       case('norm_rho')     ; write(*,201) Miter, sum1/au_length_aa**6
       case('norm_rho_dng') ; write(*,202) Miter, sum1/au_length_aa**6
-      case('norm_pot')     ; write(*,203) Miter, sum1*(2.d0*Ry)**2/au_length_aa**6
-      case('norm_pot_dng') ; write(*,204) Miter, sum1*(2.d0*Ry)**2/au_length_aa**6
+      case('norm_pot')     ; write(*,203) Miter, sum1*(au_energy_ev)**2/au_length_aa**6
+      case('norm_pot_dng') ; write(*,204) Miter, sum1*(au_energy_ev)**2/au_length_aa**6
       end select
 200   format("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
 201   format("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)

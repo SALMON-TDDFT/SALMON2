@@ -17,7 +17,7 @@ subroutine subdip(rt,ng,srho,rNe,poisson,Etot,system,pp)
 use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
 use salmon_parallel, only: nproc_group_global, nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
-use inputoutput, only: au_length_aa, natom, au_time_fs
+use inputoutput, only: au_length_aa, au_energy_ev, natom, au_time_fs
 use scf_data
 use allocate_mat_sub
 use inputoutput, only: yn_md
@@ -93,10 +93,10 @@ Hgs(:) = system%Hgs(:)
       select case(iperiodic)
       case(0)
          write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
-             itt,time, rt%dDp_e(1:3,itt)*au_length_aa, rNe, Etot*2d0*Ry,poisson%iterVh
+             itt,time, rt%dDp_e(1:3,itt)*au_length_aa, rNe, Etot*au_energy_ev,poisson%iterVh
       case(3)
          write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
-             itt, time, rt%curr(1:3,itt), rNe, Etot*2d0*Ry
+             itt, time, rt%curr(1:3,itt), rNe, Etot*au_energy_ev
       end select
    end if
 
