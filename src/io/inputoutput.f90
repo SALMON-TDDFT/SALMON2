@@ -244,8 +244,7 @@ contains
       & nproc_ob, &
       & nproc_domain_orbital, &
       & nproc_domain_general, &
-      & num_datafiles_in, &
-      & num_datafiles_out, &
+      & datafiles_dist, &
       & yn_ffte, &
       & process_allocation
 
@@ -578,8 +577,7 @@ contains
     nproc_ob          = 0
     nproc_domain_orbital = 0
     nproc_domain_general = 0
-    num_datafiles_in  = 1
-    num_datafiles_out = 1
+    datafiles_dist    = 'none'
     yn_ffte           = 'n'
     process_allocation  = 'grid_sequential'
 !! == default for &system
@@ -955,8 +953,7 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_domain_orbital,nproc_group_global)
     call comm_bcast(nproc_domain_general,nproc_group_global)
-    call comm_bcast(num_datafiles_in    ,nproc_group_global)
-    call comm_bcast(num_datafiles_out   ,nproc_group_global)
+    call comm_bcast(datafiles_dist      ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
@@ -1698,8 +1695,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(1)', nproc_domain_general(1)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(2)', nproc_domain_general(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(3)', nproc_domain_general(3)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_in', num_datafiles_in
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_out', num_datafiles_out
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'datafiles_dist', datafiles_dist
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 

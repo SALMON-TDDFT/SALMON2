@@ -79,22 +79,6 @@ else if(ilsda == 1) then
   itotMST=MST(1)+MST(2)
 end if
 
-!===== namelist for group_parallel =====
-if(comm_is_root(nproc_id_global))then
-  ibox2=1
-  icheck1=0
-  icheck2=0
-  do ii=1,19
-    if(num_datafiles_IN==ibox2) icheck1=1
-    if(num_datafiles_OUT==ibox2) icheck2=1
-    ibox2=ibox2*2 
-  end do
-  if(icheck1/=1.or.icheck2/=1)then
-    write(*,*) "num_datafiles_IN and num_datafiles_OUT must be equal to nth power of 2. (n: positive integer)"
-    stop
-  end if
-end if
-
 !===== namelist for group_hartree =====
 if(layout_multipole<=0.or.layout_multipole>=4)then
   stop "layout_multipole must be equal to 1 or 2 or 3."

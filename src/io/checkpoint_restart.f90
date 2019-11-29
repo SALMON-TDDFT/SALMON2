@@ -351,8 +351,8 @@ end subroutine read_bin
 !===================================================================================================================================
 
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
-  use inputoutput, only: num_datafiles_out
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
+  use salmon_global, only: datafiles_dist
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_parallel, only: nproc_id_global
   implicit none
@@ -364,7 +364,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   logical,                 intent(in) :: is_self_checkpoint
 
   type(s_rgrid) :: dg
-  integer :: iu2_w
+  integer :: iu2_w, num_datafiles_out
   character(256) :: dir_file_out
   logical :: is_written
 
@@ -375,6 +375,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 
   iu2_w = 87
 
+  call set_ndfiles(datafiles_dist,num_datafiles_out)
   call set_dg(lg,mg,dg,num_datafiles_out,is_self_checkpoint)
 
   if(is_self_checkpoint) then
@@ -714,9 +715,8 @@ end subroutine write_Vh_stock
 
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use inputoutput, only: num_datafiles_in
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: iperiodic
+  use salmon_global, only: datafiles_dist, iperiodic
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   implicit none
   character(*),            intent(in) :: idir
@@ -728,7 +728,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   logical,                 intent(in) :: is_self_checkpoint
 
   type(s_rgrid) :: dg
-  integer :: iu2_r
+  integer :: iu2_r, num_datafiles_in
   character(256) :: dir_file_in
   logical :: is_read
 
@@ -739,6 +739,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   integer :: ix,iy,iz
 
   iu2_r = 86
+  call set_ndfiles(datafiles_dist, num_datafiles_in)
   call set_dg(lg,mg,dg,num_datafiles_in,is_self_checkpoint)
 
   if(is_self_checkpoint) then
@@ -1179,6 +1180,24 @@ end subroutine
 #endif
 
 !===================================================================================================================================
+
+subroutine set_ndfiles(datafiles_dist, num_datafiles)
+  use salmon_communication, only: comm_get_globalinfo
+  implicit none
+  character(*), intent(in)  :: datafiles_dist
+  integer,      intent(out) :: num_datafiles
+  integer :: comm, irank, nprocs
+
+  call comm_get_globalinfo(comm,irank,nprocs)
+  select case(datafiles_dist)
+    case('none')
+      num_datafiles = 1
+    case('orbital')
+      num_datafiles = nprocs
+    case default
+      stop 'datafiles_dist'
+  end select
+end subroutine
 
 subroutine set_dg(lg,mg,dg,num_datafiles,is_self_checkpoint)
   use structures, only: s_rgrid 
