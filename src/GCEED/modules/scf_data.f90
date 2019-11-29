@@ -19,7 +19,7 @@ implicit none
 !-------------------- Parameters
 
 ! Physical constants
-real(8),parameter :: E2=14.4d0, H2M=3.81d0, a_B=0.529177d0
+real(8),parameter :: a_B=0.529177d0
 real(8),parameter :: Ry=13.6058d0
 real(8),parameter :: fs2eVinv = 1.51925d0
 
