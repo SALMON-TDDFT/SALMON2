@@ -339,8 +339,8 @@ use deallocate_mat_sub
   !   write(*, *) 
   !   write(*, *) "dip2boundary", dip2boundary(1), dip2boundary(2)
   !   write(*, *) "dip2center", dip2center(1), dip2center(2)
-  !   write(*, *) "dip2boundary[A]", dip2boundary(1)*a_B, dip2boundary(2)*a_B
-  !   write(*, *) "dip2center[A]", dip2center(1)*a_B, dip2center(2)*a_B
+  !   write(*, *) "dip2boundary[A]", dip2boundary(1)*au_length_aa, dip2boundary(2)*au_length_aa
+  !   write(*, *) "dip2center[A]", dip2center(1)*au_length_aa, dip2center(2)*au_length_aa
   !   write(*, *) 
   ! end if
   call timer_end(LOG_INIT_RT)

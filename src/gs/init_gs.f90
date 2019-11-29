@@ -23,6 +23,7 @@ contains
 
 SUBROUTINE init_wf(lg,mg,system,info,spsi)
   use structures
+  use inputoutput, only: au_length_aa
   use salmon_global, only: yn_periodic,natom,rion
   use gram_schmidt_orth
   implicit none
@@ -34,7 +35,6 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
   !
   integer :: ik,io,is,iseed,a,ix,iy,iz
   real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
-  real(8),parameter :: a_B=0.529177d0
 
   select case(yn_periodic)
   case('n')
@@ -46,7 +46,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
       if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
     end do
     
-    Xmax=Xmax+1.d0/a_B ; Ymax=Ymax+1.d0/a_B ; Zmax=Zmax+1.d0/a_B
+    Xmax=Xmax+1.d0/au_length_aa ; Ymax=Ymax+1.d0/au_length_aa ; Zmax=Zmax+1.d0/au_length_aa
     
     iseed=123
     do is=1,system%nspin
@@ -61,7 +61,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
         do ix=mg%is(1),mg%ie(1)
           xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
           rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
-          spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*a_B)**2)*(a_B)**(3/2)
+          spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
         end do
         end do
         end do

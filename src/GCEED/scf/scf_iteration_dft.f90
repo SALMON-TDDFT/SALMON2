@@ -31,6 +31,7 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               band,ilevel_print )
 use math_constants, only: pi, zi
 use structures
+use inputoutput, only: au_length_aa
 use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
@@ -251,10 +252,10 @@ DFT_Iteration : do iter=1,nscf
 
       select case(convergence)
       case('rho_dne' )     ; write(*,200) Miter, sum1
-      case('norm_rho')     ; write(*,201) Miter, sum1/a_B**6
-      case('norm_rho_dng') ; write(*,202) Miter, sum1/a_B**6
-      case('norm_pot')     ; write(*,203) Miter, sum1*(2.d0*Ry)**2/a_B**6
-      case('norm_pot_dng') ; write(*,204) Miter, sum1*(2.d0*Ry)**2/a_B**6
+      case('norm_rho')     ; write(*,201) Miter, sum1/au_length_aa**6
+      case('norm_rho_dng') ; write(*,202) Miter, sum1/au_length_aa**6
+      case('norm_pot')     ; write(*,203) Miter, sum1*(2.d0*Ry)**2/au_length_aa**6
+      case('norm_pot_dng') ; write(*,204) Miter, sum1*(2.d0*Ry)**2/au_length_aa**6
       end select
 200   format("iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec        = ",i6,e15.8)
 201   format("iter and ||rho_i(ix)-rho_i-1(ix)||**2              = ",i6,e15.8)

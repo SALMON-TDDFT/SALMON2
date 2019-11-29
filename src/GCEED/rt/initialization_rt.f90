@@ -269,8 +269,8 @@ use deallocate_mat_sub
     write(*, *) 
     write(*, *) "dip2boundary", dip2boundary(1), dip2boundary(2)
     write(*, *) "dip2center", dip2center(1), dip2center(2)
-    write(*, *) "dip2boundary[A]", dip2boundary(1)*a_B, dip2boundary(2)*a_B
-    write(*, *) "dip2center[A]", dip2center(1)*a_B, dip2center(2)*a_B
+    write(*, *) "dip2boundary[A]", dip2boundary(1)*au_length_aa, dip2boundary(2)*au_length_aa
+    write(*, *) "dip2center[A]", dip2center(1)*au_length_aa, dip2center(2)*au_length_aa
     write(*, *) 
   end if
   call timer_end(LOG_INIT_RT)
@@ -419,7 +419,7 @@ use deallocate_mat_sub
   end if
   if(comm_is_root(nproc_id_global))then
     write(*,'(a30)', advance="no") "Static dipole moment(xyz) ="
-    write(*,'(3e20.10)') (rt%Dp0_e(i1)*a_B, i1=1,3)
+    write(*,'(3e20.10)') (rt%Dp0_e(i1)*au_length_aa, i1=1,3)
     write(*,*)
   endif
   
