@@ -112,7 +112,6 @@ else
   ikind_eext = 1
 end if
 
-pulse_T = tw1
 rlaser_I = I_wcm2_1
 
 !===== namelist for group_others =====
