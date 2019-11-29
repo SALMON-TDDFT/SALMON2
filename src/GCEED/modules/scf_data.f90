@@ -18,9 +18,6 @@ use salmon_global
 implicit none
 !-------------------- Parameters
 
-! Physical constants
-real(8),parameter :: fs2eVinv = 1.51925d0
-
 ! Coefficients of finite-difference
 integer,parameter :: Nd=4       ! (2*Nd+1)-points finite-difference used in Taylor expansion
 integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Hartree routine
