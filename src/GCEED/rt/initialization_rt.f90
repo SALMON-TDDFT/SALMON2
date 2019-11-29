@@ -125,12 +125,13 @@ use deallocate_mat_sub
       case(0)
         write(*,*) "Field strength[a.u.] =",e_impulse
       case(1,6,7,8,15)
-        write(*,20) "Laser frequency     =",romega*au_energy_ev,"[eV]"
+        write(*,20) "Laser frequency     =",omega1*au_energy_ev,"[eV]"
         write(*,21) "Pulse width of laser=",pulse_T*au_time_fs, "[fs]"
         write(*,22) "Laser intensity     =",rlaser_I,       "[W/cm^2]"
         write(*,22) "tau                 =",tau*au_time_fs, "[fs]"
       case(4,12)
-        write(*,23) "Laser frequency     =",romega2(1:2)*au_energy_ev,"[eV]"
+        write(*,23) "Laser frequency 1   =",omega1*au_energy_ev,"[eV]"
+        write(*,23) "Laser frequency 2   =",omega2*au_energy_ev,"[eV]"
         write(*,24) "Pulse width of laser=",pulse_T2(1:2)*au_time_fs, "[fs]"
         write(*,25) "Laser intensity     =",rlaser_I2(1:2),       "[W/cm^2]"
         write(*,21) "delay time          =",delay*au_time_fs,     "[fs]"
@@ -139,7 +140,7 @@ use deallocate_mat_sub
   20 format(a21,f5.2, a4)
   21 format(a21,f16.8,a4)
   22 format(a21,e16.8,a8)
-  23 format(a21,2f5.2, a4)
+  23 format(a21,f5.2, a4)
   24 format(a21,2f16.8,a4)
   25 format(a21,2e16.8,a8)
   26 format(a21,f16.8)
