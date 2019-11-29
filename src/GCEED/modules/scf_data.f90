@@ -18,11 +18,6 @@ use salmon_global
 implicit none
 !-------------------- Parameters
 
-! Physical constants
-real(8),parameter :: E2=14.4d0, H2M=3.81d0, a_B=0.529177d0
-real(8),parameter :: Ry=13.6058d0
-real(8),parameter :: fs2eVinv = 1.51925d0
-
 ! Coefficients of finite-difference
 integer,parameter :: Nd=4       ! (2*Nd+1)-points finite-difference used in Taylor expansion
 integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Hartree routine
@@ -45,20 +40,6 @@ real(8),allocatable :: vloc_old(:,:,:,:,:)
 
 integer :: itt
 integer :: ikind_eext   !0:No external field, 1: dipoleApprox
-
-!some of following variables can be removed by small changes
-real(8) :: Fst
-real(8) :: romega, romega2(2)
-real(8) :: pulse_T, pulse_T2(2) 
-real(8) :: rlaser_I, rlaser_I2(2) 
-real(8) :: tau, tau2(2), delay, rcycle
-
-character(2)  :: denplane  ! plane for writing density (xy, yz, xz)
-integer       :: idensum   ! whether density is summed up along direction
-                           ! perpendicular to the plane
-                           ! (0: not summed, 1: summed)
-real(8)       :: posplane  ! position of the plane
-                           ! (only for idensum = 0)
 
 character(100):: file_Projection
 

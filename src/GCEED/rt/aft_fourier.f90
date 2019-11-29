@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 program aft_fourier
+use inputoutput, only: au_energy_ev
 implicit none
 integer :: t,j,iene,Nenergy
 integer,parameter :: Ntime=4000
@@ -22,7 +23,6 @@ real(8), allocatable :: curr(:,:)
 real(8), allocatable :: curr2(:,:)
 complex(8),parameter :: zi=(0.d0,1.d0)
 real(8),parameter :: Pi=3.141592653589793d0
-real(8),parameter :: Ry=13.6058d0
 real(8) :: F
 real(8) :: hw,t2,TT,dt,dE
 complex(8) :: zalpha(1:3)
@@ -43,7 +43,7 @@ do t=1,Ntime
 end do
 
 dt=1.935104d-3/2.418884d-2
-dE=0.01d0/2.d0/Ry
+dE=0.01d0/au_energy_ev
 F=0.0001741555d0/0.348310d0
 
 TT = dt*Ntime
@@ -61,7 +61,7 @@ do iene=1,Nenergy
 !  zalpha(1:3)=1.d0/(1.d0+4.d0*Pi*zi*zalpha(1:3)/hw)
 !  zalpha(1:3)=1.d0+4.d0*Pi*zi*zalpha(1:3)/hw
 !  zalpha(1:3)=1.d0+4.d0*Pi*zi*zalpha(1:3)/hw/F
-  write(11,'(f12.4,6e14.6)') hw*2.d0*Ry,(real(zalpha(j),8),j=1,3),(aimag(zalpha(j)),j=1,3)
+  write(11,'(f12.4,6e14.6)') hw*au_energy_ev,(real(zalpha(j),8),j=1,3),(aimag(zalpha(j)),j=1,3)
 end do
 
 

@@ -180,9 +180,6 @@ use deallocate_mat_sub
   iSCFRT=2
   
   iwdenstep=30 
-  denplane='xy'
-  idensum=0
-  posplane=0.d0
   
   call convert_input_rt(Ntime)
   
@@ -192,26 +189,22 @@ use deallocate_mat_sub
     write(*,*)
     write(*,*) "Total time step      =",Ntime
     write(*,*) "Time step[fs]        =",dt*au_time_fs
-    write(*,*) "Field strength[?]    =",Fst
     write(*,*) "Energy range         =",Nenergy
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
     write(*,*) "ikind_eext is         ", ikind_eext
     write(*,*) "Step for writing dens=", iwdenstep
-    write(*,*) "Plane showing density=", denplane
-    write(*,*) "idensum              =", idensum 
-    if(idensum==0) write(*,*) "Position of the plane=", posplane
     select case (ikind_eext)
+      case(0)
+        write(*,*) "Field strength[a.u.] =",e_impulse
       case(1,6,7,8,15)
-        write(*,20) "Laser frequency     =",romega*au_energy_ev,"[eV]"
-        write(*,21) "Pulse width of laser=",pulse_T*au_time_fs, "[fs]"
-        write(*,22) "Laser intensity     =",rlaser_I,       "[W/cm^2]"
-        write(*,22) "tau                 =",tau*au_time_fs, "[fs]"
+        write(*,20) "Laser frequency     =",omega1*au_energy_ev,"[eV]"
+        write(*,21) "Pulse width of laser=",tw1*au_time_fs, "[fs]"
+        write(*,22) "Laser intensity     =",I_wcm2_1,       "[W/cm^2]"
       case(4,12)
-        write(*,23) "Laser frequency     =",romega2(1:2)*au_energy_ev,"[eV]"
-        write(*,24) "Pulse width of laser=",pulse_T2(1:2)*au_time_fs, "[fs]"
-        write(*,25) "Laser intensity     =",rlaser_I2(1:2),       "[W/cm^2]"
-        write(*,21) "delay time          =",delay*au_time_fs,     "[fs]"
-        write(*,26) "rcycle              =",rcycle
+        write(*,23) "Laser frequency =",omega1*au_energy_ev,omega2*au_energy_ev,"[eV]"
+        write(*,24) "Pulse width of laser=",tw1*au_time_fs,tw2*au_time_fs, "[fs]"
+        write(*,25) "Laser intensity     =",I_wcm2_1,I_wcm2_2,      "[W/cm^2]"
+        write(*,21) "delay time            =",t1_t2*au_time_fs,     "[fs]"
     end select
   20 format(a21,f5.2, a4)
   21 format(a21,f16.8,a4)
@@ -219,18 +212,9 @@ use deallocate_mat_sub
   23 format(a21,2f5.2, a4)
   24 format(a21,2f16.8,a4)
   25 format(a21,2e16.8,a8)
-  26 format(a21,f16.8)
   
   end if
     
-  select case (ikind_eext)
-    case(0,10) ; Fst=Fst !/5.14223d1
-  end select
-  dE=dE !/2d0/Ry 
-  dt=dt !*fs2eVinv*2.d0*Ry!a.u. ! 1[fs] = 1.51925 [1/eV]  !2.d0*Ry*1.51925d0
-  
-  if(idensum==0) posplane=posplane/a_B 
-  
   select case (ikind_eext)
     case(1)
       if(I_wcm2_1>=1.d-12)then
@@ -355,8 +339,8 @@ use deallocate_mat_sub
   !   write(*, *) 
   !   write(*, *) "dip2boundary", dip2boundary(1), dip2boundary(2)
   !   write(*, *) "dip2center", dip2center(1), dip2center(2)
-  !   write(*, *) "dip2boundary[A]", dip2boundary(1)*a_B, dip2boundary(2)*a_B
-  !   write(*, *) "dip2center[A]", dip2center(1)*a_B, dip2center(2)*a_B
+  !   write(*, *) "dip2boundary[A]", dip2boundary(1)*au_length_aa, dip2boundary(2)*au_length_aa
+  !   write(*, *) "dip2center[A]", dip2center(1)*au_length_aa, dip2center(2)*au_length_aa
   !   write(*, *) 
   ! end if
   call timer_end(LOG_INIT_RT)
@@ -515,7 +499,7 @@ use deallocate_mat_sub
     do iob=info%io_s,info%io_e
     do jspin=1,system%nspin
           spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1) &
-          = exp(zi*Fst*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
+          = exp(zi*e_impulse*R1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),  &
              mg%is(3):mg%ie(3)))   &
              *  spsi_in%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),jspin,iob,iik,1)
     end do

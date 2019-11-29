@@ -112,11 +112,6 @@ else
   ikind_eext = 1
 end if
 
-Fst = e_impulse
-romega = omega1
-pulse_T = tw1
-rlaser_I = I_wcm2_1
-
 !===== namelist for group_others =====
 
 if(comm_is_root(nproc_id_global))then
