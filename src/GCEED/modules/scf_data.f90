@@ -46,9 +46,6 @@ real(8),allocatable :: vloc_old(:,:,:,:,:)
 integer :: itt
 integer :: ikind_eext   !0:No external field, 1: dipoleApprox
 
-!some of following variables can be removed by small changes
-real(8) :: delay, rcycle
-
 character(100):: file_Projection
 
 

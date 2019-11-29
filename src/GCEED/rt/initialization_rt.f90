@@ -132,8 +132,7 @@ use deallocate_mat_sub
         write(*,23) "Laser frequency     =",omega1*au_energy_ev,omega2*au_energy_ev,"[eV]"
         write(*,24) "Pulse width of laser=",tw1*au_time_fs,tw2*au_time_fs, "[fs]"
         write(*,25) "Laser intensity     =",I_wcm2_1,I_wcm2_2,       "[W/cm^2]"
-        write(*,21) "delay time          =",delay*au_time_fs,     "[fs]"
-        write(*,26) "rcycle              =",rcycle
+        write(*,21) "delay time          =",t1_t2*au_time_fs,     "[fs]"
     end select
   20 format(a21,f5.2, a4)
   21 format(a21,f16.8,a4)
@@ -141,7 +140,6 @@ use deallocate_mat_sub
   23 format(a21,2f5.2, a4)
   24 format(a21,2f16.8,a4)
   25 format(a21,2e16.8,a8)
-  26 format(a21,f16.8)
   
   end if
   
