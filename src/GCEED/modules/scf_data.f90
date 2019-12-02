@@ -47,7 +47,6 @@ character(100):: file_Projection
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 integer :: DESCA( 50 ), DESCZ( 50 )
 
-real(8),allocatable :: A_ind(:,:)
 real(8),allocatable :: A_tot(:,:)
 real(8),allocatable :: E_ext(:,:)
 real(8),allocatable :: E_ind(:,:)
