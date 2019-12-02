@@ -22,8 +22,6 @@ implicit none
 real(8), allocatable :: vecR(:,:,:,:)
 real(8), allocatable :: vecR_tmp(:,:,:,:)
 
-real(8), allocatable :: wk_s_h(:,:,:),wk2_s_h(:,:,:),lap_wk_s_h(:,:,:)
-
 real(8), allocatable :: matbox_m(:,:,:),matbox_m2(:,:,:)
 complex(8), allocatable :: cmatbox_m(:,:,:),cmatbox_m2(:,:,:)
 real(8), allocatable :: matbox_l(:,:,:),matbox_l2(:,:,:)
@@ -84,16 +82,6 @@ allocate (cmatbox_l(lg%is(1):lg%ie(1),    &
 allocate (cmatbox_l2(lg%is(1):lg%ie(1),    &
              lg%is(2):lg%ie(2),      &
              lg%is(3):lg%ie(3)) )
-
-allocate (wk_s_h(ng%is(1)-Ndh:ng%ie(1)+Ndh,   &
-             ng%is(2)-Ndh:ng%ie(2)+Ndh,   &
-             ng%is(3)-Ndh:ng%ie(3)+Ndh))
-allocate (wk2_s_h(ng%is(1):ng%ie(1),   &
-              ng%is(2):ng%ie(2),   &
-              ng%is(3):ng%ie(3)))
-allocate (lap_wk_s_h(ng%is(1):ng%ie(1),   &
-                 ng%is(2):ng%ie(2),   &
-                 ng%is(3):ng%ie(3)))
 
 !if(iSCFRT==1.and.yn_opt=='y')then  !necessary??
 !  select case(iperiodic)

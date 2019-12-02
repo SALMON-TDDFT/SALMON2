@@ -20,7 +20,6 @@ implicit none
 
 ! Coefficients of finite-difference
 integer,parameter :: Nd=4       ! (2*Nd+1)-points finite-difference used in Taylor expansion
-integer,parameter :: Ndh=4       ! (2*Nd+1)-points finite-difference used in Hartree routine
 
 
 !-------------------- Global variables
