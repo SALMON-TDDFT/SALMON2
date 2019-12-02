@@ -121,7 +121,7 @@ call initialization2_dft( it, nspin, rion_update,  &
 it=0
 call init_A(nt,it,rt)
 !electric field:---- not yet
-!if(iperiodic==3) call calc_Aext(Mit)
+!if(iperiodic==3) call calc_Aext(Mit,rt)
 !for isolated system, use Vbox ...
 
 call init_md(system,md)

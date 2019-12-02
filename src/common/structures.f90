@@ -82,7 +82,8 @@ module structures
      real(8) :: Dp0_e(3)     !rename later
      real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
      real(8), allocatable :: rIe(:)    !rename later
-     real(8), allocatable :: curr(:,:), E_ext(:,:), E_tot(:,:)
+     real(8), allocatable :: curr(:,:), E_ext(:,:), E_ind(:,:), E_tot(:,:)
+     real(8), allocatable :: Ac_ext(:,:), Ac_ind(:,:), Ac_tot(:,:)
   end type s_rt
 
   type s_process_info

@@ -17,7 +17,7 @@ subroutine calc_emfields(nspin,rt,curr_in)
   use structures, only : s_rt
   use math_constants, only : pi
   use salmon_global, only : ispin
-  use scf_data, only : itt,A_ind,dt,A_tot,A_ext,E_ext,E_ind,E_tot
+  use scf_data, only : itt,dt
   use inputoutput, only: trans_longi
   implicit none
   type(s_rt),intent(inout) :: rt
@@ -28,33 +28,32 @@ subroutine calc_emfields(nspin,rt,curr_in)
   if(ispin==1) rt%curr(1:3,itt) = rt%curr(1:3,itt) + curr_in(1:3,2)  !<-- only if nspin==2??
 
   if(trans_longi=="lo")then
-    A_ind(:,itt+1)=2d0*A_ind(:,itt) -A_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
+    rt%Ac_ind(:,itt+1)=2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
   else if(trans_longi=="tr")then
-    A_ind(:,itt+1)=0d0
+    rt%Ac_ind(:,itt+1)=0d0
   end if
 
-  A_tot(:,itt+1) = A_ext(:,itt+1) + A_ind(:,itt+1)
+  rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
 
-  E_ext(:,itt) = -(A_ext(:,itt+1) - A_ext(:,itt-1))/(2d0*dt)
-  E_ind(:,itt) = -(A_ind(:,itt+1) - A_ind(:,itt-1))/(2d0*dt)
-  E_tot(:,itt) = -(A_tot(:,itt+1) - A_tot(:,itt-1))/(2d0*dt)
-
-  rt%E_ext(1:3,itt)=E_ext(1:3,itt)
-  rt%E_tot(1:3,itt)=E_tot(1:3,itt)
+  rt%E_ext(:,itt) = -(rt%Ac_ext(:,itt+1) - rt%Ac_ext(:,itt-1))/(2d0*dt)
+  rt%E_ind(:,itt) = -(rt%Ac_ind(:,itt+1) - rt%Ac_ind(:,itt-1))/(2d0*dt)
+  rt%E_tot(:,itt) = -(rt%Ac_tot(:,itt+1) - rt%Ac_tot(:,itt-1))/(2d0*dt)
 
 end subroutine calc_emfields
 
-subroutine calc_Aext(Mit)
+subroutine calc_Aext(Mit,rt)
 !$ use omp_lib
+use structures, only : s_rt
 use em_field, only: calc_Ac_ext
-use scf_data, only: dt,itotNtime,A_ext
+use scf_data, only: dt,itotNtime
 use math_constants, only: pi
 implicit none
 integer :: itt,Mit
+  type(s_rt),intent(inout) :: rt
 real(8) :: tt
 do itt=Mit+1,itotNtime+1
    tt = dt*dble(itt)
-   call calc_Ac_ext(tt,A_ext(:,itt))
+   call calc_Ac_ext(tt,rt%Ac_ext(:,itt))
 end do
 return
 end subroutine calc_Aext
@@ -76,26 +75,20 @@ end if
 
 allocate( rt%curr( 3,0:t_max) )
 allocate( rt%E_ext(3,0:t_max) )
+allocate( rt%E_ind(3,0:t_max) )
 allocate( rt%E_tot(3,0:t_max) )
-allocate( A_ext(3,0:t_max+1) )
-allocate( A_ind(3,0:t_max+1) )
-allocate( A_tot(3,0:t_max+1) )
-allocate( E_ext(3,0:t_max) )
-allocate( E_ind(3,0:t_max) )
-allocate( E_tot(3,0:t_max) )
+allocate( rt%Ac_ext(3,0:t_max+1) )
+allocate( rt%Ac_ind(3,0:t_max+1) )
+allocate( rt%Ac_tot(3,0:t_max+1) )
 
 rt%curr =0d0
 rt%E_ext=0d0
+rt%E_ind=0d0
 rt%E_tot=0d0
 
-A_ext   =0d0
-A_ind   =0d0
-A_tot   =0d0
-
-E_ind     =0d0
-E_ext     =0d0
-E_ind(:,0)=0d0
-E_tot(:,0)=0d0
+rt%Ac_ext   =0d0
+rt%Ac_ind   =0d0
+rt%Ac_tot   =0d0
 
 end subroutine init_A
 
