@@ -66,6 +66,8 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_ofile)  :: ofile
 
+integer,parameter :: Nd = 4
+
 integer :: jspin
 
 !call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
