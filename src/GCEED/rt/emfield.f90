@@ -17,7 +17,7 @@ subroutine calc_emfields(nspin,rt,curr_in)
   use structures, only : s_rt
   use math_constants, only : pi
   use salmon_global, only : ispin
-  use scf_data, only : itt,dt,E_ext,E_tot
+  use scf_data, only : itt,dt
   use inputoutput, only: trans_longi
   implicit none
   type(s_rt),intent(inout) :: rt
@@ -35,12 +35,9 @@ subroutine calc_emfields(nspin,rt,curr_in)
 
   rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
 
-  E_ext(:,itt) = -(rt%Ac_ext(:,itt+1) - rt%Ac_ext(:,itt-1))/(2d0*dt)
+  rt%E_ext(:,itt) = -(rt%Ac_ext(:,itt+1) - rt%Ac_ext(:,itt-1))/(2d0*dt)
   rt%E_ind(:,itt) = -(rt%Ac_ind(:,itt+1) - rt%Ac_ind(:,itt-1))/(2d0*dt)
-  E_tot(:,itt) = -(rt%Ac_tot(:,itt+1) - rt%Ac_tot(:,itt-1))/(2d0*dt)
-
-  rt%E_ext(1:3,itt)=E_ext(1:3,itt)
-  rt%E_tot(1:3,itt)=E_tot(1:3,itt)
+  rt%E_tot(:,itt) = -(rt%Ac_tot(:,itt+1) - rt%Ac_tot(:,itt-1))/(2d0*dt)
 
 end subroutine calc_emfields
 
@@ -78,26 +75,20 @@ end if
 
 allocate( rt%curr( 3,0:t_max) )
 allocate( rt%E_ext(3,0:t_max) )
+allocate( rt%E_ind(3,0:t_max) )
 allocate( rt%E_tot(3,0:t_max) )
 allocate( rt%Ac_ext(3,0:t_max+1) )
 allocate( rt%Ac_ind(3,0:t_max+1) )
 allocate( rt%Ac_tot(3,0:t_max+1) )
-allocate( E_ext(3,0:t_max) )
-allocate( rt%E_ind(3,0:t_max) )
-allocate( E_tot(3,0:t_max) )
 
 rt%curr =0d0
 rt%E_ext=0d0
+rt%E_ind=0d0
 rt%E_tot=0d0
 
 rt%Ac_ext   =0d0
 rt%Ac_ind   =0d0
 rt%Ac_tot   =0d0
-
-rt%E_ind     =0d0
-E_ext     =0d0
-rt%E_ind(:,0)=0d0
-E_tot(:,0)=0d0
 
 end subroutine init_A
 
