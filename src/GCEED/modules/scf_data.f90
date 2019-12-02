@@ -16,11 +16,6 @@
 MODULE scf_data
 use salmon_global
 implicit none
-!-------------------- Parameters
-
-! Coefficients of finite-difference
-integer,parameter :: Nd=4       ! (2*Nd+1)-points finite-difference used in Taylor expansion
-
 
 !-------------------- Global variables
 
