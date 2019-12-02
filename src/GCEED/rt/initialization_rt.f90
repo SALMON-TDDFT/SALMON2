@@ -455,7 +455,7 @@ use deallocate_mat_sub
       end if
     end do
   
-  if(iperiodic==3) call calc_Aext(Mit)
+  if(iperiodic==3) call calc_Aext(Mit,rt)
   
   if(yn_md=='y') call init_md(system,md)
   
