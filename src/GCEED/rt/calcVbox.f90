@@ -33,6 +33,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
   real(8) :: env_trigon_1,env_trigon_2
+  integer,parameter :: Nd = 4
 
 
 

@@ -34,8 +34,6 @@ deallocate (matbox_l,matbox_l2)
 deallocate (cmatbox_m,cmatbox_m2)
 deallocate (cmatbox_l,cmatbox_l2)
 
-deallocate (wk_s_h,wk2_s_h,lap_wk_s_h)
-
 !if(iSCFRT==1.and.yn_opt=='y')then
 !  deallocate(rgrad_wk)
 !else if(iSCFRT==2.and.(yn_out_rvf_rt=='y'.or.yn_md=='y'))then

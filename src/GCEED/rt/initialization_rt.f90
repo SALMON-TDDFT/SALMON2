@@ -59,6 +59,7 @@ use deallocate_mat_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
   implicit none
+  integer,parameter :: Nd = 4
 
   real(8)       :: debye2au   ! [D]  -> [a.u.] 
   integer       :: Ntime
