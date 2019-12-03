@@ -30,7 +30,6 @@ real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
 
 integer :: itt
-integer :: ikind_eext   !0:No external field, 1: dipoleApprox
 
 character(100):: file_Projection
 
