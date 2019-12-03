@@ -92,16 +92,15 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
      rion_update = check_rion_update() .or. (itt == Mit+1)
   endif
 
-  select case(ikind_eext)
-    case(0,3,9:12)
-      ihpsieff=0
-    case(1,2,4,6:8,15)
-      ihpsieff=1
-  end select
+  if(ae_shape1 == 'impulse')then
+    ihpsieff=0
+  else 
+    ihpsieff=1
+  end if
   
   select case(iperiodic)
   case(0)
-    if(ikind_eext==1) call calcVbox(mg,lg,itt,system,Vbox)
+    if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt,system,Vbox)
     if(ihpsieff==1) then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
       do is=1,nspin
@@ -157,7 +156,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
 
     select case(iperiodic)
     case(0)
-      if(ikind_eext==1) call calcVbox(mg,lg,itt+1,system,Vbox)
+      if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt+1,system,Vbox)
       if(ihpsieff==1)then
   !$OMP parallel do collapse(3) private(is,iz,iy,ix)
         do is=1,nspin

@@ -102,13 +102,6 @@ else if(layout_multipole==3)then
   end if
 end if
 
-!===== namelist for group_extfield =====
-if(ae_shape1 == 'impulse')then
-  ikind_eext = 0
-else
-  ikind_eext = 1
-end if
-
 !===== namelist for group_others =====
 
 if(comm_is_root(nproc_id_global))then

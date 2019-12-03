@@ -120,21 +120,21 @@ use deallocate_mat_sub
     write(*,*) "Time step[fs]        =",dt*au_time_fs
     write(*,*) "Energy range         =",Nenergy
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
-    write(*,*) "ikind_eext is         ", ikind_eext
     write(*,*) "Step for writing dens=", iwdenstep
-    select case (ikind_eext)
-      case(0)
-        write(*,*) "Field strength[a.u.] =",e_impulse
-      case(1,6,7,8,15)
+    if(ae_shape1 == 'impulse')then 
+      write(*,*) "Field strength[a.u.] =",e_impulse
+    else
+      if(I_wcm2_2<1.d-12.and.E_amplitude2<=1.d-12)then
         write(*,20) "Laser frequency     =",omega1*au_energy_ev,"[eV]"
         write(*,21) "Pulse width of laser=",tw1*au_time_fs, "[fs]"
         write(*,22) "Laser intensity     =",I_wcm2_1,       "[W/cm^2]"
-      case(4,12)
+      else
         write(*,23) "Laser frequency     =",omega1*au_energy_ev,omega2*au_energy_ev,"[eV]"
         write(*,24) "Pulse width of laser=",tw1*au_time_fs,tw2*au_time_fs, "[fs]"
         write(*,25) "Laser intensity     =",I_wcm2_1,I_wcm2_2,       "[W/cm^2]"
         write(*,21) "delay time          =",t1_t2*au_time_fs,     "[fs]"
-    end select
+      end if
+    end if
   20 format(a21,f5.2, a4)
   21 format(a21,f16.8,a4)
   22 format(a21,e16.8,a8)
@@ -145,20 +145,19 @@ use deallocate_mat_sub
   end if
   
   debye2au = 0.393428d0
-  
-  select case (ikind_eext)
-    case(1)
-      if(I_wcm2_1>=1.d-12)then
-        E_amplitude1=sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+
+  if(ae_shape1 /= 'impulse')then 
+    if(I_wcm2_1>=1.d-12)then
+      E_amplitude1=sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    end if
+    if(I_wcm2_2>=1.d-12)then
+      E_amplitude2=sqrt(I_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+    else
+      if(abs(E_amplitude2)<=1.d-12)then
+        E_amplitude2=0.d0
       end if
-      if(I_wcm2_2>=1.d-12)then
-        E_amplitude2=sqrt(I_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
-      else
-        if(abs(E_amplitude2)<=1.d-12)then
-          E_amplitude2=0.d0
-        end if
-      end if
-  end select
+    end if
+  end if
   
   call timer_end(LOG_INIT_RT)
   
@@ -425,7 +424,7 @@ use deallocate_mat_sub
   endif
   
   ! Initial wave function
-  if(iperiodic==0 .and. ikind_eext==0 .and. yn_restart /= 'y')then
+  if(iperiodic==0 .and. ae_shape1 == 'impulse' .and. yn_restart /= 'y')then
     do iik=info%ik_s,info%ik_e
     do iob=info%io_s,info%io_e
     do jspin=1,system%nspin
