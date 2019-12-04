@@ -376,12 +376,12 @@ CONTAINS
     logical :: rion_update
   
     select case('theory')
-    case default
-      stop 'invalid theory'
     case('DFT','DFT_BAND','DFT_MD') 
       rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
     case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
       rion_update = (yn_md == 'y')
+    case default
+      stop 'invalid theory'
     end select
   
   end function

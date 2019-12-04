@@ -75,13 +75,13 @@ subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,rho0,itt)
   call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
   select case('theory')
-  case default
-    stop 'invalid theory'
   case('DFT','DFT_BAND','DFT_MD') 
     suffix = "dns"
   case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
+  case default
+    stop 'invalid theory'
   end select
 
   phys_quantity = "dns"
@@ -95,7 +95,6 @@ subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,rho0,itt)
   end if
 
   select case('theory')
-  case default
   case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
     !$OMP parallel do collapse(2) private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
@@ -139,6 +138,7 @@ subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,rho0,itt)
     else if(format_voxel_data=='vtk')then
       call write_vtk(lg,103,suffix,rmat2,hgs)
     end if
+  case default
   end select
  
 end subroutine write_dns
@@ -309,13 +309,13 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
 
   select case('theory')
-  case default
-    stop 'invalid theory'
   case('DFT','DFT_BAND','DFT_MD') 
     suffix = "elf"
   case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
     write(filenum, '(i6.6)') itt
     suffix = "elf_"//adjustl(filenum)
+  case default
+    stop 'invalid theory'
   end select
 
   phys_quantity = "elf"
