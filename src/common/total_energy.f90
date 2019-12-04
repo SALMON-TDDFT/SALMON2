@@ -368,4 +368,22 @@ CONTAINS
     return
   End Subroutine calc_eigen_energy
 
+!===================================================================================================================================
+
+  function check_rion_update() result(rion_update)
+    use salmon_global, only: theory,yn_opt,yn_md
+    implicit none
+    logical :: rion_update
+  
+    select case('theory')
+    case default
+      stop 'invalid theory'
+    case('DFT','DFT_BAND','DFT_MD') 
+      rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
+    case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
+      rion_update = (yn_md == 'y')
+    end select
+  
+  end function
+
 END MODULE salmon_Total_Energy
