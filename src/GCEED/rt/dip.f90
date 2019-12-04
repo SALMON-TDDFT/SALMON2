@@ -100,7 +100,7 @@ Hgs(:) = system%Hgs(:)
       end select
    end if
 
-   if(ilsda==1.and.sum(nelec_spin(:))>0)then
+   if(system%nspin==2.and.sum(nelec_spin(:))>0)then
       if(rNe.lt.dble(sum(nelec_spin(:)))*10.d0.and.rNe.gt.dble(sum(nelec_spin(:)))/10.d0)then
          continue
       else

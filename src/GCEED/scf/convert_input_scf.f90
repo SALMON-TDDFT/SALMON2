@@ -27,8 +27,6 @@ integer :: icheck1,icheck2
 character(100) :: file_atoms_coo
 real(8) :: dip_spacing
 
-ilsda = ispin
-
 !===== namelist for group_parallel =====
 if(comm_is_root(nproc_id_global))then
   ibox2=1

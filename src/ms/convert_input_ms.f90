@@ -23,8 +23,6 @@ implicit none
 integer :: Ntime
 real(8) :: dip_spacing
 
-ilsda=ispin
-
 if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
 end if
