@@ -106,8 +106,6 @@ use deallocate_mat_sub
 
   call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
   
-  iSCFRT=2
-  
   iwdenstep=30 
   
   call convert_input_rt(Ntime)
@@ -167,7 +165,7 @@ use deallocate_mat_sub
   ! | initialization |
   ! +----------------+
   
-  call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+  call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   
   call init_code_optimization
   call allocate_mat(ng,mg,lg) ! future work: remove this line
@@ -445,10 +443,10 @@ use deallocate_mat_sub
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-        call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,itt)
+        call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
+        call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
         call write_estatic(lg,ng,system%hgs,stencil,info_field,sVh,srg_ng,itt)

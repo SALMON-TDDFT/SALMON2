@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,iscfrt,rho0,itt)
+subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa
   use structures, only: s_rgrid
   use salmon_parallel, only: nproc_group_global
@@ -35,7 +35,6 @@ subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,iscfrt,rho0,itt)
   real(8),intent(out) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   real(8),intent(out) :: rmat2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   real(8),intent(in) :: hgs(3)
-  integer,intent(in) :: iscfrt
   real(8),intent(in),optional :: rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer,intent(in),optional :: itt
   integer :: ix,iy,iz
@@ -75,12 +74,16 @@ subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,iscfrt,rho0,itt)
   
   call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
-  if(iSCFRT==1)then 
+  select case('theory')
+  case('DFT','DFT_BAND','DFT_MD') 
     suffix = "dns"
-  else if(iSCFRT==2)then
+  case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
-  end if
+  case default
+    stop 'invalid theory'
+  end select
+
   phys_quantity = "dns"
   if(format_voxel_data=='avs')then
     header_unit='A**(-3)'
@@ -91,7 +94,8 @@ subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,iscfrt,rho0,itt)
     call write_vtk(lg,103,suffix,rmat2,hgs)
   end if
 
-  if(iscfrt==2)then
+  select case('theory')
+  case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
     !$OMP parallel do collapse(2) private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)
@@ -134,13 +138,14 @@ subroutine write_dns(lg,mg,ng,rho,rmat,rmat2,hgs,iscfrt,rho0,itt)
     else if(format_voxel_data=='vtk')then
       call write_vtk(lg,103,suffix,rmat2,hgs)
     end if
-  end if
+  case default
+  end select
  
 end subroutine write_dns
 
 !===================================================================================================================================
 
-subroutine write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
+subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   use salmon_global, only: format_voxel_data
   use structures
   use math_constants, only: pi
@@ -150,7 +155,6 @@ subroutine write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tps
   use stencil_sub, only: calc_gradient_psi,calc_gradient_field
   use write_file3d
   implicit none
-  integer                 ,intent(in) :: iscfrt
   integer                 ,intent(in) :: itt
   type(s_rgrid)           ,intent(in) :: lg,mg,ng
   type(s_dft_system)      ,intent(in) :: system
@@ -304,12 +308,16 @@ subroutine write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tps
 
   call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
 
-  if(iSCFRT==1)then 
+  select case('theory')
+  case('DFT','DFT_BAND','DFT_MD') 
     suffix = "elf"
-  else if(iSCFRT==2)then
+  case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
     write(filenum, '(i6.6)') itt
     suffix = "elf_"//adjustl(filenum)
-  end if
+  case default
+    stop 'invalid theory'
+  end select
+
   phys_quantity = "elf"
   if(format_voxel_data=='avs')then
     header_unit = "none"

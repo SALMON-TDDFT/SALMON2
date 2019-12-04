@@ -83,23 +83,6 @@ allocate (cmatbox_l2(lg%is(1):lg%ie(1),    &
              lg%is(2):lg%ie(2),      &
              lg%is(3):lg%ie(3)) )
 
-!if(iSCFRT==1.and.yn_opt=='y')then  !necessary??
-!  select case(iperiodic)
-!  case(0)
-!    allocate(rgrad_wk(mg%is(1):mg%ie(1)+1,   &
-!                      mg%is(2):mg%ie(2),     &
-!                      mg%is(3):mg%ie(3),1:iobnum,k_sta:k_end,3))
-!  case(3)
-!    allocate(cgrad_wk(mg%is(1):mg%ie(1)+1,   &
-!                      mg%is(2):mg%ie(2),     &
-!                      mg%is(3):mg%ie(3),1:iobnum,k_sta:k_end,3))
-!  end select
-!else if(iSCFRT==2.and.(yn_out_rvf_rt=='y'.or.yn_md=='y'))then !necessary??
-!  allocate(cgrad_wk(mg%is(1):mg%ie(1)+1,   &
-!                    mg%is(2):mg%ie(2),     &
-!                    mg%is(3):mg%ie(3),1:iobnum,k_sta:k_end,3))
-!end if
-
 allocate (rho_tmp(ng%num(1), ng%num(2), ng%num(3)))
 allocate (exc_dummy(ng%num(1), ng%num(2), ng%num(3)))
 allocate (exc_dummy2(ng%num(1), ng%num(2), ng%num(3),2))

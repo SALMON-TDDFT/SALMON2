@@ -20,7 +20,6 @@ implicit none
 !-------------------- Global variables
 
 integer :: ilsda
-integer :: iSCFRT
 complex(8), allocatable :: zc(:)
 integer :: itotNtime
 
@@ -54,23 +53,6 @@ character(100) :: file_RT_dip2_e
 character(100) :: file_external
 character(100) :: file_out_rt_bin
 character(100) :: file_in_rt_bin
-
-
-CONTAINS
-
-!======================================================================
-
-function check_rion_update() result(rion_update)
-  implicit none
-  logical :: rion_update
-  if (iscfrt == 1) then
-    rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
-  else if (iscfrt == 2) then
-    rion_update = (yn_md == 'y')
-  else
-    rion_update = .true.
-  end if
-end function
 
 END MODULE scf_data
 

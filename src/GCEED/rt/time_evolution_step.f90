@@ -31,7 +31,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   use allocate_mat_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree
-  use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy
+  use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy, check_rion_update
   use force_sub, only: calc_force_salmon
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
@@ -347,12 +347,12 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt,srho%f,itt)
+      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,srho%f,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call write_elf(iscfrt,itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out)
+      call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
