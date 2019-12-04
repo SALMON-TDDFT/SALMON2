@@ -381,7 +381,7 @@ CONTAINS
     case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
       rion_update = (yn_md == 'y')
     case default
-      stop 'invalid theory'
+      rion_update = .true.
     end select
   
   end function
