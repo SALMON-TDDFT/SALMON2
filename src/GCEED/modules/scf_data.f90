@@ -19,7 +19,6 @@ implicit none
 
 !-------------------- Global variables
 
-integer :: ilsda
 complex(8), allocatable :: zc(:)
 integer :: itotNtime
 
