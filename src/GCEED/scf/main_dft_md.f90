@@ -217,12 +217,7 @@ MD_Loop : do it=1,nt
    !end if
 
    ! force
-   if(iperiodic == 3 .and. yn_ffte=='y') then
-      !NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
-      !      does not allocate.
-   else
-      call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
-   end if
+   call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
 
    !force on ion directly from field --- should put in calc_force_salmon?
    do iatom=1,system%nion
