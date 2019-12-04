@@ -20,10 +20,10 @@ module scf_iteration_sub
 contains
 
 subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
-               srg,srg_ng,spsi,shpsi,srho,srho_s,mst, &
+               srg,srg_ng,spsi,shpsi,srho,srho_s, &
                cg,ppg,vlocal,  &
                miter,   &
-               iditer_nosubspace_diag,ifmst,mixing,iter, &
+               iditer_nosubspace_diag,mixing,iter, &
                poisson,fg,sVh,xc_func,ppn,sVxc,energy)
   use inputoutput, only: calc_mode,iperiodic,method_mixing,mixrate &
                         ,yn_subspace_diagonalization
@@ -51,12 +51,10 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
   type(s_sendrecv_grid), intent(inout) :: srg
   type(s_sendrecv_grid), intent(inout) :: srg_ng
   type(s_pp_grid),       intent(in)    :: ppg
-  integer,               intent(in)    :: mst(2)
   type(s_cg),            intent(inout) :: cg
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
   integer,               intent(in)    :: miter
   integer,               intent(in)    :: iditer_nosubspace_diag
-  integer,               intent(in)    :: ifmst(2)
   type(s_mixing),        intent(inout) :: mixing
   integer,               intent(in)    :: iter
   type(s_poisson),       intent(inout) :: poisson
@@ -103,7 +101,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
 
   select case(method_mixing)
     case ('simple') ; call simple_mixing(ng,system,1.d0-mixrate,mixrate,srho_s,mixing)
-    case ('broyden'); call wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
+    case ('broyden'); call wrapper_broyden(ng,system,srho_s,iter,mixing)
   end select
   call timer_end(LOG_CALC_RHO)
 

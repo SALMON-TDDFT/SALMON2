@@ -34,7 +34,7 @@ integer :: i1,ix,iy,iz, ia
 real(8) :: rbox_array(10),  rbox_arrayq(3,3)
 real(8) :: rbox_array2(10), rbox_arrayq2(3,3)
 real(8) :: rbox1
-real(8) :: fact, time, Hvol,Hgs(3)
+real(8) :: time, Hvol,Hgs(3)
 
 
 Hvol   = system%Hvol
@@ -100,10 +100,8 @@ Hgs(:) = system%Hgs(:)
       end select
    end if
 
-   fact=1.d0
-
-   if(ilsda==0)then
-      if(rNe.lt.ifMST(1)*2.d0*10.d0*fact.and.rNe.gt.ifMST(1)*2.d0/10.d0*fact)then
+   if(ilsda==1.and.sum(nelec_spin(:))>0)then
+      if(rNe.lt.dble(sum(nelec_spin(:)))*10.d0.and.rNe.gt.dble(sum(nelec_spin(:)))/10.d0)then
          continue
       else
          write(*,*) nproc_id_global,"t=",itt
@@ -111,8 +109,8 @@ Hgs(:) = system%Hgs(:)
          write(*,*) nproc_id_global,"Ne=",rNe
          stop
       end if
-   else if(ilsda==1)then
-      if(rNe.lt.(ifMST(1)+ifMST(2))*10d0*fact.and.rNe.gt.(ifMST(1)+ifMST(2))/10d0*fact)then
+   else 
+      if(rNe.lt.dble(nelec)*10d0.and.rNe.gt.dble(nelec)/10d0)then
          continue
       else
          write(*,*) nproc_id_global,"t=",itt

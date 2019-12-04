@@ -129,10 +129,10 @@ DFT_Iteration : do iter=1,nscf
    call copy_density(Miter,system%nspin,ng,srho_s,mixing)
 
    call scf_iteration_step(lg,mg,ng,system,info,info_field,stencil,  &
-                     srg,srg_ng,spsi,shpsi,srho,srho_s,mst,  &
+                     srg,srg_ng,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &
-                     iditer_nosubspace_diag,ifmst,mixing,iter,  &
+                     iditer_nosubspace_diag,mixing,iter,  &
                      poisson,fg,sVh,xc_func,ppn,sVxc,energy)
 
    call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
@@ -192,9 +192,13 @@ DFT_Iteration : do iter=1,nscf
       end do
       call comm_summation(sum0,sum1,info_field%icomm_all)
       if(ispin==0)then
-         sum1 = sum1*system%Hvol/(dble(ifMST(1))*2.d0)
+         sum1 = sum1*system%Hvol/dble(nelec)
       else if(ispin==1)then
-         sum1 = sum1*system%Hvol/dble(ifMST(1)+ifMST(2))
+         if(sum(nelec_spin(:))>0)then
+            sum1 = sum1*system%Hvol/dble(sum(nelec_spin(:)))
+         else 
+            sum1 = sum1*system%Hvol/dble(nelec)
+         end if
       end if
    case('norm_rho','norm_rho_dng')
       sum0=0.d0
@@ -238,16 +242,20 @@ DFT_Iteration : do iter=1,nscf
 100   format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
 101   format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
 
-      do ik=1,system%nk
-         if(ik<=3)then
-            if(iperiodic==3) write(*,*) "k=",ik
-            do p5=1,(itotMST+3)/4
-               p1=4*(p5-1)+1
-               p2=4*p5 ; if ( p2 > itotMST ) p2=itotMST
-               write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,1)*au_energy_ev,iob=p1,p2)
-            end do
-            if(iperiodic==3) write(*,*) 
-         end if
+      do ispin=1,system%nspin
+         if(system%nspin==2.and.ispin==1) write(*,*) "for up-spin"
+         if(system%nspin==2.and.ispin==2) write(*,*) "for down-spin"
+         do ik=1,system%nk
+            if(ik<=3)then
+               if(iperiodic==3) write(*,*) "k=",ik
+               do p5=1,(system%no+3)/4
+                  p1=4*(p5-1)+1
+                  p2=4*p5 ; if ( p2 > system%no ) p2=system%no
+                  write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,ispin)*au_energy_ev,iob=p1,p2)
+               end do
+               if(iperiodic==3) write(*,*) 
+            end if
+         end do
       end do
 
       select case(convergence)
