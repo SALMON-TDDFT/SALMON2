@@ -29,47 +29,6 @@ if(comm_is_root(nproc_id_global))then
    open(fh_namelist, file='.namelist.tmp', status='old')
 end if
 
-
-if(ispin == 0)then
-  MST(1)=nstate
-  if(temperature_k>=0.d0)then
-    ifMST(1)=nstate
-  else
-    ifMST(1)=nelec/2
-  end if
-  MST(2)=0
-  ifMST(2)=0
-else if(ispin == 1)then
-  if(nstate /= 0 .and. sum(nstate_spin) ==0)then
-    MST(1:2)=nstate
-    if(temperature_k>=0.d0)then
-      ifMST(1:2)=nstate
-    else
-      ifMST(1)=nelec - nelec/2
-      ifMST(2)=nelec/2
-    end if
-  else if(nstate == 0 .and. sum(nstate_spin) /=0)then
-    MST(1)=maxval(nstate_spin(1:2))
-    MST(2)=maxval(nstate_spin(1:2))
-    if(temperature_k>=0.d0)then
-      ifMST(1)=maxval(nstate_spin(1:2))
-      ifMST(2)=maxval(nstate_spin(1:2))
-    else
-      ifMST(1:2)=nelec_spin(1:2)
-    end if
-  else
-    write(*,*)"'nstate' or 'nstate_spin' should be spacified in input. "
-  end if
-else
-  write(*,*)"'ispin' should be 0 or 1. "
-end if
-
-if(ilsda == 0) then
-  itotMST=MST(1)
-else if(ilsda == 1) then
-  itotMST=MST(1)+MST(2)
-end if
-
 !===== namelist for group_fundamental =====
 if(iwrite_projection==1.and.itwproj==-1)then
   write(*,*) "Please specify itwproj when iwrite_projection=1."

@@ -20,7 +20,6 @@ implicit none
 !-------------------- Global variables
 
 integer :: ilsda
-integer :: MST(2),ifMST(2),itotMST
 integer :: iSCFRT
 complex(8), allocatable :: zc(:)
 integer :: itotNtime

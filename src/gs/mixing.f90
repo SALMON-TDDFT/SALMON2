@@ -84,7 +84,7 @@ end subroutine simple_mixing
 
 !===================================================================================================================================
 
-subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
+subroutine wrapper_broyden(ng,system,srho_s,iter,mixing)
   use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
   use salmon_parallel, only: nproc_group_global
   use broyden_sub
@@ -92,7 +92,6 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
   type(s_scalar),intent(inout) :: srho_s(system%nspin)
-  integer,intent(in) :: mst(2),ifmst(2)
   integer,intent(in) :: iter
   type(s_mixing),intent(inout) :: mixing
   integer :: ix,iy,iz,is
@@ -147,48 +146,46 @@ subroutine wrapper_broyden(ng,system,srho_s,mst,ifmst,iter,mixing)
   else if(system%nspin==2)then
     
     do is=1,2
-      if(ifmst(is)>=1.and.mst(is)>=1)then
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+         vecr(ix,iy,iz)=srho_s(is)%f(ix,iy,iz)
+      end do
+      end do
+      end do
+  
+      do i=1,mixing%num_rho_stock+1
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
-           vecr(ix,iy,iz)=srho_s(is)%f(ix,iy,iz)
+           vecr_in(ix,iy,iz,i)=mixing%srho_s_in(i,is)%f(ix,iy,iz)
+           vecr_out(ix,iy,iz,i)=mixing%srho_s_out(i,is)%f(ix,iy,iz)
         end do
         end do
         end do
-  
-        do i=1,mixing%num_rho_stock+1
-          do iz=ng%is(3),ng%ie(3)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-             vecr_in(ix,iy,iz,i)=mixing%srho_s_in(i,is)%f(ix,iy,iz)
-             vecr_out(ix,iy,iz,i)=mixing%srho_s_out(i,is)%f(ix,iy,iz)
-          end do
-          end do
-          end do
-        end do
+      end do
 
-        call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),  &
-                     iter,mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global)
+      call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),  &
+                   iter,mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global)
   
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+         srho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
+      end do
+      end do
+      end do
+
+      do i=1,mixing%num_rho_stock+1
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
-           srho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
+           mixing%srho_s_in(i,is)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
+           mixing%srho_s_out(i,is)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
         end do
         end do
         end do
-
-        do i=1,mixing%num_rho_stock+1
-          do iz=ng%is(3),ng%ie(3)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-             mixing%srho_s_in(i,is)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
-             mixing%srho_s_out(i,is)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
-          end do
-          end do
-          end do
-        end do
-      end if
+      end do
     end do
 
   end if
