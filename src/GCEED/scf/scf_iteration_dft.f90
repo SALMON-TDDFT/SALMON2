@@ -57,7 +57,7 @@ use salmon_total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
-integer :: ix,iy,iz,ik
+integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=2:print-all, =1:print-minimum, =1:no-print
 integer :: iter,Miter,iob,p1,p2,p5
 real(8) :: sum0,sum1
@@ -154,25 +154,25 @@ DFT_Iteration : do iter=1,nscf
       tol_esp_diff=1.0d-5
       esp_old=abs(esp_old-energy%esp)
       band%check_conv_esp(:,:,:)=.false.
-      do ispin=1,system%nspin
+      do is=1,system%nspin
       do ik=1,system%nk
          i=0
          j=0
          do iob=1,system%no
-            if ( esp_old(iob,ik,ispin) <= tol_esp_diff ) then
+            if ( esp_old(iob,ik,is) <= tol_esp_diff ) then
                i=i+1
                j=max(j,iob)
-               if( iob <= band%nref_band ) band%check_conv_esp(iob,ik,ispin)=.true.
+               if( iob <= band%nref_band ) band%check_conv_esp(iob,ik,is)=.true.
             end if
          end do !io
          if( ilevel_print.ge.2 ) then
-         if( ispin==1 .and. ik==1 ) then
+         if( is==1 .and. ik==1 ) then
             write(*,'(/,1x,"ispin","   ik",2x,"converged bands (total, maximum band index)")')
          end if
-         write(*,'(1x,2i5,2x,2i5)') ispin,ik,i,j
+         write(*,'(1x,2i5,2x,2i5)') is,ik,i,j
          end if
       end do !ik
-      end do !ispin
+      end do !is
 
       esp_old=energy%esp
    end if
@@ -191,9 +191,9 @@ DFT_Iteration : do iter=1,nscf
       end do
       end do
       call comm_summation(sum0,sum1,info_field%icomm_all)
-      if(ispin==0)then
+      if(system%nspin==1)then
          sum1 = sum1*system%Hvol/dble(nelec)
-      else if(ispin==1)then
+      else if(system%nspin==2)then
          if(sum(nelec_spin(:))>0)then
             sum1 = sum1*system%Hvol/dble(sum(nelec_spin(:)))
          else 
@@ -242,16 +242,16 @@ DFT_Iteration : do iter=1,nscf
 100   format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
 101   format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
 
-      do ispin=1,system%nspin
-         if(system%nspin==2.and.ispin==1) write(*,*) "for up-spin"
-         if(system%nspin==2.and.ispin==2) write(*,*) "for down-spin"
+      do is=1,system%nspin
+         if(system%nspin==2.and.is==1) write(*,*) "for up-spin"
+         if(system%nspin==2.and.is==2) write(*,*) "for down-spin"
          do ik=1,system%nk
             if(ik<=3)then
                if(iperiodic==3) write(*,*) "k=",ik
                do p5=1,(system%no+3)/4
                   p1=4*(p5-1)+1
                   p2=4*p5 ; if ( p2 > system%no ) p2=system%no
-                  write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,ispin)*au_energy_ev,iob=p1,p2)
+                  write(*,'(1x,4(i5,f15.4,2x))') (iob,energy%esp(iob,ik,is)*au_energy_ev,iob=p1,p2)
                end do
                if(iperiodic==3) write(*,*) 
             end if
