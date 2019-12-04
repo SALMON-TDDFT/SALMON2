@@ -8,11 +8,4 @@
 
 cp ../pseudo/C_rps.dat ./
 cp ../pseudo/H_rps.dat ./
-if [ -e data_for_restart/ ]; then
-  rm -rf data_for_restart/
-fi
 
-
-#if [ -e C2H2_gs.bin ]; then
-#  rm C2H2_gs.bin
-#fi

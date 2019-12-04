@@ -8,10 +8,4 @@
 
 cp ../pseudo/H_rps.dat ./
 cp ../pseudo/O_rps.dat ./
-if [ -e data_for_restart/ ]; then
-  rm -rf data_for_restart/
-fi
 
-if [ -e H2O_info.data ]; then
-  rm H2O_info.data
-fi

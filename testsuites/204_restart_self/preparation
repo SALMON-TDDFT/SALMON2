@@ -7,14 +7,4 @@
 # the input data for the following calculations.
 
 cp ../pseudo/Si_rps.dat ./
-if [ -e checkpoint_rt_000060/ ]; then
-  rm -rf checkpoint_rt_000060
-fi
-if [ -e restart/ ]; then
-  rm restart
-fi
 ln -s ../203_checkpoint_self/checkpoint_rt_000060 ./checkpoint_rt_000060
-
-if [ -e Si_rt.data ]; then
-  rm Si_rt.data
-fi

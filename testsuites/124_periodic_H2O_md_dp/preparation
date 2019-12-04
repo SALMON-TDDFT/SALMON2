@@ -8,17 +8,5 @@
 
 cp ../pseudo/H_rps.dat ./
 cp ../pseudo/O_rps.dat ./
-if [ -e data_for_restart/ ]; then
-  rm -rf data_for_restart/
-fi
-if [ -e restart/ ]; then
-  rm restart
-fi
 ln -s ../123_periodic_H2O_gs_dp/data_for_restart ./restart
 
-if [ -e H2O_rt_energy.data ]; then
-  rm H2O_rt_energy.data
-fi
-
-
-#cp ../123_periodic_H2O_gs_dp/H2O_gs.bin ./
