@@ -96,15 +96,13 @@ if(theory=='DFT_BAND'.and.iperiodic/=3) return
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
-iSCFRT=1
-
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
 call convert_input_scf(file_atoms_coo)
 
 ! please move folloings into initialization_dft 
-call init_dft(iSCFRT,nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
@@ -306,10 +304,10 @@ call write_info_data(Miter,system,energy,pp)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,iscfrt)
+if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
-if(yn_out_elf =='y') call write_elf(iscfrt,0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)
+if(yn_out_elf =='y') call write_elf(0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 

@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(calc_mode,comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
   use salmon_global, only: iperiodic,num_multipole_xyz,layout_multipole
   use sendrecv_grid
@@ -33,7 +33,6 @@ subroutine init_dft(calc_mode,comm,pinfo,info,info_field,lg,mg,ng,system,stencil
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
   implicit none
-  integer,intent(in) :: calc_mode
   integer,intent(in) :: comm
   type(s_process_info)     :: pinfo
   type(s_orbital_parallel) :: info
@@ -54,7 +53,7 @@ subroutine init_dft(calc_mode,comm,pinfo,info,info_field,lg,mg,ng,system,stencil
 
 ! parallelization
 
-  call init_process_distribution(calc_mode,system,comm,pinfo)
+  call init_process_distribution(system,comm,pinfo)
   call init_communicator_dft(comm,pinfo,info,info_field)
   call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info)
@@ -222,14 +221,13 @@ end subroutine init_dft_system
 
 !===================================================================================================================================
 
-subroutine init_process_distribution(calc_mode,system,icomm1,pinfo)
+subroutine init_process_distribution(system,icomm1,pinfo)
   use structures, only: s_process_info,s_dft_system
   use salmon_parallel, only: nproc_id_global, nproc_group_global
-  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general,ispin
+  use salmon_global, only: theory,nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general,ispin
   use salmon_communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
-  integer,intent(in)               :: calc_mode
   type(s_dft_system),intent(in)    :: system
   integer, intent(in)              :: icomm1 ! Communicator for single DFT system.
   type(s_process_info),intent(out) :: pinfo
@@ -240,10 +238,12 @@ subroutine init_process_distribution(calc_mode,system,icomm1,pinfo)
     if (system%ngrid > 16**3) then
       call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,pinfo)
     else
-      select case(calc_mode)
-      case(1)
+      select case(theory)
+      case default
+        stop 'invalid theory'
+      case('DFT','DFT_BAND','DFT_MD') 
         call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,icomm1,pinfo)
-      case(2)
+      case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
         call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,pinfo)
       end select
     end if

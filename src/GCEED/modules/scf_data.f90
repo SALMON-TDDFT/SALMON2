@@ -20,7 +20,6 @@ implicit none
 !-------------------- Global variables
 
 integer :: ilsda
-integer :: iSCFRT
 complex(8), allocatable :: zc(:)
 integer :: itotNtime
 
@@ -63,13 +62,16 @@ CONTAINS
 function check_rion_update() result(rion_update)
   implicit none
   logical :: rion_update
-  if (iscfrt == 1) then
+
+  select case('theory')
+  case default
+    stop 'invalid theory'
+  case('DFT','DFT_BAND','DFT_MD') 
     rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
-  else if (iscfrt == 2) then
+  case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
     rion_update = (yn_md == 'y')
-  else
-    rion_update = .true.
-  end if
+  end select
+
 end function
 
 END MODULE scf_data
