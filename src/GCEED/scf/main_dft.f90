@@ -239,10 +239,6 @@ if(yn_out_tm  == 'y') then
 end if
 
 ! force
-!if(iperiodic == 3 .and. yn_ffte=='y') then
-!  ! NOTE: calc_force_salmon hangs under this configuration due to ppg%vpsl_atom
-!  ! does not allocate.
-!else
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
@@ -254,7 +250,6 @@ end if
       end do
 300   format(i6,3e16.8)
    end if
-!end if
 
 call timer_end(LOG_GS_ITERATION)
 
