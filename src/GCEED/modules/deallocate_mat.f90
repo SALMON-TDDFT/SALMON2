@@ -15,7 +15,6 @@
 !
 MODULE deallocate_mat_sub
 
-use scf_data
 use allocate_mat_sub
 implicit none
 

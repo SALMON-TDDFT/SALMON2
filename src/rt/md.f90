@@ -230,7 +230,7 @@ end subroutine cal_Tion_Temperature_ion
 
 subroutine time_evolution_step_md_part1(itt,system,md)
   use structures, only: s_dft_system, s_md
-  use salmon_global, only: natom,Kion,dt, Rion
+  use salmon_global, only: natom,Kion,dt, Rion, ensemble,thermostat
   use const, only: umass,hartree2J,kB
   use inputoutput, only: step_velocity_scaling
   implicit none
@@ -241,10 +241,10 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 
   dt_h = dt*0.5d0
 
-!  !NHC act on velocity with dt/2
-!  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
-!     call apply_nose_hoover_velocity(dt_h)
-!  endif
+  !NHC act on velocity with dt/2
+  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
+     call apply_nose_hoover_velocity(system,md,dt_h)
+  endif
 
 
   !update ion velocity with dt/2
@@ -270,18 +270,18 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 
   !put SHAKE here in future (if needed)
 
-!  !NHC act on thermostat with dt
-!  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
-!     call cal_Tion_Temperature_ion(Tion,Temperature_ion,velocity)
-!     call apply_nose_hoover_thermostat(Temperature_ion,dt)
-!     md%Enh_gkTlns = md%Enh_gkTlns + md%gkT * md%xi_nh*dt
-!     md%Enh        = md%Enh_gkTlns + 0.5d0 * md%Qnh * md%xi_nh*md%xi_nh
-!  endif
+  !NHC act on thermostat with dt
+  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
+     call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
+     call apply_nose_hoover_thermostat(md,dt)
+     md%Enh_gkTlns = md%Enh_gkTlns + md%gkT * md%xi_nh*dt
+     md%E_nh       = md%Enh_gkTlns + 0.5d0 * md%Qnh * (md%xi_nh)**2
+  endif
 
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
-  use structures, only: s_dft_system,s_stencil,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
+subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+  use structures, only: s_dft_system,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
     s_orbital_parallel, s_field_parallel, s_scalar, s_pp_info
   use salmon_global, only: step_update_ps,step_update_ps2
   use const, only: umass,hartree2J,kB
@@ -294,7 +294,6 @@ subroutine update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,
   type(s_rgrid),intent(in) :: lg,mg,ng
   type(s_poisson),intent(inout) :: poisson
   type(s_reciprocal_grid) :: fg
-  type(s_stencil),intent(inout) :: stencil
   type(s_pp_info),intent(inout) :: pp
   type(s_pp_nlcc) :: ppn
   type(s_pp_grid) :: ppg
@@ -317,7 +316,7 @@ end subroutine
 
 subroutine time_evolution_step_md_part2(system,md)
   use structures, only: s_dft_system, s_md
-  use salmon_global, only: natom,Kion,dt,yn_stop_system_momt
+  use salmon_global, only: natom,Kion,dt,yn_stop_system_momt,ensemble,thermostat
   use const, only: umass,hartree2J,kB
   implicit none
   type(s_dft_system) :: system
@@ -336,10 +335,10 @@ subroutine time_evolution_step_md_part2(system,md)
      md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
   enddo
 
-!  !NHC act on velocity with dt/2
-!  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
-!     call apply_nose_hoover_velocity(dt_h)
-!  endif
+  !NHC act on velocity with dt/2
+  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
+     call apply_nose_hoover_velocity(system,md,dt_h)
+  endif
 
 
   if (yn_stop_system_momt=='y') call remove_system_momentum(0,system)
@@ -359,6 +358,35 @@ subroutine apply_velocity_scaling_ion(Temp_ion,system)
 
   return
 end subroutine apply_velocity_scaling_ion
+
+subroutine apply_nose_hoover_velocity(system,md,dt_h) !assuming half dt
+  use structures, only: s_dft_system,s_md
+  use salmon_global, only: natom
+  implicit none
+  type(s_dft_system),intent(inout) :: system
+  type(s_md),intent(in) :: md
+  integer :: ia
+  real(8) :: tmp_exp,dt_h 
+
+  tmp_exp = exp(-md%xi_nh*dt_h)
+  do ia=1,natom
+     system%Velocity(:,ia) = system%Velocity(:,ia) * tmp_exp
+  enddo
+
+  return
+end subroutine apply_nose_hoover_velocity
+
+subroutine apply_nose_hoover_thermostat(md,dt_f) !assuming full dt
+  use structures, only: s_md
+  use salmon_global, only: temperature0_ion_k, thermostat_tau
+  implicit none
+  type(s_md),intent(inout) :: md
+  real(8) :: dt_f 
+
+  md%xi_nh = md%xi_nh + (md%Temperature/temperature0_ion_k-1d0)/(thermostat_tau**2d0)*dt_f 
+  
+  return
+end subroutine apply_nose_hoover_thermostat
 
 subroutine print_restart_data_md(system,md)
   use structures, only: s_dft_system,s_md

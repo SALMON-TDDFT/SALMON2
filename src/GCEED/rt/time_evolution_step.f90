@@ -32,7 +32,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree
   use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy, check_rion_update
-  use force_sub, only: calc_force_salmon
+  use force_sub, only: calc_force
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
   use write_sub
@@ -130,7 +130,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
-     call update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+     call update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
 
   if(propagator=='etrs')then
@@ -271,7 +271,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
     else
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
     end if
-    call calc_emfields(nspin,rt,curr_e_tmp)
+    call calc_emfields(itt,nspin,rt,curr_e_tmp)
     call timer_end(LOG_CALC_CURRENT)
 
     if(yn_md=='y') then
@@ -295,7 +295,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(rt,ng,srho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(itt,rt,ng,srho,rNe,poisson,energy%E_tot,system,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)
@@ -303,9 +303,9 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   !(force)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
 
-     call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
+     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
 
-     !force on ion directly from field --- should put in calc_force_salmon?
+     !force on ion directly from field --- should put in calc_force?
      do iatom=1,system%nion
         FionE(:,iatom) = pp%Zps(Kion(iatom)) * rt%E_tot(:,itt)
      enddo

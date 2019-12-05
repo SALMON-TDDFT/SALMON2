@@ -22,8 +22,6 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,rt,Vbox)
   use misc_routines, only: get_wtime
   use em_field, only: calc_E_ext
   use inputoutput
-  use scf_data
-  
   implicit none
   
   type(s_rgrid),intent(in) :: mg,lg

@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 MODULE scf_data
-use salmon_global
+!use salmon_global
 implicit none
 
 !-------------------- Global variables
