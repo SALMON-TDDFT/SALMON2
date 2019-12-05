@@ -18,28 +18,11 @@ use salmon_global
 implicit none
 
 !-------------------- Global variables
-
-integer :: itotNtime
-
 integer :: itt
+integer :: itotNtime
 
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 integer :: DESCA( 50 ), DESCZ( 50 )
-
-!filename
-character(100) :: file_eigen
-character(100) :: file_RT_q
-character(100) :: file_alpha_q
-character(100) :: file_RT_e
-character(100) :: file_RT_dip2
-character(100) :: file_alpha_dip2
-character(100) :: file_RT_dip2_q
-character(100) :: file_alpha_dip2_q
-character(100) :: file_RT_dip2_e
-character(100) :: file_external
-character(100) :: file_out_rt_bin
-character(100) :: file_in_rt_bin
-character(100) :: file_Projection
 
 END MODULE scf_data
 

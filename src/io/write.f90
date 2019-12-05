@@ -1253,39 +1253,42 @@ contains
   
 !===================================================================================================================================
 
-  subroutine write_eigen(file_eigen,system,energy)
-    use structures
+  subroutine write_eigen(ofl,system,energy)
+    use structures, only: s_ofile, s_dft_system, s_dft_energy
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
-    use inputoutput, only: uenergy_from_au,iperiodic,unit_energy
+    use inputoutput, only: uenergy_from_au,iperiodic,unit_energy,sysname
+    use salmon_file, only: open_filehandle
     implicit none
-    character(100)    ,intent(in) :: file_eigen
+    type(s_ofile),intent(inout) :: ofl
     type(s_dft_system),intent(in) :: system
     type(s_dft_energy),intent(in) :: energy
-    !
-    integer :: iob,iik,is
+    integer :: iob,iik,is, uid
 
     if(comm_is_root(nproc_id_global))then
-      open(101,file=file_eigen)
-      write(101,'("# 1 particle energies")')
-      select case(unit_energy)
-      case('au','a.u.')
-        write(101,'("# Orbital   Energy[a.u.]")')
-      case('ev','eV')
-        write(101,'("# Orbital   Energy[eV]")')
-      end select
-      write(101,'("#-----------------------")')
-      do is=1,system%nspin
-      do iik=1,system%nk
-        if(iperiodic==3)then
-          write(101,'("k=",1x,i5,",  spin=",1x,i5)') iik,is
-        end if
-        do iob=1,system%no
-          write(101,'(1x,i5,e26.16e3)') iob, energy%esp(iob,iik,is)*uenergy_from_au
-        end do
-      end do
-      end do
-      close(101)
+       ofl%file_eigen_data=trim(sysname)//"_eigen.data"
+       ofl%fh_eigen = open_filehandle(trim(ofl%file_eigen_data))
+       uid = ofl%fh_eigen
+       open(uid,file=ofl%file_eigen_data)
+       write(uid,'("# 1 particle energies")')
+       select case(unit_energy)
+       case('au','a.u.')
+          write(uid,'("# Orbital   Energy[a.u.]")')
+       case('ev','eV')
+          write(uid,'("# Orbital   Energy[eV]")')
+       end select
+       write(uid,'("#-----------------------")')
+       do is=1,system%nspin
+       do iik=1,system%nk
+          if(iperiodic==3)then
+             write(uid,'("k=",1x,i5,",  spin=",1x,i5)') iik,is
+          end if
+          do iob=1,system%no
+             write(uid,'(1x,i5,e26.16e3)') iob, energy%esp(iob,iik,is)*uenergy_from_au
+          end do
+       end do
+       end do
+       close(uid)
     end if
 
   end subroutine write_eigen

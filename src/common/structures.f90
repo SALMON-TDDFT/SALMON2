@@ -338,16 +338,20 @@ module structures
 
 ! output files
   type s_ofile
+     integer :: fh_eigen
      integer :: fh_rt
      integer :: fh_rt_energy
      integer :: fh_response
      integer :: fh_pulse
      integer :: fh_dft_md
+     integer :: fh_proj
+     character(100) :: file_eigen_data
      character(256) :: file_rt_data
      character(256) :: file_rt_energy_data
      character(256) :: file_response_data
      character(256) :: file_pulse_data
      character(256) :: file_dft_md
+     character(256) :: file_proj_data
      !
      character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile

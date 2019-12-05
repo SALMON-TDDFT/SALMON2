@@ -14,17 +14,18 @@
 !  limitations under the License.
 !
 !-----------------------------------------------------------------------------------------
-subroutine set_coo_em(iperi,Nd,ioe,ista,iend,hgs,coo)
+subroutine set_coo_em(Nd,ioe,ista,iend,hgs,coo,peri)
   implicit none
-  integer,intent(in)  :: iperi,Nd
-  integer,intent(in)  :: ioe(3),ista(3),iend(3)
-  real(8),intent(in)  :: hgs(3)
-  real(8),intent(out) :: coo(minval(ista(:))-Nd:maxval(iend(:))+Nd,3)
+  integer,intent(in)      :: Nd
+  integer,intent(in)      :: ioe(3),ista(3),iend(3)
+  real(8),intent(in)      :: hgs(3)
+  real(8),intent(out)     :: coo(minval(ista(:))-Nd:maxval(iend(:))+Nd,3)
+  character(1),intent(in) :: peri
   integer :: ii,ij
   
   do ii=1,3
-    select case(iperi)
-    case(0)
+    select case(peri)
+    case('n')
       select case(ioe(ii))
       case(1)
         do ij=ista(ii)-Nd,iend(ii)+Nd
@@ -35,7 +36,7 @@ subroutine set_coo_em(iperi,Nd,ioe,ista,iend,hgs,coo)
           coo(ij,ii)=(dble(ij)-0.5d0)*hgs(ii)
         end do
       end select
-    case(3)
+    case('y')
       do ij=ista(ii)-Nd,iend(ii)+Nd
         coo(ij,ii)=dble(ij-1)*hgs(ii)
       end do

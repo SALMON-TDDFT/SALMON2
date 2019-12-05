@@ -181,8 +181,6 @@ use deallocate_mat_sub
   
   call convert_input_rt(Ntime)
   
-  call set_filename
-  
   if(comm_is_root(nproc_id_global))then
     write(*,*)
     write(*,*) "Total time step      =",Ntime
@@ -393,7 +391,9 @@ use deallocate_mat_sub
   
     !(header in SYSname_proj.data)
     if(iwrite_projection==1)then
-      open(41,file=file_Projection)
+     !ofl%fh_proj = 41  !use open_filehandle !!
+      ofl%file_proj_data = trim(sysname)//"_proj.data"
+      open(41,file=ofl%file_proj_data)
       write(41,'("#",5X,"time[fs]",4("    projection"))')
       write(41,'("#",13x,4("  orbital",i5))') (iwrite_projection_ob(jj),jj=1,4)
       write(41,'("#",13x,4("        k",i5))') (iwrite_projection_k(jj), jj=1,4)
