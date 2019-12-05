@@ -274,8 +274,8 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 !  if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
 !     call cal_Tion_Temperature_ion(Tion,Temperature_ion,velocity)
 !     call apply_nose_hoover_thermostat(Temperature_ion,dt)
-!     Enh_gkTlns = Enh_gkTlns + gkT * xi_nh*dt
-!     Enh        = Enh_gkTlns + 0.5d0 * Qnh * xi_nh*xi_nh
+!     md%Enh_gkTlns = md%Enh_gkTlns + md%gkT * md%xi_nh*dt
+!     md%Enh        = md%Enh_gkTlns + 0.5d0 * md%Qnh * md%xi_nh*md%xi_nh
 !  endif
 
 end subroutine 
@@ -360,5 +360,65 @@ subroutine apply_velocity_scaling_ion(Temp_ion,system)
   return
 end subroutine apply_velocity_scaling_ion
 
+subroutine print_restart_data_md(system,md)
+  use structures, only: s_dft_system,s_md
+  use salmon_global, only: natom
+  use salmon_communication, only: comm_is_root
+  use salmon_parallel, only: nproc_id_global
+  use inputoutput, only: au_length_aa,unit_length,ensemble,thermostat, &
+                 iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
+  implicit none
+  type(s_dft_system),intent(in) :: system
+  type(s_md) :: md
+  integer :: ia,unit_atomic_coor_tmp=201,ik,j
+  real(8) :: tmpr(3), uconv
+  character(100)  :: char_atom
+
+  if(comm_is_root(nproc_id_global)) then
+
+       select case(iflag_atom_coor)
+       case(ntype_atom_coor_cartesian)
+          open(unit_atomic_coor_tmp,file='.atomic_coor.tmp',status='old')
+       case(ntype_atom_coor_reduced)
+          open(unit_atomic_coor_tmp,file='.atomic_red_coor.tmp',status='old')
+       end select
+
+       if(unit_length=='AA')then
+          uconv = au_length_aa
+       else  !au
+          uconv = 1d0
+       endif
+
+       write(*,*) 
+       write(*,9000) "##------ Restarting Data for MD-GS -------"
+       write(*,9000) "# Coordinate in specified unit in input"
+       write(*,9000) "# Copy into new input file"
+       write(*,9000) "&atomic_coor"
+       do ia = 1,natom
+          read(unit_atomic_coor_tmp,*) char_atom, (tmpr(j),j=1,3),ik
+          write(*,7000) trim(char_atom), system%Rion(1:3,ia)*uconv, ik
+7000      format("     '",a,"'  ",3f18.10,i4)
+       enddo
+       write(*,9000) "/"
+
+       write(*,*) 
+       write(*,9000) "# Velocity (atoms, thermostat if nose-hoover ooption) in [au]"
+       write(*,9000) "# Copy to separated file used in file_ini_vel option with yn_set_ini_velocity='r'"
+       do ia = 1,natom
+          write(*,8000) system%Velocity(1:3,ia)
+       enddo
+8000   format(3e18.10)
+       if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
+          write(*,8000) md%xi_nh
+       endif
+       write(*,*) 
+
+
+       close(unit_atomic_coor_tmp)
+9000   format(a)
+    endif
+
+    return
+end subroutine print_restart_data_md
 
 end module md_sub
