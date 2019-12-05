@@ -1,7 +1,6 @@
 set(SOURCES
     allocate_mat.f90
     deallocate_mat.f90
-    scf_data.f90
     )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

@@ -60,7 +60,6 @@ end subroutine calc_Aext
 
 subroutine init_A(Ntime,Mit,rt)
 use structures, only : s_rt
-use scf_data
 use salmon_global, only: yn_restart
 implicit none
 type(s_rt),intent(inout) :: rt

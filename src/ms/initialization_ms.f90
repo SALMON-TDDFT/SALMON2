@@ -40,7 +40,6 @@ subroutine initialization_ms( &
                      imacro_mygrp_e, &
                      fs, ff)
 use inputoutput
-use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 
