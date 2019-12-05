@@ -332,16 +332,16 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   call comm_bcast(system%rocc,comm)
 
   !wave function
-  call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
+  call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
 
   !rho_inout
   if(theory=='DFT'.or.calc_mode=='GS')then
-    call read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
+    call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
   end if
 
   !Vh_stock
   if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
-    call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
+    call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
   end if
 
 end subroutine read_bin
