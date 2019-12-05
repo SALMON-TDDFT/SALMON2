@@ -42,14 +42,14 @@ subroutine calc_emfields(itt,nspin,rt,curr_in)
 
 end subroutine calc_emfields
 
-subroutine calc_Aext(Mit,rt)
+subroutine calc_Aext(Mit,itotNtime,rt)
 !$ use omp_lib
 use structures, only : s_rt
 use em_field, only: calc_Ac_ext
-use scf_data, only: dt,itotNtime
+use scf_data, only: dt
 use math_constants, only: pi
 implicit none
-integer :: itt,Mit
+integer :: itt,Mit,itotNtime
   type(s_rt),intent(inout) :: rt
 real(8) :: tt
 do itt=Mit+1,itotNtime+1

@@ -23,7 +23,7 @@ contains
 
 subroutine initialization_ms( &
                      nmacro, &
-                     Mit, system, energy, rt, md, singlescale,  &
+                     Mit, itotNtime, system, energy, rt, md, singlescale,  &
                      stencil, fg, poisson,  &
                      lg, mg, ng,  &
                      info, info_field,  &
@@ -114,6 +114,7 @@ use deallocate_mat_sub
 
 
   
+  integer :: itotNtime
   integer :: iob, i,i1,i2,i3, iik,jspin, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
@@ -533,7 +534,7 @@ use deallocate_mat_sub
       end if
     end do
   
-  if(iperiodic==3) call calc_Aext(Mit,rt)
+  if(iperiodic==3) call calc_Aext(Mit,itotNtime,rt)
   
   if(yn_md=='y') call init_md(system,md)
   
