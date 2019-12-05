@@ -258,6 +258,7 @@ use deallocate_mat_sub
   allocate( rt%Dp_i(  3,0:Ntime) )
   allocate( rt%Qp_e(3,3,0:Ntime) )
   call init_A(Ntime,Mit,rt)
+  itotNtime = Ntime
   if (yn_restart /= 'y') Mit=0
   call timer_end(LOG_READ_RT_DATA)
   

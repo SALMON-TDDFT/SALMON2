@@ -44,16 +44,15 @@ end subroutine calc_emfields
 
 subroutine calc_Aext(Mit,rt)
 !$ use omp_lib
-use salmon_global, only : nt
 use structures, only : s_rt
 use em_field, only: calc_Ac_ext
-use scf_data, only: dt
+use scf_data, only: dt,itotNtime
 use math_constants, only: pi
 implicit none
 integer :: itt,Mit
   type(s_rt),intent(inout) :: rt
 real(8) :: tt
-do itt=Mit+1,Mit+nt
+do itt=Mit+1,itotNtime+1
    tt = dt*dble(itt)
    call calc_Ac_ext(tt,rt%Ac_ext(:,itt))
 end do
