@@ -795,7 +795,7 @@ contains
     complex(8) :: zsigma(3),zeps(3)
 
     if (comm_is_root(nproc_id_global)) then
-      ofl%fh_response        = open_filehandle(ofl%file_response_data)
+      ofl%fh_response  = open_filehandle(ofl%file_response_data)
       uid = ofl%fh_response
 
 10    format("#",1X,A,":",1X,A)
@@ -849,6 +849,75 @@ contains
   end subroutine
 
 !===================================================================================================================================
+  subroutine write_dft_md_data(it,ofl,md)
+    use structures, only: s_md, s_ofile
+    use inputoutput, only: t_unit_time,t_unit_energy
+    use salmon_global, only: dt,nt,sysname
+    use salmon_parallel, only: nproc_id_global
+    use salmon_communication, only: comm_is_root,comm_sync_all
+    use salmon_file, only: open_filehandle
+    implicit none
+    type(s_ofile) :: ofl
+    type(s_md) :: md
+    integer :: uid, it
+
+    if(it==0 .and. comm_is_root(nproc_id_global)) then
+       ofl%file_dft_md = trim(sysname)//'_dft_md.data'
+       ofl%fh_dft_md   = open_filehandle(ofl%file_dft_md)
+       uid = ofl%fh_dft_md
+       open(uid,file=trim(ofl%file_dft_md),status="unknown")
+    endif
+    uid = ofl%fh_dft_md
+
+    if(comm_is_root(nproc_id_global)) then
+      if(it==0) then
+         write(uid,'("#",1X,A)') "DFT-MD: adiabatic (ground state) molecular dynamics"
+         write(uid,'("#",1X,A,":",1X,A)') "Tene", "Kinetic energy of atoms(ions)"
+         write(uid,'("#",1X,A,":",1X,A)') "Uene", "Potential energy"
+         write(uid,'("#",1X,A,":",1X,A)') "Uene0", "Initial potential energy"
+         write(uid,'("#",1X,A,":",1X,A)') "E_work", "Work energy (sum F*dR)"
+         write(uid,'("#",1X,A,":",1X,A)') "E_nh", "Energy of NH thermostat"
+         write(uid,'("#",1X,A,":",1X,A)') "E_tot", "Total energy(=Tene+Uene)"
+         write(uid,'("#",1X,A,":",1X,A)') "E_tot0", "Initial total energy"
+         write(uid,'("#",1X,A,":",1X,A)') "Hnvt", "Hamiltonian with NH thermostat"
+         write(uid,'("#",1X,A,":",1X,A)') "Hnvt'", "Hnvt using E_work"
+         write(uid,'("#",1X,A,":",1X,A)') "Temperature", "Temperature of atoms"
+         write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+              &  1, "Time",   trim(t_unit_time%name), &
+              &  2, "Tene",   trim(t_unit_energy%name), &
+              &  3, "Uene",   trim(t_unit_energy%name), &
+              &  4, "Uene-Uene0", trim(t_unit_energy%name), &
+              &  5, "E_work", trim(t_unit_energy%name), &
+              &  6, "E_nh",   trim(t_unit_energy%name), &
+              &  7, "E_tot",  trim(t_unit_energy%name), &
+              &  8, "E_tot-E_tot0", trim(t_unit_energy%name), &
+              &  9, "Hnvt(2+3+6)",  trim(t_unit_energy%name), &
+              & 10, "Hnvt(2+5+6)'", trim(t_unit_energy%name), &
+              & 11, "Temperature_ion", "K"
+      endif
+
+      write(uid, "(F16.8,99(1X,E23.15E3))") &
+          & it * dt    * t_unit_time%conv, &
+          & md%Tene    * t_unit_energy%conv, &
+          & md%Uene    * t_unit_energy%conv, &
+          & (md%Uene-md%Uene0) * t_unit_energy%conv, &
+          & md%E_work  * t_unit_energy%conv, &
+          & md%E_nh    * t_unit_energy%conv, &
+          & md%E_tot   * t_unit_energy%conv, &
+          & (md%E_tot-md%E_tot0) * t_unit_energy%conv, &
+          & md%Htot    * t_unit_energy%conv, &
+          & (md%Tene+md%E_work+md%E_nh) * t_unit_energy%conv, &
+          & md%Temperature
+      flush(uid)
+
+      if(it==Nt) close(uid)
+    end if
+
+    call comm_sync_all
+    return
+  end subroutine write_dft_md_data
+!===================================================================================================================================
+
   subroutine write_pulse_0d(ofl,rt)
     use inputoutput, only: nt, dt, nenergy, de,  &
                            t_unit_energy,  &

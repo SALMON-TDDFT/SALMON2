@@ -22,22 +22,22 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dir_out_restart(ofile)
+subroutine init_dir_out_restart(ofl)
   use structures,  only: s_ofile
   use filesystem,  only: atomic_create_directory
   use salmon_global,   only: theory,write_rt_wfn_k
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   implicit none
-  type(s_ofile), intent(inout) :: ofile
+  type(s_ofile), intent(inout) :: ofl
 
   select case(theory)
     case('DFT','DFT_MD')
-      ofile%dir_out_restart = 'data_for_restart/'
-      call atomic_create_directory(ofile%dir_out_restart,nproc_group_global,nproc_id_global)
+      ofl%dir_out_restart = 'data_for_restart/'
+      call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
     case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT')
       if (write_rt_wfn_k == 'y') then
-        ofile%dir_out_restart = 'data_for_restart_rt/'
-        call atomic_create_directory(ofile%dir_out_restart,nproc_group_global,nproc_id_global)
+        ofl%dir_out_restart = 'data_for_restart_rt/'
+        call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
       end if
   end select
 
