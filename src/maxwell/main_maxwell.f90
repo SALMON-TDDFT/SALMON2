@@ -14,10 +14,10 @@
 !  limitations under the License.
 !
 !-----------------------------------------------------------------------------------------
-subroutine classic_em
+subroutine main_maxwell
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
-  use structures,           only: s_fdtd_system, s_fdtd_field
+  use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work
   use misc_routines,        only: get_wtime
   implicit none
@@ -34,4 +34,4 @@ subroutine classic_em
     write(*,'(A,f16.8)') " elapsed time [s] = ", elapsed_time
   end if
   
-end subroutine classic_em
+end subroutine main_maxwell
