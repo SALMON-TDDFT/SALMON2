@@ -112,11 +112,11 @@ nmacro = nx_m * ny_m * nz_m
 ! TE : do itt=Mit+1,itotNtime
 
 !   if(mod(itt,2)==1)then
-!     call time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
+!     call time_evolution_step(Mit,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
 !      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
 !      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
 !   else
-!     call time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
+!     call time_evolution_step(Mit,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
 !      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
 !      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
 !   end if

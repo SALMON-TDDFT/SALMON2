@@ -123,6 +123,7 @@ use deallocate_mat_sub
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: nproc_mygrp
+  integer :: itt
   
   call timer_begin(LOG_INIT_RT)
 

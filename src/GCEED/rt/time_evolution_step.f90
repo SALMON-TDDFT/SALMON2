@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
+SUBROUTINE time_evolution_step(Mit,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
 &   md,ofl,poisson,j_e,singlescale)
   use structures
@@ -41,6 +41,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   use salmon_pp, only: calc_nlcc !test hoge
   use salmon_xc
   implicit none
+  integer,intent(in)       :: itt
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
@@ -271,7 +272,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
     else
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
     end if
-    call calc_emfields(nspin,rt,curr_e_tmp)
+    call calc_emfields(itt,nspin,rt,curr_e_tmp)
     call timer_end(LOG_CALC_CURRENT)
 
     if(yn_md=='y') then
@@ -295,7 +296,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(rt,ng,srho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(itt,rt,ng,srho,rNe,poisson,energy%E_tot,system,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   call timer_begin(LOG_WRITE_RT_INFOS)

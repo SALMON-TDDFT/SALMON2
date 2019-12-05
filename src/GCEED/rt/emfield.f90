@@ -13,13 +13,14 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_emfields(nspin,rt,curr_in)
+subroutine calc_emfields(itt,nspin,rt,curr_in)
   use structures, only : s_rt
   use math_constants, only : pi
   use salmon_global, only : ispin
-  use scf_data, only : itt,dt
+  use scf_data, only : dt
   use inputoutput, only: trans_longi
   implicit none
+  integer,intent(in) :: itt
   type(s_rt),intent(inout) :: rt
   integer,intent(in) :: nspin
   real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
