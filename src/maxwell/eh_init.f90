@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_init(fs,fw)
-  use salmon_global,        only: nt_em,al_em,dl_em,dt_em,boundary_em,iperiodic,base_directory,&
+  use salmon_global,        only: nt_em,al_em,dl_em,dt_em,boundary_em,yn_periodic,base_directory,&
                                   imedia_num,shape_file,epsilon,rmu,sigma,type_media,&
                                   pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
                                   iobs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
@@ -53,23 +53,23 @@ subroutine eh_init(fs,fw)
   do ij=1,2
     select case(boundary_em(ii,ij))
     case('default')
-      if(iperiodic==0) then
+      if(yn_periodic=='n') then
         fs%a_bc(ii,ij)='pml'
         iflag_pml   =1
-      elseif(iperiodic==3) then
+      elseif(yn_periodic=='y') then
         fs%a_bc(ii,ij)='periodic'
       end if
     case('pml')
       fs%a_bc(ii,ij)='pml'
       iflag_pml   =1
     case('pec')
-      if(comm_is_root(nproc_id_global).and.(iperiodic==3)) &
-      write(*,*) "For iperiodic = 3, boundary_em must be default or pml."
+      if(comm_is_root(nproc_id_global).and.(yn_periodic=='y')) &
+      write(*,*) "For yn_periodic = y, boundary_em must be default or pml."
       stop
       fs%a_bc(ii,ij)='pec'
     case('periodic')
-      if(comm_is_root(nproc_id_global).and.(iperiodic==0)) &
-      write(*,*) "For iperiodic = 0, boundary_em must be default, pml, or pec."
+      if(comm_is_root(nproc_id_global).and.(yn_periodic=='n')) &
+      write(*,*) "For yn_periodic = n, boundary_em must be default, pml, or pec."
       stop
     end select
   end do
@@ -96,7 +96,7 @@ subroutine eh_init(fs,fw)
     end if
   end do 
   allocate(fw%coo(minval(fs%lg%is(:))-fw%Nd:maxval(fs%lg%ie(:))+fw%Nd,3))
-  call set_coo_em(iperiodic,fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo(:,:))
+  call set_coo_em(fw%Nd,fw%ioddeven(:),fs%lg%is(:),fs%lg%ie(:),fs%hgs(:),fw%coo(:,:),yn_periodic)
   
   !*** set and check dt *************************************************************************************!
   dt_cfl=1.0d0/( &
@@ -649,7 +649,7 @@ subroutine eh_init(fs,fw)
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
     !check condition
     iflag_lr=0
-    if(iperiodic==3.and.trans_longi/='tr') iflag_lr=1
+    if(yn_periodic=='y'.and.trans_longi/='tr') iflag_lr=1
     do ii=0,imedia_num
       if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag_lr=1
       if(ii==0) then
@@ -674,8 +674,8 @@ subroutine eh_init(fs,fw)
         write(*,*) "When you execute linear response calculation by ae_shape1=impulse and/or ae_shape2=impulse,"
         write(*,*) "epsilon and rmu must be 1.0d0."
         write(*,*) "sigma must be 0.0d0."
-        write(*,*) "type_media(i) must be drude, where i > 0."
-        if(iperiodic==3) write(*,*) "trans_longi must be tr."
+        write(*,*) "type_media(i) must be lorentz-drude, where i > 0."
+        if(yn_periodic=='y') write(*,*) "trans_longi must be tr."
       end if
       stop
     end if
@@ -736,7 +736,7 @@ subroutine eh_init(fs,fw)
     fw%iter_lr=1
     allocate(fw%fr_lr(0:nenergy,3),fw%fi_lr(0:nenergy,3))
     fw%fr_lr(:,:)=0.0d0; fw%fi_lr(:,:)=0.0d0;
-    if(iperiodic==0) then
+    if(yn_periodic=='n') then
       allocate(fw%px_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
                         fs%ng%is_array(2):fs%ng%ie_array(2),&
                         fs%ng%is_array(3):fs%ng%ie_array(3)),&
@@ -749,7 +749,7 @@ subroutine eh_init(fs,fw)
       fw%px_lr(:,:,:)=0.0d0; fw%py_lr(:,:,:)=0.0d0; fw%pz_lr(:,:,:)=0.0d0;
       allocate(fw%dip_lr(nt_em,3))
       fw%dip_lr(:,:)=0.0d0
-    elseif(iperiodic==3) then
+    elseif(yn_periodic=='y') then
       allocate(fw%rjx_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
                          fs%ng%is_array(2):fs%ng%ie_array(2),&
                          fs%ng%is_array(3):fs%ng%ie_array(3)),&
@@ -1440,7 +1440,7 @@ subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
         if(iz>lg_ie(3))                      iz=lg_is(3) !iz
         if(iz==lg_is(3))                     iy=iy+1     !iy
         if(iy>lg_ie(2))                      iy=lg_is(2) !iy
-        if(iz==lg_is(3) .and. iy==lg_is(2)) ix=ix+1      !ix
+        if(iz==lg_is(3) .and. iy==lg_is(2))  ix=ix+1     !ix
       end do
     end do
     deallocate(rtmp1d)
@@ -1479,7 +1479,7 @@ end subroutine eh_input_shape
 !=========================================================================================
 != prepare mpi, grid, and sendrecv enviroments============================================
 subroutine eh_mpi_grid_sr(fs,fw)
-  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,iperiodic, &
+  use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,yn_periodic, &
                                nproc_k,nproc_ob
   use salmon_parallel,   only: nproc_group_global
   use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
@@ -1495,7 +1495,7 @@ subroutine eh_mpi_grid_sr(fs,fw)
   type(s_orbital_parallel)          :: info
   type(s_field_parallel)            :: info_field
   integer                           :: neig_ng_eh(1:2,1:3)
-  integer                           :: ii
+  integer                           :: ii,iperi
   
   !set mpi condition
   pinfo%npdomain_orbital = nproc_domain_orbital
@@ -1542,7 +1542,12 @@ subroutine eh_mpi_grid_sr(fs,fw)
   fs%ng%Nd=fw%Nd
   
   !set sendrecv environment
-  call create_sendrecv_neig_ng(neig_ng_eh,info_field,iperiodic) ! neighboring node array
+  if    (yn_periodic=='n') then
+    iperi=0
+  elseif(yn_periodic=='y') then
+    iperi=3
+  end if
+  call create_sendrecv_neig_ng(neig_ng_eh,info_field,iperi) ! neighboring node array
   call init_sendrecv_grid(fs%srg_ng,fs%ng,1,info_field%icomm_all,neig_ng_eh)
   
 end subroutine eh_mpi_grid_sr

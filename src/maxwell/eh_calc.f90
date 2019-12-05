@@ -251,7 +251,7 @@ contains
   !=========================================================================================
   != calculate linear response =============================================================
   subroutine eh_calc_lr
-    use salmon_global,        only: iperiodic
+    use salmon_global,        only: yn_periodic
     use salmon_parallel,      only: nproc_group_global
     use salmon_communication, only: comm_summation
     implicit none
@@ -261,7 +261,7 @@ contains
     !update time
     fw%time_lr(fw%iter_lr)=dble(fw%iter_lr)*dt_em
     
-    if(iperiodic==0) then
+    if(yn_periodic=='n') then
       !initialize polarization vector
 !$omp parallel
 !$omp do private(ix,iy,iz)
@@ -309,7 +309,7 @@ contains
       sum_lr(1)=sum_lr_x; sum_lr(2)=sum_lr_y; sum_lr(3)=sum_lr_z;
       call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
       fw%dip_lr(fw%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
-    elseif(iperiodic==3) then
+    elseif(yn_periodic=='y') then
       !initialize current density
 !$omp parallel
 !$omp do private(ix,iy,iz)

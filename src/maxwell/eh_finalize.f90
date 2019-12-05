@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_finalize(fs,fw)
-  use salmon_global,        only: dt_em,unit_system,iperiodic,ae_shape1,ae_shape2,e_impulse,sysname, &
+  use salmon_global,        only: dt_em,unit_system,yn_periodic,ae_shape1,ae_shape2,e_impulse,sysname, &
                                   nt_em,nenergy,de,base_directory,iobs_num_em,iobs_samp_em,obs_plane_em
   use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au
   use salmon_parallel,      only: nproc_id_global
@@ -32,7 +32,7 @@ subroutine eh_finalize(fs,fw)
   
   !output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr)
   if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
-    if(iperiodic==0) then
+    if(yn_periodic=='n') then
       !output time-dependent matter dipole data
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_p.data'
@@ -71,7 +71,7 @@ subroutine eh_finalize(fs,fw)
         end do
         close(fw%ifn)
       end if
-    elseif(iperiodic==3) then
+    elseif(yn_periodic=='y') then
       !output time-dependent average  matter current density data and average electric field data
       if(comm_is_root(nproc_id_global)) then
         save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_current.data'
@@ -136,7 +136,7 @@ subroutine eh_finalize(fs,fw)
       !make information file
       open(fw%ifn,file=trim(base_directory)//"/obs0_info.data")
       write(fw%ifn,'(A,A14)')                      'unit_system       =',trim(unit_system)
-      write(fw%ifn,'(A,I14)')                      'iperiodic         =',iperiodic
+      write(fw%ifn,'(A,A)')                        'yn_periodic       =             ',yn_periodic
       write(fw%ifn,'(A,ES14.5)')                   'dt_em             =',dt_em*utime_from_au
       write(fw%ifn,'(A,I14)')                      'nt_em             =',(fw%iter_end-fw%iter_sta+1)
       write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'al_em             =',&

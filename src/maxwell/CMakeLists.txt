@@ -1,6 +1,6 @@
 set(SOURCES
     salmon_maxwell.f90
-    classic_em.f90
+    main_maxwell.f90
     weyl_init.f90
     weyl_finalize.f90
     weyl_calc.f90
