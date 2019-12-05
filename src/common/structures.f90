@@ -87,6 +87,7 @@ module structures
      complex(8), allocatable :: zc(:)
      type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
      type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)
+     type(s_scalar)       :: vonf, eonf(3)
   end type s_rt
 
   type s_process_info

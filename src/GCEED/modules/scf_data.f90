@@ -26,8 +26,6 @@ integer :: itt
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 integer :: DESCA( 50 ), DESCZ( 50 )
 
-real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
-
 !filename
 character(100) :: file_eigen
 character(100) :: file_RT_q

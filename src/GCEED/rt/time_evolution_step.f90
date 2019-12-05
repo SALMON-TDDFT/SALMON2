@@ -100,7 +100,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   
   select case(iperiodic)
   case(0)
-    if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt,system,Vbox)
+    if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt,system,rt,Vbox)
     if(ihpsieff==1) then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
       do is=1,nspin
@@ -156,7 +156,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
 
     select case(iperiodic)
     case(0)
-      if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt+1,system,Vbox)
+      if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt+1,system,rt,Vbox)
       if(ihpsieff==1)then
   !$OMP parallel do collapse(3) private(is,iz,iy,ix)
         do is=1,nspin

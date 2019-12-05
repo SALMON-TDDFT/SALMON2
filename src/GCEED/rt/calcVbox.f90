@@ -16,8 +16,8 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
-  use structures, only: s_rgrid, s_dft_system, s_scalar
+SUBROUTINE calcVbox(mg,lg,itt_t,system,rt,Vbox)
+  use structures, only: s_rgrid, s_dft_system, s_rt, s_scalar
   use salmon_communication, only: comm_is_root
   use misc_routines, only: get_wtime
   use em_field, only: calc_E_ext
@@ -30,6 +30,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
   integer :: itt_t
   type(s_dft_system),intent(inout) :: system
   type(s_scalar),intent(inout)     :: Vbox
+  type(s_rt),intent(in) :: rt
   integer :: ix,iy,iz,jj
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
@@ -127,7 +128,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_1
+        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+rt%vonf%f(ix,iy,iz)*env_trigon_1
       end do
       end do
       end do
@@ -139,7 +140,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+vonf_sd(ix,iy,iz)*env_trigon_2
+        Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+rt%vonf%f(ix,iy,iz)*env_trigon_2
       end do
       end do
       end do

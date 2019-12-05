@@ -5,7 +5,7 @@ set(SOURCES
     dip.f90
     initialization_rt.f90
     main_tddft.f90
-    set_vonf_sd.f90
+    set_vonf.f90
     time_evolution_step.f90
     )
   #    aft_fourier.f90 # Is this single program?
