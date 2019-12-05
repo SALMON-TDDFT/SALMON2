@@ -13,15 +13,14 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine calc_emfields(nspin,rt,curr_in)
+subroutine calc_emfields(itt,nspin,rt,curr_in)
   use structures, only : s_rt
   use math_constants, only : pi
-  use salmon_global, only : ispin
-  use scf_data, only : itt,dt
+  use salmon_global, only : ispin,dt
   use inputoutput, only: trans_longi
   implicit none
   type(s_rt),intent(inout) :: rt
-  integer,intent(in) :: nspin
+  integer,intent(in) :: itt,nspin
   real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
 
   rt%curr(1:3,itt) = curr_in(1:3,1)
@@ -45,7 +44,8 @@ subroutine calc_Aext(Mit,rt)
 !$ use omp_lib
 use structures, only : s_rt
 use em_field, only: calc_Ac_ext
-use scf_data, only: dt,itotNtime
+use salmon_global, only : dt
+use scf_data, only: itotNtime
 use math_constants, only: pi
 implicit none
 integer :: itt,Mit

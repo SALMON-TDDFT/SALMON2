@@ -22,7 +22,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
   use misc_routines, only: get_wtime
   use em_field, only: calc_E_ext
   use inputoutput
-  use scf_data
+  use scf_data, only: vonf_sd
   
   implicit none
   

@@ -18,7 +18,6 @@
 MODULE global_variables_scf
 
 use inputoutput
-use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 use structure_opt_sub
@@ -239,7 +238,7 @@ if(yn_out_tm  == 'y') then
 end if
 
 ! force
-   call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
       do iatom=1,natom

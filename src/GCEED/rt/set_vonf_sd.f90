@@ -20,6 +20,7 @@ subroutine set_vonf_sd(mg,lg,Hgs)
 !$ use omp_lib
   use structures, only: s_rgrid
   use salmon_communication, only: comm_is_root, comm_summation
+  use salmon_global
   use scf_data
   implicit none
   real(8),intent(in) :: Hgs(3)

@@ -22,7 +22,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,tpsi)
+  subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi)
     use structures
     use stencil_sub, only: calc_gradient_psi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
@@ -231,7 +231,7 @@ contains
       deallocate( zF_tmp )
     end if 
     return
-  end subroutine calc_force_salmon
+  end subroutine calc_force
 
   subroutine force_ion_ion(F_sum,F_tmp,system,pp,fg,nion)
     use structures

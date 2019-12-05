@@ -794,7 +794,7 @@ contains
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'
     file_ini_velocity     = 'none'
-    thermostat_tau        =  41.34d0  !=1fs: just test value
+    thermostat_tau        =  41.34d0/utime_to_au  !=1fs: just test value
     friction              =  0d0
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
@@ -2211,7 +2211,7 @@ contains
       end select
     end select
 
-    ! NOTE: `calc_force_salmon` calculates incorrect values under these configuration
+    ! NOTE: `calc_force` calculates incorrect values under these configuration
     !       we should fix it.
     if (yn_ffte == 'y') then
       if (yn_md  == 'y') stop "invalid: yn_ffte=='y' and yn_md=='y'"

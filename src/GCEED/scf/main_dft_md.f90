@@ -145,7 +145,7 @@ MD_Loop : do it=1,nt
 
    call time_evolution_step_md_part1(it,system,md)
 
-   call update_pseudo_rt(it,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+   call update_pseudo_rt(it,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
 
    if(allocated(rho_old%f))    deallocate(rho_old%f)
    if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
@@ -181,7 +181,7 @@ MD_Loop : do it=1,nt
                            band,1 )
 
    ! force
-   call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
 
    call time_evolution_step_md_part2(system,md)
 
@@ -204,9 +204,9 @@ MD_Loop : do it=1,nt
    if (yn_out_rvf_rt=='y' .and. mod(it,out_rvf_rt_step)==0)then
       write(comment_line,110) it, it*dt
 110   format("#md-gs  step=",i8,"   time",e16.6)
-!      if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
-!           write(comment_line,112) trim(comment_line), md%xi_nh
-!112   format(a,"  xi_nh=",e18.10)
+      if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
+           write(comment_line,112) trim(comment_line), md%xi_nh
+112   format(a,"  xi_nh=",e18.10)
       call write_xyz(comment_line,"add","rvf",system)
    endif
 
