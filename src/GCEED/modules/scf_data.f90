@@ -19,7 +19,6 @@ implicit none
 
 !-------------------- Global variables
 
-complex(8), allocatable :: zc(:)
 integer :: itotNtime
 
 real(8),allocatable :: vloc_t(:,:,:,:)
