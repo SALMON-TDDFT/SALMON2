@@ -31,7 +31,7 @@ real(8),intent(out)       :: rNe
 type(s_poisson),intent(in) :: poisson
 type(s_dft_system),intent(in) :: system
 type(s_pp_info),intent(in) :: pp
-integer :: itt,i1,ix,iy,iz, ia
+integer :: i1,ix,iy,iz, ia
 real(8) :: rbox_array(10),  rbox_arrayq(3,3)
 real(8) :: rbox_array2(10), rbox_arrayq2(3,3)
 real(8) :: rbox1
