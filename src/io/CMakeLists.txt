@@ -10,6 +10,7 @@ set(SOURCES
     write_field.f90
     write_file3d.f90
     write.f90
+    main_dft2tddft.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

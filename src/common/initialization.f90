@@ -239,7 +239,7 @@ subroutine init_process_distribution(system,icomm1,pinfo)
       call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,pinfo)
     else
       select case(theory)
-      case('DFT','DFT_BAND','DFT_MD') 
+      case('DFT','DFT_BAND','DFT_MD','DFT2TDDFT')
         call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,icomm1,pinfo)
       case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
         call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,pinfo)

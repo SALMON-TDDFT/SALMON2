@@ -39,6 +39,9 @@ subroutine init_dir_out_restart(ofl)
         ofl%dir_out_restart = 'data_for_restart_rt/'
         call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
       end if
+    case('DFT2TDDFT')
+      ofl%dir_out_restart = 'data_for_restart_rt/'
+      call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
   end select
 
 end subroutine init_dir_out_restart
