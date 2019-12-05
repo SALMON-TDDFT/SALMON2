@@ -63,7 +63,6 @@ use deallocate_mat_sub
   use hamiltonian
   use md_sub, only: init_md
   use fdtd_coulomb_gauge, only: ls_singlescale
-  use taylor_sub, only: taylor_coe
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
@@ -115,7 +114,7 @@ use deallocate_mat_sub
 
 
   
-  integer :: iob, i1,i2,i3, iik,jspin
+  integer :: iob, i1,i2,i3, iik,jspin, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
   real(8) :: rbox_array(10), rbox_array2(10)
@@ -554,8 +553,24 @@ use deallocate_mat_sub
   
   
   call timer_begin(LOG_INIT_RT)
+
   allocate(rt%zc(N_hamil))
-  call taylor_coe(N_hamil,dt,rt)
+
+  if(propagator=='etrs')then
+    do n=1,N_hamil
+      rt%zc(n)=(-zi*dt/2.d0)**n
+      do m=1,n
+        rt%zc(n)=rt%zc(n)/m
+      end do
+    end do
+  else
+    do n=1,N_hamil
+      rt%zc(n)=(-zi*dt)**n
+      do m=1,n
+        rt%zc(n)=rt%zc(n)/m
+      end do
+    end do
+  end if
 
   deallocate (R1)
 

@@ -101,34 +101,5 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
 
 end subroutine taylor
 
-subroutine taylor_coe(N_hamil,dt,rt)
-  use salmon_global, only : propagator
-  use structures, only : s_rt
-  implicit none
-  integer,intent(in) :: N_hamil
-  real(8),intent(in) :: dt
-  type(s_rt) :: rt
-  !
-  integer :: mm,nn
-  complex(8),parameter :: zi=(0.d0,1.d0)
-
-  if(propagator=='etrs')then
-    do nn=1,N_hamil
-      rt%zc(nn)=(-zi*dt/2.d0)**nn
-      do mm=1,nn
-        rt%zc(nn)=rt%zc(nn)/mm
-      end do
-    end do
-  else
-    do nn=1,N_hamil
-      rt%zc(nn)=(-zi*dt)**nn
-      do mm=1,nn
-        rt%zc(nn)=rt%zc(nn)/mm
-      end do
-    end do
-  end if
-
-end subroutine taylor_coe
-
 end module taylor_sub
 
