@@ -231,7 +231,7 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 
 ! write GS: basic data
 !call write_band_information(system,energy)
-!call write_eigen(file_eigen,system,energy)
+!call write_eigen(ofl_eigen,system,energy)
 !call write_info_data(it,system,energy,pp)
 
 ! write GS: analysis option
