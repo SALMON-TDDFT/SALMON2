@@ -373,33 +373,33 @@ contains
       & set_ini_coor_vel,&
       & nmacro_write_group
 
-    namelist/maxwell/ &
-      & al_em, &
-      & dl_em, &
-      & dt_em, &
-      & nt_em, &
-      & boundary_em, &
-      & shape_file, &
-      & imedia_num, &
-      & type_media, &
-      & epsilon, &
-      & rmu, &
-      & sigma, &
-      & pole_num_ld, &
-      & omega_p_ld, &
-      & f_ld, &
-      & gamma_ld, &
-      & omega_ld, &
-      & wave_input, &
-      & ek_dir1, &
-      & source_loc1, &
-      & ek_dir2, &
-      & source_loc2, &
-      & iobs_num_em, &
-      & iobs_samp_em, &
-      & obs_loc_em, &
-      & obs_plane_em, &
-      & wf_em
+    namelist/maxwell/    &
+      & al_em,           &
+      & dl_em,           &
+      & dt_em,           &
+      & nt_em,           &
+      & boundary_em,     &
+      & shape_file,      &
+      & media_num,       &
+      & media_type,      &
+      & epsilon_em,      &
+      & mu_em,           &
+      & sigma_em,        &
+      & pole_num_ld,     &
+      & omega_p_ld,      &
+      & f_ld,            &
+      & gamma_ld,        &
+      & omega_ld,        &
+      & wave_input,      &
+      & ek_dir1,         &
+      & source_loc1,     &
+      & ek_dir2,         &
+      & source_loc2,     &
+      & obs_num_em,      &
+      & obs_samp_em,     &
+      & obs_loc_em,      &
+      & yn_obs_plane_em, &
+      & yn_wf_em
 
     namelist/analysis/ &
       & projection_option, &
@@ -704,32 +704,32 @@ contains
     nmacro_write_group= -1
 
 !! == default for &maxwell
-    al_em(:)         = 0d0
-    dl_em(:)         = 0d0
-    dt_em            = 0d0
-    nt_em            = 0
-    boundary_em(:,:) = 'default'
-    shape_file       = 'none'
-    imedia_num       = 0
-    type_media(:)    = 'vacuum'
-    epsilon(:)       = 1d0
-    rmu(:)           = 1d0
-    sigma(:)         = 0d0
-    pole_num_ld(:)   = 1
-    omega_p_ld(:)    = 0d0
-    f_ld(:,:)        = 0d0
-    gamma_ld(:,:)    = 0d0
-    omega_ld(:,:)    = 0d0
-    wave_input       = 'none'
-    ek_dir1(:)       = 0d0
-    source_loc1(:)   = 0d0
-    ek_dir2(:)       = 0d0
-    source_loc2(:)   = 0d0
-    iobs_num_em      = 0
-    iobs_samp_em     = 1
-    obs_loc_em(:,:)  = 0d0
-    obs_plane_em(:)  = 'n'
-    wf_em            = 'y'
+    al_em(:)           = 0d0
+    dl_em(:)           = 0d0
+    dt_em              = 0d0
+    nt_em              = 0
+    boundary_em(:,:)   = 'default'
+    shape_file         = 'none'
+    media_num          = 0
+    media_type(:)      = 'vacuum'
+    epsilon_em(:)      = 1d0
+    mu_em(:)           = 1d0
+    sigma_em(:)        = 0d0
+    pole_num_ld(:)     = 1
+    omega_p_ld(:)      = 0d0
+    f_ld(:,:)          = 0d0
+    gamma_ld(:,:)      = 0d0
+    omega_ld(:,:)      = 0d0
+    wave_input         = 'none'
+    ek_dir1(:)         = 0d0
+    source_loc1(:)     = 0d0
+    ek_dir2(:)         = 0d0
+    source_loc2(:)     = 0d0
+    obs_num_em         = 0
+    obs_samp_em        = 1
+    obs_loc_em(:,:)    = 0d0
+    yn_obs_plane_em(:) = 'n'
+    yn_wf_em           = 'y'
 
 !! == default for &analysis
     projection_option   = 'no'
@@ -794,7 +794,7 @@ contains
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'
     file_ini_velocity     = 'none'
-    thermostat_tau        =  41.34d0  !=1fs: just test value
+    thermostat_tau        =  41.34d0/utime_to_au  !=1fs: just test value
     friction              =  0d0
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
@@ -1137,41 +1137,41 @@ contains
     call comm_bcast(nmacro_write_group,nproc_group_global)
 
 !! == bcast for &maxwell
-    call comm_bcast(al_em        ,nproc_group_global)
+    call comm_bcast(al_em           ,nproc_group_global)
     al_em = al_em * ulength_to_au
-    call comm_bcast(dl_em        ,nproc_group_global)
+    call comm_bcast(dl_em           ,nproc_group_global)
     dl_em = dl_em * ulength_to_au
-    call comm_bcast(dt_em        ,nproc_group_global)
+    call comm_bcast(dt_em           ,nproc_group_global)
     dt_em = dt_em * utime_to_au
-    call comm_bcast(nt_em        ,nproc_group_global)
-    call comm_bcast(boundary_em  ,nproc_group_global)
-    call comm_bcast(shape_file   ,nproc_group_global)
-    call comm_bcast(imedia_num   ,nproc_group_global)
-    call comm_bcast(type_media   ,nproc_group_global)
-    call comm_bcast(epsilon      ,nproc_group_global)
-    call comm_bcast(rmu          ,nproc_group_global)
-    call comm_bcast(sigma        ,nproc_group_global)
-    call comm_bcast(pole_num_ld  ,nproc_group_global)
-    call comm_bcast(omega_p_ld   ,nproc_group_global)
+    call comm_bcast(nt_em           ,nproc_group_global)
+    call comm_bcast(boundary_em     ,nproc_group_global)
+    call comm_bcast(shape_file      ,nproc_group_global)
+    call comm_bcast(media_num       ,nproc_group_global)
+    call comm_bcast(media_type      ,nproc_group_global)
+    call comm_bcast(epsilon_em      ,nproc_group_global)
+    call comm_bcast(mu_em           ,nproc_group_global)
+    call comm_bcast(sigma_em        ,nproc_group_global)
+    call comm_bcast(pole_num_ld     ,nproc_group_global)
+    call comm_bcast(omega_p_ld      ,nproc_group_global)
     omega_p_ld = omega_p_ld * uenergy_to_au
-    call comm_bcast(f_ld         ,nproc_group_global)
-    call comm_bcast(gamma_ld     ,nproc_group_global)
+    call comm_bcast(f_ld            ,nproc_group_global)
+    call comm_bcast(gamma_ld        ,nproc_group_global)
     gamma_ld = gamma_ld * uenergy_to_au
-    call comm_bcast(omega_ld     ,nproc_group_global)
+    call comm_bcast(omega_ld        ,nproc_group_global)
     omega_ld = omega_ld * uenergy_to_au
-    call comm_bcast(wf_em        ,nproc_group_global)
+    call comm_bcast(yn_wf_em        ,nproc_group_global)
     call comm_bcast(wave_input,nproc_group_global)
-    call comm_bcast(ek_dir1      ,nproc_group_global)
-    call comm_bcast(source_loc1  ,nproc_group_global)
+    call comm_bcast(ek_dir1         ,nproc_group_global)
+    call comm_bcast(source_loc1     ,nproc_group_global)
     source_loc1 = source_loc1 * ulength_to_au
-    call comm_bcast(ek_dir2      ,nproc_group_global)
-    call comm_bcast(source_loc2  ,nproc_group_global)
+    call comm_bcast(ek_dir2         ,nproc_group_global)
+    call comm_bcast(source_loc2     ,nproc_group_global)
     source_loc2 = source_loc2 * ulength_to_au
-    call comm_bcast(iobs_num_em  ,nproc_group_global)
-    call comm_bcast(iobs_samp_em ,nproc_group_global)
-    call comm_bcast(obs_loc_em   ,nproc_group_global)
+    call comm_bcast(obs_num_em      ,nproc_group_global)
+    call comm_bcast(obs_samp_em     ,nproc_group_global)
+    call comm_bcast(obs_loc_em      ,nproc_group_global)
     obs_loc_em = obs_loc_em * ulength_to_au
-    call comm_bcast(obs_plane_em ,nproc_group_global)
+    call comm_bcast(yn_obs_plane_em ,nproc_group_global)
 
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
@@ -1888,12 +1888,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,1)', boundary_em(3,1)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,2)', boundary_em(3,2)
       write(fh_variables_log, '("#",4X,A,"=",A)')      'shape_file', trim(shape_file)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'imedia_num', imedia_num
-      do i = 0,imedia_num
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')      'type_media(',i,')', type_media(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'epsilon(',i,')', epsilon(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'rmu(',i,')', rmu(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'sigma(',i,')', sigma(i)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_num', media_num
+      do i = 0,media_num
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')      'media_type(',i,')', media_type(i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'epsilon_em(',i,')', epsilon_em(i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'mu_em(',i,')', mu_em(i)
+        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'sigma_em(',i,')', sigma_em(i)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')     'pole_num_ld(',i,')', pole_num_ld(i)
         write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'omega_p_ld(',i,')', omega_p_ld(i)
         do j = 1,pole_num_ld(i)
@@ -1915,18 +1915,18 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(1)', source_loc2(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(2)', source_loc2(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(3)', source_loc2(3)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iobs_num_em', iobs_num_em
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'iobs_samp_em', iobs_samp_em
-      if(iobs_num_em==0) then
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_num_em', obs_num_em
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
+      if(obs_num_em==0) then
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
-        write(fh_variables_log, '("#",4X,A,"=",A)')       'obs_plane_em', obs_plane_em(1)
+        write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_em', yn_obs_plane_em(1)
       else
-        do i = 1,iobs_num_em
+        do i = 1,obs_num_em
           write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'obs_loc_em(',i,',:)', obs_loc_em(i,:)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'obs_plane_em(',i,')', obs_plane_em(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'yn_obs_plane_em(',i,')', yn_obs_plane_em(i)
         end do
       end if
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'wf_em', wf_em
+      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
 
       if(inml_analysis >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
@@ -2211,7 +2211,7 @@ contains
       end select
     end select
 
-    ! NOTE: `calc_force_salmon` calculates incorrect values under these configuration
+    ! NOTE: `calc_force` calculates incorrect values under these configuration
     !       we should fix it.
     if (yn_ffte == 'y') then
       if (yn_md  == 'y') stop "invalid: yn_ffte=='y' and yn_md=='y'"

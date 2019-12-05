@@ -16,13 +16,12 @@
 subroutine calc_emfields(itt,nspin,rt,curr_in)
   use structures, only : s_rt
   use math_constants, only : pi
-  use salmon_global, only : ispin
-  use scf_data, only : dt
+  use salmon_global, only : ispin,dt
   use inputoutput, only: trans_longi
   implicit none
   integer,intent(in) :: itt
   type(s_rt),intent(inout) :: rt
-  integer,intent(in) :: nspin
+  integer,intent(in) :: itt,nspin
   real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
 
   rt%curr(1:3,itt) = curr_in(1:3,1)
@@ -46,7 +45,7 @@ subroutine calc_Aext(Mit,itotNtime,rt)
 !$ use omp_lib
 use structures, only : s_rt
 use em_field, only: calc_Ac_ext
-use scf_data, only: dt
+use salmon_global, only: dt
 use math_constants, only: pi
 implicit none
 integer :: itt,Mit,itotNtime

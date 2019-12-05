@@ -16,7 +16,7 @@
 MODULE global_variables_rt
 
 use inputoutput
-use scf_data
+use scf_data, only: itt,itotNtime
 use allocate_mat_sub
 use deallocate_mat_sub
 implicit none

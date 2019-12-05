@@ -59,7 +59,7 @@ use deallocate_mat_sub
   use density_matrix, only: calc_density
   use writefield
   use salmon_pp, only: calc_nlcc
-  use force_sub, only: calc_force_salmon
+  use force_sub, only: calc_force
   use hamiltonian
   use md_sub, only: init_md
   use fdtd_coulomb_gauge, only: ls_singlescale
@@ -550,7 +550,7 @@ use deallocate_mat_sub
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
+     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format
      write(comment_line,10) -1, 0.0d0

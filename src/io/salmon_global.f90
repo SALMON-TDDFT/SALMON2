@@ -221,11 +221,11 @@ module salmon_global
   integer        :: nt_em
   character(8)   :: boundary_em(3,2)
   character(256) :: shape_file
-  integer        :: imedia_num
-  character(16)  :: type_media(0:200)
-  real(8)        :: epsilon(0:200)
-  real(8)        :: rmu(0:200)
-  real(8)        :: sigma(0:200)
+  integer        :: media_num
+  character(16)  :: media_type(0:200)
+  real(8)        :: epsilon_em(0:200)
+  real(8)        :: mu_em(0:200)
+  real(8)        :: sigma_em(0:200)
   integer        :: pole_num_ld(0:200)
   real(8)        :: omega_p_ld(0:200)
   real(8)        :: f_ld(0:200,1:100)
@@ -236,11 +236,11 @@ module salmon_global
   real(8)        :: source_loc1(3)
   real(8)        :: ek_dir2(3)
   real(8)        :: source_loc2(3)
-  integer        :: iobs_num_em
-  integer        :: iobs_samp_em
+  integer        :: obs_num_em
+  integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
-  character(1)   :: obs_plane_em(200)
-  character(1)   :: wf_em
+  character(1)   :: yn_obs_plane_em(200)
+  character(1)   :: yn_wf_em
   
 !! &analysis
   character(2)   :: projection_option

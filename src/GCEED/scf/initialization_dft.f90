@@ -346,7 +346,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           band,1 )
 
   call init_md(system,md)
-  call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+  call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
 
   md%Uene0 = energy%E_tot
   md%E_tot0= energy%E_tot + md%Tene

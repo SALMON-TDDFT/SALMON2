@@ -32,7 +32,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree
   use salmon_Total_Energy, only: calc_Total_Energy_isolated, calc_Total_Energy_periodic, calc_eigen_energy, check_rion_update
-  use force_sub, only: calc_force_salmon
+  use force_sub, only: calc_force
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
   use write_sub
@@ -132,7 +132,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
-     call update_pseudo_rt(itt,info,info_field,system,stencil,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+     call update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
 
   if(propagator=='etrs')then
@@ -305,9 +305,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   !(force)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
 
-     call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
+     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
 
-     !force on ion directly from field --- should put in calc_force_salmon?
+     !force on ion directly from field --- should put in calc_force?
      do iatom=1,system%nion
         FionE(:,iatom) = pp%Zps(Kion(iatom)) * rt%E_tot(:,itt)
      enddo
