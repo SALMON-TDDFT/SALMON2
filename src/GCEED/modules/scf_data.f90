@@ -21,8 +21,5 @@ implicit none
 integer :: itt
 integer :: itotNtime
 
-integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
-integer :: DESCA( 50 ), DESCZ( 50 )
-
 END MODULE scf_data
 
