@@ -16,7 +16,7 @@
 !-----------------------------------------------------------------------------------------
 subroutine eh_finalize(fs,fw)
   use salmon_global,        only: dt_em,unit_system,yn_periodic,ae_shape1,ae_shape2,e_impulse,sysname, &
-                                  nt_em,nenergy,de,base_directory,iobs_num_em,iobs_samp_em,obs_plane_em
+                                  nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,yn_obs_plane_em
   use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au
   use salmon_parallel,      only: nproc_id_global
   use salmon_communication, only: comm_is_root
@@ -131,34 +131,34 @@ subroutine eh_finalize(fs,fw)
   end if
   
   !observation
-  if(iobs_num_em>0) then
+  if(obs_num_em>0) then
     if(comm_is_root(nproc_id_global)) then
       !make information file
       open(fw%ifn,file=trim(base_directory)//"/obs0_info.data")
-      write(fw%ifn,'(A,A14)')                      'unit_system       =',trim(unit_system)
-      write(fw%ifn,'(A,A)')                        'yn_periodic       =             ',yn_periodic
-      write(fw%ifn,'(A,ES14.5)')                   'dt_em             =',dt_em*utime_from_au
-      write(fw%ifn,'(A,I14)')                      'nt_em             =',(fw%iter_end-fw%iter_sta+1)
-      write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'al_em             =',&
+      write(fw%ifn,'(A,A14)')                      'unit_system          =',trim(unit_system)
+      write(fw%ifn,'(A,A)')                        'yn_periodic          =             ',yn_periodic
+      write(fw%ifn,'(A,ES14.5)')                   'dt_em                =',dt_em*utime_from_au
+      write(fw%ifn,'(A,I14)')                      'nt_em                =',(fw%iter_end-fw%iter_sta+1)
+      write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'al_em                =',&
             fs%rlsize(1)*ulength_from_au,', ',&
             fs%rlsize(2)*ulength_from_au,', ',&
             fs%rlsize(3)*ulength_from_au
-      write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'dl_em             =',&
+      write(fw%ifn,'(A,ES14.5,A,ES14.5,A,ES14.5)') 'dl_em                =',&
             fs%hgs(1)*ulength_from_au,', ',&
             fs%hgs(2)*ulength_from_au,', ',&
             fs%hgs(3)*ulength_from_au
-      write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_sta            =',&
+      write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_sta               =',&
             fs%lg%is(1),', ',fs%lg%is(2),', ',fs%lg%is(3)
-      write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_end            =',&
+      write(fw%ifn,'(A,I14,A,I14,A,I14)')          'lg_end               =',&
             fs%lg%ie(1),', ',fs%lg%ie(2),', ',fs%lg%ie(3)
-      write(fw%ifn,'(A,I14)')                      'iobs_num_em       =',iobs_num_em
-      write(fw%ifn,'(A,I14)')                      'iobs_samp_em      =',iobs_samp_em
-      do ii=1,iobs_num_em
-        write(fw%ifn,'(A,I3,A,A)')                 'obs_plane_em(',&
-                                                                ii,') =             ',obs_plane_em(ii)
+      write(fw%ifn,'(A,I14)')                      'obs_num_em           =',obs_num_em
+      write(fw%ifn,'(A,I14)')                      'obs_samp_em          =',obs_samp_em
+      do ii=1,obs_num_em
+        write(fw%ifn,'(A,I3,A,A)')                 'yn_obs_plane_em(',&
+                                                                ii,') =             ',yn_obs_plane_em(ii)
       end do
-      write(fw%ifn,'(A,ES14.5)')                   'e_max             =',fw%e_max
-      write(fw%ifn,'(A,ES14.5)')                   'h_max             =',fw%h_max
+      write(fw%ifn,'(A,ES14.5)')                   'e_max                =',fw%e_max
+      write(fw%ifn,'(A,ES14.5)')                   'h_max                =',fw%h_max
       close(fw%ifn)
     end if
   end if
@@ -184,7 +184,7 @@ end subroutine eh_finalize
 !=========================================================================================
 != Fourier transformation in eh ==========================================================
 subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
-  use salmon_global,  only: wf_em
+  use salmon_global,  only: yn_wf_em
   use math_constants, only: zi
   implicit none
   integer,intent(in)   :: nt,ne
@@ -197,7 +197,7 @@ subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
   complex(8)           :: zf
   
   !apply window function
-  if(wf_em=='y') then
+  if(yn_wf_em=='y') then
     do it=1,nt
       ft_wf(it)=ft(it)*( 1.0d0 -3.0d0*(ti(it)/maxval(ti(:)))**2.0d0 +2.0d0*(ti(it)/maxval(ti(:)))**3.0d0 )
     end do

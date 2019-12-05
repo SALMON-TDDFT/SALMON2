@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_calc(fs,fw)
-  use salmon_global,        only: dt_em,pole_num_ld,iobs_num_em,iobs_samp_em,obs_plane_em,&
+  use salmon_global,        only: dt_em,pole_num_ld,obs_num_em,obs_samp_em,yn_obs_plane_em,&
                                   base_directory,t1_t2,t1_start,&
                                   E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                   E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
@@ -74,7 +74,7 @@ subroutine eh_calc(fs,fw)
     end if
     
     !store old h
-    if( (iobs_num_em>0).and.(mod(iter,iobs_samp_em)==0) )then
+    if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
 !$omp parallel
 !$omp do private(ix,iy,iz)
       do iz=(fs%ng%is_array(3)),(fs%ng%ie_array(3))
@@ -106,7 +106,7 @@ subroutine eh_calc(fs,fw)
     call eh_sendrecv(fs,fw,'h')
     
     !observation
-    if( (iobs_num_em>0).and.(mod(iter,iobs_samp_em)==0) )then
+    if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
       !prepare e and h for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
@@ -127,7 +127,7 @@ subroutine eh_calc(fs,fw)
       call eh_sendrecv(fs,fw,'s')
       
       !save data
-      do ii=1,iobs_num_em
+      do ii=1,obs_num_em
         !point
         if(fw%iobs_po_pe(ii)==1) then
           write(save_name,*) ii
@@ -150,7 +150,7 @@ subroutine eh_calc(fs,fw)
         end if
         
         !plane
-        if(obs_plane_em(ii)=='y') then
+        if(yn_obs_plane_em(ii)=='y') then
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&
                              fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fw%Nd,fw%ifn,ii,iter,fw%ex_s,'ex')
           call eh_save_plane(fw%iobs_po_id(ii,:),fw%iobs_pl_pe(ii,:),fw%uVperm_from_au,&

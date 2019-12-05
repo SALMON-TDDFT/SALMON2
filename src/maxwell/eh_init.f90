@@ -16,9 +16,9 @@
 !-----------------------------------------------------------------------------------------
 subroutine eh_init(fs,fw)
   use salmon_global,        only: nt_em,al_em,dl_em,dt_em,boundary_em,yn_periodic,base_directory,&
-                                  imedia_num,shape_file,epsilon,rmu,sigma,type_media,&
+                                  media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
                                   pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
-                                  iobs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
+                                  obs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
                                   source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
                                   phi_cep1,I_wcm2_1,E_amplitude1,&
                                   source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
@@ -140,7 +140,7 @@ subroutine eh_init(fs,fw)
                      fs%ng%is_array(2):fs%ng%ie_array(2),&
                      fs%ng%is_array(3):fs%ng%ie_array(3)))
   fw%rmedia(:,:,:)=0.0d0
-  if(imedia_num>0) then
+  if(media_num>0) then
     !check file format and input shape file
     if(comm_is_root(nproc_id_global)) write(*,*)
     if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
@@ -169,8 +169,8 @@ subroutine eh_init(fs,fw)
   
   !*** prepare Lorentz-Drude ********************************************************************************!
   fw%num_ld=0
-  do ii=0,imedia_num
-    select case(type_media(ii))
+  do ii=0,media_num
+    select case(media_type(ii))
     case('lorentz-drude')
       fw%num_ld=fw%num_ld+1
     end select
@@ -180,15 +180,15 @@ subroutine eh_init(fs,fw)
     icount_ld=1; fw%max_pole_num_ld=0;
     allocate(fw%media_ld(fw%num_ld))
     fw%media_ld(:)=0;
-    do ii=0,imedia_num
-      select case(type_media(ii))
+    do ii=0,media_num
+      select case(media_type(ii))
       case('lorentz-drude')
         fw%media_ld(icount_ld)=ii
         icount_ld=icount_ld+1
         if(fw%max_pole_num_ld<pole_num_ld(ii)) fw%max_pole_num_ld=pole_num_ld(ii)
         if(pole_num_ld(ii)<=0) then
           if(comm_is_root(nproc_id_global)) &
-            write(*,*) "For type_media = lorentz-drude, pole_num_ld must be equal to or larger than 1."
+            write(*,*) "For media_type = lorentz-drude, pole_num_ld must be equal to or larger than 1."
           stop
         end if
       end select
@@ -255,28 +255,31 @@ subroutine eh_init(fs,fw)
   end if
   
   !*** set fdtd coeffient and write media information *******************************************************!
-  allocate(fw%rep(0:imedia_num),fw%rmu(0:imedia_num),fw%sig(0:imedia_num))
+  allocate(fw%rep(0:media_num),fw%rmu(0:media_num),fw%sig(0:media_num))
   fw%rep(:)=1.0d0; fw%rmu(:)=1.0d0; fw%sig(:)=0.0d0;
-  do ii=0,imedia_num
+  do ii=0,media_num
+    fw%rep(ii)=epsilon_em(ii); fw%rmu(ii)=mu_em(ii); fw%sig(ii)=sigma_em(ii);
+  end do
+  do ii=0,media_num
     call eh_coeff
   end do
   deallocate(fs%imedia); deallocate(fw%rmedia);
   if(comm_is_root(nproc_id_global)) then
     write(*,*)
     write(*,*) "**************************"
-    write(*,'(A,I3)')          ' imedia_num = ',imedia_num
-    do ii=0,imedia_num
+    write(*,'(A,I6)')          ' media_num   = ',media_num
+    do ii=0,media_num
       write(*,*) "=========================="
       write(*,'(A,I3,A)')      ' id ',ii, ':'
-      select case(type_media(ii))
+      select case(media_type(ii))
       case ('vacuum')
-        if(epsilon(ii)/=1d0 .or. rmu(ii)/=1d0 .or. sigma(ii)/=0d0) then
-          write(*,'(A)'  )     ' type_media  =  constant media'
+        if(fw%rep(ii)/=1d0 .or. fw%rmu(ii)/=1d0 .or. fw%sig(ii)/=0d0) then
+          write(*,'(A)'  )     ' media_type  =  constant media'
         else
-          write(*,'(A,A)')     ' type_media  =  ', trim(type_media(ii))
+          write(*,'(A,A)')     ' media_type  =  ', trim(media_type(ii))
         end if
       case('lorentz-drude')
-        write(*,'(A,A)')       ' type_media  =  ', trim(type_media(ii))
+        write(*,'(A,A)')       ' media_type  =  ', trim(media_type(ii))
         write(*,'(A,I6)')      ' pole_num_ld = ', pole_num_ld(ii)
         write(*,'(A,ES12.5)')  ' omega_p_ld  = ', omega_p_ld(ii)*uenergy_from_au
         do ij=1,pole_num_ld(ii)
@@ -301,11 +304,11 @@ subroutine eh_init(fs,fw)
           end if
         end do
       case default
-        write(*,'(A,A)')       ' type_media  =  ', trim(type_media(ii))
+        write(*,'(A,A)')       ' media_type  =  ', trim(media_type(ii))
       end select
-      write(*,'(A,ES12.5)')    ' epsilon     = ', epsilon(ii)
-      write(*,'(A,ES12.5)')    ' rmu         = ', rmu(ii)
-      write(*,'(A,ES12.5)'   ) ' sigma       = ', sigma(ii)
+      write(*,'(A,ES12.5)')    ' epsilon_em  = ', fw%rep(ii)
+      write(*,'(A,ES12.5)')    ' mu_em       = ', fw%rmu(ii)
+      write(*,'(A,ES12.5)'   ) ' sigma_em    = ', fw%sig(ii)
     end do
     write(*,*) "**************************"
   end if
@@ -384,7 +387,7 @@ subroutine eh_init(fs,fw)
   end if
   
   !*** prepare observation **********************************************************************************!
-  if(iobs_num_em>0) then
+  if(obs_num_em>0) then
     !set initial
     allocate(fw%ex_s(fs%ng%is_array(1):fs%ng%ie_array(1),&
                      fs%ng%is_array(2):fs%ng%ie_array(2),&
@@ -406,15 +409,15 @@ subroutine eh_init(fs,fw)
                      fs%ng%is_array(3):fs%ng%ie_array(3)))
     fw%ex_s(:,:,:)=0; fw%ey_s(:,:,:)=0; fw%ez_s(:,:,:)=0; 
     fw%hx_s(:,:,:)=0; fw%hy_s(:,:,:)=0; fw%hz_s(:,:,:)=0; 
-    allocate(fw%iobs_po_id(iobs_num_em,3)) !1:x,        2:y,        3:z
-    allocate(fw%iobs_po_pe(iobs_num_em))
-    allocate(fw%iobs_li_pe(iobs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
-    allocate(fw%iobs_pl_pe(iobs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
+    allocate(fw%iobs_po_id(obs_num_em,3)) !1:x,        2:y,        3:z
+    allocate(fw%iobs_po_pe(obs_num_em))
+    allocate(fw%iobs_li_pe(obs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
+    allocate(fw%iobs_pl_pe(obs_num_em,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
     fw%iobs_po_id(:,:)=0; fw%iobs_po_pe(:)=0; fw%iobs_li_pe(:,:)=0; fw%iobs_pl_pe(:,:)=0; 
     fw%e_max=0.0d0; fw%h_max=0.0d0;
     
     !search observation point
-    do ii=1,iobs_num_em
+    do ii=1,obs_num_em
       call find_point_em(obs_loc_em(ii,:),fw%iobs_po_id(ii,:),&
                          fw%iobs_po_pe(ii),fw%iobs_li_pe(ii,:),fw%iobs_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
                          minval(fs%lg%is)-fw%Nd,maxval(fs%lg%ie)+fw%Nd,fw%coo(:,:))
@@ -424,16 +427,16 @@ subroutine eh_init(fs,fw)
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"
-      if(iobs_num_em==1) then
+      if(obs_num_em==1) then
         write(*,*) "Observation point is placed at"
       else
         write(*,*) "Observation points are placed at"
       end if
-      do ii=1,iobs_num_em
+      do ii=1,obs_num_em
         write(*,'(I3,A,3ES14.5)') ii,":",(fw%coo(fw%iobs_po_id(ii,ix),ix)*ulength_from_au,ix=1,3)
       end do
       write(*,*) "**************************"
-      do ii=1,iobs_num_em
+      do ii=1,obs_num_em
         write(save_name,*) ii
         save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
         open(fw%ifn,file=save_name)
@@ -650,17 +653,17 @@ subroutine eh_init(fs,fw)
     !check condition
     iflag_lr=0
     if(yn_periodic=='y'.and.trans_longi/='tr') iflag_lr=1
-    do ii=0,imedia_num
+    do ii=0,media_num
       if(fw%rep(ii)/=1.0d0.or.fw%rmu(ii)/=1.0d0.or.fw%sig(ii)/=0.0d0) iflag_lr=1
       if(ii==0) then
-        select case(type_media(ii))
+        select case(media_type(ii))
         case('vacuum')
           continue
         case default
           iflag_lr=1
         end select
       else
-        select case(type_media(ii))
+        select case(media_type(ii))
         case('lorentz-drude')
           continue
         case default
@@ -672,9 +675,9 @@ subroutine eh_init(fs,fw)
       if(comm_is_root(nproc_id_global)) then
         write(*,*) "Invalid input keywords:"
         write(*,*) "When you execute linear response calculation by ae_shape1=impulse and/or ae_shape2=impulse,"
-        write(*,*) "epsilon and rmu must be 1.0d0."
-        write(*,*) "sigma must be 0.0d0."
-        write(*,*) "type_media(i) must be lorentz-drude, where i > 0."
+        write(*,*) "epsilon_em and mu_em must be 1.0d0."
+        write(*,*) "sigma_em must be 0.0d0."
+        write(*,*) "media_type(i) must be lorentz-drude, where i > 0."
         if(yn_periodic=='y') write(*,*) "trans_longi must be tr."
       end if
       stop
@@ -928,9 +931,6 @@ contains
     real(8)  :: c1_e,c2_e_x,c2_e_y,c2_e_z,c1_h,c2_h_x,c2_h_y,c2_h_z,c2_j,&
                 c1_e_mid,c2_e_x_mid,c2_e_y_mid,c2_e_z_mid,c2_j_mid
     
-    !set constant parameter
-    fw%rep(ii)=epsilon(ii); fw%rmu(ii)=rmu(ii); fw%sig(ii)=sigma(ii);
-    
     !prepare coefficient
     c1_e  =(1.0d0-2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em) &
            /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)
@@ -956,8 +956,8 @@ contains
          /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)
     call comm_bcast(c2_j,nproc_group_global)
     
-    !check type_media
-    select case(type_media(ii))
+    !check media_type
+    select case(media_type(ii))
     case('pec')
       c1_e=0.0d0; c2_e_x=0.0d0; c2_e_y=0.0d0; c2_e_z=0.0d0;
     case('lorentz-drude')
@@ -1117,16 +1117,16 @@ contains
             fw%c1_ex_z(ix,iy,iz)=c1_e; fw%c2_ex_z(ix,iy,iz)=-c2_e_z;
             fw%c2_jx(ix,iy,iz)=-c2_j;
           elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em)
-            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+            c1_e_mid  = (1.0d0-2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em)
+            c2_e_y_mid= (fw%c_0/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(2)
-            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+            c2_e_z_mid= (fw%c_0/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(3)
-            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em)
+            c2_j_mid  = (4.0d0*pi/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em)
             fw%c1_ex_y(ix,iy,iz)=c1_e_mid; fw%c2_ex_y(ix,iy,iz)= c2_e_y_mid;
             fw%c1_ex_z(ix,iy,iz)=c1_e_mid; fw%c2_ex_z(ix,iy,iz)=-c2_e_z_mid;
             fw%c2_jx(ix,iy,iz)=-c2_j_mid;
@@ -1142,16 +1142,16 @@ contains
             fw%c1_ey_x(ix,iy,iz)=c1_e; fw%c2_ey_x(ix,iy,iz)=-c2_e_x;
             fw%c2_jy(ix,iy,iz)=-c2_j;
           elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em)
-            c2_e_z_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
+            c1_e_mid  = (1.0d0-2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em)
+            c2_e_z_mid= (fw%c_0/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /fs%hgs(3)
-            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
+            c2_e_x_mid= (fw%c_0/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /fs%hgs(1)
-            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy+1,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy+1,iz))/epsilon(fs%imedia(ix,iy+1,iz))*dt_em)
+            c2_j_mid  = (4.0d0*pi/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em)
             fw%c1_ey_z(ix,iy,iz)=c1_e_mid; fw%c2_ey_z(ix,iy,iz)= c2_e_z_mid;
             fw%c1_ey_x(ix,iy,iz)=c1_e_mid; fw%c2_ey_x(ix,iy,iz)=-c2_e_x_mid;
             fw%c2_jy(ix,iy,iz)=-c2_j_mid;
@@ -1167,16 +1167,16 @@ contains
             fw%c1_ez_y(ix,iy,iz)=c1_e; fw%c2_ez_y(ix,iy,iz)=-c2_e_y;
             fw%c2_jz(ix,iy,iz)=-c2_j;
           elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
-            c1_e_mid  =(1.0d0-2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em)
-            c2_e_x_mid=(fw%c_0/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
+            c1_e_mid  = (1.0d0-2.0d0*pi*fw%sig(fs%imedia(ix,iy,iz+1))/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy,iz+1))/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em)
+            c2_e_x_mid= (fw%c_0/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy,iz+1))/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                        /fs%hgs(1)
-            c2_e_y_mid=(fw%c_0/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix+1,iy,iz))/epsilon(fs%imedia(ix+1,iy,iz))*dt_em) &
+            c2_e_y_mid= (fw%c_0/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(2)
-            c2_j_mid  =(4.0d0*pi/epsilon(fs%imedia(ix,iy,iz+1))*dt_em) &
-                       /(1.0d0+2.0d0*pi*sigma(fs%imedia(ix,iy,iz+1))/epsilon(fs%imedia(ix,iy,iz+1))*dt_em)
+            c2_j_mid  = (4.0d0*pi/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy,iz+1))/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em)
             fw%c1_ez_x(ix,iy,iz)=c1_e_mid; fw%c2_ez_x(ix,iy,iz)= c2_e_x_mid;
             fw%c1_ez_y(ix,iy,iz)=c1_e_mid; fw%c2_ez_y(ix,iy,iz)=-c2_e_y_mid;
             fw%c2_jz(ix,iy,iz)=-c2_j_mid;
