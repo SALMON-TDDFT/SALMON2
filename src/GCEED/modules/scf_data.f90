@@ -18,34 +18,17 @@ use salmon_global
 implicit none
 
 !-------------------- Global variables
-
+integer :: itt
 integer :: itotNtime
 
 real(8),allocatable :: vloc_t(:,:,:,:)
 real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
 
-integer :: itt
-
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 integer :: DESCA( 50 ), DESCZ( 50 )
 
 real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
-
-!filename
-character(100) :: file_eigen
-character(100) :: file_RT_q
-character(100) :: file_alpha_q
-character(100) :: file_RT_e
-character(100) :: file_RT_dip2
-character(100) :: file_alpha_dip2
-character(100) :: file_RT_dip2_q
-character(100) :: file_alpha_dip2_q
-character(100) :: file_RT_dip2_e
-character(100) :: file_external
-character(100) :: file_out_rt_bin
-character(100) :: file_in_rt_bin
-character(100) :: file_Projection
 
 END MODULE scf_data
 

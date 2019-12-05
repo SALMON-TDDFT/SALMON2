@@ -111,8 +111,6 @@ else
   if(comm_is_root(nproc_id_global)) write(*,*) "non-orthogonal cell: using al_vec[1,2,3]"
 end if
 
-call set_filename
-
 
 contains
 
