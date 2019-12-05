@@ -20,6 +20,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
   use structures, only: s_rgrid, s_dft_system, s_scalar
   use salmon_communication, only: comm_is_root
   use misc_routines, only: get_wtime
+  use em_field, only: calc_E_ext
   use inputoutput
   use scf_data
   
@@ -74,18 +75,18 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
     else
         if(dt*dble(itt_t) <= tw1)then
           ipulse=1
-          call calc_env_trigon(ipulse,env_trigon_1)
+          call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_1,'y')
         !$OMP parallel do collapse(2) private(ix,iy,iz)
           do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
-            Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+  &
-                           E_amplitude1*(epdir_re1(1)*lg%coordinate(ix,1)+   &
-                                       epdir_re1(2)*lg%coordinate(iy,2)+   &
-                                       epdir_re1(3)*lg%coordinate(iz,3))*env_trigon_1  &
-                          +E_amplitude1*(epdir_im1(1)*lg%coordinate(ix,1)+   &
-                                       epdir_im1(2)*lg%coordinate(iy,2)+   &
-                                       epdir_im1(3)*lg%coordinate(iz,3))*env_trigon_1
+            Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)  &
+                             +( epdir_re1(1)*lg%coordinate(ix,1)   &
+                               +epdir_re1(2)*lg%coordinate(iy,2)   &
+                               +epdir_re1(3)*lg%coordinate(iz,3) )*env_trigon_1  &
+                             +( epdir_im1(1)*lg%coordinate(ix,1)   &
+                               +epdir_im1(2)*lg%coordinate(iy,2)   &
+                               +epdir_im1(3)*lg%coordinate(iz,3) )*env_trigon_1
           end do
           end do
           end do
@@ -94,18 +95,18 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
         end if
         if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
           ipulse=2
-          call calc_env_trigon(ipulse,env_trigon_2)
+          call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_2,'y')
           !$OMP parallel do collapse(2) private(ix,iy,iz)
           do iz=ix_sta_Vbox(3),ix_end_Vbox(3)
           do iy=ix_sta_Vbox(2),ix_end_Vbox(2)
           do ix=ix_sta_Vbox(1),ix_end_Vbox(1)
             Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)   &
-                          +E_amplitude2*(epdir_re2(1)*lg%coordinate(ix,1)+   &
-                                       epdir_re2(2)*lg%coordinate(iy,2)+   &
-                                       epdir_re2(3)*lg%coordinate(iz,3))*env_trigon_2  &
-                          +E_amplitude2*(epdir_im2(1)*lg%coordinate(ix,1)+   &
-                                       epdir_im2(2)*lg%coordinate(iy,2)+   &
-                                       epdir_im2(3)*lg%coordinate(iz,3))*env_trigon_2
+                             +( epdir_re2(1)*lg%coordinate(ix,1)   &
+                               +epdir_re2(2)*lg%coordinate(iy,2)   &
+                               +epdir_re2(3)*lg%coordinate(iz,3) )*env_trigon_2  &
+                             +( epdir_im2(1)*lg%coordinate(ix,1)   &
+                               +epdir_im2(2)*lg%coordinate(iy,2)   &
+                               +epdir_im2(3)*lg%coordinate(iz,3) )*env_trigon_2
           end do
           end do
           end do
@@ -121,7 +122,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
   if(num_dipole_source>=1)then
     if(dt*dble(itt_t) <= tw1)then
       ipulse=1
-      call calc_env_trigon(ipulse,env_trigon_1)
+      call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_1,'n')
 !$OMP parallel do collapse(2) private(ix,iy,iz)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -133,7 +134,7 @@ SUBROUTINE calcVbox(mg,lg,itt_t,system,Vbox)
     end if
     if(abs(dt*dble(itt_t)-0.5d0*tw1-t1_t2) < 0.5d0*tw2)then
       ipulse=2
-      call calc_env_trigon(ipulse,env_trigon_2)
+      call calc_E_ext(ipulse,dt*dble(itt_t),env_trigon_2,'n')
 !$OMP parallel do collapse(2) private(ix,iy,iz)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
