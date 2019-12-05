@@ -484,8 +484,8 @@ use deallocate_mat_sub
   
   
   call timer_begin(LOG_INIT_RT)
-  allocate(zc(N_hamil))
-  call taylor_coe(N_hamil,dt,zc)
+  allocate(rt%zc(N_hamil))
+  call taylor_coe(N_hamil,dt,rt)
 
   deallocate (R1)
 
