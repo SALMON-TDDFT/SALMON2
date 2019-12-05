@@ -144,11 +144,11 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      vloc_t(ix,iy,iz,is) = V_local(is)%f(ix,iy,iz)
-      vloc_new(ix,iy,iz,is) = 3d0*V_local(is)%f(ix,iy,iz) - 3d0*vloc_old(ix,iy,iz,is,1) + vloc_old(ix,iy,iz,is,2)
-      vloc_old(ix,iy,iz,is,2) = vloc_old(ix,iy,iz,is,1)
-      vloc_old(ix,iy,iz,is,1) = V_local(is)%f(ix,iy,iz)
-      V_local(is)%f(ix,iy,iz) = vloc_new(ix,iy,iz,is)
+      rt%vloc_t(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz)
+      rt%vloc_new(is)%f(ix,iy,iz) = 3d0*V_local(is)%f(ix,iy,iz) - 3d0*rt%vloc_old(is,1)%f(ix,iy,iz) + rt%vloc_old(is,2)%f(ix,iy,iz)
+      rt%vloc_old(is,2)%f(ix,iy,iz) = rt%vloc_old(is,1)%f(ix,iy,iz)
+      rt%vloc_old(is,1)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz)
+      V_local(is)%f(ix,iy,iz) = rt%vloc_new(is)%f(ix,iy,iz)
     end do
     end do
     end do

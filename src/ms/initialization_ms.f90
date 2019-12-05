@@ -260,6 +260,16 @@ use deallocate_mat_sub
   call allocate_orbital_complex(system%nspin,mg,info,tpsi)
   call allocate_dmatrix(system%nspin,mg,info,dmat)
   
+  if(propagator=='etrs')then
+    allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
+    do jspin=1,system%nspin
+      call allocate_scalar(mg,rt%vloc_t(jspin))
+      call allocate_scalar(mg,rt%vloc_new(jspin))
+      call allocate_scalar(mg,rt%vloc_old(jspin,1))
+      call allocate_scalar(mg,rt%vloc_old(jspin,2))
+    end do
+  end if
+ 
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
   call restart_rt(lg,mg,ng,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)

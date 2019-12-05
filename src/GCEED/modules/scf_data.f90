@@ -21,10 +21,6 @@ implicit none
 
 integer :: itotNtime
 
-real(8),allocatable :: vloc_t(:,:,:,:)
-real(8),allocatable :: vloc_new(:,:,:,:)
-real(8),allocatable :: vloc_old(:,:,:,:,:)
-
 integer :: itt
 
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
