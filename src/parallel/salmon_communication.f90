@@ -73,12 +73,20 @@ module salmon_communication
   end type
 
   interface comm_send
+    ! 4-D array
+    module procedure comm_send_array4d_double
+    module procedure comm_send_array4d_dcomplex
+
     ! 5-D array
     module procedure comm_send_array5d_double
     module procedure comm_send_array5d_dcomplex
   end interface
 
   interface comm_recv
+    ! 4-D array
+    module procedure comm_recv_array4d_double
+    module procedure comm_recv_array4d_dcomplex
+
     ! 5-D array
     module procedure comm_recv_array5d_double
     module procedure comm_recv_array5d_dcomplex
@@ -196,11 +204,10 @@ module salmon_communication
     ! 3-D array
     module procedure comm_bcast_array3d_double
     module procedure comm_bcast_array3d_dcomplex
-  
+
     ! 4-D array
     module procedure comm_bcast_array4d_double
-    ! module procedure comm_bcast_array3d_dcomplex
-    !! TODO: create broadcast routine for rank-4 tensor later ...
+    module procedure comm_bcast_array4d_dcomplex
 
     ! 5-D array
     module procedure comm_bcast_array5d_dcomplex
@@ -322,6 +329,42 @@ contains
     end if
   end subroutine
 
+
+  subroutine comm_send_array4d_double(invalue, ndest, ntag, ngroup)
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
+    implicit none
+    real(8), intent(in) :: invalue(:,:,:,:)
+    integer, intent(in) :: ndest, ntag, ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Send(invalue, size(invalue), MPI_DOUBLE_PRECISION, ndest, ntag, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_send_array4d_dcomplex(invalue, ndest, ntag, ngroup)
+    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_SIZE
+    implicit none
+    complex(8), intent(in) :: invalue(:,:,:,:)
+    integer, intent(in)    :: ndest, ntag, ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Send(invalue, size(invalue), MPI_DOUBLE_COMPLEX, ndest, ntag, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_recv_array4d_double(outvalue, nsrc, ntag, ngroup)
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
+    implicit none
+    real(8), intent(out) :: outvalue(:,:,:,:)
+    integer, intent(in)  :: nsrc, ntag, ngroup
+    integer :: ierr,istatus(MPI_STATUS_SIZE)
+    MPI_ERROR_CHECK(call MPI_Recv(outvalue, size(outvalue), MPI_DOUBLE_PRECISION, nsrc, ntag, ngroup, istatus, ierr))
+  end subroutine
+
+  subroutine comm_recv_array4d_dcomplex(outvalue, nsrc, ntag, ngroup)
+    use mpi, only: MPI_DOUBLE_COMPLEX, MPI_STATUS_SIZE
+    implicit none
+    complex(8), intent(out) :: outvalue(:,:,:,:)
+    integer, intent(in)     :: nsrc, ntag, ngroup
+    integer :: ierr,istatus(MPI_STATUS_SIZE)
+    MPI_ERROR_CHECK(call MPI_Recv(outvalue, size(outvalue), MPI_DOUBLE_COMPLEX, nsrc, ntag, ngroup, istatus, ierr))
+  end subroutine
 
   subroutine comm_send_array5d_double(invalue, ndest, ntag, ngroup)
     use mpi, only: MPI_DOUBLE_PRECISION, MPI_STATUS_SIZE
@@ -1068,6 +1111,21 @@ contains
     use mpi, only: MPI_DOUBLE_COMPLEX
     implicit none
     complex(8), intent(inout)     :: val(:,:,:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    integer :: rank, ierr
+    if (present(root)) then
+      rank = root
+    else
+      rank = 0
+    end if
+    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_COMPLEX, rank, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_bcast_array4d_dcomplex(val, ngroup, root)
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(inout)     :: val(:,:,:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     integer :: rank, ierr
