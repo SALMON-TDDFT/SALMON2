@@ -209,5 +209,51 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   return
 End Subroutine calc_Ac_ext
 
+Subroutine calc_E_ext(ipulse,t,E_ext,amp_flag)
+  use salmon_global,  only: ae_shape1,ae_shape2,tw1,tw2,omega1,omega2,&
+                            phi_cep1,phi_cep2,E_amplitude1,E_amplitude2,t1_t2
+  use math_constants, only: Pi
+  implicit none
+  integer,intent(in)      :: ipulse  ! 1: first pulse, 2: second pulse
+  real(8),intent(in)      :: t
+  real(8),intent(out)     :: E_ext
+  character(1),intent(in) :: amp_flag
+  real(8)                 :: alpha,beta,theta1,theta2,amp
+  character(16)           :: tae_shape
+  
+  if(ipulse==1)then
+    ! cos(theta1)**2
+    theta1 = Pi/tw1*(t-0.5d0*tw1)
+    alpha  = Pi/tw1
+    ! cos(theta2)
+    theta2 = omega1*(t-0.5d0*tw1)+phi_cep1*2d0*pi
+    beta   = omega1
+    !other
+    tae_shape = ae_shape1
+    amp       = E_amplitude1
+  else if(ipulse==2)then
+    ! cos(theta1)**2
+    theta1 = Pi/tw2*(t-t1_t2-0.5d0*tw1)
+    alpha  = Pi/tw2
+    ! cos(theta2)
+    theta2 = omega2*(t-t1_t2-0.5d0*tw1)+phi_cep2*2d0*pi
+    beta   = omega2
+    !other
+    tae_shape = ae_shape2
+    amp       = E_amplitude2
+  end if
+  
+  if(tae_shape=='Ecos2')then
+    E_ext = cos(theta1)**2*cos(theta2)
+  else if(tae_shape=='Acos2')then
+    E_ext = -( -alpha*sin(2d0*theta1)*cos(theta2)   &
+               -beta*cos(theta1)**2*sin(theta2) )/beta
+  end if
+  
+  if(amp_flag=='y') E_ext = amp*E_ext
+  
+  return
+End Subroutine calc_E_ext
+
 end module em_field
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
