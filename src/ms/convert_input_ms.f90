@@ -18,7 +18,6 @@ use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_bcast
 use inputoutput
 use set_numcpu
-use scf_data
 implicit none
 integer :: Ntime
 real(8) :: dip_spacing

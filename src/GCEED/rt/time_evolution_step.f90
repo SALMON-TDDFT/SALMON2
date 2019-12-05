@@ -24,10 +24,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
   use writefield
   use timer
-  use inputoutput
+  use salmon_global
   use taylor_sub
   use const, only: umass
-  use scf_data
   use allocate_mat_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree

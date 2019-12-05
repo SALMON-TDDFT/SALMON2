@@ -31,7 +31,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, rt, md, singlescal
                      V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                      pp, ppg, ppn )
 use inputoutput
-use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 
