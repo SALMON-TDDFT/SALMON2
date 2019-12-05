@@ -32,6 +32,7 @@ subroutine main_maxwell
   elapsed_time=get_wtime()-elapsed_time
   if(comm_is_root(nproc_id_global)) then
     write(*,'(A,f16.8)') " elapsed time [s] = ", elapsed_time
+    write(*,*)
   end if
   
 end subroutine main_maxwell

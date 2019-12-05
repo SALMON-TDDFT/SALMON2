@@ -7,8 +7,9 @@ set(SOURCES
     fdtd_coulomb_gauge.f90
     set_coo_em.f90
     find_point_em.f90
-    eh_calc.f90
+    eh_misc.f90
     eh_init.f90
+    eh_calc.f90
     eh_finalize.f90
     )
 
