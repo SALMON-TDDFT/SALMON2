@@ -20,8 +20,8 @@ subroutine calc_emfields(itt,nspin,rt,curr_in)
   use inputoutput, only: trans_longi
   implicit none
   integer,intent(in) :: itt
+  integer,intent(in) :: nspin
   type(s_rt),intent(inout) :: rt
-  integer,intent(in) :: itt,nspin
   real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
 
   rt%curr(1:3,itt) = curr_in(1:3,1)
