@@ -55,7 +55,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
 
   call init_process_distribution(system,comm,pinfo)
   call init_communicator_dft(comm,pinfo,info,info_field)
-  call init_grid_parallel(info%id_rko,info%isize_rko,lg,mg,ng) ! lg --> mg & ng
+  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
@@ -429,17 +429,24 @@ end subroutine init_grid_whole
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(myrank,nproc,lg,mg,ng)
+subroutine init_grid_parallel(myrank,nproc,pinfo,lg,mg,ng)
   use salmon_communication, only: comm_is_root
-  use salmon_global, only: yn_periodic,process_allocation,nproc_domain_orbital,nproc_domain_general,nproc_k,nproc_ob
-  use structures, only: s_rgrid
+  use salmon_global, only: yn_periodic,process_allocation
+  use structures, only: s_process_info,s_rgrid
   implicit none
-  integer      ,intent(in)    :: myrank,nproc
-  type(s_rgrid),intent(inout) :: lg
-  type(s_rgrid),intent(inout) :: mg,ng
+  integer,             intent(in)    :: myrank,nproc
+  type(s_process_info),intent(in)    :: pinfo
+  type(s_rgrid),       intent(inout) :: lg
+  type(s_rgrid),       intent(inout) :: mg,ng
   !
+  integer :: nproc_domain_orbital(3),nproc_domain_general(3),nproc_k,nproc_ob
   integer :: i1,i2,i3,i4,j1,j2,j3,ibox,j,ii
   integer :: nproc_domain_orbital_mul,ngo(3),ngo_mul
+
+  nproc_k              = pinfo%npk
+  nproc_ob             = pinfo%nporbital
+  nproc_domain_orbital = pinfo%npdomain_orbital
+  nproc_domain_general = pinfo%npdomain_general
 
   if ( allocated(mg%is_all) ) deallocate(mg%is_all)
   if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)
