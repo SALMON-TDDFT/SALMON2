@@ -51,6 +51,7 @@ module salmon_global
   character(256) :: sysname
   character(256) :: base_directory
   integer        :: output_buffer_interval
+  character(1)   :: yn_datafiles_converted
   character(1)   :: yn_restart
   character(256) :: directory_read_data
   character(1)   :: yn_self_checkpoint

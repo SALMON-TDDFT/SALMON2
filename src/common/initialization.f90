@@ -56,7 +56,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   call init_process_distribution(system,comm,pinfo)
   call init_communicator_dft(comm,pinfo,info,info_field)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,lg,mg,ng) ! lg --> mg & ng
-  call init_orbital_parallel_singlecell(system,info)
+  call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_r, neig)
@@ -278,14 +278,18 @@ end subroutine init_process_distribution
 
 !===================================================================================================================================
 
-subroutine init_orbital_parallel_singlecell(system,info)
+subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   use structures
-  use salmon_global, only: nproc_k,nproc_ob,nproc_domain_orbital
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel)      :: info
+  type(s_process_info)          :: pinfo
   !
-  integer :: io
+  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3)
+
+  nproc_k              = pinfo%npk
+  nproc_ob             = pinfo%nporbital
+  nproc_domain_orbital = pinfo%npdomain_orbital
 
 ! for single-cell calculations
   info%im_s = 1

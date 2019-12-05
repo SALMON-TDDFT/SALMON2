@@ -4,6 +4,7 @@
 
 &control
   sysname = 'Si'
+  yn_datafiles_converted = 'y'
 /
 
 &units
@@ -12,7 +13,10 @@
 
 &parallel
   yn_domain_parallel='y'
-  num_datafiles_in = 4
+  nproc_k = 1
+  nproc_ob = 2
+  nproc_domain_orbital = 1,1,2
+  nproc_domain_general = 1,2,2
 /
 
 &system

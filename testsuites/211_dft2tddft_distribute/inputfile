@@ -12,8 +12,10 @@
 
 &parallel
   yn_domain_parallel='y'
-  num_datafiles_in = 1
-  num_datafiles_out = 4
+  nproc_k = 4
+  nproc_ob = 1
+  nproc_domain_orbital = 1,1,1
+  nproc_domain_general = 1,2,2
 /
 
 &system

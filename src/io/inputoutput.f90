@@ -218,6 +218,7 @@ contains
       & sysname, &
       & base_directory, &
       & output_buffer_interval, &
+      & yn_datafiles_converted, &
       & yn_restart, &
       & directory_read_data, &
       & yn_self_checkpoint,  &
@@ -554,6 +555,7 @@ contains
     sysname               = 'default'
     base_directory        = './'
     output_buffer_interval= -1
+    yn_datafiles_converted= 'n'
     yn_restart            = 'n'
     directory_read_data   = 'restart/'
     yn_self_checkpoint    = 'n'
@@ -928,6 +930,7 @@ contains
     if(base_directory(ii:ii).ne.'/') &
        base_directory = trim(base_directory)//'/'
     call comm_bcast(output_buffer_interval,nproc_group_global)
+    call comm_bcast(yn_datafiles_converted,nproc_group_global)
     call comm_bcast(yn_restart            ,nproc_group_global)
     call comm_bcast(directory_read_data   ,nproc_group_global)
     ii = len_trim(directory_read_data)
@@ -1664,6 +1667,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'output_buffer_interval', output_buffer_interval
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_datafiles_converted', yn_datafiles_converted
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint

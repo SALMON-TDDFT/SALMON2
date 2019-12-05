@@ -8,4 +8,3 @@
 
 cp ../pseudo/Si_rps.dat ./
 ln -s ../211_dft2tddft_distribute/data_for_restart_rt ./restart
-

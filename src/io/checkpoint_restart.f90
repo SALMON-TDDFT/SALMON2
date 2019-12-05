@@ -237,13 +237,17 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   call write_wavefunction(odir,lg,mg,system,info,spsi,iself)
 
   !rho_inout
-  if(theory=='DFT'.or.calc_mode=='GS')then
-    call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
+  if((theory=='DFT'.or.calc_mode=='GS'))then
+    if (present(mixing)) then
+      call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
+    end if
   end if
 
   !Vh_stock
   if(theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT')then
-    call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
+    if (present(sVh_stock1) .and. present(sVh_stock2)) then
+      call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
+    end if
   end if
 
 end subroutine write_bin
@@ -251,7 +255,7 @@ end subroutine write_bin
 !===================================================================================================================================
 
 subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
-  use inputoutput, only: theory,calc_mode
+  use inputoutput, only: theory,calc_mode,yn_datafiles_converted
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global,nproc_group_global,nproc_size_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -310,7 +314,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   end if
 
   !debug check
-  if (yn_restart == 'y') then
+  if (yn_restart == 'y' .or. yn_datafiles_converted == 'y') then
     if (nprocs /= nproc_size_global) then
       stop 'number of processes do not match!'
     end if
@@ -336,12 +340,16 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
 
   !rho_inout
   if(theory=='DFT'.or.calc_mode=='GS')then
-    call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
+    if (present(mixing)) then
+      call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
+    end if
   end if
 
   !Vh_stock
   if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
-    call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
+    if (present(sVh_stock1) .and. present(sVh_stock2)) then
+      call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
+    end if
   end if
 
 end subroutine read_bin
@@ -349,7 +357,7 @@ end subroutine read_bin
 !===================================================================================================================================
 
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
-  use inputoutput, only: num_datafiles_out
+  use inputoutput, only: num_datafiles_out,theory
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use salmon_parallel, only: nproc_id_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
@@ -372,11 +380,15 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 
   iu2_w = 87
 
-  call set_dg(lg,mg,dg,num_datafiles_out,is_self_checkpoint)
+  call set_dg(lg,mg,dg,num_datafiles_out,is_self_checkpoint .or. theory == 'DFT2TDDFT')
 
   if(is_self_checkpoint) then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
+    open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
+  else if(theory == 'DFT2TDDFT') then
+    ! write all processes (each process dump data)
+    write(dir_file_out, '(A,A,I6.6,A)') trim(odir),'wfn',nproc_id_global,".bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
   else if(num_datafiles_out==1.and.comm_is_root(nproc_id_global)) then
     ! write root process
@@ -389,7 +401,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   end if
 
   !write wavefunction
-  if(is_self_checkpoint)then
+  if(is_self_checkpoint .or. theory == 'DFT2TDDFT')then
     if(allocated(spsi%rwf))then
       write (iu2_w) spsi%rwf(dg%is(1):dg%ie(1),   &
                              dg%is(2):dg%ie(2),   &
@@ -720,7 +732,7 @@ end subroutine write_Vh_stock
 
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use inputoutput, only: iperiodic,num_datafiles_in
+  use inputoutput, only: iperiodic,num_datafiles_in,yn_datafiles_converted
   use salmon_parallel, only: nproc_id_global,nproc_group_global
   use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -745,11 +757,15 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   iu2_r = 86
   comm = nproc_group_global
 
-  call set_dg(lg,mg,dg,num_datafiles_in,is_self_checkpoint)
+  call set_dg(lg,mg,dg,num_datafiles_in,is_self_checkpoint .or. yn_datafiles_converted == 'y')
 
   if(is_self_checkpoint) then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
+    open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
+  else if(yn_datafiles_converted == 'y') then
+    ! read all processes (each process load dumped data)
+    write(dir_file_in, '(A,A,I6.6,A)') trim(idir),'wfn',nproc_id_global,".bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
   else if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
     ! read root process
@@ -761,7 +777,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
     open(iu2_r,file=dir_file_in,form='unformatted')
   end if
 
-  if(is_self_checkpoint)then
+  if(is_self_checkpoint .or. yn_datafiles_converted == 'y')then
     if (allocated(spsi%rwf)) then
       read (iu2_r) spsi%rwf(dg%is(1):dg%ie(1),   &
                             dg%is(2):dg%ie(2),   &

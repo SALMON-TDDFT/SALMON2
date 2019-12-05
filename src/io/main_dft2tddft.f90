@@ -14,27 +14,32 @@
 !  limitations under the License.
 !
 
+#include "config.h"
+
 subroutine main_dft2tddft
 use structures
-use salmon_global, only: ispin,cval,xc,xname,cname,directory_read_data
+use salmon_global, only: ispin,cval,xc,xname,cname,directory_read_data,calc_mode
 use salmon_parallel, only: nproc_group_global
+use salmon_communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
 use salmon_xc
 use timer
 use initialization_sub
+use init_communicator
 use checkpoint_restart_sub
+use set_numcpu, only: check_numcpu
 implicit none
 integer :: Miter
 character(100) :: file_atoms_coo
 
-type(s_rgrid) :: lg
-type(s_rgrid) :: mg
-type(s_rgrid) :: ng
-type(s_process_info) :: pinfo
-type(s_orbital_parallel) :: info
-type(s_field_parallel) :: info_field
+type(s_rgrid) :: lg_scf,lg_rt
+type(s_rgrid) :: mg_scf,mg_rt
+type(s_rgrid) :: ng_scf,ng_rt
+type(s_process_info) :: pinfo_scf,pinfo_rt
+type(s_orbital_parallel) :: info_scf,info_rt
+type(s_field_parallel) :: info_field_scf,info_field_rt
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
-type(s_dft_system) :: system
+type(s_dft_system) :: system_scf,system_rt
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
@@ -47,38 +52,223 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_ofile)  :: ofl
 
+integer :: icomm,irank,nprocs
+logical :: if_stop
+character(100) :: dir_file_out
+integer,parameter :: fh = 41
+
+call comm_get_globalinfo(icomm,irank,nprocs)
+
+if(comm_is_root(irank))then
+  print *, '==============================================='
+  print *, 'DFT2TDDFT'
+  print *, '  DFT calulated data convert to calculate TDDFT'
+  print *, '==============================================='
+end if
+
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
+
 call timer_begin(LOG_INIT_GS)
 
 call convert_input_scf(file_atoms_coo)
 
 ! please move folloings into initialization_dft
-call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
-allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
+call init_dft(nproc_group_global,pinfo_scf,info_scf,info_field_scf,lg_scf,mg_scf,ng_scf,system_scf,stencil,fg,poisson,srg,srg_ng,ofl)
+allocate( srho_s(system_scf%nspin),V_local(system_scf%nspin),sVxc(system_scf%nspin) )
 
-
-call initialization1_dft( system, energy, stencil, fg, poisson,  &
-                          lg, mg, ng,  &
-                          pinfo, info, info_field,  &
+call initialization1_dft( system_scf, energy, stencil, fg, poisson,  &
+                          lg_scf, mg_scf, ng_scf,  &
+                          pinfo_scf, info_scf, info_field_scf,  &
                           srg, srg_ng,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
                           ofl )
 
-call read_bin(directory_read_data,lg,mg,ng,system,info,spsi,Miter)
+call read_bin(directory_read_data,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
 
 call timer_end(LOG_INIT_GS)
 
+
 ! Redistributed write to use TDDFT calculation.
+! ---------------------------------------------------------
 call timer_begin(LOG_WRITE_GS_DATA)
-call write_bin(ofl%dir_out_restart,lg,mg,ng,system,info,spsi,Miter)
+
+calc_mode = 'RT' ! FIXME
+call init_dft_system(lg_rt,system_rt,stencil)
+
+pinfo_rt%npk                 = 1 !pinfo_scf%npk
+pinfo_rt%nporbital           = 2 !pinfo_scf%nporbital
+pinfo_rt%npdomain_orbital    = [1,1,2] !pinfo_scf%npdomain_orbital
+pinfo_rt%npdomain_general    = pinfo_scf%npdomain_general
+pinfo_rt%npdomain_general_dm = pinfo_scf%npdomain_general_dm
+
+if (comm_is_root(irank)) then
+  if_stop = .not. check_numcpu(icomm, pinfo_rt)
+end if
+call comm_bcast(if_stop, icomm)
+if (if_stop) stop 'fail: check_numcpu'
+
+call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
+call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)
+call init_grid_parallel(irank,nprocs,pinfo_rt,lg_rt,mg_rt,ng_rt)
+
+call deallocate_orbital(shpsi)
+call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)
+
+call convert_wave_function
+
+! TODO: move to checkpoint_restart.f90
+if(comm_is_root(irank))then
+!information
+  dir_file_out = trim(ofl%dir_out_restart)//"info.bin"
+  open(fh,file=dir_file_out,form='unformatted')
+  write(fh) system_scf%nk
+  write(fh) system_scf%no
+  write(fh) Miter
+  write(fh) nprocs
+  close(fh)
+
+!occupation
+  dir_file_out = trim(ofl%dir_out_restart)//"occupation.bin"
+  open(fh,file=dir_file_out,form='unformatted')
+  write(fh) system_scf%rocc(1:system_scf%no,1:system_scf%nk,1:system_scf%nspin)
+  close(fh)
+end if
+
+call write_wavefunction(ofl%dir_out_restart,lg_rt,mg_rt,system_rt,info_rt,shpsi,.false.)
+! TODO: move to checkpoint_restart.f90
+
 call timer_end(LOG_WRITE_GS_DATA)
+
 
 call finalize_xc(xc_func)
 
 call timer_end(LOG_TOTAL)
+
+contains
+
+subroutine convert_wave_function
+use salmon_communication, only: comm_summation, comm_create_group_byid, &
+                                comm_proc_null, comm_send, comm_recv, comm_bcast
+implicit none
+integer,allocatable    :: is_ref(:,:,:),is_ref_srank(:,:,:),is_ref_rrank(:,:,:)
+integer,allocatable    :: irank_src(:,:),irank_dst(:,:)
+real(8),allocatable    :: dbuf1(:,:,:,:),dbuf2(:,:,:,:)
+complex(8),allocatable :: zbuf1(:,:,:,:),zbuf2(:,:,:,:)
+integer :: ik,io,jrank,krank
+
+! get referrer
+allocate(is_ref      (system_scf%no,system_scf%nk,0:nprocs-1))
+allocate(is_ref_srank(system_scf%no,system_scf%nk,0:nprocs-1)) ! SCF
+allocate(is_ref_rrank(system_scf%no,system_scf%nk,0:nprocs-1)) ! RT
+
+is_ref = 0
+is_ref(info_scf%io_s:info_scf%io_e, &
+       info_scf%ik_s:info_scf%ik_e, irank) = 1
+call comm_summation(is_ref,is_ref_srank,size(is_ref),icomm)
+
+is_ref = 0
+is_ref(info_rt%io_s:info_rt%io_e, &
+       info_rt%ik_s:info_rt%ik_e, irank) = 1
+call comm_summation(is_ref,is_ref_rrank,size(is_ref),icomm)
+
+
+! find src rank and dst rank
+allocate(irank_src(system_scf%no,system_scf%nk))
+allocate(irank_dst(system_scf%no,system_scf%nk))
+
+irank_src = -1
+irank_dst = -1
+
+do ik=1,system_scf%nk
+do io=1,system_scf%no
+  ! src (SCF) rank
+  do jrank=0,nprocs-1
+    if (is_ref_srank(io,ik,jrank) >= 1) then
+      irank_src(io,ik) = jrank
+      exit
+    end if
+  end do
+
+  ! dst (RT) rank
+  do jrank=0,nprocs-1
+    if (is_ref_rrank(io,ik,jrank) >= 1) then
+      irank_dst(io,ik) = jrank
+      exit
+    end if
+  end do
+end do
+end do
+
+
+! conversion
+if (allocated(spsi%rwf)) then
+  allocate(dbuf1(lg_scf%is(1):lg_scf%ie(1), &
+                 lg_scf%is(2):lg_scf%ie(2), &
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+  allocate(dbuf2(lg_scf%is(1):lg_scf%ie(1), &
+                 lg_scf%is(2):lg_scf%ie(2), &
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+end if
+if (allocated(spsi%zwf)) then
+  allocate(zbuf1(lg_scf%is(1):lg_scf%ie(1), &
+                 lg_scf%is(2):lg_scf%ie(2), &
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+  allocate(zbuf2(lg_scf%is(1):lg_scf%ie(1), &
+                 lg_scf%is(2):lg_scf%ie(2), &
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+end if
+
+do ik=1,system_scf%nk
+do io=1,system_scf%no
+  ! gather rgrid data
+  if (info_scf%ik_s <= ik .and. ik <= info_scf%ik_e .and. &
+      info_scf%io_s <= io .and. io <= info_scf%io_e) then
+    if (allocated(dbuf1)) then
+      dbuf1 = 0d0
+      dbuf1(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:) &
+        = spsi%rwf(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:,io,ik,1)
+      call comm_summation(dbuf1,dbuf2,size(dbuf1),info_scf%icomm_r)
+    end if
+    if (allocated(zbuf1)) then
+      zbuf1 = 0d0
+      zbuf1(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:) &
+        = spsi%zwf(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:,io,ik,1)
+      call comm_summation(zbuf1,zbuf2,size(zbuf1),info_scf%icomm_r)
+    end if
+  end if
+
+  ! send representive SCF rank to RT rank
+  jrank = irank_src(io,ik)
+  krank = irank_dst(io,ik)
+  if (jrank == irank) then
+    if (allocated(dbuf2)) call comm_send(dbuf2, krank, io*system_scf%nk+ik, icomm)
+    if (allocated(zbuf2)) call comm_send(zbuf2, krank, io*system_scf%nk+ik, icomm)
+  else if (krank == irank) then
+    if (allocated(dbuf2)) call comm_recv(dbuf2, jrank, io*system_scf%nk+ik, icomm)
+    if (allocated(zbuf2)) call comm_recv(zbuf2, jrank, io*system_scf%nk+ik, icomm)
+  end if
+
+  ! scatter rgrid data
+  if (info_rt%ik_s <= ik .and. ik <= info_rt%ik_e .and. &
+      info_rt%io_s <= io .and. io <= info_rt%io_e) then
+    if (allocated(dbuf2)) then
+      call comm_bcast(dbuf2, info_rt%icomm_r)
+      shpsi%zwf(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:,io,ik,1) &
+        = cmplx(dbuf2(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:))
+    end if
+    if (allocated(zbuf2)) then
+      call comm_bcast(zbuf2, info_rt%icomm_r)
+      shpsi%zwf(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:,io,ik,1) &
+        = zbuf2(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:)
+    end if
+  end if
+end do
+end do
+
+end subroutine convert_wave_function
 
 end subroutine main_dft2tddft
