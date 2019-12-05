@@ -84,7 +84,7 @@ call initialization_rt( Mit, system, energy, rt, md, singlescale,  &
 
 
 call timer_begin(LOG_RT_ITERATION)
-TE : do itt=Mit+1,itotNtime
+TE : do itt=Mit+1,Mit+nt
 
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &

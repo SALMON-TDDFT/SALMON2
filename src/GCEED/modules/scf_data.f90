@@ -17,8 +17,5 @@ MODULE scf_data
 use salmon_global
 implicit none
 
-!-------------------- Global variables
-integer :: itotNtime
-
 END MODULE scf_data
 

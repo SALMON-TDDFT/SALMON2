@@ -248,7 +248,7 @@ SUBROUTINE time_evolution_step(Mit,itt,lg,mg,ng,system,rt,info,info_field,stenci
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
-  if(itt==1.or.itt==itotNtime.or.mod(itt,itcalc_ene)==0)then
+  if(itt==1.or.itt==Mit+nt.or.mod(itt,itcalc_ene)==0)then
     call timer_begin(LOG_CALC_EIGEN_ENERGY)
     ! tpsi,spsi_in = working arrays
     call calc_eigen_energy(energy,spsi_out,tpsi,spsi_in,system,info,mg,V_local,stencil,srg,ppg)
