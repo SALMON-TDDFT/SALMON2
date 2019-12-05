@@ -84,7 +84,7 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
-type(s_ofile)  :: ofile
+type(s_ofile)  :: ofl
 type(s_band_dft) ::band
 
 logical :: rion_update
@@ -102,7 +102,7 @@ call timer_begin(LOG_INIT_GS)
 call convert_input_scf(file_atoms_coo)
 
 ! please move folloings into initialization_dft 
-call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
@@ -113,7 +113,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
-                          ofile )
+                          ofl )
 
 call initialization2_dft( Miter, nspin, rion_update,  &
                           system, energy, stencil, fg, poisson,  &
@@ -308,7 +308,7 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
+call write_bin(ofl%dir_out_restart,lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY

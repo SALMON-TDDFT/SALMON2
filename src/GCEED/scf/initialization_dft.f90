@@ -22,7 +22,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                                 spsi, shpsi, sttpsi,  &
                                 pp, ppg,  &
-                                ofile )
+                                ofl )
 use math_constants, only: pi, zi
 use structures
 use salmon_parallel, only: nproc_id_global!,nproc_group_global
@@ -64,13 +64,13 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
-type(s_ofile)  :: ofile
+type(s_ofile)  :: ofl
 
 integer,parameter :: Nd = 4
 
 integer :: jspin
 
-!call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+!call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 
 call init_code_optimization
 call allocate_mat(ng,mg,lg) ! future work: remove this line
@@ -249,3 +249,120 @@ integer :: Miter,jspin, nspin
 
 
 end subroutine initialization2_dft
+
+!====================================
+subroutine initialization_dft_md( Miter, rion_update,  &
+                                system,md,energy,stencil,fg,poisson,  &
+                                lg,mg,ng,  &
+                                info,info_field,  &
+                                srg,srg_ng,  &
+                                srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
+                                spsi,shpsi,sttpsi,  &
+                                pp,ppg,ppn,  &
+                                xc_func,mixing )
+  use math_constants, only: pi, zi
+  use const, only: hartree2J,kB
+  use structures
+  use salmon_parallel, only: nproc_id_global
+  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use salmon_xc
+  use timer
+  use scf_iteration_sub
+  use density_matrix, only: calc_density
+  use writefield
+  use global_variables_scf
+  use hartree_sub, only: hartree
+  use force_sub
+  use write_sub
+  use read_gs
+  use code_optimization
+  use initialization_sub
+  use occupation
+  use input_pp_sub
+  use prep_pp_sub
+  use mixing_sub
+  use checkpoint_restart_sub
+  use hamiltonian
+  use salmon_total_energy
+  use band_dft_sub
+  use md_sub, only: init_md
+  implicit none
+  type(s_rgrid) :: lg
+  type(s_rgrid) :: mg
+  type(s_rgrid) :: ng
+  type(s_orbital_parallel) :: info
+  type(s_field_parallel) :: info_field
+  type(s_sendrecv_grid) :: srg, srg_ng
+  type(s_orbital) :: spsi,shpsi,sttpsi
+  type(s_dft_system) :: system
+  type(s_md) :: md
+  type(s_poisson) :: poisson
+  type(s_stencil) :: stencil
+  type(s_xc_functional) :: xc_func
+  type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
+  type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
+  type(s_reciprocal_grid) :: fg
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
+  type(s_pp_nlcc) :: ppn
+  type(s_dft_energy) :: energy
+  type(s_mixing) :: mixing
+  type(s_cg)     :: cg
+  type(s_band_dft) ::band
+  
+  logical :: rion_update
+  integer :: Miter,ix,iy,iz
+  real(8) :: sum1
+
+  if(allocated(rho_old%f))    deallocate(rho_old%f)
+  if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
+  call allocate_scalar(ng,rho_old)
+  call allocate_scalar(ng,Vlocal_old)
+
+!$OMP parallel do private(iz,iy,ix)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+     rho_old%f(ix,iy,iz)   = srho%f(ix,iy,iz)
+     Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
+  end do
+  end do
+  end do
+
+  !-------------- SCF Iteration ----------------
+  !Iteration loop for SCF (DFT_Iteration)
+  Miter=0
+  call scf_iteration_dft( Miter,rion_update,sum1,  &
+                          system,energy,  &
+                          lg,mg,ng,  &
+                          info,info_field,  &
+                          poisson,fg,  &
+                          cg,mixing,  &
+                          stencil,  &
+                          srg,srg_ng,   &
+                          spsi,shpsi,sttpsi,  &
+                          srho,srho_s,  &
+                          V_local,sVh,sVxc,sVpsl,xc_func,  &
+                          pp,ppg,ppn,  &
+                          rho_old,Vlocal_old,  &
+                          band,1 )
+
+  call init_md(system,md)
+  call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+
+  md%Uene0 = energy%E_tot
+  md%E_tot0= energy%E_tot + md%Tene
+
+  md%Uene  = energy%E_tot
+  md%E_tot = energy%E_tot + md%Tene
+  md%Htot  = energy%E_tot + md%E_nh  !for NHC
+
+  md%Enh_gkTlns = 0d0
+  md%E_nh       = 0d0
+  if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
+     md%gkT = 3d0*natom * kB/hartree2J * temperature0_ion_k
+     md%Qnh = md%gkT * thermostat_tau**2d0
+  endif
+
+
+end subroutine initialization_dft_md

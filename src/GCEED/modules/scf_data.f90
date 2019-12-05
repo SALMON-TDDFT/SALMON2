@@ -19,7 +19,6 @@ implicit none
 
 !-------------------- Global variables
 
-complex(8), allocatable :: zc(:)
 integer :: itotNtime
 
 real(8),allocatable :: vloc_t(:,:,:,:)
@@ -27,12 +26,6 @@ real(8),allocatable :: vloc_new(:,:,:,:)
 real(8),allocatable :: vloc_old(:,:,:,:,:)
 
 integer :: itt
-
-character(100):: file_Projection
-
-
-!real(8),allocatable :: curr(:,:)
-
 
 integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 integer :: DESCA( 50 ), DESCZ( 50 )
@@ -52,6 +45,7 @@ character(100) :: file_RT_dip2_e
 character(100) :: file_external
 character(100) :: file_out_rt_bin
 character(100) :: file_in_rt_bin
+character(100) :: file_Projection
 
 END MODULE scf_data
 

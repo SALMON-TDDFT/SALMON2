@@ -65,7 +65,6 @@ type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
-type(s_ofile) :: ofile
 
 integer :: Mit
 integer :: nntime
@@ -143,7 +142,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi_out,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+  call write_bin(ofl%dir_out_restart,lg,mg,ng,system,info,spsi_out,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
 end if
 
 call deallocate_mat

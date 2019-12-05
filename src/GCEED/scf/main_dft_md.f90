@@ -29,7 +29,7 @@ use global_variables_scf
 use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
-use write_sub
+use write_sub, only: write_dft_md_data,write_xyz,write_band_information,write_eigen,write_info_data,write_dos,write_pdos
 use read_gs
 use code_optimization
 use initialization_sub
@@ -66,21 +66,14 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
-type(s_ofile)  :: ofile
 type(s_band_dft) ::band
-type(s_rt) :: rt
+type(s_ofile) :: ofl
 type(s_md) :: md
 
-integer :: ix,iy,iz, iatom,nspin
-real(8) :: sum1
-character(100) :: file_atoms_coo, comment_line
-
 logical :: rion_update
-integer :: it, Miter
-real(8),allocatable :: FionE(:,:)
-
-real(8) :: dt_h, Uene0, E_tot0
-real(8) :: Htot, Enh, Enh_gkTlns, gkT, Qnh  !NHC xxx 
+integer :: ix,iy,iz, nspin, it, Miter
+real(8) :: dt_h, sum1
+character(100) :: file_atoms_coo, comment_line
 
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -88,11 +81,11 @@ call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
+it=0
 call convert_input_scf(file_atoms_coo)
 
-
 ! please move folloings into initialization_dft 
-call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
@@ -103,7 +96,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
-                          ofile )
+                          ofl )
 
 call initialization2_dft( it, nspin, rion_update,  &
                           system, energy, stencil, fg, poisson,  &
@@ -115,34 +108,28 @@ call initialization2_dft( it, nspin, rion_update,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
 
-
-it=0
-call init_A(nt,it,rt)
-!electric field:---- not yet
-!if(iperiodic==3) call calc_Aext(Mit,rt)
-!for isolated system, use Vbox ...
-
-call init_md(system,md)
-
+call initialization_dft_md( it, rion_update,  &
+                          system, md, energy, stencil, fg, poisson,  &
+                          lg, mg, ng,  &
+                          info, info_field,   &
+                          srg, srg_ng,  &
+                          srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
+                          spsi, shpsi, sttpsi,  &
+                          pp, ppg, ppn,   &
+                          xc_func, mixing )
 
 call timer_end(LOG_INIT_GS)
 
 !-------------  MD Loop ------------------
+
+!Export initial step
+call write_dft_md_data(0,ofl,md)
 
 write(comment_line,10) 0
 call write_xyz(comment_line,"new","r  ",system)
 10 format("#Adiabatic-MD time step=",i5)
 
 dt_h       = dt*0.5d0
-
-!  Enh_gkTlns = 0d0
-!  Enh        = 0d0
-!  if(ensemble=="NVT" .and. thermostat=="nose-hoover") then
-!     gkT = 3d0*NI * kB/hartree2J*temperature0_ion_k
-!     Qnh = gkT * thermostat_tau**2d0
-!  endif
-
-allocate( FionE(3,system%nion) )
 
 if(comm_is_root(nproc_id_global)) then
    write(*,'(3a)')"# 1.time[au], 2.Tene(ion)[au], 3.Uene(gs)[au], 4.Ework[au], ",&
@@ -193,70 +180,32 @@ MD_Loop : do it=1,nt
                            rho_old,Vlocal_old,  &
                            band,1 )
 
-!   ! output the wavefunctions for next GS calculations
-!   if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
-!      select case(iperiodic)
-!      case(3)
-!         call write_wfn(lg,mg,spsi,info,system)
-!         ! Experimental Implementation of Inner-Product Outputs:
-!         call write_prod_dk_data(lg, mg, system, info, spsi) 
-!      case(0)
-!         write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
-!      end select
-!   end if
-
-   !! output transition moment (currently no support in dft_md)
-   !if(yn_out_tm == 'y') then
-   !   select case(iperiodic)
-   !   case(3)
-   !      call write_k_data(system,stencil)
-   !      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
-   !   case(0)
-   !      write(*,*) "error: yn_out_tm='y' & iperiodic=0"
-   !   end select
-   !end if
-
    ! force
    call calc_force_salmon(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
 
-   !force on ion directly from field --- should put in calc_force_salmon?
-   do iatom=1,system%nion
-      FionE(:,iatom) = pp%Zps(Kion(iatom)) * rt%E_tot(:,it)
-   enddo
-   system%Force(:,:) = system%Force(:,:) + FionE(:,:)
-
-
    call time_evolution_step_md_part2(system,md)
 
-   if(it==1) then
-      Uene0 = energy%E_tot
-      E_tot0= energy%E_tot + md%Tene
-   endif
    md%Uene  = energy%E_tot
-   md%E_tot = energy%E_tot + md%Tene  !??
-   Htot     = energy%E_tot + Enh      !for NHC
-   !how about field energy??
-
+   md%E_tot = energy%E_tot + md%Tene
+   md%Htot  = energy%E_tot + md%E_nh  !for NHC
 
    !---Write section---
    ! Export to standard log file
    if(comm_is_root(nproc_id_global)) then
-      write(*,120) it*dt, md%Tene, md%Uene, md%E_work, md%E_tot, md%E_tot-E_tot0,&
-                   Enh, Htot, md%Temperature, sum1
+      write(*,120) it*dt, md%Tene,md%Uene,md%E_work,md%E_tot,md%E_tot-md%E_tot0,&
+                   md%E_nh, md%Htot, md%Temperature, sum1
 120   format(1x,f10.4, 7e20.10E3,f12.3,e15.8)
    endif
 
-
-!   ! Export to file_rt_data
-!   call write_md_gs_data(it,Vion_gs,Tion,Temperature_ion,Eall,Eall00,Ework_integ_fdR_gs,Enh,Htot)
-
+   ! Export to file_dft_md_data
+   call write_dft_md_data(it,ofl,md)
 
    ! Export to file_trj
    if (yn_out_rvf_rt=='y' .and. mod(it,out_rvf_rt_step)==0)then
       write(comment_line,110) it, it*dt
 110   format("#md-gs  step=",i8,"   time",e16.6)
 !      if(ensemble=="NVT" .and. thermostat=="nose-hoover") &
-!           write(comment_line,112) trim(comment_line), xi_nh
+!           write(comment_line,112) trim(comment_line), md%xi_nh
 !112   format(a,"  xi_nh=",e18.10)
       call write_xyz(comment_line,"add","rvf",system)
    endif
@@ -281,22 +230,22 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 !xxxxxxxxxxxx
 
 ! write GS: basic data
-call write_band_information(system,energy)
-call write_eigen(file_eigen,system,energy)
-call write_info_data(it,system,energy,pp)
+!call write_band_information(system,energy)
+!call write_eigen(file_eigen,system,energy)
+!call write_info_data(it,system,energy,pp)
 
 ! write GS: analysis option
-if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs)
-if(yn_out_dos =='y') call write_dos(system,energy)
-if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
-if(yn_out_elf =='y') call write_elf(0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)
+!if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
+!if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs)
+!if(yn_out_dos =='y') call write_dos(system,energy)
+!if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
+!if(yn_out_elf =='y') call write_elf(0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call write_bin(ofile%dir_out_restart,lg,mg,ng,system,info,spsi,it,mixing=mixing)
+call write_bin(ofl%dir_out_restart,lg,mg,ng,system,info,spsi,it,mixing=mixing)
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY

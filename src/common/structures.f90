@@ -84,6 +84,7 @@ module structures
      real(8), allocatable :: rIe(:)    !rename later
      real(8), allocatable :: curr(:,:), E_ext(:,:), E_ind(:,:), E_tot(:,:)
      real(8), allocatable :: Ac_ext(:,:), Ac_ind(:,:), Ac_tot(:,:)
+     complex(8), allocatable :: zc(:)
   end type s_rt
 
   type s_process_info
@@ -325,15 +326,26 @@ module structures
   end type s_fdtd_field
 
   type s_md
-     real(8) :: Tene,Uene,E_tot,E_work, Temperature, xi_nh
+     real(8) :: Uene,  E_tot, Tene, E_work, E_nh, Htot
+     real(8) :: Uene0, E_tot0 
+     real(8) :: Enh_gkTlns, xi_nh, Qnh, gkT 
+     real(8) :: Temperature
      real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
 ! output files
   type s_ofile
-     integer :: fh_rt, fh_rt_energy, fh_response, fh_pulse
-     character(256) :: file_rt_data, file_rt_energy_data
-     character(256) :: file_response_data, file_pulse_data
+     integer :: fh_rt
+     integer :: fh_rt_energy
+     integer :: fh_response
+     integer :: fh_pulse
+     integer :: fh_dft_md
+     character(256) :: file_rt_data
+     character(256) :: file_rt_energy_data
+     character(256) :: file_response_data
+     character(256) :: file_pulse_data
+     character(256) :: file_dft_md
+     !
      character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
 
