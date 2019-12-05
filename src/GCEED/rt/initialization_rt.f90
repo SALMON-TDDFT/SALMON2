@@ -92,7 +92,7 @@ use deallocate_mat_sub
   type(ls_singlescale) :: singlescale
   type(s_ofile) :: ofile
   
-  integer :: iob, i1,i2,i3, iik,jspin, Mit, m, n
+  integer :: iob, i,i1,i2,i3, iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
   real(8) :: rbox_array(10), rbox_array2(10)
@@ -187,6 +187,16 @@ use deallocate_mat_sub
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi)
   call allocate_dmatrix(system%nspin,mg,info,dmat)
+  
+  if(propagator=='etrs')then
+    allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
+    do jspin=1,system%nspin
+      call allocate_scalar(mg,rt%vloc_t(jspin))
+      call allocate_scalar(mg,rt%vloc_new(jspin))
+      call allocate_scalar(mg,rt%vloc_old(jspin,1))
+      call allocate_scalar(mg,rt%vloc_old(jspin,2))
+    end do
+  end if
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
@@ -383,11 +393,11 @@ use deallocate_mat_sub
   end do
   
   if(num_dipole_source>=1)then
-    allocate(vonf_sd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(eonf_sd(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    vonf_sd=0.d0
-    eonf_sd=0.d0
-    call set_vonf_sd(mg,lg,system%Hgs)
+    call allocate_scalar(mg,rt%vonf)
+    do i=1,3
+      call allocate_scalar(mg,rt%eonf(i))
+    end do
+    call set_vonf(mg,lg,system%Hgs,rt)
   end if
   
   if(yn_restart /= 'y')then

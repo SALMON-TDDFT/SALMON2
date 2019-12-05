@@ -21,14 +21,5 @@ implicit none
 integer :: itt
 integer :: itotNtime
 
-real(8),allocatable :: vloc_t(:,:,:,:)
-real(8),allocatable :: vloc_new(:,:,:,:)
-real(8),allocatable :: vloc_old(:,:,:,:,:)
-
-integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
-integer :: DESCA( 50 ), DESCZ( 50 )
-
-real(8),allocatable :: vonf_sd(:,:,:),eonf_sd(:,:,:,:)
-
 END MODULE scf_data
 
