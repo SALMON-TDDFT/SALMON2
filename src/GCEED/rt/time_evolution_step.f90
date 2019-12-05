@@ -136,7 +136,7 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   if(propagator=='etrs')then
     if(info%numo.ge.1)then
     ! spsi_in --> tpsi, (spsi_out = working array)
-      call taylor(mg,system,info,stencil,srg,spsi_in,tpsi,spsi_out,ppg,V_local,zc)
+      call taylor(mg,system,info,stencil,srg,spsi_in,tpsi,spsi_out,ppg,V_local,rt)
     end if
 
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
@@ -183,14 +183,14 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
 
     if(info%numo.ge.1)then
     ! tpsi --> spsi_out (spsi_in = working array)
-      call taylor(mg,system,info,stencil,srg,tpsi,spsi_out,spsi_in,ppg,V_local,zc)
+      call taylor(mg,system,info,stencil,srg,tpsi,spsi_out,spsi_in,ppg,V_local,rt)
     end if
 
   else 
 
     if(info%numo.ge.1)then
     ! spsi_in --> spsi_out (tpsi = working array)
-      call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,zc)
+      call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
     end if
     
   end if

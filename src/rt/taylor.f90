@@ -19,7 +19,7 @@ module taylor_sub
 contains
 
 subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
-                  ppg,V_local,zc)
+                  ppg,V_local,rt)
   use inputoutput, only: n_hamil
   use structures
   use hamiltonian, only: hpsi
@@ -36,11 +36,11 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   type(s_orbital),intent(inout) :: sshtpsi
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: V_local(system%nspin)
-  complex(8),intent(in) :: zc(n_hamil)
   integer :: nn,ix,iy,iz
   integer :: ik,io,nspin
   complex(8),parameter :: zi=(0.d0,1.d0)
   integer :: is
+  type(s_rt) :: rt
   nspin = system%nspin
 
   do nn=1,n_hamil
@@ -55,7 +55,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
             do iy=mg%is_array(2),mg%ie_array(2)
             do ix=mg%is_array(1),mg%ie_array(1)
               tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_in%zwf(ix,iy,iz,is,io,ik,1)+ &
-                                                   zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
+                                                   rt%zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
             end do
             end do
             end do
@@ -71,7 +71,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
             do iy=mg%is_array(2),mg%ie_array(2)
             do ix=mg%is_array(1),mg%ie_array(1)
               tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_out%zwf(ix,iy,iz,is,io,ik,1)+ &
-                                                   zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
+                                                   rt%zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
             end do
             end do
             end do
@@ -89,7 +89,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
           do iy=mg%is_array(2),mg%ie_array(2)
           do ix=mg%is_array(1),mg%ie_array(1)
             tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_out%zwf(ix,iy,iz,is,io,ik,1)+ &
-                                               zc(nn)*tspsi_in%zwf(ix,iy,iz,is,io,ik,1)
+                                               rt%zc(nn)*tspsi_in%zwf(ix,iy,iz,is,io,ik,1)
           end do
           end do
           end do
@@ -100,34 +100,6 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   end do
 
 end subroutine taylor
-
-subroutine taylor_coe(N_hamil,dt,zc)
-  use salmon_global, only : propagator
-  implicit none
-  integer,intent(in) :: N_hamil
-  real(8),intent(in) :: dt
-  complex(8)         :: zc(n_hamil)
-  !
-  integer :: mm,nn
-  complex(8),parameter :: zi=(0.d0,1.d0)
-
-  if(propagator=='etrs')then
-    do nn=1,N_hamil
-      zc(nn)=(-zi*dt/2.d0)**nn
-      do mm=1,nn
-        zc(nn)=zc(nn)/mm
-      end do
-    end do
-  else
-    do nn=1,N_hamil
-      zc(nn)=(-zi*dt)**nn
-      do mm=1,nn
-        zc(nn)=zc(nn)/mm
-      end do
-    end do
-  end if
-
-end subroutine taylor_coe
 
 end module taylor_sub
 
