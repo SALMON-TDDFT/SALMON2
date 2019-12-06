@@ -15,7 +15,6 @@
 !
 MODULE allocate_mat_sub
 
-use inputoutput, only: iperiodic
 implicit none
 
 real(8), allocatable :: vecR(:,:,:,:)
@@ -26,16 +25,7 @@ complex(8), allocatable :: cmatbox_m(:,:,:),cmatbox_m2(:,:,:)
 real(8), allocatable :: matbox_l(:,:,:),matbox_l2(:,:,:)
 complex(8), allocatable :: cmatbox_l(:,:,:),cmatbox_l2(:,:,:)
 
-complex(8), allocatable :: zalpha2(:,:,:,:),zalpha3(:,:,:,:)
-
-real(8),allocatable :: rgrad_wk(:,:,:,:,:,:)
-
-complex(8),allocatable :: cgrad_wk(:,:,:,:,:,:)
-
 real(8), allocatable :: rho_tmp(:,:,:)
-real(8), allocatable :: exc_dummy(:,:,:)
-real(8), allocatable :: exc_dummy2(:,:,:,:)
-real(8), allocatable :: exc_dummy3(:,:,:,:)
 
 CONTAINS
 
@@ -83,9 +73,6 @@ allocate (cmatbox_l2(lg%is(1):lg%ie(1),    &
              lg%is(3):lg%ie(3)) )
 
 allocate (rho_tmp(ng%num(1), ng%num(2), ng%num(3)))
-allocate (exc_dummy(ng%num(1), ng%num(2), ng%num(3)))
-allocate (exc_dummy2(ng%num(1), ng%num(2), ng%num(3),2))
-allocate (exc_dummy3(ng%num(1), ng%num(2), ng%num(3),3))
 
 END SUBROUTINE allocate_mat
 
