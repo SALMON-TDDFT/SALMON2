@@ -26,8 +26,6 @@ CONTAINS
 SUBROUTINE deallocate_mat
   implicit none
 
-deallocate (vecR)
-deallocate (vecR_tmp)
 deallocate (matbox_m,matbox_m2)
 deallocate (matbox_l,matbox_l2)
 deallocate (cmatbox_m,cmatbox_m2)

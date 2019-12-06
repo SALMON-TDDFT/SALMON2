@@ -117,7 +117,7 @@ use deallocate_mat_sub
   integer :: iob, i,i1,i2,i3, iik,jspin, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
-  real(8) :: rbox_array(10), rbox_array2(10)
+  real(8) :: rbox_array2(4)
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line
@@ -417,41 +417,6 @@ use deallocate_mat_sub
   allocate( R1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2), &
                                  lg%is(3):lg%ie(3)))
   
-  ! External Field Direction
-  
-  select case(mod(lg%num(1),2))
-    case(1)
-      do i1=lg%is(1),lg%ie(1)
-         vecR(1,i1,:,:)=dble(i1)
-      end do
-    case(0)
-      do i1=lg%is(1),lg%ie(1)
-         vecR(1,i1,:,:)=dble(i1)-0.5d0
-      end do
-  end select
-  
-  select case(mod(lg%num(2),2))
-    case(1)
-      do i2=lg%is(2),lg%ie(2)
-         vecR(2,:,i2,:)=dble(i2)
-      end do
-    case(0)
-      do i2=lg%is(2),lg%ie(2)
-         vecR(2,:,i2,:)=dble(i2)-0.5d0
-      end do
-  end select
-  
-  select case(mod(lg%num(3),2))
-    case(1)
-      do i3=lg%is(3),lg%ie(3)
-         vecR(3,:,:,i3)=dble(i3)
-      end do
-    case(0)
-      do i3=lg%is(3),lg%ie(3)
-         vecR(3,:,:,i3)=dble(i3)-0.5d0
-      end do
-  end select
-  
   !$OMP parallel do collapse(2) private(iz,iy,ix)
   do iz=lg%is(3),lg%ie(3)
   do iy=lg%is(2),lg%ie(2)
@@ -472,26 +437,7 @@ use deallocate_mat_sub
   end if
   
   if(yn_restart /= 'y')then
-    rbox_array=0d0
-    do i1=1,3
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-         rbox_array(i1) = rbox_array(i1) + vecR(i1,ix,iy,iz) * srho%f(ix,iy,iz)
-      end do
-      end do
-      end do
-    end do
-  
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-       rbox_array(4) = rbox_array(4) + srho%f(ix,iy,iz)
-    end do
-    end do
-    end do
-  
-    call comm_summation(rbox_array,rbox_array2,4,nproc_group_macropoint)
+    call dip(lg,ng,srho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   
   end if
