@@ -13,9 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine subdip(itt,rt,ng,srho,rNe,poisson,Etot,system,pp)
+subroutine subdip(itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
 use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
-use salmon_parallel, only: nproc_group_global, nproc_id_global
+use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: au_length_aa, au_energy_ev, natom, au_time_fs
 use salmon_global
@@ -23,6 +23,7 @@ use allocate_mat_sub
 use inputoutput, only: yn_md
 implicit none
 integer,intent(in) :: itt
+type(s_rgrid) ,intent(in) :: lg
 type(s_rgrid) ,intent(in) :: ng
 type(s_scalar),intent(in) :: srho
 type(s_rt),intent(inout) :: rt
@@ -31,9 +32,8 @@ real(8),intent(out)       :: rNe
 type(s_poisson),intent(in) :: poisson
 type(s_dft_system),intent(in) :: system
 type(s_pp_info),intent(in) :: pp
-integer :: i1,ix,iy,iz, ia
-real(8) :: rbox_array(10),  rbox_arrayq(3,3)
-real(8) :: rbox_array2(10), rbox_arrayq2(3,3)
+integer :: ia
+real(8) :: rbox_array2(4)
 real(8) :: rbox1
 real(8) :: time, Hvol,Hgs(3)
 
@@ -41,36 +41,7 @@ real(8) :: time, Hvol,Hgs(3)
 Hvol   = system%Hvol
 Hgs(:) = system%Hgs(:)
 
-!$OMP parallel do
-   do i1=1,4
-     rbox_array(i1)=0.d0
-   end do
-   do i1=1,3
-     rbox1=0d0
-!$OMP parallel do reduction( + : rbox1 ) private(iz,iy,ix)
-     do iz=ng%is(3),ng%ie(3)
-     do iy=ng%is(2),ng%ie(2)
-     do ix=ng%is(1),ng%ie(1)
-        rbox1 = rbox1 + vecR(i1,ix,iy,iz)*srho%f(ix,iy,iz)
-     end do
-     end do
-     end do
-     rbox_array(i1)=rbox1
-   end do
-   
-   rbox1=0d0
-!$OMP parallel do reduction( + : rbox1 ) private(iz,iy,ix)
-   do iz=ng%is(3),ng%ie(3)
-   do iy=ng%is(2),ng%ie(2)
-   do ix=ng%is(1),ng%ie(1)
-      rbox1 = rbox1 + srho%f(ix,iy,iz)
-   end do
-   end do
-   end do
-   rbox_array(4)=rbox1
-   
-   call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
-   call comm_summation(rbox_arrayq,rbox_arrayq2,9,nproc_group_global)
+   call dip(lg,ng,srho,rbox_array2)
 
    !(ionic dipole) -- defined as plus charge (ordinary definition))
    rt%Dp_i(:,itt) = 0d0
@@ -81,9 +52,6 @@ Hgs(:) = system%Hgs(:)
    !(electronic dipole/quadrapole) -- defined as plus charge (opposite definition))
    rt%Dp_e(1:3,itt)  = -rbox_array2(1:3) * Hgs(1:3) * Hvol
    rt%dDp_e(1:3,itt) = rt%Dp_e(1:3,itt) - rt%Dp0_e(1:3)
-   do i1=1,3
-      rt%Qp_e(1:3,i1,itt) = -rbox_arrayq2(1:3,i1)*Hgs(1:3)*Hvol
-   end do
 
    !(Number of electrons)
    rNe = rbox_array2(4)*Hvol
@@ -123,3 +91,101 @@ Hgs(:) = system%Hgs(:)
 
 
 end subroutine subdip
+
+subroutine dip(lg,ng,srho,rbox_array2)
+  use structures, only: s_rgrid,s_scalar
+  use salmon_parallel, only: nproc_group_global
+  use salmon_communication, only: comm_summation
+  implicit none
+  type(s_rgrid) ,intent(in) :: lg
+  type(s_rgrid) ,intent(in) :: ng
+  type(s_scalar),intent(in) :: srho
+  integer :: ix,iy,iz
+  real(8) :: rbox_array(4),rbox_array2(4)
+  real(8) :: rbox
+
+  rbox_array=0d0
+  
+  rbox=0.d0
+  select case(mod(lg%num(1),2))
+  case(1)
+!$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+       rbox = rbox + dble(ix) * srho%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  case(0)
+!$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      rbox = rbox + (dble(ix)-0.5d0) * srho%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end select
+  rbox_array(1)=rbox
+
+  rbox=0.d0
+  select case(mod(lg%num(2),2))
+  case(1)
+!$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      rbox = rbox + dble(iy) * srho%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  case(0)
+!$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      rbox = rbox + (dble(iy)-0.5d0) * srho%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end select
+  rbox_array(2)=rbox
+ 
+  rbox=0.d0
+  select case(mod(lg%num(3),2))
+  case(1)
+!$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+       rbox = rbox + dble(iz) * srho%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  case(0)
+!$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+       rbox = rbox + (dble(iz)-0.5d0) * srho%f(ix,iy,iz)
+    end do
+    end do
+    end do
+  end select
+  rbox_array(3)=rbox
+
+  rbox=0.d0
+!$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+     rbox = rbox + srho%f(ix,iy,iz)
+  end do
+  end do
+  end do
+  rbox_array(4)=rbox
+
+  call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
+
+end subroutine dip
