@@ -17,20 +17,32 @@
 
 &emfield
   ae_shape1 = 'impulse'
-  epdir_re1 = 1.0d0, 0.0d0, 0.0d0
+  epdir_re1 = 0.0d0, 0.0d0, 1.0d0
+/
+
+&analysis
+  nenergy = 1000
+  de      = 0.01d0
 /
 
 &maxwell
   !grid and time-step information
-  al_em = 1000.0d0, 1000.0d0, 1000.0d0
-  dl_em = 10.0d0, 10.0d0, 10.0d0
-  nt_em = 5000
-  dt_em = 1.90d-3
+  al_em = 120d0, 120d0, 120d0
+  dl_em = 1.2d0, 1.2d0, 1.2d0
+  nt_em = 20000
+  dt_em = 2.30d-4
   
   !media information
-  imedia_num    = 1
-  shape_file    = 'shape.cube'
-  type_media(1) = 'drude'
-  omega_p_d(1)  = 9.03d0
-  gamma_d(1)    = 0.53d0-1
+  shape_file      = 'shape.cube'
+  media_num       = 1
+  !--- Au described by Lorentz-Drude model ---!
+  ! The parameters are determined by refering the following paper:
+  ! https://www.osapublishing.org/ao/abstract.cfm?uri=ao-37-22-5271
+  !-------------------------------------------!
+  media_type(1)   = 'lorentz-drude'
+  pole_num_ld(1)  = 6
+  omega_p_ld(1)   = 9.030d0
+  f_ld(1,1:6)     = 0.760d0, 0.024d0, 0.010d0, 0.071d0, 0.601d0, 4.384d0
+  gamma_ld(1,1:6) = 0.053d0, 0.241d0, 0.345d0, 0.870d0, 2.494d0, 2.214d0
+  omega_ld(1,1:6) = 0.000d0, 0.415d0, 0.830d0, 2.969d0, 4.304d0, 13.32d0
 /
