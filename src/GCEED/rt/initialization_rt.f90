@@ -21,7 +21,7 @@ module initialization_rt_sub
 
 contains
 
-subroutine initialization_rt( Mit, system, energy, rt, md, singlescale,  &
+subroutine initialization_rt( Mit, itotNtime, system, energy, rt, md, singlescale,  &
                      stencil, fg, poisson,  &
                      lg, mg, ng,  &
                      info, info_field,  &
@@ -31,7 +31,6 @@ subroutine initialization_rt( Mit, system, energy, rt, md, singlescale,  &
                      V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                      pp, ppg, ppn )
 use inputoutput
-use scf_data
 use allocate_mat_sub
 use deallocate_mat_sub
 
@@ -92,6 +91,7 @@ use deallocate_mat_sub
   type(ls_singlescale) :: singlescale
   type(s_ofile) :: ofile
   
+  integer :: itotNtime
   integer :: iob, i,i1,i2,i3, iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
@@ -100,6 +100,7 @@ use deallocate_mat_sub
   character(10) :: fileLaser
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
+  integer :: itt
   
   call timer_begin(LOG_INIT_RT)
 
@@ -462,7 +463,7 @@ use deallocate_mat_sub
       end if
     end do
   
-  if(iperiodic==3) call calc_Aext(Mit,rt)
+  if(iperiodic==3) call calc_Aext(Mit,itotNtime,rt)
   
   if(yn_md=='y') call init_md(system,md)
   

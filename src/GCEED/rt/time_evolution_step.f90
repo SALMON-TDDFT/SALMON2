@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
+SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
 &   md,ofl,poisson,j_e,singlescale)
   use structures
@@ -24,10 +24,9 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
   use writefield
   use timer
-  use inputoutput
+  use salmon_global
   use taylor_sub
   use const, only: umass
-  use scf_data
   use allocate_mat_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use hartree_sub, only: hartree
@@ -41,6 +40,8 @@ SUBROUTINE time_evolution_step(Mit,lg,mg,ng,system,rt,info,info_field,stencil,xc
   use salmon_pp, only: calc_nlcc !test hoge
   use salmon_xc
   implicit none
+  integer,intent(in)       :: itt
+  integer,intent(in)       :: itotNtime
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
