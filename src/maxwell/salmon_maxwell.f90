@@ -29,7 +29,6 @@ module salmon_maxwell
     !coulomb
     
     !eh
-    real(8)             :: c_0             !light speed
     integer             :: Nd              !number of additional grid in mpi
     integer             :: iter_sta        !start of time-iteration
     integer             :: iter_end        !end of time-iteration

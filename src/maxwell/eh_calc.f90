@@ -131,20 +131,15 @@ subroutine eh_calc(fs,fw)
         !point
         if(fw%iobs_po_pe(ii)==1) then
           write(save_name,*) ii
-          save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
+          save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
           open(fw%ifn,file=save_name,status='old',position='append')
-          write(fw%ifn, '(E13.5)',advance="no") dble(iter)*dt_em*utime_from_au
-          write(fw%ifn,'(E16.6e3)',advance="no") &
-                fw%ex_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uVperm_from_au
-          write(fw%ifn,'(E16.6e3)',advance="no") &
-                fw%ey_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uVperm_from_au
-          write(fw%ifn,'(E16.6e3)',advance="no") &
-                fw%ez_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uVperm_from_au
-          write(fw%ifn,'(E16.6e3)',advance="no") &
-                fw%hx_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uAperm_from_au
-          write(fw%ifn,'(E16.6e3)',advance="no") &
-                fw%hy_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uAperm_from_au
-          write(fw%ifn,'(E16.6e3)',advance="no") &
+          write(fw%ifn,"(F16.8,99(1X,E23.15E3))",advance='no')                                          &
+                dble(iter)*dt_em*utime_from_au,                                                         &
+                fw%ex_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uVperm_from_au, &
+                fw%ey_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uVperm_from_au, &
+                fw%ez_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uVperm_from_au, &
+                fw%hx_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uAperm_from_au, &
+                fw%hy_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uAperm_from_au, &
                 fw%hz_s(fw%iobs_po_id(ii,1),fw%iobs_po_id(ii,2),fw%iobs_po_id(ii,3))*fw%uAperm_from_au
           close(fw%ifn)
         end if
@@ -274,6 +269,7 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+      
       !add all polarization vector
       if(fw%num_ld>0) then
 !$omp parallel
@@ -290,6 +286,7 @@ contains
 !$omp end do
 !$omp end parallel
       end if
+      
       !calculate dipolemoment
       sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
@@ -322,6 +319,7 @@ contains
       end do
 !$omp end do
 !$omp end parallel
+      
       !add all current density
       if(fw%num_ld>0) then
 !$omp parallel
@@ -338,6 +336,7 @@ contains
 !$omp end do
 !$omp end parallel
       end if
+      
       !calculate average current density
       sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
@@ -358,6 +357,7 @@ contains
       call comm_summation(sum_lr,sum_lr2,3,nproc_group_global)
       fw%curr_lr(fw%iter_lr,:)=sum_lr2(:)*fs%hgs(1)*fs%hgs(2)*fs%hgs(3) &
                                /(fs%rlsize(1)*fs%rlsize(2)*fs%rlsize(3))
+      
       !calculate average electric field
       sum_lr_x=0.0d0;  sum_lr_y=0.0d0;  sum_lr_z=0.0d0;
       sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;

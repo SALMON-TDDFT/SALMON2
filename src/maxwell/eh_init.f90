@@ -29,6 +29,7 @@ subroutine eh_init(fs,fw)
   use salmon_communication, only: comm_is_root, comm_bcast
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work
+  use phys_constants,       only: cspeed_au
   use math_constants,       only: pi
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
@@ -39,7 +40,6 @@ subroutine eh_init(fs,fw)
   character(128)                    :: save_name
   
   !*** set initial parameter and value **********************************************************************!
-  fw%c_0        = 1.370359991378353d2
   fw%Nd         = 1
   fw%iter_sta   = 1
   fw%iter_end   = nt_em
@@ -100,7 +100,7 @@ subroutine eh_init(fs,fw)
   
   !*** set and check dt *************************************************************************************!
   dt_cfl=1.0d0/( &
-         fw%c_0*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
+         cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) &
          )
   if(dt_em==0.0d0) then
     dt_em=dt_cfl*0.99d0
@@ -438,13 +438,30 @@ subroutine eh_init(fs,fw)
       write(*,*) "**************************"
       do ii=1,obs_num_em
         write(save_name,*) ii
-        save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point.data'
+        save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
         open(fw%ifn,file=save_name)
+        write(fw%ifn,'(A)') "# Real time calculation:" 
+        write(fw%ifn,'(A)') "# E: Electric field" 
+        write(fw%ifn,'(A)') "# H: Magnetic field" 
         select case(unit_system)
         case('au','a.u.')
-          write(fw%ifn,'(A)') "# time[a.u.], Ex[a.u.], Ey[a.u.], Ez[a.u.], Hx[a.u.], Hy[a.u.], Hz[a.u.]" 
+          write(fw%ifn,'("#",99(1X,I0,":",A))') &
+                1, "Time[a.u.]",              &
+                2, "E_x[a.u.]",         &
+                3, "E_y[a.u.]",         &
+                4, "E_z[a.u.]",         &
+                5, "H_x[a.u.]",         &
+                6, "H_y[a.u.]",         &
+                7, "H_z[a.u.]"
         case('A_eV_fs')
-          write(fw%ifn,'(A)') "# time[fs], Ex[V/Ang.], Ey[V/Ang.], Ez[V/Ang.], Hx[A/Ang.], Hy[A/Ang.], Hz[A/Ang.]" 
+          write(fw%ifn,'("#",99(1X,I0,":",A))') &
+                1, "Time[fs]",                  &
+                2, "E_x[V/Angstrom]",           &
+                3, "E_y[V/Angstrom]",           &
+                4, "E_z[V/Angstrom]",           &
+                5, "H_x[A/Angstrom]",           &
+                6, "H_y[A/Angstrom]",           &
+                7, "H_z[A/Angstrom]"
         end select
         close(fw%ifn)
       end do
@@ -576,7 +593,7 @@ subroutine eh_init(fs,fw)
     allocate(fw%inc_pl_pe(fw%inc_num,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
     fw%inc_po_id(:,:)=0; fw%inc_po_pe(:)=0; fw%inc_li_pe(:,:)=0; fw%inc_pl_pe(:,:)=0; 
     do ii=1,3
-      fw%c2_inc_xyz(ii)=(fw%c_0/fw%rep(0)*dt_em) &
+      fw%c2_inc_xyz(ii)=(cspeed_au/fw%rep(0)*dt_em) &
                          /(1.0d0+2.0d0*pi*fw%sig(0)/fw%rep(0)*dt_em) &
                          *2.0d0/( fs%hgs(ii)*sqrt(fw%rmu(0)/fw%rep(0)) )
     end do
@@ -737,7 +754,7 @@ subroutine eh_init(fs,fw)
     allocate(fw%time_lr(nt_em))
     fw%time_lr(:)=0.0d0
     fw%iter_lr=1
-    allocate(fw%fr_lr(0:nenergy,3),fw%fi_lr(0:nenergy,3))
+    allocate(fw%fr_lr(nenergy,3),fw%fi_lr(nenergy,3))
     fw%fr_lr(:,:)=0.0d0; fw%fi_lr(:,:)=0.0d0;
     if(yn_periodic=='n') then
       allocate(fw%px_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
@@ -934,20 +951,20 @@ contains
     !prepare coefficient
     c1_e  =(1.0d0-2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em) &
            /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)
-    c2_e_x=(fw%c_0/fw%rep(ii)*dt_em) &
+    c2_e_x=(cspeed_au/fw%rep(ii)*dt_em) &
            /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)/fs%hgs(1)
-    c2_e_y=(fw%c_0/fw%rep(ii)*dt_em) &
+    c2_e_y=(cspeed_au/fw%rep(ii)*dt_em) &
            /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)/fs%hgs(2)
-    c2_e_z=(fw%c_0/fw%rep(ii)*dt_em) &
+    c2_e_z=(cspeed_au/fw%rep(ii)*dt_em) &
            /(1.0d0+2.0d0*pi*fw%sig(ii)/fw%rep(ii)*dt_em)/fs%hgs(3)
     call comm_bcast(c1_e,  nproc_group_global)
     call comm_bcast(c2_e_x,nproc_group_global)
     call comm_bcast(c2_e_y,nproc_group_global)
     call comm_bcast(c2_e_z,nproc_group_global)
     c1_h=1.0d0
-    c2_h_x=fw%c_0/fw%rmu(ii)*dt_em/fs%hgs(1)
-    c2_h_y=fw%c_0/fw%rmu(ii)*dt_em/fs%hgs(2)
-    c2_h_z=fw%c_0/fw%rmu(ii)*dt_em/fs%hgs(3)
+    c2_h_x=cspeed_au/fw%rmu(ii)*dt_em/fs%hgs(1)
+    c2_h_y=cspeed_au/fw%rmu(ii)*dt_em/fs%hgs(2)
+    c2_h_z=cspeed_au/fw%rmu(ii)*dt_em/fs%hgs(3)
     call comm_bcast(c1_h,  nproc_group_global)
     call comm_bcast(c2_h_x,nproc_group_global)
     call comm_bcast(c2_h_y,nproc_group_global)
@@ -1119,10 +1136,10 @@ contains
           elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
             c1_e_mid  = (1.0d0-2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em)
-            c2_e_y_mid= (fw%c_0/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+            c2_e_y_mid= (cspeed_au/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(2)
-            c2_e_z_mid= (fw%c_0/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+            c2_e_z_mid= (cspeed_au/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(3)
             c2_j_mid  = (4.0d0*pi/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
@@ -1144,10 +1161,10 @@ contains
           elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
             c1_e_mid  = (1.0d0-2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em)
-            c2_e_z_mid= (fw%c_0/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+            c2_e_z_mid= (cspeed_au/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /fs%hgs(3)
-            c2_e_x_mid= (fw%c_0/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+            c2_e_x_mid= (cspeed_au/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy+1,iz))/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
                        /fs%hgs(1)
             c2_j_mid  = (4.0d0*pi/fw%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
@@ -1169,10 +1186,10 @@ contains
           elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
             c1_e_mid  = (1.0d0-2.0d0*pi*fw%sig(fs%imedia(ix,iy,iz+1))/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy,iz+1))/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em)
-            c2_e_x_mid= (fw%c_0/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+            c2_e_x_mid= (cspeed_au/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix,iy,iz+1))/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
                        /fs%hgs(1)
-            c2_e_y_mid= (fw%c_0/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+            c2_e_y_mid= (cspeed_au/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /(1.0d0+2.0d0*pi*fw%sig(fs%imedia(ix+1,iy,iz))/fw%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
                        /fs%hgs(2)
             c2_j_mid  = (4.0d0*pi/fw%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
@@ -1238,7 +1255,7 @@ contains
     !set pml conductivity
     pml_del=fs%hgs(idir)
     s_max=-(fw%pml_m+1.0d0)*log(fw%pml_r)/(2.0d0*dble(fw%ipml_l)*pml_del) &
-          *fw%c_0/(4.0d0*pi)*sqrt(fw%rep(0)/fw%rmu(0));
+          *cspeed_au/(4.0d0*pi)*sqrt(fw%rep(0)/fw%rmu(0));
     do ii=1,(fw%ipml_l+1)
       s_l(ii)=s_max*(&
                     (dble(fw%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fw%ipml_l)*pml_del)&
@@ -1255,7 +1272,7 @@ contains
     do ii=1,(fw%ipml_l+1)
       c1_pml(ii)=(1.0d0-2.0d0*pi*s_l(ii)/fw%rep(0)*dt_em) &
                  /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*dt_em);
-      c2_pml(ii)=(fw%c_0/fw%rep(0)*dt_em) &
+      c2_pml(ii)=(cspeed_au/fw%rep(0)*dt_em) &
                  /(1.0d0+2.0d0*pi*s_l(ii)/fw%rep(0)*dt_em)/pml_del
     end do
     call comm_bcast(c1_pml,nproc_group_global)
@@ -1263,7 +1280,7 @@ contains
     do ii=1,fw%ipml_l
       c1_pml_h(ii)=(1.0d0-2.0d0*pi*sh_l(ii)/fw%rmu(0)*dt_em) &
                    /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*dt_em);
-      c2_pml_h(ii)=(fw%c_0/fw%rmu(0)*dt_em) &
+      c2_pml_h(ii)=(cspeed_au/fw%rmu(0)*dt_em) &
                    /(1.0d0+2.0d0*pi*sh_l(ii)/fw%rmu(0)*dt_em)/pml_del
     end do
     call comm_bcast(c1_pml_h,nproc_group_global)
