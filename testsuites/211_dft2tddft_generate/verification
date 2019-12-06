@@ -14,6 +14,10 @@ print("# Verification start")
 
 filelist = [ 
     "Si_eigen.data",
+    "data_for_restart/rank_000000/wfn.bin",
+    "data_for_restart/rank_000001/wfn.bin",
+    "data_for_restart/rank_000002/wfn.bin",
+    "data_for_restart/rank_000003/wfn.bin",
 ]
 
 # difference of eigen energies for io=1 and io=2 with ik=2"

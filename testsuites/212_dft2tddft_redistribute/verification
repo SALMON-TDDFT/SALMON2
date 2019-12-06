@@ -13,10 +13,10 @@ print("#" * 60)
 print("# Verification start")
 
 filelist = [
-    "data_for_restart_rt/wfn000000.bin",
-    "data_for_restart_rt/wfn000001.bin",
-    "data_for_restart_rt/wfn000002.bin",
-    "data_for_restart_rt/wfn000003.bin",
+    "data_for_restart_rt/rank_000000/wfn.bin",
+    "data_for_restart_rt/rank_000001/wfn.bin",
+    "data_for_restart_rt/rank_000002/wfn.bin",
+    "data_for_restart_rt/rank_000003/wfn.bin",
 ]
 
 print("# Checking the existance of outputfile") 

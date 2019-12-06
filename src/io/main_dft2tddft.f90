@@ -29,6 +29,7 @@ use initialization_sub
 use init_communicator
 use checkpoint_restart_sub
 use set_numcpu
+use filesystem, only: create_directory
 implicit none
 integer :: Miter
 character(100) :: file_atoms_coo
@@ -56,7 +57,7 @@ type(s_ofile)  :: ofl
 
 integer :: icomm,irank,nprocs
 logical :: if_stop
-character(100) :: dir_file_out
+character(256) :: dir_file_out,gdir,pdir
 integer,parameter :: fh = 41
 
 call comm_get_globalinfo(icomm,irank,nprocs)
@@ -89,7 +90,8 @@ call initialization1_dft( system_scf, energy, stencil, fg, poisson,  &
                           pp, ppg, ppn,  &
                           ofl )
 
-call read_bin(directory_read_data,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
+call generate_restart_directory_name(directory_read_data,gdir,pdir)
+call read_bin(pdir,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
 
 call timer_end(LOG_INIT_GS)
 
@@ -138,9 +140,12 @@ call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)
 call convert_wave_function
 
 ! TODO: move to checkpoint_restart.f90
+call generate_restart_directory_name(ofl%dir_out_restart,gdir,pdir)
+call create_directory(pdir)
+
 if(comm_is_root(irank))then
 !information
-  dir_file_out = trim(ofl%dir_out_restart)//"info.bin"
+  dir_file_out = trim(pdir)//"info.bin"
   open(fh,file=dir_file_out,form='unformatted')
   write(fh) system_scf%nk
   write(fh) system_scf%no
@@ -149,13 +154,13 @@ if(comm_is_root(irank))then
   close(fh)
 
 !occupation
-  dir_file_out = trim(ofl%dir_out_restart)//"occupation.bin"
+  dir_file_out = trim(pdir)//"occupation.bin"
   open(fh,file=dir_file_out,form='unformatted')
   write(fh) system_scf%rocc(1:system_scf%no,1:system_scf%nk,1:system_scf%nspin)
   close(fh)
 end if
 
-call write_wavefunction(ofl%dir_out_restart,lg_rt,mg_rt,system_rt,info_rt,shpsi,.false.)
+call write_wavefunction(pdir,lg_rt,mg_rt,system_rt,info_rt,shpsi,.false.)
 ! TODO: move to checkpoint_restart.f90
 
 call timer_end(LOG_WRITE_GS_DATA)

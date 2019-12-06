@@ -75,10 +75,10 @@ subroutine generate_restart_directory_name(basedir,gdir,pdir)
 end subroutine generate_restart_directory_name
 
 
-subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing)
+subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint
+  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
   use salmon_parallel, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
@@ -87,15 +87,20 @@ subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_mixing)          ,intent(in) :: mixing
+  character(*),optional   ,intent(in) :: odir
 
   character(256) :: gdir,wdir
   logical :: iself
 
-  call generate_checkpoint_directory_name('gs',iter,gdir,wdir)
-  call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+  if (present(odir)) then
+    call generate_restart_directory_name(odir,gdir,wdir)
+  else
+    call generate_checkpoint_directory_name('gs',iter,gdir,wdir)
+    call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+  end if
 
   iself = (yn_self_checkpoint == 'y')
-  if (iself) then
+  if (iself .or. yn_datafiles_dump == 'y') then
     call create_directory(wdir)
   else
     wdir = gdir
@@ -105,7 +110,7 @@ end subroutine checkpoint_gs
 
 subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_mixing
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
@@ -120,17 +125,17 @@ subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (.not. iself) then
+  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
     wdir = gdir
   end if
   call read_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
 end subroutine restart_gs
 
 
-subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
+subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,idir)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_scalar
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint
+  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
   use salmon_parallel, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
@@ -139,15 +144,20 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_scalar)          ,intent(in) :: sVh_stock1,sVh_stock2
+  character(*),optional   ,intent(in) :: idir
 
   character(256) :: gdir,wdir
   logical :: iself
 
-  call generate_checkpoint_directory_name('rt',iter,gdir,wdir)
-  call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+  if (present(idir)) then
+    call generate_restart_directory_name(idir,gdir,wdir)
+  else
+    call generate_checkpoint_directory_name('rt',iter,gdir,wdir)
+    call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+  end if
 
   iself = (yn_self_checkpoint == 'y')
-  if (iself) then
+  if (iself .or. yn_datafiles_dump == 'y') then
     call create_directory(wdir)
   else
     wdir = gdir
@@ -158,7 +168,7 @@ end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
@@ -172,8 +182,8 @@ subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
 
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
-  iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (.not. iself) then
+  iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'
+  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
     wdir = gdir
   end if
   call read_bin(wdir,lg,mg,ng,system,info,spsi,iter &
@@ -382,13 +392,9 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 
   call set_dg(lg,mg,dg,num_datafiles_out,is_self_checkpoint .or. yn_datafiles_dump == 'y')
 
-  if(is_self_checkpoint) then
+  if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
-    open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
-  else if(yn_datafiles_dump == 'y') then
-    ! write all processes (each process dump data)
-    write(dir_file_out, '(A,A,I6.6,A)') trim(odir),'wfn',nproc_id_global,".bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
   else if(num_datafiles_out==1.and.comm_is_root(nproc_id_global)) then
     ! write root process
@@ -759,13 +765,9 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
 
   call set_dg(lg,mg,dg,num_datafiles_in,is_self_checkpoint .or. yn_datafiles_dump == 'y')
 
-  if(is_self_checkpoint) then
+  if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
-    open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
-  else if(yn_datafiles_dump == 'y') then
-    ! read all processes (each process load dumped data)
-    write(dir_file_in, '(A,A,I6.6,A)') trim(idir),'wfn',nproc_id_global,".bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
   else if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
     ! read root process
