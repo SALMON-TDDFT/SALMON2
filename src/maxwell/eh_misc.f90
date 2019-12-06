@@ -458,7 +458,7 @@ subroutine eh_save_plane(id,ipl,conv,ng_is,ng_ie,lg_is,lg_ie,Nd,ifn,iobs,iter,f,
       open(ifn,file=save_name)
       do i2=lg_is(i2s),lg_ie(i2s)
       do i1=lg_is(i1s),lg_ie(i1s)
-        write(ifn,'(I8,I8,E16.6e3)') i1,i2,save_pl2(i1,i2)*conv
+        write(ifn,'(I8,I8,1X,E23.15E3)') i1,i2,save_pl2(i1,i2)*conv
       end do
       end do
       close(ifn)
@@ -479,7 +479,7 @@ subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
   integer,intent(in)   :: nt,ne
   real(8),intent(in)   :: dt,de
   real(8),intent(in)   :: ti(nt),ft(nt)
-  real(8),intent(out)  :: fr(0:ne),fi(0:ne)
+  real(8),intent(out)  :: fr(ne),fi(ne)
   integer              :: ie,it
   real(8)              :: ft_wf(nt)
   real(8)              :: hw
@@ -495,7 +495,7 @@ subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
   end if
   
   !Fourier transformation
-  do ie=0,ne
+  do ie=1,ne
     hw=dble(ie)*de; zf=(0.0d0,0.0d0);
 !$omp parallel
 !$omp do private(it) reduction( + : zf )
