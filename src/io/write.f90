@@ -742,7 +742,7 @@ contains
       write(uid,10) "df/dE", "Strength function"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "Time", trim(t_unit_time%name), &
+        & 1, "Energy", trim(t_unit_energy%name), &
         & 2, "Re(alpha_x)", trim(t_unit_polarizability%name), &
         & 3, "Im(alpha_x)", trim(t_unit_polarizability%name), &
         & 4, "Re(alpha_y)", trim(t_unit_polarizability%name), &
@@ -804,7 +804,7 @@ contains
       write(uid,10) "eps", "Dielectric constant"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "Time", trim(t_unit_time%name), &
+        & 1, "Energy", trim(t_unit_energy%name), &
         & 2, "Re(sigma_x)", trim(t_unit_conductivity%name), &
         & 3, "Im(sigma_x)", trim(t_unit_conductivity%name), &
         & 4, "Re(sigma_y)", trim(t_unit_conductivity%name), &
