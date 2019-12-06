@@ -18,7 +18,9 @@
 
 subroutine main_dft2tddft
 use structures
-use salmon_global, only: ispin,cval,xc,xname,cname,directory_read_data,calc_mode
+use salmon_global, only: ispin,cval,xc,xname,cname,directory_read_data,calc_mode, &
+                         target_nproc_k,target_nproc_ob,target_nproc_domain_orbital, &
+                         target_nproc_domain_general
 use salmon_parallel, only: nproc_group_global
 use salmon_communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
 use salmon_xc
@@ -26,7 +28,7 @@ use timer
 use initialization_sub
 use init_communicator
 use checkpoint_restart_sub
-use set_numcpu, only: check_numcpu
+use set_numcpu
 implicit none
 integer :: Miter
 character(100) :: file_atoms_coo
@@ -99,17 +101,32 @@ call timer_begin(LOG_WRITE_GS_DATA)
 calc_mode = 'RT' ! FIXME
 call init_dft_system(lg_rt,system_rt,stencil)
 
-pinfo_rt%npk                 = 1 !pinfo_scf%npk
-pinfo_rt%nporbital           = 2 !pinfo_scf%nporbital
-pinfo_rt%npdomain_orbital    = [1,1,2] !pinfo_scf%npdomain_orbital
-pinfo_rt%npdomain_general    = pinfo_scf%npdomain_general
-pinfo_rt%npdomain_general_dm = pinfo_scf%npdomain_general_dm
+pinfo_rt%npk                 = target_nproc_k
+pinfo_rt%nporbital           = target_nproc_ob
+pinfo_rt%npdomain_orbital    = target_nproc_domain_orbital
+pinfo_rt%npdomain_general    = target_nproc_domain_general
+if((target_nproc_ob + sum(target_nproc_domain_orbital) + sum(target_nproc_domain_general)) == 0) then
+  if (system_rt%ngrid > 16**3) then
+    call set_numcpu_general(iprefer_domain_distribution,system_rt%nk,system_rt%no,icomm,pinfo_rt)
+  else
+    call set_numcpu_general(iprefer_orbital_distribution,system_rt%nk,system_rt%no,icomm,pinfo_rt)
+  end if
+end if
 
 if (comm_is_root(irank)) then
   if_stop = .not. check_numcpu(icomm, pinfo_rt)
 end if
 call comm_bcast(if_stop, icomm)
 if (if_stop) stop 'fail: check_numcpu'
+
+if (ispin==1) then
+  pinfo_rt%nporbital_spin(1)=(pinfo_rt%nporbital+1)/2
+  pinfo_rt%nporbital_spin(2)= pinfo_rt%nporbital   /2
+else
+  pinfo_rt%nporbital_spin = 0
+end if
+pinfo_rt%npdomain_general_dm(1:3)=pinfo_rt%npdomain_general(1:3)/pinfo_rt%npdomain_orbital(1:3)
+pinfo_rt%npdomain_general_dm(1:3)=pinfo_rt%npdomain_general(1:3)/pinfo_rt%npdomain_orbital(1:3)
 
 call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
 call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)

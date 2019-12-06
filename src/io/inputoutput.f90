@@ -59,6 +59,7 @@ module inputoutput
   integer :: inml_group_hartree
   integer :: inml_group_others
   integer :: inml_code
+  integer :: inml_dft2tddft
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -218,7 +219,6 @@ contains
       & sysname, &
       & base_directory, &
       & output_buffer_interval, &
-      & yn_datafiles_converted, &
       & yn_restart, &
       & directory_read_data, &
       & yn_self_checkpoint,  &
@@ -504,6 +504,12 @@ contains
       & yn_force_stencil_sequential_computation, &
       & yn_want_communication_overlapping
 
+    namelist/dft2tddft/ &
+      & yn_datafiles_dump, &
+      & target_nproc_k, &
+      & target_nproc_ob, &
+      & target_nproc_domain_orbital, &
+      & target_nproc_domain_general
 
 !! == default for &unit ==
     unit_system='au'
@@ -555,7 +561,6 @@ contains
     sysname               = 'default'
     base_directory        = './'
     output_buffer_interval= -1
-    yn_datafiles_converted= 'n'
     yn_restart            = 'n'
     directory_read_data   = 'restart/'
     yn_self_checkpoint    = 'n'
@@ -833,6 +838,12 @@ contains
     yn_force_stencil_openmp_parallelization = 'n'
     yn_force_stencil_sequential_computation = 'n'
     yn_want_communication_overlapping = 'n'
+!! == default for dft2tddft
+    yn_datafiles_dump = 'n'
+    target_nproc_k = 0
+    target_nproc_ob = 0
+    target_nproc_domain_orbital = 0
+    target_nproc_domain_general = 0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -907,6 +918,9 @@ contains
       read(fh_namelist, nml=code, iostat=inml_code)
       rewind(fh_namelist)
 
+      read(fh_namelist, nml=dft2tddft, iostat=inml_dft2tddft)
+      rewind(fh_namelist)
+
       close(fh_namelist)
     end if
 
@@ -930,7 +944,6 @@ contains
     if(base_directory(ii:ii).ne.'/') &
        base_directory = trim(base_directory)//'/'
     call comm_bcast(output_buffer_interval,nproc_group_global)
-    call comm_bcast(yn_datafiles_converted,nproc_group_global)
     call comm_bcast(yn_restart            ,nproc_group_global)
     call comm_bcast(directory_read_data   ,nproc_group_global)
     ii = len_trim(directory_read_data)
@@ -1279,6 +1292,12 @@ contains
     call comm_bcast(yn_force_stencil_openmp_parallelization,nproc_group_global)
     call comm_bcast(yn_force_stencil_sequential_computation,nproc_group_global)
     call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
+!! == bcast for dft2tddft
+    call comm_bcast(yn_datafiles_dump     ,nproc_group_global)
+    call comm_bcast(target_nproc_k             ,nproc_group_global)
+    call comm_bcast(target_nproc_ob            ,nproc_group_global)
+    call comm_bcast(target_nproc_domain_orbital,nproc_group_global)
+    call comm_bcast(target_nproc_domain_general,nproc_group_global)
 
     if (yn_force_stencil_openmp_parallelization == 'y' .and. yn_force_stencil_sequential_computation == 'y') then
       if (comm_is_root(nproc_id_global)) then
@@ -1667,7 +1686,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'output_buffer_interval', output_buffer_interval
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_datafiles_converted', yn_datafiles_converted
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
@@ -2064,6 +2082,17 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_openmp_parallelization', yn_force_stencil_openmp_parallelization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_sequential_computation', yn_force_stencil_sequential_computation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
+
+      if(inml_dft2tddft >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_datafiles_dump', yn_datafiles_dump
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_k', target_nproc_k
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_ob', target_nproc_ob
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_orbital(1)', target_nproc_domain_orbital(1)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_orbital(2)', target_nproc_domain_orbital(2)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_orbital(3)', target_nproc_domain_orbital(3)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_general(1)', target_nproc_domain_general(1)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_general(2)', target_nproc_domain_general(2)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_general(3)', target_nproc_domain_general(3)
 
       close(fh_variables_log)
 

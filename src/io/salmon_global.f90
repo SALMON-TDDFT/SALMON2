@@ -51,7 +51,6 @@ module salmon_global
   character(256) :: sysname
   character(256) :: base_directory
   integer        :: output_buffer_interval
-  character(1)   :: yn_datafiles_converted
   character(1)   :: yn_restart
   character(256) :: directory_read_data
   character(1)   :: yn_self_checkpoint
@@ -352,5 +351,12 @@ character(256),allocatable :: atom_name(:)
   character(1) :: yn_force_stencil_openmp_parallelization
   character(1) :: yn_force_stencil_sequential_computation
   character(1) :: yn_want_communication_overlapping
+
+!! &dft2tddft
+  character(1) :: yn_datafiles_dump
+  integer      :: target_nproc_k
+  integer      :: target_nproc_ob
+  integer      :: target_nproc_domain_orbital(3)
+  integer      :: target_nproc_domain_general(3)
 
 end module salmon_global
