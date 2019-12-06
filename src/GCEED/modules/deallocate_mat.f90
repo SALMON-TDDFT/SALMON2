@@ -34,9 +34,6 @@ deallocate (cmatbox_m,cmatbox_m2)
 deallocate (cmatbox_l,cmatbox_l2)
 
 deallocate (rho_tmp)
-deallocate (exc_dummy)
-deallocate (exc_dummy2)
-deallocate (exc_dummy3)
 
 END SUBROUTINE deallocate_mat
 
