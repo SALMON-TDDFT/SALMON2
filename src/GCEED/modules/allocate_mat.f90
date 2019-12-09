@@ -22,8 +22,6 @@ complex(8), allocatable :: cmatbox_m(:,:,:),cmatbox_m2(:,:,:)
 real(8), allocatable :: matbox_l(:,:,:),matbox_l2(:,:,:)
 complex(8), allocatable :: cmatbox_l(:,:,:),cmatbox_l2(:,:,:)
 
-real(8), allocatable :: rho_tmp(:,:,:)
-
 CONTAINS
 
 !=======================================================================
@@ -60,8 +58,6 @@ allocate (cmatbox_l(lg%is(1):lg%ie(1),    &
 allocate (cmatbox_l2(lg%is(1):lg%ie(1),    &
              lg%is(2):lg%ie(2),      &
              lg%is(3):lg%ie(3)) )
-
-allocate (rho_tmp(ng%num(1), ng%num(2), ng%num(3)))
 
 END SUBROUTINE allocate_mat
 
