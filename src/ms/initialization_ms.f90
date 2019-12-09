@@ -40,8 +40,6 @@ subroutine initialization_ms( &
                      imacro_mygrp_e, &
                      fs, ff)
 use inputoutput
-use allocate_mat_sub
-use deallocate_mat_sub
 
   use math_constants, only: pi, zi
   use structures
@@ -236,7 +234,6 @@ use deallocate_mat_sub
   call init_dft(nproc_group_macropoint,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   
   call init_code_optimization
-  call allocate_mat(ng,mg,lg) ! future work: remove this line
   
   call allocate_scalar(mg,srho)
   call allocate_scalar(mg,sVh)
@@ -469,7 +466,7 @@ use deallocate_mat_sub
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-        call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,srho%f,itt)
+        call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
         call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
