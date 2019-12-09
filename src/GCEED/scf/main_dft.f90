@@ -305,7 +305,7 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
-call write_bin(ofl%dir_out_restart,lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
+call checkpoint_gs(lg,mg,ng,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
