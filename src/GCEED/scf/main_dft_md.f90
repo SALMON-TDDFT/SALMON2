@@ -212,7 +212,7 @@ MD_Loop : do it=1,nt
 
    ! Export electronic density (cube or vtk)
    if(yn_out_dns_rt=='y' .and. mod(it,out_dns_rt_step)==0) then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,srho%f,it)
+      call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,it)
    end if
 
 end do MD_Loop
@@ -236,7 +236,7 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 
 ! write GS: analysis option
 !if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-!if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs)
+!if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,system%hgs)
 !if(yn_out_dos =='y') call write_dos(system,energy)
 !if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 !if(yn_out_elf =='y') call write_elf(0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)

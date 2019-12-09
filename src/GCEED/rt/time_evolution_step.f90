@@ -348,7 +348,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,ng,srho%f,matbox_m,matbox_m2,system%hgs,srho%f,itt)
+      call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
     end if
   end if
   if(yn_out_elf_rt=='y')then

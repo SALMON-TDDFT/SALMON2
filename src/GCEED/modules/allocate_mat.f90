@@ -17,8 +17,6 @@ MODULE allocate_mat_sub
 
 implicit none
 
-real(8), allocatable :: matbox_m(:,:,:),matbox_m2(:,:,:)
-complex(8), allocatable :: cmatbox_m(:,:,:),cmatbox_m2(:,:,:)
 real(8), allocatable :: matbox_l(:,:,:),matbox_l2(:,:,:)
 complex(8), allocatable :: cmatbox_l(:,:,:),cmatbox_l2(:,:,:)
 
@@ -31,20 +29,6 @@ SUBROUTINE allocate_mat(ng,mg,lg)
   use structures, only: s_rgrid
   implicit none
   type(s_rgrid),intent(in) :: ng,mg,lg
-
-allocate (matbox_m(mg%is(1):mg%ie(1),    &
-             mg%is(2):mg%ie(2),      &
-             mg%is(3):mg%ie(3)) )
-
-allocate (matbox_m2(mg%is(1):mg%ie(1),    &
-             mg%is(2):mg%ie(2),      &
-             mg%is(3):mg%ie(3)) )
-allocate (cmatbox_m(mg%is(1):mg%ie(1),    &
-             mg%is(2):mg%ie(2),      &
-             mg%is(3):mg%ie(3)) )
-allocate (cmatbox_m2(mg%is(1):mg%ie(1),    &
-             mg%is(2):mg%ie(2),      &
-             mg%is(3):mg%ie(3)) )
 
 allocate (matbox_l(lg%is(1):lg%ie(1),    &
              lg%is(2):lg%ie(2),      &
