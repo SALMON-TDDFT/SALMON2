@@ -73,7 +73,6 @@ integer :: jspin
 !call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 
 call init_code_optimization
-call allocate_mat(ng,mg,lg) ! future work: remove this line
 
 allocate( energy%esp(system%no,system%nk,system%nspin) ); energy%esp=0.0d0
 

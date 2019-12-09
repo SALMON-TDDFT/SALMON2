@@ -19,7 +19,6 @@ use salmon_parallel, only: nproc_id_global
 use salmon_communication, only: comm_is_root, comm_summation
 use inputoutput, only: au_length_aa, au_energy_ev, natom, au_time_fs
 use salmon_global
-use allocate_mat_sub
 use inputoutput, only: yn_md
 implicit none
 integer,intent(in) :: itt

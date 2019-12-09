@@ -31,8 +31,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, rt, md, singlescal
                      V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                      pp, ppg, ppn )
 use inputoutput
-use allocate_mat_sub
-use deallocate_mat_sub
 
   use math_constants, only: pi, zi
   use structures
@@ -166,7 +164,6 @@ use deallocate_mat_sub
   call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   
   call init_code_optimization
-  call allocate_mat(ng,mg,lg) ! future work: remove this line
   
   call allocate_scalar(mg,srho)
   call allocate_scalar(mg,sVh)

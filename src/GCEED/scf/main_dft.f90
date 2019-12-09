@@ -18,8 +18,6 @@
 MODULE global_variables_scf
 
 use inputoutput
-use allocate_mat_sub
-use deallocate_mat_sub
 use structure_opt_sub
 implicit none
 

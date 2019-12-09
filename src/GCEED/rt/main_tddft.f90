@@ -16,8 +16,6 @@
 MODULE global_variables_rt
 
 use inputoutput
-use allocate_mat_sub
-use deallocate_mat_sub
 implicit none
 
 END MODULE global_variables_rt
@@ -144,8 +142,6 @@ call timer_end(LOG_TOTAL)
 if(write_rt_wfn_k=='y')then
   call write_bin(ofl%dir_out_restart,lg,mg,ng,system,info,spsi_out,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
 end if
-
-call deallocate_mat
 
 call finalize_xc(xc_func)
 
