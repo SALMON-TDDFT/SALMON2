@@ -20,8 +20,7 @@ subroutine main_dft2tddft
 use structures
 use salmon_global, only: ispin,cval,xc,xname,cname,directory_read_data,calc_mode, &
                          target_nproc_k,target_nproc_ob,target_nproc_domain_orbital, &
-                         target_nproc_domain_general
-use salmon_parallel, only: nproc_group_global
+                         target_nproc_domain_general,yn_periodic
 use salmon_communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
 use salmon_xc
 use timer
@@ -40,19 +39,10 @@ type(s_rgrid) :: ng_scf,ng_rt
 type(s_process_info) :: pinfo_scf,pinfo_rt
 type(s_orbital_parallel) :: info_scf,info_rt
 type(s_field_parallel) :: info_field_scf,info_field_rt
-type(s_sendrecv_grid) :: srg, srg_ng
-type(s_orbital) :: spsi,shpsi,sttpsi
+type(s_orbital) :: spsi,shpsi
 type(s_dft_system) :: system_scf,system_rt
-type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: srho,sVh,sVpsl
-type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
-type(s_reciprocal_grid) :: fg
-type(s_pp_info) :: pp
-type(s_pp_grid) :: ppg
-type(s_pp_nlcc) :: ppn
-type(s_dft_energy) :: energy
 type(s_ofile)  :: ofl
 
 integer :: icomm,irank,nprocs
@@ -78,17 +68,17 @@ call timer_begin(LOG_INIT_GS)
 call convert_input_scf(file_atoms_coo)
 
 ! please move folloings into initialization_dft
-call init_dft(nproc_group_global,pinfo_scf,info_scf,info_field_scf,lg_scf,mg_scf,ng_scf,system_scf,stencil,fg,poisson,srg,srg_ng,ofl)
-allocate( srho_s(system_scf%nspin),V_local(system_scf%nspin),sVxc(system_scf%nspin) )
+call init_dft_system(lg_scf,system_scf,stencil)
+call init_process_distribution(system_scf,icomm,pinfo_scf)
+call init_communicator_dft(icomm,pinfo_scf,info_scf,info_field_scf)
+call init_grid_parallel(irank,nprocs,pinfo_scf,lg_scf,mg_scf,ng_scf)
+call init_orbital_parallel_singlecell(system_scf,info_scf,pinfo_scf)
 
-call initialization1_dft( system_scf, energy, stencil, fg, poisson,  &
-                          lg_scf, mg_scf, ng_scf,  &
-                          pinfo_scf, info_scf, info_field_scf,  &
-                          srg, srg_ng,  &
-                          srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
-                          spsi, shpsi, sttpsi,  &
-                          pp, ppg, ppn,  &
-                          ofl )
+if (yn_periodic == 'y') then
+  call allocate_orbital_complex(system_scf%nspin,mg_scf,info_scf,spsi)
+else
+  call allocate_orbital_real(system_scf%nspin,mg_scf,info_scf,spsi)
+end if
 
 call generate_restart_directory_name(directory_read_data,gdir,pdir)
 call read_bin(pdir,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
@@ -131,15 +121,15 @@ pinfo_rt%npdomain_general_dm(1:3)=pinfo_rt%npdomain_general(1:3)/pinfo_rt%npdoma
 pinfo_rt%npdomain_general_dm(1:3)=pinfo_rt%npdomain_general(1:3)/pinfo_rt%npdomain_orbital(1:3)
 
 call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
-call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)
 call init_grid_parallel(irank,nprocs,pinfo_rt,lg_rt,mg_rt,ng_rt)
+call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)
 
-call deallocate_orbital(shpsi)
 call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)
 
 call convert_wave_function
 
 ! TODO: move to checkpoint_restart.f90
+call init_dir_out_restart(ofl)
 call generate_restart_directory_name(ofl%dir_out_restart,gdir,pdir)
 call create_directory(pdir)
 
@@ -180,7 +170,8 @@ integer,allocatable    :: is_ref(:,:,:),is_ref_srank(:,:,:),is_ref_rrank(:,:,:)
 integer,allocatable    :: irank_src(:,:),irank_dst(:,:)
 real(8),allocatable    :: dbuf1(:,:,:,:),dbuf2(:,:,:,:)
 complex(8),allocatable :: zbuf1(:,:,:,:),zbuf2(:,:,:,:)
-integer :: ik,io,jrank,krank
+integer :: ik,io,is,jrank,krank
+integer :: ix,iy,iz
 
 ! get referrer
 allocate(is_ref      (system_scf%no,system_scf%nk,0:nprocs-1))
@@ -205,6 +196,11 @@ allocate(irank_dst(system_scf%no,system_scf%nk))
 irank_src = -1
 irank_dst = -1
 
+!$omp parallel do collapse(2) default(none) &
+!$omp             private(ik,io,jrank) &
+!$omp             shared(system_scf,nprocs) &
+!$omp             shared(is_ref_srank,irank_src) &
+!$omp             shared(is_ref_rrank,irank_dst)
 do ik=1,system_scf%nk
 do io=1,system_scf%no
   ! src (SCF) rank
@@ -224,6 +220,7 @@ do io=1,system_scf%no
   end do
 end do
 end do
+!$omp end parallel do
 
 
 ! conversion
@@ -251,14 +248,38 @@ do io=1,system_scf%no
       info_scf%io_s <= io .and. io <= info_scf%io_e) then
     if (allocated(dbuf1)) then
       dbuf1 = 0d0
-      dbuf1(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:) &
-        = spsi%rwf(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:,io,ik,1)
+!$omp parallel do collapse(3) default(none) &
+!$omp             private(ix,iy,iz,is) &
+!$omp             shared(system_scf,mg_scf,dbuf1,spsi) &
+!$omp             shared(ik,io)
+      do is=1,system_scf%nspin
+      do iz=mg_scf%is(3),mg_scf%ie(3)
+      do iy=mg_scf%is(2),mg_scf%ie(2)
+      do ix=mg_scf%is(1),mg_scf%ie(1)
+        dbuf1(ix,iy,iz,is) = spsi%rwf(ix,iy,iz,is,io,ik,1)
+      end do
+      end do
+      end do
+      end do
+!$omp end parallel do
       call comm_summation(dbuf1,dbuf2,size(dbuf1),info_scf%icomm_r)
     end if
     if (allocated(zbuf1)) then
       zbuf1 = 0d0
-      zbuf1(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:) &
-        = spsi%zwf(mg_scf%is(1):mg_scf%ie(1),mg_scf%is(2):mg_scf%ie(2),mg_scf%is(3):mg_scf%ie(3),:,io,ik,1)
+!$omp parallel do collapse(3) default(none) &
+!$omp             private(ix,iy,iz,is) &
+!$omp             shared(system_scf,mg_scf,zbuf1,spsi) &
+!$omp             shared(ik,io)
+      do is=1,system_scf%nspin
+      do iz=mg_scf%is(3),mg_scf%ie(3)
+      do iy=mg_scf%is(2),mg_scf%ie(2)
+      do ix=mg_scf%is(1),mg_scf%ie(1)
+        zbuf1(ix,iy,iz,is) = spsi%zwf(ix,iy,iz,is,io,ik,1)
+      end do
+      end do
+      end do
+      end do
+!$omp end parallel do
       call comm_summation(zbuf1,zbuf2,size(zbuf1),info_scf%icomm_r)
     end if
   end if
@@ -279,13 +300,37 @@ do io=1,system_scf%no
       info_rt%io_s <= io .and. io <= info_rt%io_e) then
     if (allocated(dbuf2)) then
       call comm_bcast(dbuf2, info_rt%icomm_r)
-      shpsi%zwf(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:,io,ik,1) &
-        = cmplx(dbuf2(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:))
+!$omp parallel do collapse(3) default(none) &
+!$omp             private(ix,iy,iz,is) &
+!$omp             shared(system_rt,mg_rt,dbuf2,shpsi) &
+!$omp             shared(ik,io)
+      do is=1,system_rt%nspin
+      do iz=mg_rt%is(3),mg_rt%ie(3)
+      do iy=mg_rt%is(2),mg_rt%ie(2)
+      do ix=mg_rt%is(1),mg_rt%ie(1)
+        shpsi%zwf(ix,iy,iz,is,io,ik,1) = cmplx(dbuf2(ix,iy,iz,is))
+      end do
+      end do
+      end do
+      end do
+!$omp end parallel do
     end if
     if (allocated(zbuf2)) then
       call comm_bcast(zbuf2, info_rt%icomm_r)
-      shpsi%zwf(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:,io,ik,1) &
-        = zbuf2(mg_rt%is(1):mg_rt%ie(1),mg_rt%is(2):mg_rt%ie(2),mg_rt%is(3):mg_rt%ie(3),:)
+!$omp parallel do collapse(3) default(none) &
+!$omp             private(ix,iy,iz,is) &
+!$omp             shared(system_rt,mg_rt,zbuf2,shpsi) &
+!$omp             shared(ik,io)
+      do is=1,system_rt%nspin
+      do iz=mg_rt%is(3),mg_rt%ie(3)
+      do iy=mg_rt%is(2),mg_rt%ie(2)
+      do ix=mg_rt%is(1),mg_rt%ie(1)
+        shpsi%zwf(ix,iy,iz,is,io,ik,1) = zbuf2(ix,iy,iz,is)
+      end do
+      end do
+      end do
+      end do
+!$omp end parallel do
     end if
   end if
 end do
