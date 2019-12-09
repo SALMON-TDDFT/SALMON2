@@ -39,6 +39,7 @@ program main
   case('DFT','DFT_BAND')              ; call main_dft
   case('DFT_MD')                      ; call main_dft_md
   case('TDDFT_response','TDDFT_pulse'); call main_tddft
+  case('DFT2TDDFT')                   ; call main_dft2tddft ! DFT data redistributor to use TDDFT
   case('Single_scale_Maxwell_TDDFT'  ); call main_tddft
   case('Multi_scale_Maxwell_TDDFT'   ); call arted      !temporally
   case('MULTISCALE_EXPERIMENT' )      ; call main_ms    ! experimental

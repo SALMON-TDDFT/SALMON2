@@ -52,7 +52,7 @@ subroutine eh_mpi_grid_sr(fs,fw)
   
   !initialize r-grid
   call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
-  call init_grid_parallel(info%id_rko,info%isize_rko,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
+  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
   !### This process about ng is temporal. #####################!
   !### With modifying set_ng to be applied to arbitrary Nd, ###!
   !### this process will be removed.###########################!
