@@ -1141,6 +1141,7 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
                    flag_use_grad_wf_on_force,property,hvol0)
   use salmon_global,only : natom,kion,iperiodic,yn_domain_parallel
   use math_constants,only : pi
+  use salmon_math,only : ylm,dylm
   use structures,only : s_pp_info,s_pp_grid
   implicit none
   type(s_pp_info) :: pp
@@ -1163,7 +1164,6 @@ subroutine calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_
   real(8) :: uvr(0:2*pp%lmax+1),duvr(0:2*pp%lmax+1)
   real(8) :: r,x,y,z
   real(8) :: xx
-  real(8) :: ylm,dylm
   real(8) :: rshift(3)
   real(8) :: hvol
 

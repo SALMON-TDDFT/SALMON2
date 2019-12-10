@@ -163,6 +163,7 @@ contains
 
   subroutine calc_uv_plusU(pp,ppg,flag_use_grad_wf_on_force,property)
     use salmon_global, only : natom, kion
+    use salmon_math,   only : ylm, dylm
     use structures,    only : s_pp_info, s_pp_grid
     implicit none
     type(s_pp_info),intent(inout) :: pp
@@ -181,7 +182,6 @@ contains
     real(8) :: upp(0:2*pp%lmax+1),dupp(0:2*pp%lmax+1)
     real(8) :: r,x,y,z
     real(8) :: xx
-    real(8),external :: Ylm, dYlm
 
     call set_nlma_ao( pp, ppg )
 

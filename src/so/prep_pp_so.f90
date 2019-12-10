@@ -575,12 +575,12 @@ subroutine finalize_uvpsi_summation(ppg)
 end subroutine
 
   function zylm( x,y,z,l,m )
+    use salmon_math, only: Ylm
     implicit none
     real(8),intent(in) :: x,y,z
     integer,intent(in) :: l,m
     complex(8) :: zylm
     real(8),parameter :: factor=0.70710678118654752d0 ! =sqrt(0.5)
-    real(8),external :: Ylm
     zylm=(0.0d0,0.0d0)
     if ( l < 0 .or. abs(m) > l ) return
     if ( m < 0 ) then
@@ -593,12 +593,12 @@ end subroutine
   end function zylm
 
   function dzylm( x,y,z,l,m,idir )
+    use salmon_math, only: dYlm
     implicit none
     real(8),intent(in) :: x,y,z
     integer,intent(in) :: l,m,idir
     complex(8) :: dzylm
     real(8),parameter :: factor=0.70710678118654752d0 ! =sqrt(0.5)
-    real(8),external :: dYlm
     dzylm=(0.0d0,0.0d0)
     if ( l < 0 .or. abs(m) > l ) return
     if ( m < 0 ) then
