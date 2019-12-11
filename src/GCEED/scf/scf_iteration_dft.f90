@@ -18,7 +18,7 @@
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,  &
                               lg,mg,ng,  &
-                              info,info_field,  &
+                              info,info_field,pinfo,  &
                               poisson,fg,  &
                               cg,mixing,  &
                               stencil,  &
@@ -68,6 +68,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_orbital_parallel) :: info
 type(s_field_parallel) :: info_field
+type(s_process_info),intent(in) :: pinfo
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
@@ -128,7 +129,7 @@ DFT_Iteration : do iter=1,nscf
 
    call copy_density(Miter,system%nspin,ng,srho_s,mixing)
 
-   call scf_iteration_step(lg,mg,ng,system,info,info_field,stencil,  &
+   call scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil,  &
                      srg,srg_ng,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &

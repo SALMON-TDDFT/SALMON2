@@ -18,13 +18,15 @@ module eigen_subdiag_sub
 
 contains
 
-subroutine eigen_subdiag(Rmat,evec,iter,ier2)
+subroutine eigen_subdiag(Rmat,evec,iter,ier2,pinfo)
   use salmon_parallel, only: nproc_size_global
+  use structures, only: s_process_info
   implicit none
   
   integer :: iter,ier2
   real(8) :: Rmat(iter,iter)
   real(8) :: evec(iter,iter)
+  type(s_process_info),intent(in) :: pinfo
   
   character(1) :: JOBZ,UPLO
   integer :: N
@@ -46,7 +48,7 @@ subroutine eigen_subdiag(Rmat,evec,iter,ier2)
     call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
     evec=A
   else
-    call SAMPLE_PDSYEV_CALL(Rmat,evec,iter)
+    call SAMPLE_PDSYEV_CALL(Rmat,evec,iter,pinfo)
   end if
 
 end subroutine eigen_subdiag
@@ -80,7 +82,7 @@ subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
 end subroutine eigen_subdiag_periodic
  
 !
-      subroutine SAMPLE_PDSYEV_CALL(Rmat,evec,iter)
+      subroutine SAMPLE_PDSYEV_CALL(Rmat,evec,iter,pinfo)
 !
 !
 !  -- ScaLAPACK routine (version 1.2) --
@@ -93,11 +95,12 @@ end subroutine eigen_subdiag_periodic
 !     pasted directly into matlab.
 !
 !     .. Parameters ..
-      use inputoutput, only: nproc_domain_orbital
+      use structures, only: s_process_info
       use salmon_parallel, only: nproc_size_global
       integer :: iter
       real(8) :: Rmat(iter,iter)
       real(8) :: evec(iter,iter)
+      type(s_process_info),intent(in) :: pinfo
       INTEGER            LWORK, MAXN
       INTEGER            LIWORK
       INTEGER,allocatable :: IWORK(:)
@@ -141,12 +144,12 @@ end subroutine eigen_subdiag_periodic
       NB = 1
 !      NPROW = 2
 !      NPCOL = 2
-      if(nproc_domain_orbital(1)>1)then
-        NPROW = nproc_domain_orbital(1)
-      else if(nproc_domain_orbital(2)>1)then
-        NPROW = nproc_domain_orbital(2)
+      if(pinfo%npdomain_orbital(1)>1)then
+        NPROW = pinfo%npdomain_orbital(1)
+      else if(pinfo%npdomain_orbital(2)>1)then
+        NPROW = pinfo%npdomain_orbital(2)
       else
-        NPROW = nproc_domain_orbital(3)
+        NPROW = pinfo%npdomain_orbital(3)
       end if
       NPCOL = nproc_size_global/NPROW
       LDA = iter

@@ -168,7 +168,7 @@ MD_Loop : do it=1,nt
    call scf_iteration_dft( Miter,rion_update,sum1,  &
                            system,energy,  &
                            lg,mg,ng,  &
-                           info,info_field,  &
+                           info,info_field,pinfo,  &
                            poisson,fg,  &
                            cg,mixing,  &
                            stencil,  &

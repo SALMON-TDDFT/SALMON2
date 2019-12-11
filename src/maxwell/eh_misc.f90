@@ -37,18 +37,12 @@ subroutine eh_mpi_grid_sr(fs,fw)
   integer                           :: ii,iperi
   
   !set mpi condition
+  pinfo%npk              = nproc_k
+  pinfo%nporbital        = nproc_ob
   pinfo%npdomain_orbital = nproc_domain_orbital
   pinfo%npdomain_general = nproc_domain_general
   call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,pinfo)
   call init_communicator_dft(nproc_group_global,pinfo,info,info_field)
-  !### This process about nproc_** is temporal. ###################!
-  !### When init_grid_parallel(&others) does not need nproc_**, ###!
-  !### this process will be removed. ##############################!
-  nproc_k              = pinfo%npk
-  nproc_ob             = pinfo%nporbital
-  nproc_domain_orbital = pinfo%npdomain_orbital
-  nproc_domain_general = pinfo%npdomain_general
-  !################################################################!
   
   !initialize r-grid
   call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
@@ -86,7 +80,7 @@ subroutine eh_mpi_grid_sr(fs,fw)
   elseif(yn_periodic=='y') then
     iperi=3
   end if
-  call create_sendrecv_neig_ng(neig_ng_eh,info_field,iperi) ! neighboring node array
+  call create_sendrecv_neig_ng(neig_ng_eh,pinfo,info_field,iperi) ! neighboring node array
   call init_sendrecv_grid(fs%srg_ng,fs%ng,1,info_field%icomm_all,neig_ng_eh)
   
 end subroutine eh_mpi_grid_sr

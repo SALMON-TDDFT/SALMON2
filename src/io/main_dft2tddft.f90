@@ -19,8 +19,10 @@
 subroutine main_dft2tddft
 use structures
 use salmon_global, only: ispin,cval,xc,xname,cname,directory_read_data,calc_mode, &
+                         nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general, &
                          target_nproc_k,target_nproc_ob,target_nproc_domain_orbital, &
-                         target_nproc_domain_general,yn_periodic
+                         target_nproc_domain_general, &
+                         yn_periodic
 use salmon_communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
 use salmon_xc
 use timer
@@ -46,7 +48,6 @@ type(s_xc_functional) :: xc_func
 type(s_ofile)  :: ofl
 
 integer :: icomm,irank,nprocs
-logical :: if_stop
 character(256) :: dir_file_out,gdir,pdir
 integer,parameter :: fh = 41
 
@@ -69,7 +70,13 @@ call convert_input_scf(file_atoms_coo)
 
 ! please move folloings into initialization_dft
 call init_dft_system(lg_scf,system_scf,stencil)
+
+pinfo_scf%npk                 = nproc_k
+pinfo_scf%nporbital           = nproc_ob
+pinfo_scf%npdomain_orbital    = nproc_domain_orbital
+pinfo_scf%npdomain_general    = nproc_domain_general
 call init_process_distribution(system_scf,icomm,pinfo_scf)
+
 call init_communicator_dft(icomm,pinfo_scf,info_scf,info_field_scf)
 call init_grid_parallel(irank,nprocs,pinfo_scf,lg_scf,mg_scf,ng_scf)
 call init_orbital_parallel_singlecell(system_scf,info_scf,pinfo_scf)
@@ -97,28 +104,7 @@ pinfo_rt%npk                 = target_nproc_k
 pinfo_rt%nporbital           = target_nproc_ob
 pinfo_rt%npdomain_orbital    = target_nproc_domain_orbital
 pinfo_rt%npdomain_general    = target_nproc_domain_general
-if((target_nproc_ob + sum(target_nproc_domain_orbital) + sum(target_nproc_domain_general)) == 0) then
-  if (system_rt%ngrid > 16**3) then
-    call set_numcpu_general(iprefer_domain_distribution,system_rt%nk,system_rt%no,icomm,pinfo_rt)
-  else
-    call set_numcpu_general(iprefer_orbital_distribution,system_rt%nk,system_rt%no,icomm,pinfo_rt)
-  end if
-end if
-
-if (comm_is_root(irank)) then
-  if_stop = .not. check_numcpu(icomm, pinfo_rt)
-end if
-call comm_bcast(if_stop, icomm)
-if (if_stop) stop 'fail: check_numcpu'
-
-if (ispin==1) then
-  pinfo_rt%nporbital_spin(1)=(pinfo_rt%nporbital+1)/2
-  pinfo_rt%nporbital_spin(2)= pinfo_rt%nporbital   /2
-else
-  pinfo_rt%nporbital_spin = 0
-end if
-pinfo_rt%npdomain_general_dm(1:3)=pinfo_rt%npdomain_general(1:3)/pinfo_rt%npdomain_orbital(1:3)
-pinfo_rt%npdomain_general_dm(1:3)=pinfo_rt%npdomain_general(1:3)/pinfo_rt%npdomain_orbital(1:3)
+call init_process_distribution(system_rt,icomm,pinfo_rt)
 
 call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
 call init_grid_parallel(irank,nprocs,pinfo_rt,lg_rt,mg_rt,ng_rt)
