@@ -18,7 +18,7 @@
 
 subroutine main_dft2tddft
 use structures
-use salmon_global, only: ispin,cval,xc,xname,cname,directory_read_data,calc_mode, &
+use salmon_global, only: directory_read_data,calc_mode, &
                          nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general, &
                          target_nproc_k,target_nproc_ob,target_nproc_domain_orbital, &
                          target_nproc_domain_general, &
@@ -33,19 +33,17 @@ use set_numcpu
 use filesystem, only: create_directory
 implicit none
 integer :: Miter
-character(100) :: file_atoms_coo
 
-type(s_rgrid) :: lg_scf,lg_rt
-type(s_rgrid) :: mg_scf,mg_rt
-type(s_rgrid) :: ng_scf,ng_rt
-type(s_process_info) :: pinfo_scf,pinfo_rt
+type(s_rgrid)            :: lg_scf,lg_rt
+type(s_rgrid)            :: mg_scf,mg_rt
+type(s_rgrid)            :: ng_scf,ng_rt
+type(s_process_info)     :: pinfo_scf,pinfo_rt
 type(s_orbital_parallel) :: info_scf,info_rt
-type(s_field_parallel) :: info_field_scf,info_field_rt
-type(s_orbital) :: spsi,shpsi
-type(s_dft_system) :: system_scf,system_rt
-type(s_stencil) :: stencil
-type(s_xc_functional) :: xc_func
-type(s_ofile)  :: ofl
+type(s_field_parallel)   :: info_field_scf,info_field_rt
+type(s_orbital)          :: spsi,shpsi
+type(s_dft_system)       :: system_scf,system_rt
+type(s_stencil)          :: stencil
+type(s_ofile)            :: ofl
 
 integer :: icomm,irank,nprocs
 character(256) :: dir_file_out,gdir,pdir
@@ -54,21 +52,18 @@ integer,parameter :: fh = 41
 call comm_get_globalinfo(icomm,irank,nprocs)
 
 if(comm_is_root(irank))then
-  print *, '==============================================='
+  print *, '=========================================='
   print *, 'DFT2TDDFT'
-  print *, '  DFT calulated data convert to calculate TDDFT'
-  print *, '==============================================='
+  print *, '  data redisribution for prep. TDDFT calc.'
+  print *, '=========================================='
 end if
-
-call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
 
+
+! Read DFT calculation results
+! ---------------------------------------------------------
 call timer_begin(LOG_INIT_GS)
-
-call convert_input_scf(file_atoms_coo)
-
-! please move folloings into initialization_dft
 call init_dft_system(lg_scf,system_scf,stencil)
 
 pinfo_scf%npk                 = nproc_k
@@ -86,17 +81,19 @@ if (yn_periodic == 'y') then
 else
   call allocate_orbital_real(system_scf%nspin,mg_scf,info_scf,spsi)
 end if
-
-call generate_restart_directory_name(directory_read_data,gdir,pdir)
-call read_bin(pdir,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
-
 call timer_end(LOG_INIT_GS)
 
 
-! Redistributed write to use TDDFT calculation.
-! ---------------------------------------------------------
-call timer_begin(LOG_WRITE_GS_DATA)
+call timer_begin(LOG_INIT_GS_RESTART)
+call generate_restart_directory_name(directory_read_data,gdir,pdir)
+call read_bin(pdir,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
+call timer_end(LOG_INIT_GS_RESTART)
 
+
+! Redistribute and write to use TDDFT calculation.
+! ---------------------------------------------------------
+
+call timer_begin(LOG_INIT_RT)
 calc_mode = 'RT' ! FIXME
 call init_dft_system(lg_rt,system_rt,stencil)
 
@@ -111,10 +108,15 @@ call init_grid_parallel(irank,nprocs,pinfo_rt,lg_rt,mg_rt,ng_rt)
 call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)
 
 call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)
+call timer_end(LOG_INIT_RT)
 
+
+call timer_begin(LOG_WRITE_RT_DATA)
 call convert_wave_function
+call timer_end(LOG_WRITE_RT_DATA)
 
-! TODO: move to checkpoint_restart.f90
+
+call timer_begin(LOG_WRITE_RT_RESULTS)
 call init_dir_out_restart(ofl)
 call generate_restart_directory_name(ofl%dir_out_restart,gdir,pdir)
 call create_directory(pdir)
@@ -137,12 +139,7 @@ if(comm_is_root(irank))then
 end if
 
 call write_wavefunction(pdir,lg_rt,mg_rt,system_rt,info_rt,shpsi,.false.)
-! TODO: move to checkpoint_restart.f90
-
-call timer_end(LOG_WRITE_GS_DATA)
-
-
-call finalize_xc(xc_func)
+call timer_end(LOG_WRITE_RT_RESULTS)
 
 call timer_end(LOG_TOTAL)
 
@@ -270,7 +267,7 @@ do io=1,system_scf%no
     end if
   end if
 
-  ! send representive SCF rank to RT rank
+  ! send data from representive SCF rank to RT rank
   jrank = irank_src(io,ik)
   krank = irank_dst(io,ik)
   if (jrank == irank) then
