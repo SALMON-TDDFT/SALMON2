@@ -151,7 +151,7 @@ contains
     end if
 
     select case(theory)
-    case('DFT','DFT_BAND','DFT_MD','DFT2TDDFT')
+    case('DFT','DFT_BAND','DFT_MD')
       call set(0, 0, 'scf calculation')
       call set(1, LOG_INIT_GS            , 'gs initialization')
       call set(2, LOG_INIT_GS_RESTART    , 'reading data')
@@ -173,6 +173,14 @@ contains
       call set(7, LOG_CALC_TOTAL_ENERGY , 'calculating Etot')
       call set(8, LOG_CALC_ESP          , 'calculating esp')
       call write_loadbalance(fd, 8, tsrc, headers, mode)
+    case('DFT2TDDFT')
+      call set(0, 0, 'DFT data redistribution')
+      call set(1, LOG_INIT_GS         , 'gs initialization')
+      call set(2, LOG_INIT_GS_RESTART , 'reading data')
+      call set(3, LOG_INIT_RT         , 'rt initialization')
+      call set(4, LOG_WRITE_RT_DATA   , 'data redistribution')
+      call set(5, LOG_WRITE_RT_RESULTS, 'writing data')
+      call write_loadbalance(fd, 5, tsrc, headers, mode)
     case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT',&
          'Multi_scale_Maxwell_TDDFT','Maxwell')
       call set(0, 0, 'rt calculation')
