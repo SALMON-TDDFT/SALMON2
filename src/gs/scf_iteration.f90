@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
+subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
                srg,srg_ng,spsi,shpsi,srho,srho_s, &
                cg,ppg,vlocal,  &
                miter,   &
@@ -44,6 +44,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
   type(s_dft_system),    intent(in)    :: system
   type(s_orbital_parallel),intent(in)  :: info
   type(s_field_parallel),intent(in)    :: info_field
+  type(s_process_info),  intent(in)    :: pinfo
   type(s_orbital),       intent(inout) :: spsi,shpsi
   type(s_scalar),        intent(inout) :: srho
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
@@ -86,7 +87,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,stencil, &
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
       case(0)      
-        call ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+        call ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
 
       case(3)
         call ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)

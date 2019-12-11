@@ -471,20 +471,20 @@ module sendrecv_grid
 
   end subroutine update_overlap_complex8
 
-  subroutine create_sendrecv_neig_mg(neig_mg, ob_para_info, iperiodic)
-    use structures, only: s_orbital_parallel
+  subroutine create_sendrecv_neig_mg(neig_mg, ob_para_info, pinfo, iperiodic)
+    use structures, only: s_orbital_parallel,s_process_info
     use salmon_communication, only: comm_proc_null
-    use salmon_global, only: nproc_domain_orbital
     implicit none
     integer, intent(out) :: neig_mg(1:2, 1:3)
     type(s_orbital_parallel), intent(in) :: ob_para_info
+    type(s_process_info), intent(in)     :: pinfo
     integer, intent(in) :: iperiodic
     !
     integer :: imr(3)
     integer :: nproc_d_o(3)
 
     imr = ob_para_info%imr
-    nproc_d_o = nproc_domain_orbital
+    nproc_d_o = pinfo%npdomain_orbital
 
     neig_mg(1, 1)=ob_para_info%id_r+1
     neig_mg(2, 1)=ob_para_info%id_r-1
@@ -535,12 +535,13 @@ module sendrecv_grid
   end subroutine create_sendrecv_neig_mg
 
 
-  subroutine create_sendrecv_neig_ng(neig_ng, info_field, iperiodic)
-    use structures, only: s_field_parallel
+  subroutine create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic)
+    use structures, only: s_process_info,s_field_parallel
     use salmon_communication, only: comm_proc_null
-    use salmon_global, only: process_allocation,nproc_domain_orbital,nproc_domain_general
+    use salmon_global, only: process_allocation
     implicit none
     integer, intent(out) :: neig_ng(1:2, 1:3)
+    type(s_process_info), intent(in)   :: pinfo
     type(s_field_parallel), intent(in) :: info_field
     integer, intent(in) :: iperiodic
     !
@@ -551,8 +552,8 @@ module sendrecv_grid
     imr = info_field%imr
     imrs = info_field%imrs
 
-    nproc_d_o = nproc_domain_orbital
-    nproc_d_g = nproc_domain_general
+    nproc_d_o = pinfo%npdomain_orbital
+    nproc_d_g = pinfo%npdomain_general
     nproc_d_o_mul = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
     nproc_d_g_dm = nproc_d_g/nproc_d_o
     nproc_d_g_mul_dm = nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)

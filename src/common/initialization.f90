@@ -26,7 +26,8 @@ contains
 
 subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
-  use salmon_global, only: iperiodic,num_multipole_xyz,layout_multipole
+  use salmon_global, only: iperiodic,num_multipole_xyz,layout_multipole, &
+                           nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general
   use sendrecv_grid
   use init_communicator
   use init_poisson_sub
@@ -52,16 +53,20 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   call init_dft_system(lg,system,stencil)
 
 ! parallelization
-
+  pinfo%npk              = nproc_k
+  pinfo%nporbital        = nproc_ob
+  pinfo%npdomain_orbital = nproc_domain_orbital
+  pinfo%npdomain_general = nproc_domain_general
   call init_process_distribution(system,comm,pinfo)
+
   call init_communicator_dft(comm,pinfo,info,info_field)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
-  call create_sendrecv_neig_mg(neig, info, iperiodic) ! neighboring node array
+  call create_sendrecv_neig_mg(neig, info, pinfo, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_r, neig)
   ! sendrecv_grid object for scalar potential updates
-  call create_sendrecv_neig_ng(neig_ng, info_field, iperiodic) ! neighboring node array
+  call create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
   
 ! symmetry
@@ -224,7 +229,7 @@ end subroutine init_dft_system
 subroutine init_process_distribution(system,icomm1,pinfo)
   use structures, only: s_process_info,s_dft_system
   use salmon_parallel, only: nproc_id_global, nproc_group_global
-  use salmon_global, only: theory,nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general,ispin
+  use salmon_global, only: theory,ispin
   use salmon_communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
@@ -233,7 +238,7 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   type(s_process_info),intent(out) :: pinfo
   logical :: if_stop
 
-  if((nproc_ob + sum(nproc_domain_orbital) + sum(nproc_domain_general)) == 0) then
+  if((pinfo%nporbital + sum(pinfo%npdomain_orbital) + sum(pinfo%npdomain_general)) == 0) then
     ! Process distribution is automatically decided by SALMON.
     if (system%ngrid > 16**3) then
       call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,pinfo)
@@ -249,10 +254,6 @@ subroutine init_process_distribution(system,icomm1,pinfo)
     end if
   else
     ! Process distribution is explicitly specified by user.
-    pinfo%npk              = nproc_k
-    pinfo%nporbital        = nproc_ob
-    pinfo%npdomain_orbital = nproc_domain_orbital
-    pinfo%npdomain_general = nproc_domain_general
   end if
 
   if (comm_is_root(nproc_id_global)) then
@@ -262,18 +263,12 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   if (if_stop) stop 'fail: check_numcpu'
 
   if (ispin==1) then
-    pinfo%nporbital_spin(1)=(nproc_ob+1)/2
-    pinfo%nporbital_spin(2)= nproc_ob   /2
+    pinfo%nporbital_spin(1)=(pinfo%nporbital+1)/2
+    pinfo%nporbital_spin(2)= pinfo%nporbital   /2
   else
     pinfo%nporbital_spin = 0
   end if
   pinfo%npdomain_general_dm(1:3)=pinfo%npdomain_general(1:3)/pinfo%npdomain_orbital(1:3)
-
-  ! Future work: remove these
-  nproc_k              = pinfo%npk
-  nproc_ob             = pinfo%nporbital
-  nproc_domain_orbital = pinfo%npdomain_orbital
-  nproc_domain_general = pinfo%npdomain_general
 end subroutine init_process_distribution
 
 !===================================================================================================================================

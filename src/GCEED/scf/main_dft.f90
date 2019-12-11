@@ -195,7 +195,7 @@ call timer_begin(LOG_GS_ITERATION)
 call scf_iteration_dft( Miter,rion_update,sum1,  &
                         system,energy,  &
                         lg,mg,ng,  &
-                        info,info_field,  &
+                        info,info_field,pinfo,  &
                         poisson,fg,  &
                         cg,mixing,  &
                         stencil,  &
