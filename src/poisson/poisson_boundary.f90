@@ -24,6 +24,7 @@ contains
 subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson
+  use salmon_math, only: ylm
   use salmon_communication, only: comm_summation
   
   use omp_lib, only: omp_get_num_threads, omp_get_thread_num, omp_get_max_threads
@@ -44,14 +45,13 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
                  ng%is_array(2):ng%ie_array(2),      &
                  ng%is_array(3):ng%ie_array(3))
   integer,parameter :: maxiter=1000
-  integer :: ii,jj,kk,ix,iy,iz,lm,ll,icen,pl,cl
+  integer :: ii,jj,kk,ix,iy,iz,lm,ll,m,icen,pl,cl
   integer :: ixbox,iybox,izbox
   integer :: j,k
   integer :: istart(0:info_field%isize_all-1),iend(0:info_field%isize_all-1)
   integer :: icount
   integer,allocatable :: itrho(:)
   integer :: num_center
-  real(8) :: ylm
   real(8) :: ylm2(25)
   integer :: l2(25)
   real(8) :: xx,yy,zz,rr,sum1,xxxx,yyyy,zzzz,rrrr,sumbox1,sumbox2,sumbox3
@@ -123,10 +123,11 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   itrho(1)=1
   
   do ll=0,lmax_lmp
-  do lm=ll**2+1,(ll+1)**2
+  do m=-ll,ll
+    lm=ll*ll+ll+1+m
     rholm2box=0.d0
   !$OMP parallel do reduction ( + : rholm2box)&
-  !$OMP private(ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,ylm)
+  !$OMP private(ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -134,8 +135,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
       yy=coordinate(iy,2)-center_trho(2,1)
       zz=coordinate(iz,3)-center_trho(3,1)
       rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
-      call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-      rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*hvol
+      rholm2box=rholm2box+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ix,iy,iz)*hvol
     end do
     end do
     end do
@@ -167,10 +167,11 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   
   do icen=1,poisson%npole_partial
     do ll=0,lmax_lmp
-    do lm=ll**2+1,(ll+1)**2
+    do m=-ll,ll
+      lm=ll*ll+ll+1+m
       rholm2box=0.d0
   !$OMP parallel do reduction ( + : rholm2box)&
-  !$OMP private(jj,ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,ylm)
+  !$OMP private(jj,ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz)
       do jj=1,ig_num(icen)
         ix=ig(1,jj,icen)
         iy=ig(2,jj,icen)
@@ -179,8 +180,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
         yy=coordinate(iy,2)-rion2(2,poisson%ipole_tbl(icen))
         zz=coordinate(iz,3)-rion2(3,poisson%ipole_tbl(icen))
         rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
-        call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-        rholm2box=rholm2box+rr**ll*ylm*trho(ix,iy,iz)*hvol
+        rholm2box=rholm2box+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ix,iy,iz)*hvol
       end do
       rholm2(lm,poisson%ipole_tbl(icen))=rholm2box
     end do
@@ -262,7 +262,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
       if(itrho(pl)==1)then
   !$omp parallel default(none) &
   !$omp          shared(ig,coordinate,center_trho,trho,rholm3) &
-  !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz,ylm) &
+  !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz) &
   !$omp          firstprivate(ii,pl,cl,lmax_lmp_tmp,hvol) !iwata
         tid=omp_get_thread_num()
         rholm3(:,tid)=0.d0
@@ -281,9 +281,9 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
           yyyy=yy*rinv
           zzzz=zz*rinv
           do ll=0,lmax_lmp_tmp !iwata
-          do lm=ll**2+1,(ll+1)**2
-            call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-            rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm*trho(ixbox,iybox,izbox)*hvol
+          do m=-ll,ll
+            lm=ll*ll+ll+1+m
+            rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
           end do
           end do
         end do
@@ -308,10 +308,11 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
       if(itrho(poisson%ipole_tbl(ii))==1)then
         rholm=0.d0
         do ll=0,lmax_lmp
-        do lm=ll**2+1,(ll+1)**2
+        do m=-ll,ll
+          lm=ll*ll+ll+1+m
           rholm2box=0.d0
   !$OMP parallel do reduction ( + : rholm2box)&
-  !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz,ylm)
+  !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz)
           do jj=1,ig_num(ii)
             ixbox=ig(1,jj,ii)
             iybox=ig(2,jj,ii)
@@ -320,8 +321,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
             yy=coordinate(iybox,2)-center_trho(2,poisson%ipole_tbl(ii))
             zz=coordinate(izbox,3)-center_trho(3,poisson%ipole_tbl(ii))
             rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
-            call ylm_sub(xxxx,yyyy,zzzz,lm,ylm)
-            rholm2box=rholm2box+rr**ll*ylm*trho(ixbox,iybox,izbox)*hvol
+            rholm2box=rholm2box+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
           end do
           rholm2(lm,poisson%ipole_tbl(ii))=rholm2box
         end do
