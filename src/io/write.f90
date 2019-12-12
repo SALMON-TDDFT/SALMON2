@@ -718,7 +718,7 @@ contains
 !===================================================================================================================================
   subroutine write_response_0d(ofl,rt)
     use inputoutput, only: e_impulse, nt, dt, nenergy, de,  &
-                           t_unit_time,t_unit_energy,t_unit_polarizability
+                           t_unit_energy,t_unit_polarizability
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
@@ -781,7 +781,7 @@ contains
 !===================================================================================================================================
   subroutine write_response_3d(ofl,rt)
     use inputoutput, only: e_impulse, trans_longi, nt, dt, nenergy, de,  &
-                           t_unit_time,t_unit_energy,t_unit_conductivity
+                           t_unit_energy,t_unit_conductivity
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
@@ -1374,6 +1374,7 @@ contains
   subroutine write_pdos(lg,mg,system,info,pp,energy,tpsi)
     use structures
     use math_constants, only: pi,zi
+    use salmon_math, only: ylm
     use salmon_parallel, only: nproc_id_global
     use salmon_communication, only: comm_is_root, comm_summation
     use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
@@ -1388,14 +1389,14 @@ contains
     type(s_dft_energy)      ,intent(in) :: energy
     type(s_orbital)         ,intent(in) :: tpsi
     !
-    integer :: iob,iatom,L,ix,iy,iz,iik,ispin
+    integer :: iob,iatom,L,m,ix,iy,iz,iik,ispin
     integer :: ikoa
     integer :: intr
     real(8) :: phi_r
     real(8) :: rr
     real(8) :: ratio1,ratio2
     real(8) :: xx,yy,zz
-    real(8) :: Ylm
+    real(8) :: xxxx,yyyy,zzzz,rinv
     integer :: lm
     real(8) :: rbox_pdos(25,natom)
     real(8) :: rbox_pdos2(25,natom)
@@ -1435,7 +1436,8 @@ contains
       do iatom=1,natom
         ikoa=Kion(iatom)
         do L=0,pp%mlps(ikoa)
-          do lm=L**2+1,(L+1)**2
+          do m=-L,L
+            lm=L*L+L+1+m
             do iz=mg%is(3),mg%ie(3)
             do iy=mg%is(2),mg%ie(2)
             do ix=mg%is(1),mg%ie(1)
@@ -1443,14 +1445,17 @@ contains
               yy=lg%coordinate(iy,2)-system%Rion(2,iatom)
               zz=lg%coordinate(iz,3)-system%Rion(3,iatom)
               rr=sqrt(xx**2+yy**2+zz**2)+1.d-50
+              rinv=1.0d0/rr
+              xxxx=xx*rinv
+              yyyy=yy*rinv
+              zzzz=zz*rinv
               call bisection(rr,intr,ikoa,pp%nrmax,pp%rad)
               if(intr==1) intr=2
               ratio1=(rr-pp%rad(intr,ikoa))/(pp%rad(intr+1,ikoa)-pp%rad(intr,ikoa)) ; ratio2=1.d0-ratio1
               phi_r= ratio1*pp%upp_f(intr,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi)) +  &
                      ratio2*pp%upp_f(intr-1,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi))
                                             !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-              call Ylm_sub(xx,yy,zz,lm,Ylm)
-              rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm*system%Hvol
+              rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
             end do
             end do
             end do
