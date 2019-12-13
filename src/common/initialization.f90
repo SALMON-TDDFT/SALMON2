@@ -26,7 +26,7 @@ contains
 
 subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
-  use salmon_global, only: iperiodic,num_multipole_xyz,layout_multipole, &
+  use salmon_global, only: iperiodic,layout_multipole, &
                            nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general
   use sendrecv_grid
   use init_communicator
@@ -76,7 +76,6 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
 ! for Poisson equation
 
   poisson%iterVh = 0 ! Iteration counter
-  poisson%npole_total=num_multipole_xyz(1)*num_multipole_xyz(2)*num_multipole_xyz(3)
   select case(iperiodic)
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)

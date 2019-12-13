@@ -21,7 +21,8 @@ contains
 
 !=====================================================================
 subroutine make_corr_pole(lg,ng,poisson)
-  use inputoutput, only: natom,Rion,layout_multipole,num_multipole_xyz
+  use salmon_global, only: natom,Rion,layout_multipole,num_multipole_xyz,al
+  use inputoutput, only: au_length_aa
   use structures, only: s_rgrid,s_poisson
   implicit none
   type(s_rgrid), intent(in) :: lg
@@ -41,6 +42,7 @@ subroutine make_corr_pole(lg,ng,poisson)
   integer,allocatable :: nearatomnum(:,:,:)
   integer,allocatable :: inv_icorr_polenum(:)
   integer :: maxval_ig_num
+  real(8) :: dip_spacing
 
   if(layout_multipole==2)then
   
@@ -106,21 +108,29 @@ subroutine make_corr_pole(lg,ng,poisson)
   
   else if(layout_multipole==3)then
   
+    if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
+      dip_spacing = 8.d0/au_length_aa  ! approximate spacing of multipoles 
+      poisson%n_multipole_xyz(1:3)=int((al(1:3)+dip_spacing)/dip_spacing-1.d-8)
+    else
+      poisson%n_multipole_xyz(1:3)=num_multipole_xyz(1:3)
+    end if
+    poisson%npole_total=poisson%n_multipole_xyz(1)*poisson%n_multipole_xyz(2)*poisson%n_multipole_xyz(3)
+
     allocate(ista_Mxin_pole(3,0:poisson%npole_total-1))
     allocate(iend_Mxin_pole(3,0:poisson%npole_total-1))
     allocate(inum_Mxin_pole(3,0:poisson%npole_total-1))
     allocate(iflag_pole(1:poisson%npole_total))
   
-    do j3=0,num_multipole_xyz(3)-1
-    do j2=0,num_multipole_xyz(2)-1
-    do j1=0,num_multipole_xyz(1)-1
-      ibox = j1 + num_multipole_xyz(1)*j2 + num_multipole_xyz(1)*num_multipole_xyz(2)*j3 
-      ista_Mxin_pole(1,ibox)=j1*lg%num(1)/num_multipole_xyz(1)+lg%is(1)
-      iend_Mxin_pole(1,ibox)=(j1+1)*lg%num(1)/num_multipole_xyz(1)+lg%is(1)-1
-      ista_Mxin_pole(2,ibox)=j2*lg%num(2)/num_multipole_xyz(2)+lg%is(2)
-      iend_Mxin_pole(2,ibox)=(j2+1)*lg%num(2)/num_multipole_xyz(2)+lg%is(2)-1
-      ista_Mxin_pole(3,ibox)=j3*lg%num(3)/num_multipole_xyz(3)+lg%is(3)
-      iend_Mxin_pole(3,ibox)=(j3+1)*lg%num(3)/num_multipole_xyz(3)+lg%is(3)-1
+    do j3=0,poisson%n_multipole_xyz(3)-1
+    do j2=0,poisson%n_multipole_xyz(2)-1
+    do j1=0,poisson%n_multipole_xyz(1)-1
+      ibox = j1 + poisson%n_multipole_xyz(1)*j2 + poisson%n_multipole_xyz(1)*poisson%n_multipole_xyz(2)*j3 
+      ista_Mxin_pole(1,ibox)=j1*lg%num(1)/poisson%n_multipole_xyz(1)+lg%is(1)
+      iend_Mxin_pole(1,ibox)=(j1+1)*lg%num(1)/poisson%n_multipole_xyz(1)+lg%is(1)-1
+      ista_Mxin_pole(2,ibox)=j2*lg%num(2)/poisson%n_multipole_xyz(2)+lg%is(2)
+      iend_Mxin_pole(2,ibox)=(j2+1)*lg%num(2)/poisson%n_multipole_xyz(2)+lg%is(2)-1
+      ista_Mxin_pole(3,ibox)=j3*lg%num(3)/poisson%n_multipole_xyz(3)+lg%is(3)
+      iend_Mxin_pole(3,ibox)=(j3+1)*lg%num(3)/poisson%n_multipole_xyz(3)+lg%is(3)-1
     end do
     end do
     end do
