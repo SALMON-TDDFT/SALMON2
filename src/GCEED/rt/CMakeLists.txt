@@ -8,7 +8,6 @@ set(SOURCES
     set_vonf.f90
     time_evolution_step.f90
     )
-  #    aft_fourier.f90 # Is this single program?
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
 list(APPEND SALMON_SOURCES ${SOURCES})
