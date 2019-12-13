@@ -24,7 +24,6 @@ integer :: ii  !,iatom
 integer :: ibox2
 integer :: icheck1,icheck2
 character(100) :: file_atoms_coo
-real(8) :: dip_spacing
 
 !===== namelist for group_parallel =====
 if(comm_is_root(nproc_id_global))then
@@ -39,21 +38,6 @@ if(comm_is_root(nproc_id_global))then
   if(icheck1/=1.or.icheck2/=1)then
     write(*,*) "num_datafiles_IN and num_datafiles_OUT must be equal to nth power of 2. (n: positive integer)"
     stop
-  end if
-end if
-
-!===== namelist for group_hartree =====
-if(layout_multipole<=0.or.layout_multipole>=4)then
-  stop "layout_multipole must be equal to 1 or 2 or 3."
-else if(layout_multipole==3)then
-  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
-    continue
-  else if(num_multipole_xyz(1)<=0.or.num_multipole_xyz(2)<=0.or.num_multipole_xyz(3)<=0)then
-    stop "num_multipole_xyz must be largar than 0 when they are not default values."
-  end if
-  if(num_multipole_xyz(1)==0.and.num_multipole_xyz(2)==0.and.num_multipole_xyz(3)==0)then
-    dip_spacing = 8.d0/au_length_aa  ! approximate spacing of multipoles 
-    num_multipole_xyz(:)=int((al(:)+dip_spacing)/dip_spacing-1.d-8)
   end if
 end if
 

@@ -309,6 +309,7 @@ module structures
     complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
     complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
     complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
+    integer :: n_multipole_xyz(3)                  ! number of multipoles
   end type s_poisson
 
   type s_fdtd_system
