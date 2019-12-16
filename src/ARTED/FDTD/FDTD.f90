@@ -17,7 +17,7 @@
 !===============================================================
 subroutine write_excited_electron(iter)
   use Global_Variables
-  use salmon_file
+  use filesystem
   implicit none
   integer iter, imacro, ix_m, iy_m, iz_m, fh
   character(100) file_exc_elec

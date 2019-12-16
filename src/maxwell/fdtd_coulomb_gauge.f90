@@ -410,7 +410,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use initialization_sub, only: set_bn
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_time
     implicit none
     integer,dimension(3),intent(in) :: ng_sta,ng_end,lg_sta,lg_end

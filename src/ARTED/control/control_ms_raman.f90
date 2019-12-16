@@ -35,7 +35,7 @@ subroutine init_ms_raman
   use opt_variables
   use parallelization
   use communication
-  use salmon_file
+  use filesystem
   use misc_routines
   use timer
   use inputoutput, only: au_length_aa
@@ -170,7 +170,7 @@ subroutine raman_maxwell_ms
   use opt_variables
   use parallelization
   use communication
-  use salmon_file
+  use filesystem
   use misc_routines
   use inputoutput, only: t_unit_time, t_unit_current, t_unit_ac
   use restart, only: prep_restart_write
@@ -1060,7 +1060,7 @@ contains
   !===============================================================
 
   subroutine write_data_local_ac_jm()
-    use salmon_file
+    use filesystem
     implicit none
     integer :: fh_ac_m
     integer :: iimacro, iiter
@@ -1196,7 +1196,7 @@ contains
   
   
   subroutine write_data_vac_ac()
-    use salmon_file
+    use filesystem
     implicit none
     integer :: fh_ac_vac
     integer :: iiter
@@ -1239,7 +1239,7 @@ contains
     use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_file
+    use filesystem
     implicit none
     integer :: ia,unit_xyz,imacro 
     character(3) :: action,rvf
@@ -1296,7 +1296,7 @@ contains
 !    use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_file
+    use filesystem
     implicit none
     integer :: ia,unit_ini_rv,imacro 
     character(1024) :: file_ini_rv

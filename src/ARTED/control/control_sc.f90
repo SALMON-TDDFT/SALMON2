@@ -27,7 +27,7 @@ subroutine tddft_sc
   use communication, only: comm_bcast, comm_sync_all, comm_is_root
   use misc_routines, only: get_wtime
   use salmon_global, only: format_voxel_data, yn_out_dns, yn_out_dns_rt, out_dns_rt_step
-  use salmon_file, only: open_filehandle
+  use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_current, t_unit_ac,  t_unit_energy, t_unit_elec
   use restart, only: prep_restart_write
   use Ac_yn_local_field
