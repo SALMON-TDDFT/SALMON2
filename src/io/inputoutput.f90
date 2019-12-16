@@ -2119,6 +2119,8 @@ contains
     implicit none
     integer :: round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
+    integer :: itmp,i
+    logical :: l1,l2
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -2249,6 +2251,19 @@ contains
     if (yn_ffte == 'y') then
       if (yn_md  == 'y') stop "invalid: yn_ffte=='y' and yn_md=='y'"
       if (yn_opt == 'y') stop "invalid: yn_ffte=='y' and yn_optc=='y'"
+    end if
+
+    itmp=1
+    l1 = .false. 
+    l2 = .false.
+    do i=1,19
+      if(num_datafiles_in==itmp) l1 = .true.
+      if(num_datafiles_out==itmp) l2 = .true.
+      itmp=itmp*2 
+    end do
+    if(l1.and.l2)then
+    else
+      stop "num_datafiles_in and num_datafiles_out must be equal to nth power of 2. (n: positive integer)"
     end if
 
   end subroutine check_bad_input

@@ -25,22 +25,6 @@ integer :: ibox2
 integer :: icheck1,icheck2
 character(100) :: file_atoms_coo
 
-!===== namelist for group_parallel =====
-if(comm_is_root(nproc_id_global))then
-  ibox2=1
-  icheck1=0
-  icheck2=0
-  do ii=1,19
-    if(num_datafiles_IN==ibox2) icheck1=1
-    if(num_datafiles_OUT==ibox2) icheck2=1
-    ibox2=ibox2*2 
-  end do
-  if(icheck1/=1.or.icheck2/=1)then
-    write(*,*) "num_datafiles_IN and num_datafiles_OUT must be equal to nth power of 2. (n: positive integer)"
-    stop
-  end if
-end if
-
 !===== namelist for group_atom =====
 MI=natom
 MKI=nelem
