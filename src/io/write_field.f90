@@ -25,7 +25,7 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa
   use structures, only: s_rgrid,s_scalar,allocate_scalar,deallocate_scalar
   use salmon_parallel, only: nproc_group_global
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use write_file3d
   implicit none
   type(s_rgrid),intent(in) :: lg
@@ -154,7 +154,7 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   use salmon_global, only: format_voxel_data
   use structures
   use math_constants, only: pi
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use misc_routines, only: get_wtime
   use sendrecv_grid, only: update_overlap_complex8,update_overlap_real8
   use stencil_sub, only: calc_gradient_psi,calc_gradient_field
@@ -342,7 +342,7 @@ subroutine write_estatic(lg,ng,hgs,stencil,info_field,sVh,srg_ng,itt)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use write_file3d
   implicit none
   type(s_rgrid)   ,intent(in) :: lg,ng
@@ -422,7 +422,7 @@ subroutine write_psi(lg,mg,system,info,spsi)
   use inputoutput, only: au_length_aa
   use structures
   use salmon_global, only: format_voxel_data
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use write_file3d
   implicit none
   type(s_rgrid),intent(in) :: lg,mg

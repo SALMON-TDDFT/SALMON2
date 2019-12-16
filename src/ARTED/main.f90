@@ -21,7 +21,7 @@
 Subroutine err_finalize(err_message)
   use Global_Variables
   use salmon_parallel, only: nproc_id_global, end_parallel
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   implicit none
   character(*),intent(in) :: err_message
   if (comm_is_root(nproc_id_global)) then

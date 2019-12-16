@@ -34,7 +34,7 @@ End Subroutine CG_omp
 Subroutine CG_ompk(iter_cg_max)
   use Global_Variables
   use salmon_parallel, only: nproc_group_tdks
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use timer
   use hpsi, only: hpsi_omp_KB_GS
   use projector
@@ -141,7 +141,7 @@ End Subroutine CG_ompk
 Subroutine CG_ompb(iter_cg_max)
   use Global_Variables
   use salmon_parallel, only: nproc_group_tdks
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use timer
   use hpsi, only: hpsi_omp_KB_GS
   use projector

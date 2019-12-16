@@ -23,7 +23,7 @@ subroutine read_dns(lg,mg,rho)
   use structures
   use salmon_global, only: natom
   use salmon_parallel
-  use salmon_communication
+  use communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   real(8) :: rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
@@ -69,7 +69,7 @@ end subroutine read_dns
 subroutine read_wfn(lg,mg,psi,info,system)
   use structures
   use salmon_parallel
-  use salmon_communication
+  use communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system) ,intent(in) :: system
@@ -152,7 +152,7 @@ end subroutine read_wfn
 subroutine write_wfn(lg,mg,psi,info,system)
   use structures
   use salmon_parallel
-  use salmon_communication
+  use communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system) ,intent(in) :: system

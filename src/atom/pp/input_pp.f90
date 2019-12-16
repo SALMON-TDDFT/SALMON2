@@ -59,7 +59,7 @@ subroutine input_pp(pp,hx,hy,hz)
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
     & yn_psmask
   use salmon_parallel, only: nproc_group_global, nproc_id_global
-  use salmon_communication, only: comm_bcast, comm_is_root
+  use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
   implicit none
   type(s_pp_info) :: pp

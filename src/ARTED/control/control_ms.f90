@@ -24,7 +24,7 @@ subroutine tddft_maxwell_ms
   use timer
   use opt_variables
   use salmon_parallel
-  use salmon_communication
+  use communication
   use salmon_file
   use const, only: umass
   use misc_routines
@@ -994,7 +994,7 @@ contains
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
     use salmon_parallel, only: nproc_id_global
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     use salmon_file
     implicit none
     integer :: ia,unit_xyz,imacro 
@@ -1051,7 +1051,7 @@ contains
     use inputoutput, only: au_length_aa
 !    use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
     use salmon_parallel, only: nproc_id_global
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     use salmon_file
     implicit none
     integer :: ia,unit_ini_rv,imacro 

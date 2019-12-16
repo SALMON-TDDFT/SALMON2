@@ -23,7 +23,7 @@ contains
 subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
-  use salmon_communication, only: comm_is_root, comm_summation
+  use communication, only: comm_is_root, comm_summation
   use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
   use poisson_boundary_sub

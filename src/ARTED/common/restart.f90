@@ -29,7 +29,7 @@ subroutine prep_backup_values(is_backup)
   use backup_routines, only: backup_value
   use misc_routines,   only: get_wtime
   use salmon_parallel
-  use salmon_communication, only: comm_bcast, comm_sync_all, comm_create_group, comm_get_groupinfo,  comm_is_root
+  use communication, only: comm_bcast, comm_sync_all, comm_create_group, comm_get_groupinfo,  comm_is_root
   implicit none
   logical, intent(in) :: is_backup
 

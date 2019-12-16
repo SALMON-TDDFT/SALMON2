@@ -26,7 +26,7 @@ subroutine eh_init(fs,fw)
   use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                   uenergy_to_au,ulength_to_au,ucharge_to_au
   use salmon_parallel,      only: nproc_id_global, nproc_group_global
-  use salmon_communication, only: comm_is_root, comm_bcast
+  use communication, only: comm_is_root, comm_bcast
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work
   use phys_constants,       only: cspeed_au

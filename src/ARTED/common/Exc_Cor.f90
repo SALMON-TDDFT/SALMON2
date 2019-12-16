@@ -459,7 +459,7 @@ SUBROUTINE fec_xz(x,z,alp,a,b,c,d,e,f,fxz,dfxz_dx,dfxz_dz)
 Subroutine rho_j_tau(GS_RT,rho_s,tau_s,j_s,grho_s,lrho_s)
   use Global_Variables
   use salmon_parallel, only: nproc_group_tdks
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   implicit none
   integer,intent(in)    :: GS_RT
   real(8),intent(inout) :: rho_s(NL),tau_s(NL),j_s(NL,3),grho_s(NL,3),lrho_s(NL)

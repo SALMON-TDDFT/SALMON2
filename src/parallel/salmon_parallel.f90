@@ -38,14 +38,14 @@ module salmon_parallel
 
 contains
   subroutine setup_parallel
-    use salmon_communication
+    use communication
     implicit none
     call comm_init
     call comm_get_globalinfo(nproc_group_global, nproc_id_global, nproc_size_global)
   end subroutine
 
   subroutine end_parallel
-    use salmon_communication
+    use communication
     implicit none
     call comm_finalize
   end subroutine

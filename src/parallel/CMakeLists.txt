@@ -6,9 +6,9 @@ set(SOURCES
 )
 
 if (USE_MPI)
-  set(SOURCES ${SOURCES} salmon_communication.f90)
+  set(SOURCES ${SOURCES} communication.f90)
 else ()
-  set(SOURCES ${SOURCES} salmon_communication_dummy.f90)
+  set(SOURCES ${SOURCES} communication_dummy.f90)
 endif ()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

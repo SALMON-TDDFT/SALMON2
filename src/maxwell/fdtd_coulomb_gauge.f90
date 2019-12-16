@@ -41,7 +41,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root, comm_summation
+  use communication, only: comm_is_root, comm_summation
   use inputoutput, only: t_unit_time
   implicit none
   integer       ,intent(in) :: itt,comm
@@ -408,7 +408,7 @@ contains
   subroutine init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
     use salmon_global, only: sysname,base_directory
     use salmon_parallel, only: nproc_id_global
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     use initialization_sub, only: set_bn
     use salmon_file, only: open_filehandle
     use inputoutput, only: t_unit_time

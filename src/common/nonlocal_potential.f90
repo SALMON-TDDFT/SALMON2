@@ -25,7 +25,7 @@ contains
 
 subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
   use structures
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use timer
   implicit none
   integer,intent(in) :: nspin
@@ -276,9 +276,9 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
   use salmon_global, only: natom
   use timer
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
 #ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
-  use salmon_communication, only: comm_wait_all
+  use communication, only: comm_wait_all
   use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
 #endif
   implicit none

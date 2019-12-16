@@ -23,7 +23,7 @@ CONTAINS
 subroutine init_communicator_dft(comm,pinfo,info,info_field)
   use salmon_global, only: process_allocation,ispin
   use structures, only: s_orbital_parallel, s_field_parallel, s_process_info
-  use salmon_communication, only: comm_create_group, comm_get_groupinfo, &
+  use communication, only: comm_create_group, comm_get_groupinfo, &
                                   comm_summation
   use misc_routines, only: get_wtime
   implicit none

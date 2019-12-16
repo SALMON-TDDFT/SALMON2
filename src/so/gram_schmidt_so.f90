@@ -20,7 +20,7 @@ module gram_schmidt_so_sub
   use structures, only: s_dft_system, s_rgrid, s_orbital_parallel, s_orbital
   use pack_unpack, only: copy_data
   use timer
-  use salmon_communication, only: comm_bcast, comm_summation
+  use communication, only: comm_bcast, comm_summation
   use spin_orbit_global, only: SPIN_ORBIT_ON
 
   implicit none

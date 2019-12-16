@@ -18,7 +18,7 @@
 
 SUBROUTINE calcVbox(mg,lg,itt_t,system,rt,Vbox)
   use structures, only: s_rgrid, s_dft_system, s_rt, s_scalar
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use misc_routines, only: get_wtime
   use em_field, only: calc_E_ext
   use inputoutput

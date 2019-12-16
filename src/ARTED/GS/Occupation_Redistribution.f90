@@ -20,7 +20,7 @@
 Subroutine Occupation_Redistribution
   use Global_Variables
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   implicit none
   integer,parameter :: NFSset=100,Nvc_min=1 !Nvc_min:number of primitive cell in our orthorhombic unit cell
   integer :: i,j,k,ib,ik

@@ -37,7 +37,7 @@ end subroutine write_excited_electron
 !===============================================================
 subroutine init_ac_ms_2dc()
   use Global_variables
-  use salmon_communication, only: comm_sync_all
+  use communication, only: comm_sync_all
   implicit none
   select case(AE_shape1)
   case('Asin2cos')
@@ -49,7 +49,7 @@ end subroutine init_ac_ms_2dc
 !===============================================================
 subroutine init_ac_ms
   use Global_variables
-  use salmon_communication, only: comm_sync_all, comm_is_root
+  use communication, only: comm_sync_all, comm_is_root
   implicit none
   ! real(8) x,y
   real(8) x

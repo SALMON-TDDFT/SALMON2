@@ -16,7 +16,7 @@
 Subroutine Fermi_Dirac_distribution
   use Global_Variables
   use salmon_parallel, only: nproc_group_tdks, nproc_id_global
-  use salmon_communication, only: comm_summation, comm_is_root
+  use communication, only: comm_summation, comm_is_root
   use misc_routines, only: get_wtime
   implicit none
   real(8) :: chemical_potential

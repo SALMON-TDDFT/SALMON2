@@ -22,7 +22,7 @@ contains
 subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
   use structures, only: s_rgrid, s_field_parallel, s_dft_system, &
                         s_scalar, s_reciprocal_grid, s_poisson
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use math_constants, only : pi
   implicit none
   type(s_rgrid),intent(in) :: lg

@@ -20,7 +20,7 @@ contains
 
 subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm)
   use salmon_global, only: alpha_mb, nmemory_mb
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use salmon_math
   implicit none
   integer, intent(in) :: nl

@@ -422,7 +422,7 @@ contains
   subroutine init_uvpsi_summation(ppg,icomm_r)
   use structures,    only: s_pp_grid
   use salmon_global, only: natom
-  use salmon_communication, only: comm_get_groupinfo &
+  use communication, only: comm_get_groupinfo &
                                  ,comm_allgather &
                                  ,comm_create_group_byid
   implicit none
@@ -487,7 +487,7 @@ stop "xxxx"
 
   subroutine finalize_uvpsi_summation(ppg)
   use structures,    only: s_pp_grid
-  use salmon_communication, only: comm_free_group
+  use communication, only: comm_free_group
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
   integer :: ia

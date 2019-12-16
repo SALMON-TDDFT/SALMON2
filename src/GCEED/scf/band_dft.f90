@@ -16,7 +16,7 @@
 !=======================================================================
 module band_dft_sub
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   implicit none
 
 contains
@@ -156,7 +156,7 @@ end subroutine check_data_format
 subroutine get_band_kpt( kpt, nref_band, system )
    use structures, only: s_dft_system
    use salmon_parallel, only: nproc_id_global
-   use salmon_communication, only: comm_is_root
+   use communication, only: comm_is_root
    implicit none
    real(8),allocatable,intent(inout) :: kpt(:,:)
    integer,intent(out) :: nref_band ! convergence is checked up to nref_band

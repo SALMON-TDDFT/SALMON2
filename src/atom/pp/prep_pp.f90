@@ -23,7 +23,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use structures
   use hamiltonian, only: update_kvector_nonlocalpt
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use salmon_global, only: iperiodic,yn_ffte
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
@@ -228,7 +228,7 @@ subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
                      ngzero,gx,gy,gz,ng,ng_s,ng_e,nl,alxyz,lx,ly,lz,hx,hy,hz,matrix_A0)
   use salmon_global,only : natom, nelem, kion, rion
   use salmon_parallel,only : nproc_group_tdks
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use math_constants,only : pi
   use structures,only : s_pp_info
   implicit none
@@ -383,7 +383,7 @@ END SUBROUTINE calc_Vpsl_isolated
 
 subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
   use salmon_global,only : natom, nelem, kion
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
   implicit none
@@ -554,7 +554,7 @@ end subroutine calc_vpsl_periodic
 subroutine calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
   use structures
   use math_constants, only: pi,zi
-  use salmon_communication, only: comm_bcast, comm_summation, comm_is_root
+  use communication, only: comm_bcast, comm_summation, comm_is_root
   use salmon_global, only: natom, nelem, kion
   implicit none
   type(s_rgrid)     ,intent(in) :: lg,mg,ng
@@ -1440,7 +1440,7 @@ end subroutine bisection
 subroutine init_uvpsi_summation(ppg,icomm_r)
   use structures,    only: s_pp_grid
   use salmon_global, only: natom
-  use salmon_communication, only: comm_get_groupinfo &
+  use communication, only: comm_get_groupinfo &
                                  ,comm_allgather &
                                  ,comm_create_group_byid
   implicit none
@@ -1505,7 +1505,7 @@ end subroutine init_uvpsi_summation
 
 subroutine finalize_uvpsi_summation(ppg)
   use structures,    only: s_pp_grid
-  use salmon_communication, only: comm_free_group
+  use communication, only: comm_free_group
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
   integer :: ia

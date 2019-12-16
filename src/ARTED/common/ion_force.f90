@@ -40,7 +40,7 @@ contains
   subroutine impl(Rion_update,zutmp,zu_NB)
     use Global_Variables
     use salmon_parallel, only: nproc_group_tdks,get_thread_id
-    use salmon_communication, only: comm_summation, comm_is_root
+    use communication, only: comm_summation, comm_is_root
     use timer
     use salmon_math
     use projector

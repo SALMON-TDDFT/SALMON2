@@ -19,7 +19,7 @@
 subroutine main_dft_md
 use structures
 use salmon_parallel, only: nproc_id_global,nproc_group_global
-use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
 use scf_iteration_sub

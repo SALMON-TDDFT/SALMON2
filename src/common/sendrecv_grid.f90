@@ -131,7 +131,7 @@ module sendrecv_grid
   end subroutine init_sendrecv_grid
 
   subroutine dealloc_cache(srg)
-    use salmon_communication, only: comm_get_groupinfo, &
+    use communication, only: comm_get_groupinfo, &
       & comm_free_reqs, comm_proc_null
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
@@ -170,7 +170,7 @@ module sendrecv_grid
   end subroutine
 
   subroutine update_overlap_real8(srg, rg, data, istage)
-    use salmon_communication, only: comm_get_groupinfo, &
+    use communication, only: comm_get_groupinfo, &
       & comm_start_all, comm_wait_all, comm_proc_null
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
@@ -263,7 +263,7 @@ module sendrecv_grid
     end subroutine
 
     subroutine init_pcomm(jside, jdir)
-      use salmon_communication, only: comm_send_init, comm_recv_init
+      use communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
@@ -322,7 +322,7 @@ module sendrecv_grid
 
 
   subroutine update_overlap_complex8(srg, rg, data, istage)
-    use salmon_communication, only: comm_get_groupinfo, &
+    use communication, only: comm_get_groupinfo, &
       & comm_start_all, comm_wait_all, comm_proc_null
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
@@ -414,7 +414,7 @@ module sendrecv_grid
     end subroutine
 
     subroutine init_pcomm(jside, jdir)
-      use salmon_communication, only: comm_send_init, comm_recv_init
+      use communication, only: comm_send_init, comm_recv_init
       implicit none
       integer, intent(in) :: jdir, jside
       ! Send (and initialize persistent communication)
@@ -473,7 +473,7 @@ module sendrecv_grid
 
   subroutine create_sendrecv_neig_mg(neig_mg, ob_para_info, pinfo, iperiodic)
     use structures, only: s_orbital_parallel,s_process_info
-    use salmon_communication, only: comm_proc_null
+    use communication, only: comm_proc_null
     implicit none
     integer, intent(out) :: neig_mg(1:2, 1:3)
     type(s_orbital_parallel), intent(in) :: ob_para_info
@@ -537,7 +537,7 @@ module sendrecv_grid
 
   subroutine create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic)
     use structures, only: s_process_info,s_field_parallel
-    use salmon_communication, only: comm_proc_null
+    use communication, only: comm_proc_null
     use salmon_global, only: process_allocation
     implicit none
     integer, intent(out) :: neig_ng(1:2, 1:3)

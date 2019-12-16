@@ -121,7 +121,7 @@ contains
 
   subroutine read_stdin
     use salmon_parallel, only: nproc_id_global
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     use salmon_file, only: get_filehandle
     implicit none
 
@@ -197,7 +197,7 @@ contains
 
   subroutine read_input_common
     use salmon_parallel
-    use salmon_communication
+    use communication
     use salmon_file, only: get_filehandle
     implicit none
     integer :: ii
@@ -1311,7 +1311,7 @@ contains
 
   subroutine read_atomic_coordinates
     use salmon_parallel
-    use salmon_communication
+    use communication
     use salmon_file, only: get_filehandle
     character(256) :: filename_tmp,char_atom
     integer :: icount,i
@@ -1656,7 +1656,7 @@ contains
 
   subroutine dump_input_common
     use salmon_parallel
-    use salmon_communication
+    use communication
     use salmon_file, only: get_filehandle
     use filesystem, only: atomic_create_directory
     implicit none
@@ -2115,7 +2115,7 @@ contains
 
   subroutine check_bad_input
     use salmon_parallel
-    use salmon_communication
+    use communication
     implicit none
     integer :: round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
@@ -2270,7 +2270,7 @@ contains
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)
     use salmon_parallel
-    use salmon_communication
+    use communication
     implicit none
     character(*) :: inp1
     character(*) :: inp2

@@ -150,7 +150,7 @@ contains
   ! igroup:    communicator
   ! idelegate: A delegate process of creating directory
   subroutine atomic_create_directory(dirpath, igroup, idelegate)
-    use salmon_communication, only: comm_is_root,comm_sync_all
+    use communication, only: comm_is_root,comm_sync_all
     implicit none
     character(*), intent(in) :: dirpath
     integer, intent(in)      :: igroup, idelegate

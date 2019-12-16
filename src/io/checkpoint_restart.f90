@@ -197,7 +197,7 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global, nproc_size_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)            ,intent(in) :: odir
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
@@ -268,7 +268,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   use inputoutput, only: theory,calc_mode,yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use salmon_parallel, only: nproc_id_global,nproc_group_global,nproc_size_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: yn_restart
   implicit none
   character(*)              ,intent(in) :: idir
@@ -370,7 +370,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   use inputoutput, only: num_datafiles_out,yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)   :: odir
   type(s_rgrid), intent(in) :: lg, mg
@@ -533,7 +533,7 @@ end subroutine write_wavefunction
 subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)                        :: odir
   type(s_rgrid)           ,intent(in) :: lg,ng
@@ -665,7 +665,7 @@ end subroutine write_rho_inout
 subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)   :: odir
   type(s_rgrid), intent(in)    :: lg,ng
@@ -740,7 +740,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use inputoutput, only: iperiodic,num_datafiles_in,yn_datafiles_dump
   use salmon_parallel, only: nproc_id_global,nproc_group_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*),intent(in) :: idir
   type(s_rgrid), intent(in) :: lg, mg
@@ -881,7 +881,7 @@ end subroutine read_wavefunction
 subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,ng
@@ -1008,7 +1008,7 @@ end subroutine read_rho_inout
 subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,ng

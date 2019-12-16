@@ -25,7 +25,7 @@ CONTAINS
   SUBROUTINE calc_Total_Energy_isolated(energy,system,info,ng,pp,rho,Vh,Vxc)
     use structures
     use salmon_global, only: kion
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use timer
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -112,7 +112,7 @@ CONTAINS
     use structures
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use timer
     implicit none
     type(s_dft_system) ,intent(in) :: system
@@ -230,7 +230,7 @@ CONTAINS
 ! eigen energies (esp), kinetic energy (E_kin), & nonlocal part of electron-ion energy (E_ion_nloc)
   Subroutine calc_eigen_energy(energy,tpsi,htpsi,ttpsi,system,info,mg,V_local,stencil,srg,ppg)
     use structures
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use hamiltonian, only: hpsi
     use spin_orbit_global, only: SPIN_ORBIT_ON
     use timer

@@ -23,7 +23,7 @@ module band
     subroutine calc_kgrid_prod(sys, lg, mg, par, wf, nk1, nk2, nk3, ndk, ik3d_tbl, prod_dk)
         use structures, only: s_dft_system, s_rgrid, s_orbital_parallel, s_orbital
         use pack_unpack, only: copy_data
-        use salmon_communication, only: comm_summation, comm_is_root
+        use communication, only: comm_summation, comm_is_root
         use math_constants, only: zI
         implicit none
         type(s_dft_system), intent(in) :: sys

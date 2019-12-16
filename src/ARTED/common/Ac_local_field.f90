@@ -25,7 +25,7 @@ contains
   subroutine init_Ac_local
   use Global_Variables
   use salmon_parallel, only: nproc_group_global, nproc_id_global
-  use salmon_communication, only: comm_bcast, comm_is_root
+  use communication, only: comm_bcast, comm_is_root
   implicit none
   logical :: flag_use_gauss_for_weight_ion
   integer :: i,j,NI_local

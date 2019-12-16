@@ -1,6 +1,6 @@
 module plusU_global
 
-  use salmon_communication, only: comm_get_globalinfo
+  use communication, only: comm_get_globalinfo
 
   implicit none
   private

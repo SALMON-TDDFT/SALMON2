@@ -30,7 +30,7 @@ contains
   subroutine calc_density_matrix(system,info,mg,srg,psi,dmat)
     use structures
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use timer
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -130,7 +130,7 @@ contains
 
   subroutine calc_density(system,rho,psi,info,mg)
     use structures
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use salmon_parallel, only: get_thread_id,get_nthreads
     use misc_routines, only: ceiling_pow2
     use timer
@@ -262,7 +262,7 @@ contains
   subroutine calc_current(system,mg,stencil,info,srg,psi,ppg,curr)
     use structures
     use sendrecv_grid, only: update_overlap_complex8
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
     use code_optimization, only: stencil_is_parallelized_by_omp
@@ -424,7 +424,7 @@ contains
 
   subroutine calc_current_use_dmat(system,mg,stencil,info,psi,ppg,dmat,curr)
     use structures
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use code_optimization, only: stencil_is_parallelized_by_omp
     use timer
@@ -663,7 +663,7 @@ contains
 
   subroutine calc_microscopic_current(system,mg,stencil,info,psi,dmat,curr)
     use structures
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use timer
     implicit none
     type(s_dft_system),intent(in) :: system

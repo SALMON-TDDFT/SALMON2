@@ -25,7 +25,7 @@ private
 contains
   subroutine write_loadbalance(fd,nsize,tsrc,headers,write_mode)
     use salmon_parallel
-    use salmon_communication
+    use communication
     use timer
     use math_constants
     implicit none
@@ -84,7 +84,7 @@ contains
 
   subroutine write_flops(fd,write_mode)
     use salmon_parallel
-    use salmon_communication
+    use communication
     use flops
     use math_constants
     use salmon_global, only: theory, iperiodic, yn_domain_parallel
@@ -124,7 +124,7 @@ contains
 
   subroutine write_root(fd, str)
     use salmon_parallel
-    use salmon_communication
+    use communication
     implicit none
     integer, intent(in)      :: fd
     character(*), intent(in) :: str
@@ -135,7 +135,7 @@ contains
 
   subroutine write_performance(fd,mode)
     use salmon_parallel
-    use salmon_communication
+    use communication
     use salmon_global, only: theory
     use timer
     implicit none

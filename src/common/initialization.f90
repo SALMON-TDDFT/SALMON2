@@ -229,7 +229,7 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   use structures, only: s_process_info,s_dft_system
   use salmon_parallel, only: nproc_id_global, nproc_group_global
   use salmon_global, only: theory,ispin
-  use salmon_communication, only: comm_is_root,comm_bcast
+  use communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
   type(s_dft_system),intent(in)    :: system
@@ -428,7 +428,7 @@ end subroutine init_grid_whole
 !===================================================================================================================================
 
 subroutine init_grid_parallel(myrank,nproc,pinfo,lg,mg,ng)
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use salmon_global, only: yn_periodic,process_allocation
   use structures, only: s_process_info,s_rgrid
   implicit none

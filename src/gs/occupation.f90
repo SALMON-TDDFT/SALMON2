@@ -21,7 +21,7 @@ contains
 SUBROUTINE ne2mu(energy,system)
   use structures
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use salmon_global, only: nelec, temperature
   implicit none
   type(s_dft_energy),intent(in) :: energy
