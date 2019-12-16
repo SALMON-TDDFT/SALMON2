@@ -22,7 +22,7 @@
 module md_ground_state
   use Global_Variables
   use salmon_parallel, only: nproc_group_global, nproc_id_global
-  use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
+  use communication, only: comm_bcast, comm_sync_all, comm_is_root
   use salmon_parallel, only: nproc_id_global
   use const, only: umass, hartree2J, kB
   implicit none
@@ -286,7 +286,7 @@ end subroutine calc_md_ground_state
   end subroutine apply_velocity_scaling_ion
 
   subroutine print_restart_data_md_gs
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     use salmon_parallel, only: nproc_id_global
     use inputoutput, only: au_length_aa
     implicit none
@@ -343,7 +343,7 @@ end subroutine calc_md_ground_state
 
   subroutine remove_system_momentum(flag_print_check)
     ! remove center of mass and momentum of whole system
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     use salmon_parallel, only: nproc_id_global
     implicit none
     integer :: ia, flag_print_check
@@ -387,7 +387,7 @@ end subroutine calc_md_ground_state
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
     use salmon_parallel, only: nproc_id_global
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     implicit none
     integer :: ia,unit_xyz=200
     character(3) :: action,rvf

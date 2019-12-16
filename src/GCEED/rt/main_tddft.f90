@@ -26,7 +26,7 @@ subroutine main_tddft
 use math_constants, only: pi
 use structures
 use salmon_parallel, only: nproc_id_global
-use salmon_communication, only: comm_is_root, comm_sync_all
+use communication, only: comm_is_root, comm_sync_all
 use salmon_xc, only: finalize_xc
 use timer
 use global_variables_rt

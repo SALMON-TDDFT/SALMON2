@@ -21,8 +21,8 @@ contains
 
 subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
   use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid,s_poisson
-  use salmon_communication, only: comm_summation
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_summation
+  use communication, only: comm_is_root
   use math_constants, only : pi
 !$  use omp_lib
   implicit none

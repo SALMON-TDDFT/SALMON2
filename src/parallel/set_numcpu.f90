@@ -24,7 +24,7 @@ contains
 
   function check_numcpu(icomm1, pinfo) result(iok)
   use structures, only: s_process_info
-  use salmon_communication, only: comm_get_groupinfo
+  use communication, only: comm_get_groupinfo
   implicit none
   integer, intent(in) :: icomm1 ! Communicator for a single grid system
   type(s_process_info),intent(inout) :: pinfo
@@ -81,7 +81,7 @@ end function check_numcpu
 
 subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
   use structures, only: s_process_info
-  use salmon_communication, only: comm_get_groupinfo
+  use communication, only: comm_get_groupinfo
   implicit none
   integer,intent(in)               :: iprefer_dist,numk,numo,icomm1
   type(s_process_info),intent(out) :: pinfo

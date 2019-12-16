@@ -41,7 +41,7 @@ subroutine psi_rho_impl(zutmp,zu_NB)
   use timer
   use opt_variables
   use salmon_parallel, only: nproc_group_tdks
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   implicit none
   integer,intent(in)    :: zu_NB
   complex(8),intent(in) :: zutmp(0:NL-1,zu_NB,NK_s:NK_e)

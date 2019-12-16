@@ -28,7 +28,7 @@ contains
     use timer
     use opt_variables
     use salmon_parallel
-    use salmon_communication
+    use communication
     use salmon_xc, only: init_xc
     use salmon_pp, only: init_pp
     use input_pp_sub, only: input_pp
@@ -125,7 +125,7 @@ contains
     use Global_Variables
     use opt_variables
     use salmon_parallel
-    use salmon_communication
+    use communication
     use salmon_file
     use misc_routines
     use timer
@@ -559,7 +559,7 @@ contains
 
   Subroutine init_md
     use Global_Variables
-    use salmon_communication
+    use communication
     use salmon_parallel
     implicit none    
 
@@ -595,7 +595,7 @@ contains
     use salmon_global
     use Global_Variables
     use salmon_parallel
-    use salmon_communication
+    use communication
     !use misc_routines
     use salmon_math
     use const, only: umass, hartree2J, kB
@@ -674,7 +674,7 @@ contains
     use salmon_global
     use Global_Variables
     use salmon_parallel
-    use salmon_communication
+    use communication
     use salmon_math
     implicit none
     integer :: ia,ixyz
@@ -905,7 +905,7 @@ contains
     subroutine set_macropoint_from_file()
       use salmon_file
       use salmon_parallel
-      use salmon_communication
+      use communication
       use global_variables
       implicit none
       integer :: fh, icount, itmp
@@ -1044,7 +1044,7 @@ contains
   
   ! subroutine set_trans_mat(ms_angle_x, ms_angle_y, ms_angle_z)
   !   use salmon_parallel, only: nproc_id_global
-  !   use salmon_communication, only: comm_is_root
+  !   use communication, only: comm_is_root
   !   use global_variables, only: trans_mat, trans_inv
   !   implicit none
   !   real(8), intent(in) :: ms_angle_x

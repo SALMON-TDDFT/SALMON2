@@ -254,7 +254,7 @@ contains
   subroutine summation(jx,jy,jz)
     use Global_Variables, only: jav
     use salmon_parallel, only: nproc_group_tdks
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     implicit none
     real(8),intent(in) :: jx,jy,jz
     real(8) :: jav_l(3)

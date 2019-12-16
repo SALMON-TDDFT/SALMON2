@@ -17,7 +17,7 @@
 Subroutine init_Ac
   use Global_Variables
   use salmon_parallel, only: nproc_group_global, nproc_id_global
-  use salmon_communication, only: comm_bcast, comm_is_root
+  use communication, only: comm_bcast, comm_is_root
   use Ac_yn_local_field
   implicit none
   integer :: iter, npower

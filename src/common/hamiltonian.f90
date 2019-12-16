@@ -424,7 +424,7 @@ end subroutine hpsi
 
 subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
   use structures
-  use salmon_communication, only: comm_allgatherv
+  use communication, only: comm_allgatherv
   use salmon_global, only: process_allocation
   use timer
   implicit none

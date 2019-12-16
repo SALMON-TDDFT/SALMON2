@@ -16,7 +16,7 @@
 subroutine convert_input_scf(file_atoms_coo)
 use salmon_global
 use salmon_parallel, only: nproc_group_global, nproc_id_global
-use salmon_communication, only: comm_is_root, comm_bcast
+use communication, only: comm_is_root, comm_bcast
 use set_numcpu
 use inputoutput
 implicit none

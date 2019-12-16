@@ -17,7 +17,7 @@
 subroutine Total_Energy_omp(Rion_update,GS_RT,ixy_m)
   use Global_Variables, only: zu_t,zu_m,zu_GS,NB,NBoccmax,calc_mode_gs,calc_mode_rt
   use salmon_parallel, only: nproc_group_tdks
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   implicit none
   integer,intent(in) :: GS_RT
   logical,intent(in) :: Rion_update

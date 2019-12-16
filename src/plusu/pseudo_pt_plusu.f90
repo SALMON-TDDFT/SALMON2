@@ -149,9 +149,9 @@ contains
   subroutine calc_phipsi_rdivided(nspin,info,ppg,tpsi,phipsibox,phipsibox2)
     use structures
     use timer
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
 #ifdef SALMON_ENABLE_MPI3
-    use salmon_communication, only: comm_wait_all
+    use communication, only: comm_wait_all
     use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
 #endif
     implicit none

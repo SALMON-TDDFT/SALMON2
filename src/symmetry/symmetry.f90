@@ -1,6 +1,6 @@
 module sym_sub
 
-  use salmon_communication, only: comm_get_globalinfo, comm_is_root
+  use communication, only: comm_get_globalinfo, comm_is_root
 
   implicit none
 

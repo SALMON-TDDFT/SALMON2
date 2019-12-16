@@ -19,7 +19,7 @@ subroutine eh_finalize(fs,fw)
                                   nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,yn_obs_plane_em
   use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au
   use salmon_parallel,      only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work
   use math_constants,       only: pi,zi

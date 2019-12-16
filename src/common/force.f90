@@ -26,7 +26,7 @@ contains
     use structures
     use stencil_sub, only: calc_gradient_psi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
@@ -237,7 +237,7 @@ contains
     use structures
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_pp_info)   ,intent(in) :: pp

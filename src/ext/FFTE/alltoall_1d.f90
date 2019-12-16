@@ -15,7 +15,7 @@
 !
 !======================================================================
 subroutine alltoall_1d(vec_a,vec_b,n,icomm,npu)
-  use salmon_communication, only: comm_alltoall
+  use communication, only: comm_alltoall
   implicit none
   integer,intent(in)      :: n
   complex(8),intent(in)   :: vec_a(n)

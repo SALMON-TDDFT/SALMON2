@@ -24,7 +24,7 @@ contains
   
   subroutine transfer_basic_input()
     use salmon_global
-    use salmon_communication, only: comm_sync_all, &
+    use communication, only: comm_sync_all, &
                                     comm_is_root
     use salmon_parallel, only: nproc_id_global
     use Global_Variables
@@ -173,7 +173,7 @@ contains
   subroutine transfer_atomic_data()
     use salmon_global
     use salmon_parallel, only: nproc_group_global, nproc_id_global
-    use salmon_communication, only: comm_is_root, comm_bcast, comm_sync_all
+    use communication, only: comm_is_root, comm_bcast, comm_sync_all
     use Global_Variables, only: NE, Zatom, Lref
     implicit none
     integer :: i

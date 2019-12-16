@@ -15,7 +15,7 @@
 !
 subroutine convert_input_rt(Ntime)
 use salmon_parallel, only: nproc_id_global
-use salmon_communication, only: comm_is_root, comm_bcast
+use communication, only: comm_is_root, comm_bcast
 use inputoutput
 use set_numcpu
 implicit none

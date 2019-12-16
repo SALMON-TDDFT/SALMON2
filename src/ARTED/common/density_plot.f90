@@ -18,7 +18,7 @@ subroutine write_density(it,action)
   use Global_Variables
   use salmon_file, only: open_filehandle
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   implicit none
   integer :: it
   integer :: fh

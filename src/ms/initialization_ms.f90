@@ -44,7 +44,7 @@ use inputoutput
   use math_constants, only: pi, zi
   use structures
   use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
-  use salmon_communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all, comm_create_group, comm_get_groupinfo
+  use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all, comm_create_group, comm_get_groupinfo
   use salmon_xc
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &

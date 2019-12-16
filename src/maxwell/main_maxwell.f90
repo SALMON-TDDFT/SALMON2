@@ -16,7 +16,7 @@
 !-----------------------------------------------------------------------------------------
 subroutine main_maxwell
   use salmon_parallel,      only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work
   use misc_routines,        only: get_wtime

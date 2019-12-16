@@ -90,7 +90,7 @@ end subroutine eh_mpi_grid_sr
 subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
   use salmon_global,        only: shape_file
   use salmon_parallel,      only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   implicit none
   integer,intent(in)      :: ifn,Nd
   integer,intent(in)      :: ng_is(3),ng_ie(3),lg_is(3),lg_ie(3)
@@ -398,7 +398,7 @@ end subroutine eh_fd
 subroutine eh_save_plane(id,ipl,conv,ng_is,ng_ie,lg_is,lg_ie,Nd,ifn,iobs,iter,f,var)
   use salmon_global,        only: base_directory
   use salmon_parallel,      only: nproc_id_global,nproc_group_global
-  use salmon_communication, only: comm_is_root,comm_summation
+  use communication, only: comm_is_root,comm_summation
   implicit none
   integer,intent(in)      :: id(3),ipl(3)
   real(8),intent(in)      :: conv

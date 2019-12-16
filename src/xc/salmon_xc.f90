@@ -48,7 +48,7 @@ contains
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(sys, xc_func, ng, srg_ng, srho_s, ppn, comm, sVxc, E_xc)
-    use salmon_communication, only: comm_summation
+    use communication, only: comm_summation
     use structures, only: s_dft_system, s_pp_nlcc, s_scalar, s_rgrid,s_sendrecv_grid
     use sendrecv_grid, only: update_overlap_real8
     implicit none

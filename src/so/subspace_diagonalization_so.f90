@@ -27,7 +27,7 @@ contains
 
   subroutine ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
-    use salmon_communication, only: comm_summation,comm_bcast
+    use communication, only: comm_summation,comm_bcast
     use timer
     use hamiltonian
     use eigen_subdiag_sub
@@ -207,7 +207,7 @@ contains
 
   subroutine ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
-    use salmon_communication, only: comm_summation,comm_bcast
+    use communication, only: comm_summation,comm_bcast
     use timer
     use hamiltonian
     use eigen_subdiag_sub

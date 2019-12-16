@@ -16,7 +16,7 @@
 !-----------------------------------------------------------------------------------------
 subroutine find_point_em(rloc,id,ipo,ili,ipl,ista,iend,icoo_sta,icoo_end,coo)
   use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   implicit none
   real(8),intent(in)    :: rloc(3)
   integer,intent(inout) :: id(3)

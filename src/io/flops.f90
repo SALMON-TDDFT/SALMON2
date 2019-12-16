@@ -25,7 +25,7 @@ contains
   subroutine get_hamiltonian_flops(lgflops,pgflops,mgflops,sgflops)
     use global_variables
     use salmon_parallel
-    use salmon_communication
+    use communication
     use timer
     implicit none
     real(8),intent(out) :: lgflops(4) ! processor

@@ -18,7 +18,7 @@ Subroutine Fourier_tr
   use Global_Variables
   use salmon_file, only: open_filehandle
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use inputoutput, only: t_unit_current, t_unit_energy, t_unit_elec
   implicit none
   integer :: ihw,ixyz,iter
@@ -166,7 +166,7 @@ End Subroutine Fourier_tr
 subroutine analysis_dns_trans(it)
   use Global_Variables
   use salmon_parallel, only: nproc_id_global
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use inputoutput, only: t_unit_energy
   implicit none
   integer :: it, fh_dns_trans1,fh_dns_trans2,i,j,ix,iy,iz

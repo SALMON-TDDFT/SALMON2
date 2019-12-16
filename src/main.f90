@@ -1,7 +1,7 @@
 program main
   use salmon_global
   use salmon_parallel
-  use salmon_communication, only: comm_is_root
+  use communication, only: comm_is_root
   use inputoutput
   use math_constants
   use timer
@@ -118,7 +118,7 @@ contains
     use misc_routines, only: gen_logfilename
     use salmon_file, only: get_filehandle
     use salmon_parallel, only: nproc_id_global
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     use iso_fortran_env, only: output_unit
     implicit none
     integer :: fh

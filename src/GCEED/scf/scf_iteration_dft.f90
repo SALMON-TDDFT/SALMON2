@@ -33,7 +33,7 @@ use math_constants, only: pi, zi
 use structures
 use inputoutput, only: au_length_aa, au_energy_ev
 use salmon_parallel, only: nproc_id_global
-use salmon_communication, only: comm_is_root, comm_summation, comm_bcast
+use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
 use scf_iteration_sub

@@ -23,7 +23,7 @@ subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   !$ use omp_lib
   implicit none
   type(s_rgrid)     ,intent(in) :: mg
@@ -331,7 +331,7 @@ subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
-  use salmon_communication, only: comm_summation
+  use communication, only: comm_summation
   !$ use omp_lib
   implicit none
   type(s_rgrid)     ,intent(in) :: mg

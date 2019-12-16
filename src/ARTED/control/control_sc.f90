@@ -24,7 +24,7 @@ subroutine tddft_sc
   use timer
   use opt_variables
   use salmon_parallel, only: nproc_group_global, nproc_id_global
-  use salmon_communication, only: comm_bcast, comm_sync_all, comm_is_root
+  use communication, only: comm_bcast, comm_sync_all, comm_is_root
   use misc_routines, only: get_wtime
   use salmon_global, only: format_voxel_data, yn_out_dns, yn_out_dns_rt, out_dns_rt_step
   use salmon_file, only: open_filehandle
@@ -568,7 +568,7 @@ end subroutine tddft_sc
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
     use salmon_parallel, only: nproc_id_global
-    use salmon_communication, only: comm_is_root
+    use communication, only: comm_is_root
     implicit none
     integer :: ia,unit_xyz=200
     character(3) :: action,rvf

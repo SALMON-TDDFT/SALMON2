@@ -23,7 +23,7 @@ use salmon_global, only: directory_read_data,calc_mode, &
                          target_nproc_k,target_nproc_ob,target_nproc_domain_orbital, &
                          target_nproc_domain_general, &
                          yn_periodic
-use salmon_communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
+use communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
 use salmon_xc
 use timer
 use initialization_sub
@@ -146,7 +146,7 @@ call timer_end(LOG_TOTAL)
 contains
 
 subroutine convert_wave_function
-use salmon_communication, only: comm_summation, comm_create_group_byid, &
+use communication, only: comm_summation, comm_create_group_byid, &
                                 comm_proc_null, comm_send, comm_recv, comm_bcast
 implicit none
 integer,allocatable    :: is_ref(:,:,:),is_ref_srank(:,:,:),is_ref_rrank(:,:,:)

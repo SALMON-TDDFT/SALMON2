@@ -1,7 +1,7 @@
 module sym_rho_sub
 
   use sym_sub, only: SymMatA, SymMatB, use_symmetry
-  use salmon_communication
+  use communication
 
   implicit none
 
