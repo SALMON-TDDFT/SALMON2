@@ -227,7 +227,7 @@ end subroutine init_dft_system
 
 subroutine init_process_distribution(system,icomm1,pinfo)
   use structures, only: s_process_info,s_dft_system
-  use salmon_parallel, only: nproc_id_global, nproc_group_global
+  use parallelization, only: nproc_id_global, nproc_group_global
   use salmon_global, only: theory,ispin
   use communication, only: comm_is_root,comm_bcast
   use set_numcpu

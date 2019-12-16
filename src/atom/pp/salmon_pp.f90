@@ -26,7 +26,7 @@ module salmon_pp
     use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat, &
                              n_ABINITFHI_psformat,n_FHI_psformat, &
                              ps_format,izatom,nelem
-    use salmon_parallel, only: nproc_group_global, nproc_id_global
+    use parallelization, only: nproc_group_global, nproc_id_global
     use communication, only: comm_bcast, comm_is_root
     implicit none
     type(s_pp_info) :: pp

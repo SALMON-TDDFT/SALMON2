@@ -25,7 +25,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 ofl )
 use math_constants, only: pi, zi
 use structures
-use salmon_parallel, only: nproc_id_global!,nproc_group_global
+use parallelization, only: nproc_id_global!,nproc_group_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use salmon_pp, only: calc_nlcc
@@ -146,7 +146,7 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 xc_func,mixing )
 use math_constants, only: pi, zi
 use structures
-use salmon_parallel, only: nproc_id_global
+use parallelization, only: nproc_id_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
@@ -260,7 +260,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   use math_constants, only: pi, zi
   use const, only: hartree2J,kB
   use structures
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_xc
   use timer

@@ -19,7 +19,7 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 Subroutine Occupation_Redistribution
   use Global_Variables
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
   integer,parameter :: NFSset=100,Nvc_min=1 !Nvc_min:number of primitive cell in our orthorhombic unit cell

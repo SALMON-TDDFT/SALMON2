@@ -43,7 +43,7 @@ use inputoutput
 
   use math_constants, only: pi, zi
   use structures
-  use salmon_parallel, only: nproc_id_global, nproc_group_global, nproc_size_global
+  use parallelization, only: nproc_id_global, nproc_group_global, nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all, comm_create_group, comm_get_groupinfo
   use salmon_xc
   use timer

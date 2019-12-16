@@ -84,7 +84,7 @@ contains
 
   subroutine optimization_log(pinfo)
     use structures, only: s_process_info
-    use salmon_parallel, only: is_distributed_parallel, get_nthreads
+    use parallelization, only: is_distributed_parallel, get_nthreads
     implicit none
     type(s_process_info), intent(in) :: pinfo
     print *, '========== code optimization log =========='

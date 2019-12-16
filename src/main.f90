@@ -1,6 +1,6 @@
 program main
   use salmon_global
-  use salmon_parallel
+  use parallelization
   use communication, only: comm_is_root
   use inputoutput
   use math_constants
@@ -117,7 +117,7 @@ contains
     use perflog
     use misc_routines, only: gen_logfilename
     use salmon_file, only: get_filehandle
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use iso_fortran_env, only: output_unit
     implicit none

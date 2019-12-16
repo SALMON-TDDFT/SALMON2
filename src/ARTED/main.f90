@@ -20,7 +20,7 @@
 
 Subroutine err_finalize(err_message)
   use Global_Variables
-  use salmon_parallel, only: nproc_id_global, end_parallel
+  use parallelization, only: nproc_id_global, end_parallel
   use communication, only: comm_is_root
   implicit none
   character(*),intent(in) :: err_message
@@ -41,7 +41,7 @@ subroutine arted
   use optimization,    only: calc_opt_ground_state
   use md_ground_state, only: calc_md_ground_state
 
-  use salmon_parallel
+  use parallelization
   use initialization
   use ground_state
   use io_gs_wfn_k

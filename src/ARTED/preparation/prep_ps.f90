@@ -22,7 +22,7 @@
 
 Subroutine prep_ps_periodic(property)
   use Global_Variables
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_summation, comm_is_root
   use salmon_math
   use prep_pp_sub, only: calc_uv,set_lma_tbl,init_uv,finalize_uv,   &

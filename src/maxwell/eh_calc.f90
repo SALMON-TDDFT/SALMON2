@@ -20,7 +20,7 @@ subroutine eh_calc(fs,fw)
                                   E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                   E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
   use inputoutput,          only: utime_from_au
-  use salmon_parallel,      only: nproc_id_global,nproc_size_global,nproc_group_global
+  use parallelization,      only: nproc_id_global,nproc_size_global,nproc_group_global
   use communication, only: comm_is_root,comm_summation
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work
@@ -247,7 +247,7 @@ contains
   != calculate linear response =============================================================
   subroutine eh_calc_lr
     use salmon_global,        only: yn_periodic
-    use salmon_parallel,      only: nproc_group_global
+    use parallelization,      only: nproc_group_global
     use communication, only: comm_summation
     implicit none
     real(8) :: sum_lr_x,sum_lr_y,sum_lr_z

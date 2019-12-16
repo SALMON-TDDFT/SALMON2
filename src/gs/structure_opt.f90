@@ -23,7 +23,7 @@ contains
 
   !==============================================================initilize
   subroutine structure_opt_ini(natom)
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
     integer,intent(in) :: natom
@@ -47,7 +47,7 @@ contains
     use structures
     use salmon_global, only: convrg_opt_fmax,unit_system,flag_opt_atom
     use inputoutput, only: au_length_aa, au_energy_ev
-    use salmon_parallel, only: nproc_id_global,nproc_group_global
+    use parallelization, only: nproc_id_global,nproc_group_global
     use communication, only: comm_is_root,comm_bcast
     implicit none
     integer,intent(in) :: natom,iopt
@@ -172,7 +172,7 @@ contains
 
   !===============================================================finilize
   subroutine structure_opt_fin
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
     deallocate(a_dRion,dFion)

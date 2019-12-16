@@ -24,7 +24,7 @@ module perflog
 private
 contains
   subroutine write_loadbalance(fd,nsize,tsrc,headers,write_mode)
-    use salmon_parallel
+    use parallelization
     use communication
     use timer
     use math_constants
@@ -83,7 +83,7 @@ contains
   end subroutine
 
   subroutine write_flops(fd,write_mode)
-    use salmon_parallel
+    use parallelization
     use communication
     use flops
     use math_constants
@@ -123,7 +123,7 @@ contains
   end subroutine
 
   subroutine write_root(fd, str)
-    use salmon_parallel
+    use parallelization
     use communication
     implicit none
     integer, intent(in)      :: fd
@@ -134,7 +134,7 @@ contains
   end subroutine
 
   subroutine write_performance(fd,mode)
-    use salmon_parallel
+    use parallelization
     use communication
     use salmon_global, only: theory
     use timer

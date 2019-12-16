@@ -86,7 +86,7 @@ end subroutine simple_mixing
 
 subroutine wrapper_broyden(ng,system,srho_s,iter,mixing)
   use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
-  use salmon_parallel, only: nproc_group_global
+  use parallelization, only: nproc_group_global
   use broyden_sub
   implicit none
   type(s_rgrid) :: ng

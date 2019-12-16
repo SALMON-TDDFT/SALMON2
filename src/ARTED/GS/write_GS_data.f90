@@ -27,7 +27,7 @@ Subroutine write_GS_data
                          & out_dos_function, &
                          & yn_out_dos_set_fe_origin
   use inputoutput, only: unit_length, t_unit_energy_inv, t_unit_energy
-  use salmon_parallel, only: nproc_group_global, nproc_id_global, nproc_group_tdks
+  use parallelization, only: nproc_group_global, nproc_id_global, nproc_group_tdks
   use communication, only: comm_is_root,comm_summation, comm_bcast, comm_sync_all
   use salmon_file, only: open_filehandle
   implicit none

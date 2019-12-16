@@ -458,7 +458,7 @@ SUBROUTINE fec_xz(x,z,alp,a,b,c,d,e,f,fxz,dfxz_dx,dfxz_dz)
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 Subroutine rho_j_tau(GS_RT,rho_s,tau_s,j_s,grho_s,lrho_s)
   use Global_Variables
-  use salmon_parallel, only: nproc_group_tdks
+  use parallelization, only: nproc_group_tdks
   use communication, only: comm_summation
   implicit none
   integer,intent(in)    :: GS_RT

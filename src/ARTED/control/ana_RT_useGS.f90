@@ -70,7 +70,7 @@ End Subroutine write_projection_header
 Subroutine analysis_RT_using_GS(Rion_xyz_update,iter_GS_max,zu,it,action)
 !(this subroutine was named "k_shift_wf" in past)
   use Global_Variables
-  use salmon_parallel, only: nproc_group_tdks, nproc_id_global
+  use parallelization, only: nproc_group_tdks, nproc_id_global
   use communication, only: comm_summation, comm_is_root
   use inputoutput, only: t_unit_time, t_unit_energy
   use ground_state

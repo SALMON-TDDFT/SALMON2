@@ -15,7 +15,7 @@
 !
 Subroutine Fermi_Dirac_distribution
   use Global_Variables
-  use salmon_parallel, only: nproc_group_tdks, nproc_id_global
+  use parallelization, only: nproc_group_tdks, nproc_id_global
   use communication, only: comm_summation, comm_is_root
   use misc_routines, only: get_wtime
   implicit none

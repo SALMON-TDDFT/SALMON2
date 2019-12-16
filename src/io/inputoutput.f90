@@ -120,7 +120,7 @@ contains
 
 
   subroutine read_stdin
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file, only: get_filehandle
     implicit none
@@ -196,7 +196,7 @@ contains
   end subroutine read_stdin
 
   subroutine read_input_common
-    use salmon_parallel
+    use parallelization
     use communication
     use salmon_file, only: get_filehandle
     implicit none
@@ -1310,7 +1310,7 @@ contains
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
-    use salmon_parallel
+    use parallelization
     use communication
     use salmon_file, only: get_filehandle
     character(256) :: filename_tmp,char_atom
@@ -1655,7 +1655,7 @@ contains
   end subroutine initialize_inputoutput_units
 
   subroutine dump_input_common
-    use salmon_parallel
+    use parallelization
     use communication
     use salmon_file, only: get_filehandle
     use filesystem, only: atomic_create_directory
@@ -2114,7 +2114,7 @@ contains
   end subroutine dump_input_common
 
   subroutine check_bad_input
-    use salmon_parallel
+    use parallelization
     use communication
     implicit none
     integer :: round_phi
@@ -2269,7 +2269,7 @@ contains
   end subroutine check_bad_input
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)
-    use salmon_parallel
+    use parallelization
     use communication
     implicit none
     character(*) :: inp1
@@ -2289,7 +2289,7 @@ contains
 
   subroutine yn_argument_check(str)
     use misc_routines, only: string_lowercase
-    use salmon_parallel, only: end_parallel
+    use parallelization, only: end_parallel
     implicit none
     character(*), intent(inout) :: str
 

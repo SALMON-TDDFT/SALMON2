@@ -22,7 +22,7 @@ contains
   subroutine calc_ground_state
     use Global_Variables
     use timer
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_bcast, comm_sync_all, comm_is_root
     use broyden_sub
     use io_gs_wfn_k, only: iflag_read,read_write_gs_wfn_k

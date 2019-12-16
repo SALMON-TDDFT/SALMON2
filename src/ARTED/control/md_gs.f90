@@ -21,9 +21,9 @@
 !-----------------------------------------------------------------
 module md_ground_state
   use Global_Variables
-  use salmon_parallel, only: nproc_group_global, nproc_id_global
+  use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_sync_all, comm_is_root
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use const, only: umass, hartree2J, kB
   implicit none
 contains
@@ -287,7 +287,7 @@ end subroutine calc_md_ground_state
 
   subroutine print_restart_data_md_gs
     use communication, only: comm_is_root
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use inputoutput, only: au_length_aa
     implicit none
     integer :: ia,unit_atomic_coor_tmp=201,ik,j
@@ -344,7 +344,7 @@ end subroutine calc_md_ground_state
   subroutine remove_system_momentum(flag_print_check)
     ! remove center of mass and momentum of whole system
     use communication, only: comm_is_root
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     implicit none
     integer :: ia, flag_print_check
     real(8) :: v_com(3), sum_mass, mass_au
@@ -386,7 +386,7 @@ end subroutine calc_md_ground_state
     use Global_Variables
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
     integer :: ia,unit_xyz=200

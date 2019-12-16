@@ -32,7 +32,7 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
 use math_constants, only: pi, zi
 use structures
 use inputoutput, only: au_length_aa, au_energy_ev
-use salmon_parallel, only: nproc_id_global
+use parallelization, only: nproc_id_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer

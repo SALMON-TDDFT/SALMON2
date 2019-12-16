@@ -58,7 +58,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
     & yn_psmask
-  use salmon_parallel, only: nproc_group_global, nproc_id_global
+  use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
   implicit none

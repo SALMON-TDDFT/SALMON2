@@ -28,7 +28,7 @@ subroutine prep_backup_values(is_backup)
   use opt_variables,   only: opt_vars_initialize_p1, opt_vars_initialize_p2
   use backup_routines, only: backup_value
   use misc_routines,   only: get_wtime
-  use salmon_parallel
+  use parallelization
   use communication, only: comm_bcast, comm_sync_all, comm_create_group, comm_get_groupinfo,  comm_is_root
   implicit none
   logical, intent(in) :: is_backup
