@@ -19,7 +19,7 @@ module eigen_subdiag_sub
 contains
 
 subroutine eigen_subdiag(Rmat,evec,iter,ier2,pinfo)
-  use salmon_parallel, only: nproc_size_global
+  use parallelization, only: nproc_size_global
   use structures, only: s_process_info
   implicit none
   
@@ -96,7 +96,7 @@ end subroutine eigen_subdiag_periodic
 !
 !     .. Parameters ..
       use structures, only: s_process_info
-      use salmon_parallel, only: nproc_size_global
+      use parallelization, only: nproc_size_global
       integer :: iter
       real(8) :: Rmat(iter,iter)
       real(8) :: evec(iter,iter)

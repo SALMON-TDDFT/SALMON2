@@ -33,7 +33,7 @@ subroutine init_ms_raman
   use salmon_global
   use Global_Variables
   use opt_variables
-  use salmon_parallel
+  use parallelization
   use communication
   use salmon_file
   use misc_routines
@@ -168,7 +168,7 @@ subroutine raman_maxwell_ms
   use Global_Variables
   use timer
   use opt_variables
-  use salmon_parallel
+  use parallelization
   use communication
   use salmon_file
   use misc_routines
@@ -1237,7 +1237,7 @@ contains
     use Global_Variables
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file
     implicit none
@@ -1294,7 +1294,7 @@ contains
     use Global_Variables
     use inputoutput, only: au_length_aa
 !    use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file
     implicit none
@@ -1536,7 +1536,7 @@ end subroutine raman_maxwell_ms
 subroutine dt_evolve_Ac_1d_raman
   use Global_variables
   use inputoutput, only: au_length_aa
-  use salmon_parallel, only: nproc_id_global, nproc_group_global, end_parallel
+  use parallelization, only: nproc_id_global, nproc_group_global, end_parallel
   use communication, only: comm_is_root, comm_summation, comm_sync_all
   implicit none
   logical :: flag_q_cos

@@ -15,7 +15,7 @@
 !
 subroutine subdip(itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
 use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
-use salmon_parallel, only: nproc_id_global
+use parallelization, only: nproc_id_global
 use communication, only: comm_is_root, comm_summation
 use inputoutput, only: au_length_aa, au_energy_ev, natom, au_time_fs
 use salmon_global
@@ -93,7 +93,7 @@ end subroutine subdip
 
 subroutine dip(lg,ng,srho,rbox_array2)
   use structures, only: s_rgrid,s_scalar
-  use salmon_parallel, only: nproc_group_global
+  use parallelization, only: nproc_group_global
   use communication, only: comm_summation
   implicit none
   type(s_rgrid) ,intent(in) :: lg

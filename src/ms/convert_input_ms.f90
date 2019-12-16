@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 subroutine convert_input_ms(Ntime)
-use salmon_parallel, only: nproc_id_global
+use parallelization, only: nproc_id_global
 use communication, only: comm_is_root, comm_bcast
 use inputoutput
 use set_numcpu

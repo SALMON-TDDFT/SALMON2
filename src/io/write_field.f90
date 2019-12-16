@@ -24,7 +24,7 @@ contains
 subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa
   use structures, only: s_rgrid,s_scalar,allocate_scalar,deallocate_scalar
-  use salmon_parallel, only: nproc_group_global
+  use parallelization, only: nproc_group_global
   use communication, only: comm_summation
   use write_file3d
   implicit none

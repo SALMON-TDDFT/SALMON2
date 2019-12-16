@@ -16,7 +16,7 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 Subroutine init_Ac
   use Global_Variables
-  use salmon_parallel, only: nproc_group_global, nproc_id_global
+  use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use Ac_yn_local_field
   implicit none

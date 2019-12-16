@@ -92,7 +92,7 @@ contains
     use Global_Variables, only: NLx,NLy,NLz,kAc,lapx,lapy,lapz,nabx,naby,nabz,Vloc,Mps,iuV,Hxyz,Nlma,zproj, & 
     & flag_set_ini_Ac_local, Ac2_al,Ac1x_al,Ac1y_al,Ac1z_al,nabt_al
     use opt_variables, only: lapt,PNLx,PNLy,PNLz,PNL,spseudo,dpseudo
-    use salmon_parallel, only: get_thread_id
+    use parallelization, only: get_thread_id
     use salmon_global, only: yn_local_field
     use stencil_sub, only: zstencil
     use code_optimization, only: modx,mody,modz

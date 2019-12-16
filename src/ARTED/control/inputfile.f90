@@ -26,7 +26,7 @@ contains
     use salmon_global
     use communication, only: comm_sync_all, &
                                     comm_is_root
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use Global_Variables
     implicit none
 
@@ -172,7 +172,7 @@ contains
 
   subroutine transfer_atomic_data()
     use salmon_global
-    use salmon_parallel, only: nproc_group_global, nproc_id_global
+    use parallelization, only: nproc_group_global, nproc_id_global
     use communication, only: comm_is_root, comm_bcast, comm_sync_all
     use Global_Variables, only: NE, Zatom, Lref
     implicit none

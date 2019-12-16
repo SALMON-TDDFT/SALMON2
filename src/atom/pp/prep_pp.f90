@@ -22,7 +22,7 @@ contains
 subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use structures
   use hamiltonian, only: update_kvector_nonlocalpt
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use salmon_global, only: iperiodic,yn_ffte
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
@@ -227,7 +227,7 @@ end subroutine calc_vloc
 subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
                      ngzero,gx,gy,gz,ng,ng_s,ng_e,nl,alxyz,lx,ly,lz,hx,hy,hz,matrix_A0)
   use salmon_global,only : natom, nelem, kion, rion
-  use salmon_parallel,only : nproc_group_tdks
+  use parallelization,only : nproc_group_tdks
   use communication, only: comm_summation
   use math_constants,only : pi
   use structures,only : s_pp_info
@@ -326,7 +326,7 @@ end subroutine calc_vpsl
 SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
   use structures
   use salmon_global,only : natom, kion
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   implicit none
   type(s_rgrid)     ,intent(in) :: mg,lg
   type(s_dft_system),intent(in) :: system

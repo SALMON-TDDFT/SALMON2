@@ -22,7 +22,7 @@ subroutine init_md(system,md)
   use structures, only: s_dft_system,s_md
   use salmon_global, only: natom,yn_out_rvf_rt, ensemble, thermostat,yn_set_ini_velocity,step_velocity_scaling
   use communication, only: comm_is_root
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   implicit none    
   type(s_dft_system) :: system
   type(s_md) :: md
@@ -58,7 +58,7 @@ end subroutine init_md
 subroutine set_initial_velocity(system,md)
   use structures, only: s_dft_system,s_md
   use salmon_global, only: natom,Kion,temperature0_ion_k
-  use salmon_parallel, only: nproc_id_global,nproc_group_global
+  use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root,comm_bcast
   use math_constants, only: Pi
   use const, only: umass,hartree2J,kB
@@ -139,7 +139,7 @@ subroutine read_initial_velocity(system,md)
   ! xi_nh  !only for nose-hoover thermostat option
   use structures, only: s_dft_system,s_md
   use salmon_global, only: natom,file_ini_velocity, ensemble, thermostat
-  use salmon_parallel, only: nproc_id_global,nproc_group_global,end_parallel
+  use parallelization, only: nproc_id_global,nproc_group_global,end_parallel
   use communication, only: comm_is_root,comm_bcast
   implicit none
   type(s_dft_system) :: system
@@ -173,7 +173,7 @@ subroutine remove_system_momentum(flag_print_check,system)
   use structures, only: s_dft_system
   use salmon_global, only: natom,Kion
   use communication, only: comm_is_root
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use const, only: umass
   implicit none
   type(s_dft_system) :: system
@@ -392,7 +392,7 @@ subroutine print_restart_data_md(system,md)
   use structures, only: s_dft_system,s_md
   use salmon_global, only: natom
   use communication, only: comm_is_root
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use inputoutput, only: au_length_aa,unit_length,ensemble,thermostat, &
                  iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
   implicit none

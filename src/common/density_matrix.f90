@@ -131,7 +131,7 @@ contains
   subroutine calc_density(system,rho,psi,info,mg)
     use structures
     use communication, only: comm_summation
-    use salmon_parallel, only: get_thread_id,get_nthreads
+    use parallelization, only: get_thread_id,get_nthreads
     use misc_routines, only: ceiling_pow2
     use timer
     use sym_rho_sub, only: sym_rho

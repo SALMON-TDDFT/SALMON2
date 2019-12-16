@@ -1,5 +1,5 @@
 set(SOURCES
-    salmon_parallel.f90
+    parallelization.f90
     code_optimization.f90
     init_communicator.f90
     set_numcpu.f90

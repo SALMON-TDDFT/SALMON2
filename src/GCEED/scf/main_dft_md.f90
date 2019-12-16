@@ -18,7 +18,7 @@
 
 subroutine main_dft_md
 use structures
-use salmon_parallel, only: nproc_id_global,nproc_group_global
+use parallelization, only: nproc_id_global,nproc_group_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer

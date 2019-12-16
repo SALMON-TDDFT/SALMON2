@@ -19,7 +19,7 @@
 module io_gs_wfn_k
   use salmon_global
   use communication
-  use salmon_parallel
+  use parallelization
   use global_variables
   use filesystem, only: atomic_create_directory
   implicit none
@@ -275,7 +275,7 @@ end module io_gs_wfn_k
 module io_rt_wfn_k
   use salmon_global
   use communication
-  use salmon_parallel
+  use parallelization
   use global_variables
   implicit none
 

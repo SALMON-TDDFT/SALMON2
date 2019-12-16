@@ -23,7 +23,7 @@ subroutine tddft_maxwell_ms
   use Global_Variables
   use timer
   use opt_variables
-  use salmon_parallel
+  use parallelization
   use communication
   use salmon_file
   use const, only: umass
@@ -993,7 +993,7 @@ contains
     use Global_Variables
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file
     implicit none
@@ -1050,7 +1050,7 @@ contains
     use Global_Variables
     use inputoutput, only: au_length_aa
 !    use salmon_global, only: SYSname,iflag_atom_coor,ntype_atom_coor_cartesian,ntype_atom_coor_reduced
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file
     implicit none

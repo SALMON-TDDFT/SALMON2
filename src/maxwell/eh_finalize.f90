@@ -18,7 +18,7 @@ subroutine eh_finalize(fs,fw)
   use salmon_global,        only: dt_em,unit_system,yn_periodic,ae_shape1,ae_shape2,e_impulse,sysname, &
                                   nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,yn_obs_plane_em
   use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au
-  use salmon_parallel,      only: nproc_id_global
+  use parallelization,      only: nproc_id_global
   use communication, only: comm_is_root
   use structures,           only: s_fdtd_system
   use salmon_maxwell,       only: ls_fdtd_work

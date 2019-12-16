@@ -22,7 +22,7 @@ contains
 subroutine read_dns(lg,mg,rho)
   use structures
   use salmon_global, only: natom
-  use salmon_parallel
+  use parallelization
   use communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
@@ -68,7 +68,7 @@ end subroutine read_dns
 
 subroutine read_wfn(lg,mg,psi,info,system)
   use structures
-  use salmon_parallel
+  use parallelization
   use communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
@@ -151,7 +151,7 @@ end subroutine read_wfn
 
 subroutine write_wfn(lg,mg,psi,info,system)
   use structures
-  use salmon_parallel
+  use parallelization
   use communication
   implicit none
   type(s_rgrid),intent(in) :: lg,mg

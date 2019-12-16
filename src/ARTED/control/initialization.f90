@@ -27,7 +27,7 @@ contains
     use Global_Variables
     use timer
     use opt_variables
-    use salmon_parallel
+    use parallelization
     use communication
     use salmon_xc, only: init_xc
     use salmon_pp, only: init_pp
@@ -124,7 +124,7 @@ contains
     use salmon_global
     use Global_Variables
     use opt_variables
-    use salmon_parallel
+    use parallelization
     use communication
     use salmon_file
     use misc_routines
@@ -560,7 +560,7 @@ contains
   Subroutine init_md
     use Global_Variables
     use communication
-    use salmon_parallel
+    use parallelization
     implicit none    
 
     if(yn_out_rvf_rt=='n') then
@@ -594,7 +594,7 @@ contains
   Subroutine set_initial_velocity
     use salmon_global
     use Global_Variables
-    use salmon_parallel
+    use parallelization
     use communication
     !use misc_routines
     use salmon_math
@@ -673,7 +673,7 @@ contains
   ! xi_nh  !only for nose-hoover thermostat option
     use salmon_global
     use Global_Variables
-    use salmon_parallel
+    use parallelization
     use communication
     use salmon_math
     implicit none
@@ -703,7 +703,7 @@ contains
   
   subroutine set_nksplit_nxysplit()
     use Global_Variables
-    use salmon_parallel
+    use parallelization
     implicit none
     !! Special Rule for Debug and Calculation Check
     if (nmacro < 1) then
@@ -743,7 +743,7 @@ contains
   ! TODO: Create deallocate variables for the finalization of the program
   subroutine allocate_multiscale_vars()
     use Global_Variables
-    use salmon_parallel
+    use parallelization
     implicit none
     
     !! Set the size of macroscopic grid
@@ -904,7 +904,7 @@ contains
     
     subroutine set_macropoint_from_file()
       use salmon_file
-      use salmon_parallel
+      use parallelization
       use communication
       use global_variables
       implicit none
@@ -1043,7 +1043,7 @@ contains
   end subroutine set_macropoint_from_file
   
   ! subroutine set_trans_mat(ms_angle_x, ms_angle_y, ms_angle_z)
-  !   use salmon_parallel, only: nproc_id_global
+  !   use parallelization, only: nproc_id_global
   !   use communication, only: comm_is_root
   !   use global_variables, only: trans_mat, trans_inv
   !   implicit none

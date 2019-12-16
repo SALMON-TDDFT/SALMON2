@@ -15,7 +15,7 @@
 !
 !=======================================================================
 module band_dft_sub
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
 
@@ -155,7 +155,7 @@ end subroutine check_data_format
 
 subroutine get_band_kpt( kpt, nref_band, system )
    use structures, only: s_dft_system
-   use salmon_parallel, only: nproc_id_global
+   use parallelization, only: nproc_id_global
    use communication, only: comm_is_root
    implicit none
    real(8),allocatable,intent(inout) :: kpt(:,:)

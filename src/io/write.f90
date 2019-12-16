@@ -26,7 +26,7 @@ contains
   subroutine write_k_data(system,stencil)
     use structures
     use salmon_global, only: sysname
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use salmon_file, only: open_filehandle
     implicit none
@@ -99,7 +99,7 @@ contains
     use stencil_sub
     use sendrecv_grid
     use salmon_global, only: sysname
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
     use salmon_file, only: open_filehandle
     implicit none
@@ -380,7 +380,7 @@ contains
     use structures, only: s_dft_system
     use inputoutput, only: au_length_aa
     use salmon_global, only: SYSname,atom_name
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
 
@@ -426,7 +426,7 @@ contains
 
   subroutine write_rt_data_0d(it,ofl,dt,system,rt)
     use structures, only: s_ofile, s_dft_system, s_rt
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file, only: open_filehandle
     use inputoutput, only: t_unit_length,t_unit_time,t_unit_ac,t_unit_elec
@@ -501,7 +501,7 @@ contains
 !===================================================================================================================================
   subroutine write_rt_data_3d(it,ofl,dt,system,curr_e,curr_i)
     use structures, only: s_ofile, s_dft_system
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
@@ -607,7 +607,7 @@ contains
 
   subroutine write_rt_energy_data(it,ofl,dt,energy,md)
     use structures, only: s_ofile,s_dft_energy,s_md
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_global, only: ensemble, thermostat
     use salmon_file, only: open_filehandle
@@ -719,7 +719,7 @@ contains
   subroutine write_response_0d(ofl,rt)
     use inputoutput, only: e_impulse, nt, dt, nenergy, de,  &
                            t_unit_energy,t_unit_polarizability
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
@@ -782,7 +782,7 @@ contains
   subroutine write_response_3d(ofl,rt)
     use inputoutput, only: e_impulse, trans_longi, nt, dt, nenergy, de,  &
                            t_unit_energy,t_unit_conductivity
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
@@ -853,7 +853,7 @@ contains
     use structures, only: s_md, s_ofile
     use inputoutput, only: t_unit_time,t_unit_energy
     use salmon_global, only: dt,nt,sysname
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
     use salmon_file, only: open_filehandle
     implicit none
@@ -923,7 +923,7 @@ contains
                            t_unit_energy,  &
                            t_unit_spectrum_dipole,  &
                            t_unit_spectrum_dipole_square
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
@@ -985,7 +985,7 @@ contains
                            t_unit_spectrum_current_square,  &
                            t_unit_spectrum_elec,  &
                            t_unit_spectrum_elec_square
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
     use salmon_file, only: open_filehandle
@@ -1081,7 +1081,7 @@ contains
 
   subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
     use structures,           only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-    use salmon_parallel,      only: nproc_id_global
+    use parallelization,      only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_file,          only: open_filehandle
     use inputoutput,          only: sysname, base_directory, num_kgrid
@@ -1151,7 +1151,7 @@ contains
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,ntmg,unit_system
-    use salmon_parallel,     only: nproc_id_global
+    use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use salmon_file,         only: open_filehandle
     use inputoutput,         only: au_length_aa,au_energy_ev
@@ -1255,7 +1255,7 @@ contains
 
   subroutine write_eigen(ofl,system,energy)
     use structures, only: s_ofile, s_dft_system, s_dft_energy
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use inputoutput, only: uenergy_from_au,iperiodic,unit_energy,sysname
     use salmon_file, only: open_filehandle
@@ -1298,7 +1298,7 @@ contains
   subroutine write_dos(system,energy)
     use structures
     use math_constants, only: pi
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use inputoutput, only: out_dos_start, out_dos_end, out_dos_function, &
                            out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, uenergy_from_au, unit_energy, &
@@ -1375,7 +1375,7 @@ contains
     use structures
     use math_constants, only: pi,zi
     use salmon_math, only: ylm
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root, comm_summation
     use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
     out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, nelec, kion, natom, nstate, unit_energy
@@ -1554,7 +1554,7 @@ contains
     use structures
     use salmon_global, only: nelec
     use inputoutput, only: au_energy_ev
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -1594,7 +1594,7 @@ contains
   
   subroutine projection(itt,mg,system,info,tpsi,tpsi0)
     use structures
-    use salmon_parallel, only: nproc_id_global
+    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root, comm_summation, comm_bcast
     use salmon_global, only: dt,iwrite_projnum,iwrite_projection_k,iwrite_projection_ob,num_projection
     use pack_unpack, only: copy_data

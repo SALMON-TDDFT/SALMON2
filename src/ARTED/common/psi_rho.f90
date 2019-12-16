@@ -40,7 +40,7 @@ subroutine psi_rho_impl(zutmp,zu_NB)
   use global_variables
   use timer
   use opt_variables
-  use salmon_parallel, only: nproc_group_tdks
+  use parallelization, only: nproc_group_tdks
   use communication, only: comm_summation
   implicit none
   integer,intent(in)    :: zu_NB

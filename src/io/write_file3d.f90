@@ -22,7 +22,7 @@ contains
 
 subroutine write_avs(lg,fp,suffix,header_unit,rmat)
   use inputoutput, only: nsplit_voxel_data
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use structures, only: s_rgrid
   use communication, only: comm_is_root
   implicit none
@@ -97,7 +97,7 @@ end subroutine write_avs
 subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,hgs)
   use inputoutput, only: natom,kion,rion,izatom
   use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
   type(s_rgrid),intent(in) :: lg
@@ -163,7 +163,7 @@ end subroutine write_cube
 subroutine write_vtk(lg,fp,suffix,rmat,hgs)
   use inputoutput, only: au_length_aa
   use structures, only: s_rgrid
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
   type(s_rgrid),intent(in) :: lg

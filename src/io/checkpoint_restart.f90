@@ -26,7 +26,7 @@ subroutine init_dir_out_restart(ofl)
   use structures,  only: s_ofile
   use filesystem,  only: atomic_create_directory
   use salmon_global,   only: theory,write_rt_wfn_k
-  use salmon_parallel, only: nproc_id_global,nproc_group_global
+  use parallelization, only: nproc_id_global,nproc_group_global
   implicit none
   type(s_ofile), intent(inout) :: ofl
 
@@ -48,7 +48,7 @@ end subroutine init_dir_out_restart
 
 
 subroutine generate_checkpoint_directory_name(header,iter,gdir,pdir)
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   implicit none
   character(*),  intent(in)  :: header
   integer,       intent(in)  :: iter
@@ -62,7 +62,7 @@ subroutine generate_checkpoint_directory_name(header,iter,gdir,pdir)
 end subroutine generate_checkpoint_directory_name
 
 subroutine generate_restart_directory_name(basedir,gdir,pdir)
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   implicit none
   character(*),  intent(in)  :: basedir
   character(256),intent(out) :: gdir
@@ -79,7 +79,7 @@ subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
-  use salmon_parallel, only: nproc_group_global,nproc_id_global
+  use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
   type(s_dft_system)      ,intent(in) :: system
@@ -136,7 +136,7 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,id
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_scalar
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
-  use salmon_parallel, only: nproc_group_global,nproc_id_global
+  use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
   type(s_dft_system)      ,intent(in) :: system
@@ -196,7 +196,7 @@ end subroutine restart_rt
 subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use inputoutput, only: theory,calc_mode
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
-  use salmon_parallel, only: nproc_id_global, nproc_size_global
+  use parallelization, only: nproc_id_global, nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)            ,intent(in) :: odir
@@ -267,7 +267,7 @@ end subroutine write_bin
 subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use inputoutput, only: theory,calc_mode,yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
-  use salmon_parallel, only: nproc_id_global,nproc_group_global,nproc_size_global
+  use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: yn_restart
   implicit none
@@ -369,7 +369,7 @@ end subroutine read_bin
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   use inputoutput, only: num_datafiles_out,yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)   :: odir
@@ -532,7 +532,7 @@ end subroutine write_wavefunction
 
 subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)                        :: odir
@@ -664,7 +664,7 @@ end subroutine write_rho_inout
 
 subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)   :: odir
@@ -739,7 +739,7 @@ end subroutine write_Vh_stock
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use inputoutput, only: iperiodic,num_datafiles_in,yn_datafiles_dump
-  use salmon_parallel, only: nproc_id_global,nproc_group_global
+  use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*),intent(in) :: idir
@@ -880,7 +880,7 @@ end subroutine read_wavefunction
 
 subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
@@ -1007,7 +1007,7 @@ end subroutine read_rho_inout
 
 subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_orbital_parallel, s_scalar
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
@@ -1071,7 +1071,7 @@ end subroutine read_Vh_stock
 
 subroutine set_dg(lg,mg,dg,num_datafiles,is_self_checkpoint)
   use structures, only: s_rgrid 
-  use salmon_parallel, only: nproc_id_global
+  use parallelization, only: nproc_id_global
   implicit none 
   type(s_rgrid),intent(in)     :: lg,mg
   type(s_rgrid),intent(inout)  :: dg

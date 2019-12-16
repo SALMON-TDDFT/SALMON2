@@ -19,7 +19,7 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 Subroutine sp_energy_omp
   use Global_Variables
-  use salmon_parallel, only: nproc_group_tdks
+  use parallelization, only: nproc_group_tdks
   use communication, only: comm_summation
   use timer
   use hpsi, only: hpsi_omp_KB_GS
