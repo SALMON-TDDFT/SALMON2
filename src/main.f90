@@ -116,7 +116,7 @@ contains
   subroutine write_perflog_csv
     use perflog
     use misc_routines, only: gen_logfilename
-    use salmon_file, only: get_filehandle
+    use filesystem, only: get_filehandle
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use iso_fortran_env, only: output_unit

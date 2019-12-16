@@ -24,8 +24,11 @@ module filesystem
 
   public :: atomic_create_directory ! for multi process
 
+  public :: get_filehandle
+  public :: open_filehandle
+
 private
-interface 
+interface
   subroutine posix_file_exists(filepath, retcode) bind(C,name='posix_file_exists')
     use, intrinsic :: iso_c_binding
     character(kind=c_char),intent(in) :: filepath
@@ -168,4 +171,37 @@ contains
     end do
     call comm_sync_all(igroup)
   end subroutine
+
+  !! Return a unit number available to open file
+  integer function get_filehandle() result(fh)
+    implicit none
+    integer, parameter :: fh_start = 1000
+    logical :: flag
+
+    fh = fh_start - 1
+    flag = .true.
+    do while (flag)
+      fh = fh + 1
+      inquire(unit=fh, opened=flag)
+    end do
+    return
+  end function get_filehandle
+
+  !! Open file and Return the unit number
+  integer function open_filehandle(file, status) result(fh)
+    implicit none
+    character(*), intent(in) :: file
+    character(*), optional, intent(in) :: status
+    character(256) :: my_status
+
+    if (present(status)) then
+      my_status = status
+    else
+      my_status = "unknown"
+    endif
+
+    fh = get_filehandle()
+    open(unit=fh, file=trim(file), status=trim(my_status))
+  end function open_filehandle
+
 end module filesystem

@@ -126,7 +126,7 @@ contains
     use opt_variables
     use parallelization
     use communication
-    use salmon_file
+    use filesystem
     use misc_routines
     use timer
     use inputoutput, only: au_length_aa
@@ -903,7 +903,7 @@ contains
     end subroutine
     
     subroutine set_macropoint_from_file()
-      use salmon_file
+      use filesystem
       use parallelization
       use communication
       use global_variables

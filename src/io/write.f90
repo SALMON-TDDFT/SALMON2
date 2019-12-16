@@ -28,7 +28,7 @@ contains
     use salmon_global, only: sysname
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_stencil),intent(in) :: stencil
@@ -101,7 +101,7 @@ contains
     use salmon_global, only: sysname
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_summation,comm_sync_all
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
@@ -428,7 +428,7 @@ contains
     use structures, only: s_ofile, s_dft_system, s_rt
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_length,t_unit_time,t_unit_ac,t_unit_elec
     implicit none
     integer, intent(in) :: it
@@ -503,7 +503,7 @@ contains
     use structures, only: s_ofile, s_dft_system
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
     implicit none
     type(s_ofile) :: ofl
@@ -610,7 +610,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use salmon_global, only: ensemble, thermostat
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
     type(s_dft_energy) :: energy
@@ -722,7 +722,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
     type(s_rt),intent(in) :: rt
@@ -785,7 +785,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
     type(s_rt),intent(in) :: rt
@@ -855,7 +855,7 @@ contains
     use salmon_global, only: dt,nt,sysname
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root,comm_sync_all
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
     type(s_md) :: md
@@ -926,7 +926,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
     type(s_rt),intent(in) :: rt
@@ -988,7 +988,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use structures, only: s_ofile, s_rt
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_ofile) :: ofl
     type(s_rt),intent(in) :: rt
@@ -1083,7 +1083,7 @@ contains
     use structures,           only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
     use parallelization,      only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_file,          only: open_filehandle
+    use filesystem,          only: open_filehandle
     use inputoutput,          only: sysname, base_directory, num_kgrid
     use band,                 only: calc_kgrid_prod
     implicit none
@@ -1153,7 +1153,7 @@ contains
     use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,ntmg,unit_system
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
-    use salmon_file,         only: open_filehandle
+    use filesystem,         only: open_filehandle
     use inputoutput,         only: au_length_aa,au_energy_ev
     implicit none
     integer           ,intent(in) :: Miter
@@ -1258,7 +1258,7 @@ contains
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use inputoutput, only: uenergy_from_au,iperiodic,unit_energy,sysname
-    use salmon_file, only: open_filehandle
+    use filesystem, only: open_filehandle
     implicit none
     type(s_ofile),intent(inout) :: ofl
     type(s_dft_system),intent(in) :: system

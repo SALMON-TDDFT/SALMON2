@@ -16,7 +16,7 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 Subroutine Fourier_tr
   use Global_Variables
-  use salmon_file, only: open_filehandle
+  use filesystem, only: open_filehandle
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use inputoutput, only: t_unit_current, t_unit_energy, t_unit_elec

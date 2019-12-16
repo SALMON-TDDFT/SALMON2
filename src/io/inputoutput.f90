@@ -122,7 +122,7 @@ contains
   subroutine read_stdin
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_file, only: get_filehandle
+    use filesystem, only: get_filehandle
     implicit none
 
     integer :: cur
@@ -198,7 +198,7 @@ contains
   subroutine read_input_common
     use parallelization
     use communication
-    use salmon_file, only: get_filehandle
+    use filesystem, only: get_filehandle
     implicit none
     integer :: ii
     real(8) :: norm
@@ -1312,7 +1312,7 @@ contains
   subroutine read_atomic_coordinates
     use parallelization
     use communication
-    use salmon_file, only: get_filehandle
+    use filesystem, only: get_filehandle
     character(256) :: filename_tmp,char_atom
     integer :: icount,i
     logical :: if_error, if_cartesian
@@ -1657,7 +1657,7 @@ contains
   subroutine dump_input_common
     use parallelization
     use communication
-    use salmon_file, only: get_filehandle
+    use filesystem, only: get_filehandle
     use filesystem, only: atomic_create_directory
     implicit none
     integer :: i,j,ierr_nml

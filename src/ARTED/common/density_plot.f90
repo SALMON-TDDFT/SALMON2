@@ -16,7 +16,7 @@
 subroutine write_density(it,action)
   use salmon_global, only: format_voxel_data
   use Global_Variables
-  use salmon_file, only: open_filehandle
+  use filesystem, only: open_filehandle
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
