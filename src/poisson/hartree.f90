@@ -24,7 +24,8 @@ contains
 subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   use inputoutput, only: iperiodic,yn_ffte
   use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_poisson,  &
-                        s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
+                        s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid, &
+                        s_orbital_parallel
   use poisson_cg_sub
   use poisson_periodic_sub
   use poisson_ffte_sub

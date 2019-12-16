@@ -24,7 +24,7 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   use salmon_global, only: process_allocation,ispin
   use structures, only: s_orbital_parallel, s_field_parallel, s_process_info
   use communication, only: comm_create_group, comm_get_groupinfo, &
-                                  comm_summation
+                           comm_summation
   use misc_routines, only: get_wtime
   implicit none
   integer,      intent(in) :: comm
@@ -38,7 +38,8 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   integer :: imr(3),imrs(3),igroup
   integer :: i1,i2,i3,i4,i5,ix,iy,iz,ixs,iys,izs
   integer :: ibox,icolor,ikey
-  integer :: npuy,npuz
+  integer :: npux,npuy,npuz,irank,icolors(3)
+  integer :: icomm_parent,irank_parent
 
   call comm_get_groupinfo(comm, myrank, nproc)
 
@@ -439,23 +440,39 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   info_field%nproc_o = nproc_d_o_mul
 
 ! communicators for FFTE routine
-  npuy = nproc_d_g_dm(2)*nproc_d_o(2)
-  npuz = nproc_d_g_dm(3)*nproc_d_o(3)
+! NOTE: calculation is closed in info%icomm_r
+  icomm_parent = info%icomm_r
+  irank_parent = info%id_r
 
-  icolor=info_field%id(3)+info_field%id(1)*npuz
-  ikey=info_field%id(2)
-  info_field%icomm_ffte(2) = comm_create_group(comm, icolor, ikey)
+  npux = nproc_d_o(1)
+  npuy = nproc_d_o(2)
+  npuz = nproc_d_o(3)
+
+  do iz=0,npuz-1
+  do iy=0,npuy-1
+  do ix=0,npux-1
+    irank = ix &
+          + iy * npux &
+          + iz * npux * npuy
+    if (irank == irank_parent) then
+      icolors(1) = iy + iz*npuy
+      icolors(2) = iz + ix*npuz
+      icolors(3) = iy + ix*npuy
+    end if
+  end do
+  end do
+  end do
+
+  ikey=irank_parent
+
+  info_field%icomm_ffte(1) = comm_create_group(icomm_parent, icolors(1), ikey)
+  call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
+
+  info_field%icomm_ffte(2) = comm_create_group(icomm_parent, icolors(2), ikey)
   call comm_get_groupinfo(info_field%icomm_ffte(2), info_field%id_ffte(2), info_field%isize_ffte(2))
 
-  icolor=info_field%id(2)+info_field%id(1)*npuy
-  ikey=info_field%id(3)
-  info_field%icomm_ffte(3) = comm_create_group(comm, icolor, ikey)
+  info_field%icomm_ffte(3) = comm_create_group(icomm_parent, icolors(3), ikey)
   call comm_get_groupinfo(info_field%icomm_ffte(3), info_field%id_ffte(3), info_field%isize_ffte(3))
-
-  icolor=info_field%id(2)+info_field%id(3)*npuy
-  ikey=info_field%id(1)
-  info_field%icomm_ffte(1) = comm_create_group(comm, icolor, ikey)
-  call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
 
 end subroutine init_communicator_dft
 

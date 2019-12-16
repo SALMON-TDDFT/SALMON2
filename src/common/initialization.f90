@@ -80,7 +80,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
   case(3)
-    call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+    call init_reciprocal_grid(lg,mg,ng,fg,system,info,info_field,poisson)
   end select
   call set_ig_bound(lg,ng,poisson)
 
@@ -637,15 +637,18 @@ end subroutine init_grid_parallel
 
 !===================================================================================================================================
 
-subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+subroutine init_reciprocal_grid(lg,mg,ng,fg,system,info,info_field,poisson)
   use inputoutput,     only : nelem,yn_ffte
   use math_constants,  only : pi,zi
-  use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_field_parallel,s_poisson
+  use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_field_parallel,s_poisson&
+                             ,s_orbital_parallel
   implicit none
   type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
   real(8) :: brl(3,3)
@@ -665,11 +668,18 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   brl(:,:)=system%primitive_b(:,:)
 
-  fg%icomm_G = info_field%icomm_all
   fg%ng = system%ngrid
 
-  nproc = info_field%isize_all
-  myrank = info_field%id_all
+  select case(yn_ffte)
+  case('n')
+    fg%icomm_G = info_field%icomm_all
+    nproc = info_field%isize_all
+    myrank = info_field%id_all
+  case('y')
+    fg%icomm_G = info%icomm_r
+    nproc = info%isize_r
+    myrank = info%id_r
+  end select
 
   fg%ig_s = myrank*(fg%ng/nproc)+1
   fg%ig_e = (myrank+1)*(fg%ng/nproc)
@@ -743,7 +753,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     npuz=info_field%isize_ffte(3)
 
     if(.not.allocated(poisson%coef))then
-      allocate(poisson%coef(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+      allocate(poisson%coef(lg%num(1),mg%num(2),mg%num(3)))
     end if
     poisson%coef=0.d0
 
@@ -754,12 +764,12 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     kx_sta=lg%is(1)
     kx_end=lg%ie(1)
     ky_sta=1
-    ky_end=lg%num(2)/npuy
+    ky_end=mg%num(2)
     kz_sta=1
-    kz_end=lg%num(3)/npuz
+    kz_end=mg%num(3)
 
-    ky_shift=info_field%id_ffte(2)*lg%num(2)/npuy
-    kz_shift=info_field%id_ffte(3)*lg%num(3)/npuz
+    ky_shift=info_field%id_ffte(2)*mg%num(2)
+    kz_shift=info_field%id_ffte(3)*mg%num(3)
 
     fg%iGzero = -1
     do kz = kz_sta,kz_end
