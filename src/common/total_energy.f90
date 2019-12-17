@@ -375,8 +375,8 @@ CONTAINS
     implicit none
     logical :: rion_update
   
-    select case('theory')
-    case('DFT','DFT_BAND','DFT_MD') 
+    select case(theory)
+    case('DFT','DFT_BAND','DFT_MD')
       rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
     case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
       rion_update = (yn_md == 'y')
