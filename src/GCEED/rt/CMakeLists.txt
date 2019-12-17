@@ -1,7 +1,6 @@
 set(SOURCES
     emfield.f90
     calcVbox.f90
-    convert_input_rt.f90
     dip.f90
     initialization_rt.f90
     main_tddft.f90

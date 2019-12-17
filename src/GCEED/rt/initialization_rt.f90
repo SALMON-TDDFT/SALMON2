@@ -106,7 +106,7 @@ use inputoutput
   
   iwdenstep=30 
   
-  call convert_input_rt(Ntime)
+  Ntime=nt
   
   if(comm_is_root(nproc_id_global))then
     write(*,*)
