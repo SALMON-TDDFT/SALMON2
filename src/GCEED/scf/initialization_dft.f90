@@ -194,7 +194,6 @@ type(s_mixing) :: mixing
 logical :: rion_update
 integer :: Miter,jspin, nspin
 
-  !moved from convert_input_scf (necessary?)
   select case(method_min)
   case('cg')   ; continue
   case default ; stop 'Specify "cg" for method_min.'

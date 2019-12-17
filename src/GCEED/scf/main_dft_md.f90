@@ -82,7 +82,6 @@ call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
 it=0
-call convert_input_scf(file_atoms_coo)
 
 ! please move folloings into initialization_dft 
 call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)

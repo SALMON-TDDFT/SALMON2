@@ -96,8 +96,6 @@ call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
-call convert_input_scf(file_atoms_coo)
-
 ! please move folloings into initialization_dft 
 call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
