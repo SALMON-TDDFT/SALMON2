@@ -1,6 +1,5 @@
 set(SOURCES
     main_ms.f90
-    convert_input_ms.f90
     initialization_ms.f90
    )
 
