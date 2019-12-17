@@ -15,11 +15,11 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine main_maxwell
-  use parallelization,      only: nproc_id_global
-  use communication, only: comm_is_root
-  use structures,           only: s_fdtd_system
-  use salmon_maxwell,       only: ls_fdtd_work
-  use misc_routines,        only: get_wtime
+  use parallelization, only: nproc_id_global
+  use communication,   only: comm_is_root
+  use structures,      only: s_fdtd_system
+  use salmon_maxwell,  only: ls_fdtd_work
+  use misc_routines,   only: get_wtime
   implicit none
   type(s_fdtd_system) :: fs
   type(ls_fdtd_work)  :: fw

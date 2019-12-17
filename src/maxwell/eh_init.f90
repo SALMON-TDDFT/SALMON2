@@ -15,22 +15,22 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine eh_init(fs,fw)
-  use salmon_global,        only: nt_em,al_em,dl_em,dt_em,boundary_em,yn_periodic,base_directory,&
-                                  media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
-                                  pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
-                                  obs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
-                                  source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
-                                  phi_cep1,I_wcm2_1,E_amplitude1,&
-                                  source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
-                                  phi_cep2,I_wcm2_2,E_amplitude2
-  use inputoutput,          only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
-                                  uenergy_to_au,ulength_to_au,ucharge_to_au
-  use parallelization,      only: nproc_id_global, nproc_group_global
-  use communication, only: comm_is_root, comm_bcast
-  use structures,           only: s_fdtd_system
-  use salmon_maxwell,       only: ls_fdtd_work
-  use phys_constants,       only: cspeed_au
-  use math_constants,       only: pi
+  use salmon_global,   only: nt_em,al_em,dl_em,dt_em,boundary_em,yn_periodic,base_directory,&
+                             media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
+                             pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
+                             obs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
+                             source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
+                             phi_cep1,I_wcm2_1,E_amplitude1,&
+                             source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
+                             phi_cep2,I_wcm2_2,E_amplitude2
+  use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
+                             uenergy_to_au,ulength_to_au,ucharge_to_au
+  use parallelization, only: nproc_id_global, nproc_group_global
+  use communication,   only: comm_is_root, comm_bcast
+  use structures,      only: s_fdtd_system
+  use salmon_maxwell,  only: ls_fdtd_work
+  use phys_constants,  only: cspeed_au
+  use math_constants,  only: pi
   implicit none
   type(s_fdtd_system),intent(inout) :: fs
   type(ls_fdtd_work), intent(inout) :: fw
