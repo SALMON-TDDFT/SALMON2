@@ -36,7 +36,7 @@ result = {}
 linecount = 0
 for line in open("classicEM_rt.data"):
     linecount += 1
-    if linecount == 21: # corresponds to line 20 (0.00460000 fs)
+    if linecount == 23: # corresponds to 0.00460000 fs
         for name, [resval, refval, error] in checklist.items(): 
             data = line.split()
             result[name] = float(data[3])
