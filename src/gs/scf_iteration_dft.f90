@@ -127,7 +127,7 @@ DFT_Iteration : do iter=1,nscf
       end if
    end if
 
-   call copy_density(Miter,system%nspin,ng,srho_s,mixing)
+   call copy_density(Miter,system%nspin,mg,srho_s,mixing)
 
    call scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil,  &
                      srg,srg_ng,spsi,shpsi,srho,srho_s,  &

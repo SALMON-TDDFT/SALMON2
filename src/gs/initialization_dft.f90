@@ -208,7 +208,7 @@ integer :: Miter,jspin, nspin
   nspin = system%nspin
 
   mixing%num_rho_stock = 21
-  call init_mixing(nspin,ng,mixing)
+  call init_mixing(nspin,mg,mixing)
 
   if (yn_restart == 'y') then
     ! restart from binary

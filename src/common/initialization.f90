@@ -670,16 +670,9 @@ subroutine init_reciprocal_grid(lg,mg,ng,fg,system,info,info_field,poisson)
 
   fg%ng = system%ngrid
 
-  select case(yn_ffte)
-  case('n')
-    fg%icomm_G = info_field%icomm_all
-    nproc = info_field%isize_all
-    myrank = info_field%id_all
-  case('y')
-    fg%icomm_G = info%icomm_r
-    nproc = info%isize_r
-    myrank = info%id_r
-  end select
+  fg%icomm_G = info%icomm_r
+  nproc      = info%isize_r
+  myrank     = info%id_r
 
   fg%ig_s = myrank*(fg%ng/nproc)+1
   fg%ig_e = (myrank+1)*(fg%ng/nproc)
@@ -709,21 +702,21 @@ subroutine init_reciprocal_grid(lg,mg,ng,fg,system,info,info_field,poisson)
     enddo
     enddo
     allocate(poisson%ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-    allocate(poisson%ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff1x(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff1y(mg%is(1):mg%ie(1),lg%is(2):lg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff1z(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),lg%is(3):lg%ie(3)))
     allocate(poisson%ff2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-    allocate(poisson%ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff2x(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff2y(mg%is(1):mg%ie(1),lg%is(2):lg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff2z(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),lg%is(3):lg%ie(3)))
     allocate(poisson%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
     allocate(poisson%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
     allocate(poisson%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
     allocate(poisson%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
     allocate(poisson%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
     allocate(poisson%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
-    allocate(poisson%trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-    allocate(poisson%trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%trho2z(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%trho3z(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),lg%is(3):lg%ie(3)))
 !$OMP parallel do private(ix,kx,tmp)
     do ix=lg%is(1),lg%ie(1)
       do kx=lg%is(1),lg%ie(1)

@@ -472,9 +472,9 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
     end do
 
 !$OMP parallel do private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
+    do iz=mg%is(3),mg%ie(3)
     do iy=lg%is(2),lg%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do ix=mg%is(1),mg%ie(1)
       poisson%ff1y(ix,iy,iz) = 0d0
     end do
     end do
@@ -482,17 +482,17 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
 
 !$OMP parallel do private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       poisson%ff1z(ix,iy,iz)=0.d0
     end do
     end do
     end do
 
 !$OMP parallel do private(kz,ky,kx,n)
-    do kz = ng%is(3),ng%ie(3)
-    do ky = ng%is(2),ng%ie(2)
-    do kx = ng%is(1),ng%ie(1)
+    do kz = mg%is(3),mg%ie(3)
+    do ky = mg%is(2),mg%ie(2)
+    do kx = mg%is(1),mg%ie(1)
       n=(kz-lg%is(3))*lg%num(2)*lg%num(1)+(ky-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
       if(kx-1==0.and.ky-1==0.and.kz-1==0)then
         poisson%ff1z(kx,ky,kz) = 0.d0
@@ -502,27 +502,27 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
     end do
     end do
     end do
-    call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
+    call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*lg%num(3),info_field%icomm_ffte(3))
 
   !$OMP parallel do private(iz,ky,kx)
-    do iz = ng%is(3),ng%ie(3)
-    do ky = ng%is(2),ng%ie(2)
-    do kx = ng%is(1),ng%ie(1)
+    do iz = mg%is(3),mg%ie(3)
+    do ky = mg%is(2),mg%ie(2)
+    do kx = mg%is(1),mg%ie(1)
       poisson%ff1y(kx,ky,iz)=sum(poisson%egz(:,iz)*poisson%ff2z(kx,ky,:))
     end do
     end do
     end do
-    call comm_summation(poisson%ff1y,poisson%ff2y,ng%num(1)*lg%num(2)*ng%num(3),info_field%icomm(2))
+    call comm_summation(poisson%ff1y,poisson%ff2y,mg%num(1)*lg%num(2)*mg%num(3),info_field%icomm_ffte(2))
 
   !$OMP parallel do private(iz,iy,kx)
-    do iz = ng%is(3),ng%ie(3)
-    do iy = ng%is(2),ng%ie(2)
-    do kx = ng%is(1),ng%ie(1)
+    do iz = mg%is(3),mg%ie(3)
+    do iy = mg%is(2),mg%ie(2)
+    do kx = mg%is(1),mg%ie(1)
       poisson%ff1(kx,iy,iz)=sum(poisson%egy(:,iy)*poisson%ff2y(kx,:,iz))
     end do
     end do
     end do
-    call comm_summation(poisson%ff1,poisson%ff2,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
+    call comm_summation(poisson%ff1,poisson%ff2,lg%num(1)*lg%num(2)*lg%num(3),fg%icomm_G)
 
   !$OMP parallel do private(iz,iy,ix)
     do iz = mg%is(3),mg%ie(3)

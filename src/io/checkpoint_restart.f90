@@ -249,7 +249,7 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   !rho_inout
   if((theory=='DFT'.or.calc_mode=='GS'))then
     if (present(mixing)) then
-      call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
+      call write_rho_inout(odir,lg,mg,system,info,mixing,iself)
     end if
   end if
 
