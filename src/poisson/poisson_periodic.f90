@@ -19,7 +19,7 @@ module poisson_periodic_sub
 
 contains
 
-subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
+subroutine poisson_periodic(lg,mg,system,info_field,srho,sVh,fg,poisson)
   use structures, only: s_rgrid, s_field_parallel, s_dft_system, &
                         s_scalar, s_reciprocal_grid, s_poisson
   use communication, only: comm_summation
@@ -27,7 +27,6 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system),intent(in) :: system
   type(s_scalar),intent(in)    :: srho

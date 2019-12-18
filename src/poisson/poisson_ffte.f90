@@ -19,7 +19,7 @@ module poisson_ffte_sub
 
 contains
 
-subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
+subroutine poisson_ffte(lg,mg,info_field,trho,tvh,hgs,fg,poisson)
   use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid,s_poisson
   use communication, only: comm_summation
   use math_constants, only : pi
@@ -27,7 +27,6 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,hgs,fg,poisson)
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   real(8),intent(in)       :: hgs(3)
   type(s_reciprocal_grid),intent(inout) :: fg

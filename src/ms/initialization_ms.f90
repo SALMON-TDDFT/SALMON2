@@ -249,7 +249,7 @@ use inputoutput
   end do
   allocate(ppg%Vpsl_atom(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),natom))
   call read_pslfile(system,pp,ppg)
-  call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)

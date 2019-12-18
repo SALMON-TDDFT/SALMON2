@@ -19,7 +19,7 @@ module prep_pp_sub
 
 contains
 
-subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+subroutine init_ps(lg,mg,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use structures
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
@@ -28,7 +28,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   implicit none
-  type(s_rgrid)           ,intent(in) :: lg,mg,ng
+  type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel)  ,intent(in) :: info_field
@@ -140,9 +140,9 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   case(3)
     select case(yn_ffte)
     case('n')
-      call calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,sVpsl,ppg)
+      call calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,sVpsl,ppg)
     case('y')
-      call calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info,info_field,pp,ppg,poisson,sVpsl,fg)
+      call calc_Vpsl_periodic_FFTE(lg,mg,system,info,info_field,pp,ppg,poisson,sVpsl,fg)
     end select
   end select
 
@@ -381,13 +381,13 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
+subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg)
   use salmon_global,only : natom, nelem, kion
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg,mg,ng
+  type(s_rgrid)         ,intent(in) :: lg,mg
   type(s_dft_system)    ,intent(in) :: system
   type(s_field_parallel),intent(in) :: info_field
   type(s_pp_info),intent(in) :: pp
@@ -551,13 +551,13 @@ end subroutine calc_vpsl_periodic
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info,info_field,pp,ppg,poisson,sVpsl,fg)
+subroutine calc_Vpsl_periodic_FFTE(lg,mg,system,info,info_field,pp,ppg,poisson,sVpsl,fg)
   use structures
   use math_constants, only: pi,zi
   use communication, only: comm_bcast, comm_summation, comm_is_root
   use salmon_global, only: natom, nelem, kion
   implicit none
-  type(s_rgrid)     ,intent(in) :: lg,mg,ng
+  type(s_rgrid)     ,intent(in) :: lg,mg
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel),intent(in) :: info_field

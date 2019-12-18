@@ -144,7 +144,7 @@ MD_Loop : do it=1,nt
 
    call time_evolution_step_md_part1(it,system,md)
 
-   call update_pseudo_rt(it,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+   call update_pseudo_rt(it,info,info_field,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
 
    if(allocated(rho_old%f))    deallocate(rho_old%f)
    if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)

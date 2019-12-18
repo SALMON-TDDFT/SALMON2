@@ -80,7 +80,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
   case(3)
-    call init_reciprocal_grid(lg,mg,ng,fg,system,info,info_field,poisson)
+    call init_reciprocal_grid(lg,mg,fg,system,info,info_field,poisson)
   end select
   call set_ig_bound(lg,ng,poisson)
 
@@ -637,7 +637,7 @@ end subroutine init_grid_parallel
 
 !===================================================================================================================================
 
-subroutine init_reciprocal_grid(lg,mg,ng,fg,system,info,info_field,poisson)
+subroutine init_reciprocal_grid(lg,mg,fg,system,info,info_field,poisson)
   use inputoutput,     only : nelem,yn_ffte
   use math_constants,  only : pi,zi
   use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_field_parallel,s_poisson&
@@ -645,7 +645,6 @@ subroutine init_reciprocal_grid(lg,mg,ng,fg,system,info,info_field,poisson)
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info

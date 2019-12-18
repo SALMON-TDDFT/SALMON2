@@ -130,7 +130,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
-     call update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+     call update_pseudo_rt(itt,info,info_field,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
 
   if(propagator=='etrs')then

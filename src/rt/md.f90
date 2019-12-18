@@ -280,7 +280,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
   use structures, only: s_dft_system,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
     s_orbital_parallel, s_field_parallel, s_scalar, s_pp_info
   use salmon_global, only: step_update_ps,step_update_ps2
@@ -291,7 +291,7 @@ subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,pp
   type(s_orbital_parallel) :: info
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system) :: system
-  type(s_rgrid),intent(in) :: lg,mg,ng
+  type(s_rgrid),intent(in) :: lg,mg
   type(s_poisson),intent(inout) :: poisson
   type(s_reciprocal_grid) :: fg
   type(s_pp_info),intent(inout) :: pp
@@ -304,12 +304,12 @@ subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,pp
   if (mod(itt,step_update_ps)==0 ) then
      call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+     call init_ps(lg,mg,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   else if (mod(itt,step_update_ps2)==0 ) then
      !xxxxxxx this option is not yet made xxxxxx
      call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+     call init_ps(lg,mg,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   endif
 
 end subroutine 
