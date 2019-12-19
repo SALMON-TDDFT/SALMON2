@@ -180,17 +180,19 @@ CONTAINS
 !$omp          private(ig,g,G2,rho_i,rho_e,ia,r,Gd) &
 !$omp          shared(fg,aEwald,system,sysvol,kion)
     do ig=fg%ig_s,fg%ig_e
-      !if(ig == fg%iGzero ) cycle !iwata
       g(1) = fg%Gx(ig)
       g(2) = fg%Gy(ig)
       g(3) = fg%Gz(ig)
-      G2 = g(1)**2 + g(2)**2 + g(3)**2
-      rho_i = fg%zrhoG_ion(ig)
       rho_e = fg%zrhoG_ele(ig)
-      if( ig /= fg%iGzero )then ! iwata
-      E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
-      E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
-      end if ! iwata
+
+      if (ig /= fg%iGzero) then
+        G2 = g(1)**2 + g(2)**2 + g(3)**2
+        rho_i = fg%zrhoG_ion(ig)
+        E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
+        E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
+      end if
+
+!$omp simd reduction(+:E_wrk(3))
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
