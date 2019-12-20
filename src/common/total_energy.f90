@@ -192,7 +192,9 @@ CONTAINS
         E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
       end if
 
+#ifdef __INTEL_COMPILER
 !$omp simd reduction(+:E_wrk(3))
+#endif
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
