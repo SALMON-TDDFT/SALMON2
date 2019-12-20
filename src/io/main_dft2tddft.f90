@@ -271,7 +271,9 @@ do io=1,system_scf%no
   jrank = irank_src(io,ik)
   krank = irank_dst(io,ik)
   if (jrank >= 0 .and. krank >= 0) then
-    if (jrank == irank) then
+    if (jrank == krank) then
+      ! sender == receiver
+    else if (jrank == irank) then
       if (allocated(dbuf2)) call comm_send(dbuf2, krank, io*system_scf%nk+ik, icomm)
       if (allocated(zbuf2)) call comm_send(zbuf2, krank, io*system_scf%nk+ik, icomm)
     else if (krank == irank) then
