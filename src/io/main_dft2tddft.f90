@@ -270,12 +270,14 @@ do io=1,system_scf%no
   ! send data from representive SCF rank to RT rank
   jrank = irank_src(io,ik)
   krank = irank_dst(io,ik)
-  if (jrank == irank) then
-    if (allocated(dbuf2)) call comm_send(dbuf2, krank, io*system_scf%nk+ik, icomm)
-    if (allocated(zbuf2)) call comm_send(zbuf2, krank, io*system_scf%nk+ik, icomm)
-  else if (krank == irank) then
-    if (allocated(dbuf2)) call comm_recv(dbuf2, jrank, io*system_scf%nk+ik, icomm)
-    if (allocated(zbuf2)) call comm_recv(zbuf2, jrank, io*system_scf%nk+ik, icomm)
+  if (jrank >= 0 .and. krank >= 0) then
+    if (jrank == irank) then
+      if (allocated(dbuf2)) call comm_send(dbuf2, krank, io*system_scf%nk+ik, icomm)
+      if (allocated(zbuf2)) call comm_send(zbuf2, krank, io*system_scf%nk+ik, icomm)
+    else if (krank == irank) then
+      if (allocated(dbuf2)) call comm_recv(dbuf2, jrank, io*system_scf%nk+ik, icomm)
+      if (allocated(zbuf2)) call comm_recv(zbuf2, jrank, io*system_scf%nk+ik, icomm)
+    end if
   end if
 
   ! scatter rgrid data
