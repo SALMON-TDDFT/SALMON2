@@ -341,18 +341,20 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 ! FIXME: This subroutine uses MPI functions directly...
   nreq = 0
   do ia=1,natom
+    is = ppg%irange_atom(1,ia)
+    ie = ppg%irange_atom(2,ia)
+    ns = ie - is + 1
+
     if (ppg%ireferred_atom(ia)) then
-      is = ppg%irange_atom(1,ia)
-      ie = ppg%irange_atom(2,ia)
-      ns = ie - is + 1
       nreq = nreq + 1
       call MPI_Iallreduce( uvpsibox (1,io_s,ik_s,im_s,is) &
                          , uvpsibox2(1,io_s,ik_s,im_s,is) &
                          , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
                          , ireqs(nreq), ierr )
-    !else
+    else
       ! uvpsibox2(:,:,:,:,ppg%irange_ia(1:2,ia)) does not use in this process...
-      ! We can skip self copy.
+      ! We can skip self copy, but zero clear required
+      uvpsibox2(:,io_s:io_e,ik_s:ik_e,im_s:im_e,is:ie) = 0d0
     end if
   end do
   call comm_wait_all(ireqs(1:nreq))
