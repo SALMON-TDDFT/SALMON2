@@ -123,6 +123,7 @@ CONTAINS
     !
     integer :: ix,iy,iz,ia,ib,ig
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
+    real(8) :: etmp
     complex(8) :: rho_e,rho_i
 
     call timer_begin(LOG_TE_PERIODIC_CALC)
@@ -177,7 +178,7 @@ CONTAINS
     E_wrk = 0d0
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_wrk) &
-!$omp          private(ig,g,G2,rho_i,rho_e,ia,r,Gd) &
+!$omp          private(ig,g,G2,rho_i,rho_e,ia,r,Gd,etmp) &
 !$omp          shared(fg,aEwald,system,sysvol,kion)
     do ig=fg%ig_s,fg%ig_e
       g(1) = fg%Gx(ig)
@@ -188,18 +189,21 @@ CONTAINS
       if (ig /= fg%iGzero) then
         G2 = g(1)**2 + g(2)**2 + g(3)**2
         rho_i = fg%zrhoG_ion(ig)
-        E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)                     ! Hartree
-        E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))                     ! electron-ion (valence)
+        E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)     ! Hartree
+        E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))     ! electron-ion (valence)
       end if
 
-#ifdef __INTEL_COMPILER
-!$omp simd reduction(+:E_wrk(3))
+      etmp = 0d0
+
+#if _OPENMP >= 201307
+!$omp simd reduction(+:etmp)
 #endif
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        E_wrk(3) = E_wrk(3) + conjg(rho_e)*fg%zdVG_ion(ig,Kion(ia))*exp(-zI*Gd)         ! electron-ion (core)
+        etmp = etmp + conjg(rho_e)*fg%zdVG_ion(ig,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
       end do
+      E_wrk(3) = E_wrk(3) + etmp
     enddo
 !$omp end parallel do
     call timer_end(LOG_TE_PERIODIC_CALC)
