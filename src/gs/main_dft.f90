@@ -15,20 +15,10 @@
 !
 !=======================================================================
 
-MODULE global_variables_scf
-
-use inputoutput
-use structure_opt_sub
-implicit none
-
-END MODULE global_variables_scf
-
-!=======================================================================
-
 subroutine main_dft
 use math_constants, only: pi, zi
 use structures
-use inputoutput, only: au_length_aa, au_energy_ev
+use inputoutput
 use parallelization, only: nproc_id_global,nproc_group_global
 use parallelization, only: nproc_id_global,nproc_group_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -51,6 +41,7 @@ use prep_pp_sub
 use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
+use structure_opt_sub
 use salmon_total_energy
 use band_dft_sub
 use init_gs, only: init_wf

@@ -105,6 +105,7 @@ subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
   else
     wdir = gdir
   end if
+  call write_Rion_Vel(wdir,system)
   call write_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
 end subroutine checkpoint_gs
 
@@ -128,6 +129,7 @@ subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   if (yn_datafiles_dump /= 'y' .and. .not. iself) then
     wdir = gdir
   end if
+!  call read_Rion_Vel(wdir,system)
   call read_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
 end subroutine restart_gs
 
@@ -162,6 +164,7 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,id
   else
     wdir = gdir
   end if
+  call write_Rion_Vel(wdir,system)
   call write_bin(wdir,lg,mg,ng,system,info,spsi,iter &
                 ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
 end subroutine checkpoint_rt
@@ -186,6 +189,7 @@ subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   if (yn_datafiles_dump /= 'y' .and. .not. iself) then
     wdir = gdir
   end if
+!  call read_Rion_Vel(wdir,system)
   call read_bin(wdir,lg,mg,ng,system,info,spsi,iter &
                ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
 end subroutine restart_rt
@@ -1066,6 +1070,122 @@ subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoin
     deallocate(matbox1,matbox2)
   end if
 end subroutine read_Vh_stock
+
+!===================================================================================================================================
+subroutine write_Rion_Vel(odir,system)
+  use structures, only: s_dft_system
+  use inputoutput, only: au_length_aa, unit_length
+  use salmon_global, only: natom, atom_name, kion
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  implicit none
+  type(s_dft_system),intent(in) :: system
+  real(8) :: uconv
+  integer :: iu1_w, ia
+  character(*)   :: odir
+  character(256) :: dir_file_out
+
+  iu1_w = 87
+
+  ! atomic coordinate
+  if(unit_length=='AA')then ; uconv = au_length_aa
+  else                      ; uconv = 1d0   !au
+  endif
+
+  if(comm_is_root(nproc_id_global)) then
+     dir_file_out = trim(odir)//"atomic_coor.txt"
+     open(iu1_w, file=dir_file_out, status="unknown")
+
+     write(iu1_w,9000) "&atomic_coor"
+     do ia = 1,natom
+        write(iu1_w,7000) trim(atom_name(ia)), system%Rion(1:3,ia)*uconv, kion(ia)
+     enddo
+7000 format("     '",a,"'  ",3f18.10,i4)
+     write(iu1_w,9000) "/"
+
+     close(iu1_w)
+  end if
+
+  ! atomic velocity [au]
+  if(comm_is_root(nproc_id_global)) then
+     dir_file_out = trim(odir)//"atomic_vel.txt"
+     open(iu1_w, file=dir_file_out, status="unknown")
+
+     do ia = 1,natom
+        write(iu1_w,8000) system%Velocity(1:3,ia)
+     enddo
+8000 format(3f24.14)
+
+     close(iu1_w)
+  end if
+
+9000 format(a)
+
+end subroutine write_Rion_Vel
+
+subroutine read_Rion_Vel(idir,system)
+  use structures, only: s_dft_system
+  use inputoutput, only: au_length_aa, unit_length
+  use salmon_global, only: natom, atom_name, kion, rion
+  use parallelization, only: nproc_id_global,nproc_group_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  implicit none
+  type(s_dft_system) :: system
+  character(*),intent(in) :: idir
+  real(8) :: uconv
+  integer :: iu1_w, ia, comm
+  character(256) :: dir_file_out
+
+  iu1_w = 87
+  comm = nproc_group_global
+
+  ! atomic coordinate
+  if(unit_length=='AA')then ; uconv = au_length_aa
+  else                      ; uconv = 1d0   !au
+  endif
+
+  if(comm_is_root(nproc_id_global)) then
+     dir_file_out = trim(idir)//"atomic_coor.txt"
+     open(iu1_w, file=dir_file_out, status="old",err=10)
+     read(iu1_w,*) 
+     do ia = 1,natom
+        read(iu1_w,*) atom_name(ia), system%Rion(1:3,ia), kion(ia)
+        system%Rion(1:3,ia) = system%Rion(1:3,ia)/uconv
+     enddo
+     close(iu1_w)
+     write(*,*) "  read atomic coordinates from restart data"
+  end if
+
+  call comm_bcast(system%Rion,comm)
+  call comm_bcast(atom_name,comm)
+  call comm_bcast(kion,comm)
+  Rion(:,:) = system%Rion(:,:)  !remove later 
+
+10 continue
+
+  ! atomic velocity [au]
+  if(comm_is_root(nproc_id_global)) then
+     dir_file_out = trim(idir)//"atomic_vel.txt"
+     open(iu1_w, file=dir_file_out, status="old",err=20)
+     do ia = 1,natom
+        read(iu1_w,8000) system%Velocity(1:3,ia)
+     enddo
+!     if(ensemble=="NVT" .and. thermostat=="nose-hoover")then
+!        read(411,*,err=100,end=100) md%xi_nh !if no value, skip reading (xi_nh=0)
+!     endif
+!100  close(411)
+
+8000 format(3f24.14)
+
+     close(iu1_w)
+     write(*,*) "  read atomic velocities from restart data"
+  end if
+  call comm_bcast(system%Velocity,comm)
+!  call comm_bcast(md%xi_nh,comm)
+
+20 continue
+
+end subroutine read_Rion_Vel
 
 !===================================================================================================================================
 
