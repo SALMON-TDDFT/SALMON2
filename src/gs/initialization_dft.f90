@@ -25,6 +25,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 ofl )
 use math_constants, only: pi, zi
 use structures
+use inputoutput
 use parallelization, only: nproc_id_global!,nproc_group_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
@@ -32,7 +33,6 @@ use salmon_pp, only: calc_nlcc
 use timer
 use scf_iteration_sub
 use writefield
-use global_variables_scf
 use write_sub
 use read_gs
 use code_optimization
@@ -146,6 +146,7 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 xc_func,mixing )
 use math_constants, only: pi, zi
 use structures
+use inputoutput
 use parallelization, only: nproc_id_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
@@ -153,7 +154,6 @@ use timer
 use scf_iteration_sub
 use density_matrix, only: calc_density
 use writefield
-use global_variables_scf
 use hartree_sub, only: hartree
 use force_sub
 use write_sub
@@ -259,6 +259,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   use math_constants, only: pi, zi
   use const, only: hartree2J,kB
   use structures
+  use inputoutput
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_xc
@@ -266,7 +267,6 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   use scf_iteration_sub
   use density_matrix, only: calc_density
   use writefield
-  use global_variables_scf
   use hartree_sub, only: hartree
   use force_sub
   use write_sub

@@ -18,6 +18,7 @@
 
 subroutine main_dft_md
 use structures
+use inputoutput
 use parallelization, only: nproc_id_global,nproc_group_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
@@ -25,7 +26,6 @@ use timer
 use scf_iteration_sub
 use density_matrix, only: calc_density
 use writefield
-use global_variables_scf
 use salmon_pp, only: calc_nlcc
 use hartree_sub, only: hartree
 use force_sub
