@@ -1097,7 +1097,7 @@ end subroutine restart_Velocity
 subroutine write_Rion(odir,system)
   use structures, only: s_dft_system
   use salmon_global, only: natom, atom_name, kion, unit_length,yn_opt,flag_opt_atom
-  use inputoutput, only: au_length_aa
+!  use inputoutput, only: au_length_aa   !?? why error??
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
@@ -1106,6 +1106,8 @@ subroutine write_Rion(odir,system)
   real(8) :: uconv
   character(*)   :: odir
   character(256) :: dir_file_out
+
+  real(8),parameter :: au_length_aa = 0.52917721067d0
 
   iu1_w = 87
 
@@ -1167,7 +1169,7 @@ end subroutine write_Velocity
 subroutine read_Rion(idir,system)
   use structures, only: s_dft_system
   use salmon_global, only: natom, atom_name, kion, rion, unit_length
-  use inputoutput, only: au_length_aa
+!  use inputoutput, only: au_length_aa  !?? why error??
   use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -1176,6 +1178,8 @@ subroutine read_Rion(idir,system)
   real(8) :: uconv
   integer :: iu1_w, ia, comm
   character(256) :: dir_file_out
+
+  real(8),parameter :: au_length_aa = 0.52917721067d0
 
   iu1_w = 87
   comm = nproc_group_global
