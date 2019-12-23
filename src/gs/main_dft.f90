@@ -48,7 +48,7 @@ implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
 real(8) :: sum1
-character(100) :: file_atoms_coo, comment_line
+character(100) :: comment_line
 
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg

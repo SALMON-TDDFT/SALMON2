@@ -20,9 +20,11 @@ contains
 
 subroutine init_md(system,md)
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: natom,yn_out_rvf_rt, ensemble, thermostat,yn_set_ini_velocity,step_velocity_scaling
+  use salmon_global, only: natom,yn_out_rvf_rt, ensemble, thermostat, &
+      yn_set_ini_velocity,step_velocity_scaling,file_ini_velocity,yn_restart
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
+  use checkpoint_restart_sub, only: restart_Velocity
   implicit none    
   type(s_dft_system) :: system
   type(s_md) :: md
@@ -39,9 +41,14 @@ subroutine init_md(system,md)
   md%E_work = 0d0
 
   if(ensemble=="NVT" .and. thermostat=="nose-hoover") md%xi_nh=0d0
-  if(yn_set_ini_velocity=='y' .or. step_velocity_scaling>=1) &
-       call set_initial_velocity(system,md)
-  if(yn_set_ini_velocity=='r') call read_initial_velocity(system,md)
+
+  if( file_ini_velocity /= 'none' ) then
+     call read_initial_velocity(system,md)
+  else if( yn_set_ini_velocity=='y' .or. step_velocity_scaling>=1 ) then
+       call set_initial_velocity(system,md) 
+  else if( yn_restart=='y' ) then
+     call restart_Velocity(system)
+  end if
 
   !if(use_ms_maxwell == 'y' .and. use_potential_model=='n') then
   !   if(nproc_size_global.lt.nmacro) then
@@ -431,7 +438,7 @@ subroutine print_restart_data_md(system,md)
 
        write(*,*) 
        write(*,9000) "# Velocity (atoms, thermostat if nose-hoover ooption) in [au]"
-       write(*,9000) "# Copy to separated file used in file_ini_vel option with yn_set_ini_velocity='r'"
+       write(*,9000) "# Copy to separated file used in file_ini_vel option"
        do ia = 1,natom
           write(*,8000) system%Velocity(1:3,ia)
        enddo

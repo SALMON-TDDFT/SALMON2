@@ -124,22 +124,24 @@ contains
     use communication, only: comm_is_root
     use filesystem, only: get_filehandle
     implicit none
-
     integer :: cur
     integer :: ret = 0
-    character(100) :: buff, text
-
+    character(256) :: buff, text
 
     if (comm_is_root(nproc_id_global)) then
+
       fh_namelist = get_filehandle()
       open(fh_namelist, file='.namelist.tmp', status='replace')
-!      open(fh_atomic_spiecies, file='.atomic_spiecies.tmp', status='replace')
+     !open(fh_atomic_spiecies, file='.atomic_spiecies.tmp', status='replace')
+
       if_nml_coor =.false.
       fh_atomic_coor = get_filehandle()
       open(fh_atomic_coor, file='.atomic_coor.tmp', status='replace')
+
       if_nml_red_coor = .false.
       fh_atomic_red_coor = get_filehandle()
       open(fh_atomic_red_coor, file='.atomic_red_coor.tmp', status='replace')
+
       fh_reentrance = get_filehandle()
       open(fh_reentrance, file='.reenetrance.tmp', status='replace')
 
@@ -152,11 +154,11 @@ contains
           text = trim(adjustl(buff))
           ! Comment lines
           if (text(1:1) == '!') cycle
-!          ! Beginning of 'atomic_species' part
-!          if (text == '&atomic_spiecies') then
-!            cur = fh_atomic_spiecies
-!            cycle
-!          end if
+         !! Beginning of 'atomic_species' part
+         !if (text == '&atomic_spiecies') then
+         !  cur = fh_atomic_spiecies
+         !  cycle
+         !end if
           ! Beginning of 'atomic_positions' part
           if (text == '&atomic_coor') then
             cur = fh_atomic_coor
@@ -179,18 +181,18 @@ contains
             cycle
           end if
 
-          write(cur, '(a)') text
+          write(cur, '(a)') trim(text)
         end if
       end do
+
       close(fh_namelist)
       close(fh_atomic_coor)
       close(fh_atomic_red_coor)
-!      close(fh_atomic_spiecies)
+     !close(fh_atomic_spiecies)
       close(fh_reentrance)
     end if
 
-!    call comm_sync_all()
-
+   !call comm_sync_all()
 
     return
   end subroutine read_stdin
@@ -580,15 +582,15 @@ contains
     write_rt_wfn_k_ms= 'n'
 
 !! == default for &parallel
-    yn_domain_parallel= 'n'
-    nproc_k           = 0
-    nproc_ob          = 0
+    yn_domain_parallel   = 'n'
+    nproc_k              = 0
+    nproc_ob             = 0
     nproc_domain_orbital = 0
     nproc_domain_general = 0
-    num_datafiles_in  = 1
-    num_datafiles_out = 1
-    yn_ffte           = 'n'
-    process_allocation  = 'grid_sequential'
+    num_datafiles_in     = 1
+    num_datafiles_out    = 1
+    yn_ffte              = 'n'
+    process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
     ispin              = 0
@@ -606,17 +608,17 @@ contains
     temperature_k      = -1d0
     nelem              = 0
     natom              = 0
-    file_atom_coor          = 'none'
-    file_atom_red_coor          = 'none'
+    file_atom_coor     = 'none'
+    file_atom_red_coor = 'none'
 !! == default for &pseudo
-    file_pseudo     = 'none'
-    lmax_ps       = -1
-    lloc_ps       = -1
-    izatom        = -1
-    yn_psmask = 'n'
-    alpha_mask    = 0.8d0
-    gamma_mask    = 1.8d0
-    eta_mask      = 15d0
+    file_pseudo = 'none'
+    lmax_ps     = -1
+    lloc_ps     = -1
+    izatom      = -1
+    yn_psmask   = 'n'
+    alpha_mask  = 0.8d0
+    gamma_mask  = 1.8d0
+    eta_mask    = 15d0
 !! == default for &functional
     xc    = 'none'
     ! xcname = 'PZ'
@@ -636,7 +638,7 @@ contains
     nt = 0
     dt = 0
 !! == default for &propagation
-    n_hamil = 4
+    n_hamil     = 4
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
 !! == default for &scf
@@ -840,7 +842,7 @@ contains
     yn_want_communication_overlapping = 'n'
 !! == default for dft2tddft
     yn_datafiles_dump = 'n'
-    target_nproc_k = 0
+    target_nproc_k  = 0
     target_nproc_ob = 0
     target_nproc_domain_orbital = 0
     target_nproc_domain_general = 0
@@ -1313,15 +1315,15 @@ contains
     use parallelization
     use communication
     use filesystem, only: get_filehandle
-    character(256) :: filename_tmp,char_atom
+    use salmon_global, only: directory_read_data,yn_restart !,yn_self_checkpoint,yn_datafiles_dump
+    use checkpoint_restart_sub, only: generate_restart_directory_name
+    character(256) :: filename_tmp,char_atom, gdir,wdir
     integer :: icount,i
     logical :: if_error, if_cartesian
 
-
     if (comm_is_root(nproc_id_global)) then
 
-
-      if_error = .false.
+      if_error     = .false.
       if_cartesian = .true.
       iflag_atom_coor = ntype_atom_coor_none
       icount = 0
@@ -1353,8 +1355,28 @@ contains
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
 
-    end if
+      if(icount==0 .and. (yn_restart == 'y' .or. &
+         index(theory,'TDDFT_')/=0 .or. index(theory,'_TDDFT')/=0 ) ) then
 
+        if (comm_is_root(nproc_id_global))then
+           write(*,"(A)") '  Atomic coordinate is read from restart directory'
+        end if
+
+        call generate_restart_directory_name(directory_read_data,gdir,wdir)
+
+        !(needed??)
+        !iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
+        !if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+        !   wdir = gdir
+        !end if
+
+        icount = icount + 1
+        if_cartesian = .true.
+        filename_tmp = trim(gdir)//"atomic_coor.txt"
+        iflag_atom_coor = ntype_atom_coor_cartesian
+      end if
+
+    end if
 
     call comm_bcast(icount,nproc_group_global)
     call comm_bcast(if_cartesian,nproc_group_global)
@@ -1391,8 +1413,7 @@ contains
         open(fh_atomic_coor, file=filename_tmp, status='old')
         select case(iflag_atom_coor)
         case(ntype_atom_coor_cartesian)
-           do i=1, natom
-             !if(use_geometry_opt == 'y')then
+           do i=1,natom
               if(yn_opt == 'y')then
                  read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i), flag_opt_atom(i)
               else
@@ -1401,9 +1422,9 @@ contains
               atom_name(i) = char_atom
            end do
            rion = rion*ulength_to_au
+              
         case(ntype_atom_coor_reduced)
-           do i=1, natom
-             !if(use_geometry_opt == 'y')then
+           do i=1,natom
               if(yn_opt == 'y')then
                  read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i), flag_opt_atom(i)
               else
@@ -1411,6 +1432,7 @@ contains
               end if
               atom_name(i) = char_atom
            end do
+
         end select
         close(fh_atomic_coor)
         
