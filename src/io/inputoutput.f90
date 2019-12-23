@@ -245,8 +245,6 @@ contains
       & nproc_ob, &
       & nproc_domain_orbital, &
       & nproc_domain_general, &
-      & num_datafiles_in, &
-      & num_datafiles_out, &
       & yn_ffte, &
       & process_allocation
 
@@ -585,8 +583,6 @@ contains
     nproc_ob          = 0
     nproc_domain_orbital = 0
     nproc_domain_general = 0
-    num_datafiles_in  = 1
-    num_datafiles_out = 1
     yn_ffte           = 'n'
     process_allocation  = 'grid_sequential'
 !! == default for &system
@@ -971,8 +967,6 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_domain_orbital,nproc_group_global)
     call comm_bcast(nproc_domain_general,nproc_group_global)
-    call comm_bcast(num_datafiles_in    ,nproc_group_global)
-    call comm_bcast(num_datafiles_out   ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
@@ -1720,8 +1714,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(1)', nproc_domain_general(1)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(2)', nproc_domain_general(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(3)', nproc_domain_general(3)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_in', num_datafiles_in
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_datafiles_out', num_datafiles_out
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 
@@ -2119,8 +2111,6 @@ contains
     implicit none
     integer :: round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
-    integer :: itmp,i
-    logical :: l1,l2
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -2251,19 +2241,6 @@ contains
     if (yn_ffte == 'y') then
       if (yn_md  == 'y') stop "invalid: yn_ffte=='y' and yn_md=='y'"
       if (yn_opt == 'y') stop "invalid: yn_ffte=='y' and yn_optc=='y'"
-    end if
-
-    itmp=1
-    l1 = .false. 
-    l2 = .false.
-    do i=1,19
-      if(num_datafiles_in==itmp) l1 = .true.
-      if(num_datafiles_out==itmp) l2 = .true.
-      itmp=itmp*2 
-    end do
-    if(l1.and.l2)then
-    else
-      stop "num_datafiles_in and num_datafiles_out must be equal to nth power of 2. (n: positive integer)"
     end if
 
   end subroutine check_bad_input
