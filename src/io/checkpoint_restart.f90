@@ -372,7 +372,7 @@ end subroutine read_bin
 !===================================================================================================================================
 
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
-  use salmon_global, only: num_datafiles_out,yn_datafiles_dump
+  use salmon_global, only: yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -395,19 +395,15 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 
   iu2_w = 87
 
-  call set_dg(lg,mg,dg,num_datafiles_out,is_self_checkpoint .or. yn_datafiles_dump == 'y')
+  call set_dg(lg,mg,dg,is_self_checkpoint .or. yn_datafiles_dump == 'y')
 
   if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
-  else if(num_datafiles_out==1.and.comm_is_root(nproc_id_global)) then
+  else if(comm_is_root(nproc_id_global)) then
     ! write root process
     dir_file_out = trim(odir)//"wfn.bin"
-    open(iu2_w,file=dir_file_out,form='unformatted')
-  else if(num_datafiles_out>1.and.nproc_id_global<num_datafiles_out) then
-    ! distributed-write
-    write(dir_file_out, '(A,A,I6.6,A)') trim(odir),'wfn',nproc_id_global,".bin"
     open(iu2_w,file=dir_file_out,form='unformatted')
   end if
 
@@ -469,9 +465,8 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
         end if
         call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
 
-        if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
-           (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
-            write(iu2_w) matbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
+        if(comm_is_root(nproc_id_global))then
+          write(iu2_w) matbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
         end if
       end do
       end do
@@ -516,9 +511,8 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
         end if
         call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
 
-        if((num_datafiles_out==1.and.comm_is_root(nproc_id_global)).or.   &
-           (num_datafiles_out>1.and.nproc_id_global<num_datafiles_out))then
-            write(iu2_w) cmatbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
+        if(comm_is_root(nproc_id_global))then
+          write(iu2_w) cmatbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
         end if
       end do
       end do
@@ -743,7 +737,7 @@ end subroutine write_Vh_stock
 
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use salmon_global, only: iperiodic,num_datafiles_in,yn_datafiles_dump
+  use salmon_global, only: iperiodic,yn_datafiles_dump
   use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -768,19 +762,15 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   iu2_r = 86
   comm = nproc_group_global
 
-  call set_dg(lg,mg,dg,num_datafiles_in,is_self_checkpoint .or. yn_datafiles_dump == 'y')
+  call set_dg(lg,mg,dg,is_self_checkpoint .or. yn_datafiles_dump == 'y')
 
   if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
-  else if(num_datafiles_in==1.and.comm_is_root(nproc_id_global))then
+  else if(comm_is_root(nproc_id_global))then
     ! read root process
     dir_file_in = trim(idir)//"wfn.bin"
-    open(iu2_r,file=dir_file_in,form='unformatted')
-  else if(num_datafiles_in>1.and.nproc_id_global<num_datafiles_in) then
-    ! distributed-read
-    write(dir_file_in, '(A,A,I6.6,A)') trim(idir),"wfn",nproc_id_global,".bin"
     open(iu2_r,file=dir_file_in,form='unformatted')
   end if
 
@@ -812,17 +802,10 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
     do iob=1,mo
     do is=1,system%nspin
       if(iperiodic==0)then
-        if(num_datafiles_in==1)then
-          if(comm_is_root(nproc_id_global))then
-            read(iu2_r) matbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-          end if
-          call comm_bcast(matbox2,comm)
-        else if(num_datafiles_in>1)then
-          if(nproc_id_global<num_datafiles_in)then
-            read(iu2_r) matbox (dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-          end if
-          call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),comm)
+        if(comm_is_root(nproc_id_global))then
+          read(iu2_r) matbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
         end if
+        call comm_bcast(matbox2,comm)
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
           if(allocated(spsi%rwf))then
@@ -846,17 +829,10 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
           end if
         end if
       else if(iperiodic==3)then
-        if(num_datafiles_in==1)then
-          if(comm_is_root(nproc_id_global))then
-            read(iu2_r) cmatbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-          end if
-          call comm_bcast(cmatbox2,comm)
-        else if(num_datafiles_in>1)then
-          if(nproc_id_global<num_datafiles_in)then
-            read(iu2_r) cmatbox (dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-          end if
-          call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),comm)
+        if(comm_is_root(nproc_id_global))then
+          read(iu2_r) cmatbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
         end if
+        call comm_bcast(cmatbox2,comm)
         if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
            info%io_s <= iob .and. iob <= info%io_e) then
   !$omp parallel do collapse(2)
@@ -1121,7 +1097,7 @@ end subroutine restart_Velocity
 subroutine write_Rion(odir,system)
   use structures, only: s_dft_system
   use salmon_global, only: natom, atom_name, kion, unit_length
-  use inputoutput, only: au_length_aa
+!  use inputoutput, only: au_length_aa  !why error???
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
@@ -1130,6 +1106,8 @@ subroutine write_Rion(odir,system)
   real(8) :: uconv
   character(*)   :: odir
   character(256) :: dir_file_out
+
+  real(8),parameter :: au_length_aa = 0.52917721067d0  !! from inputoutput
 
   iu1_w = 87
 
@@ -1186,7 +1164,7 @@ end subroutine write_Velocity
 subroutine read_Rion(idir,system)
   use structures, only: s_dft_system
   use salmon_global, only: natom, atom_name, kion, rion, unit_length
-  use inputoutput, only: au_length_aa
+!  use inputoutput, only: au_length_aa  !!why error???
   use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -1195,6 +1173,8 @@ subroutine read_Rion(idir,system)
   real(8) :: uconv
   integer :: iu1_w, ia, comm
   character(256) :: dir_file_out
+
+  real(8),parameter :: au_length_aa = 0.52917721067d0  !! from inputoutput
 
   iu1_w = 87
   comm = nproc_group_global
@@ -1265,13 +1245,12 @@ end subroutine read_Velocity
 
 !===================================================================================================================================
 
-subroutine set_dg(lg,mg,dg,num_datafiles,is_self_checkpoint)
+subroutine set_dg(lg,mg,dg,is_self_checkpoint)
   use structures, only: s_rgrid 
   use parallelization, only: nproc_id_global
   implicit none 
   type(s_rgrid),intent(in)     :: lg,mg
   type(s_rgrid),intent(inout)  :: dg
-  integer,intent(in)           :: num_datafiles
   logical,intent(in)           :: is_self_checkpoint
   integer :: i,j,j1,j2,j3
   integer :: ibox
@@ -1281,40 +1260,10 @@ subroutine set_dg(lg,mg,dg,num_datafiles,is_self_checkpoint)
     dg%is(1:3) =mg%is(1:3)
     dg%ie(1:3) =mg%ie(1:3)
     dg%num(1:3)=mg%num(1:3)
-  else if(num_datafiles==1)then
+  else 
     dg%is(1:3) =lg%is(1:3)
     dg%ie(1:3) =lg%ie(1:3)
     dg%num(1:3)=lg%num(1:3)
-  else
-    if(nproc_id_global<num_datafiles)then
-      ibox=1
-      nproc_xyz_datafile=1
-      do i=1,19
-      do j=3,1,-1
-        if(ibox<num_datafiles)then
-          nproc_xyz_datafile(j)=nproc_xyz_datafile(j)*2
-          ibox=ibox*2
-        end if
-      end do
-      end do
-
-      do j3=0,nproc_xyz_datafile(3)-1
-      do j2=0,nproc_xyz_datafile(2)-1
-      do j1=0,nproc_xyz_datafile(1)-1
-        ibox = j1 + nproc_xyz_datafile(1)*j2 + nproc_xyz_datafile(1)*nproc_xyz_datafile(2)*j3
-        if(ibox==nproc_id_global)then
-          dg%is(1)=j1*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)
-          dg%ie(1)=(j1+1)*lg%num(1)/nproc_xyz_datafile(1)+lg%is(1)-1
-          dg%is(2)=j2*lg%num(2)/nproc_xyz_datafile(2)+lg%is(2)
-          dg%ie(2)=(j2+1)*lg%num(2)/nproc_xyz_datafile(2)+lg%is(2)-1
-          dg%is(3)=j3*lg%num(3)/nproc_xyz_datafile(3)+lg%is(3)
-          dg%ie(3)=(j3+1)*lg%num(3)/nproc_xyz_datafile(3)+lg%is(3)-1
-        end if
-      end do
-      end do
-      end do
-      dg%num(:)=dg%ie(:)-dg%is(:)+1
-    end if
   end if
 
 end subroutine set_dg

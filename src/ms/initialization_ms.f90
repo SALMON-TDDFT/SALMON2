@@ -63,6 +63,7 @@ use inputoutput
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
+  use em_field, only: set_vonf
   implicit none
   integer,parameter :: Nd = 4
 

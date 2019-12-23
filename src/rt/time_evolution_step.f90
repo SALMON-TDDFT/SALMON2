@@ -36,8 +36,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   use write_sub
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, allgatherv_vlocal
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
-  use salmon_pp, only: calc_nlcc !test hoge
   use salmon_xc
+  use em_field, only: calcVbox
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -54,7 +54,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   type(s_pp_info),intent(inout) :: pp
   type(s_pp_grid) :: ppg
 !  type(s_pp_nlcc),intent(in)    :: ppn
-  type(s_pp_nlcc),intent(inout)    :: ppn !hoge test
+  type(s_pp_nlcc),intent(inout)    :: ppn
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
