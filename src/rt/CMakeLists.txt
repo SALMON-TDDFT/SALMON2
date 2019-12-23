@@ -6,7 +6,6 @@ set(SOURCES
     initialization_rt.f90
     main_tddft.f90
     md.f90
-    set_vonf.f90
     taylor.f90
     time_evolution_step.f90
    )
