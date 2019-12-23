@@ -82,8 +82,6 @@ module salmon_global
   integer        :: nproc_ob
   integer        :: nproc_domain_orbital(3)
   integer        :: nproc_domain_general(3)
-  integer        :: num_datafiles_in
-  integer        :: num_datafiles_out
   character(1)   :: yn_ffte
   character(32)  :: process_allocation
 
