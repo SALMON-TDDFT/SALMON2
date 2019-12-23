@@ -36,6 +36,7 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/122_bulk_Si_rt_response_temperatur
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/123_periodic_H2O_gs_dp")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/124_periodic_H2O_md_dp")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/125_periodic_H2O_opt_dp")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/126_periodic_H2O_dft_md_dp")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/131_bulk_Si_nonorthogonal_lattice")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/201_checkpoint")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/202_restart")

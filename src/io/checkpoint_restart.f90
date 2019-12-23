@@ -1096,8 +1096,8 @@ end subroutine restart_Velocity
 
 subroutine write_Rion(odir,system)
   use structures, only: s_dft_system
-  use salmon_global, only: natom, atom_name, kion, unit_length
-!  use inputoutput, only: au_length_aa  !why error???
+  use salmon_global, only: natom, atom_name, kion, unit_length,yn_opt,flag_opt_atom
+  use inputoutput, only: au_length_aa
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
@@ -1106,8 +1106,6 @@ subroutine write_Rion(odir,system)
   real(8) :: uconv
   character(*)   :: odir
   character(256) :: dir_file_out
-
-  real(8),parameter :: au_length_aa = 0.52917721067d0  !! from inputoutput
 
   iu1_w = 87
 
@@ -1119,15 +1117,20 @@ subroutine write_Rion(odir,system)
   if(comm_is_root(nproc_id_global)) then
      dir_file_out = trim(odir)//"atomic_coor.txt"
      open(iu1_w, file=dir_file_out, status="unknown")
-    !write(iu1_w,9000) "&atomic_coor"
-     do ia = 1,natom
-        write(iu1_w,7000) trim(atom_name(ia)), system%Rion(1:3,ia)*uconv, kion(ia)
-     enddo
-    !write(iu1_w,9000) "/"
+     if(yn_opt == 'y')then
+        do ia = 1,natom
+           write(iu1_w,7000) trim(atom_name(ia)), system%Rion(1:3,ia)*uconv, kion(ia), flag_opt_atom(ia)
+        enddo
+     else
+        do ia = 1,natom
+           write(iu1_w,7100) trim(atom_name(ia)), system%Rion(1:3,ia)*uconv, kion(ia)
+        enddo
+     endif
      close(iu1_w)
   end if
 
-7000 format("'",a,"'  ",3f18.10,i4)
+7000 format("'",a,"'  ",3f18.10,i4,'   ',a)
+7100 format("'",a,"'  ",3f18.10,i4)
 9000 format(a)
 
 end subroutine write_Rion
@@ -1164,7 +1167,7 @@ end subroutine write_Velocity
 subroutine read_Rion(idir,system)
   use structures, only: s_dft_system
   use salmon_global, only: natom, atom_name, kion, rion, unit_length
-!  use inputoutput, only: au_length_aa  !!why error???
+  use inputoutput, only: au_length_aa
   use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -1173,8 +1176,6 @@ subroutine read_Rion(idir,system)
   real(8) :: uconv
   integer :: iu1_w, ia, comm
   character(256) :: dir_file_out
-
-  real(8),parameter :: au_length_aa = 0.52917721067d0  !! from inputoutput
 
   iu1_w = 87
   comm = nproc_group_global
@@ -1247,14 +1248,10 @@ end subroutine read_Velocity
 
 subroutine set_dg(lg,mg,dg,is_self_checkpoint)
   use structures, only: s_rgrid 
-  use parallelization, only: nproc_id_global
   implicit none 
   type(s_rgrid),intent(in)     :: lg,mg
   type(s_rgrid),intent(inout)  :: dg
   logical,intent(in)           :: is_self_checkpoint
-  integer :: i,j,j1,j2,j3
-  integer :: ibox
-  integer :: nproc_xyz_datafile(3)
 
   if(is_self_checkpoint)then
     dg%is(1:3) =mg%is(1:3)

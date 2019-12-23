@@ -308,7 +308,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_band_dft) ::band
   
   logical :: rion_update
-  integer :: Miter,ix,iy,iz, ilevel_print
+  integer :: Miter,ix,iy,iz
   real(8) :: sum1
 
   if(allocated(rho_old%f))    deallocate(rho_old%f)
@@ -329,12 +329,10 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   !-------------- SCF Iteration ----------------
   !Iteration loop for SCF (DFT_Iteration)
   Miter=0
-  ilevel_print=1
-write(*,*) "hogehoge3", mixing%num_rho_stock
   call scf_iteration_dft( Miter,rion_update,sum1,  &
                           system,energy,  &
                           lg,mg,ng,  &
-                          info,info_field,,pinfo,  &
+                          info,info_field,pinfo,  &
                           poisson,fg,  &
                           cg,mixing,  &
                           stencil,  &
@@ -344,7 +342,7 @@ write(*,*) "hogehoge3", mixing%num_rho_stock
                           V_local,sVh,sVxc,sVpsl,xc_func,  &
                           pp,ppg,ppn,  &
                           rho_old,Vlocal_old,  &
-                          band,ilevel_print )
+                          band, 1 )
 
   call init_md(system,md)
   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
