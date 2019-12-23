@@ -38,6 +38,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   use salmon_pp, only: calc_nlcc !test hoge
   use salmon_xc
+  use em_field, only: calcVbox
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime

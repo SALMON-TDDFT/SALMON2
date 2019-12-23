@@ -1,5 +1,4 @@
 set(SOURCES
-    calcVbox.f90
     dip.f90
     em_field.f90
     emfield.f90
