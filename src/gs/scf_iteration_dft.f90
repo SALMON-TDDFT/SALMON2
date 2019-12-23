@@ -92,7 +92,7 @@ integer :: i,j
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: tol_esp_diff
 
-
+!write(*,*) "gomi0: must be 21:", mixing%num_rho_stock !currently returning 0 in DFT_MD:: bug, why?
 
 if(calc_mode=='DFT_BAND') then
    allocate( esp_old(system%no,system%nk,system%nspin) )
@@ -125,18 +125,14 @@ DFT_Iteration : do iter=1,nscf
          call ne2mu(energy,system)
       end if
    end if
-
    call copy_density(Miter,system%nspin,ng,srho_s,mixing)
-
    call scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil,  &
                      srg,srg_ng,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
                      poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-
    call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
-
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )
@@ -149,7 +145,6 @@ DFT_Iteration : do iter=1,nscf
       end select
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
-
    if(calc_mode=='DFT_BAND')then
       tol_esp_diff=1.0d-5
       esp_old=abs(esp_old-energy%esp)
@@ -273,7 +268,6 @@ DFT_Iteration : do iter=1,nscf
 
    end if
    end if
-
    rNebox1 = 0d0 
 !$OMP parallel do reduction(+:rNebox1) private(iz,iy,ix)
    do iz=ng%is(3),ng%ie(3)
@@ -290,7 +284,6 @@ DFT_Iteration : do iter=1,nscf
    end if
    end if
    call timer_end(LOG_WRITE_GS_RESULTS)
-
 !$OMP parallel do private(iz,iy,ix)
    do iz=ng%is(3),ng%ie(3)
    do iy=ng%is(2),ng%ie(2)

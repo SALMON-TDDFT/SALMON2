@@ -210,9 +210,9 @@ integer :: Miter,jspin, nspin
   mixing%num_rho_stock = 21
   call init_mixing(nspin,ng,mixing)
 
+  ! restart from binary
   if (yn_restart == 'y') then
-    ! restart from binary
-    call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
+     call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
   else
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
@@ -250,7 +250,7 @@ end subroutine initialization2_dft
 subroutine initialization_dft_md( Miter, rion_update,  &
                                 system,md,energy,stencil,fg,poisson,  &
                                 lg,mg,ng,  &
-                                info,info_field,  &
+                                info,info_field,pinfo,  &
                                 srg,srg_ng,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
@@ -286,6 +286,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
   type(s_rgrid) :: ng
+  type(s_process_info) :: pinfo
   type(s_orbital_parallel) :: info
   type(s_field_parallel) :: info_field
   type(s_sendrecv_grid) :: srg, srg_ng
@@ -307,7 +308,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_band_dft) ::band
   
   logical :: rion_update
-  integer :: Miter,ix,iy,iz
+  integer :: Miter,ix,iy,iz, ilevel_print
   real(8) :: sum1
 
   if(allocated(rho_old%f))    deallocate(rho_old%f)
@@ -328,10 +329,12 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   !-------------- SCF Iteration ----------------
   !Iteration loop for SCF (DFT_Iteration)
   Miter=0
+  ilevel_print=1
+write(*,*) "hogehoge3", mixing%num_rho_stock
   call scf_iteration_dft( Miter,rion_update,sum1,  &
                           system,energy,  &
                           lg,mg,ng,  &
-                          info,info_field,  &
+                          info,info_field,,pinfo,  &
                           poisson,fg,  &
                           cg,mixing,  &
                           stencil,  &
@@ -341,7 +344,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           V_local,sVh,sVxc,sVpsl,xc_func,  &
                           pp,ppg,ppn,  &
                           rho_old,Vlocal_old,  &
-                          band,1 )
+                          band,ilevel_print )
 
   call init_md(system,md)
   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)

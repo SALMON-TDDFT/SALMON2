@@ -66,14 +66,14 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
-type(s_band_dft) ::band
+type(s_band_dft) :: band
 type(s_ofile) :: ofl
 type(s_md) :: md
 
 logical :: rion_update
 integer :: ix,iy,iz, nspin, it, Miter
 real(8) :: dt_h, sum1
-character(100) :: file_atoms_coo, comment_line
+character(100) :: comment_line
 
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
@@ -110,7 +110,7 @@ call initialization2_dft( it, nspin, rion_update,  &
 call initialization_dft_md( it, rion_update,  &
                           system, md, energy, stencil, fg, poisson,  &
                           lg, mg, ng,  &
-                          info, info_field,   &
+                          info, info_field, pinfo,  &
                           srg, srg_ng,  &
                           srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
