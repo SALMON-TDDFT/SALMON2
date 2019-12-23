@@ -2097,6 +2097,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
 
       if(inml_dft2tddft >0)ierr_nml = ierr_nml +1
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dft2tddft', inml_dft2tddft
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_datafiles_dump', yn_datafiles_dump
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_k', target_nproc_k
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_ob', target_nproc_ob
