@@ -92,7 +92,7 @@ integer :: i,j
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: tol_esp_diff
 
-write(*,*) "gomi0: must be 21:", mixing%num_rho_stock !currently returning 0 :: bug, why?
+!write(*,*) "gomi0: must be 21:", mixing%num_rho_stock !currently returning 0 in DFT_MD:: bug, why?
 
 if(calc_mode=='DFT_BAND') then
    allocate( esp_old(system%no,system%nk,system%nspin) )
