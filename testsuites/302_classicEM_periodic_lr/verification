@@ -17,8 +17,8 @@ filelist = [
 ] 
 
 checklist = { 
-    # Dipole moment
-    "Dipole moment (z-direction)": [
+    # Matter current density
+    "Matter current density (z-direction)": [
         -100, # Temporary value for result
         0.565454124657380E-003,  # Reference value 
         5e-5,  # Permissible error 
