@@ -15,7 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 subroutine weyl_init(fs,ff,fw)
-  use salmon_maxwell, only: ls_fdtd_work
+  use common_maxwell, only: ls_fdtd_work
   use structures,     only: s_fdtd_system, s_fdtd_field, allocate_scalar, &
                           & allocate_vector, allocate_vector_with_ovlp
   implicit none

@@ -17,7 +17,7 @@
 subroutine weyl_calc(fs,ff,fw)
   use inputoutput, only: fdtddim, dt_em
   use structures,     only: s_fdtd_system, s_fdtd_field
-  use salmon_maxwell, only: ls_fdtd_work
+  use common_maxwell, only: ls_fdtd_work
   use phys_constants,    only: cspeed_au
   use math_constants,    only: pi
   use pack_unpack, only: copy_data
