@@ -15,8 +15,13 @@
 !
 !=======================================================================
 
+#include "config.h"
+
 module checkpoint_restart_sub
   implicit none
+
+  integer,parameter,private :: write_mode = 1
+  integer,parameter,private :: read_mode  = 2
 
 contains
 
@@ -196,7 +201,6 @@ subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
                ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
 end subroutine restart_rt
 
-
 !===================================================================================================================================
 
 subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
@@ -369,157 +373,82 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
 
 end subroutine read_bin
 
+
 !===================================================================================================================================
 
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   use salmon_global, only: yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
-  character(*)   :: odir
-  type(s_rgrid), intent(in) :: lg, mg
-  type(s_dft_system),intent(in) :: system
+  character(*),            intent(in) :: odir
+  type(s_rgrid),           intent(in) :: lg, mg
+  type(s_dft_system),      intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  type(s_orbital), intent(in) :: spsi
-  logical,intent(in) :: is_self_checkpoint
+  type(s_orbital)                     :: spsi
+  logical,                 intent(in) :: is_self_checkpoint
 
-  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
-  complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
   integer :: iu2_w
-  type(s_rgrid) :: dg
-  integer :: is,iob,ik
-  integer :: ix,iy,iz
-  character(256) ::  dir_file_out
+  character(256) :: dir_file_out
   logical :: is_written
 
-  iu2_w = 87
+#ifdef USE_MPI
+#else
+  integer :: im,ik,io,is
+#endif
 
-  call set_dg(lg,mg,dg,is_self_checkpoint .or. yn_datafiles_dump == 'y')
+  iu2_w = 87
 
   if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
-  else if(comm_is_root(nproc_id_global)) then
-    ! write root process
-    dir_file_out = trim(odir)//"wfn.bin"
-    open(iu2_w,file=dir_file_out,form='unformatted')
-  end if
 
-  !write wavefunction
-  if(is_self_checkpoint .or. yn_datafiles_dump == 'y')then
     if(allocated(spsi%rwf))then
-      write (iu2_w) spsi%rwf(dg%is(1):dg%ie(1),   &
-                             dg%is(2):dg%ie(2),   &
-                             dg%is(3):dg%ie(3),   &
+      write (iu2_w) spsi%rwf(mg%is(1):mg%ie(1),   &
+                             mg%is(2):mg%ie(2),   &
+                             mg%is(3):mg%ie(3),   &
                              1:system%nspin,      &
                              info%io_s:info%io_e, &
                              info%ik_s:info%ik_e, &
-                             1)
+                             info%im_s:info%im_e)
     else if(allocated(spsi%zwf))then
-      write (iu2_w) spsi%zwf(dg%is(1):dg%ie(1),   &
-                             dg%is(2):dg%ie(2),   &
-                             dg%is(3):dg%ie(3),   &
+      write (iu2_w) spsi%zwf(mg%is(1):mg%ie(1),   &
+                             mg%is(2):mg%ie(2),   &
+                             mg%is(3):mg%ie(3),   &
                              1:system%nspin,      &
                              info%io_s:info%io_e, &
                              info%ik_s:info%ik_e, &
-                             1)
+                             info%im_s:info%im_e)
     end if
   else
-    if(allocated(spsi%rwf))then
-      allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-      allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+#ifdef USE_MPI
+    call distributed_rw_wavefunction(odir,lg,mg,system,info,spsi,system%nk,system%no,write_mode)
+#else
+    ! single process execution
+    dir_file_out = trim(odir)//"wfn.bin"
+    open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
 
-!$omp parallel do collapse(2)
-      do iz=lg%is(3),lg%ie(3)
-      do iy=lg%is(2),lg%ie(2)
-      do ix=lg%is(1),lg%ie(1)
-        matbox(ix,iy,iz) = 0d0
-      end do
-      end do
-      end do
-
-      do ik=1,system%nk
-      do iob=1,system%no
-      do is=1,system%nspin
-!$omp parallel do collapse(2)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          matbox(ix,iy,iz)=0.d0
-        end do
-        end do
-        end do
-
-        if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
-           info%io_s <= iob .and. iob <= info%io_e) then
-  !$omp parallel do collapse(2)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            matbox(ix,iy,iz) = spsi%rwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end if
-        call comm_summation(matbox,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-
-        if(comm_is_root(nproc_id_global))then
-          write(iu2_w) matbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-        end if
-      end do
-      end do
-      end do
-
-      deallocate(matbox,matbox2)
-    else if(allocated(spsi%zwf))then
-      allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-      allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-
-!$omp parallel do collapse(2)
-      do iz=lg%is(3),lg%ie(3)
-      do iy=lg%is(2),lg%ie(2)
-      do ix=lg%is(1),lg%ie(1)
-        cmatbox(ix,iy,iz) = 0d0
-      end do
-      end do
-      end do
-
-      do ik=1,system%nk
-      do iob=1,system%no
-      do is=1,system%nspin
-!$omp parallel do collapse(2)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          cmatbox(ix,iy,iz)=0.d0
-        end do
-        end do
-        end do
-
-        if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
-           info%io_s <= iob .and. iob <= info%io_e) then
-  !$omp parallel do collapse(2)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            cmatbox(ix,iy,iz) = spsi%zwf(ix,iy,iz,is,iob,ik,1)
-          end do
-          end do
-          end do
-        end if
-        call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-
-        if(comm_is_root(nproc_id_global))then
-          write(iu2_w) cmatbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-        end if
-      end do
-      end do
-      end do
-
-      deallocate(cmatbox,cmatbox2)
-    end if
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do is=1,system%nspin
+      if(allocated(spsi%rwf))then
+        write (iu2_w) spsi%rwf(lg%is(1):lg%ie(1),   &
+                               lg%is(2):lg%ie(2),   &
+                               lg%is(3):lg%ie(3),   &
+                               is,io,ik,im)
+      else if(allocated(spsi%zwf))then
+        write (iu2_w) spsi%zwf(lg%is(1):lg%ie(1),   &
+                               lg%is(2):lg%ie(2),   &
+                               lg%is(3):lg%ie(3),   &
+                               is,io,ik,im)
+      end if
+    end do
+    end do
+    end do
+    end do
+#endif
   end if
 
   !close file iu2_w
@@ -736,120 +665,102 @@ end subroutine write_Vh_stock
 !===================================================================================================================================
 
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
-  use salmon_global, only: iperiodic,yn_datafiles_dump
-  use parallelization, only: nproc_id_global,nproc_group_global
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
+  &                     allocate_orbital_real, deallocate_orbital
+  use salmon_global, only: yn_datafiles_dump
   use communication, only: comm_is_root, comm_summation, comm_bcast
+#ifdef USE_MPI
+#else
+  use salmon_global, only: yn_periodic
+#endif
   implicit none
-  character(*),intent(in) :: idir
-  type(s_rgrid), intent(in) :: lg, mg
-  type(s_dft_system),intent(in) :: system
+  character(*),            intent(in) :: idir
+  type(s_rgrid),           intent(in) :: lg, mg
+  type(s_dft_system),      intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  type(s_orbital), intent(inout) :: spsi
-  integer,intent(in) :: mk,mo
-  logical,intent(in) :: is_self_checkpoint
+  type(s_orbital)                     :: spsi
+  integer,                 intent(in) :: mk, mo
+  logical,                 intent(in) :: is_self_checkpoint
 
-  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
-  complex(8),allocatable :: cmatbox(:,:,:),cmatbox2(:,:,:)
-  type(s_rgrid)                :: dg
   integer :: iu2_r
-  integer :: is,iob,ik
-  integer :: ix,iy,iz
   character(256) :: dir_file_in
-  integer :: comm
   logical :: is_read
 
-  iu2_r = 86
-  comm = nproc_group_global
+#ifdef USE_MPI
+#else
+  real(8),allocatable :: ddummy(:,:,:)
+  complex(8),allocatable :: zdummy(:,:,:)
+  integer :: im,ik,io,is
+#endif
 
-  call set_dg(lg,mg,dg,is_self_checkpoint .or. yn_datafiles_dump == 'y')
+  iu2_r = 86
 
   if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
-  else if(comm_is_root(nproc_id_global))then
-    ! read root process
-    dir_file_in = trim(idir)//"wfn.bin"
-    open(iu2_r,file=dir_file_in,form='unformatted')
-  end if
 
-  if(is_self_checkpoint .or. yn_datafiles_dump == 'y')then
     if (allocated(spsi%rwf)) then
-      read (iu2_r) spsi%rwf(dg%is(1):dg%ie(1),   &
-                            dg%is(2):dg%ie(2),   &
-                            dg%is(3):dg%ie(3),   &
+      read (iu2_r) spsi%rwf(mg%is(1):mg%ie(1),   &
+                            mg%is(2):mg%ie(2),   &
+                            mg%is(3):mg%ie(3),   &
                             1:system%nspin,      &
                             info%io_s:info%io_e, &
                             info%ik_s:info%ik_e, &
-                            1)
+                            info%im_s:info%im_e)
     else if (allocated(spsi%zwf)) then
-      read (iu2_r) spsi%zwf(dg%is(1):dg%ie(1),   &
-                            dg%is(2):dg%ie(2),   &
-                            dg%is(3):dg%ie(3),   &
+      read (iu2_r) spsi%zwf(mg%is(1):mg%ie(1),   &
+                            mg%is(2):mg%ie(2),   &
+                            mg%is(3):mg%ie(3),   &
                             1:system%nspin,      &
                             info%io_s:info%io_e, &
                             info%ik_s:info%ik_e, &
-                            1)
+                            info%im_s:info%im_e)
     end if
   else
-    allocate(matbox(  lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-    allocate(matbox2( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-    allocate(cmatbox( lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-    allocate(cmatbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+#ifdef USE_MPI
+    call distributed_rw_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,read_mode)
+#else
+    ! single process execution
+    dir_file_in = trim(idir)//"wfn.bin"
+    open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
 
+    if (yn_periodic == 'n') then
+      allocate(ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    else
+      allocate(zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    end if
+
+    do im=info%im_s,info%im_e
     do ik=1,mk
-    do iob=1,mo
+    do io=1,mo
     do is=1,system%nspin
-      if(iperiodic==0)then
-        if(comm_is_root(nproc_id_global))then
-          read(iu2_r) matbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-        end if
-        call comm_bcast(matbox2,comm)
-        if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
-           info%io_s <= iob .and. iob <= info%io_e) then
-          if(allocated(spsi%rwf))then
-  !$omp parallel do collapse(2)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%rwf(ix,iy,iz,is,iob,ik,1) = matbox2(ix,iy,iz)
-            end do
-            end do
-            end do
+      if (yn_periodic == 'n') then
+        read (iu2_r) ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+      else
+        read (iu2_r) zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+      endif
+
+      if (info%ik_s <= ik .and. ik <= info%ik_e .and. &
+          info%io_s <= io .and. io <= info%io_e) then
+        if (yn_periodic == 'n') then
+          if (allocated(spsi%rwf)) then
+            spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = ddummy(:,:,:)
           else
-  !$omp parallel do collapse(2)
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,is,iob,ik,1) = cmplx(matbox2(ix,iy,iz))
-            end do
-            end do
-            end do
+            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = cmplx(ddummy(:,:,:))
           end if
-        end if
-      else if(iperiodic==3)then
-        if(comm_is_root(nproc_id_global))then
-          read(iu2_r) cmatbox2(dg%is(1):dg%ie(1),dg%is(2):dg%ie(2),dg%is(3):dg%ie(3))
-        end if
-        call comm_bcast(cmatbox2,comm)
-        if(info%ik_s <= ik  .and. ik  <= info%ik_e .and.   &
-           info%io_s <= iob .and. iob <= info%io_e) then
-  !$omp parallel do collapse(2)
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-            spsi%zwf(ix,iy,iz,is,iob,ik,1) = cmatbox2(ix,iy,iz)
-          end do
-          end do
-          end do
+        else
+          spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = zdummy(:,:,:)
         end if
       end if
     end do
     end do
     end do
+    end do
 
-    deallocate(matbox,matbox2,cmatbox,cmatbox2)
+    if (allocated(ddummy)) deallocate(ddummy)
+    if (allocated(zdummy)) deallocate(zdummy)
+#endif
   end if
 
   !close file iu2_r
@@ -1250,25 +1161,141 @@ end subroutine read_Velocity
 
 !===================================================================================================================================
 
-subroutine set_dg(lg,mg,dg,is_self_checkpoint)
-  use structures, only: s_rgrid 
-  implicit none 
-  type(s_rgrid),intent(in)     :: lg,mg
-  type(s_rgrid),intent(inout)  :: dg
-  logical,intent(in)           :: is_self_checkpoint
+#ifdef USE_MPI
+#define MPI_CHECK(X) call X; call errcheck(ierr)
+subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,rw_mode)
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
+  &                     allocate_orbital_real, deallocate_orbital
+  use salmon_global, only: yn_restart, yn_periodic
+  use mpi
+  implicit none
+  character(*),            intent(in)    :: iodir
+  type(s_rgrid),           intent(in)    :: lg, mg
+  type(s_dft_system),      intent(in)    :: system
+  type(s_orbital_parallel),intent(in)    :: info
+  type(s_orbital),         intent(inout) :: spsi
+  integer,                 intent(in)    :: mk, mo
+  integer,                 intent(in)    :: rw_mode
 
-  if(is_self_checkpoint)then
-    dg%is(1:3) =mg%is(1:3)
-    dg%ie(1:3) =mg%ie(1:3)
-    dg%num(1:3)=mg%num(1:3)
-  else 
-    dg%is(1:3) =lg%is(1:3)
-    dg%ie(1:3) =lg%ie(1:3)
-    dg%num(1:3)=lg%num(1:3)
+  character(256) :: iofile
+  integer :: icomm
+  integer :: gsize(7), lsize(7), lstart(7)
+  integer :: source_type, local_type, global_type
+  integer :: iopen_flag, minfo, mfile
+  integer :: ierr
+
+  type(s_orbital) :: dummy
+
+  ! create single shared file
+  iofile = trim(iodir)//"wfn.bin"
+  icomm = info%icomm_rko
+
+  ! determine source type
+  if (allocated(spsi%rwf)) then
+    source_type = MPI_DOUBLE
+  else if (allocated(spsi%zwf)) then
+    source_type = MPI_DOUBLE_COMPLEX
   end if
 
-end subroutine set_dg
+  ! requires data conversion from double to double complex (for isolated system)
+  if (rw_mode == read_mode .and. &
+      yn_restart == 'n'    .and. &
+      yn_periodic == 'n'   .and. &
+      allocated(spsi%zwf)) then
+    source_type = MPI_DOUBLE
+    call allocate_orbital_real(system%nspin,mg,info,dummy)
+  end if
 
-!===================================================================================================================================
+  minfo = MPI_INFO_NULL
+  select case(rw_mode)
+    case (write_mode)
+      iopen_flag = ior(MPI_MODE_CREATE,MPI_MODE_WRONLY)
+
+      ! NOTE: Tuning parameter for distributed file system (eg. lustre)
+      !       use all OSS (Object Storage Server)
+      MPI_CHECK(MPI_Info_create(minfo, ierr))
+      MPI_CHECK(MPI_Info_set(minfo, 'striping_factor', '-1', ierr))
+    case (read_mode)
+      iopen_flag = MPI_MODE_RDONLY
+    case default
+      stop 'iopen_flag'
+  end select
+
+  ! create MPI_Type (Window) of process-local wave function
+  gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, info%numo, info%numk, 1]
+  lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, info%numo, info%numk, 1]
+  lstart = [mg%is(1:3)       - mg%is_array(1:3) + 1, 1,            1,         1,         1] - 1
+
+  MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, local_type, ierr))
+  MPI_CHECK(MPI_Type_commit(local_type, ierr))
+
+  ! create MPI_Type (Window) of global wave function
+  gsize  = [lg%ie(1:3) - lg%is(1:3) + 1, system%nspin, mo,        mk,        1]
+  lstart = [mg%is(1:3)                 , 1,            info%io_s, info%ik_s, 1] - 1
+  if (yn_periodic == 'n') then
+    lstart(1:3) = lstart(1:3) + lg%num(1:3)/2
+  end if
+
+  MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, global_type, ierr))
+  MPI_CHECK(MPI_Type_commit(global_type, ierr))
+
+  ! write/read file
+  MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+  MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
+
+  select case(rw_mode)
+    case (write_mode)
+      if (allocated(spsi%rwf)) then
+        MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+      else if (allocated(spsi%zwf)) then
+        MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+      end if
+    case (read_mode)
+      if (allocated(spsi%rwf)) then
+        if (source_type /= MPI_DOUBLE) stop 'source_type /= MPI_DOUBLE'
+        MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+      else if (allocated(spsi%zwf)) then
+        if (source_type == MPI_DOUBLE) then
+          ! convert from double to double complex
+          ! NOTE: When simulating large-scale isolated system, it's possible that
+          !       SALMON hangs by failing memory allocation.
+          MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+          spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:) &
+            = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
+        else
+          MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+        end if
+      end if
+  end select
+
+  MPI_CHECK(MPI_File_close(mfile, ierr))
+
+  MPI_CHECK(MPI_Type_free(global_type, ierr))
+  MPI_CHECK(MPI_Type_free( local_type, ierr))
+
+  call deallocate_orbital(dummy)
+
+  select case(rw_mode)
+    case (write_mode)
+      MPI_CHECK(MPI_Info_free(minfo, ierr))
+  end select
+
+contains
+  subroutine errcheck(errcode)
+    use mpi, only: MPI_MAX_ERROR_STRING, MPI_SUCCESS
+    use communication, only: comm_finalize
+    implicit none
+    integer, intent(in) :: errcode
+    character(MPI_MAX_ERROR_STRING) :: errstr
+    integer                         :: retlen, ierr
+    if (errcode /= MPI_SUCCESS) then
+      call MPI_Error_string(errcode, errstr, retlen, ierr)
+      print *, 'MPI Error:', errstr
+      call comm_finalize
+      stop
+    end if
+  end subroutine
+end subroutine
+#endif
 
 end module checkpoint_restart_sub
