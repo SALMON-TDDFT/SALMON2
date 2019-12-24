@@ -54,7 +54,8 @@ use inputoutput
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
-  use em_field, only: set_vonf
+  use em_field, only: set_vonf,init_A,calc_Aext
+  use dip, only: calc_dip
   implicit none
   integer,parameter :: Nd = 4
 
@@ -268,15 +269,6 @@ use inputoutput
   
   poisson%iterVh = 0        ! Iteration counter
   
-  
-  if(comm_is_root(nproc_id_global))then
-    write(*, *) 
-    write(*, *) "dip2boundary", dip2boundary(1), dip2boundary(2)
-    write(*, *) "dip2center", dip2center(1), dip2center(2)
-    write(*, *) "dip2boundary[A]", dip2boundary(1)*au_length_aa, dip2boundary(2)*au_length_aa
-    write(*, *) "dip2center[A]", dip2center(1)*au_length_aa, dip2center(2)*au_length_aa
-    write(*, *) 
-  end if
   call timer_end(LOG_INIT_RT)
   
   !Open output files and print header parts (Please move and put this kinds here!)
@@ -365,7 +357,7 @@ use inputoutput
   end if
   
   if(yn_restart /= 'y')then
-    call dip(lg,ng,srho,rbox_array2)
+    call calc_dip(lg,ng,srho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
   if(comm_is_root(nproc_id_global))then
