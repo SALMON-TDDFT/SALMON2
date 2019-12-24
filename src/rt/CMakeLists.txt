@@ -1,7 +1,6 @@
 set(SOURCES
     dip.f90
     em_field.f90
-    emfield.f90
     initialization_rt.f90
     main_tddft.f90
     md.f90
