@@ -37,7 +37,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, allgatherv_vlocal
   use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
   use salmon_xc
-  use em_field, only: calcVbox
+  use em_field, only: calcVbox, calc_emfields
+  use dip, only: subdip
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -271,7 +272,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     else
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
     end if
-    call calc_emfields(itt,nspin,rt,curr_e_tmp)
+    call calc_emfields(itt,rt,curr_e_tmp)
     call timer_end(LOG_CALC_CURRENT)
 
     if(yn_md=='y') then
