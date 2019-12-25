@@ -117,7 +117,7 @@ contains
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer                           :: ii,ij,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml
-    real(8)                           :: dt_cfl,diff_cep
+    real(8)                           :: dt_cfl
     character(1)                      :: dir
     character(128)                    :: save_name
     
@@ -211,17 +211,49 @@ contains
     call comm_bcast(dt_em,nproc_group_global)
     
     !*** basic allocation in eh-FDTD **************************************************************************!
-    call eh_allocate
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ex_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ex_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ex_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ex_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ex_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ex_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ey_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ey_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ey_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ey_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ey_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ey_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ez_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ez_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ez_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ez_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ez_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ez_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hx_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hx_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hx_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hx_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hx_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hx_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hy_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hy_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hy_z)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hy_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hy_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hy_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hz_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hz_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hz_x)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hz_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hz_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hz_y)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_jx)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_jy)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_jz)
     
     !*** input fdtd shape *************************************************************************************!
-    allocate(fs%imedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-    fs%imedia(:,:,:)=0
-    allocate(fe%rmedia(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-    fe%rmedia(:,:,:)=0.0d0
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i3d',i3d=fs%imedia)
+    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rmedia)
     if(media_num>0) then
       !check file format and input shape file
       if(comm_is_root(nproc_id_global)) write(*,*)
@@ -279,57 +311,22 @@ contains
       !reset counter
       icount_ld=1
       
-      !allocate drude variable
-      allocate(fe%idx_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                         fs%ng%is_array(2):fs%ng%ie_array(2),&
-                         fs%ng%is_array(3):fs%ng%ie_array(3),fe%num_ld),&
-               fe%idy_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                         fs%ng%is_array(2):fs%ng%ie_array(2),&
-                         fs%ng%is_array(3):fs%ng%ie_array(3),fe%num_ld),&
-               fe%idz_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                         fs%ng%is_array(2):fs%ng%ie_array(2),&
-                         fs%ng%is_array(3):fs%ng%ie_array(3),fe%num_ld) )
-      fe%idx_ld(:,:,:,:)=0; fe%idy_ld(:,:,:,:)=0; fe%idz_ld(:,:,:,:)=0;
-      allocate( fe%rjx_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3),fe%max_pole_num_ld,fe%num_ld),&
-                fe%rjy_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3),fe%max_pole_num_ld,fe%num_ld),&
-                fe%rjz_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3),fe%max_pole_num_ld,fe%num_ld) )
-      fe%rjx_ld(:,:,:,:,:)=0.0d0; fe%rjy_ld(:,:,:,:,:)=0.0d0; fe%rjz_ld(:,:,:,:,:)=0.0d0;
-      allocate( fe%rjx_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                              fs%ng%is_array(2):fs%ng%ie_array(2),&
-                              fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                fe%rjy_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                              fs%ng%is_array(2):fs%ng%ie_array(2),&
-                              fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                fe%rjz_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                              fs%ng%is_array(2):fs%ng%ie_array(2),&
-                              fs%ng%is_array(3):fs%ng%ie_array(3)) )
-      fe%rjx_sum_ld(:,:,:)=0.0d0; fe%rjy_sum_ld(:,:,:)=0.0d0; fe%rjz_sum_ld(:,:,:)=0.0d0;
-      allocate( fe%px_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                         fs%ng%is_array(2):fs%ng%ie_array(2),&
-                         fs%ng%is_array(3):fs%ng%ie_array(3),fe%max_pole_num_ld,fe%num_ld),&
-                fe%py_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                         fs%ng%is_array(2):fs%ng%ie_array(2),&
-                         fs%ng%is_array(3):fs%ng%ie_array(3),fe%max_pole_num_ld,fe%num_ld),&
-                fe%pz_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                         fs%ng%is_array(2):fs%ng%ie_array(2),&
-                         fs%ng%is_array(3):fs%ng%ie_array(3),fe%max_pole_num_ld,fe%num_ld) )
-      fe%px_ld(:,:,:,:,:)=0.0d0; fe%py_ld(:,:,:,:,:)=0.0d0; fe%pz_ld(:,:,:,:,:)=0.0d0;
-      allocate( fe%px_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                             fs%ng%is_array(2):fs%ng%ie_array(2),&
-                             fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                fe%py_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                             fs%ng%is_array(2):fs%ng%ie_array(2),&
-                             fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                fe%pz_sum_ld(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                             fs%ng%is_array(2):fs%ng%ie_array(2),&
-                             fs%ng%is_array(3):fs%ng%ie_array(3)) )
-      fe%px_sum_ld(:,:,:)=0.0d0; fe%py_sum_ld(:,:,:)=0.0d0; fe%pz_sum_ld(:,:,:)=0.0d0;
+      !allocate Lorentz-Drude variables
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idx_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idy_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idz_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjx_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjy_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjz_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjx_sum_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjy_sum_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjz_sum_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%px_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%py_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%pz_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%px_sum_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%py_sum_ld)
+      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%pz_sum_ld)
       allocate(fe%c1_j_ld(fe%max_pole_num_ld,fe%num_ld),&
                fe%c2_j_ld(fe%max_pole_num_ld,fe%num_ld),&
                fe%c3_j_ld(fe%max_pole_num_ld,fe%num_ld))
@@ -553,7 +550,7 @@ contains
     !*** check incident current source condition **************************************************************!
     select case(wave_input)
     case('source')
-      !linear response
+      !check linear response
       if(ae_shape1=='impulse'.or.ae_shape2=='impulse') then
         if(comm_is_root(nproc_id_global)) then
           write(*,*) "invalid ae_shape1/2:"
@@ -562,89 +559,9 @@ contains
         stop
       end if
       
-      !source1
-      if    (ek_dir1(1)==0.0d0.and.ek_dir1(2)==0.0d0.and.ek_dir1(3)==0.0d0) then 
-        fe%inc_dist1='none'
-      elseif(ek_dir1(1)==1.0d0.and.ek_dir1(2)==0.0d0.and.ek_dir1(3)==0.0d0) then
-        if(epdir_re1(1)/=0.0d0.or.epdir_im1(1)/=0.0d0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "invalid epdir_re1(1) and epdir_im1(1):"
-            write(*,*) "For theory = Maxwell and ek_dir1(1) = 1.0d0, epdir_re1(1) and epdir_im1(1) must be 0.0d0."
-          end if
-          stop
-        else
-          fe%inc_dist1='yz-plane'
-        end if
-      elseif(ek_dir1(1)==0.0d0.and.ek_dir1(2)==1.0d0.and.ek_dir1(3)==0.0d0) then
-        if(epdir_re1(2)/=0.0d0.or.epdir_im1(2)/=0.0d0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "invalid epdir_re1(2) and epdir_im1(2):"
-            write(*,*) "For theory = Maxwell and ek_dir1(2) = 1.0d0, epdir_re1(2) and epdir_im1(2) must be 0.0d0."
-          end if
-          stop
-        else
-          fe%inc_dist1='xz-plane'
-        end if
-      elseif(ek_dir1(1)==0.0d0.and.ek_dir1(2)==0.0d0.and.ek_dir1(3)==1.0d0) then
-        if(epdir_re1(3)/=0.0d0.or.epdir_im1(3)/=0.0d0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "invalid epdir_re1(3) and epdir_im1(3):"
-            write(*,*) "For theory = Maxwell and ek_dir1(3) = 1.0d0, epdir_re1(3) and epdir_im1(3) must be 0.0d0."
-          end if
-          stop
-        else
-          fe%inc_dist1='xy-plane'
-        end if
-      else
-        if(comm_is_root(nproc_id_global)) then
-          write(*,*) "invalid ek_dir1:"
-          write(*,*) "For theory = Maxwell, ek_dir1 is only allowed by"
-          write(*,*) "(0d0,0d0,0d0),(1d0,0d0,0d0),(0d0,1d0,0d0),or (0d0,0d0,1d0)."
-        end if
-        stop
-      end if
-      
-      !source2
-      if    (ek_dir2(1)==0.0d0.and.ek_dir2(2)==0.0d0.and.ek_dir2(3)==0.0d0) then 
-        fe%inc_dist2='none'
-      elseif(ek_dir2(1)==1.0d0.and.ek_dir2(2)==0.0d0.and.ek_dir2(3)==0.0d0) then
-        if(epdir_re2(1)/=0.0d0.or.epdir_im2(1)/=0.0d0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "invalid epdir_re2(1) and epdir_im2(1):"
-            write(*,*) "For theory = Maxwell and ek_dir2(1) = 1.0d0, epdir_re2(1) and epdir_im2(1) must be 0.0d0."
-          end if
-          stop
-        else
-          fe%inc_dist2='yz-plane'
-        end if
-      elseif(ek_dir2(1)==0.0d0.and.ek_dir2(2)==1.0d0.and.ek_dir2(3)==0.0d0) then
-        if(epdir_re2(2)/=0.0d0.or.epdir_im2(2)/=0.0d0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "invalid epdir_re2(2) and epdir_im2(2):"
-            write(*,*) "For theory = Maxwell and ek_dir2(2) = 1.0d0, epdir_re2(2) and epdir_im2(2) must be 0.0d0."
-          end if
-          stop
-        else
-          fe%inc_dist2='xz-plane'
-        end if
-      elseif(ek_dir2(1)==0.0d0.and.ek_dir2(2)==0.0d0.and.ek_dir2(3)==1.0d0) then
-        if(epdir_re2(3)/=0.0d0.or.epdir_im2(3)/=0.0d0) then
-          if(comm_is_root(nproc_id_global)) then
-            write(*,*) "invalid epdir_re2(3) and epdir_im2(3):"
-            write(*,*) "For theory = Maxwell and ek_dir2(3) = 1.0d0, epdir_re2(3) and epdir_im2(3) must be 0.0d0."
-          end if
-          stop
-        else
-          fe%inc_dist2='xy-plane'
-        end if
-      else
-        if(comm_is_root(nproc_id_global)) then
-          write(*,*) "invalid ek_dir2:"
-          write(*,*) "For theory = Maxwell, ek_dir2 is only allowed by"
-          write(*,*) "(0d0,0d0,0d0),(1d0,0d0,0d0),(0d0,1d0,0d0),or (0d0,0d0,1d0)."
-        end if
-        stop
-      end if
+      !check source1 and source2
+      call eh_check_inc(1,ek_dir1,epdir_re1,epdir_im1,fe%inc_dist1)
+      call eh_check_inc(2,ek_dir2,epdir_re2,epdir_im2,fe%inc_dist2)
     case('point','x-line','y-line','z-line')
       !these selection are for debug
       fe%inc_dist1=wave_input; fe%inc_dist2='none';
@@ -686,42 +603,14 @@ contains
         call find_point_em(source_loc1(:),fe%inc_po_id(ii,:),&
                            fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
                            minval(fs%lg%is(:))-fe%Nd,maxval(fs%lg%ie(:))+fe%Nd,fe%coo(:,:))
-        select case(ae_shape1)
-        case("Ecos2","Acos2")
-          continue
-        case default
-          if(comm_is_root(nproc_id_global)) write(*,*) 'set ae_shape1 to "Ecos2" or "Acos2".'
-          stop
-        end select
-        diff_cep=(phi_cep1-0.25d0)*2.d0-int((phi_cep1-0.25d0)*2.d0)
-        if(ae_shape1=="Ecos2".and.abs(diff_cep)>=1.d-12)then
-          if(comm_is_root(nproc_id_global)) write(*,*) &
-            "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
-          stop
-        end if
-        if(I_wcm2_1/=-1d0) &
-          E_amplitude1=sqrt(I_wcm2_1)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+        call eh_check_iw_parameter(ii,phi_cep1,I_wcm2_1,E_amplitude1,ae_shape1)
       end if
       if(fe%inc_dist2/='none') then
         ii=2
         call find_point_em(source_loc2(:),fe%inc_po_id(ii,:),&
                            fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
                            minval(fs%lg%is(:))-fe%Nd,maxval(fs%lg%ie(:))+fe%Nd,fe%coo(:,:))
-        select case(ae_shape2)
-        case("Ecos2","Acos2")
-          continue
-        case default
-          if(comm_is_root(nproc_id_global)) write(*,*) 'set ae_shape2 to "Ecos2" or "Acos2".'
-          stop
-        end select
-        diff_cep=(phi_cep2-0.25d0)*2.d0-int((phi_cep2-0.25d0)*2.d0)
-        if(ae_shape2=="Ecos2".and.abs(diff_cep)>=1.d-12)then
-          if(comm_is_root(nproc_id_global)) write(*,*) &
-            "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
-          stop
-        end if
-        if(I_wcm2_2/=-1d0) &
-          E_amplitude2=sqrt(I_wcm2_2)*1.0d2*2.74492d1/(5.14223d11)!I[W/cm^2]->E[a.u.]
+        call eh_check_iw_parameter(ii,phi_cep2,I_wcm2_2,E_amplitude2,ae_shape2)
       end if
       
       !write information
@@ -839,29 +728,15 @@ contains
       allocate(fe%fr_lr(nenergy,3),fe%fi_lr(nenergy,3))
       fe%fr_lr(:,:)=0.0d0; fe%fi_lr(:,:)=0.0d0;
       if(yn_periodic=='n') then
-        allocate(fe%px_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                 fe%py_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                 fe%pz_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)) )
-        fe%px_lr(:,:,:)=0.0d0; fe%py_lr(:,:,:)=0.0d0; fe%pz_lr(:,:,:)=0.0d0;
+        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%px_lr)
+        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%py_lr)
+        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%pz_lr)
         allocate(fe%dip_lr(nt_em,3))
         fe%dip_lr(:,:)=0.0d0
       elseif(yn_periodic=='y') then
-        allocate(fe%rjx_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                           fs%ng%is_array(2):fs%ng%ie_array(2),&
-                           fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                 fe%rjy_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                           fs%ng%is_array(2):fs%ng%ie_array(2),&
-                           fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                 fe%rjz_lr(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                           fs%ng%is_array(2):fs%ng%ie_array(2),&
-                           fs%ng%is_array(3):fs%ng%ie_array(3)) )
-        fe%rjx_lr(:,:,:)=0.0d0; fe%rjy_lr(:,:,:)=0.0d0; fe%rjz_lr(:,:,:)=0.0d0;
+        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjx_lr)
+        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjy_lr)
+        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjz_lr)
         allocate(fe%curr_lr(nt_em,3),fe%e_lr(nt_em,3))
         fe%curr_lr(:,:)=0.0d0; fe%e_lr(:,:)=0.0d0;
         allocate(fe%er_lr(0:nenergy,3),fe%ei_lr(0:nenergy,3))
@@ -869,7 +744,7 @@ contains
       end if
     end if
     
-    !*** write strat ******************************************************************************************!
+    !*** write start ******************************************************************************************!
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"
@@ -883,144 +758,31 @@ contains
   contains
     
     !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    !+ e and h allocation ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine eh_allocate
+    !+ allocation in eh-FDTD +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_allocate(ista,iend,allocate_mode,num4d,num5d,i3d,r3d,i4d,r5d)
       implicit none
+      integer,            intent(in)           :: ista(3),iend(3)
+      character(3),       intent(in)           :: allocate_mode
+      integer,            intent(in), optional :: num4d,num5d
+      integer,allocatable,intent(out),optional :: i3d(:,:,:)
+      real(8),allocatable,intent(out),optional :: r3d(:,:,:)
+      integer,allocatable,intent(out),optional :: i4d(:,:,:,:)
+      real(8),allocatable,intent(out),optional :: r5d(:,:,:,:,:)
       
-      !e
-      allocate(fe%ex_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_ex_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_ex_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%ex_y(:,:,:)=0.0d0; fe%c1_ex_y(:,:,:)=0.0d0; fe%c2_ex_y(:,:,:)=0.0d0;
-      allocate(fe%ex_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_ex_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_ex_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%ex_z(:,:,:)=0.0d0; fe%c1_ex_z(:,:,:)=0.0d0; fe%c2_ex_z(:,:,:)=0.0d0;
-      allocate(fe%ey_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_ey_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_ey_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%ey_z(:,:,:)=0.0d0; fe%c1_ey_z(:,:,:)=0.0d0; fe%c2_ey_z(:,:,:)=0.0d0;
-      allocate(fe%ey_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_ey_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_ey_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%ey_x(:,:,:)=0.0d0; fe%c1_ey_x(:,:,:)=0.0d0; fe%c2_ey_x(:,:,:)=0.0d0;
-      allocate(fe%ez_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_ez_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_ez_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%ez_x(:,:,:)=0.0d0; fe%c1_ez_x(:,:,:)=0.0d0; fe%c2_ez_x(:,:,:)=0.0d0;
-      allocate(fe%ez_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_ez_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_ez_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%ez_y(:,:,:)=0.0d0; fe%c1_ez_y(:,:,:)=0.0d0; fe%c2_ez_y(:,:,:)=0.0d0;
-      
-      !h
-      allocate(fe%hx_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_hx_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_hx_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%hx_y(:,:,:)=0.0d0; fe%c1_hx_y(:,:,:)=0.0d0; fe%c2_hx_y(:,:,:)=0.0d0;
-      allocate(fe%hx_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_hx_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_hx_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%hx_z(:,:,:)=0.0d0; fe%c1_hx_z(:,:,:)=0.0d0; fe%c2_hx_z(:,:,:)=0.0d0;
-      allocate(fe%hy_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_hy_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_hy_z(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%hy_z(:,:,:)=0.0d0; fe%c1_hy_z(:,:,:)=0.0d0; fe%c2_hy_z(:,:,:)=0.0d0;
-      allocate(fe%hy_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_hy_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_hy_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%hy_x(:,:,:)=0.0d0; fe%c1_hy_x(:,:,:)=0.0d0; fe%c2_hy_x(:,:,:)=0.0d0;
-      allocate(fe%hz_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_hz_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_hz_x(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%hz_x(:,:,:)=0.0d0; fe%c1_hz_x(:,:,:)=0.0d0; fe%c2_hz_x(:,:,:)=0.0d0;
-      allocate(fe%hz_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                       fs%ng%is_array(2):fs%ng%ie_array(2),&
-                       fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c1_hz_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      allocate(fe%c2_hz_y(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                          fs%ng%is_array(2):fs%ng%ie_array(2),&
-                          fs%ng%is_array(3):fs%ng%ie_array(3)))
-      fe%hz_y(:,:,:)=0.0d0; fe%c1_hz_y(:,:,:)=0.0d0; fe%c2_hz_y(:,:,:)=0.0d0;
-      
-      allocate(fe%c2_jx(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                        fs%ng%is_array(2):fs%ng%ie_array(2),&
-                        fs%ng%is_array(3):fs%ng%ie_array(3)),&
-               fe%c2_jy(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                        fs%ng%is_array(2):fs%ng%ie_array(2),&
-                        fs%ng%is_array(3):fs%ng%ie_array(3)),&
-               fe%c2_jz(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                        fs%ng%is_array(2):fs%ng%ie_array(2),&
-                        fs%ng%is_array(3):fs%ng%ie_array(3)) )
-      fe%c2_jx(:,:,:)=0.0d0; fe%c2_jy(:,:,:)=0.0d0; fe%c2_jz(:,:,:)=0.0d0;
+      select case(allocate_mode)
+      case('i3d')
+        allocate(i3d(ista(1):iend(1),ista(2):iend(2),ista(3):iend(3)))
+        i3d(:,:,:)=0
+      case('r3d')
+        allocate(r3d(ista(1):iend(1),ista(2):iend(2),ista(3):iend(3)))
+        r3d(:,:,:)=0.0d0
+      case('i4d')
+        allocate(i4d(ista(1):iend(1),ista(2):iend(2),ista(3):iend(3),num4d))
+        i4d(:,:,:,:)=0
+      case('r5d')
+        allocate(r5d(ista(1):iend(1),ista(2):iend(2),ista(3):iend(3),num4d,num5d))
+        r5d(:,:,:,:,:)=0.0d0
+      end select
       
       return
     end subroutine eh_allocate
@@ -1483,6 +1245,126 @@ contains
       
       return
     end subroutine eh_set_pml
+    
+    !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ incident current source condition +++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_check_inc(ipulse,ek_dir,epdir_re,epdir_im,inc_dist)
+      implicit none
+      integer,      intent(in)  :: ipulse
+      real(8),      intent(in)  :: ek_dir(3),epdir_re(3),epdir_im(3)
+      character(16),intent(out) :: inc_dist
+      
+      if    (ek_dir(1)==0.0d0.and.ek_dir(2)==0.0d0.and.ek_dir(3)==0.0d0) then 
+        inc_dist='none'
+      elseif(ek_dir(1)==1.0d0.and.ek_dir(2)==0.0d0.and.ek_dir(3)==0.0d0) then !x-direction propagation
+        if(epdir_re(1)/=0.0d0.or.epdir_im(1)/=0.0d0) then
+          if(comm_is_root(nproc_id_global)) then
+            if     (ipulse==1) then
+              write(*,*) "invalid epdir_re1(1) and epdir_im1(1):"
+              write(*,*) "For theory = Maxwell and ek_dir1(1) = 1.0d0, epdir_re1(1) and epdir_im1(1) must be 0.0d0."
+            elseif (ipulse==2) then
+              write(*,*) "invalid epdir_re2(1) and epdir_im2(1):"
+              write(*,*) "For theory = Maxwell and ek_dir2(1) = 1.0d0, epdir_re2(1) and epdir_im2(1) must be 0.0d0."
+            end if
+          end if
+          stop
+        else
+          inc_dist='yz-plane'
+        end if
+      elseif(ek_dir(1)==0.0d0.and.ek_dir(2)==1.0d0.and.ek_dir(3)==0.0d0) then !y-direction propagation
+        if(epdir_re(2)/=0.0d0.or.epdir_im(2)/=0.0d0) then
+          if(comm_is_root(nproc_id_global)) then
+            if     (ipulse==1) then
+              write(*,*) "invalid epdir_re1(2) and epdir_im1(2):"
+              write(*,*) "For theory = Maxwell and ek_dir1(2) = 1.0d0, epdir_re1(2) and epdir_im1(2) must be 0.0d0."
+            elseif (ipulse==2) then
+              write(*,*) "invalid epdir_re2(2) and epdir_im2(2):"
+              write(*,*) "For theory = Maxwell and ek_dir2(2) = 1.0d0, epdir_re2(2) and epdir_im2(2) must be 0.0d0."
+            end if
+          end if
+          stop
+        else
+          inc_dist='xz-plane'
+        end if
+      elseif(ek_dir(1)==0.0d0.and.ek_dir(2)==0.0d0.and.ek_dir(3)==1.0d0) then !z-direction propagation
+        if(epdir_re(3)/=0.0d0.or.epdir_im(3)/=0.0d0) then
+          if(comm_is_root(nproc_id_global)) then
+            if     (ipulse==1) then
+              write(*,*) "invalid epdir_re1(3) and epdir_im1(3):"
+              write(*,*) "For theory = Maxwell and ek_dir1(3) = 1.0d0, epdir_re1(3) and epdir_im1(3) must be 0.0d0."
+            elseif (ipulse==2) then
+              write(*,*) "invalid epdir_re2(3) and epdir_im2(3):"
+              write(*,*) "For theory = Maxwell and ek_dir2(3) = 1.0d0, epdir_re2(3) and epdir_im2(3) must be 0.0d0."
+            end if
+          end if
+          stop
+        else
+          inc_dist='xy-plane'
+        end if
+      else
+        if(comm_is_root(nproc_id_global)) then
+          if     (ipulse==1) then
+            write(*,*) "invalid ek_dir1:"
+            write(*,*) "For theory = Maxwell, ek_dir1 is only allowed by"
+            write(*,*) "(0d0,0d0,0d0),(1d0,0d0,0d0),(0d0,1d0,0d0),or (0d0,0d0,1d0)."
+          elseif (ipulse==2) then
+            write(*,*) "invalid ek_dir2:"
+            write(*,*) "For theory = Maxwell, ek_dir2 is only allowed by"
+            write(*,*) "(0d0,0d0,0d0),(1d0,0d0,0d0),(0d0,1d0,0d0),or (0d0,0d0,1d0)."
+          end if
+        end if
+        stop
+      end if
+      
+      return
+    end subroutine eh_check_inc
+    
+    !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    !+ check incident wave parameter +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_check_iw_parameter(ipulse,phi_cep,I_wcm2,E_amplitude,ae_shape)
+      implicit none
+      integer,      intent(in)  :: ipulse
+      real(8),      intent(in)  :: phi_cep
+      real(8),      intent(in)  :: I_wcm2
+      real(8),      intent(out) :: E_amplitude
+      character(16),intent(in)  :: ae_shape
+      real(8)                   :: diff_cep
+      
+      !check ae_shape
+      select case(ae_shape)
+      case('Ecos2','Acos2')
+        continue
+      case default
+        if(comm_is_root(nproc_id_global)) then
+          if     (ipulse==1) then
+            write(*,*) 'set ae_shape1 to "Ecos2" or "Acos2".'
+          elseif (ipulse==2) then
+            write(*,*) 'set ae_shape2 to "Ecos2" or "Acos2".'
+          end if
+        end if
+        stop
+      end select
+      
+      !check phi_cep
+      diff_cep=(phi_cep-0.25d0)*2.d0-int((phi_cep-0.25d0)*2.d0)
+      if(ae_shape=='Ecos2'.and.abs(diff_cep)>=1.d-12)then
+        if(comm_is_root(nproc_id_global)) then
+          if     (ipulse==1) then
+            write(*,*) 'phi_cep1 must be equal to 0.25+0.5*i when "Ecos2" is specified for ae_shape1.'
+          elseif (ipulse==2) then
+            write(*,*) 'phi_cep2 must be equal to 0.25+0.5*i when "Ecos2" is specified for ae_shape2.'
+          end if
+        end if 
+        stop
+      end if
+      
+      !set E_amplitude
+      if(I_wcm2/=-1d0) &
+        E_amplitude=sqrt(I_wcm2)*1.0d2*2.74492d1/(5.14223d11) !I[W/cm^2]->E[a.u.]
+        
+      return
+    end subroutine eh_check_iw_parameter
+    
     
   end subroutine eh_init
   
