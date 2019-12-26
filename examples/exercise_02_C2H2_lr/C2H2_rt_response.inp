@@ -1,5 +1,7 @@
-! please copy the ground state data, C2H2_gs.bin, obtained by the calculation in "examples/exercise_01_C2H2_gs/"
-! to the current directory for a read-in file of this calculation
+! Copy the ground state data directory ('data_for_restart') (or make symbolic link)
+! calculated in 'examples/exercise_01_C2H2_gs/'
+! and rename the directory to 'restart/'
+
 &units
   unit_system='A_eV_fs'
 /
@@ -26,6 +28,9 @@
   lmax_ps(2)=0
   lloc_ps(1)=1
   lloc_ps(2)=0
+/
+&rgrid
+  dl = 0.25d0, 0.25d0, 0.25d0
 /
 &functional
   xc = 'PZ'

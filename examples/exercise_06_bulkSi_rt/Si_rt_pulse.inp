@@ -1,0 +1,75 @@
+! Copy the ground state data directory ('data_for_restart') (or make symbolic link)
+! calculated in 'examples/exercise_04_bulkSi_gs/'
+! and rename the directory to 'restart/' in the current directory
+
+&calculation
+ theory='TDDFT_pulse'
+/
+
+&control
+  sysname = 'Si'
+/
+
+&parallel
+  yn_domain_parallel = 'y'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 10.26d0, 10.26d0, 10.26d0
+  nstate = 32
+  nelec = 32
+  nelem = 1
+  natom = 8
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  num_rgrid = 12, 12, 12
+/
+
+&kgrid
+  num_kgrid = 4, 4, 4
+/
+
+&tgrid
+  nt = 3000
+  dt = 0.16
+/
+
+&propagation
+  propagator = 'etrs'
+/
+
+&emfield
+  trans_longi = 'tr'
+  ae_shape1 = 'Acos2'
+  I_wcm2_1 = 1d14
+  tw1 = 441.195136248d0
+  omega1 = 0.05696145187d0
+  epdir_re1 = 0., 0., 1.
+/
+
+&atomic_red_coor
+  'Si'	.0	.0	.0	1
+  'Si'	.25	.25	.25	1
+  'Si'	.5	.0	.5	1
+  'Si'	.0	.5	.5	1
+  'Si'	.5	.5	.0	1
+  'Si'	.75	.25	.75	1
+  'Si'	.25	.75	.75	1
+  'Si'	.75	.75	.25	1
+/

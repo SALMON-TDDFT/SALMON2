@@ -1,0 +1,60 @@
+
+&calculation
+  theory = 'DFT'
+  yn_opt='y'
+/
+
+&control
+  sysname = 'C2H2'
+/
+
+&parallel
+  yn_domain_parallel = 'y'
+/
+
+&units
+  unit_system='A_eV_fs'
+/
+
+&system
+  yn_periodic = 'n'
+  al = 12d0, 12d0, 16d0
+  nstate = 10
+  nelem = 2
+  natom = 4
+  nelec = 10
+/
+
+&pseudo
+  izatom(1)=6
+  izatom(2)=1
+  file_pseudo(1)='C_rps.dat'
+  file_pseudo(2)='H_rps.dat'
+  lloc_ps(1)=1
+  lloc_ps(2)=1
+/
+
+&functional
+  xc ='PZ'
+/
+
+&rgrid
+  dl = 0.20d0, 0.20d0, 0.20d0
+/
+
+&scf
+  nscf = 200
+  threshold=1d-8
+/
+
+&opt
+  convrg_opt_fmax  = 1d-3
+/
+
+&atomic_coor
+'C'    0.0    0.0    0.6  1  y
+'H'    0.0    0.0    1.7  2  y
+'C'    0.0    0.0   -0.6  1  y
+'H'    0.0    0.0   -1.7  2  y
+/
+
