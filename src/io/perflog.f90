@@ -136,7 +136,7 @@ contains
   subroutine write_performance(fd,mode)
     use parallelization
     use communication
-    use salmon_global, only: theory
+    use salmon_global, only: theory,yn_md,yn_opt
     use timer
     implicit none
     integer, intent(in) :: fd, mode
@@ -219,6 +219,14 @@ contains
     case default
       stop 'invalid theory'
     end select
+
+    if (theory == 'DFT_MD' .or. yn_md == 'y' .or. yn_opt == 'y') then
+      call set(0, 0, 'MD or opt. routines')
+      call set(1, LOG_MD_TEVOL_PART1     , 'time-evol. part1')
+      call set(2, LOG_MD_TEVOL_PART2     , 'time-evol. part2')
+      call set(3, LOG_MD_UPDATE_PSEUDO_PT, 'update pseudo-pt')
+      call write_loadbalance(fd, 3, tsrc, headers, mode)
+    end if
 
     call set(0, 0, 'total_energy module')
     call set(1, LOG_TE_ISOLATED_CALC,       'isolated calc.')

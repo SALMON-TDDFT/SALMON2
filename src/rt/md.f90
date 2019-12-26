@@ -240,11 +240,14 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   use salmon_global, only: natom,Kion,dt, Rion, ensemble,thermostat
   use const, only: umass,hartree2J,kB
   use inputoutput, only: step_velocity_scaling
+  use timer
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
   integer :: itt,iatom
   real(8) :: mass_au, dt_h
+
+  call timer_begin(LOG_MD_TEVOL_PART1)
 
   dt_h = dt*0.5d0
 
@@ -285,6 +288,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
      md%E_nh       = md%Enh_gkTlns + 0.5d0 * md%Qnh * (md%xi_nh)**2
   endif
 
+  call timer_end(LOG_MD_TEVOL_PART1)
 end subroutine 
 
 subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
@@ -294,6 +298,7 @@ subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,pp
   use const, only: umass,hartree2J,kB
   use salmon_pp, only: calc_nlcc
   use prep_pp_sub, only: init_ps,dealloc_init_ps
+  use timer
   implicit none
   type(s_orbital_parallel) :: info
   type(s_field_parallel),intent(in) :: info_field
@@ -307,6 +312,8 @@ subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,pp
   type(s_scalar) :: sVpsl
   integer :: itt
 
+  call timer_begin(LOG_MD_UPDATE_PSEUDO_PT)
+
   !update pseudopotential
   if (mod(itt,step_update_ps)==0 ) then
      call dealloc_init_ps(ppg)
@@ -319,17 +326,21 @@ subroutine update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,pp
      call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   endif
 
+  call timer_end(LOG_MD_UPDATE_PSEUDO_PT)
 end subroutine 
 
 subroutine time_evolution_step_md_part2(system,md)
   use structures, only: s_dft_system, s_md
   use salmon_global, only: natom,Kion,dt,yn_stop_system_momt,ensemble,thermostat
   use const, only: umass,hartree2J,kB
+  use timer
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
   integer :: iatom
   real(8) :: mass_au,dt_h, aforce(3,natom), dR(3,natom)
+
+  call timer_begin(LOG_MD_TEVOL_PART2)
 
   dt_h = dt*0.5d0
   aforce(:,:) = 0.5d0*( md%Force_last(:,:) + system%Force(:,:) )
@@ -351,6 +362,7 @@ subroutine time_evolution_step_md_part2(system,md)
   if (yn_stop_system_momt=='y') call remove_system_momentum(0,system)
   call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
 
+  call timer_end(LOG_MD_TEVOL_PART2)
 end subroutine 
 
 subroutine apply_velocity_scaling_ion(Temp_ion,system)

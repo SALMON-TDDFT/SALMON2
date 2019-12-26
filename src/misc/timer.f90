@@ -70,6 +70,11 @@ module timer
   integer,public,parameter :: LOG_RT_MISC               = 63
   integer,public,parameter :: LOG_RT_ANALYSIS           = 64
 
+  ! for MD
+  integer,public,parameter :: LOG_MD_TEVOL_PART1        = 70
+  integer,public,parameter :: LOG_MD_TEVOL_PART2        = 71
+  integer,public,parameter :: LOG_MD_UPDATE_PSEUDO_PT   = 72
+
   integer,public,parameter :: LOG_CHECKPOINT_SELF       = 80
   integer,public,parameter :: LOG_CHECKPOINT_SYNC       = 81
   integer,public,parameter :: LOG_RESTART_SELF          = 82
