@@ -136,12 +136,12 @@ contains
   subroutine write_performance(fd,mode)
     use parallelization
     use communication
-    use salmon_global, only: theory
+    use salmon_global, only: theory,yn_md,yn_opt
     use timer
     implicit none
     integer, intent(in) :: fd, mode
 
-    integer,parameter :: LOG_SIZE = 20
+    integer,parameter :: LOG_SIZE = 30
     real(8)       :: tsrc(LOG_SIZE)
     character(30) :: headers(0:LOG_SIZE)
 
@@ -172,7 +172,8 @@ contains
       call set(6, LOG_CALC_EXC_COR      , 'Exc_Cor routine')
       call set(7, LOG_CALC_TOTAL_ENERGY , 'calculating Etot')
       call set(8, LOG_CALC_ESP          , 'calculating esp')
-      call write_loadbalance(fd, 8, tsrc, headers, mode)
+      call set(9, LOG_CALC_ION_FORCE    , 'calc force')
+      call write_loadbalance(fd, 9, tsrc, headers, mode)
     case('DFT2TDDFT')
       call set(0, 0, 'DFT data redistribution')
       call set(1, LOG_INIT_GS         , 'gs initialization')
@@ -210,13 +211,22 @@ contains
       call set(14, LOG_CALC_EIGEN_ENERGY    , 'calc_eigen_energy')
       call set(15, LOG_CALC_CURRENT_ION     , 'calc_current_ion')
       call set(16, LOG_CALC_TOTAL_ENERGY_PERIODIC, 'calc_total_energy_periodic')
-      call set(17, LOG_WRITE_RT_INFOS       , 'writing info etc.')
-      call set(18, LOG_RT_ANALYSIS          , 'analysis calc.')
-      call set(19, LOG_RT_MISC              , 'misc.')
-      call write_loadbalance(fd, 19, tsrc, headers, mode)
+      call set(17, LOG_CALC_ION_FORCE    , 'calc force')
+      call set(18, LOG_WRITE_RT_INFOS       , 'writing info etc.')
+      call set(19, LOG_RT_ANALYSIS          , 'analysis calc.')
+      call set(20, LOG_RT_MISC              , 'misc.')
+      call write_loadbalance(fd, 20, tsrc, headers, mode)
     case default
       stop 'invalid theory'
     end select
+
+    if (theory == 'DFT_MD' .or. yn_md == 'y' .or. yn_opt == 'y') then
+      call set(0, 0, 'MD or opt. routines')
+      call set(1, LOG_MD_TEVOL_PART1     , 'time-evol. part1')
+      call set(2, LOG_MD_TEVOL_PART2     , 'time-evol. part2')
+      call set(3, LOG_MD_UPDATE_PSEUDO_PT, 'update pseudo-pt')
+      call write_loadbalance(fd, 3, tsrc, headers, mode)
+    end if
 
     call set(0, 0, 'total_energy module')
     call set(1, LOG_TE_ISOLATED_CALC,       'isolated calc.')

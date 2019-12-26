@@ -30,6 +30,7 @@ contains
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
+    use timer
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in) :: pp
@@ -53,6 +54,8 @@ contains
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
     integer :: Norb,iorb
+
+    call timer_begin(LOG_CALC_ION_FORCE)
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
@@ -230,6 +233,8 @@ contains
       deallocate( dphipsi_lma )
       deallocate( zF_tmp )
     end if 
+
+    call timer_end(LOG_CALC_ION_FORCE)
     return
   end subroutine calc_force
 
