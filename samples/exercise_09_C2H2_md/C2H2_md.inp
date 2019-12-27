@@ -49,10 +49,6 @@
  nt=5000
 /
 
-&propagation
-  propagator='etrs'
-/
-
 &emfield
   ae_shape1 = 'Ecos2'
   epdir_re1 = 0.d0,0.d0,1.d0
