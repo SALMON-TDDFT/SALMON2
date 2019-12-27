@@ -1,8 +1,12 @@
+! Copy the ground state data directory ('data_for_restart') (or make symbolic link)
+! calculated in 'examples/exercise_01_C2H2_gs/'
+! and rename the directory to 'restart/'
+
 &units
   unit_system='A_eV_fs'
 /
 &calculation
-  theory = 'DFT'
+  theory='TDDFT_pulse'
 /
 &control
   sysname = 'C2H2'
@@ -28,14 +32,20 @@
 &rgrid
   dl = 0.25d0, 0.25d0, 0.25d0
 /
-&scf
-  ncg = 4
-  nscf = 1000
-  convergence = 'norm_rho_dng'
-  threshold = 1.d-15
-/
 &functional
   xc = 'PZ'
+/
+&tgrid
+  dt=1.25d-3
+  nt=4800
+/
+&emfield
+  ae_shape1 = 'Ecos2'
+  epdir_re1 = 0.d0,0.d0,1.d0
+  I_wcm2_1 = 1.d8
+  omega1=9.28d0
+  tw1=6.d0
+  phi_cep1=0.75d0
 /
 &atomic_coor
 'C'    0.000000    0.000000    0.599672  1

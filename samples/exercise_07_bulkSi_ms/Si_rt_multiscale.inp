@@ -1,7 +1,9 @@
+! Copy the ground state data directory ('data_for_restart') (or make symbolic link)
+! calculated in 'examples/exercise_04_bulkSi_gs/'
+! and rename the directory to 'restart/' in the current directory
+
 &calculation
-!(first-run: DFT, second-run: Multi_scale_Maxwell_TDDFT)
-  theory='DFT'
-! theory='Multi_scale_Maxwell_TDDFT'
+ theory='Multi_scale_Maxwell_TDDFT'
 /
 
 &control
@@ -46,12 +48,6 @@
 
 &propagation
   propagator = 'etrs'
-/
-
-&scf
-  ncg = 5
-  nscf = 120
-  threshold = 1.d-9
 /
 
 &emfield

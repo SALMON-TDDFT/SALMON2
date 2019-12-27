@@ -1,10 +1,8 @@
-! please copy the ground state data, C2H2_gs.bin, obtained by the calculation in "examples/exercise_01_C2H2_gs/"
-! to the current directory for a read-in file of this calculation
 &units
   unit_system='A_eV_fs'
 /
 &calculation
-  theory='TDDFT_pulse'
+  theory = 'DFT'
 /
 &control
   sysname = 'C2H2'
@@ -27,20 +25,16 @@
   lloc_ps(1)=1
   lloc_ps(2)=0
 /
+&rgrid
+  dl = 0.25d0, 0.25d0, 0.25d0
+/
+&scf
+  nscf = 1000
+  convergence = 'norm_rho_dng'
+  threshold = 1.d-15
+/
 &functional
   xc = 'PZ'
-/
-&tgrid
-  dt=1.25d-3
-  nt=4800
-/
-&emfield
-  ae_shape1 = 'Ecos2'
-  epdir_re1 = 0.d0,0.d0,1.d0
-  I_wcm2_1 = 1.d8
-  omega1=9.28d0
-  tw1=6.d0
-  phi_cep1=0.75d0
 /
 &atomic_coor
 'C'    0.000000    0.000000    0.599672  1
