@@ -13,7 +13,7 @@ add_custom_target("check_test_requirements" COMMAND ${CMAKE_CTEST_COMMAND} DEPEN
 add_custom_target("test_preparations" ALL
                   COMMAND ${CMAKE_COMMAND} -E cmake_echo_color --cyan "generate ctest scripts"
                   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/pseudo" "${CMAKE_CURRENT_BINARY_DIR}/pseudo"
-                  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/examples"       "${CMAKE_BINARY_DIR}/examples")
+                  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/samples"       "${CMAKE_BINARY_DIR}/samples")
 
 # test directories
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/001_bulk_gs")
