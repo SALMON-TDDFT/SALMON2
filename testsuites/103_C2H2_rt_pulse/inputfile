@@ -38,7 +38,7 @@
 &emfield
   ae_shape1 = 'Ecos2'
   epdir_re1 = 0.d0,0.d0,1.d0
-  I_wcm2_1 = 1.d8
+  I_wcm2_1 = 1.d11
   omega1=9.28d0
   tw1=6.d0
   phi_cep1=0.75d0
