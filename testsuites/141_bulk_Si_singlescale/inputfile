@@ -58,7 +58,7 @@
   I_wcm2_1 = 1d14
   omega1 = 0.05696145187d0
   tw1 = 441.195136248d0
-  epdir_re1 = 0., 0., 1.
+  epdir_re1 = 1., 0., 0.
 /
 
 &atomic_coor
