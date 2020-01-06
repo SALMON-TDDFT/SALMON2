@@ -85,6 +85,9 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 
   if(.not.allocated(fw%vec_Ac)) then
     call init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
+    allocate(fw%box(ng%is_array(1):ng%ie_array(1), &
+    & ng%is_array(2):ng%ie_array(2), &
+    & ng%is_array(3):ng%ie_array(3)))
     fw%box = 0d0
   !$OMP parallel do collapse(2) private(ix,iy,iz)
     do iz=ng_sta(3),ng_end(3)
@@ -452,8 +455,7 @@ contains
 
     allocate(fw%integral_poynting(lg_sta(3):lg_end(3)))
 
-    allocate(fw%box(ng_sta(1)-Nd:ng_end(1)+Nd,ng_sta(2)-Nd:ng_end(2)+Nd,ng_sta(3)-Nd:ng_end(3)+Nd) &
-          & ,fw%rotation_A(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
+    allocate(fw%rotation_A(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
      & ,fw%poynting_vector(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
           & ,fw%divergence_A(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
           & ,fw%vbox      (3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) &
