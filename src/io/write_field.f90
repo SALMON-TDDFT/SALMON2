@@ -209,9 +209,9 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   real(8) :: rho_half(mg%is(1):mg%ie(1),   &
                       mg%is(2):mg%ie(2),   &
                       mg%is(3):mg%ie(3))
-  real(8) :: box(ng%is(1)-Nd:ng%ie(1)+Nd,   &
-                 ng%is(2)-Nd:ng%ie(2)+Nd,   &
-                 ng%is(3)-Nd:ng%ie(3)+Nd)
+  real(8) :: box(ng%is_array(1):ng%ie_array(1), &
+  & ng%is_array(2):ng%ie_array(2), &
+  & ng%is_array(3):ng%ie_array(3))
   real(8) :: matbox_l(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ calc_elf"
@@ -285,7 +285,7 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
     end do
     
     call update_overlap_real8(srg_ng, ng, box)
-    call calc_gradient_field(ng%is,ng%ie,stencil%coef_nab,box,gradrho)
+    call calc_gradient_field(ng,stencil%coef_nab,box,gradrho)
 
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
@@ -362,9 +362,9 @@ subroutine write_estatic(lg,ng,hgs,stencil,info_field,sVh,srg_ng,itt)
   real(8) :: grad_Vh(3,ng%is(1):ng%ie(1),   &
                        ng%is(2):ng%ie(2),   &
                        ng%is(3):ng%ie(3))
-  real(8) :: box(ng%is(1)-Nd:ng%ie(1)+Nd,   &
-                 ng%is(2)-Nd:ng%ie(2)+Nd,   &
-                 ng%is(3)-Nd:ng%ie(3)+Nd)
+  real(8) :: box(ng%is_array(1):ng%ie_array(1), &
+  & ng%is_array(2):ng%ie_array(2), &
+  & ng%is_array(3):ng%ie_array(3))
   real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: rmat,rmat2
   
   do iz=ng%is(3),ng%ie(3)
@@ -376,7 +376,7 @@ subroutine write_estatic(lg,ng,hgs,stencil,info_field,sVh,srg_ng,itt)
   end do
 
   call update_overlap_real8(srg_ng, ng, box)
-  call calc_gradient_field(ng%is,ng%ie,stencil%coef_nab,box,grad_Vh)
+  call calc_gradient_field(ng,stencil%coef_nab,box,grad_Vh)
 
   do jj=1,3
     

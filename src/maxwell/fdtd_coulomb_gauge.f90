@@ -100,7 +100,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
     end do
     end do
     call update_overlap_real8(srg_ng, ng, fw%box)
-    call calc_gradient_field(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh_old)
+    call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -125,7 +125,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 
 ! calculate grad_dVh_dt: gradient of d(Vh)/dt (Vh: Hartree potential)
   call update_overlap_real8(srg_ng, ng, fw%box)
-  call calc_gradient_field(ng_sta,ng_end,fw%coef_nab,fw%box,fw%grad_Vh) ! grad[Vh(t+dt/2)]
+  call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh) ! grad[Vh(t+dt/2)]
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=ng_sta(3),ng_end(3)

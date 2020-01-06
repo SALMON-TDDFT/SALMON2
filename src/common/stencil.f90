@@ -402,20 +402,23 @@ end subroutine calc_gradient_psi
 # define DDY(dt) ix,(iy+(dt)),iz
 # define DDZ(dt) ix,iy,(iz+(dt))
 
-subroutine calc_gradient_field(is,ie,nabt,box,grad)
+subroutine calc_gradient_field(ng,nabt,box,grad)
+  use structures
   implicit none
-  integer      ,intent(in) :: is(3),ie(3)
+  type(s_rgrid),intent(in) :: ng
   real(8)      ,intent(in) :: nabt(4,3)
-  real(8)      ,intent(in) :: box(is(1)-4:ie(1)+4,is(2)-4:ie(2)+4,is(3)-4:ie(3)+4)
-  real(8)                  :: grad(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
+  real(8)      ,intent(in) :: box(ng%is_array(1):ng%ie_array(1), &
+                                & ng%is_array(2):ng%ie_array(2), &
+                                & ng%is_array(3):ng%ie_array(3))
+  real(8)                  :: grad(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
   !
   integer :: ix,iy,iz
   real(8) :: w(3)
 !$OMP parallel
 !$OMP do private(iz,iy,ix,w)
-  do iz=is(3),ie(3)
-  do iy=is(2),ie(2)
-  do ix=is(1),ie(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     w(1) =  nabt(1,1)*(box(DDX(1)) - box(DDX(-1))) &
          & +nabt(2,1)*(box(DDX(2)) - box(DDX(-2))) &
          & +nabt(3,1)*(box(DDX(3)) - box(DDX(-3))) &
