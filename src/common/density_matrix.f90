@@ -713,7 +713,7 @@ contains
       call timer_end(LOG_MCURRENT_COMM_COLL)
 
       call timer_begin(LOG_MCURRENT_CALC)
-      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%idx,mg%idy,mg%idz,mg%ndir)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%ndir)
 
       curr%v = curr%v + wrk + wrk2
       call timer_end(LOG_MCURRENT_CALC)
@@ -744,10 +744,9 @@ contains
       return
     end subroutine kvec_part
 
-    subroutine stencil_current(jw,zdm,nabt,is,ie,idx,idy,idz,ndir)
+    subroutine stencil_current(jw,zdm,nabt,is,ie,ndir)
       implicit none
-      integer   ,intent(in) :: is(3),ie(3) &
-                              ,idx(is(1)-Nd:ie(1)+Nd),idy(is(2)-Nd:ie(2)+Nd),idz(is(3)-Nd:ie(3)+Nd),ndir
+      integer   ,intent(in) :: is(3),ie(3),ndir
       real(8)   ,intent(in) :: nabt(Nd,3)
       complex(8),intent(in) :: zdm(Nd,ndir,is(1)-Nd:ie(1),is(2)-Nd:ie(2),is(3)-Nd:ie(3))
       real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
@@ -760,28 +759,28 @@ contains
 
 !OCL swp
         do ix=is(1),ie(1)
-          xtmp = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,idx(ix-1),iy,iz)) ) & ! dmat(x,-dx)==conjg(dmat(x-dx,dx))
-               + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,idx(ix-2),iy,iz)) ) &
-               + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,idx(ix-3),iy,iz)) ) &
-               + nabt(4,1) * ( zdm(4,1,ix,iy,iz) - conjg(zdm(4,1,idx(ix-4),iy,iz)) )
+          xtmp = nabt(1,1) * ( zdm(1,1,ix,iy,iz) - conjg(zdm(1,1,ix-1,iy,iz)) ) & ! dmat(x,-dx)==conjg(dmat(x-dx,dx))
+               + nabt(2,1) * ( zdm(2,1,ix,iy,iz) - conjg(zdm(2,1,ix-2,iy,iz)) ) &
+               + nabt(3,1) * ( zdm(3,1,ix,iy,iz) - conjg(zdm(3,1,ix-3,iy,iz)) ) &
+               + nabt(4,1) * ( zdm(4,1,ix,iy,iz) - conjg(zdm(4,1,ix-4,iy,iz)) )
           jw(1,ix,iy,iz) = aimag(xtmp)
         end do
 
 !OCL swp
         do ix=is(1),ie(1)
-          ytmp = nabt(1,2) * ( zdm(1,2,ix,iy,iz) - conjg(zdm(1,2,ix,idy(iy-1),iz)) ) &
-               + nabt(2,2) * ( zdm(2,2,ix,iy,iz) - conjg(zdm(2,2,ix,idy(iy-2),iz)) ) &
-               + nabt(3,2) * ( zdm(3,2,ix,iy,iz) - conjg(zdm(3,2,ix,idy(iy-3),iz)) ) &
-               + nabt(4,2) * ( zdm(4,2,ix,iy,iz) - conjg(zdm(4,2,ix,idy(iy-4),iz)) )
+          ytmp = nabt(1,2) * ( zdm(1,2,ix,iy,iz) - conjg(zdm(1,2,ix,iy-1,iz)) ) &
+               + nabt(2,2) * ( zdm(2,2,ix,iy,iz) - conjg(zdm(2,2,ix,iy-2,iz)) ) &
+               + nabt(3,2) * ( zdm(3,2,ix,iy,iz) - conjg(zdm(3,2,ix,iy-3,iz)) ) &
+               + nabt(4,2) * ( zdm(4,2,ix,iy,iz) - conjg(zdm(4,2,ix,iy-4,iz)) )
           jw(2,ix,iy,iz) = aimag(ytmp)
         end do
 
 !OCL swp
         do ix=is(1),ie(1)
-          ztmp = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,idz(iz-1))) ) &
-               + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,idz(iz-2))) ) &
-               + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,idz(iz-3))) ) &
-               + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,idz(iz-4))) )
+          ztmp = nabt(1,3) * ( zdm(1,3,ix,iy,iz) - conjg(zdm(1,3,ix,iy,iz-1)) ) &
+               + nabt(2,3) * ( zdm(2,3,ix,iy,iz) - conjg(zdm(2,3,ix,iy,iz-2)) ) &
+               + nabt(3,3) * ( zdm(3,3,ix,iy,iz) - conjg(zdm(3,3,ix,iy,iz-3)) ) &
+               + nabt(4,3) * ( zdm(4,3,ix,iy,iz) - conjg(zdm(4,3,ix,iy,iz-4)) )
           jw(3,ix,iy,iz) = aimag(ztmp)
         end do
 
