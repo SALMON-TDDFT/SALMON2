@@ -67,11 +67,15 @@ subroutine subdip(itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
      time = dble(itt) * dt * au_time_fs
      select case(iperiodic)
      case(0)
-        write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
-            itt,time, rt%dDp_e(1:3,itt)*au_length_aa, rNe, Etot*au_energy_ev,poisson%iterVh
+       if(mod(itt,itcalc_ene)==0)then
+          write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')       &
+              itt,time, rt%dDp_e(1:3,itt)*au_length_aa, rNe, Etot*au_energy_ev,poisson%iterVh
+       end if
      case(3)
-        write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
-            itt, time, rt%curr(1:3,itt), rNe, Etot*au_energy_ev
+       if(mod(itt,itcalc_ene)==0)then
+         write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
+             itt, time, rt%curr(1:3,itt), rNe, Etot*au_energy_ev
+       end if
      end select
   end if
 
