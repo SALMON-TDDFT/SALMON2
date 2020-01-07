@@ -382,16 +382,15 @@ CONTAINS
     use salmon_global, only: theory,yn_opt,yn_md
     implicit none
     logical :: rion_update
-  
+
     select case(theory)
     case('DFT','DFT_BAND','DFT_MD')
       rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
     case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
       rion_update = (yn_md == 'y')
     case default
-      rion_update = .true.
+      rion_update = .false.
     end select
-  
   end function
 
 END MODULE salmon_Total_Energy
