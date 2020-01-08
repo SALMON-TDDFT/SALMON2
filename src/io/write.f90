@@ -609,7 +609,7 @@ contains
     use structures, only: s_ofile,s_dft_energy,s_md
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_global, only: ensemble, thermostat
+    use salmon_global, only: ensemble, thermostat, itcalc_ene
     use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
@@ -677,39 +677,40 @@ contains
        flush(uid)
 
     else  !it>=0
-       uid = ofl%fh_rt_energy
-
-       write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
-          & it * dt * t_unit_time%conv,        &
-          & energy%E_tot * t_unit_energy%conv, &
-          & (energy%E_tot-energy%E_tot0) * t_unit_energy%conv
-       if(yn_md=='y') then
-       write(uid, "(99(1X,E23.15E3))",advance='no') &
-          & md%Tene * t_unit_energy%conv, &
-          & md%Temperature,               &
-          & md%E_work * t_unit_energy%conv
-       endif
-
-
-!        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
-!          & it * dt * t_unit_time%conv, &
-!          & Eall_t(it) * t_unit_energy%conv, &
-!          & (Eall_t(it) - Eall0) * t_unit_energy%conv
-!        if(yn_md=='y') then
-!        write(uid, "(99(1X,E23.15E3))",advance='no') &
-!          & Tion_t(it) * t_unit_energy%conv, &
-!          & Temperature_ion_t(it), &
-!          & Ework_integ_fdR(it) * t_unit_energy%conv
-!        if(ensemble=="NVT".and.thermostat=="nose-hoover")then
-!        write(uid, "(99(1X,E23.15E3))",advance='no') &
-!          & Enh_t(it) * t_unit_energy%conv, &
-!          & Hnvt_t(it) * t_unit_energy%conv, &
-!          & (Tion_t(it)+Ework_integ_fdR(it)+Enh_t(it)) * t_unit_energy%conv
-!        endif
-!        endif
-       write(uid,*)
-       flush(uid)  !for debug
-
+       if(mod(it,itcalc_ene)==0)then
+          uid = ofl%fh_rt_energy
+   
+          write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+             & it * dt * t_unit_time%conv,        &
+             & energy%E_tot * t_unit_energy%conv, &
+             & (energy%E_tot-energy%E_tot0) * t_unit_energy%conv
+          if(yn_md=='y') then
+          write(uid, "(99(1X,E23.15E3))",advance='no') &
+             & md%Tene * t_unit_energy%conv, &
+             & md%Temperature,               &
+             & md%E_work * t_unit_energy%conv
+          endif
+   
+   
+   !        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
+   !          & it * dt * t_unit_time%conv, &
+   !          & Eall_t(it) * t_unit_energy%conv, &
+   !          & (Eall_t(it) - Eall0) * t_unit_energy%conv
+   !        if(yn_md=='y') then
+   !        write(uid, "(99(1X,E23.15E3))",advance='no') &
+   !          & Tion_t(it) * t_unit_energy%conv, &
+   !          & Temperature_ion_t(it), &
+   !          & Ework_integ_fdR(it) * t_unit_energy%conv
+   !        if(ensemble=="NVT".and.thermostat=="nose-hoover")then
+   !        write(uid, "(99(1X,E23.15E3))",advance='no') &
+   !          & Enh_t(it) * t_unit_energy%conv, &
+   !          & Hnvt_t(it) * t_unit_energy%conv, &
+   !          & (Tion_t(it)+Ework_integ_fdR(it)+Enh_t(it)) * t_unit_energy%conv
+   !        endif
+   !        endif
+          write(uid,*)
+          flush(uid)  !for debug
+       end if
     endif
     endif
 
