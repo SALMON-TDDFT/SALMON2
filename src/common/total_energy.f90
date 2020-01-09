@@ -112,7 +112,7 @@ CONTAINS
     use structures
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
-    use communication, only: comm_summation
+    use communication, only: comm_summation,comm_get_groupinfo
     use timer
     implicit none
     type(s_dft_system) ,intent(in) :: system
@@ -121,10 +121,11 @@ CONTAINS
     type(s_dft_energy)             :: energy
     logical,intent(in)             :: rion_update
     !
-    integer :: ix,iy,iz,ia,ib,ig
-    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(4),E_sum(4)
+    integer :: ix,iy,iz,ia,ib,ig,zps1,zps2
+    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(5),E_sum(5)
     real(8) :: etmp
     complex(8) :: rho_e,rho_i
+    integer :: irank,nproc,nion_r,nion_s,nion_e
 
     call timer_begin(LOG_TE_PERIODIC_CALC)
 
@@ -133,15 +134,20 @@ CONTAINS
     E_tmp = 0d0
     E_tmp_l = 0d0
     if (rion_update) then ! Ewald sum
+      call comm_get_groupinfo(fg%icomm_G,irank,nproc)
+      nion_r = (system%nion + 1) / nproc
+      nion_s = nion_r * irank + 1
+      nion_e = nion_s + nion_r - 1
+      if (irank == nproc-1) nion_e = system%nion
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ia,ib,ix,iy,iz,r,rab,rr) &
-!$omp          shared(NEwald,system,pp,Kion,aEwald)
+!$omp          shared(NEwald,system,pp,Kion,aEwald,nion_s,nion_e)
       do ia=1,system%nion
       do ix=-NEwald,NEwald
       do iy=-NEwald,NEwald
       do iz=-NEwald,NEwald
-        do ib=1,system%nion
+        do ib=nion_s,nion_e
           !if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle ! iwata
           r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
           r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
@@ -157,7 +163,6 @@ CONTAINS
       end do
       end do
 !$omp end parallel do
-    E_tmp = E_tmp - Pi*sum(pp%Zps(Kion(:)))**2/(2*aEwald*sysvol)-sqrt(aEwald/Pi)*sum(pp%Zps(Kion(:))**2)
 
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_tmp_l) &
@@ -212,9 +217,21 @@ CONTAINS
 
     if (rion_update) then
       E_wrk(4) = E_tmp_l
-      call comm_summation(E_wrk,E_sum,4,fg%icomm_G)
+      E_wrk(5) = E_tmp
+      call comm_summation(E_wrk,E_sum,5,fg%icomm_G)
+
   ! ion-ion energy
-      energy%E_ion_ion = E_tmp + E_sum(4)
+      zps1 = 0
+      zps2 = 0
+!$omp parallel do default(none) private(ia) shared(system,pp,Kion) reduction(+:zps1,zps2)
+      do ia=1,system%nion
+        zps1 = zps1 + pp%Zps(Kion(ia))
+        zps2 = zps2 + pp%Zps(Kion(ia))**2
+      end do
+!$omp end parallel do
+
+      E_sum(5) = E_sum(5) - Pi*zps1**2/(2*aEwald*sysvol) - sqrt(aEwald/Pi)*zps2
+      energy%E_ion_ion = E_sum(5) + E_sum(4)
     else
       call comm_summation(E_wrk,E_sum,3,fg%icomm_G)
     end if
