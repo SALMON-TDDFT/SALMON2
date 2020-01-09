@@ -247,6 +247,10 @@ module structures
     integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process
     integer,allocatable :: icomm_atom(:)     ! communicator for uVpsi(n:m)
+    ! for reducing pseudo-potential parallelization costs.
+    integer             :: ilocal_nlma         ! number of own nlma
+    integer,allocatable :: ilocal_nlma2ilma(:) ! ilocal_nlma to global nlma
+    integer,allocatable :: ilocal_nlma2ia(:)   ! ilocal_nlma to atom number (ia_tbl)
   end type s_pp_grid
 
   type s_pp_nlcc
