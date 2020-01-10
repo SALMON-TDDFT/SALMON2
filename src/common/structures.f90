@@ -78,18 +78,6 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
   end type s_rgrid
 
-  type s_rt
-     real(8) :: Dp0_e(3)     !rename later
-     real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
-     real(8), allocatable :: rIe(:)    !rename later
-     real(8), allocatable :: curr(:,:), E_ext(:,:), E_ind(:,:), E_tot(:,:)
-     real(8), allocatable :: Ac_ext(:,:), Ac_ind(:,:), Ac_tot(:,:)
-     complex(8), allocatable :: zc(:)
-     type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
-     type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)
-     type(s_scalar)       :: vonf, eonf(3)
-  end type s_rt
-
   type s_process_info
     integer :: npk
     integer :: nporbital
@@ -330,34 +318,34 @@ module structures
   end type s_fdtd_field
 
   type s_md
-     real(8) :: Uene,  E_tot, Tene, E_work, E_nh, Htot
-     real(8) :: Uene0, E_tot0 
-     real(8) :: Enh_gkTlns, xi_nh, Qnh, gkT 
-     real(8) :: Temperature
-     real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
+    real(8) :: Uene,  E_tot, Tene, E_work, E_nh, Htot
+    real(8) :: Uene0, E_tot0
+    real(8) :: Enh_gkTlns, xi_nh, Qnh, gkT
+    real(8) :: Temperature
+    real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
 ! output files
   type s_ofile
-     integer :: fh_eigen
-     integer :: fh_rt
-     integer :: fh_rt_energy
-     integer :: fh_response
-     integer :: fh_pulse
-     integer :: fh_dft_md
-     integer :: fh_proj
-     character(100) :: file_eigen_data
-     character(256) :: file_rt_data
-     character(256) :: file_rt_energy_data
-     character(256) :: file_response_data
-     character(256) :: file_pulse_data
-     character(256) :: file_dft_md
-     character(256) :: file_proj_data
-     !
-     character(256) :: dir_out_restart, dir_out_checkpoint
+    integer :: fh_eigen
+    integer :: fh_rt
+    integer :: fh_rt_energy
+    integer :: fh_response
+    integer :: fh_pulse
+    integer :: fh_dft_md
+    integer :: fh_proj
+    character(100) :: file_eigen_data
+    character(256) :: file_rt_data
+    character(256) :: file_rt_energy_data
+    character(256) :: file_response_data
+    character(256) :: file_pulse_data
+    character(256) :: file_dft_md
+    character(256) :: file_proj_data
+    !
+    character(256) :: dir_out_restart, dir_out_checkpoint
   end type s_ofile
 
-! for DFT ground state calculations
+! for DFT ground-state calculations
 
   type s_cg
     type(s_orbital) :: xk,hxk,gk,pk,pko,hwf
@@ -369,10 +357,25 @@ module structures
   end type s_mixing
 
   type s_band_dft
-     integer :: num_band_kpt, nref_band
-     real(8),allocatable :: band_kpt(:,:)
-     logical,allocatable :: check_conv_esp(:,:,:)
+    integer :: num_band_kpt, nref_band
+    real(8),allocatable :: band_kpt(:,:)
+    logical,allocatable :: check_conv_esp(:,:,:)
   end type s_band_dft
+
+! for TDDFT real-time calculations
+
+  type s_rt
+    real(8) :: Dp0_e(3)     !rename later
+    real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
+    real(8), allocatable :: rIe(:)    !rename later
+    real(8), allocatable :: curr(:,:), E_ext(:,:), E_ind(:,:), E_tot(:,:)
+    real(8), allocatable :: Ac_ext(:,:), Ac_ind(:,:), Ac_tot(:,:)
+    complex(8), allocatable :: zc(:)
+    type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
+    type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)
+    type(s_scalar) :: vonf, eonf(3)
+    type(s_vector) :: j_e ! microscopic electron number current density
+  end type s_rt
 
 !===================================================================================================================================
 

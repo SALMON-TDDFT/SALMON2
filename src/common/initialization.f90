@@ -34,17 +34,17 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
   implicit none
-  integer,intent(in) :: comm
+  integer      ,intent(in) :: comm
   type(s_process_info)     :: pinfo
   type(s_orbital_parallel) :: info
   type(s_field_parallel)   :: info_field
-  type(s_rgrid)      :: lg,mg,ng
-  type(s_dft_system) :: system
-  type(s_stencil)    :: stencil
-  type(s_reciprocal_grid) :: fg
-  type(s_poisson)    :: poisson
-  type(s_sendrecv_grid) :: srg,srg_ng
-  type(s_ofile)      :: ofile
+  type(s_rgrid)            :: lg,mg,ng
+  type(s_dft_system)       :: system
+  type(s_stencil)          :: stencil
+  type(s_reciprocal_grid)  :: fg
+  type(s_poisson)          :: poisson
+  type(s_sendrecv_grid)    :: srg,srg_ng
+  type(s_ofile)            :: ofile
   !
   integer,dimension(2,3) :: neig,neig_ng
 
@@ -53,6 +53,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   call init_dft_system(lg,system,stencil)
 
 ! parallelization
+
   pinfo%npk              = nproc_k
   pinfo%nporbital        = nproc_ob
   pinfo%npdomain_orbital = nproc_domain_orbital
@@ -300,14 +301,13 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   info%io_e = (info%id_o+1) * system%no / nproc_ob
   info%numo = info%io_e - info%io_s + 1
 
-! for parallelization
+! flags
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
   info%if_divide_orbit  = nproc_ob.ne.1
 
+! process ID corresponding to the orbital index io
   if ( allocated(info%irank_io) ) deallocate(info%irank_io)
   allocate(info%irank_io(1:system%no))
-
-! process ID corresponding to the orbital index io
   do io=1, system%no
     if(mod(io*nproc_ob,system%no)==0)then
       info%irank_io(io) = io*nproc_ob/system%no - 1

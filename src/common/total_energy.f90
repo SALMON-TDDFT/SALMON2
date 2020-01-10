@@ -15,7 +15,6 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 MODULE salmon_Total_Energy
-  use math_constants,only : pi,zi
 implicit none
 
 CONTAINS
@@ -111,6 +110,7 @@ CONTAINS
   SUBROUTINE calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
     use structures
     use salmon_math
+    use math_constants,only : pi,zi
     use salmon_global, only: kion,NEwald,aEwald
     use communication, only: comm_summation,comm_get_groupinfo
     use timer

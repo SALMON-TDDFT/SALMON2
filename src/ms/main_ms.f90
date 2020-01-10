@@ -61,7 +61,6 @@ type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
-type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 type(s_ofile) :: ofile
 
