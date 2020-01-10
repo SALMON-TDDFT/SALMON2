@@ -33,7 +33,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   if(nspin==1) then
     rt%curr(1:3,itt) = curr_in(1:3,1)
   else if(nspin==2) then
-    rt%curr(1:3,itt) = rt%curr(1:3,itt) + curr_in(1:3,1) + curr_in(1:3,2)
+    rt%curr(1:3,itt) = curr_in(1:3,1) + curr_in(1:3,2)
   end if
 
   if(trans_longi=="lo")then
