@@ -13,23 +13,17 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-MODULE global_variables_rt
-
-use inputoutput
-implicit none
-
-END MODULE global_variables_rt
 
 !=======================================================================
 
 subroutine main_tddft
 use math_constants, only: pi
+use salmon_global
 use structures
 use parallelization, only: nproc_id_global
 use communication, only: comm_is_root, comm_sync_all
 use salmon_xc, only: finalize_xc
 use timer
-use global_variables_rt
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
 use fdtd_coulomb_gauge, only: ls_singlescale
@@ -60,7 +54,6 @@ type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
-type(s_vector)  :: j_e ! microscopic electron number current density
 type(ls_singlescale) :: singlescale
 
 integer :: Mit
@@ -73,7 +66,7 @@ call initialization_rt( Mit, itotNtime, system, energy, rt, md, singlescale,  &
                         stencil, fg, poisson,  &
                         lg, mg, ng,  &
                         info, info_field,  &
-                        xc_func, dmat, ofl, j_e,  &
+                        xc_func, dmat, ofl,  &
                         srg, srg_ng,  &
                         spsi_in, spsi_out, tpsi, srho, srho_s,  &
                         V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
@@ -86,11 +79,11 @@ TE : do itt=Mit+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
+     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,singlescale)
   else
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
+     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,singlescale)
   end if
 
   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then

@@ -20,23 +20,26 @@ module em_field
 contains
 
 !===================================================================================================================================
-subroutine calc_emfields(itt,rt,curr_in)
+
+subroutine calc_emfields(itt,nspin,curr_in,rt)
   use structures, only : s_rt
   use math_constants, only : pi
-  use salmon_global, only : ispin,dt
-  use inputoutput, only: trans_longi
+  use salmon_global, only : dt,trans_longi
   implicit none
-  integer,intent(in) :: itt
+  integer   ,intent(in)    :: itt,nspin
+  real(8)   ,intent(in)    :: curr_in(3,nspin)
   type(s_rt),intent(inout) :: rt
-  real(8),intent(in) :: curr_in(3,2)  !curr_in(3,nspin)??
 
-  rt%curr(1:3,itt) = curr_in(1:3,1)
-  if(ispin==1) rt%curr(1:3,itt) = rt%curr(1:3,itt) + curr_in(1:3,2)  !<-- only if nspin==2??
+  if(nspin==1) then
+    rt%curr(1:3,itt) = curr_in(1:3,1)
+  else if(nspin==2) then
+    rt%curr(1:3,itt) = rt%curr(1:3,itt) + curr_in(1:3,1) + curr_in(1:3,2)
+  end if
 
   if(trans_longi=="lo")then
-    rt%Ac_ind(:,itt+1)=2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
+    rt%Ac_ind(:,itt+1) = 2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
   else if(trans_longi=="tr")then
-    rt%Ac_ind(:,itt+1)=0d0
+    rt%Ac_ind(:,itt+1) = 0d0
   end if
 
   rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
@@ -48,57 +51,7 @@ subroutine calc_emfields(itt,rt,curr_in)
 end subroutine calc_emfields
 
 !===================================================================================================================================
-subroutine calc_Aext(Mit,itotNtime,rt)
-!$ use omp_lib
-  use structures, only : s_rt
-  use salmon_global, only: dt
-  use math_constants, only: pi
-  implicit none
-  integer :: itt,Mit,itotNtime
-    type(s_rt),intent(inout) :: rt
-  real(8) :: tt
-  do itt=Mit+1,itotNtime+1
-     tt = dt*dble(itt)
-     call calc_Ac_ext(tt,rt%Ac_ext(:,itt))
-  end do
-  return
-end subroutine calc_Aext
 
-!===================================================================================================================================
-subroutine init_A(Ntime,Mit,rt)
-  use structures, only : s_rt
-  use salmon_global, only: yn_restart
-  implicit none
-  type(s_rt),intent(inout) :: rt
-  integer :: Ntime,Mit
-  integer :: t_max
-  
-  if(yn_restart /= 'y')then
-    t_max = Ntime
-  else
-    t_max = Ntime + Mit
-  end if
-  
-  allocate( rt%curr( 3,0:t_max) )
-  allocate( rt%E_ext(3,0:t_max) )
-  allocate( rt%E_ind(3,0:t_max) )
-  allocate( rt%E_tot(3,0:t_max) )
-  allocate( rt%Ac_ext(3,0:t_max+1) )
-  allocate( rt%Ac_ind(3,0:t_max+1) )
-  allocate( rt%Ac_tot(3,0:t_max+1) )
-  
-  rt%curr =0d0
-  rt%E_ext=0d0
-  rt%E_ind=0d0
-  rt%E_tot=0d0
-  
-  rt%Ac_ext   =0d0
-  rt%Ac_ind   =0d0
-  rt%Ac_tot   =0d0
-  
-end subroutine init_A
-
-!===================================================================================================================================
 Subroutine calc_Ac_ext(t,Ac_ext)
   use math_constants,only: zi,pi
   use salmon_global, only: I_wcm2_1,I_wcm2_2,E_amplitude1,E_amplitude2,ae_shape1,ae_shape2, &
@@ -287,6 +240,8 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   return
 End Subroutine calc_Ac_ext
 
+!===================================================================================================================================
+
 Subroutine calc_E_ext(ipulse,t,E_ext,amp_flag)
   use salmon_global,  only: ae_shape1,ae_shape2,tw1,tw2,omega1,omega2,&
                             phi_cep1,phi_cep2,E_amplitude1,E_amplitude2,t1_t2
@@ -332,8 +287,8 @@ Subroutine calc_E_ext(ipulse,t,E_ext,amp_flag)
   
   return
 End Subroutine calc_E_ext
-!
-!=======================================================================
+
+!===================================================================================================================================
 
 subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
   use structures, only: s_rgrid, s_dft_system, s_rt, s_scalar
@@ -341,7 +296,6 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
   use misc_routines, only: get_wtime
   use inputoutput
   implicit none
-  
   type(s_rgrid),intent(in) :: mg,lg
   integer :: itt_t
   type(s_dft_system),intent(inout) :: system
@@ -352,8 +306,6 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
   integer :: ipulse
   real(8) :: env_trigon_1,env_trigon_2
   integer,parameter :: Nd = 4
-
-
 
   if(iperiodic==0)then
     if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
@@ -464,8 +416,9 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
   end if
 
   return
-  
 end subroutine calcVbox
+
+!===================================================================================================================================
 
 subroutine set_vonf(mg,lg,Hgs,rt)
 !$ use omp_lib
@@ -547,9 +500,7 @@ subroutine set_vonf(mg,lg,Hgs,rt)
   end do
 
   return
-
 end subroutine set_vonf
-
 
 end module em_field
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130

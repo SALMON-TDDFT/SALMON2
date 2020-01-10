@@ -18,7 +18,7 @@
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
-&   md,ofl,poisson,j_e,singlescale)
+&   md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
@@ -62,7 +62,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   type(s_scalar), intent(inout) :: sVh_stock1,sVh_stock2,Vbox
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
-  type(s_vector) :: j_e ! microscopic electron number current density
   type(ls_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
@@ -268,11 +267,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then
-      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin)) !curr_e_tmp(1:3,1:2)??
+      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
     else
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
     end if
-    call calc_emfields(itt,rt,curr_e_tmp)
+    call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
     call timer_end(LOG_CALC_CURRENT)
 
     if(yn_md=='y') then
@@ -286,10 +285,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
     if(use_singlescale=='y') then
-      call calc_microscopic_current(system,mg,stencil,info,spsi_out,dmat,j_e)
+      call calc_microscopic_current(system,mg,stencil,info,spsi_out,dmat,rt%j_e)
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,info%icomm_rko,lg,mg,ng,system%hgs,srho, &
-      & sVh,j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
+      & sVh,rt%j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
     end if
 

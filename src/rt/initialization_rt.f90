@@ -25,7 +25,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, rt, md, singlescal
                      stencil, fg, poisson,  &
                      lg, mg, ng,  &
                      info, info_field,  &
-                     xc_func, dmat, ofl, j_e,  &
+                     xc_func, dmat, ofl,  &
                      srg, srg_ng,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
                      V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
@@ -54,7 +54,7 @@ use inputoutput
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
-  use em_field, only: set_vonf,init_A,calc_Aext
+  use em_field, only: set_vonf,calc_Ac_ext
   use dip, only: calc_dip
   implicit none
   integer,parameter :: Nd = 4
@@ -87,7 +87,6 @@ use inputoutput
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
-  type(s_vector)  :: j_e ! microscopic electron number current density
   type(ls_singlescale) :: singlescale
   type(s_ofile) :: ofile
   
@@ -95,12 +94,12 @@ use inputoutput
   integer :: iob, i,i1,i2,i3, iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
-  real(8) :: rbox_array2(4)
+  real(8) :: rbox_array2(4),tt
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
-  integer :: itt
+  integer :: itt,t_max
   
   call timer_begin(LOG_INIT_RT)
 
@@ -256,7 +255,28 @@ use inputoutput
   allocate( rt%Dp_e(  3,0:Ntime) )
   allocate( rt%Dp_i(  3,0:Ntime) )
   allocate( rt%Qp_e(3,3,0:Ntime) )
-  call init_A(Ntime,Mit,rt)
+  
+  if(yn_restart /= 'y')then
+    t_max = Ntime
+  else
+    t_max = Ntime + Mit
+  end if
+  allocate( rt%curr( 3,0:t_max) )
+  allocate( rt%E_ext(3,0:t_max) )
+  allocate( rt%E_ind(3,0:t_max) )
+  allocate( rt%E_tot(3,0:t_max) )
+  allocate( rt%Ac_ext(3,0:t_max+1) )
+  allocate( rt%Ac_ind(3,0:t_max+1) )
+  allocate( rt%Ac_tot(3,0:t_max+1) )
+  
+  rt%curr  = 0d0
+  rt%E_ext = 0d0
+  rt%E_ind = 0d0
+  rt%E_tot = 0d0
+  rt%Ac_ext = 0d0
+  rt%Ac_ind = 0d0
+  rt%Ac_tot = 0d0
+  
   itotNtime = Ntime
   if (yn_restart /= 'y') Mit=0
   call timer_end(LOG_READ_RT_DATA)
@@ -398,14 +418,19 @@ use inputoutput
       end if
     end do
   
-  if(iperiodic==3) call calc_Aext(Mit,itotNtime,rt)
+  if(iperiodic==3) then
+    do itt=Mit+1,itotNtime+1
+      tt = dt*dble(itt)
+      call calc_Ac_ext(tt,rt%Ac_ext(:,itt))
+    end do
+  end if
   
   if(yn_md=='y') call init_md(system,md)
   
   ! single-scale Maxwell-TDDFT
   if(use_singlescale=='y') then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
-    call allocate_vector(mg,j_e)
+    call allocate_vector(mg,rt%j_e)
     call allocate_scalar(mg,system%div_Ac)
     call allocate_vector(mg,system%Ac_micro)
   end if

@@ -15,7 +15,6 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module force_sub
-  use math_constants,only : pi,zi
   implicit none
 
 contains
@@ -24,6 +23,7 @@ contains
 
   subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi)
     use structures
+    use math_constants,only : zi
     use stencil_sub, only: calc_gradient_psi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use communication, only: comm_summation
@@ -240,6 +240,7 @@ contains
 
   subroutine force_ion_ion(F_sum,F_tmp,system,pp,fg,nion)
     use structures
+    use math_constants,only : pi,zi
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
     use communication, only: comm_summation
