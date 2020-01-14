@@ -36,15 +36,15 @@ subroutine init_dir_out_restart(ofl)
   type(s_ofile), intent(inout) :: ofl
 
   select case(theory)
-    case('DFT','DFT_MD')
+    case('dft','dft_md')
       ofl%dir_out_restart = 'data_for_restart/'
       call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
-    case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT')
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft')
       if (write_rt_wfn_k == 'y') then
         ofl%dir_out_restart = 'data_for_restart_rt/'
         call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
       end if
-    case('DFT2TDDFT')
+    case('dft2tddft')
       ofl%dir_out_restart = 'data_for_restart_rt/'
       call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
   end select
@@ -257,14 +257,14 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   call write_wavefunction(odir,lg,mg,system,info,spsi,iself)
 
   !rho_inout
-  if((theory=='DFT'.or.calc_mode=='GS'))then
+  if((theory=='dft'.or.calc_mode=='GS'))then
     if (present(mixing)) then
       call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
     end if
   end if
 
   !Vh_stock
-  if(theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT')then
+  if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')then
     if (present(sVh_stock1) .and. present(sVh_stock2)) then
       call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
     end if
@@ -327,8 +327,8 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   call comm_bcast(itt,comm)
   call comm_bcast(nprocs,comm)
 
-  if((theory=='DFT'.or.calc_mode=='GS').or.  &
-     ((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
+  if((theory=='dft'.or.calc_mode=='GS').or.  &
+     ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
     iter = itt
   end if
 
@@ -358,14 +358,14 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
 
   !rho_inout
-  if(theory=='DFT'.or.calc_mode=='GS')then
+  if(theory=='dft'.or.calc_mode=='GS')then
     if (present(mixing)) then
       call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
     end if
   end if
 
   !Vh_stock
-  if((theory=='TDDFT_response'.or.theory=='TDDFT_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
+  if((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
     if (present(sVh_stock1) .and. present(sVh_stock2)) then
       call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
     end if

@@ -244,9 +244,9 @@ subroutine init_process_distribution(system,icomm1,pinfo)
       call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,pinfo)
     else
       select case(theory)
-      case('DFT','DFT_BAND','DFT_MD','DFT2TDDFT')
+      case('dft','dft_band','dft_md','dft2tddft')
         call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,icomm1,pinfo)
-      case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
+      case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
         call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,pinfo)
       case default
         stop 'invalid theory'
@@ -386,7 +386,7 @@ subroutine init_grid_whole(rsize,hgs,lg)
   end if
 
   select case(theory)
-  case('Maxwell')
+  case('maxwell')
     if( maxval(abs((al_em/dl_em)-dble(lg%num))) > 1d-4 ) stop "error: abs((al_em/dl_em)-dble(lg%num)) is too large"
   case default
     if(sum(abs(dl)) <= 1d-12) then

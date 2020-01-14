@@ -1,5 +1,5 @@
 &calculation
-  theory='Single_scale_Maxwell_TDDFT'
+  theory='single_scale_maxwell_tddft'
 /
 
 &control

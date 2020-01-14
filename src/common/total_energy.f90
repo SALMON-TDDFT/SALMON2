@@ -401,9 +401,9 @@ CONTAINS
     logical :: rion_update
 
     select case(theory)
-    case('DFT','DFT_BAND','DFT_MD')
-      rion_update = (yn_opt == 'y' .or. theory == 'DFT_MD')
-    case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
+    case('dft','dft_band','dft_md')
+      rion_update = (yn_opt == 'y' .or. theory == 'dft_md')
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
       rion_update = (yn_md == 'y')
     case default
       rion_update = .false.

@@ -2,7 +2,7 @@
   unit_system='A_eV_fs'
 /
 &calculation
-  theory = 'DFT'
+  theory = 'dft'
 /
 &control
   sysname = 'C2H2'

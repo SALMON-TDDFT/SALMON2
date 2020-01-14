@@ -116,13 +116,13 @@ call timer_begin(LOG_WRITE_RT_RESULTS)
 !
 select case(iperiodic)
 case(0)
-  if(theory=="TDDFT_response")then
+  if(theory=="tddft_response")then
     call write_response_0d(ofl,rt)
   else
     call write_pulse_0d(ofl,rt)
   end if
 case(3)
-  if(theory=="TDDFT_response")then
+  if(theory=="tddft_response")then
     call write_response_3d(ofl,rt)
   else
     call write_pulse_3d(ofl,rt)

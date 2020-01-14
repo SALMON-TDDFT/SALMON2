@@ -94,7 +94,7 @@ contains
     real(8) :: lg(4),pg(4),mg(4),sg(4)
 
     select case(theory)
-      case('TDDFT')
+      case('tddft')
         select case(iperiodic)
           ! TODO: calc flops on unified hpsi
           ! 0: GCEED
@@ -151,7 +151,7 @@ contains
     end if
 
     select case(theory)
-    case('DFT','DFT_BAND','DFT_MD')
+    case('dft','dft_band','dft_md')
       call set(0, 0, 'scf calculation')
       call set(1, LOG_INIT_GS            , 'gs initialization')
       call set(2, LOG_INIT_GS_RESTART    , 'reading data')
@@ -174,7 +174,7 @@ contains
       call set(8, LOG_CALC_ESP          , 'calculating esp')
       call set(9, LOG_CALC_ION_FORCE    , 'calc force')
       call write_loadbalance(fd, 9, tsrc, headers, mode)
-    case('DFT2TDDFT')
+    case('dft2tddft')
       call set(0, 0, 'DFT data redistribution')
       call set(1, LOG_INIT_GS         , 'gs initialization')
       call set(2, LOG_INIT_GS_RESTART , 'reading data')
@@ -182,8 +182,8 @@ contains
       call set(4, LOG_WRITE_RT_DATA   , 'data redistribution')
       call set(5, LOG_WRITE_RT_RESULTS, 'writing data')
       call write_loadbalance(fd, 5, tsrc, headers, mode)
-    case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT',&
-         'Multi_scale_Maxwell_TDDFT','Maxwell')
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft',&
+         'multi_scale_maxwell_tddft','maxwell')
       call set(0, 0, 'rt calculation')
       call set(1, LOG_INIT_RT              , 'rt initialization')
       call set(2, LOG_READ_GS_DATA        , 'reading lda data')
@@ -220,7 +220,7 @@ contains
       stop 'invalid theory'
     end select
 
-    if (theory == 'DFT_MD' .or. yn_md == 'y' .or. yn_opt == 'y') then
+    if (theory == 'dft_md' .or. yn_md == 'y' .or. yn_opt == 'y') then
       call set(0, 0, 'MD or opt. routines')
       call set(1, LOG_MD_TEVOL_PART1     , 'time-evol. part1')
       call set(2, LOG_MD_TEVOL_PART2     , 'time-evol. part2')
