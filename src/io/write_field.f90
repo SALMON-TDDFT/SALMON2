@@ -22,7 +22,7 @@ contains
 !===================================================================================================================================
 
 subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
-  use inputoutput, only: format_voxel_data,au_length_aa
+  use inputoutput, only: format_voxel_data,au_length_aa,theory
   use structures, only: s_rgrid,s_scalar,allocate_scalar,deallocate_scalar
   use parallelization, only: nproc_group_global
   use communication, only: comm_summation
@@ -76,10 +76,10 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   
   call comm_summation(work_l1%f,work_l2%f,lg%num(1)*lg%num(2)*lg%num(3),nproc_group_global)
 
-  select case('theory')
-  case('DFT','DFT_BAND','DFT_MD') 
+  select case(theory)
+  case('dft','dft_band','dft_md') 
     suffix = "dns"
-  case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
   case default
@@ -96,8 +96,8 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
     call write_vtk(lg,103,suffix,work_l2%f,hgs)
   end if
 
-  select case('theory')
-  case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
+  select case(theory)
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
     !$OMP parallel do collapse(2) private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)
@@ -151,7 +151,7 @@ end subroutine write_dns
 !===================================================================================================================================
 
 subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
-  use salmon_global, only: format_voxel_data
+  use salmon_global, only: format_voxel_data,theory
   use structures
   use math_constants, only: pi
   use communication, only: comm_summation
@@ -313,10 +313,10 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
 
   call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
 
-  select case('theory')
-  case('DFT','DFT_BAND','DFT_MD') 
+  select case(theory)
+  case('dft','dft_band','dft_md') 
     suffix = "elf"
-  case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT','MULTISCALE_EXPERIMENT')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
     write(filenum, '(i6.6)') itt
     suffix = "elf_"//adjustl(filenum)
   case default

@@ -1,5 +1,5 @@
 &calculation
-  theory='TDDFT_response'
+  theory='tddft_response'
 /
 
 &control

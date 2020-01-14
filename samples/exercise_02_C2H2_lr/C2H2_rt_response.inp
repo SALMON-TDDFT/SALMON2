@@ -6,7 +6,7 @@
   unit_system='A_eV_fs'
 /
 &calculation
-  theory='TDDFT_response'
+  theory='tddft_response'
 /
 &control
   sysname = 'C2H2'

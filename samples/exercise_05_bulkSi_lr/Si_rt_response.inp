@@ -3,7 +3,7 @@
 ! and rename the directory to 'restart/' in the current directory
 
 &calculation
-  theory='TDDFT_response'
+  theory='tddft_response'
 /
 
 &control

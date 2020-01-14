@@ -201,6 +201,7 @@ contains
     use parallelization
     use communication
     use filesystem, only: get_filehandle
+    use misc_routines, only: string_lowercase
     implicit none
     integer :: ii
     real(8) :: norm
@@ -547,7 +548,7 @@ contains
     call initialize_inputoutput_units
 
 !! == default for &calculation 
-    theory              = 'TDDFT'
+    theory              = 'tddft'
     calc_mode           = 'none'   !remove later
     use_ehrenfest_md    = 'n'  !remove later
     use_adiabatic_md    = 'n'  !remove later
@@ -792,7 +793,7 @@ contains
     step_velocity_scaling = -1
     step_update_ps        = 10
     select case(theory)
-    case('DFT_MD'); step_update_ps = 1
+    case('dft_md'); step_update_ps = 1
     end select
     step_update_ps2       = 1
     temperature0_ion_k    = 298.15d0
@@ -920,6 +921,11 @@ contains
 
       close(fh_namelist)
     end if
+
+
+!! convert lowercase
+    call string_lowercase(theory)
+
 
 ! Broad cast
 !! == bcast for &calculation
@@ -1349,7 +1355,7 @@ contains
       end if
 
       if(icount==0 .and. (yn_restart == 'y' .or. &
-         index(theory,'TDDFT_')/=0 .or. index(theory,'_TDDFT')/=0 ) ) then
+         index(theory,'tddft_')/=0 .or. index(theory,'_tddft')/=0 ) ) then
 
         if (comm_is_root(nproc_id_global))then
            write(*,"(A)") '  Atomic coordinate is read from restart directory'
@@ -2221,7 +2227,7 @@ contains
     case('n')
        select case(iperiodic)
        case(3)
-          if( theory/='Maxwell' ) then
+          if( theory/='maxwell' ) then
             return ! ARTED
           end if
        end select
@@ -2229,7 +2235,7 @@ contains
 
   ! for main_tddft
     select case(theory)
-    case('TDDFT_response','TDDFT_pulse','Single_scale_Maxwell_TDDFT')
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft')
 
       round_phi=int((phi_cep1-0.25d0)*2.d0)
       udp_phi=(phi_cep1-0.25d0)*2.d0-round_phi

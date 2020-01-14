@@ -1,7 +1,7 @@
 ! Domain parallel version for periodic system calculations is still trial.
 ! Some functions for periodic system calculations are not equipped in the domain parallel version.
 &calculation
-  theory='DFT'
+  theory='dft'
 /
 
 &control

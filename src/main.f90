@@ -27,7 +27,7 @@ program main
   case('n')
      select case(iperiodic)
      case(3) 
-        if( theory/='Maxwell' ) then
+        if( theory/='maxwell' ) then
           call arted
           stop
         end if
@@ -36,18 +36,18 @@ program main
 
   !GCEED: (main)
   select case(theory)
-  case('DFT','DFT_BAND')              ; call main_dft
-  case('DFT_MD')                      ; call main_dft_md
-  case('TDDFT_response','TDDFT_pulse'); call main_tddft
-  case('DFT2TDDFT')                   ; call main_dft2tddft ! DFT data redistributor to use TDDFT
-  case('Single_scale_Maxwell_TDDFT'  ); call main_tddft
-  case('Multi_scale_Maxwell_TDDFT'   ); call arted      !temporally
-  case('MULTISCALE_EXPERIMENT' )      ; call main_ms    ! experimental
-  case('Maxwell')                     ; call main_maxwell
- !case('SBE')                         ; call main_sbe
- !case('Maxwell_SBE')                 ; call main_maxwell_sbe
- !case('TTM')                         ; call main_ttm
- !case('Maxwell_TTM')                 ; call main_maxwell_ttm
+  case('dft','dft_band')              ; call main_dft
+  case('dft_md')                      ; call main_dft_md
+  case('tddft_response','tddft_pulse'); call main_tddft
+  case('dft2tddft')                   ; call main_dft2tddft ! DFT data redistributor to use TDDFT
+  case('single_scale_maxwell_tddft'  ); call main_tddft
+  case('multi_scale_maxwell_tddft'   ); call arted      !temporally
+  case('multiscale_experiment' )      ; call main_ms    ! experimental
+  case('maxwell')                     ; call main_maxwell
+ !case('sbe')                         ; call main_sbe
+ !case('maxwell_sbe')                 ; call main_maxwell_sbe
+ !case('ttm')                         ; call main_ttm
+ !case('maxwell_ttm')                 ; call main_maxwell_ttm
   case default ; stop 'invalid theory'
   end select
 
@@ -63,26 +63,26 @@ contains
     implicit none
     character(32)  :: theory
     
-    if(theory=="Maxwell ") return
+    if(theory=="maxwell ") return
 
     select case(theory)
-    case('DFT')
+    case('dft')
        calc_mode='GS'
-    case('DFT_MD')
+    case('dft_md')
        yn_md='y'
        calc_mode='GS'
        use_adiabatic_md='y'
-    case('TDDFT_response','TDDFT_pulse')
+    case('tddft_response','tddft_pulse')
        calc_mode='RT'
-    case('Multi_scale_Maxwell_TDDFT')
+    case('multi_scale_maxwell_tddft')
        calc_mode='RT'
        use_ms_maxwell='y'
-    case('Single_scale_Maxwell_TDDFT')
+    case('single_scale_maxwell_tddft')
        calc_mode='RT'
        use_singlescale='y'
-    case('DFT_TDDFT')
+    case('dft_tddft')
        calc_mode='GS_RT'  !legacy-- this is not supported officially now
-       write(*,*) "theory=DFT_TDDFT is not supported officially !!"
+       write(*,*) "theory=dft_tddft is not supported officially !!"
     end select
 
     select case(yn_md)

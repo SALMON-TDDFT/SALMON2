@@ -1,6 +1,6 @@
 
 &calculation
-  theory = 'DFT'
+  theory = 'dft'
   yn_opt='y'
 /
 
