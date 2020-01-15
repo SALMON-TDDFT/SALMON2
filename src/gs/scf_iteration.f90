@@ -25,8 +25,8 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
                miter,   &
                iditer_nosubspace_diag,mixing,iter, &
                poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-  use inputoutput, only: calc_mode,iperiodic,method_mixing,mixrate &
-                        ,yn_subspace_diagonalization
+  use salmon_global, only: calc_mode,iperiodic,method_mixing,mixrate &
+                        ,yn_subspace_diagonalization,ncg,ncg_init
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
@@ -65,18 +65,23 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   type(s_pp_nlcc),       intent(in)    :: ppn
   type(s_scalar),        intent(inout) :: sVxc(system%nspin)
   type(s_dft_energy),    intent(inout) :: energy
-  integer                              :: j
+  !
+  integer :: j,nncg
+  
+  if(miter==1) then
+    nncg = ncg_init
+  else
+    nncg = ncg
+  end if
 
 ! solve Kohn-Sham equation by minimization techniques
   call timer_begin(LOG_CALC_MINIMIZATION)
-
   select case(iperiodic)
   case(0)
-    call gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+    call gscg_isolated(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   case(3)
-    call gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+    call gscg_periodic(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   end select
-
   call timer_end(LOG_CALC_MINIMIZATION)
 
 ! Gram Schmidt orghonormalization
