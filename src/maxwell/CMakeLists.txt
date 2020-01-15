@@ -2,10 +2,8 @@ set(SOURCES
     common_maxwell.f90
     fdtd_eh.f90
     main_maxwell.f90
-    weyl_init.f90
-    weyl_finalize.f90
-    weyl_calc.f90
     fdtd_coulomb_gauge.f90
+    fdtd_weyl_gauge.f90
     )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
