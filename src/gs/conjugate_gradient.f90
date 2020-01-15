@@ -18,14 +18,14 @@ module Conjugate_Gradient
 
 contains
 
-subroutine gscg_isolated(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-  use inputoutput, only: ncg
+subroutine gscg_isolated(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
   !$ use omp_lib
   implicit none
+  integer           ,intent(in) :: ncg
   type(s_rgrid)     ,intent(in) :: mg
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
@@ -326,14 +326,14 @@ end subroutine gscg_isolated
 
 !===================================================================================================================================
 
-subroutine gscg_periodic(mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-  use inputoutput, only: ncg
+subroutine gscg_periodic(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
   use communication, only: comm_summation
   !$ use omp_lib
   implicit none
+  integer           ,intent(in) :: ncg
   type(s_rgrid)     ,intent(in) :: mg
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
