@@ -119,7 +119,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
     call timer_end(LOG_CALC_HARTREE)
   
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,ng,srg_ng,srho_s,ppn,info_field%icomm_all,sVxc,energy%E_xc)
+    call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
   end if

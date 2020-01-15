@@ -439,4 +439,41 @@ subroutine calc_gradient_field(ng,nabt,box,grad)
 !$OMP end parallel
 end subroutine calc_gradient_field
 
+subroutine calc_laplacian_field(ng,lapt,lap0,box,lap)
+  use structures
+  implicit none
+  type(s_rgrid),intent(in) :: ng
+  real(8)      ,intent(in) :: lapt(4,3),lap0
+  real(8)      ,intent(in) :: box(ng%is_array(1):ng%ie_array(1), &
+                                & ng%is_array(2):ng%ie_array(2), &
+                                & ng%is_array(3):ng%ie_array(3))
+  real(8)                  :: lap(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  !
+  integer :: ix,iy,iz
+  real(8) :: v
+!$OMP parallel
+!$OMP do private(iz,iy,ix,v)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    v = lapt(1,1)*( box(DDX(1)) + box(DDX(-1)) ) &
+    & + lapt(2,1)*( box(DDX(2)) + box(DDX(-2)) ) &
+    & + lapt(3,1)*( box(DDX(3)) + box(DDX(-3)) ) &
+    & + lapt(4,1)*( box(DDX(4)) + box(DDX(-4)) ) &
+    & + lapt(1,2)*( box(DDY(1)) + box(DDY(-1)) ) &
+    & + lapt(2,2)*( box(DDY(2)) + box(DDY(-2)) ) &
+    & + lapt(3,2)*( box(DDY(3)) + box(DDY(-3)) ) &
+    & + lapt(4,2)*( box(DDY(4)) + box(DDY(-4)) ) &
+    & + lapt(1,3)*( box(DDZ(1)) + box(DDZ(-1)) ) &
+    & + lapt(2,3)*( box(DDZ(2)) + box(DDZ(-2)) ) &
+    & + lapt(3,3)*( box(DDZ(3)) + box(DDZ(-3)) ) &
+    & + lapt(4,3)*( box(DDZ(4)) + box(DDZ(-4)) )
+    lap(ix,iy,iz) = v + lap0* box(ix,iy,iz)
+  end do
+  end do
+  end do
+!$OMP end do
+!$OMP end parallel
+end subroutine calc_laplacian_field
+
 end module stencil_sub

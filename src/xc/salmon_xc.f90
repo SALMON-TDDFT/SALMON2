@@ -47,35 +47,34 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(sys, xc_func, ng, srg_ng, srho_s, ppn, comm, sVxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, ng, mg, srg_ng, srg, srho_s, ppn, info, spsi, stencil, sVxc, E_xc)
     use communication, only: comm_summation
-    use structures, only: s_dft_system, s_pp_nlcc, s_scalar, s_rgrid,s_sendrecv_grid
+    use structures
     use sendrecv_grid, only: update_overlap_real8
+    use stencil_sub, only: calc_gradient_field, calc_laplacian_field
     implicit none
-    type(s_dft_system), intent(in) :: sys
-    type(s_xc_functional), intent(in) :: xc_func
-    type(s_rgrid),intent(in) :: ng
-    type(s_sendrecv_grid),intent(inout) :: srg_ng
-    type(s_scalar)  ,intent(in) :: srho_s(sys%nspin)
-    type(s_pp_nlcc), intent(in) :: ppn
-    integer         ,intent(in) :: comm
-    type(s_scalar)              :: sVxc(sys%nspin)
-    real(8)                     :: E_xc
-
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_xc_functional)   ,intent(in) :: xc_func
+    type(s_rgrid)           ,intent(in) :: ng, mg
+    type(s_sendrecv_grid)               :: srg_ng, srg
+    type(s_scalar)          ,intent(in) :: srho_s(system%nspin)
+    type(s_pp_nlcc)         ,intent(in) :: ppn
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_orbital)                     :: spsi
+    type(s_stencil)         ,intent(in) :: stencil
+    type(s_scalar)                      :: sVxc(system%nspin)
+    real(8)                             :: E_xc
+    !
     integer :: ix,iy,iz,is,nspin
     real(8) :: tot_exc
-    real(8),parameter :: bN1=4.d0/5.d0  , bN2=-1.d0/5.d0   ! for Nabla
-    real(8),parameter :: bN3=4.d0/105.d0, bN4=-1.d0/280.d0
-    real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:)
-
     real(8) :: rho_tmp(ng%num(1), ng%num(2), ng%num(3))
     real(8) :: rho_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
-
     real(8) :: eexc_tmp(ng%num(1), ng%num(2), ng%num(3))
     real(8) :: vxc_tmp(ng%num(1), ng%num(2), ng%num(3))
     real(8) :: vxc_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
+    real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:), grho(:,:,:,:), lrho(:,:,:), j(:,:,:,:), tau(:,:,:)
 
-    nspin = sys%nspin
+    nspin = system%nspin
 
     if(nspin==1)then
 !$omp parallel do collapse(2) private(iz,iy,ix)
@@ -103,13 +102,16 @@ contains
 !$omp end parallel
     end if
 
-    if(xc_func%use_gradient) then
+    if(xc_func%use_gradient) then ! meta GGA
+    
       allocate (rhd (ng%is_array(1):ng%ie_array(1), &
                      ng%is_array(2):ng%ie_array(2), &
                      ng%is_array(3):ng%ie_array(3)))
-      allocate (delr(ng%is(1):ng%ie(1), &
-                     ng%is(2):ng%ie(2), &
-                     ng%is(3):ng%ie(3),3))
+      allocate (grho(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)), &
+              & lrho(ng%num(1), ng%num(2), ng%num(3)) )
+      allocate (delr(ng%num(1), ng%num(2), ng%num(3) ,3), &
+                j   (ng%num(1), ng%num(2), ng%num(3) ,3), &
+                tau (ng%num(1), ng%num(2), ng%num(3)) )
 
 !$omp parallel do collapse(2) private(ix,iy,iz)
       do iz=ng%is(3),ng%ie(3)
@@ -122,52 +124,33 @@ contains
 !$omp end parallel do
 
       call update_overlap_real8(srg_ng, ng, rhd)
-
-
-!$omp parallel do collapse(2) private(ix,iy,iz)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-         delr(ix,iy,iz,1)= (1.0d0/sys%hgs(1))*(   &
-            bN1*( rhd(ix+1,iy,iz) - rhd(ix-1,iy,iz))  &
-          + bN2*( rhd(ix+2,iy,iz) - rhd(ix-2,iy,iz)) &
-          + bN3*( rhd(ix+3,iy,iz) - rhd(ix-3,iy,iz)) &
-          + bN4*( rhd(ix+4,iy,iz) - rhd(ix-4,iy,iz)))
-         delr(ix,iy,iz,2)= (1.0d0/sys%hgs(2))*( &
-            bN1*( rhd(ix,iy+1,iz) - rhd(ix,iy-1,iz)) &
-          + bN2*( rhd(ix,iy+2,iz) - rhd(ix,iy-2,iz)) &
-          + bN3*( rhd(ix,iy+3,iz) - rhd(ix,iy-3,iz)) &
-          + bN4*( rhd(ix,iy+4,iz) - rhd(ix,iy-4,iz)))
-         delr(ix,iy,iz,3)= (1.0d0/sys%hgs(3))*( &
-            bN1*( rhd(ix,iy,iz+1) - rhd(ix,iy,iz-1)) &
-          + bN2*( rhd(ix,iy,iz+2) - rhd(ix,iy,iz-2)) &
-          + bN3*( rhd(ix,iy,iz+3) - rhd(ix,iy,iz-3)) &
-          + bN4*( rhd(ix,iy,iz+4) - rhd(ix,iy,iz-4)))
-      enddo
-      enddo
-      enddo
+      call calc_gradient_field(ng,stencil%coef_nab,rhd,grho)
+      call calc_laplacian_field(ng,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
+      & ,lrho( 1:ng%num(1), 1:ng%num(2), 1:ng%num(3) ) )
+      
+!$omp parallel do collapse(2) private(iz,iy,ix)
+      do iz=1,ng%num(3)
+      do iy=1,ng%num(2)
+      do ix=1,ng%num(1)
+        delr(ix,iy,iz,1:3) = grho(1:3,ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      end do
+      end do
+      end do
 !$omp end parallel do
+
+      call calc_tau
+      
     end if
 
-    if (allocated(ppn%rho_nlcc)) then
-      if (xc_func%use_gradient) then
-        call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
-      else
-        if(nspin==1)then
-          call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
-        else if(nspin==2)then
-          call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
-        end if
-      end if
+    if (xc_func%use_gradient) then
+      if(nspin==2) stop "error: GGA or metaGGA & ispin==1"
+      call calc_xc(xc_func, rho=rho_tmp, grho=delr, rlrho=lrho, tau=tau, rj=j, &
+      & eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
     else
-      if (xc_func%use_gradient) then
-        call calc_xc(xc_func, rho=rho_tmp, grho=delr, eexc=eexc_tmp, vxc=vxc_tmp)
-      else
-        if(nspin==1)then
-          call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp)
-        else if(nspin==2)then
-          call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp)
-        end if
+      if(nspin==1)then
+        call calc_xc(xc_func, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+      else if(nspin==2)then
+        call calc_xc(xc_func, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
       end if
     end if
 
@@ -207,11 +190,84 @@ contains
     end do
     end do
 !$omp end parallel do
-    tot_exc=tot_exc*sys%hvol
+    tot_exc = tot_exc*system%hvol
 
-    call comm_summation(tot_exc,E_xc,comm)
+    call comm_summation(tot_exc,E_xc,info%icomm_rko)
 
     return
+    
+  contains
+  
+    subroutine calc_tau
+      use sendrecv_grid, only: update_overlap_complex8
+      use stencil_sub, only: calc_gradient_psi
+      use math_constants,only : zi
+      implicit none
+      integer :: im,ik,io,ispin
+      real(8) :: kAc(3),occ
+      complex(8) :: zs(3),p
+      real(8) :: j_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
+               & j_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
+               & tau_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)), &
+               & tau_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+      complex(8) :: gtpsi(3,mg%is_array(1):mg%ie_array(1) &
+                         & ,mg%is_array(2):mg%ie_array(2) &
+                         & ,mg%is_array(3):mg%ie_array(3))
+                         
+      if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ exchange_correlation"
+      im = 1
+      
+      tau_tmp1 = 0d0
+      j_tmp1 = 0d0
+      
+      if(info%if_divide_rspace) then
+         call update_overlap_complex8(srg, mg, spsi%zwf)
+      end if
+      
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+      do ispin=1,Nspin
+
+      ! gtpsi = (nabla) psi
+        call calc_gradient_psi(spsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
+            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+            
+        occ = system%rocc(io,ik,ispin)*system%wtk(ik)
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+!$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          p = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi* kAc(1:3)* p
+          tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
+          j_tmp1(ix,iy,iz,1:3) = j_tmp1(ix,iy,iz,1:3) + aimag(conjg(p)*zs(1:3))*occ
+        end do
+        end do
+        end do
+!$omp end parallel do
+        
+      end do
+      end do
+      end do
+      
+      call comm_summation(j_tmp1,j_tmp2,mg%num(1)*mg%num(2)*mg%num(3)*3,info%icomm_ko)
+      call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+      
+!$omp parallel do collapse(2) private(iz,iy,ix)
+      do iz=1,ng%num(3)
+      do iy=1,ng%num(2)
+      do ix=1,ng%num(1)
+        j(ix,iy,iz,1:3) = j_tmp2(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1,1:3)
+        tau(ix,iy,iz) = tau_tmp2(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      end do
+      end do
+      end do
+!$omp end parallel do
+  
+      return
+    end subroutine calc_tau
+    
   end subroutine exchange_correlation
 
 
@@ -297,32 +353,16 @@ contains
         return
 
       case ('pzm')
-        if(iperiodic==0) then
-          call stop_by_bad_input2('iperiodic=0','xc=pzm')
-        else if(yn_domain_parallel=='y')then
-          call stop_by_bad_input2('iperiodic=3','yn_domain_parallel=y','xc=pzm')
-        end if
-
         xc%xctype(1) = salmon_xctype_pzm
         return
 
       case ('pbe')
-        if(iperiodic==0) then
-          call stop_by_bad_input2('iperiodic=0','xc=pbe')
-        else if(yn_domain_parallel=='y')then
-          call stop_by_bad_input2('iperiodic=3','yn_domain_parallel=y','xc=pbe')
-        end if
-
+      
         xc%xctype(1) = salmon_xctype_pbe
         xc%use_gradient = .true.
         return
 
       case ('tbmbj')
-        if(iperiodic==0) then
-          call stop_by_bad_input2('iperiodic=0','xc=tbmbj')
-        else if(yn_domain_parallel=='y')then
-          call stop_by_bad_input2('iperiodic=3','yn_domain_parallel=y','xc=tbmbj')
-        end if
 
         xc%xctype(1) = salmon_xctype_tbmbj
         xc%use_gradient = .true.
@@ -332,11 +372,6 @@ contains
         return
 
       case ('bj_pw')
-        if(iperiodic==0) then
-          call stop_by_bad_input2('iperiodic=0','xc=bj_pw')
-        else if(yn_domain_parallel=='y')then
-          call stop_by_bad_input2('iperiodic=3','yn_domain_parallel=y','xc=bj_pw')
-        end if
 
         xc%xctype(1) = salmon_xctype_tbmbj; xc%cval = 1d0
         xc%use_gradient = .true.
@@ -346,11 +381,6 @@ contains
         return
 
       case ('tpss')
-        if(iperiodic==0) then
-          call stop_by_bad_input2('iperiodic=0','xc=tpss')
-        else if(yn_domain_parallel=='y')then
-          call stop_by_bad_input2('iperiodic=3','yn_domain_parallel=y','xc=tpss')
-        end if
 
         xc%xctype(1) = salmon_xctype_tpss
         xc%use_gradient = .true.
@@ -360,11 +390,6 @@ contains
         return
 
       case ('vs98')
-        if(iperiodic==0) then
-          call stop_by_bad_input2('iperiodic=0','xc=vs98')
-        else if(yn_domain_parallel=='y')then
-          call stop_by_bad_input2('iperiodic=3','yn_domain_parallel=y','xc=vs98')
-        end if
 
         xc%xctype(1) = salmon_xctype_vs98
         xc%use_gradient = .true.
