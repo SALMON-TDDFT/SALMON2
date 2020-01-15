@@ -1,5 +1,5 @@
 &calculation
-  theory='DFT2TDDFT'
+  theory='dft2tddft'
 /
 
 &control

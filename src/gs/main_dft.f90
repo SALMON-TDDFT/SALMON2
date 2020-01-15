@@ -79,7 +79,7 @@ logical :: flag_opt_conv
 integer :: iopt,nopt_max
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 
-if(theory=='DFT_BAND'.and.iperiodic/=3) return
+if(theory=='dft_band'.and.iperiodic/=3) return
 
 call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 
@@ -141,7 +141,7 @@ end if
 
 !---------------------------------------- Band Iteration
 
-if(theory=='DFT_BAND')then
+if(theory=='dft_band')then
    call init_band_dft(system,band)
    iter_band_kpt_end    = band%num_band_kpt
    iter_band_kpt_stride = system%nk
@@ -152,7 +152,7 @@ end if
 
 Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 
-if(theory=='DFT_BAND')then
+if(theory=='dft_band')then
    call calc_band_write(iter_band_kpt,system,band,info)
 end if
 
@@ -196,7 +196,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         band, 2 )
 
 
-if(theory=='DFT_BAND')then
+if(theory=='dft_band')then
    call write_band(system,energy)
 end if
 

@@ -1,5 +1,5 @@
 &calculation
-  theory='DFT_MD'
+  theory='dft_md'
 !  yn_md = 'y'
 /
 

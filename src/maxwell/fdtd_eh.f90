@@ -557,7 +557,7 @@ contains
       if(ae_shape1/='impulse'.and.ae_shape2/='impulse') then
         if(comm_is_root(nproc_id_global)) then
           write(*,*) "invalid wave_input:"
-          write(*,*) "For theory = Maxwell, wave_input must be source"
+          write(*,*) "For theory = maxwell, wave_input must be source"
           write(*,*) "or ae_shape1 and/or ae_shape2 must be impulse."
         end if
         stop
@@ -1193,10 +1193,10 @@ contains
           if(comm_is_root(nproc_id_global)) then
             if     (ipulse==1) then
               write(*,*) "invalid epdir_re1(1) and epdir_im1(1):"
-              write(*,*) "For theory = Maxwell and ek_dir1(1) = 1.0d0, epdir_re1(1) and epdir_im1(1) must be 0.0d0."
+              write(*,*) "For theory = maxwell and ek_dir1(1) = 1.0d0, epdir_re1(1) and epdir_im1(1) must be 0.0d0."
             elseif (ipulse==2) then
               write(*,*) "invalid epdir_re2(1) and epdir_im2(1):"
-              write(*,*) "For theory = Maxwell and ek_dir2(1) = 1.0d0, epdir_re2(1) and epdir_im2(1) must be 0.0d0."
+              write(*,*) "For theory = maxwell and ek_dir2(1) = 1.0d0, epdir_re2(1) and epdir_im2(1) must be 0.0d0."
             end if
           end if
           stop
@@ -1208,10 +1208,10 @@ contains
           if(comm_is_root(nproc_id_global)) then
             if     (ipulse==1) then
               write(*,*) "invalid epdir_re1(2) and epdir_im1(2):"
-              write(*,*) "For theory = Maxwell and ek_dir1(2) = 1.0d0, epdir_re1(2) and epdir_im1(2) must be 0.0d0."
+              write(*,*) "For theory = maxwell and ek_dir1(2) = 1.0d0, epdir_re1(2) and epdir_im1(2) must be 0.0d0."
             elseif (ipulse==2) then
               write(*,*) "invalid epdir_re2(2) and epdir_im2(2):"
-              write(*,*) "For theory = Maxwell and ek_dir2(2) = 1.0d0, epdir_re2(2) and epdir_im2(2) must be 0.0d0."
+              write(*,*) "For theory = maxwell and ek_dir2(2) = 1.0d0, epdir_re2(2) and epdir_im2(2) must be 0.0d0."
             end if
           end if
           stop
@@ -1223,10 +1223,10 @@ contains
           if(comm_is_root(nproc_id_global)) then
             if     (ipulse==1) then
               write(*,*) "invalid epdir_re1(3) and epdir_im1(3):"
-              write(*,*) "For theory = Maxwell and ek_dir1(3) = 1.0d0, epdir_re1(3) and epdir_im1(3) must be 0.0d0."
+              write(*,*) "For theory = maxwell and ek_dir1(3) = 1.0d0, epdir_re1(3) and epdir_im1(3) must be 0.0d0."
             elseif (ipulse==2) then
               write(*,*) "invalid epdir_re2(3) and epdir_im2(3):"
-              write(*,*) "For theory = Maxwell and ek_dir2(3) = 1.0d0, epdir_re2(3) and epdir_im2(3) must be 0.0d0."
+              write(*,*) "For theory = maxwell and ek_dir2(3) = 1.0d0, epdir_re2(3) and epdir_im2(3) must be 0.0d0."
             end if
           end if
           stop
@@ -1237,11 +1237,11 @@ contains
         if(comm_is_root(nproc_id_global)) then
           if     (ipulse==1) then
             write(*,*) "invalid ek_dir1:"
-            write(*,*) "For theory = Maxwell, ek_dir1 is only allowed by"
+            write(*,*) "For theory = maxwell, ek_dir1 is only allowed by"
             write(*,*) "(0d0,0d0,0d0),(1d0,0d0,0d0),(0d0,1d0,0d0),or (0d0,0d0,1d0)."
           elseif (ipulse==2) then
             write(*,*) "invalid ek_dir2:"
-            write(*,*) "For theory = Maxwell, ek_dir2 is only allowed by"
+            write(*,*) "For theory = maxwell, ek_dir2 is only allowed by"
             write(*,*) "(0d0,0d0,0d0),(1d0,0d0,0d0),(0d0,1d0,0d0),or (0d0,0d0,1d0)."
           end if
         end if

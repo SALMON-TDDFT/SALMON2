@@ -3,7 +3,7 @@
 ! and rename the directory to 'restart/' in the current directory
 
 &calculation
- theory='Multi_scale_Maxwell_TDDFT'
+ theory='multi_scale_maxwell_tddft'
 /
 
 &control
