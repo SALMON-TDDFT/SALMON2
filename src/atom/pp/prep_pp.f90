@@ -147,6 +147,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end select
 
   call init_uvpsi_summation(ppg,info%icomm_r)
+  call init_uvpsi_table(ppg)
   
   if(iperiodic==3) then
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
@@ -169,6 +170,7 @@ SUBROUTINE dealloc_init_ps(ppg)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   call finalize_uvpsi_summation(ppg)
+  call finalize_uvpsi_table(ppg)
 END SUBROUTINE dealloc_init_ps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -1518,6 +1520,43 @@ subroutine finalize_uvpsi_summation(ppg)
     end do
     deallocate(ppg%icomm_atom)
   end if
+end subroutine
+
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine init_uvpsi_table(ppg)
+  use structures,    only: s_pp_grid
+  implicit none
+  type(s_pp_grid),intent(inout) :: ppg
+  integer :: ilma,ia,ilocal,ilocal_nlma
+
+  ilocal_nlma = 0
+!$omp parallel do private(ilma,ia) reduction(+:ilocal_nlma)
+  do ilma=1,ppg%nlma
+    ia = ppg%ia_tbl(ilma)
+    if (ppg%ireferred_atom(ia)) ilocal_nlma = ilocal_nlma + 1
+  end do
+!$omp end parallel do
+  ppg%ilocal_nlma = ilocal_nlma
+
+  allocate(ppg%ilocal_nlma2ilma(ppg%ilocal_nlma))
+  allocate(ppg%ilocal_nlma2ia  (ppg%ilocal_nlma))
+  ilocal = 0
+  do ilma=1,ppg%nlma
+    ia = ppg%ia_tbl(ilma)
+    if (ppg%ireferred_atom(ia)) then
+      ilocal = ilocal + 1
+      ppg%ilocal_nlma2ilma(ilocal) = ilma
+      ppg%ilocal_nlma2ia  (ilocal) = ia
+    end if
+  end do
+end subroutine init_uvpsi_table
+
+subroutine finalize_uvpsi_table(ppg)
+  use structures,    only: s_pp_grid
+  implicit none
+  type(s_pp_grid),intent(inout) :: ppg
+  if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
+  if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
 end subroutine
 
 end module prep_pp_sub

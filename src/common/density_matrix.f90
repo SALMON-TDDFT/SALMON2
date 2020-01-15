@@ -632,13 +632,14 @@ contains
     complex(8),intent(in) :: uVpsibox(ppg%Nlma)
     real(8)               :: jw(3)
     !
-    integer    :: ilma,ia,j,ix,iy,iz
+    integer    :: ilocal,ilma,ia,j,ix,iy,iz
     real(8)    :: x,y,z
     complex(8) :: uVpsi,uVpsi_r(3)
     jw = 0d0
-!$omp parallel do private(ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
-    do ilma=1,ppg%Nlma
-      ia=ppg%ia_tbl(ilma)
+!$omp parallel do private(ilocal,ilma,ia,uVpsi,uVpsi_r,j,x,y,z,ix,iy,iz) reduction(+:jw)
+    do ilocal=1,ppg%ilocal_nlma
+      ilma=ppg%ilocal_nlma2ilma(ilocal)
+      ia  =ppg%ilocal_nlma2ia  (ilocal)
       uVpsi_r = 0d0
       do j=1,ppg%Mps(ia)
         x = ppg%Rxyz(1,j,ia)
