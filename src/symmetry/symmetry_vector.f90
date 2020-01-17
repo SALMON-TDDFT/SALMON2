@@ -19,7 +19,7 @@ contains
     vtmp = matmul( Ainv, vxyz )
     vxyz = 0.0d0
     do isym=1,nsym
-       Rvtmp = matmul( SymMatB(:,:,isym), vtmp )
+       Rvtmp = matmul( SymMatB(:,1:3,isym), vtmp )
        vxyz = vxyz + Rvtmp
     end do
     vtmp = vxyz/nsym
