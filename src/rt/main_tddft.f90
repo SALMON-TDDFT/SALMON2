@@ -41,6 +41,7 @@ type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
 type(s_reciprocal_grid) :: fg
+type(s_ewald_ion_ion) :: ewald
 type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
@@ -62,7 +63,8 @@ integer :: itt,itotNtime
 
 call timer_begin(LOG_TOTAL)
 
-call initialization_rt( Mit, itotNtime, system, energy, rt, md, singlescale,  &
+call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
+                        singlescale,  &
                         stencil, fg, poisson,  &
                         lg, mg, ng,  &
                         info, info_field,  &
@@ -79,11 +81,11 @@ TE : do itt=Mit+1,itotNtime
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,singlescale)
+     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   else
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-     & ,sVpsl,dmat,fg,energy,md,ofl,poisson,singlescale)
+     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if
 
   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then

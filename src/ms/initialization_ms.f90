@@ -23,7 +23,7 @@ contains
 
 subroutine initialization_ms( &
                      nmacro, &
-                     Mit, itotNtime, system, energy, rt, md, singlescale,  &
+                     Mit, itotNtime, system, energy, ewald, rt, md, singlescale,&
                      stencil, fg, poisson,  &
                      lg, mg, ng,  &
                      info, info_field,  &
@@ -92,6 +92,7 @@ use inputoutput
   type(s_xc_functional) :: xc_func
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
+  type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
   type(s_scalar) :: sVpsl
@@ -310,7 +311,7 @@ use inputoutput
   case(0)
      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
   case(3)
-     call calc_Total_Energy_periodic(energy,system,pp,fg,.true.)
+     call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,.true.)
   end select
   energy%E_tot0 = energy%E_tot
   
@@ -511,7 +512,7 @@ use inputoutput
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in)
+     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in,ewald)
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format
      write(comment_line,10) -1, 0.0d0

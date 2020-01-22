@@ -83,7 +83,7 @@ nmacro = nx_m * ny_m * nz_m
 
 
 
-! call initialization_ms( Mit, system, energy, rt, md, singlescale,  &
+! call initialization_ms( Mit, system, energy, ewald, rt, md, singlescale,  &
 !                         stencil, fg, poisson,  &
 !                         lg, mg, ng,  &
 !                         info, info_field,  &
@@ -93,7 +93,7 @@ nmacro = nx_m * ny_m * nz_m
 !                         V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
 !                         pp, ppg, ppn )
 
-! call initialization_rt( Mit, system, energy, rt, md, singlescale,  &
+! call initialization_rt( Mit, system, energy, ewald, rt, md, singlescale,  &
 !                         stencil, fg, poisson,  &
 !                         lg, mg, ng,  &
 !                         info, info_field,  &

@@ -20,7 +20,6 @@ use math_constants, only: pi, zi
 use structures
 use inputoutput
 use parallelization, only: nproc_id_global,nproc_group_global
-use parallelization, only: nproc_id_global,nproc_group_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
 use timer
@@ -69,6 +68,7 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
+type(s_ewald_ion_ion) :: ewald
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_ofile)  :: ofl
@@ -101,7 +101,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           ofl )
 
 call initialization2_dft( Miter, nspin, rion_update,  &
-                          system, energy, stencil, fg, poisson,  &
+                          system, energy, ewald, stencil, fg, poisson,&
                           lg, mg, ng,  &
                           info, info_field,   &
                           srg, srg_ng,  &
@@ -181,7 +181,7 @@ call timer_begin(LOG_GS_ITERATION)
 !------------------------------------ SCF Iteration
 !Iteration loop for SCF (DFT_Iteration)
 call scf_iteration_dft( Miter,rion_update,sum1,  &
-                        system,energy,  &
+                        system,energy,ewald,  &
                         lg,mg,ng,  &
                         info,info_field,pinfo,  &
                         poisson,fg,  &
@@ -224,7 +224,7 @@ if(yn_out_tm  == 'y') then
 end if
 
 ! force
-   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi,ewald)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
       do iatom=1,natom

@@ -18,7 +18,7 @@
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
-&   md,ofl,poisson,singlescale)
+&   ewald,md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
@@ -65,6 +65,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   type(ls_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
+  type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
 
@@ -281,7 +282,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     end if
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
-    call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+    call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
     if(use_singlescale=='y') then
@@ -303,7 +304,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   !(force)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
 
-     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out)
+     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out,ewald)
 
      !force on ion directly from field --- should put in calc_force?
      do iatom=1,system%nion

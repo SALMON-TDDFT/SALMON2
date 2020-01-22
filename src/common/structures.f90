@@ -68,6 +68,16 @@ module structures
     real(8) :: E_tot0 ! total energy @ t=0
   end type s_dft_energy
 
+  type s_ewald_ion_ion
+    integer :: nmax_pair_bk
+    integer,allocatable :: bk(:,:,:) ! left  :1-3=ix,iy,iz, 4=pair atom
+                                     ! middle:ion-ion pair index
+                                     ! right :atom id
+    integer,allocatable :: npair_bk(:)
+    real(8) :: cutoff_r, cutoff_r_buff
+    character(1) :: yn_bookkeep
+  end type s_ewald_ion_ion
+
   type s_rgrid
     integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
     integer,dimension(3) :: is,ie,num &             ! num=ie-is+1
