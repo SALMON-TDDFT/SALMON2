@@ -142,7 +142,7 @@ module salmon_global
 
 !! &scf
   character(8)   :: method_min
-  integer        :: ncg
+  integer        :: ncg,ncg_init
   character(8)   :: method_mixing
   real(8)        :: mixrate
   integer        :: nmemory_mb

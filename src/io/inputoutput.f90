@@ -310,6 +310,7 @@ contains
     namelist/scf/ &
       & method_min, &
       & ncg, &
+      & ncg_init, &
       & method_mixing, &
       & mixrate, &
       & nmemory_mb, &
@@ -639,7 +640,8 @@ contains
     yn_fix_func = 'n'
 !! == default for &scf
     method_min    = 'cg'
-    ncg           = 5
+    ncg           = 4
+    ncg_init      = 4
     method_mixing = 'broyden'
     mixrate       = 0.5d0
     nmemory_mb    = 8
@@ -1045,6 +1047,7 @@ contains
 !! == bcast for &scf
     call comm_bcast(method_min            ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
+    call comm_bcast(ncg_init                ,nproc_group_global)
     call comm_bcast(method_mixing                 ,nproc_group_global)
     call comm_bcast(mixrate                ,nproc_group_global)
     call comm_bcast(nmemory_mb              ,nproc_group_global)
@@ -1824,6 +1827,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing', method_mixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'mixrate', mixrate
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_mb', nmemory_mb
