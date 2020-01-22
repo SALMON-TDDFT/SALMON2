@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi)
+  subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi,ewald)
     use structures
     use math_constants,only : zi
     use stencil_sub, only: calc_gradient_psi
@@ -41,6 +41,7 @@ contains
     type(s_sendrecv_grid)      :: srg
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital)            :: tpsi
+    type(s_ewald_ion_ion),intent(in) :: ewald
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
@@ -77,7 +78,7 @@ contains
     Nlma = ppg%Nlma
 
   ! Ewald sum of ion-ion interaction
-    call force_ion_ion(F_sum,F_tmp,system,pp,fg,nion)
+    call force_ion_ion(F_sum,F_tmp,system,ewald,pp,fg,nion)
     system%Force = F_sum
 
   ! electron-ion interaction
@@ -238,7 +239,7 @@ contains
     return
   end subroutine calc_force
 
-  subroutine force_ion_ion(F_sum,F_tmp,system,pp,fg,nion)
+  subroutine force_ion_ion(F_sum,F_tmp,system,ewald,pp,fg,nion)
     use structures
     use math_constants,only : pi,zi
     use salmon_math
@@ -246,12 +247,13 @@ contains
     use communication, only: comm_summation
     implicit none
     type(s_dft_system),intent(in) :: system
+    type(s_ewald_ion_ion),intent(in) :: ewald
     type(s_pp_info)   ,intent(in) :: pp
     type(s_reciprocal_grid),intent(in) :: fg
     integer           ,intent(in) :: nion
     real(8)                       :: F_tmp(3,nion),F_sum(3,nion)
     !
-    integer :: ix,iy,iz,ia,ib,ig
+    integer :: ix,iy,iz,ia,ib,ig,ipair
     real(8) :: rr,rab(3),r(3),g(3),G2,Gd
     complex(8) :: rho_i
 
@@ -272,42 +274,83 @@ contains
 
       F_tmp = 0d0
       do ia=1,nion
-        r = system%Rion(1:3,ia)
-        do ig=fg%ig_s,fg%ig_e
-          if(ig == fg%iGzero ) cycle
-          g(1) = fg%Gx(ig)
-          g(2) = fg%Gy(ig)
-          g(3) = fg%Gz(ig)
-          G2 = g(1)**2 + g(2)**2 + g(3)**2
-          Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-          rho_i = fg%zrhoG_ion(ig)
-          F_tmp(:,ia) = F_tmp(:,ia) + g(:)*(4*Pi/G2)*exp(-G2/(4*aEwald))*pp%Zps(Kion(ia)) &
+         r = system%Rion(1:3,ia)
+         do ig=fg%ig_s,fg%ig_e
+            if(ig == fg%iGzero ) cycle
+            g(1) = fg%Gx(ig)
+            g(2) = fg%Gy(ig)
+            g(3) = fg%Gz(ig)
+            G2 = g(1)**2 + g(2)**2 + g(3)**2
+            Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
+            rho_i = fg%zrhoG_ion(ig)
+            F_tmp(:,ia) = F_tmp(:,ia) + g(:)*(4*Pi/G2)*exp(-G2/(4*aEwald))*pp%Zps(Kion(ia)) &
                                       *zI*0.5d0*(conjg(rho_i)*exp(-zI*Gd)-rho_i*exp(zI*Gd))
-        end do
+         end do
       end do
       call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_G)
 
       F_tmp = 0d0
-      do ia=1,nion
-        do ix=-NEwald,NEwald
-        do iy=-NEwald,NEwald
-        do iz=-NEwald,NEwald
-          do ib=1,nion
-            if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
-            r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
-            r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
-            r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
-            rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
-            rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
-            rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
-            rr = sum(rab(:)**2)
-            F_tmp(:,ia) = F_tmp(:,ia) - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
+      if(ewald%yn_bookkeep=='y') then
+
+!$omp parallel do private(ia,ipair,ix,iy,iz,ib,r,rab,rr)
+         do ia=1,nion
+            do ipair = 1,ewald%npair_bk(ia)
+               ix = ewald%bk(1,ipair,ia)
+               iy = ewald%bk(2,ipair,ia)
+               iz = ewald%bk(3,ipair,ia)
+               ib = ewald%bk(4,ipair,ia)
+               if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+               r(1) = ix*system%primitive_a(1,1) &
+                    + iy*system%primitive_a(1,2) &
+                    + iz*system%primitive_a(1,3)
+               r(2) = ix*system%primitive_a(2,1) &
+                    + iy*system%primitive_a(2,2) &
+                    + iz*system%primitive_a(2,3)
+               r(3) = ix*system%primitive_a(3,1) &
+                    + iy*system%primitive_a(3,2) &
+                    + iz*system%primitive_a(3,3)
+               rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
+               rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
+               rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
+               rr = sum(rab(:)**2)
+               if(rr .gt. ewald%cutoff_r**2) cycle
+               F_tmp(:,ia) = F_tmp(:,ia) - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
                                         -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
-          end do
-        end do
-        end do
-        end do
-      end do
+
+            end do  !ipair
+         end do     !ia
+!$omp end parallel do
+
+      else
+
+         do ia=1,nion
+            do ix=-NEwald,NEwald
+            do iy=-NEwald,NEwald
+            do iz=-NEwald,NEwald
+            do ib=1,nion
+               if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+               r(1) = ix*system%primitive_a(1,1) &
+                    + iy*system%primitive_a(1,2) &
+                    + iz*system%primitive_a(1,3)
+               r(2) = ix*system%primitive_a(2,1) &
+                    + iy*system%primitive_a(2,2) &
+                    + iz*system%primitive_a(2,3)
+               r(3) = ix*system%primitive_a(3,1) &
+                    + iy*system%primitive_a(3,2) &
+                    + iz*system%primitive_a(3,3)
+               rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
+               rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
+               rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
+               rr = sum(rab(:)**2)
+               F_tmp(:,ia) = F_tmp(:,ia) - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
+                                        -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
+            end do
+            end do
+            end do
+            end do
+         end do
+
+      endif
       F_sum = F_sum + F_tmp
       
     end select

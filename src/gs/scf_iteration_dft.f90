@@ -16,7 +16,7 @@
 !=======================================================================
 
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
-                              system,energy,  &
+                              system,energy,ewald,  &
                               lg,mg,ng,  &
                               info,info_field,pinfo,  &
                               poisson,fg,  &
@@ -82,6 +82,7 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
+type(s_ewald_ion_ion) :: ewald
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
@@ -139,7 +140,7 @@ DFT_Iteration : do iter=1,nscf
    if(calc_mode/='DFT_BAND')then
       select case(iperiodic)
       case(0); call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
-      case(3); call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+      case(3); call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
       end select
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
