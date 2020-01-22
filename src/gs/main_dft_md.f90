@@ -109,7 +109,7 @@ call initialization2_dft( it, nspin, rion_update,  &
                           xc_func, mixing )
 
 call initialization_dft_md( it, rion_update,  &
-                          system, md, energy, stencil, fg, poisson,  &
+                          system, md, energy, ewald, stencil, fg, poisson,&
                           lg, mg, ng,  &
                           info, info_field, pinfo,  &
                           srg, srg_ng,  &
