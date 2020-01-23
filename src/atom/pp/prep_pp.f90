@@ -400,8 +400,10 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
   !
   integer :: a,i,n,ik,ix,iy,iz,kx,ky,kz
   real(8) :: g2,gd,s,g2sq,r1,dr,vloc_av
-  complex(8) :: dvg_tmp(fg%ng,nelem),vion_tmp(fg%ng,natom),vion(fg%ng,natom),rhoG_tmp(fg%ng),tmp_exp
+  complex(8) :: dvg_tmp(fg%ng,nelem),vion_tmp(fg%ig_s:fg%ig_e,natom),rhoG_tmp(fg%ng),tmp_exp
+  complex(8) :: vion_ng(fg%ng),vion_ng_tmp(fg%ng)
 
+  vion_ng_tmp = 0d0
   dvg_tmp = 0d0
 
 !$omp parallel
@@ -455,8 +457,7 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
 !$omp end parallel
 
   call comm_summation(rhog_tmp,fg%zrhoG_ion,fg%ng,fg%icomm_G)
-  call comm_summation(vion_tmp,vion,fg%ng*natom,fg%icomm_G)
-  
+
   !(Local pseudopotential: Vlocal(=Vpsl) in real-space)
   ppg%Vpsl_atom = 0d0
   
@@ -491,6 +492,10 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
     end do
     end do
 
+    ! gather vion data
+    vion_ng_tmp(fg%ig_s:fg%ig_e) = vion_tmp(fg%ig_s:fg%ig_e,a)
+    call comm_summation(vion_ng_tmp,vion_ng,fg%ng,fg%icomm_G)
+
 !$OMP parallel do private(kz,ky,kx,n)
     do kz = ng%is(3),ng%ie(3)
     do ky = ng%is(2),ng%ie(2)
@@ -499,7 +504,7 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,ppg)
       if(kx-1==0.and.ky-1==0.and.kz-1==0)then
         poisson%ff1z(kx,ky,kz) = 0.d0
       else
-        poisson%ff1z(kx,ky,kz) = vion(n,a)
+        poisson%ff1z(kx,ky,kz) = vion_ng(n)
       end if
     end do
     end do
