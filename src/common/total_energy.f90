@@ -474,7 +474,7 @@ CONTAINS
     if(comm_is_root(nproc_id_global)) then
        write(*,900) " == Ewald =="
        write(*,800) " cutoff length in real-space in ewald =", ewald%cutoff_r*au_length_aa, " [A]"
-       write(*,800) " (additional buffer length is", ewald%cutoff_r_buff*au_length_aa, " [A])"
+       write(*,800) " (buffer length in bookkeeping =", ewald%cutoff_r_buff*au_length_aa, " [A])"
     endif
 
 800 format(a,f6.2,a)
@@ -510,7 +510,7 @@ CONTAINS
 
       ewald%nmax_pair_bk = maxval(npair_bk_tmp)
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
-      allocate( ewald%bk(5,ewald%nmax_pair_bk,system%nion) )
+      allocate( ewald%bk(4,ewald%nmax_pair_bk,system%nion) )
       allocate( ewald%npair_bk(system%nion) )
 
       if(comm_is_root(nproc_id_global)) then
