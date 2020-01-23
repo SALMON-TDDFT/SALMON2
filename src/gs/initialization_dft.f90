@@ -21,7 +21,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 srg, srg_ng,  &
                                 srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                                 spsi, shpsi, sttpsi,  &
-                                pp, ppg,  &
+                                pp, ppg, ppn,  &
                                 ofl )
 use math_constants, only: pi, zi
 use structures
