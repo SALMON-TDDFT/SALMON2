@@ -510,7 +510,7 @@ CONTAINS
 
       ewald%nmax_pair_bk = maxval(npair_bk_tmp)
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
-      allocate( ewald%bk(5,ewald%nmax_pair_bk,system%nion) )
+      allocate( ewald%bk(4,ewald%nmax_pair_bk,system%nion) )
       allocate( ewald%npair_bk(system%nion) )
 
       if(comm_is_root(nproc_id_global)) then
