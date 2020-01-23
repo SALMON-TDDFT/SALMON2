@@ -236,9 +236,11 @@ use inputoutput
   
   call timer_end(LOG_READ_GS_DATA)
 
-  ewald%yn_bookkeep='y'  !to be input keyword??
+  select case(iperiodic)
+  case(0) ; ewald%yn_bookkeep='n'  !to be input keyword??
+  case(3) ; ewald%yn_bookkeep='y'
+  end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald)
-  
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
