@@ -141,6 +141,7 @@ contains
           ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
 
     ! local part
+!$omp parallel do private(ia,ix,iy,iz,w)
       do ia=1,nion
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
@@ -152,9 +153,11 @@ contains
         end do
         end do
       end do
+!$omp end parallel do
 
     ! nonlocal part
       if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+!$omp parallel do private(ilma,ia,duVpsi,j,ix,iy,iz,w)
       do ilma=1,Nlma
         ia = ppg%ia_tbl(ilma)
         duVpsi = 0d0
@@ -168,6 +171,7 @@ contains
         F_tmp(:,ia) = F_tmp(:,ia) - 2d0*system%rocc(io,ik,ispin)*system%wtk(ik) &
         & * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) * system%Hvol
       end do
+!$omp end parallel do
 
       if( PLUS_U_ON )then
         if( .not.allocated(dphipsi_lma) )then
@@ -273,6 +277,7 @@ contains
     case(3)
 
       F_tmp = 0d0
+!$omp parallel do private(ia,r,ig,g,G2,Gd,rho_i)
       do ia=1,nion
          r = system%Rion(1:3,ia)
          do ig=fg%ig_s,fg%ig_e
@@ -287,6 +292,7 @@ contains
                                       *zI*0.5d0*(conjg(rho_i)*exp(-zI*Gd)-rho_i*exp(zI*Gd))
          end do
       end do
+!$omp end parallel do
       call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_G)
 
       F_tmp = 0d0

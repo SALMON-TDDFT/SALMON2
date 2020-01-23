@@ -235,7 +235,10 @@ integer :: Miter,jspin, nspin
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
-  ewald%yn_bookkeep='y'   !to be input keyword??
+  select case(iperiodic)
+  case(0) ; ewald%yn_bookkeep='n'  !to be input keyword??
+  case(3) ; ewald%yn_bookkeep='y'
+  end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald)
 
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
