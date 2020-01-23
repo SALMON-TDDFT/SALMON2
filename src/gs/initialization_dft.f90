@@ -136,7 +136,7 @@ end subroutine initialization1_dft
 
 
 subroutine initialization2_dft( Miter, nspin, rion_update,  &
-                                system,energy,stencil,fg,poisson,  &
+                                system,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,ng,  &
                                 info,info_field,  &
                                 srg,srg_ng,  &
@@ -189,6 +189,7 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
+type(s_ewald_ion_ion) :: ewald
 type(s_mixing) :: mixing
 
 logical :: rion_update
@@ -234,13 +235,19 @@ integer :: Miter,jspin, nspin
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
+  select case(iperiodic)
+  case(0) ; ewald%yn_bookkeep='n'  !to be input keyword??
+  case(3) ; ewald%yn_bookkeep='y'
+  end select
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald)
+
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
   select case(iperiodic)
   case(0)
      call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
   case(3)
      rion_update = .true. ! it's first calculation
-     call calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+     call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
   end select
 
 
@@ -248,7 +255,7 @@ end subroutine initialization2_dft
 
 !====================================
 subroutine initialization_dft_md( Miter, rion_update,  &
-                                system,md,energy,stencil,fg,poisson,  &
+                                system,md,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,ng,  &
                                 info,info_field,pinfo,  &
                                 srg,srg_ng,  &
@@ -303,6 +310,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
   type(s_dft_energy) :: energy
+  type(s_ewald_ion_ion) :: ewald
   type(s_mixing) :: mixing
   type(s_cg)     :: cg
   type(s_band_dft) ::band
@@ -330,7 +338,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   !Iteration loop for SCF (DFT_Iteration)
   Miter=0
   call scf_iteration_dft( Miter,rion_update,sum1,  &
-                          system,energy,  &
+                          system,energy,ewald,  &
                           lg,mg,ng,  &
                           info,info_field,pinfo,  &
                           poisson,fg,  &
@@ -345,7 +353,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           band, 1 )
 
   call init_md(system,md)
-  call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+  call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi,ewald)
 
   md%Uene0 = energy%E_tot
   md%E_tot0= energy%E_tot + md%Tene

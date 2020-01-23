@@ -64,6 +64,7 @@ type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
+type(s_ewald_ion_ion) :: ewald
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
@@ -98,7 +99,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           ofl )
 
 call initialization2_dft( it, nspin, rion_update,  &
-                          system, energy, stencil, fg, poisson,  &
+                          system, energy, ewald, stencil, fg, poisson,&
                           lg, mg, ng,  &
                           info, info_field,   &
                           srg, srg_ng,  &
@@ -108,7 +109,7 @@ call initialization2_dft( it, nspin, rion_update,  &
                           xc_func, mixing )
 
 call initialization_dft_md( it, rion_update,  &
-                          system, md, energy, stencil, fg, poisson,  &
+                          system, md, energy, ewald, stencil, fg, poisson,&
                           lg, mg, ng,  &
                           info, info_field, pinfo,  &
                           srg, srg_ng,  &
@@ -165,7 +166,7 @@ MD_Loop : do it=1,nt
    !Iteration loop for SCF (DFT_Iteration)
    Miter=0
    call scf_iteration_dft( Miter,rion_update,sum1,  &
-                           system,energy,  &
+                           system,energy,ewald,  &
                            lg,mg,ng,  &
                            info,info_field,pinfo,  &
                            poisson,fg,  &
@@ -180,7 +181,7 @@ MD_Loop : do it=1,nt
                            band,1 )
 
    ! force
-   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi)
+   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi,ewald)
 
    call time_evolution_step_md_part2(system,md)
 

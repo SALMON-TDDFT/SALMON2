@@ -107,21 +107,23 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_periodic(energy,system,pp,fg,rion_update)
+  SUBROUTINE calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
     use structures
     use salmon_math
     use math_constants,only : pi,zi
     use salmon_global, only: kion,NEwald,aEwald
-    use communication, only: comm_summation,comm_get_groupinfo
+    use communication, only: comm_summation,comm_get_groupinfo,comm_is_root
+    use parallelization, only: nproc_id_global
     use timer
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_pp_info)    ,intent(in) :: pp
     type(s_reciprocal_grid),intent(in) :: fg
     type(s_dft_energy)             :: energy
+    type(s_ewald_ion_ion)          :: ewald
     logical,intent(in)             :: rion_update
     !
-    integer :: ix,iy,iz,ia,ib,ig,zps1,zps2
+    integer :: ix,iy,iz,ia,ib,ig,zps1,zps2,ipair
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(5),E_sum(5)
     real(8) :: etmp
     complex(8) :: rho_e,rho_i
@@ -135,34 +137,78 @@ CONTAINS
     E_tmp_l = 0d0
     if (rion_update) then ! Ewald sum
       call comm_get_groupinfo(fg%icomm_G,irank,nproc)
-      nion_r = (system%nion + 1) / nproc
-      nion_s = nion_r * irank + 1
-      nion_e = nion_s + nion_r - 1
-      if (irank == nproc-1) nion_e = system%nion
+
+      if(ewald%yn_bookkeep=='y') then
+
+         !currently, only the first node calculates(MPI is not yet)... do it later
+         if(comm_is_root(nproc_id_global))then
+!$omp parallel do private(ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
+         do ia=1,system%nion
+            do ipair = 1,ewald%npair_bk(ia)
+               ix = ewald%bk(1,ipair,ia)
+               iy = ewald%bk(2,ipair,ia)
+               iz = ewald%bk(3,ipair,ia)
+               ib = ewald%bk(4,ipair,ia)
+               if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+               r(1) = ix*system%primitive_a(1,1) &
+                    + iy*system%primitive_a(1,2) &
+                    + iz*system%primitive_a(1,3)
+               r(2) = ix*system%primitive_a(2,1) &
+                    + iy*system%primitive_a(2,2) &
+                    + iz*system%primitive_a(2,3)
+               r(3) = ix*system%primitive_a(3,1) &
+                    + iy*system%primitive_a(3,2) &
+                    + iz*system%primitive_a(3,3)
+               rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
+               rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
+               rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
+               rr = sum(rab(:)**2)
+               if(rr .gt. ewald%cutoff_r**2) cycle
+               E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
+
+            end do  !ipair
+         end do     !ia
+!$omp end parallel do
+         endif
+
+      else
+
+         nion_r = (system%nion + 1) / nproc
+         nion_s = nion_r * irank + 1
+         nion_e = nion_s + nion_r - 1
+         if (irank == nproc-1) nion_e = system%nion
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ia,ib,ix,iy,iz,r,rab,rr) &
 !$omp          shared(NEwald,system,pp,Kion,aEwald,nion_s,nion_e)
-      do ia=1,system%nion
-      do ix=-NEwald,NEwald
-      do iy=-NEwald,NEwald
-      do iz=-NEwald,NEwald
-        do ib=nion_s,nion_e
-          !if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle ! iwata
-          r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
-          r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
-          r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
-          rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
-          rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
-          rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
-          rr = sum(rab(:)**2) ; if ( rr == 0.0d0 ) cycle ! iwata 
-          E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
-        end do
-      end do
-      end do
-      end do
-      end do
+         do ia=1,system%nion
+         do ix=-NEwald,NEwald
+         do iy=-NEwald,NEwald
+         do iz=-NEwald,NEwald
+            do ib=nion_s,nion_e
+               !if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle ! iwata
+               r(1) = ix*system%primitive_a(1,1) &
+                    + iy*system%primitive_a(1,2) &
+                    + iz*system%primitive_a(1,3)
+               r(2) = ix*system%primitive_a(2,1) &
+                    + iy*system%primitive_a(2,2) &
+                    + iz*system%primitive_a(2,3)
+               r(3) = ix*system%primitive_a(3,1) &
+                    + iy*system%primitive_a(3,2) &
+                    + iz*system%primitive_a(3,3)
+               rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
+               rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
+               rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
+               rr = sum(rab(:)**2) ; if ( rr == 0.0d0 ) cycle ! iwata 
+               E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
+            end do
+         end do
+         end do
+         end do
+         end do
 !$omp end parallel do
+
+      endif
 
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_tmp_l) &
@@ -392,6 +438,116 @@ CONTAINS
     deallocate(wrk1,wrk2)
     return
   End Subroutine calc_eigen_energy
+
+  subroutine init_ewald(system,ewald)
+    use structures
+    use salmon_math
+    use math_constants,only : pi,zi
+    use salmon_global, only: kion,NEwald,aEwald
+    use communication, only: comm_is_root,comm_summation,comm_get_groupinfo
+    use parallelization, only: nproc_id_global
+    use inputoutput, only: au_length_aa
+    use timer
+    implicit none
+    type(s_dft_system) ,intent(in) :: system
+    type(s_ewald_ion_ion) :: ewald
+    !
+    integer :: ix,iy,iz,ia,ib,ig,ir,ipair
+    integer,allocatable :: npair_bk_tmp(:)
+    real(8) :: rr,rab(3),r(3),g(3),G2,Gd
+    real(8) :: r1, cutoff_erfc_r, tmp
+
+
+    !(find cut off length)
+    ewald%cutoff_r_buff = 2d0 /au_length_aa !buffer in real-space in cutoff [bohr] 
+    cutoff_erfc_r = 1d-10*au_length_aa  !cut-off threshold of erfc(ar)/r [1/bohr]
+
+    do ir=1,100
+       r1=dble(ir)/au_length_aa  ![bohr]
+       tmp = erfc_salmon(sqrt(aEwald)*r1)/r1
+       if(tmp .le. cutoff_erfc_r) then
+          ewald%cutoff_r = r1
+          exit
+       endif
+    enddo
+
+    if(comm_is_root(nproc_id_global)) then
+       write(*,900) " == Ewald =="
+       write(*,800) " cutoff length in real-space in ewald =", ewald%cutoff_r*au_length_aa, " [A]"
+       write(*,800) " (buffer length in bookkeeping =", ewald%cutoff_r_buff*au_length_aa, " [A])"
+    endif
+
+800 format(a,f6.2,a)
+900 format(a)
+
+    !Book-keeping in ewald(ion-ion)
+
+    !(check maximum number of pairs and allocate)
+    allocate(npair_bk_tmp(system%nion))
+    npair_bk_tmp(:) =0
+
+    do ia=1,system%nion
+       do ix=-NEwald,NEwald
+       do iy=-NEwald,NEwald
+       do iz=-NEwald,NEwald
+          do ib=1,system%nion
+             if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+             r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
+             r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
+             r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
+             rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
+             rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
+             rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
+             rr = sum(rab(:)**2)
+             if(rr .le. (ewald%cutoff_r+ewald%cutoff_r_buff)**2) then
+                npair_bk_tmp(ia) = npair_bk_tmp(ia) + 1
+             endif
+          end do
+        end do
+        end do
+        end do
+      end do
+
+      ewald%nmax_pair_bk = maxval(npair_bk_tmp)
+      ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
+      allocate( ewald%bk(4,ewald%nmax_pair_bk,system%nion) )
+      allocate( ewald%npair_bk(system%nion) )
+
+      if(comm_is_root(nproc_id_global)) then
+         write(*,810) " number of ion-ion pair(/atom) used for allocation of bookkeeping=", ewald%nmax_pair_bk
+         write(*,*)"==========="
+810      format(a,i6)
+      endif
+
+    do ia=1,system%nion
+       ipair = 0
+       do ix=-NEwald,NEwald
+       do iy=-NEwald,NEwald
+       do iz=-NEwald,NEwald
+          do ib=1,system%nion
+             if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+             r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
+             r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
+             r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
+             rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
+             rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
+             rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
+             rr = sum(rab(:)**2)
+             if(rr .le. ewald%cutoff_r**2) then
+                ipair = ipair + 1
+                ewald%bk(1,ipair,ia) = ix
+                ewald%bk(2,ipair,ia) = iy
+                ewald%bk(3,ipair,ia) = iz
+                ewald%bk(4,ipair,ia) = ib
+             endif
+          end do
+        end do
+        end do
+        end do
+        ewald%npair_bk(ia) = ipair
+      end do
+
+  end subroutine init_ewald
 
 !===================================================================================================================================
 
