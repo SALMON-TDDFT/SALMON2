@@ -236,9 +236,14 @@ use inputoutput
   
   call timer_end(LOG_READ_GS_DATA)
 
+
+
   select case(iperiodic)
-  case(0) ; ewald%yn_bookkeep='n'  !to be input keyword??
-  case(3) ; ewald%yn_bookkeep='y'
+  case(0) 
+     ewald%yn_bookkeep='n'  !to be input keyword??
+  case(3)
+     ewald%yn_bookkeep='y'
+     call  init_nion_mpi(system,fg)
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald)
   

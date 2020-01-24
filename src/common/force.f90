@@ -45,7 +45,7 @@ contains
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
-    real(8) :: kAc(3)
+    real(8) :: kAc(3), rtmp, rtmp2(3)
     real(8),allocatable :: F_tmp(:,:),F_sum(:,:)
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -60,10 +60,9 @@ contains
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
-    allocate(F_tmp(3,nion),F_sum(3,nion))
-    if( PLUS_U_ON )then
-      allocate( zF_tmp(3,nion) ); zF_tmp=zero
-    end if
+    allocate( F_tmp(3,nion), F_sum(3,nion) )
+    if( PLUS_U_ON ) allocate( zF_tmp(3,nion) ); zF_tmp=zero
+
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_force_periodic" !??????
     im = 1
@@ -130,95 +129,101 @@ contains
        call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
-    kAc = 0d0
+    kAc   = 0d0
     F_tmp = 0d0
+
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
 
-    ! gtpsi = (nabla) psi
-      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
-          ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+       ! gtpsi = (nabla) psi
+       call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
+            ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
 
-    ! local part
-!$omp parallel do private(ia,ix,iy,iz,w)
-      do ia=1,nion
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
+       ! local part
+       rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+!$omp parallel do collapse(2) private(iz,iy,ix,ia,w,rtmp2) reduction(+:F_tmp)
+       do iz=mg%is(3),mg%ie(3)
+       do iy=mg%is(2),mg%ie(2)
+       do ix=mg%is(1),mg%ie(1)
           w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          F_tmp(:,ia) = F_tmp(:,ia) - 2d0*system%rocc(io,ik,ispin)*system%wtk(ik)  &
-          & * dble(w(:))* ppg%Vpsl_atom(ix,iy,iz,ia) * system%Hvol
-        end do
-        end do
-        end do
-      end do
-!$omp end parallel do
-
-    ! nonlocal part
-      if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-!$omp parallel do private(ilma,ia,duVpsi,j,ix,iy,iz,w)
-      do ilma=1,Nlma
-        ia = ppg%ia_tbl(ilma)
-        duVpsi = 0d0
-        do j=1,ppg%mps(ia)
-          ix = ppg%jxyz(1,j,ia)
-          iy = ppg%jxyz(2,j,ia)
-          iz = ppg%jxyz(3,j,ia)
-          w = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          duVpsi = duVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
-        end do
-        F_tmp(:,ia) = F_tmp(:,ia) - 2d0*system%rocc(io,ik,ispin)*system%wtk(ik) &
-        & * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) * system%Hvol
-      end do
-!$omp end parallel do
-
-      if( PLUS_U_ON )then
-        if( .not.allocated(dphipsi_lma) )then
-          allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
-        end if
-        do ilma=1,Nlma_ao
-          ia = ppg%ia_tbl_ao(ilma)
-          dphipsi = zero
-          do j=1,ppg%mps_ao(ia)
-            ix = ppg%jxyz_ao(1,j,ia)
-            iy = ppg%jxyz_ao(2,j,ia)
-            iz = ppg%jxyz_ao(3,j,ia)
-            w  = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-            dphipsi(:) = dphipsi(:) + conjg(ppg%zekr_phi_ao(j,ilma,ik)) * w(:)
+          rtmp2(:) = rtmp * dble(w(:))
+          do ia=1,nion
+             F_tmp(:,ia) = F_tmp(:,ia) - rtmp2(:) * ppg%Vpsl_atom(ix,iy,iz,ia)
           end do
-          dphipsi_lma(:,ilma) = dphipsi(:) * ppg%Hvol
-        end do
-      end if
-      if( PLUS_U_ON )then
-        Nproj_pairs = size(ppg%proj_pairs_ao,2)
-        do iprj=1,Nproj_pairs
-          ilma=ppg%proj_pairs_ao(1,iprj)
-          jlma=ppg%proj_pairs_ao(2,iprj)
-          ia = ppg%proj_pairs_info_ao(1,iprj)
-          l  = ppg%proj_pairs_info_ao(2,iprj)
-          n  = ppg%proj_pairs_info_ao(3,iprj)
-          m1 = ppg%proj_pairs_info_ao(4,iprj)
-          m2 = ppg%proj_pairs_info_ao(5,iprj)
-          ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
-               system%rocc(io,ispin,ik)*system%wtk(ik) &
-               *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,iorb)) &
-                + phipsibox2(ilma,iorb)*conjg(dphipsi_lma(:,jlma)) )
-          if( m1 == m2 )then
-            zF_tmp(:,ia) = zF_tmp(:,ia) &
-                 - 0.5d0*U_eff(n,l,ia)*( 1.0d0 - 2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
-                 * ddm_mms_nla(:)
-          else
-            zF_tmp(:,ia) = zF_tmp(:,ia) &
-                 - 0.5d0*U_eff(n,l,ia)*( -2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
-                 * ddm_mms_nla(:)
+       end do
+       end do
+       end do
+!$omp end parallel do
+
+       ! nonlocal part
+       if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+       rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+
+!$omp parallel do private(ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
+       do ilma=1,Nlma
+          ia = ppg%ia_tbl(ilma)
+          duVpsi = 0d0
+          do j=1,ppg%mps(ia)
+             ix = ppg%jxyz(1,j,ia)
+             iy = ppg%jxyz(2,j,ia)
+             iz = ppg%jxyz(3,j,ia)
+             w = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             duVpsi = duVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
+          end do
+          F_tmp(:,ia) = F_tmp(:,ia)  &
+                     - rtmp * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) 
+                
+       end do
+!$omp end parallel do
+
+       if( PLUS_U_ON )then
+          if( .not.allocated(dphipsi_lma) )then
+             allocate( dphipsi_lma(3,Nlma_ao) ); dphipsi_lma=zero
           end if
-        end do !iprj
-      end if
+          do ilma=1,Nlma_ao
+             ia = ppg%ia_tbl_ao(ilma)
+             dphipsi = zero
+             do j=1,ppg%mps_ao(ia)
+                ix = ppg%jxyz_ao(1,j,ia)
+                iy = ppg%jxyz_ao(2,j,ia)
+                iz = ppg%jxyz_ao(3,j,ia)
+                w  = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+                dphipsi(:) = dphipsi(:) + conjg(ppg%zekr_phi_ao(j,ilma,ik)) * w(:)
+             end do
+             dphipsi_lma(:,ilma) = dphipsi(:) * ppg%Hvol
+          end do
+       end if
+       if( PLUS_U_ON )then
+          Nproj_pairs = size(ppg%proj_pairs_ao,2)
+          do iprj=1,Nproj_pairs
+             ilma=ppg%proj_pairs_ao(1,iprj)
+             jlma=ppg%proj_pairs_ao(2,iprj)
+             ia = ppg%proj_pairs_info_ao(1,iprj)
+             l  = ppg%proj_pairs_info_ao(2,iprj)
+             n  = ppg%proj_pairs_info_ao(3,iprj)
+             m1 = ppg%proj_pairs_info_ao(4,iprj)
+             m2 = ppg%proj_pairs_info_ao(5,iprj)
+             ddm_mms_nla(:)= & ! ddm_mms_nla(m1,m2,ispin,n,l,ia)=
+                  system%rocc(io,ispin,ik)*system%wtk(ik) &
+                  *( dphipsi_lma(:,ilma)*conjg(phipsibox2(jlma,iorb)) &
+                  + phipsibox2(ilma,iorb)*conjg(dphipsi_lma(:,jlma)) )
+             if( m1 == m2 )then
+                zF_tmp(:,ia) = zF_tmp(:,ia) &
+                     - 0.5d0*U_eff(n,l,ia)*( 1.0d0 - 2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+                     * ddm_mms_nla(:)
+             else
+                zF_tmp(:,ia) = zF_tmp(:,ia) &
+                     - 0.5d0*U_eff(n,l,ia)*( -2.0d0*dm_mms_nla(m1,m2,ispin,n,l,ia) ) &
+                     * ddm_mms_nla(:)
+             end if
+          end do !iprj
+       end if
 
     end do !ispin
     end do !io
     end do !ik
+
     !do ia=1,nion
     !  write(*,'(1x,i4,2f20.10)') ia,real(zF_tmp(1,ia)),aimag(zF_tmp(1,ia))
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
@@ -254,12 +259,12 @@ contains
     type(s_ewald_ion_ion),intent(in) :: ewald
     type(s_pp_info)   ,intent(in) :: pp
     type(s_reciprocal_grid),intent(in) :: fg
-    integer           ,intent(in) :: nion
-    real(8)                       :: F_tmp(3,nion),F_sum(3,nion)
+    integer  ,intent(in) :: nion
+    real(8)              :: F_tmp(3,nion),F_tmp_l(3,nion),F_sum(3,nion)
     !
     integer :: ix,iy,iz,ia,ib,ig,ipair
-    real(8) :: rr,rab(3),r(3),g(3),G2,Gd
-    complex(8) :: rho_i
+    real(8) :: rr,rab(3),r(3),g(3),G2,Gd, rtmp(3)
+    complex(8) :: rho_i, ctmp1(3), ctmp2
 
     select case(system%iperiodic)
     case(0)
@@ -276,36 +281,46 @@ contains
 
     case(3)
 
-      F_tmp = 0d0
-!$omp parallel do private(ia,r,ig,g,G2,Gd,rho_i)
-      do ia=1,nion
-         r = system%Rion(1:3,ia)
-         do ig=fg%ig_s,fg%ig_e
-            if(ig == fg%iGzero ) cycle
-            g(1) = fg%Gx(ig)
-            g(2) = fg%Gy(ig)
-            g(3) = fg%Gz(ig)
-            G2 = g(1)**2 + g(2)**2 + g(3)**2
-            Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-            rho_i = fg%zrhoG_ion(ig)
-            F_tmp(:,ia) = F_tmp(:,ia) + g(:)*(4*Pi/G2)*exp(-G2/(4*aEwald))*pp%Zps(Kion(ia)) &
-                                      *zI*0.5d0*(conjg(rho_i)*exp(-zI*Gd)-rho_i*exp(zI*Gd))
+
+      F_tmp   = 0d0
+!$omp parallel do private(ig,ia,r,g,G2,Gd,rho_i,rtmp,ctmp1,ctmp2) reduction(+:F_tmp)
+      do ig=fg%ig_s,fg%ig_e
+         if(ig == fg%iGzero ) cycle
+         g(1) = fg%Gx(ig)
+         g(2) = fg%Gy(ig)
+         g(3) = fg%Gz(ig)
+         G2   = sum(g(:)**2)
+         if(G2 .gt. ewald%cutoff_g**2) cycle   !xxx
+
+         rho_i= fg%zrhoG_ion(ig)
+         rtmp(:) = 0.5d0 * g(:) * (4*Pi/G2) * exp(-G2/(4*aEwald))
+         ctmp1(:)= rtmp(:) * zI
+
+         do ia=1,nion
+            r = system%Rion(1:3,ia)
+            Gd = sum(g(:)*r(:))
+            ctmp2 = rho_i*exp(zI*Gd)
+            F_tmp(:,ia) = F_tmp(:,ia)  &
+                        + pp%Zps(Kion(ia)) * ctmp1(:) * (conjg(ctmp2)-ctmp2)
          end do
       end do
 !$omp end parallel do
       call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_G)
 
+
       F_tmp = 0d0
       if(ewald%yn_bookkeep=='y') then
 
+         F_tmp_l = 0d0
 !$omp parallel do private(ia,ipair,ix,iy,iz,ib,r,rab,rr)
-         do ia=1,nion
+         do ia= system%nion_s, system%nion_e
+        !do ia=1,nion
             do ipair = 1,ewald%npair_bk(ia)
                ix = ewald%bk(1,ipair,ia)
                iy = ewald%bk(2,ipair,ia)
                iz = ewald%bk(3,ipair,ia)
                ib = ewald%bk(4,ipair,ia)
-               if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
+              !if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
                r(1) = ix*system%primitive_a(1,1) &
                     + iy*system%primitive_a(1,2) &
                     + iz*system%primitive_a(1,3)
@@ -320,12 +335,14 @@ contains
                rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
                rr = sum(rab(:)**2)
                if(rr .gt. ewald%cutoff_r**2) cycle
-               F_tmp(:,ia) = F_tmp(:,ia) - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
-                                        -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
+               F_tmp_l(:,ia) = F_tmp_l(:,ia)  &
+                             - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
+                             -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
 
             end do  !ipair
          end do     !ia
 !$omp end parallel do
+         call comm_summation(F_tmp_l,F_tmp,3*nion,fg%icomm_G)
 
       else
 

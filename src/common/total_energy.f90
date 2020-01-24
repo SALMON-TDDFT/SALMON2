@@ -173,10 +173,10 @@ CONTAINS
 
       else
 
-         nion_r = (system%nion + 1) / nproc
-         nion_s = nion_r * irank + 1
-         nion_e = nion_s + nion_r - 1
-         if (irank == nproc-1) nion_e = system%nion
+         nion_r = system%nion_r
+         nion_s = system%nion_s
+         nion_e = system%nion_e
+
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:E_tmp) &
 !$omp          private(ia,ib,ix,iy,iz,r,rab,rr) &
@@ -459,8 +459,13 @@ CONTAINS
 
 
     !(find cut off length)
+    ewald%cutoff_g = 99d99 ![1/Bohr]   !cutoff in G space : change by your self
+!    ewald%cutoff_g = 4.5d0 ![1/Bohr]   !cutoff in G space : change by your self
+!    ewald%cutoff_g = 3.0d0 ![1/Bohr]   !cutoff in G space : change by your self
     ewald%cutoff_r_buff = 2d0 /au_length_aa !buffer in real-space in cutoff [bohr] 
     cutoff_erfc_r = 1d-10*au_length_aa  !cut-off threshold of erfc(ar)/r [1/bohr]
+
+
 
     do ir=1,100
        r1=dble(ir)/au_length_aa  ![bohr]
