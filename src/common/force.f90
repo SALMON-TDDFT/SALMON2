@@ -45,7 +45,7 @@ contains
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
-    real(8) :: kAc(3), rtmp
+    real(8) :: kAc(3), rtmp, rtmp2(3)
     real(8),allocatable :: F_tmp(:,:),F_sum(:,:)
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
@@ -142,16 +142,17 @@ contains
 
        ! local part
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-!$omp parallel do private(ia,ix,iy,iz,w) reduction(+:F_tmp)
-       do ia=1,nion
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-             w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-             F_tmp(:,ia) = F_tmp(:,ia) - rtmp * dble(w(:))* ppg%Vpsl_atom(ix,iy,iz,ia)
+!$omp parallel do collapse(2) private(iz,iy,ix,ia,w,rtmp2) reduction(+:F_tmp)
+       do iz=mg%is(3),mg%ie(3)
+       do iy=mg%is(2),mg%ie(2)
+       do ix=mg%is(1),mg%ie(1)
+          w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          rtmp2(:) = rtmp * dble(w(:))
+          do ia=1,nion
+             F_tmp(:,ia) = F_tmp(:,ia) - rtmp2(:) * ppg%Vpsl_atom(ix,iy,iz,ia)
           end do
-          end do
-          end do
+       end do
+       end do
        end do
 !$omp end parallel do
 

@@ -366,7 +366,7 @@ subroutine calc_gradient_psi(tpsi,gtpsi,is_array,ie_array,is,ie,idx,idy,idz,nabt
   complex(8) :: w(3)
 
 !$OMP parallel
-!$OMP do private(iz,iy,ix,w)
+!$OMP do collapse(2) private(iz,iy,ix,w)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
