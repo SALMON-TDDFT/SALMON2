@@ -235,11 +235,12 @@ integer :: Miter,jspin, nspin
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
-  call  init_nion_mpi(system,fg)
-
   select case(iperiodic)
-  case(0) ; ewald%yn_bookkeep='n'  !to be input keyword??
-  case(3) ; ewald%yn_bookkeep='y'
+  case(0) 
+     ewald%yn_bookkeep='n'  !to be input keyword??
+  case(3) 
+     ewald%yn_bookkeep='y'
+     call  init_nion_mpi(system,fg)
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald)
 
