@@ -54,6 +54,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   real(8),allocatable :: save_udVtbl_d(:,:,:)
   logical :: flag_use_grad_wf_on_force
 
+
   ilevel_print = 0
   if(abs(ppg%Hvol).lt.1d-99) ilevel_print=2 !judge the first init_ps or not
      
@@ -73,6 +74,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   aly = system%Hgs(2)*dble(lg%num(2))
   alz = system%Hgs(3)*dble(lg%num(3))
   nl = lg%num(1)*lg%num(2)*lg%num(3)
+
 
 !$omp parallel do private(iz,iy,ix,i) collapse(2)
   do iz=mg%is(3),mg%ie(3)
@@ -108,7 +110,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 
   call calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                    hx,hy,hz,system%primitive_a,system%rmatrix_A)
+                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info%icomm_ko)
 
   call set_nlma(pp,ppg)
   call init_lma_tbl(pp,ppg)
@@ -917,9 +919,10 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 end subroutine calc_nps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
+subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,icomm_ko)
   use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
   use structures,only : s_pp_info,s_pp_grid
+  use communication,only: comm_get_groupinfo,comm_summation
   implicit none
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
@@ -929,11 +932,24 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
+  integer,intent(in),optional :: icomm_ko
   integer :: a,i,ik,ix,iy,iz,j
   integer :: nc
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: r,x,y,z,u,v,w
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
+  integer :: irank,nproc,na,sa,ea
+
+  if (present(icomm_ko)) then
+    call comm_get_groupinfo(icomm_ko,irank,nproc)
+    na = (natom + 1) / nproc
+    sa = na * irank + 1
+    ea = sa + na - 1
+    if (irank == nproc-1) ea = natom
+  else
+    sa = 1
+    ea = natom
+  end if
 
   matrix_a = 0d0
   matrix_a(1,1) = 1d0
@@ -980,9 +996,17 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
     end if
   end if
 
-!$omp parallel
-!$omp do private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w)
-  do a=1,natom
+  ppg%jxyz = 0
+  ppg%jxx  = 0
+  ppg%jyy  = 0
+  ppg%jzz  = 0
+  ppg%rxyz = 0
+  ppg%mps  = 0
+
+!$omp parallel do default(none) &
+!$omp    private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w) &
+!$omp    shared(sa,ea,natom,kion,nc,al,rion,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg)
+  do a=sa,ea
     ik=kion(a)
     j=0
     do ix=-nc,nc
@@ -991,12 +1015,9 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
       rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
       rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
       rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
-      tmpx = rion(1,a)+ rr(1)
-      tmpy = rion(2,a)+ rr(2)
-      tmpz = rion(3,a)+ rr(3)
-!      tmpx = rion(1,a)+ix*aLx
-!      tmpy = rion(2,a)+iy*aLy
-!      tmpz = rion(3,a)+iz*aLz
+      tmpx = rion(1,a) + rr(1)
+      tmpy = rion(2,a) + rr(2)
+      tmpz = rion(3,a) + rr(3)
       do i=1,ml
         u = mx(i)*hx + rshift(1)
         v = my(i)*hy + rshift(2)
@@ -1007,9 +1028,6 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
         x = rr(1) - tmpx
         y = rr(2) - tmpy
         z = rr(3) - tmpz
-!        x=mx(i)*Hx+rshift(1)-tmpx
-!        y=my(i)*Hy+rshift(2)-tmpy
-!        z=mz(i)*Hz+rshift(3)-tmpz
         r=sqrt(x*x+y*y+z*z)
         if (r<pp%rps(ik)) then
           j=j+1
@@ -1017,25 +1035,30 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
             ppg%jxyz(1,j,a)=mx(i)
             ppg%jxyz(2,j,a)=my(i)
             ppg%jxyz(3,j,a)=mz(i)
-            ppg%jxx( j,a)=ix
-            ppg%jyy( j,a)=iy
-            ppg%jzz( j,a)=iz
-            ppg%rxyz(1,j,a) = x
-            ppg%rxyz(2,j,a) = y
-            ppg%rxyz(3,j,a) = z
-!            ppg%rxyz(1,j,a)=dble(mx(i))*hx+rshift(1)-(rion(1,a)+dble(ix)*alx)
-!            ppg%rxyz(2,j,a)=dble(my(i))*hy+rshift(2)-(rion(2,a)+dble(iy)*aly)
-!            ppg%rxyz(3,j,a)=dble(mz(i))*hz+rshift(3)-(rion(3,a)+dble(iz)*alz)
-          endif
-        endif
-      enddo
-    enddo
-    enddo
-    enddo
+            ppg%jxx(j,a)=ix
+            ppg%jyy(j,a)=iy
+            ppg%jzz(j,a)=iz
+            ppg%rxyz(1,j,a)=x
+            ppg%rxyz(2,j,a)=y
+            ppg%rxyz(3,j,a)=z
+          end if
+        end if
+      end do
+    end do
+    end do
+    end do
     ppg%mps(a)=j
   end do
-!$omp end do
-!$omp end parallel
+!$omp end parallel do
+
+  if (present(icomm_ko)) then
+    call comm_summation(ppg%jxyz,icomm_ko)
+    call comm_summation(ppg%jxx, icomm_ko)
+    call comm_summation(ppg%jyy, icomm_ko)
+    call comm_summation(ppg%jzz, icomm_ko)
+    call comm_summation(ppg%rxyz,icomm_ko)
+    call comm_summation(ppg%mps, icomm_ko)
+  end if
 
 end subroutine calc_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
