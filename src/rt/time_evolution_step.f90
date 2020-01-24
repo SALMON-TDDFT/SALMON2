@@ -126,14 +126,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
 
   call timer_end(LOG_CALC_VBOX)
 
-  call timer_begin(LOG_CALC_TIME_PROPAGATION)
-
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
      call update_pseudo_rt(itt,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
 
+  call timer_begin(LOG_CALC_TIME_PROPAGATION)
   if(propagator=='etrs')then
     if(info%numo.ge.1)then
     ! spsi_in --> tpsi, (spsi_out = working array)
@@ -299,8 +298,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   call subdip(itt,rt,lg,ng,srho,rNe,poisson,energy%E_tot,system,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
-  call timer_begin(LOG_WRITE_RT_INFOS)
-
   !(force)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
 
@@ -317,6 +314,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   !(MD: part2)
   if(yn_md=='y') call time_evolution_step_md_part2(system,md)
 
+  call timer_begin(LOG_WRITE_RT_INFOS)
   ! Output 
   !(Export to SYSname_trj.xyz)
   if( (yn_md=='y'.or.yn_out_rvf_rt=='y') .and. mod(itt,out_rvf_rt_step)==0 )then
