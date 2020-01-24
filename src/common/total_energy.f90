@@ -459,7 +459,8 @@ CONTAINS
 
 
     !(find cut off length)
-    ewald%cutoff_g = 4.5d0 ![1/Bohr]   !cutoff in G space : change by your self
+    ewald%cutoff_g = 99d99 ![1/Bohr]   !cutoff in G space : change by your self
+!    ewald%cutoff_g = 4.5d0 ![1/Bohr]   !cutoff in G space : change by your self
 !    ewald%cutoff_g = 3.0d0 ![1/Bohr]   !cutoff in G space : change by your self
     ewald%cutoff_r_buff = 2d0 /au_length_aa !buffer in real-space in cutoff [bohr] 
     cutoff_erfc_r = 1d-10*au_length_aa  !cut-off threshold of erfc(ar)/r [1/bohr]
