@@ -118,7 +118,4 @@
   
   !time step interval for updating pseudopotential
   step_update_ps  = 20
-  
-  !This will be removed.
-  step_update_ps2 = 200
 /
