@@ -235,6 +235,8 @@ integer :: Miter,jspin, nspin
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
+  call  init_nion_mpi(system,fg)
+
   select case(iperiodic)
   case(0) ; ewald%yn_bookkeep='n'  !to be input keyword??
   case(3) ; ewald%yn_bookkeep='y'
@@ -371,3 +373,27 @@ subroutine initialization_dft_md( Miter, rion_update,  &
 
 
 end subroutine initialization_dft_md
+
+subroutine init_nion_mpi(system,fg)
+  use structures, only: s_dft_system, s_reciprocal_grid
+  use inputoutput, only: num_kgrid
+ use communication, only: comm_get_groupinfo
+  implicit none
+  type(s_dft_system)  :: system
+  type(s_reciprocal_grid) :: fg
+  integer :: irank,nproc
+
+  call comm_get_groupinfo(fg%icomm_G,irank,nproc)
+  system%nion_r = (system%nion + 1) / nproc
+  system%nion_s = system%nion_r * irank + 1
+  system%nion_e = system%nion_s + system%nion_r - 1
+  if (irank == nproc-1) system%nion_e = system%nion
+
+  !flag of gamma point only
+  if( num_kgrid(1)==1.and.num_kgrid(2)==1.and.num_kgrid(3)==1 ) then
+     system%flag_k1x1x1 = .true.
+  else
+     system%flag_k1x1x1 = .false.
+  endif
+
+end subroutine init_nion_mpi

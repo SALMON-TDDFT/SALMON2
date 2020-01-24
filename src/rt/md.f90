@@ -258,10 +258,12 @@ subroutine time_evolution_step_md_part1(itt,system,md)
 
 
   !update ion velocity with dt/2
+!$omp parallel do private(iatom,mass_au)
   do iatom=1,natom
      mass_au = umass * system%Mass(Kion(iatom))
      system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
   enddo
+!$omp end parallel do
 
   !velocity scaling
   if(step_velocity_scaling>=1 .and. mod(itt,step_velocity_scaling)==0) then
@@ -269,14 +271,25 @@ subroutine time_evolution_step_md_part1(itt,system,md)
      call apply_velocity_scaling_ion(md%Temperature,system)
   endif
 
-  md%Rion_last(:,:) = system%Rion(:,:)
-  md%Force_last(:,:)= system%Force(:,:)
+!$omp parallel do private(iatom)
+  do iatom=1,natom
+     md%Rion_last(:,iatom) = system%Rion(:,iatom)
+     md%Force_last(:,iatom)= system%Force(:,iatom)
+  enddo
+!$omp end parallel do
 
   !update ion coordinate with dt
+!$omp parallel do private(iatom)
   do iatom=1,natom
      system%Rion(:,iatom) = system%Rion(:,iatom) + system%Velocity(:,iatom) *dt
   enddo
-  Rion(:,:) = system%Rion(:,:) !copy (old variable, Rion, is still used in somewhere)
+!$omp end parallel do
+
+!$omp parallel do private(iatom)
+  do iatom=1,natom
+     Rion(:,iatom) = system%Rion(:,iatom) !copy (old variable, Rion, is still used in somewhere)
+  enddo
+!$omp end parallel do
 
   !put SHAKE here in future (if needed)
 
@@ -338,20 +351,25 @@ subroutine time_evolution_step_md_part2(system,md)
   type(s_dft_system) :: system
   type(s_md) :: md
   integer :: iatom
-  real(8) :: mass_au,dt_h, aforce(3,natom), dR(3,natom)
+  real(8) :: mass_au,dt_h, aforce(3,natom), dR(3,natom), Ework_tmp
 
   call timer_begin(LOG_MD_TEVOL_PART2)
 
   dt_h = dt*0.5d0
-  aforce(:,:) = 0.5d0*( md%Force_last(:,:) + system%Force(:,:) )
 
   !update ion velocity with dt/2
-  dR(:,:) = system%Rion(:,:) - md%Rion_last(:,:)
+  Ework_tmp = 0d0
+  !$omp parallel do private(iatom,mass_au) reduction(+:Ework_tmp)
   do iatom=1,natom
+     aforce(:,iatom) = 0.5d0*( md%Force_last(:,iatom) + system%Force(:,iatom) )
+     dR(:,iatom) = system%Rion(:,iatom) - md%Rion_last(:,iatom)
+
      mass_au = umass * system%Mass(Kion(iatom))
      system%Velocity(:,iatom) = system%Velocity(:,iatom) + system%Force(:,iatom)/mass_au * dt_h
-     md%E_work = md%E_work - sum(aforce(:,iatom)*dR(:,iatom))
+     Ework_tmp = Ework_tmp - sum(aforce(:,iatom)*dR(:,iatom))
   enddo
+  !$omp end parallel do
+  md%E_work = md%E_work + Ework_tmp
 
   !NHC act on velocity with dt/2
   if(ensemble=="NVT" .and. thermostat=="nose-hoover")then

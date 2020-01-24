@@ -59,6 +59,9 @@ module structures
     real(8) :: vec_Ac_ext(3) ! external vector potential for output
     real(8) :: vec_E(3)      ! total electric field for output
     real(8) :: vec_E_ext(3)  ! external electric potential for output
+
+    logical :: flag_k1x1x1
+    integer :: nion_r,nion_s,nion_e
   end type s_dft_system
 
   type s_dft_energy
@@ -74,7 +77,7 @@ module structures
                                      ! middle:ion-ion pair index
                                      ! right :atom id
     integer,allocatable :: npair_bk(:)
-    real(8) :: cutoff_r, cutoff_r_buff
+    real(8) :: cutoff_r, cutoff_r_buff, cutoff_g
     character(1) :: yn_bookkeep
   end type s_ewald_ion_ion
 
