@@ -1,51 +1,106 @@
-! Copy the ground state data directory ('data_for_restart') (or make symbolic link)
-! calculated in 'examples/exercise_01_C2H2_gs/'
-! and rename the directory to 'restart/'
+!########################################################################################!
+! Excercise 02: Polarizability and photoabsorption of C2H2 molecule                      !
+!----------------------------------------------------------------------------------------!
+! * The detail of this excercise is expained in our manual(see chapter: 'Exercises').    !
+!   The manual can be obtained from: https://salmon-tddft.jp/documents.html              !
+! * Input format consists of group of keywords like:                                     !
+!     &group                                                                             !
+!       input keyword = xxx                                                              !
+!     /                                                                                  !
+!   (see chapter: 'List of all input keywords' in the manual)                            !
+!----------------------------------------------------------------------------------------!
+! * Copy the ground state data directory('data_for_restart') (or make symbolic link)     !
+!   calculated in 'samples/exercise_01_C2H2_gs/ and rename the directory to 'restart/'   !
+!   in the current directory.                                                            !
+!########################################################################################!
 
-&units
-  unit_system='A_eV_fs'
-/
 &calculation
-  theory='tddft_response'
+  !type of theory
+  theory = 'tddft_response'
 /
+
 &control
+  !common name of output files
   sysname = 'C2H2'
 /
+
+&units
+  !units used in input and output files
+  unit_system = 'A_eV_fs'
+/
+
 &system
+  !periodic boundary condition
   yn_periodic = 'n'
-  al = 16d0, 16d0, 16d0
+  
+  !grid box size(x,y,z)
+  al(1:3) = 16.0d0, 16.0d0, 16.0d0
+  
+  !number of elements, atoms, electrons and states(orbitals)
+  nelem  = 2
+  natom  = 4
+  nelec  = 10
   nstate = 5
-  nelem = 2
-  natom = 4
-  nelec = 10
 /
+
 &pseudo
-  izatom(1)=6
-  izatom(2)=1
-  file_pseudo(1)='C_rps.dat'
-  file_pseudo(2)='H_rps.dat'
-  lmax_ps(1)=1
-  lmax_ps(2)=0
-  lloc_ps(1)=1
-  lloc_ps(2)=0
+  !name of input pseudo potential file
+  file_pseudo(1) = './C_rps.dat'
+  file_pseudo(2) = './H_rps.dat'
+  
+  !atomic number of element
+  izatom(1) = 6
+  izatom(2) = 1
+  
+  !angular momentum of pseudopotential that will be treated as local
+  lloc_ps(1) = 1
+  lloc_ps(2) = 0
+  !--- Caution ---------------------------------------!
+  ! Indices must correspond to those in &atomic_coor. !
+  !---------------------------------------------------!
 /
-&rgrid
-  dl = 0.25d0, 0.25d0, 0.25d0
-/
+
 &functional
+  !functional('PZ' is Perdew-Zunger LDA: Phys. Rev. B 23, 5048 (1981).)
   xc = 'PZ'
 /
+
+&rgrid
+  !spatial grid spacing(x,y,z)
+  dl(1:3) = 0.25d0, 0.25d0, 0.25d0
+/
+
 &tgrid
-  dt=1.25d-3
-  nt=5000
+  !time step size and number of time grids(steps)
+  dt = 1.25d-3
+  nt = 5000
 /
+
 &emfield
+  !envelope shape of the incident pulse('impulse': impulsive field)
   ae_shape1 = 'impulse'
-  epdir_re1 = 0.d0,0.d0,1.d0
+  
+  !polarization unit vector(real part) for the incident pulse(x,y,z)
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  !--- Caution ---------------------------------------------------------!
+  ! Defenition of the incident pulse is wrriten in:                     !
+  ! https://www.sciencedirect.com/science/article/pii/S0010465518303412 !
+  !---------------------------------------------------------------------!
 /
+
+&analysis
+  !energy grid size and number of energy grids for output files
+  de      = 1.0d-2
+  nenergy = 3000
+/
+
 &atomic_coor
-'C'    0.000000    0.000000    0.599672  1
-'H'    0.000000    0.000000    1.662257  2
-'C'    0.000000    0.000000   -0.599672  1
-'H'    0.000000    0.000000   -1.662257  2
+  !cartesian atomic coodinates
+  'C'    0.000000    0.000000    0.599672  1
+  'H'    0.000000    0.000000    1.662257  2
+  'C'    0.000000    0.000000   -0.599672  1
+  'H'    0.000000    0.000000   -1.662257  2
+  !--- Format ---------------------------------------------------!
+  ! 'symbol' x y z index(correspond to that of pseudo potential) !
+  !--------------------------------------------------------------!
 /
