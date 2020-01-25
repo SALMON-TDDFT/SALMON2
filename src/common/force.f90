@@ -47,6 +47,7 @@ contains
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
     real(8) :: kAc(3), rtmp, rtmp2(3)
     real(8),allocatable :: F_tmp(:,:),F_sum(:,:)
+    real(8),allocatable :: dden(:,:,:,:)
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: phipsibox(:,:),phipsibox2(:,:)
@@ -131,6 +132,10 @@ contains
 
     kAc   = 0d0
     F_tmp = 0d0
+    allocate( dden(3,mg%is_array(1):mg%ie_array(1) &
+                    ,mg%is_array(2):mg%ie_array(2) &
+                    ,mg%is_array(3):mg%ie_array(3)))
+    dden(:,:,:,:) = 0d0
 
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -140,21 +145,35 @@ contains
        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
 
-       ! local part
+
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 !$omp parallel do private(iz,iy,ix,ia,w,rtmp2)
-       do ia=1,nion
-          do iz=mg%is(3),mg%ie(3)
-          do iy=mg%is(2),mg%ie(2)
-          do ix=mg%is(1),mg%ie(1)
-             w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-             rtmp2(:) = rtmp * dble(w(:))
-             F_tmp(:,ia) = F_tmp(:,ia) - rtmp2(:) * ppg%Vpsl_atom(ix,iy,iz,ia)
-          end do
-          end do
-          end do
-       end do
+       do iz=mg%is(3),mg%ie(3)
+       do iy=mg%is(2),mg%ie(2)
+       do ix=mg%is(1),mg%ie(1)
+          w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          rtmp2(:) = rtmp * dble(w(:))
+          dden(:,ix,iy,iz) = dden(:,ix,iy,iz) + rtmp2(:)
+       enddo
+       enddo
+       enddo
 !$omp end parallel do
+
+!       ! local part (based on wavefunction gradient)
+!       rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
+!!$omp parallel do private(iz,iy,ix,ia,w,rtmp2)
+!       do ia=1,nion
+!          do iz=mg%is(3),mg%ie(3)
+!          do iy=mg%is(2),mg%ie(2)
+!          do ix=mg%is(1),mg%ie(1)
+!             w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+!             rtmp2(:) = rtmp * dble(w(:))
+!             F_tmp(:,ia) = F_tmp(:,ia) - rtmp2(:) * ppg%Vpsl_atom(ix,iy,iz,ia)
+!          end do
+!          end do
+!          end do
+!       end do
+!!$omp end parallel do
 
        ! nonlocal part
        if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
@@ -223,6 +242,21 @@ contains
     end do !ispin
     end do !io
     end do !ik
+
+
+    ! local part (based on density gradient)
+!$omp parallel do private(iz,iy,ix,ia) reduction(+:F_tmp)
+    do ia=1,nion
+       do iz=mg%is(3),mg%ie(3)
+       do iy=mg%is(2),mg%ie(2)
+       do ix=mg%is(1),mg%ie(1)
+          F_tmp(:,ia) = F_tmp(:,ia) - dden(:,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+       end do
+       end do
+       end do
+    end do
+!$omp end parallel do
+
 
     !do ia=1,nion
     !  write(*,'(1x,i4,2f20.10)') ia,real(zF_tmp(1,ia)),aimag(zF_tmp(1,ia))
