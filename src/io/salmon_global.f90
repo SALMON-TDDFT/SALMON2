@@ -282,6 +282,9 @@ module salmon_global
 !! &ewald
   integer        :: newald
   real(8)        :: aewald
+  real(8)        :: cutoff_r
+  real(8)        :: cutoff_r_buff
+  real(8)        :: cutoff_g
 
 !! &opt
   integer        :: nopt

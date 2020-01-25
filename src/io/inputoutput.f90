@@ -445,7 +445,10 @@ contains
 
     namelist/ewald/ &
       & newald, &
-      & aewald
+      & aewald, &
+      & cutoff_r, &
+      & cutoff_r_buff, &
+      & cutoff_g
 
     namelist/opt/ &
       & nopt, &
@@ -780,6 +783,9 @@ contains
 !! == default for &ewald
     newald = 4
     aewald = 0.5d0
+    cutoff_r = -1d0
+    cutoff_r_buff =  2.0d0 / au_length_aa
+    cutoff_g = -1d0
 !! == default for &opt
     nopt            = 100
     cg_alpha_ini    =  0.8d0 !not use now
@@ -801,7 +807,7 @@ contains
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'
     file_ini_velocity     = 'none'
-    thermostat_tau        =  41.34d0/utime_to_au  !=1fs: just test value
+    thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
     friction              =  0d0
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
@@ -1238,8 +1244,14 @@ contains
     call comm_bcast(threshold_cg      ,nproc_group_global)
     threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3 
 !! == bcast for &ewald
-    call comm_bcast(newald,nproc_group_global)
-    call comm_bcast(aewald,nproc_group_global)
+    call comm_bcast(newald        ,nproc_group_global)
+    call comm_bcast(aewald        ,nproc_group_global)
+    call comm_bcast(cutoff_r      ,nproc_group_global)
+    call comm_bcast(cutoff_r_buff ,nproc_group_global)
+    call comm_bcast(cutoff_g      ,nproc_group_global)
+    cutoff_r      = cutoff_r * ulength_to_au
+    cutoff_r_buff = cutoff_r_buff * ulength_to_au
+    cutoff_g      = cutoff_g / ulength_to_au
 !! == bcast for &opt
     call comm_bcast(nopt             ,nproc_group_global)
     call comm_bcast(cg_alpha_ini     ,nproc_group_global)
@@ -2020,6 +2032,9 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', inml_ewald
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'newald', newald
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'aewald', aewald
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r', cutoff_r
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r_buff', cutoff_r_buff
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_g', cutoff_g
 
       if(inml_opt >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'opt', inml_opt

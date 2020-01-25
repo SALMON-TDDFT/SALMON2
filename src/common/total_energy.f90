@@ -111,7 +111,7 @@ CONTAINS
     use structures
     use salmon_math
     use math_constants,only : pi,zi
-    use salmon_global, only: kion,NEwald,aEwald
+    use salmon_global, only: kion,NEwald,aEwald, cutoff_r
     use communication, only: comm_summation,comm_get_groupinfo,comm_is_root
     use parallelization, only: nproc_id_global
     use timer
@@ -163,7 +163,7 @@ CONTAINS
                rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
                rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
                rr = sum(rab(:)**2)
-               if(rr .gt. ewald%cutoff_r**2) cycle
+               if(rr .gt. cutoff_r**2) cycle
                E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
 
             end do  !ipair
@@ -443,7 +443,7 @@ CONTAINS
     use structures
     use salmon_math
     use math_constants,only : pi,zi
-    use salmon_global, only: kion,NEwald,aEwald
+    use salmon_global, only: kion,NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g
     use communication, only: comm_is_root,comm_summation,comm_get_groupinfo
     use parallelization, only: nproc_id_global
     use inputoutput, only: au_length_aa
@@ -459,27 +459,23 @@ CONTAINS
 
 
     !(find cut off length)
-    ewald%cutoff_g = 99d99 ![1/Bohr]   !cutoff in G space : change by your self
-!    ewald%cutoff_g = 4.5d0 ![1/Bohr]   !cutoff in G space : change by your self
-!    ewald%cutoff_g = 3.0d0 ![1/Bohr]   !cutoff in G space : change by your self
-    ewald%cutoff_r_buff = 2d0 /au_length_aa !buffer in real-space in cutoff [bohr] 
     cutoff_erfc_r = 1d-10*au_length_aa  !cut-off threshold of erfc(ar)/r [1/bohr]
-
-
-
-    do ir=1,100
-       r1=dble(ir)/au_length_aa  ![bohr]
-       tmp = erfc_salmon(sqrt(aEwald)*r1)/r1
-       if(tmp .le. cutoff_erfc_r) then
-          ewald%cutoff_r = r1
-          exit
-       endif
-    enddo
+    if(cutoff_r .lt. 0d0) then
+       do ir=1,100
+          r1=dble(ir)/au_length_aa  ![bohr]
+          tmp = erfc_salmon(sqrt(aEwald)*r1)/r1
+          if(tmp .le. cutoff_erfc_r) then
+             cutoff_r = r1
+             exit
+          endif
+       enddo
+    endif
+    if(cutoff_g .lt. 0d0) cutoff_g = 99d99 ![1/Bohr]   !cutoff in G space
 
     if(comm_is_root(nproc_id_global)) then
        write(*,900) " == Ewald =="
-       write(*,800) " cutoff length in real-space in ewald =", ewald%cutoff_r*au_length_aa, " [A]"
-       write(*,800) " (buffer length in bookkeeping =", ewald%cutoff_r_buff*au_length_aa, " [A])"
+       write(*,800) " cutoff length in real-space in ewald =", cutoff_r*au_length_aa, " [A]"
+       write(*,800) " (buffer length in bookkeeping =", cutoff_r_buff*au_length_aa, " [A])"
     endif
 
 800 format(a,f6.2,a)
@@ -491,20 +487,27 @@ CONTAINS
     allocate(npair_bk_tmp(system%nion))
     npair_bk_tmp(:) =0
 
+!$omp parallel do private(ia,ix,iy,iz,ib,r,rab,rr)
     do ia=1,system%nion
        do ix=-NEwald,NEwald
        do iy=-NEwald,NEwald
        do iz=-NEwald,NEwald
           do ib=1,system%nion
              if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
-             r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
-             r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
-             r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
+             r(1) = ix*system%primitive_a(1,1) + &
+                    iy*system%primitive_a(1,2) + &
+                    iz*system%primitive_a(1,3)
+             r(2) = ix*system%primitive_a(2,1) + &
+                    iy*system%primitive_a(2,2) + &
+                    iz*system%primitive_a(2,3)
+             r(3) = ix*system%primitive_a(3,1) + &
+                    iy*system%primitive_a(3,2) + &
+                    iz*system%primitive_a(3,3)
              rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
              rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
              rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
              rr = sum(rab(:)**2)
-             if(rr .le. (ewald%cutoff_r+ewald%cutoff_r_buff)**2) then
+             if(rr .le. (cutoff_r+cutoff_r_buff)**2) then
                 npair_bk_tmp(ia) = npair_bk_tmp(ia) + 1
              endif
           end do
@@ -512,6 +515,7 @@ CONTAINS
         end do
         end do
       end do
+!$omp end parallel do
 
       ewald%nmax_pair_bk = maxval(npair_bk_tmp)
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
@@ -524,6 +528,7 @@ CONTAINS
 810      format(a,i6)
       endif
 
+!$omp parallel do private(ia,ipair,ix,iy,iz,ib,r,rab,rr)
     do ia=1,system%nion
        ipair = 0
        do ix=-NEwald,NEwald
@@ -531,14 +536,20 @@ CONTAINS
        do iz=-NEwald,NEwald
           do ib=1,system%nion
              if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
-             r(1) = ix*system%primitive_a(1,1) + iy*system%primitive_a(1,2) + iz*system%primitive_a(1,3)
-             r(2) = ix*system%primitive_a(2,1) + iy*system%primitive_a(2,2) + iz*system%primitive_a(2,3)
-             r(3) = ix*system%primitive_a(3,1) + iy*system%primitive_a(3,2) + iz*system%primitive_a(3,3)
+             r(1) = ix*system%primitive_a(1,1) + &
+                    iy*system%primitive_a(1,2) + &
+                    iz*system%primitive_a(1,3)
+             r(2) = ix*system%primitive_a(2,1) + &
+                    iy*system%primitive_a(2,2) + &
+                    iz*system%primitive_a(2,3)
+             r(3) = ix*system%primitive_a(3,1) + &
+                    iy*system%primitive_a(3,2) + &
+                    iz*system%primitive_a(3,3)
              rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
              rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
              rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
              rr = sum(rab(:)**2)
-             if(rr .le. ewald%cutoff_r**2) then
+             if(rr .le. cutoff_r**2) then
                 ipair = ipair + 1
                 ewald%bk(1,ipair,ia) = ix
                 ewald%bk(2,ipair,ia) = iy
@@ -551,6 +562,7 @@ CONTAINS
         end do
         ewald%npair_bk(ia) = ipair
       end do
+!$omp end parallel do
 
   end subroutine init_ewald
 

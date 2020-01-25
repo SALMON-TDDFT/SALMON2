@@ -254,6 +254,7 @@ contains
     use salmon_math
     use salmon_global, only: kion,NEwald,aEwald
     use communication, only: comm_summation
+    use inputoutput, only: cutoff_r, cutoff_g
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_ewald_ion_ion),intent(in) :: ewald
@@ -290,7 +291,7 @@ contains
          g(2) = fg%Gy(ig)
          g(3) = fg%Gz(ig)
          G2   = sum(g(:)**2)
-         if(G2 .gt. ewald%cutoff_g**2) cycle   !xxx
+         if(G2 .gt. cutoff_g**2) cycle   !xxx
 
          rho_i= fg%zrhoG_ion(ig)
          rtmp(:) = 0.5d0 * g(:) * (4*Pi/G2) * exp(-G2/(4*aEwald))
@@ -334,7 +335,7 @@ contains
                rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
                rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
                rr = sum(rab(:)**2)
-               if(rr .gt. ewald%cutoff_r**2) cycle
+               if(rr .gt. cutoff_r**2) cycle
                F_tmp_l(:,ia) = F_tmp_l(:,ia)  &
                              - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
                              -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))

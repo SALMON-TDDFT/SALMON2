@@ -77,7 +77,6 @@ module structures
                                      ! middle:ion-ion pair index
                                      ! right :atom id
     integer,allocatable :: npair_bk(:)
-    real(8) :: cutoff_r, cutoff_r_buff, cutoff_g
     character(1) :: yn_bookkeep
   end type s_ewald_ion_ion
 
