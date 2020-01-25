@@ -439,24 +439,25 @@ CONTAINS
     return
   End Subroutine calc_eigen_energy
 
-  subroutine init_ewald(system,ewald)
+  subroutine init_ewald(system,ewald,fg)
     use structures
     use salmon_math
-    use math_constants,only : pi,zi
-    use salmon_global, only: kion,NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g
+!    use math_constants,only : pi,zi
+    use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g
     use communication, only: comm_is_root,comm_summation,comm_get_groupinfo
-    use parallelization, only: nproc_id_global
+    use parallelization, only: nproc_id_global,nproc_group_global
     use inputoutput, only: au_length_aa
     use timer
     implicit none
     type(s_dft_system) ,intent(in) :: system
     type(s_ewald_ion_ion) :: ewald
+    type(s_reciprocal_grid),intent(in) :: fg
     !
     integer :: ix,iy,iz,ia,ib,ig,ir,ipair
     integer,allocatable :: npair_bk_tmp(:)
-    real(8) :: rr,rab(3),r(3),g(3),G2,Gd
+    integer :: irank,nproc, k, ig_tmp,ig_sum
+    real(8) :: rr,rab(3),r(3),g(3),G2
     real(8) :: r1, cutoff_erfc_r, tmp
-
 
     !(find cut off length)
     cutoff_erfc_r = 1d-10*au_length_aa  !cut-off threshold of erfc(ar)/r [1/bohr]
@@ -476,9 +477,11 @@ CONTAINS
        write(*,900) " == Ewald =="
        write(*,800) " cutoff length in real-space in ewald =", cutoff_r*au_length_aa, " [A]"
        write(*,800) " (buffer length in bookkeeping =", cutoff_r_buff*au_length_aa, " [A])"
+       write(*,810) " cutoff length in G-space in ewald =", cutoff_g/au_length_aa, " [1/A]"
     endif
 
 800 format(a,f6.2,a)
+810 format(a,f10.5,a)
 900 format(a)
 
     !Book-keeping in ewald(ion-ion)
@@ -523,9 +526,9 @@ CONTAINS
       allocate( ewald%npair_bk(system%nion) )
 
       if(comm_is_root(nproc_id_global)) then
-         write(*,810) " number of ion-ion pair(/atom) used for allocation of bookkeeping=", ewald%nmax_pair_bk
+         write(*,820) " number of ion-ion pair(/atom) used for allocation of bookkeeping=", ewald%nmax_pair_bk
          write(*,*)"==========="
-810      format(a,i6)
+820      format(a,i6)
       endif
 
 !$omp parallel do private(ia,ipair,ix,iy,iz,ib,r,rab,rr)
@@ -563,6 +566,64 @@ CONTAINS
         ewald%npair_bk(ia) = ipair
       end do
 !$omp end parallel do
+
+      return
+      !xxxxxxxxxxxxxx
+      !currently, following part is under construction
+
+      !for G-space
+      ig_sum = 0
+      ig_tmp = 0
+      do ig=fg%ig_s,fg%ig_e
+         if(ig == fg%iGzero ) cycle
+         g(1) = fg%Gx(ig)
+         g(2) = fg%Gy(ig)
+         g(3) = fg%Gz(ig)
+         G2   = sum(g(:)**2)
+         if(G2 .gt. cutoff_g**2) cycle
+         ig_tmp = ig_tmp + 1
+      enddo
+      !this cause MPI communitation error ---- why??
+      call comm_summation(ig_tmp,ig_sum,1,nproc_group_global)
+      ewald%ng_bk = ig_sum
+
+      call comm_get_groupinfo(fg%icomm_G,irank,nproc)
+
+      if(nproc .le. ewald%ng_bk) then
+         k = mod(ewald%ng_bk,nproc)
+         if(k==0) then
+            ewald%ng_r = ewald%ng_bk / nproc
+         else
+            ewald%ng_r = ewald%ng_bk / nproc + 1
+         endif
+         ewald%ng_s = ewald%ng_r * irank + 1
+         ewald%ng_e = ewald%ng_s + ewald%ng_r - 1
+         if (irank == nproc-1) ewald%ng_e = ewald%ng_bk
+         if (ewald%ng_e .gt. ewald%ng_bk) ewald%ng_e = -1
+         if (ewald%ng_s .gt. ewald%ng_bk) then
+            ewald%ng_s =  0
+            ewald%ng_e = -1
+         endif
+
+      else
+         if(irank+1.le.ewald%ng_bk) then
+            ewald%ng_s = irank + 1
+            ewald%ng_e = ewald%ng_s
+         else
+            ewald%ng_s = 0
+            ewald%ng_e = -1
+         endif
+      endif
+
+!      if(comm_is_root(nproc_id_global)) &
+
+      write(*,'(a,i8)') " number of G-points in ewald", ewald%ng_bk
+
+      if(comm_is_root(nproc_id_global)) then
+         write(*,*) "  #irank, ng_s, ng_e"
+      endif
+      write(*,'(3i6)')  irank, ewald%ng_s, ewald%ng_e
+      
 
   end subroutine init_ewald
 

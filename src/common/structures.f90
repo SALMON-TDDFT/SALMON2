@@ -76,7 +76,9 @@ module structures
     integer,allocatable :: bk(:,:,:) ! left  :1-3=ix,iy,iz, 4=pair atom
                                      ! middle:ion-ion pair index
                                      ! right :atom id
+    integer,allocatable :: g(:,:) 
     integer,allocatable :: npair_bk(:)
+    integer :: ng_bk, ng_r, ng_s, ng_e
     character(1) :: yn_bookkeep
   end type s_ewald_ion_ion
 

@@ -245,7 +245,7 @@ use inputoutput
      ewald%yn_bookkeep='y'
      call  init_nion_mpi(system,fg)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
