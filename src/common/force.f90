@@ -135,7 +135,16 @@ contains
     allocate( dden(3,mg%is_array(1):mg%ie_array(1) &
                     ,mg%is_array(2):mg%ie_array(2) &
                     ,mg%is_array(3):mg%ie_array(3)))
-    dden(:,:,:,:) = 0d0
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz = mg%is_array(3),mg%ie_array(3)
+    do iy = mg%is_array(2),mg%ie_array(2)
+    do ix = mg%is_array(1),mg%ie_array(1)
+       dden(:,ix,iy,iz) = 0d0
+    enddo
+    enddo
+    enddo
+!$omp end parallel do
 
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -159,22 +168,6 @@ contains
        enddo
 !$omp end parallel do
 
-!       ! local part (based on wavefunction gradient)
-!       rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-!!$omp parallel do private(iz,iy,ix,ia,w,rtmp2)
-!       do ia=1,nion
-!          do iz=mg%is(3),mg%ie(3)
-!          do iy=mg%is(2),mg%ie(2)
-!          do ix=mg%is(1),mg%ie(1)
-!             w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-!             rtmp2(:) = rtmp * dble(w(:))
-!             F_tmp(:,ia) = F_tmp(:,ia) - rtmp2(:) * ppg%Vpsl_atom(ix,iy,iz,ia)
-!          end do
-!          end do
-!          end do
-!       end do
-!!$omp end parallel do
-
        ! nonlocal part
        if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
@@ -192,7 +185,6 @@ contains
           end do
           F_tmp(:,ia) = F_tmp(:,ia)  &
                      - rtmp * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) 
-                
        end do
 !$omp end parallel do
 

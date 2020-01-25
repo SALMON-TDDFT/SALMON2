@@ -71,7 +71,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
 
   integer :: ix,iy,iz,iatom,is,nspin,Mit
   integer :: idensity, idiffDensity, ielf
-  real(8) :: rNe, FionE(3,system%nion)
+  real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   character(100) :: comment_line
   logical :: rion_update,if_use_dmat
@@ -304,10 +304,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
      call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_out,ewald)
 
      !force on ion directly from field --- should put in calc_force?
+!$omp parallel do private(iatom)
      do iatom=1,system%nion
-        FionE(:,iatom) = pp%Zps(Kion(iatom)) * rt%E_tot(:,itt)
+        system%Force(:,iatom)= system%Force(:,iatom) + pp%Zps(Kion(iatom)) * rt%E_tot(:,itt)
      enddo
-     system%Force(:,:) = system%Force(:,:) + FionE(:,:)
+!$omp end parallel do
 
   endif
 
