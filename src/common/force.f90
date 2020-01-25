@@ -142,17 +142,17 @@ contains
 
        ! local part
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-!$omp parallel do collapse(2) private(iz,iy,ix,ia,w,rtmp2) reduction(+:F_tmp)
-       do iz=mg%is(3),mg%ie(3)
-       do iy=mg%is(2),mg%ie(2)
-       do ix=mg%is(1),mg%ie(1)
-          w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          rtmp2(:) = rtmp * dble(w(:))
-          do ia=1,nion
+!$omp parallel do private(iz,iy,ix,ia,w,rtmp2)
+       do ia=1,nion
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+             w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             rtmp2(:) = rtmp * dble(w(:))
              F_tmp(:,ia) = F_tmp(:,ia) - rtmp2(:) * ppg%Vpsl_atom(ix,iy,iz,ia)
           end do
-       end do
-       end do
+          end do
+          end do
        end do
 !$omp end parallel do
 
