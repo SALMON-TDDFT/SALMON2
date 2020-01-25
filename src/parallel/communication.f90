@@ -182,6 +182,12 @@ module communication
     ! 6-D array
     module procedure comm_summation_array6d_double
     module procedure comm_summation_array6d_dcomplex
+
+    ! in-place
+    module procedure comm_sum_ip_array1d_integer
+    module procedure comm_sum_ip_array2d_integer
+    module procedure comm_sum_ip_array3d_integer
+    module procedure comm_sum_ip_array3d_double
   end interface
 
   interface comm_bcast
@@ -954,6 +960,43 @@ contains
     else
       MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_COMPLEX, MPI_SUM, ngroup, ierr))
     end if
+  end subroutine
+
+
+  subroutine comm_sum_ip_array1d_integer(values, ngroup)
+     use mpi, only: MPI_INTEGER, MPI_SUM, MPI_IN_PLACE
+    implicit none
+    integer, intent(inout) :: values(:)
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_INTEGER, MPI_SUM, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_sum_ip_array2d_integer(values, ngroup)
+     use mpi, only: MPI_INTEGER, MPI_SUM, MPI_IN_PLACE
+    implicit none
+    integer, intent(inout) :: values(:,:)
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_INTEGER, MPI_SUM, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_sum_ip_array3d_double(values, ngroup)
+     use mpi, only: MPI_DOUBLE_PRECISION, MPI_SUM, MPI_IN_PLACE
+    implicit none
+    real(8), intent(inout) :: values(:,:,:)
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_DOUBLE_PRECISION, MPI_SUM, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_sum_ip_array3d_integer(values, ngroup)
+     use mpi, only: MPI_INTEGER, MPI_SUM, MPI_IN_PLACE
+    implicit none
+    integer, intent(inout) :: values(:,:,:)
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_INTEGER, MPI_SUM, ngroup, ierr))
   end subroutine
 
 
