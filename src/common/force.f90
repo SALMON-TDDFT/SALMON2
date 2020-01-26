@@ -156,7 +156,7 @@ contains
 
 
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-!$omp parallel do private(iz,iy,ix,ia,w,rtmp2)
+!$omp parallel do collapse(2) private(iz,iy,ix,w,rtmp2)
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
        do ix=mg%is(1),mg%ie(1)
@@ -237,7 +237,7 @@ contains
 
 
     ! local part (based on density gradient)
-!$omp parallel do private(iz,iy,ix,ia) reduction(+:F_tmp)
+!$omp parallel do private(iz,iy,ix,ia)
     do ia=1,nion
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
