@@ -62,7 +62,10 @@ contains
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
     allocate( F_tmp(3,nion), F_sum(3,nion) )
-    if( PLUS_U_ON ) allocate( zF_tmp(3,nion) ); zF_tmp=zero
+    if( PLUS_U_ON ) then
+      allocate( zF_tmp(3,nion) )
+      zF_tmp=zero
+    end if
 
 
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_force_periodic" !??????
