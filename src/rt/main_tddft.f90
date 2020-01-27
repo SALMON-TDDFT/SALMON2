@@ -16,6 +16,8 @@
 
 !=======================================================================
 
+#include "config.h"
+
 subroutine main_tddft
 use math_constants, only: pi
 use salmon_global
@@ -75,6 +77,10 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                         pp, ppg, ppn )
 
 
+#ifdef __FUJITSU
+call fapp_start('time_evol',1,0) ! performance profiling
+#endif
+
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,itotNtime
 
@@ -103,6 +109,10 @@ TE : do itt=Mit+1,itotNtime
 
 end do TE
 call timer_end(LOG_RT_ITERATION)
+
+#ifdef __FUJITSU
+call fapp_stop('time_evol',1,0) ! performance profiling
+#endif
 
 close(030) ! laser
 

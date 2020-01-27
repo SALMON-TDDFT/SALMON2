@@ -15,6 +15,8 @@
 !
 !=======================================================================
 
+#include "config.h"
+
 subroutine main_dft
 use math_constants, only: pi, zi
 use structures
@@ -126,6 +128,10 @@ if(yn_opt=='y')then
 else
    nopt_max = 1
 end if
+
+#ifdef __FUJITSU
+call fipp_start ! performance profiling
+#endif
 
 Structure_Optimization_Iteration : do iopt=1,nopt_max
 
@@ -272,6 +278,10 @@ if(flag_opt_conv)then
   exit Structure_Optimization_Iteration
 end if
 end do Structure_Optimization_Iteration
+
+#ifdef __FUJITSU
+call fipp_stop ! performance profiling
+#endif
 
 
 !------------ Writing part -----------

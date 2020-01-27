@@ -15,6 +15,7 @@
 !
 !=======================================================================
 
+#include "config.h"
 
 subroutine main_dft_md
 use structures
@@ -139,6 +140,11 @@ endif
 
 rion_update = .true.
 
+
+#ifdef __FUJITSU
+call fipp_start ! performance profiling
+#endif
+
 call timer_begin(LOG_GS_ITERATION)
 
 MD_Loop : do it=1,nt
@@ -218,6 +224,11 @@ MD_Loop : do it=1,nt
 end do MD_Loop
 
 call timer_end(LOG_GS_ITERATION)
+
+#ifdef __FUJITSU
+call fipp_stop ! performance profiling
+#endif
+
 
 !------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
