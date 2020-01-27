@@ -129,6 +129,14 @@ module timer
   integer,public,parameter :: LOG_SSDG_SO_PERIODIC_HPSI      = 237
   integer,public,parameter :: LOG_SSDG_SO_PERIODIC_COMM_COLL = 238
 
+  ! force module
+  integer,public,parameter :: LOG_CALC_FORCE_ION_ION  = 261
+  integer,public,parameter :: LOG_CALC_FORCE_ELEC_ION = 262
+  integer,public,parameter :: LOG_CALC_FORCE_GTPSI    = 263
+  integer,public,parameter :: LOG_CALC_FORCE_DDEN     = 264
+  integer,public,parameter :: LOG_CALC_FORCE_NONLOCAL = 265
+  integer,public,parameter :: LOG_CALC_FORCE_LOCAL    = 266
+
   ! FIXME: modify later
   ! hamiltonian module
   integer,public,parameter :: LOG_ALLGATHERV_VLOCAL_CALC      = 240

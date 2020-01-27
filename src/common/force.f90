@@ -81,11 +81,13 @@ contains
     Nlma = ppg%Nlma
 
   ! Ewald sum of ion-ion interaction
+  call timer_begin(LOG_CALC_FORCE_ION_ION)
     call force_ion_ion(F_sum,F_tmp,system,ewald,pp,fg,nion)
     system%Force = F_sum
+  call timer_end(LOG_CALC_FORCE_ION_ION)
 
   ! electron-ion interaction
-
+  call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     if(allocated(tpsi%rwf)) then
       allocate(tpsi%zwf(mg%is_array(1):mg%ie_array(1) &
                        ,mg%is_array(2):mg%ie_array(2) &
@@ -128,11 +130,13 @@ contains
       end do
       call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
     end if
+  call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     if(info%if_divide_rspace) then
        call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
+  call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc   = 0d0
     F_tmp = 0d0
     allocate( dden(3,mg%is_array(1):mg%ie_array(1) &
@@ -154,10 +158,13 @@ contains
     do ispin=1,Nspin
 
        ! gtpsi = (nabla) psi
+       call timer_begin(LOG_CALC_FORCE_GTPSI)
        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+       call timer_end(LOG_CALC_FORCE_GTPSI)
 
 
+       call timer_begin(LOG_CALC_FORCE_DDEN)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 !$omp parallel do collapse(2) private(iz,iy,ix,w,rtmp2)
        do iz=mg%is(3),mg%ie(3)
@@ -170,8 +177,10 @@ contains
        enddo
        enddo
 !$omp end parallel do
+       call timer_end(LOG_CALC_FORCE_DDEN)
 
        ! nonlocal part
+       call timer_begin(LOG_CALC_FORCE_NONLOCAL)
        if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
@@ -190,6 +199,7 @@ contains
                      - rtmp * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) 
        end do
 !$omp end parallel do
+       call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
        if( PLUS_U_ON )then
           if( .not.allocated(dphipsi_lma) )then
@@ -237,9 +247,10 @@ contains
     end do !ispin
     end do !io
     end do !ik
-
+  call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     ! local part (based on density gradient)
+  call timer_begin(LOG_CALC_FORCE_LOCAL)
 !$omp parallel do private(iz,iy,ix,ia)
     do ia=1,nion
        do iz=mg%is(3),mg%ie(3)
@@ -251,6 +262,7 @@ contains
        end do
     end do
 !$omp end parallel do
+  call timer_end(LOG_CALC_FORCE_LOCAL)
 
 
     !do ia=1,nion
