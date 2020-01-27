@@ -24,7 +24,6 @@ contains
   subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi,ewald)
     use structures
     use math_constants,only : zi
-    use stencil_sub, only: calc_gradient_psi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
@@ -169,6 +168,7 @@ contains
 !$omp parallel do collapse(2) private(iz,iy,ix,w,rtmp2)
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
+!OCL swp
        do ix=mg%is(1),mg%ie(1)
           w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           rtmp2(:) = rtmp * dble(w(:))
@@ -188,6 +188,8 @@ contains
        do ilma=1,Nlma
           ia = ppg%ia_tbl(ilma)
           duVpsi = 0d0
+!OCL swp
+!OCL swp_freg_rate(115)
           do j=1,ppg%mps(ia)
              ix = ppg%jxyz(1,j,ia)
              iy = ppg%jxyz(2,j,ia)
@@ -253,13 +255,21 @@ contains
   call timer_begin(LOG_CALC_FORCE_LOCAL)
 !$omp parallel do private(iz,iy,ix,ia)
     do ia=1,nion
-       do iz=mg%is(3),mg%ie(3)
-       do iy=mg%is(2),mg%ie(2)
-       do ix=mg%is(1),mg%ie(1)
-          F_tmp(:,ia) = F_tmp(:,ia) - dden(:,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
-       end do
-       end do
-       end do
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+!OCL swp
+!OCL swp_weak
+        do ix=mg%is(1),mg%ie(1)
+#ifdef __FUJITSU
+           F_tmp(1,ia) = F_tmp(1,ia) - dden(1,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+           F_tmp(2,ia) = F_tmp(2,ia) - dden(2,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+           F_tmp(3,ia) = F_tmp(3,ia) - dden(3,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+#else
+           F_tmp(:,ia) = F_tmp(:,ia) - dden(:,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+#endif
+        end do
+      end do
+      end do
     end do
 !$omp end parallel do
   call timer_end(LOG_CALC_FORCE_LOCAL)
@@ -345,6 +355,7 @@ contains
          rtmp(:) = 0.5d0 * g(:) * (4*Pi/G2) * exp(-G2/(4*aEwald))
          ctmp1(:)= rtmp(:) * zI
 
+!OCL swp
          do ia=1,nion
             r = system%Rion(1:3,ia)
             Gd = sum(g(:)*r(:))
@@ -383,10 +394,13 @@ contains
                rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
                rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
                rr = sum(rab(:)**2)
-               if(rr .gt. cutoff_r**2) cycle
-               F_tmp_l(:,ia) = F_tmp_l(:,ia)  &
-                             - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
-                             -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
+               if(rr .gt. cutoff_r**2) then
+                 !!!
+               else
+                 F_tmp_l(:,ia) = F_tmp_l(:,ia)  &
+                               - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
+                               -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
+               end if
 
             end do  !ipair
          end do     !ia

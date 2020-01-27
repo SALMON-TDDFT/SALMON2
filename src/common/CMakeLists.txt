@@ -12,6 +12,7 @@ set(SOURCES
    total_energy.f90
    lattice.f90
    force.f90
+   calc_gradient_psi.f90
    zstencil_core/typical/seq.f90
    )
 

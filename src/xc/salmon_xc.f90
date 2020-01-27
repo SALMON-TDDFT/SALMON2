@@ -200,7 +200,6 @@ contains
   
     subroutine calc_tau
       use sendrecv_grid, only: update_overlap_complex8
-      use stencil_sub, only: calc_gradient_psi
       use math_constants,only : zi
       implicit none
       integer :: im,ik,io,ispin
