@@ -188,6 +188,7 @@ module communication
     module procedure comm_sum_ip_array2d_integer
     module procedure comm_sum_ip_array3d_integer
     module procedure comm_sum_ip_array3d_double
+    module procedure comm_sum_ip_array5d_integer
   end interface
 
   interface comm_bcast
@@ -995,6 +996,15 @@ contains
      use mpi, only: MPI_INTEGER, MPI_SUM, MPI_IN_PLACE
     implicit none
     integer, intent(inout) :: values(:,:,:)
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_INTEGER, MPI_SUM, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_sum_ip_array5d_integer(values, ngroup)
+     use mpi, only: MPI_INTEGER, MPI_SUM, MPI_IN_PLACE
+    implicit none
+    integer, intent(inout) :: values(:,:,:,:,:)
     integer, intent(in)    :: ngroup
     integer :: ierr
     MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_INTEGER, MPI_SUM, ngroup, ierr))

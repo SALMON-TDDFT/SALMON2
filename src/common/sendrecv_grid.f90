@@ -472,6 +472,7 @@ module sendrecv_grid
   end subroutine update_overlap_complex8
 
   subroutine create_sendrecv_neig_mg(neig_mg, ob_para_info, pinfo, iperiodic)
+    use network_address, only: get_neighbour => get_orbital_neighbour_rank
     use structures, only: s_orbital_parallel,s_process_info
     use communication, only: comm_proc_null
     implicit none
@@ -480,275 +481,50 @@ module sendrecv_grid
     type(s_process_info), intent(in)     :: pinfo
     integer, intent(in) :: iperiodic
     !
-    integer :: imr(3)
-    integer :: nproc_d_o(3)
+    integer :: idir,iside,idisp
 
-    imr = ob_para_info%imr
-    nproc_d_o = pinfo%npdomain_orbital
+    do idir=1,3
+    do iside=1,2
+      select case(iside)
+        case(1); idisp = 1
+        case(2); idisp = -1
+      end select
 
-    neig_mg(1, 1)=ob_para_info%id_r+1
-    neig_mg(2, 1)=ob_para_info%id_r-1
-    select case(iperiodic)
-    case(0)
-      if(imr(1)==nproc_d_o(1)-1) neig_mg(1, 1)=comm_proc_null
-      if(imr(1)==0) neig_mg(2, 1)=comm_proc_null
-    case(3)
-      if(imr(1)==nproc_d_o(1)-1) then
-        neig_mg(1, 1)=ob_para_info%id_r-(nproc_d_o(1)-1)
-      end if
-      if(imr(1)==0) then
-        neig_mg(2, 1)=ob_para_info%id_r+(nproc_d_o(1)-1)
-      end if
-    end select
+      neig_mg(iside,idir) = get_neighbour(ob_para_info, pinfo, idir, idisp)
 
-    neig_mg(1, 2)=ob_para_info%id_r+nproc_d_o(1)
-    neig_mg(2, 2)=ob_para_info%id_r-nproc_d_o(1)
-    select case(iperiodic)
-    case(0)
-      if(imr(2)==nproc_d_o(2)-1) neig_mg(1, 2)=comm_proc_null
-      if(imr(2)==0) neig_mg(2, 2)=comm_proc_null
-    case(3)
-      if(imr(2)==nproc_d_o(2)-1) then
-        neig_mg(1, 2)=ob_para_info%id_r-(nproc_d_o(2)-1)*nproc_d_o(1)
+      if (neig_mg(iside,idir) < 0 .and. iperiodic == 0) then
+        neig_mg(iside,idir) = comm_proc_null
       end if
-      if(imr(2)==0) then
-        neig_mg(2, 2)=ob_para_info%id_r+(nproc_d_o(2)-1)*nproc_d_o(1)
-      end if
-    end select
-
-    neig_mg(1, 3)=ob_para_info%id_r+nproc_d_o(1)*nproc_d_o(2)
-    neig_mg(2, 3)=ob_para_info%id_r-nproc_d_o(1)*nproc_d_o(2)
-    select case(iperiodic)
-    case(0)
-      if(imr(3)==nproc_d_o(3)-1) neig_mg(1, 3)=comm_proc_null
-      if(imr(3)==0) neig_mg(2, 3)=comm_proc_null
-    case(3)
-      if(imr(3)==nproc_d_o(3)-1) then
-        neig_mg(1, 3)=ob_para_info%id_r-(nproc_d_o(3)-1)*nproc_d_o(1)*nproc_d_o(2)
-      end if
-      if(imr(3)==0) then
-        neig_mg(2, 3)=ob_para_info%id_r+(nproc_d_o(3)-1)*nproc_d_o(1)*nproc_d_o(2)
-      end if
-    end select
-
-    return
+    end do
+    end do
   end subroutine create_sendrecv_neig_mg
 
-
   subroutine create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic)
+    use network_address, only: get_neighbour => get_field_neighbour_rank
     use structures, only: s_process_info,s_field_parallel
     use communication, only: comm_proc_null
-    use salmon_global, only: process_allocation
     implicit none
     integer, intent(out) :: neig_ng(1:2, 1:3)
     type(s_process_info), intent(in)   :: pinfo
     type(s_field_parallel), intent(in) :: info_field
     integer, intent(in) :: iperiodic
     !
-    integer :: myrank,imr(3),imrs(3)
-    integer :: nproc_d_o(3),nproc_d_g(3),nproc_d_o_mul,nproc_d_g_dm(3),nproc_d_g_mul_dm
+    integer :: idir,iside,idisp
 
-    myrank = info_field%id_all
-    imr = info_field%imr
-    imrs = info_field%imrs
+    do idir=1,3
+    do iside=1,2
+      select case(iside)
+        case(1); idisp = 1
+        case(2); idisp = -1
+      end select
 
-    nproc_d_o = pinfo%npdomain_orbital
-    nproc_d_g = pinfo%npdomain_general
-    nproc_d_o_mul = nproc_d_o(1)*nproc_d_o(2)*nproc_d_o(3)
-    nproc_d_g_dm = nproc_d_g/nproc_d_o
-    nproc_d_g_mul_dm = nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
+      neig_ng(iside,idir) = get_neighbour(info_field, pinfo, idir, idisp)
 
-    if(process_allocation=='orbital_sequential')then
-      if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(1, 1)=comm_proc_null
-        case(3)
-          neig_ng(1, 1)=myrank+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1-nproc_d_g_mul_dm*nproc_d_o(1)
-        end select
-      else if(imrs(1)==nproc_d_g_dm(1)-1) then
-        neig_ng(1, 1)=myrank+nproc_d_g_mul_dm-nproc_d_g_dm(1)+1
-      else
-        neig_ng(1, 1)=myrank+1
+      if (neig_ng(iside,idir) < 0 .and. iperiodic == 0) then
+        neig_ng(iside,idir) = comm_proc_null
       end if
-    else if(process_allocation=='grid_sequential')then
-      if(imr(1)==nproc_d_o(1)-1.and.imrs(1)==nproc_d_g_dm(1)-1) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(1, 1)=comm_proc_null
-        case(3)
-          neig_ng(1, 1)=myrank+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)-nproc_d_o(1)
-        end select
-      else if(imrs(1)==nproc_d_g_dm(1)-1) then
-        neig_ng(1, 1)=myrank+nproc_d_o_mul+1-nproc_d_o_mul*nproc_d_g_dm(1)
-      else
-        neig_ng(1, 1)=myrank+nproc_d_o_mul
-      end if
-    end if
-
-    if(process_allocation=='orbital_sequential')then
-      if(imr(1)==0.and.imrs(1)==0) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(2, 1)=comm_proc_null
-        case(3)
-          neig_ng(2, 1)=myrank-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1+nproc_d_g_mul_dm*nproc_d_o(1)
-        end select
-      else if(imrs(1)==0) then
-        neig_ng(2, 1)=myrank-nproc_d_g_mul_dm+nproc_d_g_dm(1)-1
-      else
-        neig_ng(2, 1)=myrank-1
-      end if
-    else if(process_allocation=='grid_sequential')then
-      if(imr(1)==0.and.imrs(1)==0) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(2, 1)=comm_proc_null
-        case(3)
-          neig_ng(2, 1)=myrank-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)+nproc_d_o(1)
-        end select
-      else if(imrs(1)==0) then
-        neig_ng(2, 1)=myrank-nproc_d_o_mul-1+nproc_d_o_mul*nproc_d_g_dm(1)
-      else
-        neig_ng(2, 1)=myrank-nproc_d_o_mul
-      end if
-    end if
-
-    if(process_allocation=='orbital_sequential')then
-      if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(1, 2)=comm_proc_null
-        case(3)
-          neig_ng(1, 2)=myrank+nproc_d_g_mul_dm*nproc_d_o(1)    &
-                                        -(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)
-        end select
-      else if(imrs(2)==nproc_d_g_dm(2)-1) then
-        neig_ng(1, 2)=myrank+nproc_d_g_mul_dm*nproc_d_o(1)    &
-                                        -(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)
-      else
-        neig_ng(1, 2)=myrank+nproc_d_g_dm(1)
-      end if
-    else if(process_allocation=='grid_sequential')then
-      if(imr(2)==nproc_d_o(2)-1.and.imrs(2)==nproc_d_g_dm(2)-1) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(1, 2)=comm_proc_null
-        case(3)
-          neig_ng(1, 2)=myrank+nproc_d_o_mul*nproc_d_g_dm(1)  &
-                +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)-nproc_d_o(1)*nproc_d_o(2)
-        end select
-      else if(imrs(2)==nproc_d_g_dm(2)-1) then
-        neig_ng(1, 2)=myrank+nproc_d_o_mul*nproc_d_g_dm(1)  &
-                +nproc_d_o(1)-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      else
-        neig_ng(1, 2)=myrank+nproc_d_o_mul*nproc_d_g_dm(1)
-      end if
-    end if
-
-    if(process_allocation=='orbital_sequential')then
-      if(imr(2)==0.and.imrs(2)==0) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(2, 2)=comm_proc_null
-        case(3)
-          neig_ng(2, 2)=myrank-nproc_d_g_mul_dm*nproc_d_o(1)    &
-                                        +(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)
-        end select
-      else if(imrs(2)==0) then
-        neig_ng(2, 2)=myrank-nproc_d_g_mul_dm*nproc_d_o(1)    &
-                                        +(nproc_d_g_dm(2)-1)*nproc_d_g_dm(1)
-      else
-        neig_ng(2, 2)=myrank-nproc_d_g_dm(1)
-      end if
-    else if(process_allocation=='grid_sequential')then
-      if(imr(2)==0.and.imrs(2)==0) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(2, 2)=comm_proc_null
-        case(3)
-          neig_ng(2, 2)=myrank-nproc_d_o_mul*nproc_d_g_dm(1)  &
-                -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)+nproc_d_o(1)*nproc_d_o(2)
-        end select
-      else if(imrs(2)==0) then
-        neig_ng(2, 2)=myrank-nproc_d_o_mul*nproc_d_g_dm(1)  &
-                  -nproc_d_o(1)+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      else
-        neig_ng(2, 2)=myrank-nproc_d_o_mul*nproc_d_g_dm(1)
-      end if
-    end if
-
-    if(process_allocation=='orbital_sequential')then
-      if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(1, 3)=comm_proc_null
-        case(3)
-          neig_ng(1, 3)=myrank+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
-                                        -(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
-                                        -nproc_d_g_mul_dm*nproc_d_o_mul
-        end select
-      else if(imrs(3)==nproc_d_g_dm(3)-1) then
-        neig_ng(1, 3)=myrank+nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
-                                        -(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      else
-        neig_ng(1, 3)=myrank+nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    else if(process_allocation=='grid_sequential')then
-      if(imr(3)==nproc_d_o(3)-1.and.imrs(3)==nproc_d_g_dm(3)-1) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(1, 3)=comm_proc_null
-        case(3)
-          neig_ng(1, 3)=myrank+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
-                  +nproc_d_o(1)*nproc_d_o(2)   &
-                  -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)-nproc_d_o_mul
-        end select
-      else if(imrs(3)==nproc_d_g_dm(3)-1) then
-        neig_ng(1, 3)=myrank+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-                  +nproc_d_o(1)*nproc_d_o(2)   &
-                  -nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-      else
-        neig_ng(1, 3)=myrank+nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end if
-
-    if(process_allocation=='orbital_sequential')then
-      if(imr(3)==0.and.imrs(3)==0) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(2, 3)=comm_proc_null
-        case(3)
-          neig_ng(2, 3)=myrank-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
-                                        +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
-                                        +nproc_d_g_mul_dm*nproc_d_o_mul
-        end select
-      else if(imrs(3)==0) then
-        neig_ng(2, 3)=myrank-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2)   &
-                                        +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      else
-        neig_ng(2, 3)=myrank-nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    else if(process_allocation=='grid_sequential')then
-      if(imr(3)==0.and.imrs(3)==0) then
-        select case(iperiodic)
-        case(0)
-          neig_ng(2, 3)=comm_proc_null
-        case(3)
-          neig_ng(2, 3)=myrank-nproc_d_g_mul_dm*nproc_d_o(1)*nproc_d_o(2) &
-                                        +(nproc_d_g_dm(3)-1)*nproc_d_g_dm(1)*nproc_d_g_dm(2) &
-                                        +nproc_d_g_mul_dm*nproc_d_o_mul
-        end select
-      else if(imrs(3)==0) then
-        neig_ng(2, 3)=myrank-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-                  -nproc_d_o(1)*nproc_d_o(2)   &
-                  +nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-      else
-        neig_ng(2, 3)=myrank-nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)
-      end if
-    end if
-
-    return
+    end do
+    end do
   end subroutine create_sendrecv_neig_ng
 
 end module sendrecv_grid
