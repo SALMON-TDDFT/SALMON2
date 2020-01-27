@@ -29,6 +29,7 @@ contains
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
+    use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
     use timer
     implicit none
@@ -82,8 +83,7 @@ contains
 
   ! Ewald sum of ion-ion interaction
   call timer_begin(LOG_CALC_FORCE_ION_ION)
-    call force_ion_ion(F_sum,F_tmp,system,ewald,pp,fg,nion)
-    system%Force = F_sum
+    call force_ion_ion(system%Force,F_tmp,system,ewald,pp,fg,nion)
   call timer_end(LOG_CALC_FORCE_ION_ION)
 
   ! electron-ion interaction
@@ -271,11 +271,18 @@ contains
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
     !end do
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
-    system%Force = system%Force + F_sum
-!
+
+!$omp parallel do private(ia)
     do ia=1,nion
-       call sym_vector_xyz( system%Force(:,ia) )
+      system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
+!$omp end parallel do
+!
+    if (use_symmetry) then
+      do ia=1,nion
+        call sym_vector_xyz( system%Force(:,ia) )
+      end do
+    end if
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)
     deallocate(F_tmp,F_sum,gtpsi,uVpsibox,uVpsibox2)
