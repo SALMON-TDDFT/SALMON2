@@ -107,7 +107,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 call timer_begin(LOG_INIT_PS_CALC_NPS)
   call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                   hx,hy,hz,system%primitive_a,system%rmatrix_A)
+                                   hx,hy,hz,system%primitive_a,system%rmatrix_A,info%icomm_ko)
 call timer_end(LOG_INIT_PS_CALC_NPS)
 
 call timer_begin(LOG_INIT_PS_CALC_JXYZ)
@@ -823,9 +823,10 @@ subroutine finalize_jxyz(ppg)
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
+subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,icomm_ko)
   use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
   use structures,only : s_pp_info,s_pp_grid
+  use communication, only: comm_get_max,comm_get_groupinfo
   implicit none
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
@@ -835,12 +836,24 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
+  integer,intent(in),optional :: icomm_ko
   integer :: a,i,ik,ix,iy,iz,j
-  integer :: nc
+  integer :: nc,mps_tmp
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: x,y,z,r,u,v,w
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
-  integer :: mps_tmp(natom)
+  integer :: irank,nproc,na,sa,ea
+
+  if (present(icomm_ko)) then
+    call comm_get_groupinfo(icomm_ko,irank,nproc)
+    na = (natom + 1) / nproc
+    sa = na * irank + 1
+    ea = sa + na - 1
+    if (irank == nproc-1) ea = natom
+  else
+    sa = 1
+    ea = natom
+  end if
 
   matrix_a = 0d0
   matrix_a(1,1) = 1d0
@@ -887,9 +900,11 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   end if
 
 
+  mps_tmp = 0
 !$omp parallel
-!$omp do private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w)
-  do a=1,natom
+!$omp do private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w) &
+!$omp    reduction(max:mps_tmp)
+  do a=sa,ea
     ik=kion(a)
     j=0
     do ix=-nc,nc
@@ -923,12 +938,15 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
     enddo
     enddo
     enddo
-    mps_tmp(a)=j
+    mps_tmp = max(mps_tmp,j)
   end do
 !$omp end do
 !$omp end parallel
 
-  ppg%nps=maxval(mps_tmp(:))
+  ppg%nps=mps_tmp
+  if (present(icomm_ko)) then
+    call comm_get_max(ppg%nps,icomm_ko)
+  end if
 
 end subroutine calc_nps
 

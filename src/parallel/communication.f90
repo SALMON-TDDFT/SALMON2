@@ -242,6 +242,7 @@ module communication
   interface comm_get_max
     ! scalar
     module procedure comm_get_maxloc
+    module procedure comm_get_max_integer
 
     ! 1-D array
     module procedure comm_get_max_array1d_double
@@ -1279,6 +1280,15 @@ contains
     integer, intent(in)  :: N, ngroup
     integer :: ierr
     MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, N, MPI_DOUBLE_PRECISION, MPI_MIN, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_get_max_integer(svalue, ngroup)
+    use mpi, only: MPI_INTEGER, MPI_MAX, MPI_IN_PLACE
+    implicit none
+    integer, intent(inout) :: svalue
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, svalue, 1, MPI_INTEGER, MPI_MAX, ngroup, ierr))
   end subroutine
 
   subroutine comm_get_max_array1d_double(invalue, outvalue, N, ngroup)
