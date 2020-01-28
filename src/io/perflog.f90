@@ -279,6 +279,17 @@ contains
     call set(6, LOG_SSDG_SO_PERIODIC_HPSI,      'periodic hpsi')
     call write_loadbalance(fd, 6, tsrc, headers, mode)
 
+    call set(0, 0, 'force module')
+    call set(1, LOG_CALC_ION_FORCE,      'total')
+    call set(2, LOG_CALC_FORCE_ION_ION,  'calc ion-ion')
+    call set(3, LOG_CALC_FORCE_ELEC_ION, 'calc electron-ion')
+    call set(4, LOG_CALC_FORCE_GTPSI,    '::calc gtpsi')
+    call set(5, LOG_CALC_FORCE_DDEN,     '::calc dden')
+    call set(6, LOG_CALC_FORCE_NONLOCAL, '::calc nonlocal')
+    call set(7, LOG_CALC_FORCE_LOCAL,    'calc local')
+    call write_loadbalance(fd, 7, tsrc, headers, mode)
+
+
     call set(0, 0, 'hamiltonian module')
     call set(1, LOG_UHPSI_ALL,            'total')
     call set(2, LOG_UHPSI_UPDATE_OVERLAP, 'update overlap (comm.)')

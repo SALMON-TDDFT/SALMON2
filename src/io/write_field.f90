@@ -157,7 +157,7 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   use communication, only: comm_summation
   use misc_routines, only: get_wtime
   use sendrecv_grid, only: update_overlap_complex8,update_overlap_real8
-  use stencil_sub, only: calc_gradient_psi,calc_gradient_field
+  use stencil_sub, only: calc_gradient_field
   use write_file3d
   implicit none
   integer                 ,intent(in) :: itt

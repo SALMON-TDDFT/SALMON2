@@ -24,11 +24,11 @@ contains
   subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi,ewald)
     use structures
     use math_constants,only : zi
-    use stencil_sub, only: calc_gradient_psi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
+    use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
     use timer
     implicit none
@@ -81,11 +81,12 @@ contains
     Nlma = ppg%Nlma
 
   ! Ewald sum of ion-ion interaction
-    call force_ion_ion(F_sum,F_tmp,system,ewald,pp,fg,nion)
-    system%Force = F_sum
+  call timer_begin(LOG_CALC_FORCE_ION_ION)
+    call force_ion_ion(system%Force,F_tmp,system,ewald,pp,fg,nion)
+  call timer_end(LOG_CALC_FORCE_ION_ION)
 
   ! electron-ion interaction
-
+  call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     if(allocated(tpsi%rwf)) then
       allocate(tpsi%zwf(mg%is_array(1):mg%ie_array(1) &
                        ,mg%is_array(2):mg%ie_array(2) &
@@ -128,11 +129,13 @@ contains
       end do
       call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
     end if
+  call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     if(info%if_divide_rspace) then
        call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
 
+  call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc   = 0d0
     F_tmp = 0d0
     allocate( dden(3,mg%is_array(1):mg%ie_array(1) &
@@ -154,14 +157,18 @@ contains
     do ispin=1,Nspin
 
        ! gtpsi = (nabla) psi
+       call timer_begin(LOG_CALC_FORCE_GTPSI)
        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+       call timer_end(LOG_CALC_FORCE_GTPSI)
 
 
+       call timer_begin(LOG_CALC_FORCE_DDEN)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 !$omp parallel do collapse(2) private(iz,iy,ix,w,rtmp2)
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
+!OCL swp
        do ix=mg%is(1),mg%ie(1)
           w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           rtmp2(:) = rtmp * dble(w(:))
@@ -170,8 +177,10 @@ contains
        enddo
        enddo
 !$omp end parallel do
+       call timer_end(LOG_CALC_FORCE_DDEN)
 
        ! nonlocal part
+       call timer_begin(LOG_CALC_FORCE_NONLOCAL)
        if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
@@ -179,6 +188,8 @@ contains
        do ilma=1,Nlma
           ia = ppg%ia_tbl(ilma)
           duVpsi = 0d0
+!OCL swp
+!OCL swp_freg_rate(115)
           do j=1,ppg%mps(ia)
              ix = ppg%jxyz(1,j,ia)
              iy = ppg%jxyz(2,j,ia)
@@ -190,6 +201,7 @@ contains
                      - rtmp * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) 
        end do
 !$omp end parallel do
+       call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
        if( PLUS_U_ON )then
           if( .not.allocated(dphipsi_lma) )then
@@ -237,20 +249,30 @@ contains
     end do !ispin
     end do !io
     end do !ik
-
+  call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     ! local part (based on density gradient)
+  call timer_begin(LOG_CALC_FORCE_LOCAL)
 !$omp parallel do private(iz,iy,ix,ia)
     do ia=1,nion
-       do iz=mg%is(3),mg%ie(3)
-       do iy=mg%is(2),mg%ie(2)
-       do ix=mg%is(1),mg%ie(1)
-          F_tmp(:,ia) = F_tmp(:,ia) - dden(:,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
-       end do
-       end do
-       end do
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+!OCL swp
+!OCL swp_weak
+        do ix=mg%is(1),mg%ie(1)
+#ifdef __FUJITSU
+           F_tmp(1,ia) = F_tmp(1,ia) - dden(1,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+           F_tmp(2,ia) = F_tmp(2,ia) - dden(2,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+           F_tmp(3,ia) = F_tmp(3,ia) - dden(3,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+#else
+           F_tmp(:,ia) = F_tmp(:,ia) - dden(:,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
+#endif
+        end do
+      end do
+      end do
     end do
 !$omp end parallel do
+  call timer_end(LOG_CALC_FORCE_LOCAL)
 
 
     !do ia=1,nion
@@ -259,11 +281,18 @@ contains
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
     !end do
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
-    system%Force = system%Force + F_sum
-!
+
+!$omp parallel do private(ia)
     do ia=1,nion
-       call sym_vector_xyz( system%Force(:,ia) )
+      system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
+!$omp end parallel do
+!
+    if (use_symmetry) then
+      do ia=1,nion
+        call sym_vector_xyz( system%Force(:,ia) )
+      end do
+    end if
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)
     deallocate(F_tmp,F_sum,gtpsi,uVpsibox,uVpsibox2)
@@ -326,6 +355,7 @@ contains
          rtmp(:) = 0.5d0 * g(:) * (4*Pi/G2) * exp(-G2/(4*aEwald))
          ctmp1(:)= rtmp(:) * zI
 
+!OCL swp
          do ia=1,nion
             r = system%Rion(1:3,ia)
             Gd = sum(g(:)*r(:))
@@ -364,10 +394,13 @@ contains
                rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
                rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
                rr = sum(rab(:)**2)
-               if(rr .gt. cutoff_r**2) cycle
-               F_tmp_l(:,ia) = F_tmp_l(:,ia)  &
-                             - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
-                             -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
+               if(rr .gt. cutoff_r**2) then
+                 !!!
+               else
+                 F_tmp_l(:,ia) = F_tmp_l(:,ia)  &
+                               - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
+                               -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
+               end if
 
             end do  !ipair
          end do     !ia
