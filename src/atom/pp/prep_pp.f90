@@ -27,6 +27,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use salmon_global, only: iperiodic,yn_ffte
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
+  use timer
   implicit none
   type(s_rgrid)           ,intent(in) :: lg,mg,ng
   type(s_dft_system)      ,intent(in) :: system
@@ -54,6 +55,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   real(8),allocatable :: save_udVtbl_d(:,:,:)
   logical :: flag_use_grad_wf_on_force
 
+  call timer_begin(LOG_INIT_PS_TOTAL)
 
   ilevel_print = 0
   if(abs(ppg%Hvol).lt.1d-99) ilevel_print=2 !judge the first init_ps or not
@@ -102,16 +104,21 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   end do
 !$omp end parallel do
 
+call timer_begin(LOG_INIT_PS_CALC_NPS)
   call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
                                    hx,hy,hz,system%primitive_a,system%rmatrix_A)
+call timer_end(LOG_INIT_PS_CALC_NPS)
 
+call timer_begin(LOG_INIT_PS_CALC_JXYZ)
   call init_jxyz(ppg)
 
   call calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
                                     hx,hy,hz,system%primitive_a,system%rmatrix_A,info%icomm_ko)
+call timer_end(LOG_INIT_PS_CALC_JXYZ)
 
+call timer_begin(LOG_INIT_PS_LMA_UV)
   call set_nlma(pp,ppg)
   call init_lma_tbl(pp,ppg)
   call init_uv(pp,ppg)
@@ -135,7 +142,9 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   if ( PLUS_U_ON ) then
     call calc_uv_plusU( pp, ppg, flag_use_grad_wf_on_force, property )
   end if
+call timer_end(LOG_INIT_PS_LMA_UV)
 
+call timer_begin(LOG_INIT_PS_CALC_VPSL)
   select case(iperiodic)
   case(0)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
@@ -147,15 +156,20 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
       call calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
     end select
   end select
+call timer_end(LOG_INIT_PS_CALC_VPSL)
 
+call timer_begin(LOG_INIT_PS_UVPSI)
   call init_uvpsi_summation(ppg,info%icomm_r)
   call init_uvpsi_table(ppg)
+call timer_end(LOG_INIT_PS_UVPSI)
   
   if(iperiodic==3) then
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   end if
   
   if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1) write(*,*)'end init_ps'
+
+  call timer_end(LOG_INIT_PS_TOTAL)
 
 end subroutine init_ps
 

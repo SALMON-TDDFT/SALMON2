@@ -289,6 +289,15 @@ contains
     call set(7, LOG_CALC_FORCE_LOCAL,    'calc local')
     call write_loadbalance(fd, 7, tsrc, headers, mode)
 
+    call set(0, 0, 'init_ps')
+    call set(1, LOG_INIT_PS_TOTAL,      'total')
+    call set(2, LOG_INIT_PS_CALC_NPS,   '::calc nps')
+    call set(3, LOG_INIT_PS_CALC_JXYZ,  '::calc jxyz')
+    call set(4, LOG_INIT_PS_LMA_UV,     '::calc lma and uv')
+    call set(5, LOG_INIT_PS_CALC_VPSL,  '::calc vpsl')
+    call set(6, LOG_INIT_PS_UVPSI,      '::init uvpsi')
+    call write_loadbalance(fd, 6, tsrc, headers, mode)
+
 
     call set(0, 0, 'hamiltonian module')
     call set(1, LOG_UHPSI_ALL,            'total')

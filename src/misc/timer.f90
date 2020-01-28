@@ -137,6 +137,14 @@ module timer
   integer,public,parameter :: LOG_CALC_FORCE_NONLOCAL = 265
   integer,public,parameter :: LOG_CALC_FORCE_LOCAL    = 266
 
+  ! prep_pp module
+  integer,public,parameter :: LOG_INIT_PS_TOTAL       = 267
+  integer,public,parameter :: LOG_INIT_PS_CALC_NPS    = 268
+  integer,public,parameter :: LOG_INIT_PS_CALC_JXYZ   = 269
+  integer,public,parameter :: LOG_INIT_PS_LMA_UV      = 270
+  integer,public,parameter :: LOG_INIT_PS_CALC_VPSL   = 271
+  integer,public,parameter :: LOG_INIT_PS_UVPSI       = 272
+
   ! FIXME: modify later
   ! hamiltonian module
   integer,public,parameter :: LOG_ALLGATHERV_VLOCAL_CALC      = 240
