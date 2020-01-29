@@ -75,7 +75,7 @@
   
   !*** MEDIA INFORMATION(START) **************************************!
   !type of media(media ID)
-  media_type(1)   = 'lorentz-drude'
+  media_type(1) = 'lorentz-drude'
   !--- Au described by Lorentz-Drude model ---------------------------!
   ! The parameters are determined from:                               !
   ! (https://www.osapublishing.org/ao/abstract.cfm?uri=ao-37-22-5271) !
