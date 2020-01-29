@@ -194,11 +194,16 @@ contains
              ix = ppg%jxyz(1,j,ia)
              iy = ppg%jxyz(2,j,ia)
              iz = ppg%jxyz(3,j,ia)
-             w = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-             duVpsi = duVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * w ! < uV | exp(ikr) (nabla) | psi >
+             w(1) = gtpsi(1,ix,iy,iz) + zI* kAc(1) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(2) = gtpsi(2,ix,iy,iz) + zI* kAc(2) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             w(3) = gtpsi(3,ix,iy,iz) + zI* kAc(3) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             duVpsi(1) = duVpsi(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(1) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi(2) = duVpsi(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(2) ! < uV | exp(ikr) (nabla) | psi >
+             duVpsi(3) = duVpsi(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(3) ! < uV | exp(ikr) (nabla) | psi >
           end do
-          F_tmp(:,ia) = F_tmp(:,ia)  &
-                     - rtmp * dble( conjg(duVpsi(:)) * uVpsibox2(ispin,io,ik,im,ilma) ) 
+          F_tmp(1,ia) = F_tmp(1,ia) - rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp(2,ia) = F_tmp(2,ia) - rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) )
+          F_tmp(3,ia) = F_tmp(3,ia) - rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
        end do
 !$omp end parallel do
        call timer_end(LOG_CALC_FORCE_NONLOCAL)
