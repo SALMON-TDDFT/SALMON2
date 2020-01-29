@@ -1297,7 +1297,6 @@ contains
       return
     end subroutine eh_check_iw_parameter
     
-    
   end subroutine eh_init
   
   !===========================================================================================
@@ -1451,7 +1450,6 @@ contains
         !check maximum
         call eh_update_max
       end if
-      
     end do
     
     return
