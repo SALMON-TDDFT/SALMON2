@@ -11,7 +11,7 @@
 !----------------------------------------------------------------------------------------!
 ! * Ehrenfest-MD option is still trial.                                                  !
 ! * Copy the ground state data directory ('data_for_restart') (or make symbolic link)    !
-!   calculated in 'samples/exercise_08_C2H2_opt/ and rename the directory to 'restart/'  !
+!   calculated in 'samples/exercise_08_C2H2_opt/' and rename the directory to 'restart/' !
 !   in the current directory.                                                            !
 !########################################################################################!
 
