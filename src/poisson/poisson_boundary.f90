@@ -246,63 +246,63 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
     end if
   end do
   
-  if(omp_get_max_threads() > 16) then
-  !$omp parallel shared(rholm3,lmax_lmp)
-  !$omp master
-      allocate(rholm3((lmax_lmp+1)**2,0:ceiling_pow2(omp_get_num_threads())-1))
-  !$omp end master
-  !$omp end parallel
-  
-    lmax_lmp_tmp=lmax_lmp !iwata
-    rholm2=0.d0
-    rholm3=0.d0
-    do ii=1,poisson%npole_partial
-      pl=poisson%ipole_tbl(ii)
-      cl=ig_num(ii)
-      if(itrho(pl)==1)then
-  !$omp parallel default(none) &
-  !$omp          shared(ig,coordinate,center_trho,trho,rholm3) &
-  !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz) &
-  !$omp          firstprivate(ii,pl,cl,lmax_lmp_tmp,hvol) !iwata
-        tid=omp_get_thread_num()
-        rholm3(:,tid)=0.d0
-  
-  !$omp do
-        do jj=1,cl
-          ixbox=ig(1,jj,ii)
-          iybox=ig(2,jj,ii)
-          izbox=ig(3,jj,ii)
-          xx=coordinate(ixbox,1)-center_trho(1,pl)
-          yy=coordinate(iybox,2)-center_trho(2,pl)
-          zz=coordinate(izbox,3)-center_trho(3,pl)
-          rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d0-50.d0
-          rinv=1.0d0/rr
-          xxxx=xx*rinv
-          yyyy=yy*rinv
-          zzzz=zz*rinv
-          do ll=0,lmax_lmp_tmp !iwata
-          do m=-ll,ll
-            lm=ll*ll+ll+1+m
-            rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
-          end do
-          end do
-        end do
-  !$omp end do
-  
-        kk = ceiling_pow2(omp_get_num_threads())/2
-        do while(kk > 0)
-          if(tid < kk) then
-            rholm3(:,tid) = rholm3(:,tid) + rholm3(:,tid+kk)
-          end if
-          kk = kk/2
-  !$omp barrier
-        end do
-  !$omp end parallel
-      end if
-      rholm2(:,pl)=rholm3(:,0)
-    end do
-    deallocate(rholm3)
-  else
+!  if(omp_get_max_threads() > 16) then
+!  !$omp parallel shared(rholm3,lmax_lmp)
+!  !$omp master
+!      allocate(rholm3((lmax_lmp+1)**2,0:ceiling_pow2(omp_get_num_threads())-1))
+!  !$omp end master
+!  !$omp end parallel
+!  
+!    lmax_lmp_tmp=lmax_lmp !iwata
+!    rholm2=0.d0
+!    rholm3=0.d0
+!    do ii=1,poisson%npole_partial
+!      pl=poisson%ipole_tbl(ii)
+!      cl=ig_num(ii)
+!      if(itrho(pl)==1)then
+!  !$omp parallel default(none) &
+!  !$omp          shared(ig,coordinate,center_trho,trho,rholm3) &
+!  !$omp          private(tid,kk,jj,ll,lm,ixbox,iybox,izbox,xx,yy,zz,rr,rinv,xxxx,yyyy,zzzz) &
+!  !$omp          firstprivate(ii,pl,cl,lmax_lmp_tmp,hvol) !iwata
+!        tid=omp_get_thread_num()
+!        rholm3(:,tid)=0.d0
+!  
+!  !$omp do
+!        do jj=1,cl
+!          ixbox=ig(1,jj,ii)
+!          iybox=ig(2,jj,ii)
+!          izbox=ig(3,jj,ii)
+!          xx=coordinate(ixbox,1)-center_trho(1,pl)
+!          yy=coordinate(iybox,2)-center_trho(2,pl)
+!          zz=coordinate(izbox,3)-center_trho(3,pl)
+!          rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d0-50.d0
+!          rinv=1.0d0/rr
+!          xxxx=xx*rinv
+!          yyyy=yy*rinv
+!          zzzz=zz*rinv
+!          do ll=0,lmax_lmp_tmp !iwata
+!          do m=-ll,ll
+!            lm=ll*ll+ll+1+m
+!            rholm3(lm,tid)=rholm3(lm,tid)+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
+!          end do
+!          end do
+!        end do
+!  !$omp end do
+!  
+!        kk = ceiling_pow2(omp_get_num_threads())/2
+!        do while(kk > 0)
+!          if(tid < kk) then
+!            rholm3(:,tid) = rholm3(:,tid) + rholm3(:,tid+kk)
+!          end if
+!          kk = kk/2
+!  !$omp barrier
+!        end do
+!  !$omp end parallel
+!      end if
+!      rholm2(:,pl)=rholm3(:,0)
+!    end do
+!    deallocate(rholm3)
+!  else
     rholm2=0.d0
     do ii=1,poisson%npole_partial
       if(itrho(poisson%ipole_tbl(ii))==1)then
@@ -328,7 +328,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
         end do
       end if
     end do
-  endif
+!  endif
   
   deallocate(center_trho_nume_deno)
   deallocate(center_trho_nume_deno2)
