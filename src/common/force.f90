@@ -55,7 +55,7 @@ contains
     complex(8) :: ddm_mms_nla(3), phipsi, dphipsi(3)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
-    integer :: Norb,iorb, ilocal
+    integer :: Norb,iorb,ilocal
 
     call timer_begin(LOG_CALC_ION_FORCE)
 
