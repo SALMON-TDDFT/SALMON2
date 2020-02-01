@@ -207,6 +207,7 @@ integer :: Miter,jspin, nspin
 
 
   nspin = system%nspin
+  spsi%update_zwf_overlap = .false.
 
   mixing%num_rho_stock = 21
   call init_mixing(nspin,ng,mixing)

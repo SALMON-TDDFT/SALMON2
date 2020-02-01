@@ -31,8 +31,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
                      V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                      pp, ppg, ppn )
-use inputoutput
-
+  use inputoutput
   use math_constants, only: pi, zi
   use structures
   use parallelization, only: nproc_id_global, nproc_group_global
@@ -222,6 +221,8 @@ use inputoutput
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
+  spsi_out%update_zwf_overlap = .false.
+
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
