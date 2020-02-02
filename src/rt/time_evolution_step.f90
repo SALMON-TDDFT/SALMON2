@@ -271,9 +271,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then
-      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
+       call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
     else
-      call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+       spsi_out%update_zwf_overlap = .true. 
     end if
     call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
     call timer_end(LOG_CALC_CURRENT)
