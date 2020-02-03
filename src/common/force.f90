@@ -55,7 +55,7 @@ contains
     complex(8) :: ddm_mms_nla(3), phipsi, dphipsi(3)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
-    integer :: Norb,iorb
+    integer :: Norb,iorb, ilocal
 
     call timer_begin(LOG_CALC_ION_FORCE)
 
@@ -132,7 +132,7 @@ contains
   call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     if(info%if_divide_rspace) then
-       call update_overlap_complex8(srg, mg, tpsi%zwf)
+       if(tpsi%update_zwf_overlap) call update_overlap_complex8(srg,mg,tpsi%zwf)
     end if
 
   call timer_begin(LOG_CALC_FORCE_ELEC_ION)
@@ -184,9 +184,10 @@ contains
        if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
-!$omp parallel do private(ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
-       do ilma=1,Nlma
-          ia = ppg%ia_tbl(ilma)
+!$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
+       do ilocal=1,ppg%ilocal_nlma
+          ilma=ppg%ilocal_nlma2ilma(ilocal)
+          ia  =ppg%ilocal_nlma2ia  (ilocal)
           duVpsi = 0d0
 !OCL swp
 !OCL swp_freg_rate(115)

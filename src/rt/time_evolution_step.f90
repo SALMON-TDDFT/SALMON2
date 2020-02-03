@@ -77,6 +77,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   logical :: rion_update,if_use_dmat
   integer :: ihpsieff
 
+  spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
 
   call timer_begin(LOG_CALC_VBOX)
@@ -262,14 +263,18 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   case(3)
 
     call timer_begin(LOG_CALC_DENSITY_MATRIX)
-    if(if_use_dmat) call calc_density_matrix(system,info,mg,srg,spsi_out,dmat)
+    if(if_use_dmat) then
+       call calc_density_matrix(system,info,mg,srg,spsi_out,dmat)
+       spsi_out%update_zwf_overlap = .true. 
+    endif
     call timer_end(LOG_CALC_DENSITY_MATRIX)
 
     call timer_begin(LOG_CALC_CURRENT)
     if(if_use_dmat) then
-      call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
+       call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
     else
-      call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+       spsi_out%update_zwf_overlap = .true. 
     end if
     call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
     call timer_end(LOG_CALC_CURRENT)
