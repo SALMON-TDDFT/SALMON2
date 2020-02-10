@@ -106,7 +106,7 @@ contains
           Gd = sum(g(:)*r(:))
           egd = exp(zI*Gd)
           rtmp = pp%Zps(Kion(ia))* (4*Pi/G2) * exp(-G2/(4*aEwald))
-          VG = fg%zdVG_ion(ig,kion(ia)) - 4d0*pi/g2*pp%zps(kion(ia))
+          VG = fg%zVG_ion(ig,kion(ia)) - 4d0*pi/g2*pp%zps(kion(ia))
           F_tmp(:,ia) = F_tmp(:,ia) + g(:)* ( rtmp * aimag(rho_i*egd) + aimag(egd*rho_e*conjg(VG)) )
        end do
     end do
