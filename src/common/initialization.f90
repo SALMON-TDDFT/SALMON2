@@ -857,7 +857,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   end select
 
-  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zdVG_ion(fg%ng,nelem))
+  allocate(fg%zrhoG_ion(fg%ng),fg%zrhoG_ele(fg%ng),fg%zrhoG_ele_tmp(fg%ng),fg%zVG_ion(fg%ng,nelem))
 
   return
 end subroutine init_reciprocal_grid

@@ -238,7 +238,6 @@ module structures
     integer,allocatable :: ia_tbl(:)
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
-    real(8),allocatable :: Vpsl_atom(:,:,:,:)
     !
     integer,allocatable :: ia_tbl_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
@@ -293,8 +292,8 @@ module structures
     integer :: icomm_G
     integer :: ng,iG_s,iG_e,iGzero
     real(8),allocatable :: Gx(:),Gy(:),Gz(:)
-    complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zdVG_ion(:,:)
-    complex(8),allocatable :: zrhoG_ion_tmp(:),zrhoG_ele_tmp(:),zdVG_ion_tmp(:,:) ! work arrays
+    complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zVG_ion(:,:)
+    complex(8),allocatable :: zrhoG_ion_tmp(:),zrhoG_ele_tmp(:),zVG_ion_tmp(:,:) ! work arrays
   end type s_reciprocal_grid
 
   type s_poisson
@@ -629,7 +628,6 @@ contains
     DEAL(ppg%ia_tbl)
     DEAL(ppg%rinv_uvu)
     DEAL(ppg%zekr_uV)
-    DEAL(ppg%Vpsl_atom)
     DEAL(ppg%uv_so)
     DEAL(ppg%duv_so)
   end subroutine deallocate_pp_grid
@@ -656,7 +654,7 @@ contains
     DEAL(fg%Gz)
     DEAL(fg%zrhoG_ion)
     DEAL(fg%zrhoG_ele)
-    DEAL(fg%zdVG_ion)
+    DEAL(fg%zVG_ion)
   end subroutine deallocate_reciprocal_grid
 
 end module structures

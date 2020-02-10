@@ -20,7 +20,7 @@ checklist = {
     # coordinate
     "Coordinate": [
         -100, # Temporary value for result
-        2.5628951489,  # Reference value 
+        2.4942806673,  # Reference value 
         1e-4,  # Permissible error 
     ], 
 } 

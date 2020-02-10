@@ -252,7 +252,7 @@ CONTAINS
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        etmp = etmp + conjg(rho_e)*fg%zdVG_ion(ig,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+        etmp = etmp + conjg(rho_e)*fg%zVG_ion(ig,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
       end do
       E_wrk(3) = E_wrk(3) + etmp
     enddo
