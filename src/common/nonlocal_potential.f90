@@ -288,7 +288,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   type(s_orbital),intent(in) :: tpsi
   complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
   complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
-  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,numo_max
   integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns
   complex(8) :: uVpsi
   integer :: ireqs(natom), nreq
@@ -301,12 +301,19 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
+  !numo_max = info%numo_max
+  !(should make numk_max ....)
+  !norb = Nspin* info%numo_max * info%numk * info%numm
   norb = Nspin* info%numo * info%numk * info%numm
+
 
   Nlma = ppg%Nlma
 
   allocate(uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
   allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+  !allocate(uVpsibox (Nspin,io_s:io_s+numo_max-1,ik_s:ik_e,im_s:im_e,Nlma))
+  !allocate(uVpsibox2(Nspin,io_s:io_s+numo_max-1,ik_s:ik_e,im_s:im_e,Nlma))
+  !uVpsibox(:, io_e:io_s+numo_max-1, :,:,:) = 0d0
 
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
@@ -347,6 +354,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
     if (ppg%ireferred_atom(ia)) then
       nreq = nreq + 1
+      !(this can be problem when info%numo is not same for each process)
       call MPI_Iallreduce( uvpsibox (1,io_s,ik_s,im_s,is) &
                          , uvpsibox2(1,io_s,ik_s,im_s,is) &
                          , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &

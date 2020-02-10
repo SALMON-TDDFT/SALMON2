@@ -275,12 +275,14 @@ end subroutine init_process_distribution
 
 subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   use structures
+  use communication, only: comm_summation
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_orbital_parallel)      :: info
   type(s_process_info)          :: pinfo
   !
-  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3)
+  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),ii,jj
+  integer :: numo_tmp(pinfo%nporbital), numo_all(pinfo%nporbital)
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
@@ -292,31 +294,99 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   info%numm = 1
 
 ! # of k points
-  info%ik_s = info%id_k * system%nk / nproc_k + 1
-  info%ik_e = (info%id_k+1) * system%nk / nproc_k
+  !info%ik_s = info%id_k * system%nk / nproc_k + 1
+  !info%ik_e = (info%id_k+1) * system%nk / nproc_k
+  !info%numk = info%ik_e - info%ik_s + 1
+  call init_s_e_mpi(nproc_k,info%id_k,system%nk,info%ik_s,info%ik_e)
   info%numk = info%ik_e - info%ik_s + 1
+  !write(*,'(a,5i4)')"check process-k",nproc_k,info%id_k,system%nk,info%ik_s,info%ik_e
 
 ! # of orbitals
-  info%io_s = info%id_o * system%no / nproc_ob + 1
-  info%io_e = (info%id_o+1) * system%no / nproc_ob
+  !info%io_s = info%id_o * system%no / nproc_ob + 1
+  !info%io_e = (info%id_o+1) * system%no / nproc_ob
+  !info%numo = info%io_e - info%io_s + 1
+  call init_s_e_mpi(nproc_ob,info%id_o,system%no,info%io_s,info%io_e)
   info%numo = info%io_e - info%io_s + 1
+  !write(*,'(a,6i4)')"check process-o",nproc_ob,info%id_o,system%no,info%io_s,info%io_e,info%numo
+
+  numo_all(:) = 0
+  numo_tmp(:) = 0
+  numo_tmp(info%id_o+1) = info%numo
+  call comm_summation(numo_tmp, numo_all, pinfo%nporbital, info%icomm_o)
+  info%numo_max = maxval(numo_all)
+  !write(*,'(a,6i4)')"check process-o info%numo_max=",info%numo_max
+
+! process ID corresponding to the orbital index io
+  if ( allocated(info%irank_io) ) deallocate(info%irank_io)
+  allocate(info%irank_io(1:system%no))
+  !do io=1, system%no
+  !  if(mod(io*nproc_ob,system%no)==0)then
+  !    info%irank_io(io) = io*nproc_ob/system%no - 1
+  !  else
+  !    info%irank_io(io) = io*nproc_ob/system%no
+  !  end if
+  !end do
+  io=0
+  do ii=1,nproc_ob
+     do jj=1,numo_all(ii)
+        io=io+1
+        info%irank_io(io) = ii-1
+     enddo
+  enddo
+  !do io=1, system%no
+  !  write(*,'(a,6i4)')"check irank_io",io,info%id_o, info%irank_io(io)
+  !end do
 
 ! flags
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
   info%if_divide_orbit  = nproc_ob.ne.1
 
-! process ID corresponding to the orbital index io
-  if ( allocated(info%irank_io) ) deallocate(info%irank_io)
-  allocate(info%irank_io(1:system%no))
-  do io=1, system%no
-    if(mod(io*nproc_ob,system%no)==0)then
-      info%irank_io(io) = io*nproc_ob/system%no - 1
-    else
-      info%irank_io(io) = io*nproc_ob/system%no
-    end if
-  end do
-
 end subroutine init_orbital_parallel_singlecell
+
+!===================================================================================================================================
+
+subroutine init_s_e_mpi(nproc,irank,n,n_s,n_e)
+  use communication, only: comm_get_groupinfo, comm_is_root
+  use parallelization, only: nproc_id_global
+  implicit none
+  integer :: irank,nproc,k,n,n_s,n_e,n_r
+
+  if(nproc .le. n) then
+     k = mod(n,nproc)
+     if(k==0) then
+        n_r = n/nproc
+     else
+        n_r = n/nproc + 1
+     endif
+     n_s = n_r * irank + 1
+     n_e = n_s + n_r - 1
+     if (irank == nproc-1) n_e = n   !only the last process has less number
+     !!
+     if (n_e .gt. n) stop "error in init_s_e_mpi - no1"
+     if (n_s .gt. n) stop "error in init_s_e_mpi - no2"
+     !if (n_e .gt. n) n_e = -1
+     !if (n_s .gt. n) then
+     !   n_s =  0
+     !   n_e = -1
+     !endif
+
+  else
+     !(this case must be problem for orbital) ; should stop maybe
+     stop "error in init_s_e_mpi - no3"
+     !!
+     !if(irank+1.le.n) then
+     !   n_s = irank + 1
+     !   n_e = n_s
+     !else
+     !   n_s = 0
+     !   n_e = -1
+     !endif
+  endif
+
+  !if(comm_is_root(nproc_id_global)) write(*,*) "  #irank, n_r, n_s, n_e"
+  !write(*,'(i6,3i6)')  irank, n_r, n_s, n_e
+
+end subroutine init_s_e_mpi
 
 !===================================================================================================================================
 

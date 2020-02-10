@@ -145,6 +145,7 @@ module structures
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
                               ! For calc_mode='RT' and temperature<0, these values are calculated from nelec.
                               ! In other cases, these are calculated from nstate.
+    integer :: numo_max
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
     integer :: imr(3) ! for sendrecv
   end type s_orbital_parallel

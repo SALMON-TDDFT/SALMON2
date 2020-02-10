@@ -481,7 +481,7 @@ CONTAINS
     endif
 
 800 format(a,f6.2,a)
-810 format(a,f10.5,a)
+810 format(a,f14.8,a)
 900 format(a)
 
     !Book-keeping in ewald(ion-ion)
