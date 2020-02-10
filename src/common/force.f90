@@ -23,13 +23,14 @@ contains
 
   subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi,ewald)
     use structures
-    use math_constants,only : zi
+    use math_constants,only : zi,pi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
     use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
+    use salmon_global, only: kion,cutoff_g,aEwald
     use timer
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
@@ -43,11 +44,11 @@ contains
     type(s_orbital)            :: tpsi
     type(s_ewald_ion_ion),intent(in) :: ewald
     !
-    integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
+    integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j,ig
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
-    real(8) :: kAc(3), rtmp, rtmp2(3)
+    real(8) :: kAc(3), rtmp,g(3),r(3),G2,Gd
+    complex(8) :: rho_i, rho_e, egd, VG
     real(8),allocatable :: F_tmp(:,:),F_sum(:,:)
-    real(8),allocatable :: dden(:,:,:,:)
     complex(8) :: w(3),duVpsi(3)
     complex(8),allocatable :: gtpsi(:,:,:,:),uVpsibox(:,:,:,:,:),uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: phipsibox(:,:),phipsibox2(:,:)
@@ -80,12 +81,37 @@ contains
 
     Nlma = ppg%Nlma
 
-  ! Ewald sum of ion-ion interaction
+  ! Ewald sum
   call timer_begin(LOG_CALC_FORCE_ION_ION)
-    call force_ion_ion(system%Force,F_tmp,system,ewald,pp,fg,nion)
+    call force_ewald(system%Force,F_tmp,system,ewald,pp,nion,info%icomm_rko)
   call timer_end(LOG_CALC_FORCE_ION_ION)
+  
+  ! Fourier part (local part, etc.)
+    F_tmp   = 0d0
+  !$omp parallel do private(ig,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
+    do ig=fg%ig_s,fg%ig_e
+       if(ig == fg%iGzero ) cycle
+       g(1) = fg%Gx(ig)
+       g(2) = fg%Gy(ig)
+       g(3) = fg%Gz(ig)
+       G2   = sum(g(:)**2)
+       if(G2 .gt. cutoff_g**2) cycle   !xxx
 
-  ! electron-ion interaction
+       rho_i = fg%zrhoG_ion(ig)
+       rho_e = fg%zrhoG_ele(ig)
+
+  !OCL swp
+       do ia=1,nion
+          r = system%Rion(1:3,ia)
+          Gd = sum(g(:)*r(:))
+          egd = exp(zI*Gd)
+          rtmp = pp%Zps(Kion(ia))* (4*Pi/G2) * exp(-G2/(4*aEwald))
+          VG = fg%zdVG_ion(ig,kion(ia)) - 4d0*pi/g2*pp%zps(kion(ia))
+          F_tmp(:,ia) = F_tmp(:,ia) + g(:)* ( rtmp * aimag(rho_i*egd) + aimag(egd*rho_e*conjg(VG)) )
+       end do
+    end do
+  !$omp end parallel do
+
   call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     if(allocated(tpsi%rwf)) then
       allocate(tpsi%zwf(mg%is_array(1):mg%ie_array(1) &
@@ -137,20 +163,6 @@ contains
 
   call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc   = 0d0
-    F_tmp = 0d0
-    allocate( dden(3,mg%is_array(1):mg%ie_array(1) &
-                    ,mg%is_array(2):mg%ie_array(2) &
-                    ,mg%is_array(3):mg%ie_array(3)))
-
-!$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz = mg%is_array(3),mg%ie_array(3)
-    do iy = mg%is_array(2),mg%ie_array(2)
-    do ix = mg%is_array(1),mg%ie_array(1)
-       dden(:,ix,iy,iz) = 0d0
-    enddo
-    enddo
-    enddo
-!$omp end parallel do
 
     do ik=ik_s,ik_e
     do io=io_s,io_e
@@ -161,23 +173,6 @@ contains
        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
        call timer_end(LOG_CALC_FORCE_GTPSI)
-
-
-       call timer_begin(LOG_CALC_FORCE_DDEN)
-       rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
-!$omp parallel do collapse(2) private(iz,iy,ix,w,rtmp2)
-       do iz=mg%is(3),mg%ie(3)
-       do iy=mg%is(2),mg%ie(2)
-!OCL swp
-       do ix=mg%is(1),mg%ie(1)
-          w = conjg(gtpsi(:,ix,iy,iz)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          rtmp2(:) = rtmp * dble(w(:))
-          dden(:,ix,iy,iz) = dden(:,ix,iy,iz) + rtmp2(:)
-       enddo
-       enddo
-       enddo
-!$omp end parallel do
-       call timer_end(LOG_CALC_FORCE_DDEN)
 
        ! nonlocal part
        call timer_begin(LOG_CALC_FORCE_NONLOCAL)
@@ -257,29 +252,6 @@ contains
     end do !ik
   call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
-    ! local part (based on density gradient)
-  call timer_begin(LOG_CALC_FORCE_LOCAL)
-!$omp parallel do private(iz,iy,ix,ia)
-    do ia=1,nion
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-!OCL swp
-!OCL swp_weak
-        do ix=mg%is(1),mg%ie(1)
-#ifdef __FUJITSU
-           F_tmp(1,ia) = F_tmp(1,ia) - dden(1,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
-           F_tmp(2,ia) = F_tmp(2,ia) - dden(2,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
-           F_tmp(3,ia) = F_tmp(3,ia) - dden(3,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
-#else
-           F_tmp(:,ia) = F_tmp(:,ia) - dden(:,ix,iy,iz) * ppg%Vpsl_atom(ix,iy,iz,ia)
-#endif
-        end do
-      end do
-      end do
-    end do
-!$omp end parallel do
-  call timer_end(LOG_CALC_FORCE_LOCAL)
-
 
     !do ia=1,nion
     !  write(*,'(1x,i4,2f20.10)') ia,real(zF_tmp(1,ia)),aimag(zF_tmp(1,ia))
@@ -312,24 +284,21 @@ contains
     return
   end subroutine calc_force
 
-  subroutine force_ion_ion(F_sum,F_tmp,system,ewald,pp,fg,nion)
+  subroutine force_ewald(F_sum,F_tmp,system,ewald,pp,nion,comm)
     use structures
     use math_constants,only : pi,zi
     use salmon_math
-    use salmon_global, only: kion,NEwald,aEwald
+    use salmon_global, only: kion,NEwald,aEwald,cutoff_r
     use communication, only: comm_summation
-    use inputoutput, only: cutoff_r, cutoff_g
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_ewald_ion_ion),intent(in) :: ewald
     type(s_pp_info)   ,intent(in) :: pp
-    type(s_reciprocal_grid),intent(in) :: fg
-    integer  ,intent(in) :: nion
+    integer  ,intent(in) :: nion,comm
     real(8)              :: F_tmp(3,nion),F_tmp_l(3,nion),F_sum(3,nion)
     !
-    integer :: ix,iy,iz,ia,ib,ig,ipair
-    real(8) :: rr,rab(3),r(3),g(3),G2,Gd, rtmp(3)
-    complex(8) :: rho_i, ctmp1(3), ctmp2
+    integer :: ix,iy,iz,ia,ib,ipair
+    real(8) :: rr,rab(3),r(3)
 
     select case(system%iperiodic)
     case(0)
@@ -346,34 +315,7 @@ contains
 
     case(3)
 
-
-      F_tmp   = 0d0
-!$omp parallel do private(ig,ia,r,g,G2,Gd,rho_i,rtmp,ctmp1,ctmp2) reduction(+:F_tmp)
-      do ig=fg%ig_s,fg%ig_e
-         if(ig == fg%iGzero ) cycle
-         g(1) = fg%Gx(ig)
-         g(2) = fg%Gy(ig)
-         g(3) = fg%Gz(ig)
-         G2   = sum(g(:)**2)
-         if(G2 .gt. cutoff_g**2) cycle   !xxx
-
-         rho_i= fg%zrhoG_ion(ig)
-         rtmp(:) = 0.5d0 * g(:) * (4*Pi/G2) * exp(-G2/(4*aEwald))
-         ctmp1(:)= rtmp(:) * zI
-
-!OCL swp
-         do ia=1,nion
-            r = system%Rion(1:3,ia)
-            Gd = sum(g(:)*r(:))
-            ctmp2 = rho_i*exp(zI*Gd)
-            F_tmp(:,ia) = F_tmp(:,ia)  &
-                        + pp%Zps(Kion(ia)) * ctmp1(:) * (conjg(ctmp2)-ctmp2)
-         end do
-      end do
-!$omp end parallel do
-      call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_G)
-
-
+      F_sum = 0d0
       F_tmp = 0d0
       if(ewald%yn_bookkeep=='y') then
 
@@ -411,7 +353,7 @@ contains
             end do  !ipair
          end do     !ia
 !$omp end parallel do
-         call comm_summation(F_tmp_l,F_tmp,3*nion,fg%icomm_G)
+         call comm_summation(F_tmp_l,F_tmp,3*nion,comm)
 
       else
 
@@ -446,6 +388,6 @@ contains
       F_sum = F_sum + F_tmp
       
     end select
-  end subroutine force_ion_ion
+  end subroutine force_ewald
 end module force_sub
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
