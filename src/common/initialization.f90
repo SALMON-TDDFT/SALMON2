@@ -292,13 +292,13 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   info%numm = 1
 
 ! # of k points
-  info%ik_s = info%id_k * system%nk / nproc_k + 1
-  info%ik_e = (info%id_k+1) * system%nk / nproc_k
+  info%ik_s = (info%id_k * system%nk) / nproc_k + 1
+  info%ik_e = ((info%id_k+1) * system%nk) / nproc_k
   info%numk = info%ik_e - info%ik_s + 1
 
 ! # of orbitals
-  info%io_s = info%id_o * system%no / nproc_ob + 1
-  info%io_e = (info%id_o+1) * system%no / nproc_ob
+  info%io_s = (info%id_o * system%no) / nproc_ob + 1
+  info%io_e = ((info%id_o+1) * system%no) / nproc_ob
   info%numo = info%io_e - info%io_s + 1
 
 ! flags
