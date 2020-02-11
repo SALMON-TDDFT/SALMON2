@@ -20,7 +20,7 @@ checklist = {
     # E_tot
     "E_tot": [
         -100, # Temporary value for result
-        -0.466315072374561E+003,  # Reference value 
+        -0.466675122289146E+003,  # Reference value 
         1e-3,  # Permissible error 
     ], 
 } 

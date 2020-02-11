@@ -35,7 +35,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
   type(s_orbital) :: htpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  integer :: ilma,ia,j,ix,iy,iz,Nlma
+  integer :: ilma,ia,j,ix,iy,iz,Nlma,ilocal
   real(8) :: uVpsi,wrk
   real(8),allocatable :: uVpsibox (:,:,:,:,:)
   real(8),allocatable :: uVpsibox2(:,:,:,:,:)
@@ -92,14 +92,15 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
     call timer_begin(LOG_UHPSI_PSEUDO)
 
 !$omp parallel do collapse(4) &
-!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
+!$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
 
-      do ilma=1,Nlma
-        ia = ppg%ia_tbl(ilma)
+      do ilocal=1,ppg%ilocal_nlma
+        ilma=ppg%ilocal_nlma2ilma(ilocal)
+        ia  =ppg%ilocal_nlma2ia  (ilocal)
         uVpsi = uVpsibox2(ilma,ispin,io,ik,im)
 !OCL norecurrence
         do j=1,ppg%mps(ia)
@@ -174,7 +175,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   type(s_orbital) :: htpsi
   !
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e
-  integer :: ilma,ia,j,ix,iy,iz,Nlma
+  integer :: ilma,ia,j,ix,iy,iz,Nlma,ilocal
   complex(8) :: uVpsi,wrk
   complex(8),allocatable :: uVpsibox (:,:,:,:,:)
   complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
@@ -203,14 +204,15 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     call timer_begin(LOG_UHPSI_PSEUDO)
 
 !$omp parallel do collapse(4) &
-!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
+!$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
 
-      do ilma=1,Nlma
-        ia = ppg%ia_tbl(ilma)
+      do ilocal=1,ppg%ilocal_nlma
+        ilma=ppg%ilocal_nlma2ilma(ilocal)
+        ia  =ppg%ilocal_nlma2ia  (ilocal)
         uVpsi = uVpsibox2(ispin,io,ik,im,ilma)
 !OCL norecurrence
         do j=1,ppg%mps(ia)
@@ -291,7 +293,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
   integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns
   complex(8) :: uVpsi
-  integer :: ireqs(natom), nreq
+  integer :: ireqs(natom), nreq, ilocal
 
   call timer_begin(LOG_UHPSI_PSEUDO)
 
@@ -309,14 +311,15 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
 
 !$omp parallel do collapse(4) &
-!$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz)
+!$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
   do im=im_s,im_e
   do ik=ik_s,ik_e
   do io=io_s,io_e
   do ispin=1,Nspin
 
-    do ilma=1,Nlma
-      ia = ppg%ia_tbl(ilma)
+    do ilocal=1,ppg%ilocal_nlma
+      ilma=ppg%ilocal_nlma2ilma(ilocal)
+      ia  =ppg%ilocal_nlma2ia  (ilocal)
       uVpsi = 0.d0
       do j=1,ppg%mps(ia)
         ix = ppg%jxyz(1,j,ia)
