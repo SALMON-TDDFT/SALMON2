@@ -97,8 +97,8 @@ contains
     integer,intent(in) :: natom,iopt
     !theta_opt=0.0d0:DFP,theta_opt=1.0d0:BFGS in Quasi_Newton method
     real(8), parameter :: alpha=1.0d0,theta_opt=1.0d0
-    integer :: ii,ij,icount,iatom, NA3
-    real(8) :: const1,const2
+    integer :: ii,ij,jj,icount,iatom, NA3,ixyz
+    real(8) :: const1,const2,rtmp
     real(8) :: dRion(3,natom)
     real(8) :: force_1d(3*natom),dRion_1d(3*natom),optmat_1d(3*natom)
     real(8) :: optmat1_2d(3*natom,3*natom),optmat2_2d(3*natom,3*natom),optmat3_2d(3*natom,3*natom)
@@ -107,8 +107,8 @@ contains
 
     icount=1
     do iatom=1,natom
-    do ii=1,3
-       force_1d(icount) = system%Force(ii,iatom)
+    do ixyz=1,3
+       force_1d(icount) = system%Force(ixyz,iatom)
        icount = icount+1
     end do
     end do
@@ -134,39 +134,74 @@ contains
       call dgemm('n','n',1,1,NA3,1d0,dFion,1,optmat_1d,NA3,0d0,const2,1)
       call dgemm('n','n',NA3,NA3,1,1d0,a_dRion,NA3,a_dRion,1,0d0,optmat1_2d,NA3)
       !update Hess_mat
-      Hess_mat = Hess_mat_last + ((const1+theta_opt*const2)/(const1**2d0))*optmat1_2d
+      rtmp = (const1+theta_opt*const2)/(const1**2d0)
+      !$omp parallel do collapse(2) private(ii,jj)
+      do ii=1,NA3
+      do jj=1,NA3
+         Hess_mat(ii,jj) = Hess_mat_last(ii,jj) + rtmp * optmat1_2d(ii,jj)
+      enddo
+      enddo
+      !$omp end parallel do
       if(theta_opt==0.0d0)then
         !theta_opt=0.0d0:DFP
         call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,optmat_1d,1,0d0,optmat2_2d,NA3)
-        Hess_mat = Hess_mat-(1d0/const2)*optmat2_2d
+        !$omp parallel do collapse(2) private(ii,jj)
+        do ii=1,NA3
+        do jj=1,NA3
+           Hess_mat(ii,jj) = Hess_mat(ii,jj)-(1d0/const2)*optmat2_2d(ii,jj)
+        enddo
+        enddo
+        !$omp end parallel do
       elseif(theta_opt==1.0d0)then
         !theta_opt=1.0d0:BFGS
         call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,a_dRion,1,0d0,optmat2_2d,NA3)
         call dgemm('n','n',NA3,NA3,1,1d0,a_dRion,NA3,optmat_1d,1,0d0,optmat3_2d,NA3)
-        Hess_mat = Hess_mat-(theta_opt/const1)*(optmat2_2d+optmat3_2d)
+        rtmp = theta_opt/const1
+        !$omp parallel do collapse(2) private(ii,jj)
+        do ii=1,NA3
+        do jj=1,NA3
+           Hess_mat(ii,jj) = Hess_mat(ii,jj)- rtmp *(optmat2_2d(ii,jj)+optmat3_2d(ii,jj))
+        enddo
+        enddo
+        !$omp end parallel do
       endif
       !update Hess_mat_last
-      Hess_mat_last = Hess_mat
+      !$omp parallel do collapse(2) private(ii,jj)
+      do ii=1,NA3
+      do jj=1,NA3
+         Hess_mat_last(ii,jj) = Hess_mat(ii,jj)
+      enddo
+      enddo
+      !$omp end parallel do
     end if
 
     !update dRion_1d and dRion
     dRion_1d(:) = 0d0
     call dgemm('n','n',NA3,1,NA3,1d0,Hess_mat,NA3,force_1d,NA3,0d0,dRion_1d,NA3)
+    !$omp parallel do collapse(2) private(iatom,ixyz)
     do iatom=1,natom
-      dRion(1:3,iatom) = dRion_1d((1+3*(iatom-1)):(3+3*(iatom-1)))
+    do ixyz=1,3
+       dRion(ixyz,iatom) = dRion_1d(ixyz+3*(iatom-1))       
+!      dRion(1:3,iatom) = dRion_1d((1+3*(iatom-1)):(3+3*(iatom-1)))
     end do
+    end do
+    !$omp end parallel do
 
     !update a_dRion,dFion
-    a_dRion = alpha * dRion_1d
-    dFion   = force_1d
+    !$omp parallel do private(ii)
+    do ii=1,NA3
+       a_dRion(ii) = alpha * dRion_1d(ii)
+       dFion(ii)   = force_1d(ii)
+    enddo
+    !$omp end parallel do
 
     !update Rion
+    !$omp parallel do private(iatom)
     do iatom=1,natom
-      if(flag_opt_atom(iatom)=='y') then
-        system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*dRion(1:3,iatom)
-      end if
+       if(flag_opt_atom(iatom)=='y') &
+          system%Rion(1:3,iatom) = system%Rion(1:3,iatom) +alpha*dRion(1:3,iatom)
     end do
-   !call comm_bcast(system%Rion,nproc_group_global) !<-- need?
+    !$omp end parallel do
 
   end subroutine structure_opt
 
