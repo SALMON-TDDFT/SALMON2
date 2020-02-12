@@ -22,7 +22,7 @@ use math_constants, only: pi, zi
 use structures
 use inputoutput
 use parallelization, only: nproc_id_global,nproc_group_global
-use communication, only: comm_is_root, comm_summation, comm_bcast
+use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
 use scf_iteration_sub
@@ -268,10 +268,21 @@ if(yn_opt=='y') then
 20    format(a5,3f16.8,i3,a3)
    end if
 
-   if(flag_opt_conv) call structure_opt_fin
+   if(flag_opt_conv) then
+      call structure_opt_fin
+   else
+      if((checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval)==0)) then
+         call checkpoint_gs(lg,mg,ng,system,info,spsi,iopt,mixing)
+         if(comm_is_root(nproc_id_global))then
+            write(*,'(2a,i5)')"  checkpoint data is printed: iopt=", iopt
+         endif
+         call comm_sync_all
+      endif
+   endif
 
 end if
 call timer_end(LOG_DEINIT_GS_ITERATION)
+
 
 
 if(flag_opt_conv)then
