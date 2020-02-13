@@ -30,12 +30,28 @@ program gen_plot
   end do
 
   uo=10
-  open(uo,file="plot")
+
+  open(uo,file="plot1")
   write(uo,'("#set pm3d at b")')
   write(uo,'("#set view map")')
   write(uo,'("#unset surface")')
   write(uo,'("#set cbrange [",g14.5,":",g14.5,"]")') amin, amax
   write(uo,'("set zrange [",g14.5,":",g14.5,"]")') amin, amax
+  write(uo,'(5x,a)') 
+  do i=1,ndata
+     write(fname,'("fort.",i4)') unit0+i
+     fname = "'"//trim(fname)//"'"
+     write(uo,'("splot ",a)') fname 
+     write(uo,'("pause -1")')
+  end do
+  close(uo)
+
+  open(uo,file="plot2")
+  write(uo,'("set pm3d at b")')
+  write(uo,'("set view map")')
+  write(uo,'("unset surface")')
+  write(uo,'("set cbrange [",g14.5,":",g14.5,"]")') amin, amax
+  write(uo,'("#set zrange [",g14.5,":",g14.5,"]")') amin, amax
   write(uo,'(5x,a)') 
   do i=1,ndata
      write(fname,'("fort.",i4)') unit0+i
