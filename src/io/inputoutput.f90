@@ -324,7 +324,8 @@ contains
       & threshold, &
       & omp_loop, &
       & skip_gsortho, &
-      & iditer_notemperature
+      & iditer_notemperature, &
+      & yn_gbp
 
     namelist/emfield/ &
       & trans_longi, &
@@ -659,6 +660,7 @@ contains
     omp_loop      = 'k'
     skip_gsortho  = 'n'
     iditer_notemperature = 10
+    yn_gbp        = 'n'
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -1087,6 +1089,8 @@ contains
     call comm_bcast(omp_loop                ,nproc_group_global)
     call comm_bcast(skip_gsortho            ,nproc_group_global)
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
+    call comm_bcast(yn_gbp                  ,nproc_group_global)
+
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
     call comm_bcast(ae_shape1  ,nproc_group_global)
@@ -1854,6 +1858,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'omp_loop', omp_loop
       write(fh_variables_log, '("#",4X,A,"=",A)') 'skip_gsortho', skip_gsortho
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
+
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield

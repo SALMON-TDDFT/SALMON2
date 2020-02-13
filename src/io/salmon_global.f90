@@ -157,6 +157,7 @@ module salmon_global
   character(1)   :: omp_loop
   character(1)   :: skip_gsortho
   integer        :: iditer_notemperature
+  character(1)   :: yn_gbp
 
 !! &emfield
   character(2)   :: trans_longi
