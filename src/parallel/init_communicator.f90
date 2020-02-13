@@ -21,11 +21,10 @@ CONTAINS
 !===================================================================================================================================
 
 subroutine init_communicator_dft(comm,pinfo,info,info_field)
-  use salmon_global, only: process_allocation,ispin
+  use salmon_global, only: ispin,process_allocation
   use structures, only: s_orbital_parallel, s_field_parallel, s_process_info
   use communication, only: comm_create_group, comm_get_groupinfo, &
-                                  comm_summation
-  use misc_routines, only: get_wtime
+                           comm_is_root, comm_summation, comm_create_group_byid
   implicit none
   integer,      intent(in) :: comm
   type(s_process_info), intent(in) :: pinfo
@@ -35,18 +34,15 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   integer :: myrank,nproc
   integer :: nproc_k,nproc_ob
   integer :: nproc_d_o(3),nproc_d_g(3),nproc_d_o_mul,nproc_d_g_dm(3),nproc_d_g_mul_dm,nproc_ob_spin(2)
-  integer :: imr(3),imrs(3),igroup
-  integer :: i1,i2,i3,i4,i5,ix,iy,iz,ixs,iys,izs
+  integer :: i1,i2,i3,i4,i5,ix,iy,iz,ixs,iys,izs,nsize,ilocal_rank
   integer :: ibox,icolor,ikey
   integer :: npuy,npuz
+  integer :: mesh(3),network(3),mesh_step(3)
+  integer :: icolor_r,icolor_o,icolor_k,icolor_ro,icolor_ko
+  integer :: ikey_ro,ikey_ko,nl
+  integer,allocatable :: iranklists(:)
 
   call comm_get_groupinfo(comm, myrank, nproc)
-
-  ! info
-
-  info%icomm_rko  = comm
-  info%id_rko = myrank
-  info%isize_rko = nproc
 
   nproc_k          = pinfo%npk
   nproc_ob         = pinfo%nporbital
@@ -57,386 +53,188 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   nproc_d_o_mul    = product(nproc_d_o)
   nproc_d_g_mul_dm = product(nproc_d_g_dm)
 
-  !new_world for comm_kgrid
-  if(process_allocation=='orbital_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
-        if(myrank==ibox)then
-          icolor=i5*nproc_ob+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
-          ikey=i4
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  else if(process_allocation=='grid_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
-        if(myrank==ibox)then
-          icolor=i5+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_k
-          ikey=i4
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  end if
+  call check_network_form
 
-  info%icomm_o = comm_create_group(comm, icolor, ikey)
-  call comm_get_groupinfo(info%icomm_o, info%id_o, info%isize_o)
 
-  !new_world for comm_korbital
-  if(process_allocation=='orbital_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
-        if(myrank==ibox)then
-          icolor=i5*nproc_ob+i4
-          ikey=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  else if(process_allocation=='grid_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
-        if(myrank==ibox)then
-          icolor=i5*nproc_ob+i4
-          ikey=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  end if
+! info
+  info%icomm_rko = comm
+  info%id_rko    = myrank
+  info%isize_rko = nproc
 
-  info%icomm_r = comm_create_group(comm, icolor, ikey)
+! communicator r,o,k,ro,ko
+  do i5=0,nproc_k-1
+  do i4=0,nproc_ob-1
+  do i3=0,nproc_d_o(3)-1
+  do i2=0,nproc_d_o(2)-1
+  do i1=0,nproc_d_o(1)-1
+    if (process_allocation=='grid_sequential') then
+      ibox = (i5 * nproc_ob + i4) * product(nproc_d_o) &
+           + (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1)
+    else if (process_allocation=='orbital_sequential') then
+      ibox = (i5 * nproc_ob + i4) &
+           + (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1) * nproc_ob * nproc_k
+    end if
+
+    if(myrank == ibox)then
+      info%iaddress = [i1, i2, i3, i4, i5]
+
+      ! icomm_r
+      icolor_r = i5 * nproc_ob + i4
+
+      ! icomm_o
+      icolor_o = i5 &
+               + (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1) * nproc_k
+
+      ! icomm_k
+      icolor_k = i4 * product(nproc_d_o) &
+               + (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1)
+
+      ! icomm_ro, ko
+      if(ispin==0)then
+        icolor_ro = i5
+        ikey_ro   = i4 &
+                  + (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1) * nproc_ob
+        ikey_ko   = i5 * nproc_ob + i4
+      else if(i4<nproc_ob_spin(1))then
+        icolor_ro = 2 * i5 + 0
+        ikey_ro   = i4 &
+                  + (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1) * nproc_ob_spin(1)
+        ikey_ko   = i5 * nproc_ob_spin(1) + i4
+      else
+        icolor_ro = 2 * i5 + 1
+        ikey_ro   = i4 - nproc_ob_spin(1) &
+                  + (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1) * nproc_ob_spin(2)
+        ikey_ko   = i5 * nproc_ob_spin(2) + i4 - nproc_ob_spin(1)
+      end if
+      icolor_ko = (i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1)
+    end if
+  end do
+  end do
+  end do
+  end do
+  end do
+
+  info%icomm_r = comm_create_group(comm, icolor_r, myrank)
   call comm_get_groupinfo(info%icomm_r, info%id_r, info%isize_r)
 
-  !new_world for comm_k
-  if(process_allocation=='orbital_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
-        if(ispin==0)then
-          if(myrank==ibox)then
-            icolor=i5
-            ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob
-          end if
-        else
-          if(i4<nproc_ob_spin(1))then
-            if(myrank==ibox)then
-              icolor=2*i5+0
-              ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(1)
-            end if
-          else
-            if(myrank==ibox)then
-              icolor=2*i5+1
-              ikey=i4-nproc_ob_spin(1)+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(2)
-            end if
-          end if
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  else if(process_allocation=='grid_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
-        if(ispin==0)then
-          if(myrank==ibox)then
-            icolor=i5
-            ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob
-          end if
-        else
-          if(i4<nproc_ob_spin(1))then
-            if(myrank==ibox)then
-              icolor=2*i5+0
-              ikey=i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(1)
-            end if
-          else
-            if(myrank==ibox)then
-              icolor=2*i5+1
-              ikey=i4-nproc_ob_spin(1)+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob_spin(2)
-            end if
-          end if
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  end if
+  info%icomm_o = comm_create_group(comm, icolor_o, myrank)
+  call comm_get_groupinfo(info%icomm_o, info%id_o, info%isize_o)
 
-  info%icomm_ro = comm_create_group(comm, icolor, ikey)
-  call comm_get_groupinfo(info%icomm_ro, info%id_ro, info%isize_ro)
-
-  !new_world for comm_grid
-  if(process_allocation=='orbital_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
-        if(ispin==0)then
-          if(myrank==ibox)then
-            icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-            ikey=i5*nproc_ob+i4
-          end if
-        else
-          if(i4<nproc_ob_spin(1))then
-            if(myrank==ibox)then
-              icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-              ikey=i5*nproc_ob_spin(1)+i4
-            end if
-          else
-            if(myrank==ibox)then
-              icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-              ikey=i5*nproc_ob_spin(2)+i4-nproc_ob_spin(1)
-            end if
-          end if
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  else if(process_allocation=='grid_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
-        if(ispin==0)then
-          if(myrank==ibox)then
-            icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-            ikey=i5*nproc_ob+i4
-          end if
-        else
-          if(i4<nproc_ob_spin(1))then
-            if(myrank==ibox)then
-              icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-              ikey=i5*nproc_ob_spin(1)+i4
-            end if
-          else
-            if(myrank==ibox)then
-              icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)
-              ikey=i5*nproc_ob_spin(2)+i4-nproc_ob_spin(1)
-            end if
-          end if
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  end if
-
-  info%icomm_ko = comm_create_group(comm, icolor, ikey)
-  call comm_get_groupinfo(info%icomm_ko, info%id_ko, info%isize_ko)
-
-  !new_world for comm_orbitalgrid
-  if(process_allocation=='orbital_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=i5*nproc_ob+i4+(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))*nproc_ob*nproc_k
-        if(myrank==ibox)then
-          icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)+i4*nproc_d_o_mul
-          ikey=i5
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  else if(process_allocation=='grid_sequential')then
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      do i5=0,nproc_k-1
-      do i4=0,nproc_ob-1
-        ibox=(i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2))+(i5*nproc_ob+i4)*nproc_d_o_mul
-        if(myrank==ibox)then
-          icolor=i1+i2*nproc_d_o(1)+i3*nproc_d_o(1)*nproc_d_o(2)+i4*nproc_d_o_mul
-          ikey=i5
-        end if
-      end do
-      end do
-    end do
-    end do
-    end do
-  end if
-
-  info%icomm_k = comm_create_group(comm, icolor, ikey)
+  info%icomm_k = comm_create_group(comm, icolor_k, myrank)
   call comm_get_groupinfo(info%icomm_k, info%id_k, info%isize_k)
 
-  ! info_field
+  info%icomm_ro = comm_create_group(comm, icolor_ro, ikey_ro)
+  call comm_get_groupinfo(info%icomm_ro, info%id_ro, info%isize_ro)
 
-  info_field%icomm_all = info%icomm_rko
-  info_field%id_all = info%id_rko
-  info_field%isize_all = info%isize_rko
+  info%icomm_ko = comm_create_group(comm, icolor_ko, ikey_ko)
+  call comm_get_groupinfo(info%icomm_ko, info%id_ko, info%isize_ko)
 
-  if(process_allocation=='orbital_sequential')then
-    do iz=0,nproc_d_o(3)-1
-    do iy=0,nproc_d_o(2)-1
-    do ix=0,nproc_d_o(1)-1
-      do i4=0,nproc/nproc_d_o_mul/nproc_d_g_mul_dm-1
-      do izs=0,nproc_d_g_dm(3)-1
-      do iys=0,nproc_d_g_dm(2)-1
-      do ixs=0,nproc_d_g_dm(1)-1
-        ibox=ixs+iys*nproc_d_g_dm(1)   &
-                +izs*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
-                +i4*nproc_d_g_mul_dm    &
-                +ix*nproc/nproc_d_o_mul    &
-                +iy*nproc/nproc_d_o_mul*nproc_d_o(1)   &
-                +iz*nproc/nproc_d_o_mul*nproc_d_o(1)*nproc_d_o(2)
-        if(myrank==ibox)then
-          imr(1)=ix
-          imr(2)=iy
-          imr(3)=iz
-          imrs(1)=ixs
-          imrs(2)=iys
-          imrs(3)=izs
-          igroup=i4
-        end if
-      end do
-      end do
-      end do
-    end do
-    end do
-    end do
-    end do
-  else if(process_allocation=='grid_sequential')then
-    do i4=0,nproc/nproc_d_o_mul/nproc_d_g_mul_dm-1
-    do izs=0,nproc_d_g_dm(3)-1
-    do iys=0,nproc_d_g_dm(2)-1
-    do ixs=0,nproc_d_g_dm(1)-1
-      do iz=0,nproc_d_o(3)-1
-      do iy=0,nproc_d_o(2)-1
-      do ix=0,nproc_d_o(1)-1
-        ibox=ix+iy*nproc_d_o(1)+iz*nproc_d_o(1)*nproc_d_o(2)  &
-               +ixs*nproc_d_o_mul  &
-               +iys*nproc_d_o_mul*nproc_d_g_dm(1)  &
-               +izs*nproc_d_o_mul*nproc_d_g_dm(1)*nproc_d_g_dm(2)  &
-               +i4*nproc_d_o_mul*nproc_d_g_mul_dm
-        if(myrank==ibox)then
-          imr(1)=ix
-          imr(2)=iy
-          imr(3)=iz
-          imrs(1)=ixs
-          imrs(2)=iys
-          imrs(3)=izs
-          igroup=i4
-        end if
-      end do
-      end do
-      end do
-    end do
-    end do
-    end do
-    end do
-  end if
+  allocate(info%imap(0:nproc_d_o(1)-1, &
+                     0:nproc_d_o(2)-1, &
+                     0:nproc_d_o(3)-1, &
+                     0:nproc_ob-1, &
+                     0:nproc_k-1))
+  info%imap = 0
+  info%imap(info%iaddress(1), &
+            info%iaddress(2), &
+            info%iaddress(3), &
+            info%iaddress(4), &
+            info%iaddress(5)) = myrank
+  call comm_summation(info%imap, comm)
 
-  if(process_allocation=='orbital_sequential')then
-    icolor=imrs(2)+imrs(3)*nproc_d_g_dm(2)   &
-                  +igroup*nproc_d_g_dm(2)*nproc_d_g_dm(3)   &
-                  +imr(2)*nproc/nproc_d_o_mul/nproc_d_g_dm(1)   &
-                  +imr(3)*nproc/nproc_d_o_mul/nproc_d_g_dm(1)*nproc_d_o(2)
-    ikey=imrs(1)+imr(1)*nproc_d_g_dm(1)
-  else if(process_allocation=='grid_sequential')then
-    icolor=imr(2)+imr(3)*nproc_d_o(2)   &
-                 +imrs(2)*nproc_d_o(2)*nproc_d_o(3)   &
-                 +imrs(3)*nproc_d_o(2)*nproc_d_o(3)*nproc_d_g_dm(2)  &
-                 +myrank/(nproc_d_o_mul*nproc_d_g_mul_dm)*nproc_d_o(2)  &
-                 *nproc_d_o(3)*nproc_d_g_dm(2)*nproc_d_g_dm(3)
-  !  ikey=imr(1)+imrs(1)*nproc_d_o(1)
-    ikey=imrs(1)+imr(1)*nproc_d_g_dm(1)
-  end if
 
-  info_field%icomm(1) = comm_create_group(comm, icolor, ikey)
+! info_field
+  info_field%icomm_all = comm
+  info_field%id_all    = myrank
+  info_field%isize_all = nproc
+
+  allocate(info_field%imap(0:nproc_d_g(1)-1, &
+                           0:nproc_d_g(2)-1, &
+                           0:nproc_d_g(3)-1))
+
+  allocate(iranklists(product(nproc_d_g)))
+
+  ! packing same id_r
+  ilocal_rank = 0
+  do iz=0,nproc_d_g(3)-1,nproc_d_g_dm(3)
+  do iy=0,nproc_d_g(2)-1,nproc_d_g_dm(2)
+  do ix=0,nproc_d_g(1)-1,nproc_d_g_dm(1)
+    ! search same id_r...
+    nsize = 0
+    do i5=0,nproc_k-1
+    do i4=0,nproc_ob-1
+    do i3=0,nproc_d_o(3)-1
+    do i2=0,nproc_d_o(2)-1
+    do i1=0,nproc_d_o(1)-1
+      ! `process_allocation` is not related (maybe...)
+      ibox = i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1
+      if (ibox == ilocal_rank) then
+        nsize = nsize + 1
+        iranklists(nsize) = info%imap(i1,i2,i3,i4,i5)
+      end if
+    end do
+    end do
+    end do
+    end do
+    end do
+
+    nsize = 0
+    do izs=iz,iz+nproc_d_g_dm(3)-1
+    do iys=iy,iy+nproc_d_g_dm(2)-1
+    do ixs=ix,ix+nproc_d_g_dm(1)-1
+      nsize = nsize + 1
+      info_field%imap(ixs,iys,izs) = iranklists(nsize)
+      if (iranklists(nsize) == myrank) then
+        info_field%iaddress = [ixs,iys,izs]
+      end if
+    end do
+    end do
+    end do
+    ilocal_rank = ilocal_rank + 1
+  end do
+  end do
+  end do
+
+! x-dir summation
+  iz = info_field%iaddress(3)
+  iy = info_field%iaddress(2)
+  nl = 0
+  do ix=0,nproc_d_g(1)-1
+    nl = nl + 1
+    iranklists(nl) = info_field%imap(ix,iy,iz)
+  end do
+  info_field%icomm(1) = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info_field%icomm(1), info_field%id(1), info_field%isize(1))
 
-  if(process_allocation=='orbital_sequential')then
-    icolor=imrs(1)+imrs(3)*nproc_d_g_dm(1)   &
-                  +igroup*nproc_d_g_dm(1)*nproc_d_g_dm(3)   &
-                  +imr(1)*nproc/nproc_d_o_mul/nproc_d_g_dm(2)   &
-                  +imr(3)*nproc/nproc_d_o_mul/nproc_d_g_dm(2)*nproc_d_o(1)
-    ikey=imrs(2)+imr(2)*nproc_d_g_dm(2)
-  else if(process_allocation=='grid_sequential')then
-    icolor=imr(1)+imr(3)*nproc_d_o(1)   &
-                 +imrs(1)*nproc_d_o(1)*nproc_d_o(3)   &
-                 +imrs(3)*nproc_d_o(1)*nproc_d_o(3)*nproc_d_g_dm(1)  &
-                 +myrank/(nproc_d_o_mul*nproc_d_g_mul_dm)*nproc_d_o(1)*nproc_d_o(3)  &
-                 *nproc_d_g_dm(1)*nproc_d_g_dm(3)
-  !  ikey=imr(2)+imrs(2)*nproc_d_o(2)
-    ikey=imrs(2)+imr(2)*nproc_d_g_dm(2)
-  end if
-
-  info_field%icomm(2) = comm_create_group(comm, icolor, ikey)
+! y-dir summation
+  iz = info_field%iaddress(3)
+  ix = info_field%iaddress(1)
+  nl = 0
+  do iy=0,nproc_d_g(2)-1
+    nl = nl + 1
+    iranklists(nl) = info_field%imap(ix,iy,iz)
+  end do
+  info_field%icomm(2) = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info_field%icomm(2), info_field%id(2), info_field%isize(2))
 
-  if(process_allocation=='orbital_sequential')then
-    icolor=imrs(1)+imrs(2)*nproc_d_g_dm(1)   &
-                  +igroup*nproc_d_g_dm(1)*nproc_d_g_dm(2)   &
-                  +imr(1)*nproc/nproc_d_o_mul/nproc_d_g_dm(3)   &
-                  +imr(2)*nproc/nproc_d_o_mul/nproc_d_g_dm(3)*nproc_d_o(1)
-    ikey=imrs(3)+imr(3)*nproc_d_g_dm(3)
-  else if(process_allocation=='grid_sequential')then
-    icolor=imr(1)+imr(2)*nproc_d_o(1)   &
-                 +imrs(1)*nproc_d_o(1)*nproc_d_o(2)   &
-                 +imrs(2)*nproc_d_o(1)*nproc_d_o(2)*nproc_d_g_dm(1)  &
-                 +myrank/(nproc_d_o_mul*nproc_d_g_mul_dm)*nproc_d_o(1)*nproc_d_o(2)  &
-                 *nproc_d_g_dm(1)*nproc_d_g_dm(2)
-  !  ikey=imr(3)+imrs(3)*nproc_d_o(3)
-    ikey=imrs(3)+imr(3)*nproc_d_g_dm(3)
-  end if
-
-  info_field%icomm(3) = comm_create_group(comm, icolor, ikey)
+! z-dir summation
+  iy = info_field%iaddress(2)
+  ix = info_field%iaddress(1)
+  nl = 0
+  do iz=0,nproc_d_g(3)-1
+    nl = nl + 1
+    iranklists(nl) = info_field%imap(ix,iy,iz)
+  end do
+  info_field%icomm(3) = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
 
-! for sendrecv
-  info%imr = imr
-  info_field%imr = imr
-  info_field%imrs = imrs
 
 ! for allgatherv_vlocal
-  info_field%icomm_v = info%icomm_ko
+  info_field%icomm_v  = info%icomm_ko
   info_field%ngo(1:3) = nproc_d_g_dm(1:3)
-  info_field%ngo_xyz = nproc_d_g_mul_dm
-  info_field%nproc_o = nproc_d_o_mul
+  info_field%ngo_xyz  = nproc_d_g_mul_dm
+  info_field%nproc_o  = nproc_d_o_mul
+
 
 ! communicators for FFTE routine
   npuy = nproc_d_g_dm(2)*nproc_d_o(2)
@@ -457,6 +255,31 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   info_field%icomm_ffte(1) = comm_create_group(comm, icolor, ikey)
   call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
 
+contains
+  subroutine check_network_form
+    implicit none
+
+    mesh(:)      = nproc_d_o(:)
+    mesh_step(:) = nproc_d_g(:) / nproc_d_o(:)
+    network(:)   = mesh_step(:) * nproc_d_o(:)
+
+    if (comm_is_root(myrank)) then
+      print *, '================ MPI-Info ================='
+      print *, 'we assume the network is fat-tree.'
+      print *, 'we allocate the process as grid sequential...'
+
+      print '(A,5I4)', ' requested network (5D):',mesh,nproc_ob,nproc_k
+      print '(A,3I4)', ' assumed   network (3D):',network
+
+      if (product(mesh) * nproc_ob * nproc_k /= nproc) then
+        print *, 'invalid requested network' ; stop
+      end if
+
+      if (product(network) /= nproc) then
+        print *, 'invalid assumed network' ; stop
+      end if
+    end if
+  end subroutine check_network_form
 end subroutine init_communicator_dft
 
 END MODULE init_communicator

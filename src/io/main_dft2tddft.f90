@@ -73,7 +73,7 @@ pinfo_scf%npdomain_general    = nproc_domain_general
 call init_process_distribution(system_scf,icomm,pinfo_scf)
 
 call init_communicator_dft(icomm,pinfo_scf,info_scf,info_field_scf)
-call init_grid_parallel(irank,nprocs,pinfo_scf,lg_scf,mg_scf,ng_scf)
+call init_grid_parallel(irank,nprocs,pinfo_scf,info_scf,info_field_scf,lg_scf,mg_scf,ng_scf)
 call init_orbital_parallel_singlecell(system_scf,info_scf,pinfo_scf)
 
 if (yn_periodic == 'y') then
@@ -104,7 +104,7 @@ pinfo_rt%npdomain_general    = target_nproc_domain_general
 call init_process_distribution(system_rt,icomm,pinfo_rt)
 
 call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
-call init_grid_parallel(irank,nprocs,pinfo_rt,lg_rt,mg_rt,ng_rt)
+call init_grid_parallel(irank,nprocs,pinfo_rt,info_rt,info_field_rt,lg_rt,mg_rt,ng_rt)
 call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)
 
 call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)

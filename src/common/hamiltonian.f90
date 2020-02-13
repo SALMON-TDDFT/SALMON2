@@ -453,14 +453,14 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
   allocate(matbox12(0:(mg%num(1)*mg%num(2)*mg%num(3))-1))
 
   iscnt = inum_Mxin_s(1,myrank)*inum_Mxin_s(2,myrank)*inum_Mxin_s(3,myrank)
-  if(process_allocation=='orbital_sequential')then
-    do i=0,info_field%ngo_xyz-1
-      ibox=(myrank/info_field%ngo_xyz)*info_field%ngo_xyz+i
-      ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
-    end do
-  else if(process_allocation=='grid_sequential')then
+  if(process_allocation=='grid_sequential')then
     do i=0,info_field%ngo_xyz-1
       ibox=mod(myrank,info_field%nproc_o)+i*info_field%nproc_o
+      ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
+    end do
+  else if(process_allocation=='orbital_sequential')then
+    do i=0,info_field%ngo_xyz-1
+      ibox=(myrank/info_field%ngo_xyz)*info_field%ngo_xyz+i
       ircnt(i)=inum_Mxin_s(1,ibox)*inum_Mxin_s(2,ibox)*inum_Mxin_s(3,ibox)
     end do
   end if
@@ -488,13 +488,13 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
     call timer_end(LOG_ALLGATHERV_VLOCAL_COMM_COLL)
 
     call timer_begin(LOG_ALLGATHERV_VLOCAL_CALC)
-    if(process_allocation=='orbital_sequential')then
+    if(process_allocation=='grid_sequential')then
   !$OMP parallel do private(i1,i2,i3,ibox,ibox2) collapse(3)
       do i3=0,info_field%ngo(3)-1
       do i2=0,info_field%ngo(2)-1
       do i1=0,info_field%ngo(1)-1
-        ibox=(myrank/info_field%ngo_xyz)*info_field%ngo_xyz    &
-              +(i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2))
+        ibox=mod(myrank,info_field%nproc_o)    &
+            +(i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2))*info_field%nproc_o
         ibox2=i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2)
 
         call copyVlocal(mg,ista_Mxin_s(:,ibox),iend_Mxin_s(:,ibox), &
@@ -504,13 +504,13 @@ subroutine allgatherv_vlocal(ng,mg,info_field,nspin,Vh,Vpsl,Vxc,Vlocal)
       end do
       end do
       end do
-    else if(process_allocation=='grid_sequential')then
+    else if(process_allocation=='orbital_sequential')then
   !$OMP parallel do private(i1,i2,i3,ibox,ibox2) collapse(3)
       do i3=0,info_field%ngo(3)-1
       do i2=0,info_field%ngo(2)-1
       do i1=0,info_field%ngo(1)-1
-        ibox=mod(myrank,info_field%nproc_o)    &
-            +(i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2))*info_field%nproc_o
+        ibox=(myrank/info_field%ngo_xyz)*info_field%ngo_xyz    &
+              +(i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2))
         ibox2=i1+i2*info_field%ngo(1)+i3*info_field%ngo(1)*info_field%ngo(2)
 
         call copyVlocal(mg,ista_Mxin_s(:,ibox),iend_Mxin_s(:,ibox), &

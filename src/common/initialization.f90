@@ -61,15 +61,15 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   call init_process_distribution(system,comm,pinfo)
 
   call init_communicator_dft(comm,pinfo,info,info_field)
-  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,lg,mg,ng) ! lg --> mg & ng
+  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,info_field,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, pinfo, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_r, neig)
+  call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
-  
+
 ! symmetry
 
   call init_sym_rho( lg%num, mg%is, mg%ie, info%icomm_r )
@@ -427,19 +427,20 @@ end subroutine init_grid_whole
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(myrank,nproc,pinfo,lg,mg,ng)
+subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
   use communication, only: comm_is_root
-  use salmon_global, only: yn_periodic,process_allocation
-  use structures, only: s_process_info,s_rgrid
+  use salmon_global, only: yn_periodic
+  use structures, only: s_process_info,s_rgrid,s_orbital_parallel,s_field_parallel
   implicit none
   integer,             intent(in)    :: myrank,nproc
   type(s_process_info),intent(in)    :: pinfo
+  type(s_orbital_parallel),intent(in):: info
+  type(s_field_parallel),intent(in)  :: info_field
   type(s_rgrid),       intent(inout) :: lg
   type(s_rgrid),       intent(inout) :: mg,ng
   !
   integer :: nproc_domain_orbital(3),nproc_domain_general(3),nproc_k,nproc_ob
-  integer :: i1,i2,i3,i4,j1,j2,j3,ibox,j,ii
-  integer :: nproc_domain_orbital_mul,ngo(3),ngo_mul
+  integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
@@ -459,46 +460,26 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,lg,mg,ng)
   mg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   mg%nd = Nd
 
-  nproc_domain_orbital_mul = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3)
-  if(process_allocation=='orbital_sequential')then
-    do j3=0,nproc_domain_orbital(3)-1
-    do j2=0,nproc_domain_orbital(2)-1
-    do j1=0,nproc_domain_orbital(1)-1
-      do i2=0,nproc_k-1
-      do i1=0,nproc_ob-1
-        ibox = nproc_ob*i2 + i1 + nproc_k*nproc_ob*( j1 + nproc_domain_orbital(1)*j2 &
-        & + nproc_domain_orbital(1)*nproc_domain_orbital(2)*j3 )
-        mg%is_all(1,ibox) = j1*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)
-        mg%ie_all(1,ibox) = (j1+1)*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)-1
-        mg%is_all(2,ibox) = j2*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)
-        mg%ie_all(2,ibox) = (j2+1)*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)-1
-        mg%is_all(3,ibox) = j3*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)
-        mg%ie_all(3,ibox) = (j3+1)*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)-1
-      end do
-      end do
+  do i5=0,nproc_k-1
+  do i4=0,nproc_ob-1
+  do i3=0,nproc_domain_orbital(3)-1
+  do i2=0,nproc_domain_orbital(2)-1
+  do i1=0,nproc_domain_orbital(1)-1
+    ibox = info%imap(i1,i2,i3,i4,i5)
+    npo = [i1,i2,i3]
+    do j=1,3
+      nsize = (lg%num(j) + nproc_domain_orbital(j) - 1) / nproc_domain_orbital(j)
+      mg%is_all(j,ibox) = lg%is(j) + nsize * npo(j)
+      mg%ie_all(j,ibox) = mg%is_all(j,ibox) + nsize - 1
+      if (mg%ie_all(j,ibox) > lg%num(j)) then
+        mg%ie_all(j,ibox) = lg%num(j)
+      end if
     end do
-    end do
-    end do
-  else if(process_allocation=='grid_sequential')then
-    do i2=0,nproc_k-1
-    do i1=0,nproc_ob-1
-      do j3=0,nproc_domain_orbital(3)-1
-      do j2=0,nproc_domain_orbital(2)-1
-      do j1=0,nproc_domain_orbital(1)-1
-        ibox = j1 + nproc_domain_orbital(1)*j2 + nproc_domain_orbital(1)*nproc_domain_orbital(2)*j3 &
-        & + (nproc_ob*i2 + i1)*nproc_domain_orbital_mul
-        mg%is_all(1,ibox) = j1*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)
-        mg%ie_all(1,ibox) = (j1+1)*lg%num(1)/nproc_domain_orbital(1)+lg%is(1)-1
-        mg%is_all(2,ibox) = j2*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)
-        mg%ie_all(2,ibox) = (j2+1)*lg%num(2)/nproc_domain_orbital(2)+lg%is(2)-1
-        mg%is_all(3,ibox) = j3*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)
-        mg%ie_all(3,ibox) = (j3+1)*lg%num(3)/nproc_domain_orbital(3)+lg%is(3)-1
-      end do
-      end do
-      end do
-    end do
-    end do
-  end if
+  end do
+  end do
+  end do
+  end do
+  end do
 
   mg%is(:) = mg%is_all(:,myrank)
   mg%ie(:) = mg%ie_all(:,myrank)
@@ -515,7 +496,7 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,lg,mg,ng)
           ,mg%idy(mg%is_overlap(2):mg%ie_overlap(2)) &
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
 
-  if(yn_periodic=='y' .and. nproc_domain_orbital_mul==1) then
+  if(yn_periodic=='y' .and. product(nproc_domain_orbital)==1) then
     if(comm_is_root(myrank)) write(*,*) "r-space parallelization: off"
     mg%is_array(1:3) = mg%is(1:3)
     mg%ie_array(1:3) = mg%ie(1:3)
@@ -553,49 +534,22 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,lg,mg,ng)
   ng%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   ng%nd = Nd
 
-  ngo = nproc_domain_general/nproc_domain_orbital
-  ngo_mul = ngo(1)*ngo(2)*ngo(3)
-
-  if(process_allocation=='orbital_sequential')then
-    do ii=0,nproc_domain_orbital_mul-1
-      do i4=0,nproc/nproc_domain_orbital_mul/ngo_mul-1
-      do i3=0,ngo(3)-1
-      do i2=0,ngo(2)-1
-      do i1=0,ngo(1)-1
-        ibox= i1+i2*ngo(1)+i3*ngo(1)*ngo(2)       &
-                +i4*ngo_mul   &
-                +ii*nproc/nproc_domain_orbital_mul
-        ng%is_all(1,ibox) = i1*(mg%ie_all(1,ibox)-mg%is_all(1,ibox)+1)/ngo(1)+mg%is_all(1,ibox)
-        ng%ie_all(1,ibox) = (i1+1)*(mg%ie_all(1,ibox)-mg%is_all(1,ibox)+1)/ngo(1)+mg%is_all(1,ibox)-1
-        ng%is_all(2,ibox) = i2*(mg%ie_all(2,ibox)-mg%is_all(2,ibox)+1)/ngo(2)+mg%is_all(2,ibox)
-        ng%ie_all(2,ibox) = (i2+1)*(mg%ie_all(2,ibox)-mg%is_all(2,ibox)+1)/ngo(2)+mg%is_all(2,ibox)-1
-        ng%is_all(3,ibox) = i3*(mg%ie_all(3,ibox)-mg%is_all(3,ibox)+1)/ngo(3)+mg%is_all(3,ibox)
-        ng%ie_all(3,ibox) = (i3+1)*(mg%ie_all(3,ibox)-mg%is_all(3,ibox)+1)/ngo(3)+mg%is_all(3,ibox)-1
-      end do
-      end do
-      end do
-      end do
+  do i3=0,nproc_domain_general(3)-1
+  do i2=0,nproc_domain_general(2)-1
+  do i1=0,nproc_domain_general(1)-1
+    ibox = info_field%imap(i1,i2,i3)
+    npo = [i1,i2,i3]
+    do j=1,3
+      nsize = (lg%num(j) + nproc_domain_general(j) - 1) / nproc_domain_general(j)
+      ng%is_all(j,ibox) = lg%is(j) + nsize * npo(j)
+      ng%ie_all(j,ibox) = ng%is_all(j,ibox) + nsize - 1
+      if (ng%ie_all(j,ibox) > lg%num(j)) then
+        ng%ie_all(j,ibox) = lg%num(j)
+      end if
     end do
-  else if(process_allocation=='grid_sequential')then
-    do i4=0,nproc/nproc_domain_orbital_mul/ngo_mul-1
-    do i3=0,ngo(3)-1
-    do i2=0,ngo(2)-1
-    do i1=0,ngo(1)-1
-      do ii=0,nproc_domain_orbital_mul-1
-        ibox=ii+(i1+i2*ngo(1)+i3*ngo(1)*ngo(2))*nproc_domain_orbital_mul   &
-              +i4*nproc_domain_orbital_mul*ngo_mul
-        ng%is_all(1,ibox) = i1*(mg%ie_all(1,ii)-mg%is_all(1,ii)+1)/ngo(1)+mg%is_all(1,ii)
-        ng%ie_all(1,ibox) = (i1+1)*(mg%ie_all(1,ii)-mg%is_all(1,ii)+1)/ngo(1)+mg%is_all(1,ii)-1
-        ng%is_all(2,ibox) = i2*(mg%ie_all(2,ii)-mg%is_all(2,ii)+1)/ngo(2)+mg%is_all(2,ii)
-        ng%ie_all(2,ibox) = (i2+1)*(mg%ie_all(2,ii)-mg%is_all(2,ii)+1)/ngo(2)+mg%is_all(2,ii)-1
-        ng%is_all(3,ibox) = i3*(mg%ie_all(3,ii)-mg%is_all(3,ii)+1)/ngo(3)+mg%is_all(3,ii)
-        ng%ie_all(3,ibox) = (i3+1)*(mg%ie_all(3,ii)-mg%is_all(3,ii)+1)/ngo(3)+mg%is_all(3,ii)-1
-      end do
-    end do
-    end do
-    end do
-    end do
-  end if
+  end do
+  end do
+  end do
 
   ng%is(1:3) = ng%is_all(:,myrank)
   ng%ie(1:3) = ng%ie_all(:,myrank)
@@ -633,6 +587,13 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,lg,mg,ng)
   ng%ie_array(2)=ng%ie_array(2) + 1
 #endif
 
+! final check...
+  do j=1,3
+    if (mg%is(j) > ng%is(j) .or. mg%ie(j) < ng%ie(j)) then
+      stop 'invalid range: mg and ng, please check init_grid_parallel subroutine'
+    end if
+  end do
+
 end subroutine init_grid_parallel
 
 !===================================================================================================================================
@@ -656,9 +617,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   integer :: kx,ky,kz
   integer :: kkx,kky,kkz
   integer :: ky2,kz2
-  integer :: kx_sta,kx_end,ky_sta,ky_end,kz_sta,kz_end
   real(8) :: bLx,bLy,bLz
-  integer :: ky_shift,kz_shift
   complex(8) :: tmp
 
   integer :: npuy,npuz
@@ -743,7 +702,10 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     npuz=info_field%isize_ffte(3)
 
     if(.not.allocated(poisson%coef))then
-      allocate(poisson%coef(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
+      allocate(poisson%coef      (lg%num(1),ng%num(2),ng%num(3)))
+      allocate(poisson%a_ffte    (lg%num(1),ng%num(2),ng%num(3)))
+      allocate(poisson%a_ffte_tmp(lg%num(1),ng%num(2),ng%num(3)))
+      allocate(poisson%b_ffte    (lg%num(1),ng%num(2),ng%num(3)))
     end if
     poisson%coef=0.d0
 
@@ -751,24 +713,18 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     bLy=2.d0*pi/(system%hgs(2)*dble(lg%num(2)))
     bLz=2.d0*pi/(system%hgs(3)*dble(lg%num(3)))
 
-    kx_sta=lg%is(1)
-    kx_end=lg%ie(1)
-    ky_sta=1
-    ky_end=lg%num(2)/npuy
-    kz_sta=1
-    kz_end=lg%num(3)/npuz
-
-    ky_shift=info_field%id_ffte(2)*lg%num(2)/npuy
-    kz_shift=info_field%id_ffte(3)*lg%num(3)/npuz
-
     fg%iGzero = -1
-    do kz = kz_sta,kz_end
-    do ky = ky_sta,ky_end
-    do kx = kx_sta,kx_end
-      ky2=ky+ky_shift
-      kz2=kz+kz_shift
-      n=(kz2-lg%is(3))*lg%num(2)*lg%num(1)+(ky2-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
-      kkx=kx-1-lg%num(1)*(1+sign(1,(kx-1-lg%num(1)/2)))/2
+    n = 0
+    do kz = 1,ng%num(3)
+    do ky = 1,ng%num(2)
+    do kx = lg%is(1),lg%ie(1)
+      kz2=kz+ng%is(3)-1
+      ky2=ky+ng%is(2)-1
+      n = (kz2-lg%is(3))*lg%num(1)*lg%num(2) &
+        + (ky2-lg%is(2))*lg%num(1) &
+        + (kx -lg%is(1)) &
+        + 1
+      kkx=kx -1-lg%num(1)*(1+sign(1,(kx -1-lg%num(1)/2)))/2
       kky=ky2-1-lg%num(2)*(1+sign(1,(ky2-1-lg%num(2)/2)))/2
       kkz=kz2-1-lg%num(3)*(1+sign(1,(kz2-1-lg%num(3)/2)))/2
       fg%Gx(n)=dble(kkx)*bLx
