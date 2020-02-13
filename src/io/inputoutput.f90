@@ -2232,13 +2232,6 @@ contains
       endif
     endif
 
-    select case(process_allocation)
-    case('orbital_sequential','grid_sequential')
-      continue
-    case default
-      stop "process_allocation must be specified as 'orbital_sequential' or 'grid_sequential'."
-    end select
-
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
       select case(out_dos_function)
       case("gaussian","lorentzian")
