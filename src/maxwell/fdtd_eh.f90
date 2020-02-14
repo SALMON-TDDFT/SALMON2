@@ -92,6 +92,12 @@ module fdtd_eh
     real(8),allocatable :: ei_lr(:,:)                                   !LR: Im[e_lr]
   end type ls_fdtd_eh
   
+  private :: calc_es_and_hs
+  private :: allocate_poynting
+  private :: calc_poynting_vector
+  private :: calc_poynting_vector_div
+  private :: mpi_allreduce_sum_ji
+
 contains
   
   !===========================================================================================
@@ -113,6 +119,7 @@ contains
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     use common_maxwell,  only: set_coo_em,find_point_em
+    use ttm
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -342,6 +349,14 @@ contains
     do ii=0,media_num
       call eh_coeff
     end do
+
+    !*** Check TTM On/Off, and initialization
+    call init_ttm_parameters( dt_em )
+    if( use_ttm )then
+       call init_ttm_grid( fs%hgs, fs%ng%is_array, fs%ng%is, fs%ng%ie, fs%imedia )
+       call init_ttm_alloc( fs%srg_ng, fs%ng )
+    end if
+
     deallocate(fs%imedia); deallocate(fe%rmedia);
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
@@ -1311,12 +1326,18 @@ contains
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
     use math_constants,  only: pi
+    use ttm
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer                           :: iter,ii,ij,ix,iy,iz
     character(128)                    :: save_name
     
+    integer :: jx,jy,jz,unit1=4000
+    real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
+    real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
+    real(8),allocatable :: work(:,:,:), work2(:,:,:)
+
     !time-iteration
     do iter=fe%iter_sta,fe%iter_end
       !update iter_now
@@ -1391,6 +1412,45 @@ contains
                  fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,      'h','y') !hz_y
       call eh_sendrecv(fs,fe,'h')
       
+      if( use_ttm )then
+
+         !Poynting vector
+         if ( .not.allocated(Spoynting) ) then
+            call allocate_poynting(fs, Spoynting, divS, u_energy)
+            call allocate_poynting(fs, u=u_energy_p)
+         end if
+         call calc_es_and_hs(fs, fe)
+         call calc_poynting_vector(fs, fe, Spoynting)
+         call calc_poynting_vector_div(fs, Spoynting, divS)
+         u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
+
+         u_energy_p = u_energy
+         call ttm_penetration( fs%ng%is, u_energy_p )
+
+         call ttm_main( fs%srg_ng, fs%ng, u_energy_p )
+
+         if( mod(iter,obs_samp_em) == 0 )then
+            ix=fs%lg%is(1)-fe%Nd; jx=fs%lg%ie(1)+fe%Nd
+            iy=fs%lg%is(2)-fe%Nd; jy=fs%lg%ie(2)+fe%Nd
+            iz=fs%lg%is(3)-fe%Nd; jz=fs%lg%ie(3)+fe%Nd
+            allocate( work(ix:jx,iy:jy,iz:jz) ); work=0.0d0
+            allocate( work2(ix:jx,iy:jy,iz:jz) ); work2=0.0d0
+            call ttm_get_temperatures( (/ix,iy,iz/), work, work2 )
+            call mpi_allreduce_sum_ji( nproc_group_global, work, work2 )
+            if( comm_is_root(nproc_id_global) )then
+               unit1=unit1+1
+               do iz=lbound(work,3),ubound(work,3)
+               do ix=lbound(work,1),ubound(work,1)
+                  write(unit1,'(1x,2i8,2g20.10)') ix,iz,work(ix,0,iz),work2(ix,0,iz)
+               end do
+               write(unit1,*)
+               end do
+            end if
+            deallocate( work2 )
+            deallocate( work )
+         end if
+      end if !use_ttm
+
       !observation
       if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
         !prepare e and h for save
@@ -2730,4 +2790,145 @@ contains
     return
   end subroutine eh_fourier
   
+  subroutine calc_es_and_hs(fs, fe)
+    use structures, only: s_fdtd_system
+    use sendrecv_grid, only: update_overlap_real8
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    type(ls_fdtd_eh), intent(inout)   :: fe
+    integer :: ix,iy,iz
+!$omp parallel
+!$omp do private(ix,iy,iz)
+    do iz=(fs%ng%is_array(3)),(fs%ng%ie_array(3))
+    do iy=(fs%ng%is_array(2)),(fs%ng%ie_array(2))
+    do ix=(fs%ng%is_array(1)),(fs%ng%ie_array(1))
+       fe%ex_s(ix,iy,iz)=fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz)
+       fe%ey_s(ix,iy,iz)=fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz)
+       fe%ez_s(ix,iy,iz)=fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz)
+       fe%hx_s(ix,iy,iz)=( fe%hx_s(ix,iy,iz)+(fe%hx_y(ix,iy,iz)+fe%hx_z(ix,iy,iz)) )*0.5d0
+       fe%hy_s(ix,iy,iz)=( fe%hy_s(ix,iy,iz)+(fe%hy_z(ix,iy,iz)+fe%hy_x(ix,iy,iz)) )*0.5d0
+       fe%hz_s(ix,iy,iz)=( fe%hz_s(ix,iy,iz)+(fe%hz_x(ix,iy,iz)+fe%hz_y(ix,iy,iz)) )*0.5d0
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+    call eh_sendrecv(fs,fe,'s')
+    call update_overlap_real8( fs%srg_ng, fs%ng, fe%ex_s )
+    call update_overlap_real8( fs%srg_ng, fs%ng, fe%ey_s )
+    call update_overlap_real8( fs%srg_ng, fs%ng, fe%ez_s )
+    call update_overlap_real8( fs%srg_ng, fs%ng, fe%hx_s )
+    call update_overlap_real8( fs%srg_ng, fs%ng, fe%hy_s )
+    call update_overlap_real8( fs%srg_ng, fs%ng, fe%hz_s )
+  end subroutine calc_es_and_hs
+
+  subroutine allocate_poynting(fs, S, divS, u)
+    use structures, only: s_fdtd_system
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    real(8),allocatable,optional,intent(inout) :: S(:,:,:,:)
+    real(8),allocatable,optional,intent(inout) :: divS(:,:,:)
+    real(8),allocatable,optional,intent(inout) :: u(:,:,:)
+    integer :: is1,is2,is3,ie1,ie2,ie3
+    is1=fs%ng%is_array(1); ie1=fs%ng%ie_array(1)
+    is2=fs%ng%is_array(2); ie2=fs%ng%ie_array(2)
+    is3=fs%ng%is_array(3); ie3=fs%ng%ie_array(3)
+    if ( present(S) ) then
+       if ( allocated(S) ) deallocate(S)
+       allocate( S(is1:ie1,is2:ie2,is3:ie3,3) ); S=0.0d0
+    end if
+    is1=fs%ng%is(1); ie1=fs%ng%ie(1)
+    is2=fs%ng%is(2); ie2=fs%ng%ie(2)
+    is3=fs%ng%is(3); ie3=fs%ng%ie(3)
+    if ( present(divS) ) then
+       if ( allocated(divS) ) deallocate(divS)
+       allocate( divS(is1:ie1,is2:ie2,is3:ie3) ); divS=0.0d0
+    end if
+    if ( present(u) ) then
+       if ( allocated(u) ) deallocate(u)
+       allocate( u(is1:ie1,is2:ie2,is3:ie3) ); u=0.0d0
+    end if
+  end subroutine allocate_poynting
+
+  subroutine calc_poynting_vector(fs, fe, Spoynting)
+    use structures, only: s_fdtd_system
+    use sendrecv_grid, only: update_overlap_real8
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    type(ls_fdtd_eh), intent(inout)   :: fe
+    real(8), intent(inout) :: Spoynting(:,:,:,:)
+    integer :: ix,iy,iz,jx,jy,jz,ix0,iy0,iz0,ix1,iy1,iz1
+    ix0=fs%ng%is_array(1)
+    iy0=fs%ng%is_array(2)
+    iz0=fs%ng%is_array(3)
+    ix1=fs%ng%ie_array(1)
+    iy1=fs%ng%ie_array(2)
+    iz1=fs%ng%ie_array(3)
+!$omp parallel
+!$omp do private(ix,iy,iz,jx,jy,jz)
+    do iz = iz0, iz1
+       jz=iz-iz0+1
+    do iy = iy0, iy1
+       jy=iy-iy0+1
+    do ix = ix0, ix1
+       jx=ix-ix0+1
+       Spoynting(jx,jy,jz,1) = fe%ey_s(ix,iy,iz)*fe%hz_s(ix,iy,iz) - fe%ez_s(ix,iy,iz)*fe%hy_s(ix,iy,iz)
+       Spoynting(jx,jy,jz,2) = fe%ez_s(ix,iy,iz)*fe%hx_s(ix,iy,iz) - fe%ex_s(ix,iy,iz)*fe%hz_s(ix,iy,iz)
+       Spoynting(jx,jy,jz,3) = fe%ex_s(ix,iy,iz)*fe%hy_s(ix,iy,iz) - fe%ey_s(ix,iy,iz)*fe%hx_s(ix,iy,iz)
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+  end subroutine calc_poynting_vector
+
+  subroutine calc_poynting_vector_div(fs, Spoynting, divS)
+    use structures, only: s_fdtd_system
+    implicit none
+    type(s_fdtd_system),intent(inout) :: fs
+    real(8), intent(in) :: Spoynting(:,:,:,:)
+    real(8), intent(out) :: divS(:,:,:)
+    integer :: ix,iy,iz,jx,jy,jz,ix0,iy0,iz0,jx0,jy0,jz0
+    real(8) :: cx,cy,cz
+    cx = 0.5d0/fs%hgs(1)
+    cy = 0.5d0/fs%hgs(2)
+    cz = 0.5d0/fs%hgs(3)
+    ix0=fs%ng%is(1)-1
+    iy0=fs%ng%is(2)-1
+    iz0=fs%ng%is(3)-1
+    jx0=fs%ng%is_array(1)-1
+    jy0=fs%ng%is_array(2)-1
+    jz0=fs%ng%is_array(3)-1
+!$omp parallel
+!$omp do private(jx,jy,jz)
+    do iz=fs%ng%is(3),fs%ng%ie(3)
+       jz=iz-jz0
+    do iy=fs%ng%is(2),fs%ng%ie(2)
+       jy=iy-jy0
+    do ix=fs%ng%is(1),fs%ng%ie(1)
+       jx=ix-jx0
+       divS(ix-ix0,iy-iy0,iz-iz0) &
+            = ( Spoynting(jx+1,jy,jz,1) - Spoynting(jx-1,jy,jz,1) )*cx &
+            + ( Spoynting(jx,jy+1,jz,2) - Spoynting(jx,jy-1,jz,2) )*cy &
+            + ( Spoynting(jx,jy,jz+1,3) - Spoynting(jx,jy,jz-1,3) )*cz
+    end do
+    end do
+    end do
+!$omp end do
+!$omp end parallel
+  end subroutine calc_poynting_vector_div
+
+  subroutine mpi_allreduce_sum_ji( comm, w1, w2 )
+    use mpi
+    implicit none
+    integer,intent(in) :: comm
+    real(8),intent(inout) :: w1(:,:,:)
+    real(8),optional,intent(inout) :: w2(:,:,:)
+    integer :: ierr
+    call MPI_Allreduce(MPI_IN_PLACE,w1,size(w1),MPI_REAL8,MPI_SUM,comm,ierr)
+    if( present(w2) )then
+       call MPI_Allreduce(MPI_IN_PLACE,w2,size(w2),MPI_REAL8,MPI_SUM,comm,ierr)
+    end if
+  end subroutine mpi_allreduce_sum_ji
+
 end module fdtd_eh
