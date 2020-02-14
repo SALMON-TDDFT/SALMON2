@@ -325,6 +325,7 @@ contains
       & omp_loop, &
       & skip_gsortho, &
       & iditer_notemperature, &
+      & step_initial_mix_zero,&
       & yn_gbp
 
     namelist/emfield/ &
@@ -660,6 +661,7 @@ contains
     omp_loop      = 'k'
     skip_gsortho  = 'n'
     iditer_notemperature = 10
+    step_initial_mix_zero= -1
     yn_gbp        = 'n'
 
 !! == default for &emfield
@@ -1089,6 +1091,7 @@ contains
     call comm_bcast(omp_loop                ,nproc_group_global)
     call comm_bcast(skip_gsortho            ,nproc_group_global)
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
+    call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
     call comm_bcast(yn_gbp                  ,nproc_group_global)
 
 !! == bcast for &emfield
@@ -1858,6 +1861,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'omp_loop', omp_loop
       write(fh_variables_log, '("#",4X,A,"=",A)') 'skip_gsortho', skip_gsortho
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
 
 

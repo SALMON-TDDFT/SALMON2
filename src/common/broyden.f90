@@ -18,7 +18,7 @@ module broyden_sub
 
 contains
 
-subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm)
+subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_zero)
   use salmon_global, only: alpha_mb, nmemory_mb
   use communication, only: comm_summation
   use salmon_math
@@ -31,6 +31,7 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm)
   real(8), intent(inout) :: vecr(1:nl)
   real(8), intent(inout) :: vecr_in(1:nl,1:nstock+1)
   real(8), intent(inout) :: vecr_out(1:nl,1:nstock+1)
+  logical, intent(in),optional :: flag_mix_zero
   integer,parameter :: iter_mb=0
   real(8),parameter :: omega0=0.01d0
   integer :: iter_s,iter_e
@@ -42,14 +43,19 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm)
   real(8),allocatable :: aa(:,:),aa_tmp1(:,:)
   real(8),allocatable :: beta(:,:)
   real(8),allocatable :: ss_tmp1(:), ss_tmp2(:)
-  real(8) :: ss
+  real(8) :: ss, amix
   integer :: nnegative,nnegative_tmp
+
+  amix = alpha_mb
+  if(present(flag_mix_zero)) then
+     if(flag_mix_zero) amix=0d0
+  endif
 
   vecr_out(1:nl,iter_mod)=vecr(1:nl)
   if (iter <= iter_mb+1) then
     allocate(vecf(1:nl,iter:iter))
     vecf(1:nl,iter)=vecr_out(1:nl,iter_mod)-vecr_in(1:nl,iter_mod)
-    vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+alpha_mb*vecf(1:nl,iter)
+    vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+amix*vecf(1:nl,iter)
     deallocate(vecf)
   else
     iter_s=max(iter_mb+1+(iter_mod-iter),iter_mod-nmemory_mb)
@@ -128,22 +134,22 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm)
       call comm_summation(ss_tmp1,ss_tmp2,iter_e-iter_s+1,icomm)
       vecr_tmp(1:nl)=0.d0
       do i=iter_s,iter_e
-        do j=iter_s,iter_e
-          vecr_tmp(1:nl)=vecr_tmp(1:nl)&
-              &+omega_mb(i)*omega_mb(j)*beta(i,j)*ss_tmp2(i)*(alpha_mb*del_vecf(1:nl,j)+del_vecx(1:nl,j))
-        end do
+      do j=iter_s,iter_e
+         vecr_tmp(1:nl)=vecr_tmp(1:nl)&
+              &+omega_mb(i)*omega_mb(j)*beta(i,j)*ss_tmp2(i)*(amix*del_vecf(1:nl,j)+del_vecx(1:nl,j))
+      end do
       end do
     else 
       vecr_tmp(1:nl)=0.d0
       do i=iter_s,iter_e
-        do j=iter_s,iter_e
-          vecr_tmp(1:nl)=vecr_tmp(1:nl)&
-              &+omega_mb(i)*omega_mb(j)*beta(i,j)*sum(del_vecf(:,i)*vecf(:,iter_mod))*(alpha_mb*del_vecf(1:nl,j)+del_vecx(1:nl,j))
-        end do
+      do j=iter_s,iter_e
+         vecr_tmp(1:nl)=vecr_tmp(1:nl)&
+              &+omega_mb(i)*omega_mb(j)*beta(i,j)*sum(del_vecf(:,i)*vecf(:,iter_mod))*(amix*del_vecf(1:nl,j)+del_vecx(1:nl,j))
+      end do
       end do
     end if
   
-    vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+alpha_mb*vecf(1:nl,iter_mod)-vecr_tmp(1:nl)
+    vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+amix*vecf(1:nl,iter_mod)-vecr_tmp(1:nl)
 
     if(present(icomm)) then
       nnegative_tmp=0
@@ -162,7 +168,7 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm)
       end do
     end if
     if(nnegative > 0) then
-      vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+alpha_mb*vecf(1:nl,iter_mod)
+      vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+amix*vecf(1:nl,iter_mod)
     end if
 
     deallocate(vecf,del_vecf,del_vecx,omega_mb,beta,aa,aa_tmp1)

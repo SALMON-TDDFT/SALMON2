@@ -121,9 +121,10 @@ subroutine wrapper_broyden(ng,system,srho_s,iter,mixing)
        end do
     end do
 
-    call broyden(vecr,vecr_in,vecr_out,ng%num(1)*ng%num(2)*ng%num(3),  &
-                 iter,mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global)
-  
+    call broyden(vecr,vecr_in,vecr_out,ng%num(1)*ng%num(2)*ng%num(3),iter,    &
+                 mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global,&
+                 mixing%flag_mix_zero )
+
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -165,8 +166,9 @@ subroutine wrapper_broyden(ng,system,srho_s,iter,mixing)
         end do
       end do
 
-      call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),  &
-                   iter,mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global)
+      call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),iter,  &
+                   mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global,&
+                   mixing%flag_mix_zero )
   
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
@@ -224,6 +226,8 @@ subroutine init_mixing(nspin,ng,mixing)
       end do
     end do
   end if
+
+  mixing%flag_mix_zero=.false.
 
 end subroutine init_mixing
 
