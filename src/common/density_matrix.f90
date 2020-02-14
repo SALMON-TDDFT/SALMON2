@@ -662,18 +662,18 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_microscopic_current(system,mg,stencil,info,psi,dmat,curr)
+  subroutine calc_microscopic_current(system,mg,stencil,info,psi,curr)
     use structures
     use communication, only: comm_summation
     use timer
     implicit none
-    type(s_dft_system),intent(in) :: system
-    type(s_rgrid)  ,intent(in) :: mg
-    type(s_stencil),intent(in) :: stencil
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_stencil)         ,intent(in) :: stencil
     type(s_orbital_parallel),intent(in) :: info
-    type(s_orbital),intent(in) :: psi
-    type(s_dmatrix),intent(in) :: dmat
-    type(s_vector)             :: curr ! electron number current density (without rho*A/c)
+    type(s_orbital)         ,intent(in) :: psi
+!    type(s_dmatrix),intent(in) :: dmat
+    type(s_vector)                      :: curr ! electron number current density (without rho*A/c)
     !
     integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin
     real(8) :: kAc(3)
@@ -682,6 +682,7 @@ contains
     call timer_begin(LOG_MCURRENT_CALC)
     nspin = system%nspin
 
+    if(.not. psi%update_zwf_overlap) stop "halo of wavefunction is not updated"
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im_s, im_e @ calc_microscopic_current"
     im = 1
 
@@ -691,39 +692,87 @@ contains
     nsize = 3* mg%num(1) * mg%num(2) * mg%num(3)
 
     curr%v = 0d0
+
+    wrk2 = 0d0
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do ispin=1,nspin
+
+      kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+      call micro_current(mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz, &
+      & stencil%coef_nab,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
+      wrk2 = wrk2 + wrk * system%rocc(io,ik,ispin)*system%wtk(ik)
+
+!     call nonlocal_part
+
+    end do
+    end do
+    end do
+    
     call timer_end(LOG_MCURRENT_CALC)
 
-    do ispin=1,nspin
-      call timer_begin(LOG_MCURRENT_CALC)
-      wrk2 = 0d0
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-
-        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-        call kvec_part(mg%is_array,mg%ie_array,is,ie,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
-        wrk2 = wrk2 + wrk * system%rocc(io,ik,ispin)*system%wtk(ik)
-
-!       call nonlocal_part
-
-      end do
-      end do
-      call timer_end(LOG_MCURRENT_CALC)
-
-      call timer_begin(LOG_MCURRENT_COMM_COLL)
-      call comm_summation(wrk2,wrk,nsize,info%icomm_ko)
-      call timer_end(LOG_MCURRENT_COMM_COLL)
-
-      call timer_begin(LOG_MCURRENT_CALC)
-      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,is,ie,mg%ndir)
-
-      curr%v = curr%v + wrk + wrk2
-      call timer_end(LOG_MCURRENT_CALC)
-    end do
+    call timer_begin(LOG_MCURRENT_COMM_COLL)
+    call comm_summation(wrk2,curr%v,nsize,info%icomm_ko)
+    call timer_end(LOG_MCURRENT_COMM_COLL)
 
     deallocate(wrk,wrk2)
     return
 
   contains
+  
+# define DX(dt) idx(ix+(dt)),iy,iz
+# define DY(dt) ix,idy(iy+(dt)),iz
+# define DZ(dt) ix,iy,idz(iz+(dt))
+
+    subroutine micro_current(is_array,ie_array,is,ie,idx,idy,idz,nabt,kAc,tpsi,jw)
+      implicit none
+      integer   ,intent(in) :: is_array(3),ie_array(3),is(3),ie(3), &
+                             & idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+      real(8)   ,intent(in) :: nabt(Nd,3),kAc(3)
+      complex(8),intent(in) :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
+      real(8)               :: jw(3,is(1):ie(1),is(2):ie(2),is(3):ie(3))
+      !
+      integer :: ix,iy,iz
+      complex(8) :: xtmp,ytmp,ztmp,px,py,pz
+!$omp parallel do collapse(2) private(iz,iy,ix,xtmp,ytmp,ztmp,px,py,pz)
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+
+!OCL swp
+        do ix=is(1),ie(1)
+          px = conjg(tpsi(ix,iy,iz))
+          xtmp = nabt(1,1) * ( tpsi(DX(1)) - tpsi(DX(-1)) ) &
+               + nabt(2,1) * ( tpsi(DX(2)) - tpsi(DX(-2)) ) &
+               + nabt(3,1) * ( tpsi(DX(3)) - tpsi(DX(-3)) ) &
+               + nabt(4,1) * ( tpsi(DX(4)) - tpsi(DX(-4)) )
+          jw(1,ix,iy,iz) = aimag(px*xtmp) + kAc(1) * abs(px)**2
+        end do
+
+!OCL swp
+        do ix=is(1),ie(1)
+          py = conjg(tpsi(ix,iy,iz))
+          ytmp = nabt(1,2) * ( tpsi(DY(1)) - tpsi(DY(-1)) ) &
+               + nabt(2,2) * ( tpsi(DY(2)) - tpsi(DY(-2)) ) &
+               + nabt(3,2) * ( tpsi(DY(3)) - tpsi(DY(-3)) ) &
+               + nabt(4,2) * ( tpsi(DY(4)) - tpsi(DY(-4)) )
+          jw(2,ix,iy,iz) = aimag(py*ytmp) + kAc(2) * abs(py)**2
+        end do
+
+!OCL swp
+        do ix=is(1),ie(1)
+          pz = conjg(tpsi(ix,iy,iz))
+          ztmp = nabt(1,3) * ( tpsi(DZ(1)) - tpsi(DZ(-1)) ) &
+               + nabt(2,3) * ( tpsi(DZ(2)) - tpsi(DZ(-2)) ) &
+               + nabt(3,3) * ( tpsi(DZ(3)) - tpsi(DZ(-3)) ) &
+               + nabt(4,3) * ( tpsi(DZ(4)) - tpsi(DZ(-4)) )
+          jw(3,ix,iy,iz) = aimag(pz*ztmp) + kAc(3) * abs(pz)**2
+        end do
+
+      end do
+      end do
+!$omp end parallel do
+      return
+    end subroutine micro_current
 
     subroutine kvec_part(is_array,ie_array,is,ie,k,psi,jw)
       implicit none

@@ -85,7 +85,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   idensity=0
   idiffDensity=1
   ielf=2
-  if_use_dmat = (use_singlescale=='y') ! .or. if_metaGGA ! (future work)
+  if_use_dmat = .false. !(use_singlescale=='y') ! .or. if_metaGGA ! (future work)
 
   ! for calc_total_energy_periodic
   if(yn_md=='y') then
@@ -290,7 +290,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
     if(use_singlescale=='y') then
-      call calc_microscopic_current(system,mg,stencil,info,spsi_out,dmat,rt%j_e)
+      call calc_microscopic_current(system,mg,stencil,info,spsi_out,rt%j_e)
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,info%icomm_rko,lg,mg,ng,system%hgs,srho, &
       & sVh,rt%j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
