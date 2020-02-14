@@ -372,6 +372,7 @@ module structures
   end type s_cg
 
   type s_mixing
+    logical :: flag_mix_zero
     integer :: num_rho_stock
     type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
   end type s_mixing

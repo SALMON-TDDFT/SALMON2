@@ -103,18 +103,28 @@ sum1=1d9
 
 DFT_Iteration : do iter=1,nscf
 
-   if(sum1<threshold) then
+   if(.not. mixing%flag_mix_zero)then
+   if( sum1 < threshold ) then
       flag_conv = .true.
       if( ilevel_print.ge.2 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
       endif
       exit DFT_Iteration
    endif
+   endif
    if(calc_mode=='DFT_BAND')then
       if(all(band%check_conv_esp)) cycle DFT_Iteration
    end if
 
    Miter=Miter+1
+
+   if(theory=='dft' .and. yn_opt=='n')then
+      if(step_initial_mix_zero .ge. Miter) then
+         mixing%flag_mix_zero=.true.
+      else
+         mixing%flag_mix_zero=.false.
+      endif
+   endif
 
    if(calc_mode/='DFT_BAND')then
       ! for calc_total_energy_periodic
