@@ -17,7 +17,9 @@
 
 ! for single-scale Maxwell-TDDFT method
 module fdtd_coulomb_gauge
+  use structures, only: s_sendrecv_grid
   implicit none
+
   type ls_singlescale
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
     real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
@@ -29,6 +31,7 @@ module fdtd_coulomb_gauge
     real(8),allocatable :: box(:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:),integral_poynting_tmp(:),integral_poynting_tmp2(:) &
     & ,vec_Ac_ext(:,:,:,:),vec_Ac_ext_old(:,:,:,:)
+    type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
   end type ls_singlescale
 
 contains
@@ -55,7 +58,6 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   type(ls_singlescale)      :: fw     ! FDTD working arrays, etc.
   !
   integer,parameter :: mstep=100
-  integer,parameter :: Nd = 4
   integer,dimension(3) :: ng_sta,ng_end,ng_num,mg_sta,mg_end,mg_num,lg_sta,lg_end,lg_num
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
 
@@ -167,7 +169,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
       end do
       end do
 
-      call update_overlap_real8(srg_ng, ng, fw%box)
+      call update_overlap_real8(fw%srg_eg, ng, fw%box)
       if(ng_sta(3)==lg_sta(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
         do iy=ng_sta(2),ng_end(2)
@@ -420,7 +422,6 @@ contains
     real(8)  ,intent(in) :: hgs(3)
     type(ls_singlescale) :: fw
     !
-    integer,parameter :: Nd=4
     character(100) :: filename
     integer :: lg_num(3),ii,jj
     lg_num = lg_end - lg_sta + 1

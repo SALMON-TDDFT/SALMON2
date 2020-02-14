@@ -56,6 +56,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use salmon_Total_Energy
   use em_field, only: set_vonf,calc_Ac_ext
   use dip, only: calc_dip
+  use sendrecv_grid
   implicit none
   integer,parameter :: Nd = 4
 
@@ -101,6 +102,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt,t_max
+  type(s_rgrid) :: eg
   
   call timer_begin(LOG_INIT_RT)
 
@@ -432,6 +434,12 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call allocate_vector(mg,rt%j_e)
     call allocate_scalar(mg,system%div_Ac)
     call allocate_vector(mg,system%Ac_micro)
+
+    ! specialized in FDTD timestep
+    eg%nd = 1
+    eg%is = ng%is
+    eg%ie = ng%ie
+    call init_sendrecv_grid(singlescale%srg_eg, eg, 1, info_field%icomm_all, srg_ng%neig)
   end if
   
 
