@@ -274,7 +274,7 @@ if(yn_opt=='y') then
       if((checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval)==0)) then
          call checkpoint_gs(lg,mg,ng,system,info,spsi,iopt,mixing)
          if(comm_is_root(nproc_id_global))then
-            write(*,'(2a,i5)')"  checkpoint data is printed: iopt=", iopt
+            write(*,'(a,i5)')"  checkpoint data is printed: iopt=", iopt
          endif
          call comm_sync_all
       endif
