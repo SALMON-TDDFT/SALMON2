@@ -211,11 +211,12 @@ contains
       call set(14, LOG_CALC_EIGEN_ENERGY    , 'calc_eigen_energy')
       call set(15, LOG_CALC_CURRENT_ION     , 'calc_current_ion')
       call set(16, LOG_CALC_TOTAL_ENERGY_PERIODIC, 'calc_total_energy_periodic')
-      call set(17, LOG_CALC_ION_FORCE    , 'calc force')
-      call set(18, LOG_WRITE_RT_INFOS       , 'writing info etc.')
-      call set(19, LOG_RT_ANALYSIS          , 'analysis calc.')
-      call set(20, LOG_RT_MISC              , 'misc.')
-      call write_loadbalance(fd, 20, tsrc, headers, mode)
+      call set(17, LOG_CALC_SINGLESCALE     , 'calc singlescale')
+      call set(18, LOG_CALC_ION_FORCE    , 'calc force')
+      call set(19, LOG_WRITE_RT_INFOS       , 'writing info etc.')
+      call set(20, LOG_RT_ANALYSIS          , 'analysis calc.')
+      call set(21, LOG_RT_MISC              , 'misc.')
+      call write_loadbalance(fd, 21, tsrc, headers, mode)
     case default
       stop 'invalid theory'
     end select
@@ -226,6 +227,15 @@ contains
       call set(2, LOG_MD_TEVOL_PART2     , 'time-evol. part2')
       call set(3, LOG_MD_UPDATE_PSEUDO_PT, 'update pseudo-pt')
       call write_loadbalance(fd, 3, tsrc, headers, mode)
+    end if
+
+    if (theory == 'single_scale_maxwell_tddft') then
+      call set(0, 0, 'singlescale maxwell-tddft')
+      call set(1, LOG_SS_FDTD_CALC,      'FDTD calc')
+      call set(2, LOG_SS_FDTD_COMM,      'FDTD halo comm')
+      call set(3, LOG_SS_FDTD_COMM_COLL, 'FDTD coll comm')
+      call set(4, LOG_SS_UPDATE_NONLOCALPT_MICROAC, 'update nonlocal microAc')
+      call write_loadbalance(fd, 4, tsrc, headers, mode)
     end if
 
     call set(0, 0, 'total_energy module')

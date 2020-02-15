@@ -165,6 +165,7 @@ module structures
                              ! yz-direction is parallel.
     integer :: id_ffte(3), isize_ffte(3)
     integer :: icomm_v,ngo(3),ngo_xyz,nproc_o ! for allgatherv_vlocal
+    integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
   end type s_field_parallel
 
   type s_orbital
@@ -420,7 +421,7 @@ module structures
     & ,grad_dVh_dt(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
     & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:) &
     & ,vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
-    & ,integral_poynting(:),Ac_zt(:,:)
+    & ,integral_poynting(:),Ac_zt(:,:),Ac_zt_t(:,:)
     real(8),allocatable :: box(:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:) &
     & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) &

@@ -227,6 +227,18 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   info_field%icomm(3) = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
 
+! xy-dir summation (for singlescale FDTD)
+  iz = info_field%iaddress(3)
+  nl = 0
+  do iy=0,nproc_d_g(2)-1
+  do ix=0,nproc_d_g(1)-1
+    nl = nl + 1
+    iranklists(nl) = info_field%imap(ix,iy,iz)
+  end do
+  end do
+  info_field%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
+  call comm_get_groupinfo(info_field%icomm_xy, info_field%id_xy, info_field%isize_xy)
+
 
 ! for allgatherv_vlocal
   info_field%icomm_v  = info%icomm_ko

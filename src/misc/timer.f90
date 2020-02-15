@@ -65,6 +65,7 @@ module timer
   integer,public,parameter :: LOG_CALC_CURRENT_ION      = 65
   integer,public,parameter :: LOG_CALC_EIGEN_ENERGY     = 66
   integer,public,parameter :: LOG_CALC_TOTAL_ENERGY_PERIODIC = 67
+  integer,public,parameter :: LOG_CALC_SINGLESCALE      = 69
   integer,public,parameter :: LOG_CALC_DENSITY_MATRIX   = 68
   integer,public,parameter :: LOG_WRITE_RT_INFOS        = 62
   integer,public,parameter :: LOG_RT_MISC               = 63
@@ -82,6 +83,12 @@ module timer
 
   ! =====================
   ! for specific routines
+
+  ! singlescale maxwell-tddft
+  integer,public,parameter :: LOG_SS_FDTD_CALC = 150
+  integer,public,parameter :: LOG_SS_FDTD_COMM = 151
+  integer,public,parameter :: LOG_SS_FDTD_COMM_COLL = 152
+  integer,public,parameter :: LOG_SS_UPDATE_NONLOCALPT_MICROAC = 153
 
   ! total_energy module
   integer,public,parameter :: LOG_TE_ISOLATED_CALC       = 200

@@ -44,7 +44,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use initialization_sub
   use input_pp_sub
   use prep_pp_sub
-  use density_matrix, only: calc_density
+  use density_matrix, only: calc_density,calc_microscopic_current
   use writefield
   use salmon_pp, only: calc_nlcc
   use force_sub, only: calc_force
@@ -435,8 +435,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%is = ng%is
     eg%ie = ng%ie
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, info_field%icomm_all, srg_ng%neig)
-    
-    call init_singlescale(info_field%icomm_all,ng,lg,system%hgs,srho,sVh,srg_ng,singlescale)
+
+    call init_singlescale(info_field%icomm_all,ng,mg,lg,system%hgs,srho,sVh,srg_ng,singlescale)
   end if
   
 

@@ -675,7 +675,7 @@ contains
 !    type(s_dmatrix),intent(in) :: dmat
     type(s_vector)                      :: curr ! electron number current density (without rho*A/c)
     !
-    integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin
+    integer :: ispin,im,ik,io,is(3),ie(3),nsize,nspin,ix,iy,iz
     real(8) :: kAc(3)
     real(8),allocatable :: wrk(:,:,:,:),wrk2(:,:,:,:)
 
@@ -691,8 +691,6 @@ contains
     allocate(wrk(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)),wrk2(3,is(1):ie(1),is(2):ie(2),is(3):ie(3)))
     nsize = 3* mg%num(1) * mg%num(2) * mg%num(3)
 
-    curr%v = 0d0
-
     wrk2 = 0d0
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
@@ -701,14 +699,24 @@ contains
       kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
       call micro_current(mg%is_array,mg%ie_array,is,ie,mg%idx,mg%idy,mg%idz, &
       & stencil%coef_nab,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk)
-      wrk2 = wrk2 + wrk * system%rocc(io,ik,ispin)*system%wtk(ik)
+
+!$omp parallel do collapse(2) private(ix,iy,iz)
+      do iz=is(3),ie(3)
+      do iy=is(2),ie(2)
+      do ix=is(1),ie(1)
+        wrk2(1,ix,iy,iz) = wrk2(1,ix,iy,iz) + wrk(1,ix,iy,iz) * system%rocc(io,ik,ispin)*system%wtk(ik)
+        wrk2(2,ix,iy,iz) = wrk2(2,ix,iy,iz) + wrk(2,ix,iy,iz) * system%rocc(io,ik,ispin)*system%wtk(ik)
+        wrk2(3,ix,iy,iz) = wrk2(3,ix,iy,iz) + wrk(3,ix,iy,iz) * system%rocc(io,ik,ispin)*system%wtk(ik)
+      end do
+      end do
+      end do
 
 !     call nonlocal_part
 
     end do
     end do
     end do
-    
+
     call timer_end(LOG_MCURRENT_CALC)
 
     call timer_begin(LOG_MCURRENT_COMM_COLL)
