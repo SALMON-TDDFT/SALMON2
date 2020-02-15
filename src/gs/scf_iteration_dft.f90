@@ -303,12 +303,13 @@ DFT_Iteration : do iter=1,nscf
    end do
    end do
 
+   if(yn_opt=='n' .and. yn_md=='n')then
    if((checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval)==0)) then
       call checkpoint_gs(lg,mg,ng,system,info,spsi,Miter,mixing)
       if(comm_is_root(nproc_id_global)) write(*,'(a)')"  checkpoint data is printed"
       call comm_sync_all
    endif
-
+   endif
 
 end do DFT_Iteration
 
