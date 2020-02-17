@@ -67,7 +67,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   type(s_dft_energy),    intent(inout) :: energy
   !
   integer :: j,nncg
-  
+
   if(miter==1) then
     nncg = ncg_init
   else
@@ -85,21 +85,21 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   call timer_end(LOG_CALC_MINIMIZATION)
 
 ! Gram Schmidt orghonormalization
-  call gram_schmidt(system, mg, info, spsi)
+  call gram_schmidt(system, mg, info, spsi, pinfo)
 
 ! subspace diagonalization
   if(yn_subspace_diagonalization == 'y')then
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
-      case(0)      
+      case(0)
         call ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
 
       case(3)
-        call ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+        call ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
       end select
     end if
   end if
-  
+
 ! density
   call timer_begin(LOG_CALC_RHO)
 
@@ -122,7 +122,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
     call timer_begin(LOG_CALC_HARTREE)
     call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
     call timer_end(LOG_CALC_HARTREE)
-  
+
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)

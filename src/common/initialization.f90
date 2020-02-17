@@ -169,7 +169,7 @@ subroutine init_dft_system(lg,system,stencil)
   if ( allocated(system%Force) ) deallocate(system%Force)
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
-  
+
   if(iflag_atom_coor==ntype_atom_coor_reduced) then
     Rion = matmul(system%primitive_a,Rion_red) ! [ a1, a2, a3 ] * R_ion
   end if
@@ -214,9 +214,9 @@ subroutine init_dft_system(lg,system,stencil)
   end do
 
   call set_gridcoordinate(lg,system)
-  
+
   system%vec_Ac = 0d0 ! initial value
-  
+
   system%vec_Ac_ext = 0d0 ! initial value for output
   system%vec_E = 0d0     ! initial value for output
   system%vec_E_ext = 0d0 ! initial value for output
@@ -280,7 +280,7 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   type(s_orbital_parallel)      :: info
   type(s_process_info)          :: pinfo
   !
-  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3)
+  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),m
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
@@ -300,6 +300,16 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   info%io_s = (info%id_o * system%no) / nproc_ob + 1
   info%io_e = ((info%id_o+1) * system%no) / nproc_ob
   info%numo = info%io_e - info%io_s + 1
+
+  allocate(info%io_s_all(0:nproc_ob-1))
+  allocate(info%io_e_all(0:nproc_ob-1))
+  allocate(info%numo_all(0:nproc_ob-1))
+  do m=0,nproc_ob-1
+    info%io_s_all(m) = m * system%no / nproc_ob + 1
+    info%io_e_all(m) = (m+1) * system%no / nproc_ob
+    info%numo_all(m) = info%io_e_all(m) - info%io_s_all(m) + 1
+  end do
+  info%numo_max=maxval(info%numo_all(0:nproc_ob-1))
 
 ! flags
   info%if_divide_rspace = nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3).ne.1
@@ -395,7 +405,7 @@ subroutine init_grid_whole(rsize,hgs,lg)
       if( maxval(abs((rsize/dl)-dble(lg%num))) > 1d-4 ) stop "error: abs((rsize/dl)-dble(lg%num)) is too large"
     end if
   end select
-  
+
   if(yn_ffte=='y')then
     ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
     do j=1,3
@@ -405,13 +415,13 @@ subroutine init_grid_whole(rsize,hgs,lg)
           lg_num_tmp=lg_num_tmp/2
         end if
       end do
-    
+
       do ii=1,17
         if(mod(lg_num_tmp,3)==0)then
           lg_num_tmp=lg_num_tmp/3
         end if
       end do
-    
+
       do ii=1,11
         if(mod(lg_num_tmp,5)==0)then
           lg_num_tmp=lg_num_tmp/5

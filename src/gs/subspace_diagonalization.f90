@@ -201,7 +201,343 @@ end subroutine ssdg_isolated
 
 !===================================================================================================================================
 
-subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+  use salmon_global, only: yn_gbp
+  use structures
+  use communication, only: comm_summation,comm_bcast
+  use timer
+  use hamiltonian, only: hpsi
+  use eigen_subdiag_sub
+  use sendrecv_grid, only: s_sendrecv_grid
+  use pack_unpack, only: copy_data
+  implicit none
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_stencil),intent(in) :: stencil
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_scalar) ,intent(in) :: vlocal(system%nspin)
+  type(s_orbital)            :: spsi,shpsi
+  type(s_sendrecv_grid)      :: srg
+  type(s_process_info),intent(in) :: pinfo
+
+  if(yn_gbp=='c') then
+    call ssdg_periodic_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+  elseif (yn_gbp=='r') then
+    call ssdg_periodic_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+  else
+    call ssdg_periodic_org(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  end if
+
+  return
+end subroutine
+
+  !
+  !===================================================================================================================================
+
+  subroutine ssdg_periodic_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+    use structures
+    use communication, only: comm_summation,comm_bcast
+    use timer
+    use hamiltonian, only: hpsi
+    use eigen_subdiag_sub
+    use sendrecv_grid, only: s_sendrecv_grid
+    use pack_unpack, only: copy_data
+    implicit none
+    type(s_rgrid)           ,intent(in) :: mg
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_stencil),intent(in) :: stencil
+    type(s_pp_grid),intent(in) :: ppg
+    type(s_scalar) ,intent(in) :: vlocal(system%nspin)
+    type(s_orbital)            :: spsi,shpsi
+    type(s_sendrecv_grid)      :: srg
+    type(s_process_info),intent(in) :: pinfo
+
+  complex(8),parameter :: zero = 0d0, one = 1d0
+  integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,ierr,m
+  complex(8),dimension(system%no,system%no) :: hmat,hmat_tmp,evec
+  complex(8) :: wf1_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
+  complex(8) :: wf2_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
+  complex(8) :: wf_block_send(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo_max)
+  complex(8) :: hmat_block(info%numo_max, info%numo)
+  complex(8) :: hmat_block_tmp(info%numo_max, info%numo)
+
+
+  if ( SPIN_ORBIT_ON ) then
+    call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+    return
+  end if
+
+  call timer_begin(LOG_SSDG_PERIODIC_HPSI)
+  call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+  call timer_end(LOG_SSDG_PERIODIC_HPSI)
+
+  nsize_rg = (mg%ie(1)-mg%is(1)+1)*(mg%ie(2)-mg%is(2)+1)*(mg%ie(3)-mg%is(3)+1)
+
+  do im = info%im_s, info%im_e
+  do ik = info%ik_s, info%ik_e
+  do ispin = 1, system%nspin
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    ! Copy wave function
+    do io = info%io_s, info%io_e
+      jo = io - info%io_s + 1
+      call copy_data( &
+        & spsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im), &
+        & wf1_block(:, :, :, jo))
+      call copy_data( &
+        & shpsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im), &
+        & wf2_block(:, :, :, jo))
+    end do
+
+    hmat_tmp = 0d0
+    do m = 0, pinfo%nporbital - 1
+
+      if(m == info%id_o ) then
+        call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
+      end if
+      call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+      call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+      if (info%if_divide_orbit) then
+        call comm_bcast( wf_block_send(:,:,:,1:info%numo_all(m)), info%icomm_o, info%irank_io(info%io_s_all(m)))
+      end if
+      call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+      call timer_begin(LOG_SSDG_PERIODIC_CALC)
+      hmat_block_tmp = 0d0
+      call zgemm('C', 'N', info%numo_all(m), info%numo, nsize_rg,  &
+        &   dcmplx(system%hvol), wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
+        &                        wf2_block(:,:,:,1), nsize_rg,  &
+        &                  zero, hmat_block_tmp, info%numo_all(m) )
+      call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+      call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+      if (info%if_divide_rspace) then
+        call comm_summation(hmat_block_tmp, hmat_block, info%numo_max*info%numo, info%icomm_r)
+      endif
+      call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+      call timer_begin(LOG_SSDG_PERIODIC_CALC)
+      do io1 = info%io_s_all(m), info%io_e_all(m)
+      do io2 = info%io_s, info%io_e
+        hmat_tmp(io1,io2) = hmat_block(io1-info%io_s_all(m)+1, io2-info%io_s+1)
+      end do
+      end do
+
+    end do ! m
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+    call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+    if (info%if_divide_orbit) then
+      call comm_summation(hmat_tmp, hmat, system%no*system%no, info%icomm_o)
+    else
+      hmat = hmat_tmp
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    call eigen_subdiag_periodic(hmat, evec, system%no, ierr)
+
+    !$omp workshare
+    wf2_block = 0d0
+    !$omp end workshare
+    do m = 0, pinfo%nporbital - 1
+
+      if(m == info%id_o ) then
+        call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
+      end if
+      call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+      call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+      if (info%if_divide_orbit) then
+        call comm_bcast( wf_block_send(:,:,:,1:info%numo_all(m)), info%icomm_o, info%irank_io(info%io_s_all(m)))
+      end if
+      call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+      call timer_begin(LOG_SSDG_PERIODIC_CALC)
+      call zgemm('N', 'N', nsize_rg, info%numo, info%numo_all(m),  &
+        &                one, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
+        &                     evec(info%io_s_all(m):info%io_e_all(m), info%io_s:info%io_e), info%numo_all(m),  &
+        &                one, wf2_block(:,:,:,1), nsize_rg )
+
+    end do ! m
+
+    ! Copy wave function
+    do io = info%io_s, info%io_e
+      jo = io - info%io_s + 1
+      call copy_data( &
+        & wf2_block(:, :, :, jo), &
+        & spsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) )
+    end do
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+  enddo ! ispin
+  enddo ! ik
+  enddo ! im
+
+return
+
+end subroutine ssdg_periodic_cblas
+!===================================================================================================================================
+
+!===================================================================================================================================
+
+subroutine ssdg_periodic_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+  use structures
+  use communication, only: comm_summation,comm_bcast
+  use timer
+  use hamiltonian, only: hpsi
+  use eigen_subdiag_sub
+  use sendrecv_grid, only: s_sendrecv_grid
+  use pack_unpack, only: copy_data
+  implicit none
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_stencil),intent(in) :: stencil
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_scalar) ,intent(in) :: vlocal(system%nspin)
+  type(s_orbital)            :: spsi,shpsi
+  type(s_sendrecv_grid)      :: srg
+  type(s_process_info),intent(in) :: pinfo
+
+real(8),parameter :: zero = 0d0, one = 1d0
+integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,ierr,m
+real(8),dimension(system%no,system%no) :: hmat,hmat_tmp,evec
+real(8) :: wf1_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
+real(8) :: wf2_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
+real(8) :: wf_block_send(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo_max)
+real(8) :: hmat_block(info%numo_max, info%numo)
+real(8) :: hmat_block_tmp(info%numo_max, info%numo)
+complex(8),dimension(system%no,system%no) :: zhmat, zevec
+
+if ( SPIN_ORBIT_ON ) then
+  call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  return
+end if
+
+call timer_begin(LOG_SSDG_PERIODIC_HPSI)
+call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+call timer_end(LOG_SSDG_PERIODIC_HPSI)
+
+nsize_rg = (mg%ie(1)-mg%is(1)+1)*(mg%ie(2)-mg%is(2)+1)*(mg%ie(3)-mg%is(3)+1)
+
+do im = info%im_s, info%im_e
+do ik = info%ik_s, info%ik_e
+do ispin = 1, system%nspin
+
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
+  ! Copy wave function
+  do io = info%io_s, info%io_e
+    jo = io - info%io_s + 1
+    call copy_data( &
+      & dreal( spsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) ), &
+      & wf1_block(:, :, :, jo))
+    call copy_data( &
+      & dreal( shpsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) ), &
+      & wf2_block(:, :, :, jo))
+  end do
+
+  hmat_tmp = 0d0
+  do m = 0, pinfo%nporbital - 1
+
+    if(m == info%id_o ) then
+      call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+    call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+    if (info%if_divide_orbit) then
+      call comm_bcast( wf_block_send(:,:,:,1:info%numo_all(m)), info%icomm_o, info%irank_io(info%io_s_all(m)))
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    hmat_block_tmp = 0d0
+    call dgemm('T', 'N', info%numo_all(m), info%numo, nsize_rg,  &
+      &           system%hvol, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
+      &                        wf2_block(:,:,:,1), nsize_rg,  &
+      &                  zero, hmat_block_tmp, info%numo_all(m) )
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+    call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+    if (info%if_divide_rspace) then
+      call comm_summation(hmat_block_tmp, hmat_block, info%numo_max*info%numo, info%icomm_r)
+    endif
+    call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    do io1 = info%io_s_all(m), info%io_e_all(m)
+    do io2 = info%io_s, info%io_e
+      hmat_tmp(io1,io2) = hmat_block(io1-info%io_s_all(m)+1, io2-info%io_s+1)
+    end do
+    end do
+
+  end do ! m
+  call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+  call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+  if (info%if_divide_orbit) then
+    call comm_summation(hmat_tmp, hmat, system%no*system%no, info%icomm_o)
+  else
+    hmat = hmat_tmp
+  end if
+  call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+  zhmat = hmat
+
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
+  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
+
+  evec = real(zevec)
+
+  !$omp workshare
+  wf2_block = 0d0
+  !$omp end workshare
+  do m = 0, pinfo%nporbital - 1
+
+    if(m == info%id_o ) then
+      call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+    call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
+    if (info%if_divide_orbit) then
+      call comm_bcast( wf_block_send(:,:,:,1:info%numo_all(m)), info%icomm_o, info%irank_io(info%io_s_all(m)))
+    end if
+    call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
+    call dgemm('N', 'N', nsize_rg, info%numo, info%numo_all(m),  &
+      &                one, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
+      &                     evec(info%io_s_all(m):info%io_e_all(m), info%io_s:info%io_e), info%numo_all(m),  &
+      &                one, wf2_block(:,:,:,1), nsize_rg )
+
+  end do ! m
+
+  ! Copy wave function
+  do io = info%io_s, info%io_e
+    jo = io - info%io_s + 1
+    call copy_data( &
+      & dcmplx( wf2_block(:, :, :, jo) ), &
+      & spsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) )
+  end do
+  call timer_end(LOG_SSDG_PERIODIC_CALC)
+
+enddo ! ispin
+enddo ! ik
+enddo ! im
+
+return
+
+end subroutine ssdg_periodic_rblas
+!===================================================================================================================================
+
+
+
+subroutine ssdg_periodic_org(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -398,6 +734,6 @@ subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   end do
   call timer_end(LOG_SSDG_PERIODIC_CALC)
 
-end subroutine ssdg_periodic
+end subroutine ssdg_periodic_org
 
 end module subspace_diagonalization
