@@ -101,7 +101,8 @@ endif
 flag_conv = .false.
 sum1=1d9
 
-DFT_Iteration : do iter=1,nscf
+!DFT_Iteration : do iter=1,nscf
+DFT_Iteration : do iter=Miter+1,nscf
 
    if(.not. mixing%flag_mix_zero)then
    if( sum1 < threshold ) then
