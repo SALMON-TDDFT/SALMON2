@@ -76,7 +76,7 @@ module structures
     integer,allocatable :: bk(:,:,:) ! left  :1-3=ix,iy,iz, 4=pair atom
                                      ! middle:ion-ion pair index
                                      ! right :atom id
-    integer,allocatable :: g(:,:) 
+    integer,allocatable :: g(:,:)
     integer,allocatable :: npair_bk(:)
     integer :: ng_bk, ng_r, ng_s, ng_e
     character(1) :: yn_bookkeep
@@ -89,7 +89,7 @@ module structures
                            ,is_array,ie_array       ! allocate( array(is_array(1):ie_array(1), ...) )
     integer ,allocatable :: idx(:),idy(:),idz(:)    ! idx(is_overlap(1):ie_overlap(1))=is_array(1)~ie_array(1), ...
     integer ,allocatable :: is_all(:,:),ie_all(:,:) ! (1:3,0:nproc-1), is & ie for all MPI processes
-    real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids 
+    real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids
   end type s_rgrid
 
   type s_process_info
@@ -117,7 +117,7 @@ module structures
     ! Communicator
     integer :: icomm
     ! Neightboring MPI id (1:upside,2:downside, 1:x,2:y,3:z):
-    integer :: neig(1:2, 1:3) 
+    integer :: neig(1:2, 1:3)
     ! Communication requests (1:send,2:recv, 1:upside,2:downside, 1:x,2:y,3:z):
     integer :: ireq_real8(1:2, 1:2, 1:3)
     integer :: ireq_complex8(1:2, 1:2, 1:3)
@@ -148,6 +148,10 @@ module structures
                               ! For calc_mode='RT' and temperature<0, these values are calculated from nelec.
                               ! In other cases, these are calculated from nstate.
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
+    integer,allocatable :: io_s_all(:) ! io_s for all orbital ranks
+    integer,allocatable :: io_e_all(:) ! io_e for all orbital ranks
+    integer,allocatable :: numo_all(:) ! numo for all orbital ranks
+    integer :: numo_max ! max value of numo_all
   end type s_orbital_parallel
 
   type s_field_parallel
@@ -196,7 +200,7 @@ module structures
     real(8),allocatable :: rps(:)
     real(8),allocatable :: anorm(:,:)
     integer,allocatable :: inorm(:,:)
-    real(8),allocatable :: anorm_so(:,:) ! '*_so' means what is used in 
+    real(8),allocatable :: anorm_so(:,:) ! '*_so' means what is used in
     integer,allocatable :: inorm_so(:,:) !   spin-orbit calculation
     real(8),allocatable :: rad(:,:)
     real(8),allocatable :: radnl(:,:)

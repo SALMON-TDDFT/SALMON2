@@ -91,7 +91,7 @@ call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
 if(comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
   write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
-end if    
+end if
 
 select case(iperiodic)
 case(0)
@@ -142,7 +142,7 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
-                                xc_func,mixing )
+                                xc_func,mixing,pinfo )
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -190,6 +190,7 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_ewald_ion_ion) :: ewald
 type(s_mixing) :: mixing
+type(s_process_info) :: pinfo
 
 logical :: rion_update
 integer :: Miter,jspin, nspin
@@ -217,7 +218,7 @@ integer :: Miter,jspin, nspin
   else
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
-    call init_wf(lg,mg,system,info,spsi)
+    call init_wf(lg,mg,system,info,spsi,pinfo)
   end if
 
   if(read_gs_dns_cube == 'n') then
@@ -236,9 +237,9 @@ integer :: Miter,jspin, nspin
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
 
   select case(iperiodic)
-  case(0) 
+  case(0)
      ewald%yn_bookkeep='n'  !to be input keyword??
-  case(3) 
+  case(3)
      ewald%yn_bookkeep='y'
      call  init_nion_mpi(system,fg)
   end select
@@ -317,7 +318,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_mixing) :: mixing
   type(s_cg)     :: cg
   type(s_band_dft) ::band
-  
+
   logical :: rion_update
   integer :: Miter,ix,iy,iz
   real(8) :: sum1

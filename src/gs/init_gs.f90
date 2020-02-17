@@ -16,12 +16,12 @@
 
 module init_gs
   implicit none
-  
+
 contains
 
 !===================================================================================================================================
 
-SUBROUTINE init_wf(lg,mg,system,info,spsi)
+SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   use structures
   use inputoutput, only: au_length_aa
   use salmon_global, only: yn_periodic,natom,rion
@@ -32,22 +32,23 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital)                     :: spsi
+  type(s_process_info)    ,intent(in) :: pinfo
   !
   integer :: ik,io,is,iseed,a,ix,iy,iz
   real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
 
   select case(yn_periodic)
   case('n')
-  
+
     Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
     do a=1,natom
       if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
       if ( abs(Rion(2,a)) > Ymax ) Ymax=abs(Rion(2,a))
       if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
     end do
-    
+
     Xmax=Xmax+1.d0/au_length_aa ; Ymax=Ymax+1.d0/au_length_aa ; Zmax=Zmax+1.d0/au_length_aa
-    
+
     iseed=123
     do is=1,system%nspin
     do io=1,system%no
@@ -69,9 +70,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
       end if
     end do
     end do
-    
+
   case('y')
-  
+
     Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))
     Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))
     Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))
@@ -100,11 +101,11 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
     end do
     end do
     end do
-    
+
   end select
-  
-  call gram_schmidt(system, mg, info, spsi)
-    
+
+  call gram_schmidt(system, mg, info, spsi, pinfo)
+
   return
 
 CONTAINS
@@ -118,4 +119,3 @@ CONTAINS
 END SUBROUTINE init_wf
 
 end module init_gs
-

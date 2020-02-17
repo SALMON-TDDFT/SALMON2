@@ -88,7 +88,7 @@ call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
-! please move folloings into initialization_dft 
+! please move folloings into initialization_dft
 call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
@@ -110,7 +110,7 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
-                          xc_func, mixing )
+                          xc_func, mixing, pinfo )
 
 
 call timer_end(LOG_INIT_GS)
@@ -212,7 +212,7 @@ if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
    case(3)
       call write_wfn(lg,mg,spsi,info,system)
       ! Experimental Implementation of Inner-Product Outputs:
-      call write_prod_dk_data(lg, mg, system, info, spsi) 
+      call write_prod_dk_data(lg, mg, system, info, spsi)
    case(0)
       write(*,*) "error: write_gs_wfn_k='y' & iperiodic=0"
    end select
@@ -251,9 +251,9 @@ call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(yn_opt=='y') then
    call structure_opt_check(natom,iopt,flag_opt_conv,system%Force)
    if(.not.flag_opt_conv) call structure_opt(natom,iopt,system)
-   !! Rion is old variables to be removed 
+   !! Rion is old variables to be removed
    !! but currently it is used in many subroutines.
-   Rion(:,:) = system%Rion(:,:) 
+   Rion(:,:) = system%Rion(:,:)
 
    write(comment_line,10) iopt
    call write_xyz(comment_line,"add","r  ",system)
