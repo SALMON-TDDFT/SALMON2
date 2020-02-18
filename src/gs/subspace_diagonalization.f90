@@ -310,12 +310,14 @@ end subroutine
       call zgemm('C', 'N', info%numo_all(m), info%numo, nsize_rg,  &
         &   dcmplx(system%hvol), wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
         &                        wf2_block(:,:,:,1), nsize_rg,  &
-        &                  zero, hmat_block_tmp, info%numo_all(m) )
+        &                  zero, hmat_block_tmp(1:info%numo_all(m),1:info%numo), info%numo_all(m) )
       call timer_end(LOG_SSDG_PERIODIC_CALC)
 
       call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
       if (info%if_divide_rspace) then
         call comm_summation(hmat_block_tmp, hmat_block, info%numo_max*info%numo, info%icomm_r)
+      else
+         hmat_block = hmat_block_tmp
       endif
       call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
 
@@ -459,12 +461,14 @@ do ispin = 1, system%nspin
     call dgemm('T', 'N', info%numo_all(m), info%numo, nsize_rg,  &
       &           system%hvol, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
       &                        wf2_block(:,:,:,1), nsize_rg,  &
-      &                  zero, hmat_block_tmp, info%numo_all(m) )
+      &                  zero, hmat_block_tmp(1:info%numo_all(m),1:info%numo), info%numo_all(m) )
     call timer_end(LOG_SSDG_PERIODIC_CALC)
 
     call timer_begin(LOG_SSDG_PERIODIC_COMM_COLL)
     if (info%if_divide_rspace) then
       call comm_summation(hmat_block_tmp, hmat_block, info%numo_max*info%numo, info%icomm_r)
+    else
+      hmat_block = hmat_block_tmp
     endif
     call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
 
