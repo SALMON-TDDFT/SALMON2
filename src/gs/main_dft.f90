@@ -75,10 +75,11 @@ type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_ofile)  :: ofl
 type(s_band_dft) ::band
+type(s_opt) :: opt
 
 logical :: rion_update
 logical :: flag_opt_conv
-integer :: iopt,nopt_max
+integer :: Miopt, iopt,nopt_max
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 
 if(theory=='dft_band'.and.iperiodic/=3) return
@@ -112,28 +113,20 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing, pinfo )
 
+Miopt = 0
+nopt_max = 1
+if(yn_opt=='y') call initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max)
 
 call timer_end(LOG_INIT_GS)
 
 !---------------------------------------- Opt Iteration
 
-if(yn_opt=='y')then
-   call structure_opt_ini(natom)
-   flag_opt_conv=.false.
-   nopt_max = nopt
-
-   write(comment_line,10) 0
-   call write_xyz(comment_line,"new","r  ",system)
-10 format("#opt iteration step=",i5)
-else
-   nopt_max = 1
-end if
 
 #ifdef __FUJITSU
 call fipp_start ! performance profiling
 #endif
 
-Structure_Optimization_Iteration : do iopt=1,nopt_max
+Structure_Optimization_Iteration : do iopt= Miopt+1, nopt_max
 
 if(iopt>=2)then
   call timer_begin(LOG_INIT_GS)
@@ -249,14 +242,15 @@ end do Band_Iteration
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(yn_opt=='y') then
-   call structure_opt_check(natom,iopt,flag_opt_conv,system%Force)
-   if(.not.flag_opt_conv) call structure_opt(natom,iopt,system)
+   call structure_opt_check(iopt,flag_opt_conv,system%Force)
+   if(.not.flag_opt_conv) call structure_opt(opt,iopt,system)
    !! Rion is old variables to be removed
    !! but currently it is used in many subroutines.
    Rion(:,:) = system%Rion(:,:)
 
    write(comment_line,10) iopt
    call write_xyz(comment_line,"add","r  ",system)
+10 format("#opt iteration step=",i5)
 
    if(comm_is_root(nproc_id_global))then
       write(*,*) "atomic coordinate"
@@ -269,10 +263,11 @@ if(yn_opt=='y') then
    end if
 
    if(flag_opt_conv) then
-      call structure_opt_fin
+      call structure_opt_fin(opt)
    else
       if((checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval)==0)) then
          call checkpoint_gs(lg,mg,ng,system,info,spsi,iopt,mixing)
+         call checkpoint_opt(iopt,opt)
          if(comm_is_root(nproc_id_global))then
             write(*,'(a,i5)')"  checkpoint data is printed: iopt=", iopt
          endif
@@ -284,9 +279,10 @@ end if
 call timer_end(LOG_DEINIT_GS_ITERATION)
 
 
-
-if(flag_opt_conv)then
+if(yn_opt=='y')then
+  if(flag_opt_conv)then
   exit Structure_Optimization_Iteration
+  end if
 end if
 end do Structure_Optimization_Iteration
 
@@ -315,6 +311,9 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
 call checkpoint_gs(lg,mg,ng,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
+if(yn_opt=='y') then
+   if(.not.flag_opt_conv) call checkpoint_opt(nopt,opt,ofl%dir_out_restart)
+endif
 call timer_end(LOG_WRITE_GS_DATA)
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY

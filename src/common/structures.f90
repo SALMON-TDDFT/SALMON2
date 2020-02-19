@@ -341,6 +341,11 @@ module structures
     type(s_vector) :: vec_Ac, vec_Ac_old
   end type s_fdtd_field
 
+  type s_opt
+     real(8),allocatable :: a_dRion(:), dFion(:)
+     real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
+  end type s_opt
+
   type s_md
     real(8) :: Uene,  E_tot, Tene, E_work, E_nh, Htot
     real(8) :: Uene0, E_tot0
