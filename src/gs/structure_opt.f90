@@ -90,18 +90,21 @@ contains
   !===========================================================optimization
   subroutine structure_opt(natom,iopt,system)
     use structures, only: s_dft_system
-    use salmon_global, only: flag_opt_atom
+    use salmon_global, only: flag_opt_atom, max_step_len_adjust
     use communication, only: comm_bcast
     implicit none
     type(s_dft_system),intent(inout) :: system
     integer,intent(in) :: natom,iopt
     !theta_opt=0.0d0:DFP,theta_opt=1.0d0:BFGS in Quasi_Newton method
-    real(8), parameter :: alpha=1.0d0,theta_opt=1.0d0
+    real(8), parameter :: theta_opt=1.0d0  !alpha=1.0d0 -- this is now from input
+    real(8) :: alpha
     integer :: ii,ij,jj,icount,iatom, NA3,ixyz
     real(8) :: const1,const2,rtmp
-    real(8) :: dRion(3,natom)
+    real(8) :: dRion(3,natom), dRabs(natom), dRabs_max
     real(8) :: force_1d(3*natom),dRion_1d(3*natom),optmat_1d(3*natom)
     real(8) :: optmat1_2d(3*natom,3*natom),optmat2_2d(3*natom,3*natom),optmat3_2d(3*natom,3*natom)
+
+    alpha = 1.0d0
 
     NA3 = 3*natom
 
@@ -186,6 +189,21 @@ contains
     end do
     end do
     !$omp end parallel do
+
+    !adjust alpha if required from input
+    if(max_step_len_adjust .gt. 0d0) then
+       !$omp parallel do private(iatom)
+       do iatom=1,natom
+          if(flag_opt_atom(iatom)=='y') then
+               dRabs(iatom) = sqrt( sum(dRion(:,iatom)**2d0) )
+          else
+               dRabs(iatom) = 0d0
+          endif
+       enddo
+       !$omp end parallel do
+       dRabs_max = maxval(dRabs(:))
+       alpha = max_step_len_adjust / dRabs_max
+    endif
 
     !update a_dRion,dFion
     !$omp parallel do private(ii)

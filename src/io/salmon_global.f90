@@ -55,6 +55,7 @@ module salmon_global
   character(256) :: directory_read_data
   character(1)   :: yn_self_checkpoint
   integer        :: checkpoint_interval
+  character(1)   :: yn_reset_step_restart
   real(8)        :: time_shutdown
   !remove later
   character(256) :: dump_filename
@@ -293,6 +294,7 @@ module salmon_global
   real(8)        :: cg_alpha_ini
   real(8)        :: cg_alpha_up
   real(8)        :: cg_alpha_down
+  real(8)        :: max_step_len_adjust
   real(8)        :: convrg_scf_force
   real(8)        :: convrg_scf_ene
   real(8)        :: convrg_opt_fmax
