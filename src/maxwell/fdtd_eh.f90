@@ -2307,7 +2307,7 @@ contains
     call init_communicator_dft(nproc_group_global,pinfo,info,info_field)
     
     !initialize r-grid
-    call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
+    call init_grid_whole(pinfo,fs%rlsize,fs%hgs,fs%lg)
     call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,info_field,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
     !### This process about ng is temporal. #####################!
     !### With modifying set_ng to be applied to arbitrary Nd, ###!

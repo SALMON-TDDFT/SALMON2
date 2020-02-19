@@ -64,13 +64,13 @@ call timer_begin(LOG_TOTAL)
 ! Read DFT calculation results
 ! ---------------------------------------------------------
 call timer_begin(LOG_INIT_GS)
-call init_dft_system(lg_scf,system_scf,stencil)
-
 pinfo_scf%npk                 = nproc_k
 pinfo_scf%nporbital           = nproc_ob
 pinfo_scf%npdomain_orbital    = nproc_domain_orbital
 pinfo_scf%npdomain_general    = nproc_domain_general
 call init_process_distribution(system_scf,icomm,pinfo_scf)
+
+call init_dft_system(pinfo_scf,lg_scf,system_scf,stencil)
 
 call init_communicator_dft(icomm,pinfo_scf,info_scf,info_field_scf)
 call init_grid_parallel(irank,nprocs,pinfo_scf,info_scf,info_field_scf,lg_scf,mg_scf,ng_scf)
@@ -95,13 +95,14 @@ call timer_end(LOG_INIT_GS_RESTART)
 
 call timer_begin(LOG_INIT_RT)
 calc_mode = 'RT' ! FIXME
-call init_dft_system(lg_rt,system_rt,stencil)
 
 pinfo_rt%npk                 = target_nproc_k
 pinfo_rt%nporbital           = target_nproc_ob
 pinfo_rt%npdomain_orbital    = target_nproc_domain_orbital
 pinfo_rt%npdomain_general    = target_nproc_domain_general
 call init_process_distribution(system_rt,icomm,pinfo_rt)
+
+call init_dft_system(pinfo_rt,lg_rt,system_rt,stencil)
 
 call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
 call init_grid_parallel(irank,nprocs,pinfo_rt,info_rt,info_field_rt,lg_rt,mg_rt,ng_rt)

@@ -48,19 +48,20 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   !
   integer,dimension(2,3) :: neig,neig_ng
 
-! electron system
-
-  call init_dft_system(lg,system,stencil)
-
-! parallelization
+! process distribution
 
   pinfo%npk              = nproc_k
   pinfo%nporbital        = nproc_ob
   pinfo%npdomain_orbital = nproc_domain_orbital
   pinfo%npdomain_general = nproc_domain_general
   call init_process_distribution(system,comm,pinfo)
-
   call init_communicator_dft(comm,pinfo,info,info_field)
+
+! electron system
+
+  call init_dft_system(pinfo,lg,system,stencil)
+
+! parallelization
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,info_field,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
@@ -93,7 +94,7 @@ end subroutine init_dft
 
 !===================================================================================================================================
 
-subroutine init_dft_system(lg,system,stencil)
+subroutine init_dft_system(pinfo,lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
@@ -101,6 +102,7 @@ subroutine init_dft_system(lg,system,stencil)
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
   use sym_sub, only: init_sym_sub
   implicit none
+  type(s_process_info),intent(in) :: pinfo
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
   type(s_stencil)    :: stencil
@@ -131,7 +133,7 @@ subroutine init_dft_system(lg,system,stencil)
   else
     hgs(1:3) = dl(1:3)
   end if
-  call init_grid_whole(rsize,hgs,lg)
+  call init_grid_whole(pinfo,rsize,hgs,lg)
   system%hgs = hgs
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
 
@@ -330,15 +332,19 @@ end subroutine init_orbital_parallel_singlecell
 
 !===================================================================================================================================
 
-subroutine init_grid_whole(rsize,hgs,lg)
+subroutine init_grid_whole(pinfo,rsize,hgs,lg)
   use structures
-  use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid,theory,al_em,dl_em,yn_ffte
+  use salmon_global, only: iperiodic,dl,num_rgrid,theory,al_em,dl_em,yn_ffte
   implicit none
+  type(s_process_info),intent(in) :: pinfo
   real(8),intent(in) :: rsize(3),hgs(3)
   type(s_rgrid) :: lg
   !
   real(8),parameter :: epsilon=1.d-10
   integer :: j,lg_num_tmp,ii
+  integer :: nproc_domain_orbital(3)
+
+  nproc_domain_orbital = pinfo%npdomain_orbital
 
   lg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   lg%nd = Nd
