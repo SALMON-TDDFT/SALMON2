@@ -150,10 +150,11 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
   case(3)
     select case(yn_ffte)
-    case('n')
+!    case('n')
+    case default
       call calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,sVpsl)
-    case('y')
-      call calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
+!    case('y')
+!      call calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
     end select
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)

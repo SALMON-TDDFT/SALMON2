@@ -95,15 +95,16 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson)
   do ix=1,lg%num(1)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
-    trhoG_ele(ix,iiy,iiz)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
+    if (ix == 1 .and. iiy == 1 .and. iiz == 1) then
+      trhoG_ele(ix,iiy,iiz)=0d0
+    else
+      trhoG_ele(ix,iiy,iiz)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
+    end if
     poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
   end do
   end do
   end do
 !$omp end parallel do
-  if(info_field%id_ffte(3)==0.and.info_field%id_ffte(2)==0)then
-    trhoG_ele(1,1,1)=0.d0 !???
-  end if
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
                     info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
