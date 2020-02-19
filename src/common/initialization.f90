@@ -49,18 +49,18 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   integer,dimension(2,3) :: neig,neig_ng
 
 ! electron system
-
   call init_dft_system(lg,system,stencil)
 
-! parallelization
-
+! process distribution
   pinfo%npk              = nproc_k
   pinfo%nporbital        = nproc_ob
   pinfo%npdomain_orbital = nproc_domain_orbital
   pinfo%npdomain_general = nproc_domain_general
   call init_process_distribution(system,comm,pinfo)
-
   call init_communicator_dft(comm,pinfo,info,info_field)
+
+! parallelization
+  call check_ffte_condition(pinfo,lg)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,info_field,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
@@ -331,14 +331,14 @@ end subroutine init_orbital_parallel_singlecell
 !===================================================================================================================================
 
 subroutine init_grid_whole(rsize,hgs,lg)
-  use structures
-  use salmon_global, only: nproc_domain_orbital,iperiodic,dl,num_rgrid,theory,al_em,dl_em,yn_ffte
+  use structures, only: s_rgrid
+  use salmon_global, only: iperiodic,dl,num_rgrid,theory,al_em,dl_em
   implicit none
   real(8),intent(in) :: rsize(3),hgs(3)
-  type(s_rgrid) :: lg
+  type(s_rgrid)      :: lg
   !
   real(8),parameter :: epsilon=1.d-10
-  integer :: j,lg_num_tmp,ii
+  integer :: j
 
   lg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   lg%nd = Nd
@@ -359,8 +359,10 @@ subroutine init_grid_whole(rsize,hgs,lg)
   end select
   lg%num(:)=lg%ie(:)-lg%is(:)+1
 
-  lg%is_overlap(1:3) = lg%is(1:3)-nd
-  lg%ie_overlap(1:3) = lg%ie(1:3)+nd
+  lg%is_overlap(1:3) = lg%is(1:3) - Nd
+  lg%ie_overlap(1:3) = lg%ie(1:3) + Nd
+  lg%is_array(1:3)   = lg%is_overlap(1:3)
+  lg%ie_array(1:3)   = lg%ie_overlap(1:3)
 
   if ( allocated(lg%idx) ) deallocate(lg%idx)
   if ( allocated(lg%idy) ) deallocate(lg%idy)
@@ -369,31 +371,15 @@ subroutine init_grid_whole(rsize,hgs,lg)
           ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
           ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
 
-  if(iperiodic==3 .and. nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3)==1) then
-    lg%is_array(1:3) = lg%is(1:3)
-    lg%ie_array(1:3) = lg%ie(1:3)
-    do j=lg%is_overlap(1),lg%ie_overlap(1)
-      lg%idx(j) = mod(j+lg%num(1)-1,lg%num(1))+1
-    end do
-    do j=lg%is_overlap(2),lg%ie_overlap(2)
-      lg%idy(j) = mod(j+lg%num(2)-1,lg%num(2))+1
-    end do
-    do j=lg%is_overlap(3),lg%ie_overlap(3)
-      lg%idz(j) = mod(j+lg%num(3)-1,lg%num(3))+1
-    end do
-  else
-    lg%is_array(1:3)=lg%is(1:3)-nd
-    lg%ie_array(1:3)=lg%ie(1:3)+nd
-    do j=lg%is_overlap(1),lg%ie_overlap(1)
-      lg%idx(j) = j
-    end do
-    do j=lg%is_overlap(2),lg%ie_overlap(2)
-      lg%idy(j) = j
-    end do
-    do j=lg%is_overlap(3),lg%ie_overlap(3)
-      lg%idz(j) = j
-    end do
-  end if
+  do j=lg%is_overlap(1),lg%ie_overlap(1)
+    lg%idx(j) = j
+  end do
+  do j=lg%is_overlap(2),lg%ie_overlap(2)
+    lg%idy(j) = j
+  end do
+  do j=lg%is_overlap(3),lg%ie_overlap(3)
+    lg%idz(j) = j
+  end do
 
   select case(theory)
   case('maxwell')
@@ -406,7 +392,29 @@ subroutine init_grid_whole(rsize,hgs,lg)
     end if
   end select
 
-  if(yn_ffte=='y')then
+  return
+end subroutine init_grid_whole
+
+!===================================================================================================================================
+
+subroutine check_ffte_condition(pinfo,lg)
+  use structures
+  use salmon_global, only: yn_ffte
+  implicit none
+  type(s_process_info),intent(in) :: pinfo
+  type(s_rgrid),       intent(in) :: lg
+  integer :: mx,my,mz
+  integer :: j,lg_num_tmp,ii
+
+  if (yn_ffte == 'y') then
+    mx = mod(lg%num(1), pinfo%npdomain_general(2))
+    my = mod(lg%num(2), pinfo%npdomain_general(2))
+    if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_domain_general(2)'
+
+    my = mod(lg%num(2), pinfo%npdomain_general(3))
+    mz = mod(lg%num(3), pinfo%npdomain_general(3))
+    if (my /= 0 .or. mz /= 0) stop 'Both lg%num(2) and lg%num(3) must be divisible by nproc_domain_general(3)'
+
     ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
     do j=1,3
       lg_num_tmp=lg%num(j)
@@ -431,9 +439,7 @@ subroutine init_grid_whole(rsize,hgs,lg)
       if(lg_num_tmp/=1) stop "When using FFTE, prime factors for number of grids must be combination of 2, 3 or 5."
     end do
   end if
-
-  return
-end subroutine init_grid_whole
+end subroutine check_ffte_condition
 
 !===================================================================================================================================
 
