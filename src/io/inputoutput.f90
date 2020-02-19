@@ -226,6 +226,7 @@ contains
       & directory_read_data, &
       & yn_self_checkpoint,  &
       & checkpoint_interval, &
+      & yn_reset_step_restart, &
       & time_shutdown,       &
       & dump_filename,     &  !remove later
       & modify_gs_wfn_k,   &  !remove later
@@ -454,11 +455,12 @@ contains
 
     namelist/opt/ &
       & nopt, &
-      & cg_alpha_ini, &     !not use now if flag_use_grad_wf_on_force=.T.
-      & cg_alpha_up, &
-      & cg_alpha_down, &
-      & convrg_scf_force, &
-      & convrg_scf_ene, &
+      & cg_alpha_ini, &   !(only in ARTED)not use if flag_use_grad_wf_on_force=.T.
+      & cg_alpha_up, &    !(only in ARTED)
+      & cg_alpha_down, &  !(only in ARTED)
+      & max_step_len_adjust, &
+      & convrg_scf_force, & !(only in ARTED)
+      & convrg_scf_ene, &   !(only in ARTED)
       & convrg_opt_fmax, &
       & convrg_opt_ene      !not use now if flag_use_grad_wf_on_force=.T.
 
@@ -572,6 +574,7 @@ contains
     directory_read_data   = 'restart/'
     yn_self_checkpoint    = 'n'
     checkpoint_interval   = 0
+    yn_reset_step_restart = 'n'
     time_shutdown         = -1d0
     !remove later
     dump_filename    = 'default'
@@ -791,14 +794,15 @@ contains
     cutoff_r_buff =  2.0d0 / au_length_aa
     cutoff_g = -1d0
 !! == default for &opt
-    nopt            = 100
-    cg_alpha_ini    =  0.8d0 !not use now
-    cg_alpha_up     =  1.3d0
-    cg_alpha_down   =  0.5d0
-    convrg_scf_force= -1d0
-    convrg_scf_ene  = -1d0
-    convrg_opt_fmax =  1d-3
-    convrg_opt_ene  =  1d-6  !not use now
+    nopt                = 100
+    cg_alpha_ini        =  0.8d0 !not use now
+    cg_alpha_up         =  1.3d0
+    cg_alpha_down       =  0.5d0
+    max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
+    convrg_scf_force    = -1d0
+    convrg_scf_ene      = -1d0
+    convrg_opt_fmax     =  1d-3
+    convrg_opt_ene      =  1d-6  !not use now
 !! == default for &md
     ensemble              = 'nve'
     thermostat            = 'nose-hoover'
@@ -966,6 +970,7 @@ contains
        directory_read_data = trim(directory_read_data)//'/'
     call comm_bcast(yn_self_checkpoint    ,nproc_group_global)
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
+    call comm_bcast(yn_reset_step_restart ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
     !remove later
     call comm_bcast(dump_filename   ,nproc_group_global)
@@ -1260,14 +1265,15 @@ contains
     cutoff_r_buff = cutoff_r_buff * ulength_to_au
     cutoff_g      = cutoff_g / ulength_to_au
 !! == bcast for &opt
-    call comm_bcast(nopt             ,nproc_group_global)
-    call comm_bcast(cg_alpha_ini     ,nproc_group_global)
-    call comm_bcast(cg_alpha_up      ,nproc_group_global)
-    call comm_bcast(cg_alpha_down    ,nproc_group_global)
-    call comm_bcast(convrg_scf_force ,nproc_group_global)
-    call comm_bcast(convrg_scf_ene   ,nproc_group_global)
-    call comm_bcast(convrg_opt_fmax  ,nproc_group_global)
-    call comm_bcast(convrg_opt_ene   ,nproc_group_global)
+    call comm_bcast(nopt                ,nproc_group_global)
+    call comm_bcast(cg_alpha_ini        ,nproc_group_global)
+    call comm_bcast(cg_alpha_up         ,nproc_group_global)
+    call comm_bcast(cg_alpha_down       ,nproc_group_global)
+    call comm_bcast(max_step_len_adjust ,nproc_group_global)
+    call comm_bcast(convrg_scf_force    ,nproc_group_global)
+    call comm_bcast(convrg_scf_ene      ,nproc_group_global)
+    call comm_bcast(convrg_opt_fmax     ,nproc_group_global)
+    call comm_bcast(convrg_opt_ene      ,nproc_group_global)
 !! == bcast for &md
     call comm_bcast(ensemble               ,nproc_group_global)
     call comm_bcast(thermostat             ,nproc_group_global)
@@ -1733,6 +1739,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_step_restart', yn_reset_step_restart
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
@@ -2052,6 +2059,7 @@ contains
      !write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_ini', cg_alpha_ini !not use now
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_up', cg_alpha_up
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_down', cg_alpha_down
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_scf_force', convrg_scf_force
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_scf_ene', convrg_scf_ene
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
@@ -2177,6 +2185,7 @@ contains
     call yn_argument_check(yn_opt)
     call yn_argument_check(yn_restart)
     call yn_argument_check(yn_self_checkpoint)
+    call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_domain_parallel)
     call yn_argument_check(yn_ffte)
     call yn_argument_check(yn_periodic)

@@ -237,6 +237,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
            end do
         end do
      endif
+     if(yn_reset_step_restart=='y') Miter = 0
   else
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
