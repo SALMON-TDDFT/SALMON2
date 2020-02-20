@@ -15,42 +15,59 @@
 !
 module structure_opt_sub
   implicit none
-  ! Global variables like below is not allowed by our policy
-  ! These should be moved (do it later...)
-  real(8),allocatable :: a_dRion(:), dFion(:)
-  real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
 contains
 
   !==============================================================initilize
-  subroutine structure_opt_ini(natom)
+  subroutine  initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max)
+    use structures, only: s_opt,s_dft_system
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
+    use salmon_global, only: natom,nopt,yn_restart
+    use write_sub, only: write_xyz
+    use checkpoint_restart_sub, only: restart_opt
     implicit none
-    integer,intent(in) :: natom
+    type(s_opt) :: opt
+    type(s_dft_system) :: system
+    integer :: nopt_max,Miopt,NA3
+    logical :: flag_opt_conv
+    character(100) :: comment_line
 
-    allocate(a_dRion(3*natom),dFion(3*natom))
-    allocate(Hess_mat(3*natom,3*natom),Hess_mat_last(3*natom,3*natom))
+    flag_opt_conv = .false.
+    nopt_max = nopt
 
-    a_dRion(:)=0d0
-    dFion(:)  =0d0
-    Hess_mat(:,:)     =0d0
-    Hess_mat_last(:,:)=0d0
+    NA3 = 3*natom
+    allocate( opt%a_dRion(NA3), opt%dFion(NA3) )
+    allocate( opt%Hess_mat(NA3,NA3), opt%Hess_mat_last(NA3,NA3) )
+
+    if(yn_restart == 'y') then
+       call restart_opt(Miopt,opt)
+    else
+       opt%a_dRion(:) = 0d0
+       opt%dFion(:)   = 0d0
+       opt%Hess_mat(:,:)      = 0d0
+       opt%Hess_mat_last(:,:) = 0d0
+    endif
+
     if(comm_is_root(nproc_id_global))then
       write(*,*) "===== Grand State Optimization Start ====="
       write(*,*) "       (Quasi-Newton method using Force only)       "
     end if
 
-  end subroutine structure_opt_ini
+    write(comment_line,10) 0
+    call write_xyz(comment_line,"new","r  ",system)
+10  format("#opt iteration step=",i5)
+
+  end subroutine  initialization_opt
 
   !======================================================convergence check
-  subroutine structure_opt_check(natom,iopt,flag_opt_conv,Force)
+  subroutine structure_opt_check(iopt,flag_opt_conv,Force)
     use structures
-    use salmon_global, only: convrg_opt_fmax,unit_system,flag_opt_atom
+    use salmon_global, only: natom,convrg_opt_fmax,unit_system,flag_opt_atom
     use inputoutput, only: au_length_aa, au_energy_ev
     use parallelization, only: nproc_id_global,nproc_group_global
     use communication, only: comm_is_root,comm_bcast
     implicit none
-    integer,intent(in) :: natom,iopt
+    integer,intent(in) :: iopt
     real(8),intent(in) :: Force(3,natom)
     logical,intent(inout) :: flag_opt_conv
     integer :: iatom,iatom_count
@@ -81,20 +98,21 @@ contains
       write(*,*) " Max-force=",fmax, "  Mean-force=",fave
       write(*,*) "==================================================="
       write(*,*) "Quasi-Newton Optimization Step = ", iopt
-      if(fmax<=convrg_opt_fmax) flag_opt_conv=.true.
+      if( fmax <= convrg_opt_fmax ) flag_opt_conv=.true.
     end if
     call comm_bcast(flag_opt_conv,nproc_group_global)
 
   end subroutine structure_opt_check
 
   !===========================================================optimization
-  subroutine structure_opt(natom,iopt,system)
-    use structures, only: s_dft_system
-    use salmon_global, only: flag_opt_atom, max_step_len_adjust
+  subroutine structure_opt(opt,iopt,system)
+    use structures, only: s_dft_system, s_opt
+    use salmon_global, only: natom, flag_opt_atom, max_step_len_adjust
     use communication, only: comm_bcast
     implicit none
     type(s_dft_system),intent(inout) :: system
-    integer,intent(in) :: natom,iopt
+    type(s_opt) :: opt
+    integer,intent(in) :: iopt
     !theta_opt=0.0d0:DFP,theta_opt=1.0d0:BFGS in Quasi_Newton method
     real(8), parameter :: theta_opt=1.0d0  !alpha=1.0d0 -- this is now from input
     real(8) :: alpha
@@ -117,31 +135,31 @@ contains
     end do
 
     if(iopt==1)then
-      !update Hess_mat
+      !update opt%Hess_mat
       do ii=1,NA3
       do ij=1,NA3
          if(ii==ij)then
-            Hess_mat(ii,ij) = 1d0
+            opt%Hess_mat(ii,ij) = 1d0
          else
-            Hess_mat(ii,ij) = 0d0
+            opt%Hess_mat(ii,ij) = 0d0
          end if
-         Hess_mat_last(ii,ij) = Hess_mat(ii,ij)
+         opt%Hess_mat_last(ii,ij) = opt%Hess_mat(ii,ij)
       end do
       end do
     else
-      !update dFion
-      dFion=-(force_1d-dFion)
+      !update opt%dFion
+      opt%dFion=-(force_1d-opt%dFion)
       !prepare const and matrix
-      call dgemm('n','n',1,1,NA3,1.0d0,a_dRion,1,dFion,NA3,0d0,const1,1)
-      call dgemm('n','n',NA3,1,NA3,1d0,Hess_mat,NA3,dFion,NA3,0d0,optmat_1d,NA3)
-      call dgemm('n','n',1,1,NA3,1d0,dFion,1,optmat_1d,NA3,0d0,const2,1)
-      call dgemm('n','n',NA3,NA3,1,1d0,a_dRion,NA3,a_dRion,1,0d0,optmat1_2d,NA3)
-      !update Hess_mat
+      call dgemm('n','n',1,1,NA3,1.0d0,opt%a_dRion,1,opt%dFion,NA3,0d0,const1,1)
+      call dgemm('n','n',NA3,1,NA3,1d0,opt%Hess_mat,NA3,opt%dFion,NA3,0d0,optmat_1d,NA3)
+      call dgemm('n','n',1,1,NA3,1d0,opt%dFion,1,optmat_1d,NA3,0d0,const2,1)
+      call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,opt%a_dRion,1,0d0,optmat1_2d,NA3)
+      !update opt%Hess_mat
       rtmp = (const1+theta_opt*const2)/(const1**2d0)
       !$omp parallel do collapse(2) private(ii,jj)
       do ii=1,NA3
       do jj=1,NA3
-         Hess_mat(ii,jj) = Hess_mat_last(ii,jj) + rtmp * optmat1_2d(ii,jj)
+         opt%Hess_mat(ii,jj) = opt%Hess_mat_last(ii,jj) + rtmp * optmat1_2d(ii,jj)
       enddo
       enddo
       !$omp end parallel do
@@ -151,28 +169,28 @@ contains
         !$omp parallel do collapse(2) private(ii,jj)
         do ii=1,NA3
         do jj=1,NA3
-           Hess_mat(ii,jj) = Hess_mat(ii,jj)-(1d0/const2)*optmat2_2d(ii,jj)
+           opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)-(1d0/const2)*optmat2_2d(ii,jj)
         enddo
         enddo
         !$omp end parallel do
       elseif(theta_opt==1.0d0)then
         !theta_opt=1.0d0:BFGS
-        call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,a_dRion,1,0d0,optmat2_2d,NA3)
-        call dgemm('n','n',NA3,NA3,1,1d0,a_dRion,NA3,optmat_1d,1,0d0,optmat3_2d,NA3)
+        call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,opt%a_dRion,1,0d0,optmat2_2d,NA3)
+        call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,optmat_1d,1,0d0,optmat3_2d,NA3)
         rtmp = theta_opt/const1
         !$omp parallel do collapse(2) private(ii,jj)
         do ii=1,NA3
         do jj=1,NA3
-           Hess_mat(ii,jj) = Hess_mat(ii,jj)- rtmp *(optmat2_2d(ii,jj)+optmat3_2d(ii,jj))
+           opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)- rtmp *(optmat2_2d(ii,jj)+optmat3_2d(ii,jj))
         enddo
         enddo
         !$omp end parallel do
       endif
-      !update Hess_mat_last
+      !update opt%Hess_mat_last
       !$omp parallel do collapse(2) private(ii,jj)
       do ii=1,NA3
       do jj=1,NA3
-         Hess_mat_last(ii,jj) = Hess_mat(ii,jj)
+         opt%Hess_mat_last(ii,jj) = opt%Hess_mat(ii,jj)
       enddo
       enddo
       !$omp end parallel do
@@ -180,7 +198,7 @@ contains
 
     !update dRion_1d and dRion
     dRion_1d(:) = 0d0
-    call dgemm('n','n',NA3,1,NA3,1d0,Hess_mat,NA3,force_1d,NA3,0d0,dRion_1d,NA3)
+    call dgemm('n','n',NA3,1,NA3,1d0,opt%Hess_mat,NA3,force_1d,NA3,0d0,dRion_1d,NA3)
     !$omp parallel do collapse(2) private(iatom,ixyz)
     do iatom=1,natom
     do ixyz=1,3
@@ -205,11 +223,11 @@ contains
        alpha = max_step_len_adjust / dRabs_max
     endif
 
-    !update a_dRion,dFion
+    !update opt%a_dRion,opt%dFion
     !$omp parallel do private(ii)
     do ii=1,NA3
-       a_dRion(ii) = alpha * dRion_1d(ii)
-       dFion(ii)   = force_1d(ii)
+       opt%a_dRion(ii) = alpha * dRion_1d(ii)
+       opt%dFion(ii)   = force_1d(ii)
     enddo
     !$omp end parallel do
 
@@ -224,12 +242,14 @@ contains
   end subroutine structure_opt
 
   !===============================================================finilize
-  subroutine structure_opt_fin
+  subroutine structure_opt_fin(opt)
+    use structures, only: s_opt
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
-    deallocate(a_dRion,dFion)
-    deallocate(Hess_mat,Hess_mat_last)
+    type(s_opt) :: opt
+    deallocate(opt%a_dRion,opt%dFion)
+    deallocate(opt%Hess_mat,opt%Hess_mat_last)
     if(comm_is_root(nproc_id_global)) write(*,*) "Optimization Converged"
   end subroutine structure_opt_fin
 

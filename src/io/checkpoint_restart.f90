@@ -139,6 +139,80 @@ subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   call read_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
 end subroutine restart_gs
 
+subroutine checkpoint_opt(Miopt,opt,odir)
+  use structures, only: s_opt
+  use salmon_global, only: natom
+  use parallelization, only: nproc_id_global,nproc_group_global
+  use communication, only: comm_is_root
+  use filesystem, only: get_filehandle, atomic_create_directory
+  implicit none
+  type(s_opt) :: opt
+  integer :: Miopt,fh_opt_bin, NA3
+  character(256) :: dir_file_out, gdir,wdir
+  character(*),optional   ,intent(in) :: odir
+
+  if (present(odir)) then
+    call generate_restart_directory_name(odir,gdir,wdir)
+  else
+    call generate_checkpoint_directory_name('gs',Miopt,gdir,wdir)
+    call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+  end if
+
+  dir_file_out = trim(gdir)//"opt.bin"
+  NA3 = 3*natom
+
+  if (comm_is_root(nproc_id_global))then
+     fh_opt_bin = get_filehandle()
+     open(fh_opt_bin,file=dir_file_out,form='unformatted')
+     write(fh_opt_bin) Miopt
+     write(fh_opt_bin) opt%a_dRion(1:NA3)
+     write(fh_opt_bin) opt%dFion(1:NA3)
+     write(fh_opt_bin) opt%Hess_mat(1:NA3,1:NA3)
+     write(fh_opt_bin) opt%Hess_mat_last(1:NA3,1:NA3)
+     close(fh_opt_bin)
+  endif
+
+end subroutine checkpoint_opt
+
+subroutine restart_opt(Miopt,opt)
+  use structures, only: s_opt
+  use salmon_global, only: directory_read_data,natom
+  use parallelization, only: nproc_id_global,nproc_group_global
+  use communication, only: comm_is_root,comm_bcast
+  use filesystem, only: get_filehandle
+  implicit none
+  type(s_opt) :: opt
+  integer :: access
+  integer :: Miopt,istat, fh_opt_bin, NA3, comm
+  character(256) :: dir_file_in, gdir,wdir
+  
+  call generate_restart_directory_name(directory_read_data,gdir,wdir)
+  dir_file_in = trim(gdir)//"opt.bin"
+
+  NA3 = 3*natom
+
+  if (comm_is_root(nproc_id_global))then
+     istat = access( dir_file_in, " ")
+     if(istat==0) then  !if file exists
+        fh_opt_bin = get_filehandle()
+        open(fh_opt_bin,file=dir_file_in,form='unformatted')
+        read(fh_opt_bin) Miopt
+        read(fh_opt_bin) opt%a_dRion(1:NA3)
+        read(fh_opt_bin) opt%dFion(1:NA3)
+        read(fh_opt_bin) opt%Hess_mat(1:NA3,1:NA3)
+        read(fh_opt_bin) opt%Hess_mat_last(1:NA3,1:NA3)
+        close(fh_opt_bin)
+     endif
+  endif
+
+  comm = nproc_group_global
+  call comm_bcast(Miopt             ,comm)
+  call comm_bcast(opt%a_dRion       ,comm)
+  call comm_bcast(opt%dFion         ,comm)
+  call comm_bcast(opt%Hess_mat      ,comm)
+  call comm_bcast(opt%Hess_mat_last ,comm)
+
+end subroutine restart_opt
 
 subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,idir)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_scalar
@@ -1042,8 +1116,8 @@ subroutine write_Rion(odir,system)
      close(iu1_w)
   end if
 
-7000 format("'",a,"'  ",3f18.10,i4,'   ',a)
-7100 format("'",a,"'  ",3f18.10,i4)
+7000 format("'",a,"'  ",3f24.18,i4,'   ',a)
+7100 format("'",a,"'  ",3f24.18,i4)
 9000 format(a)
 
 end subroutine write_Rion
