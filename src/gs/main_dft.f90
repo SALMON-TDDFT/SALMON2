@@ -267,6 +267,7 @@ if(yn_opt=='y') then
    else
       if((checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval)==0)) then
          call checkpoint_gs(lg,mg,ng,system,info,spsi,iopt,mixing)
+         call comm_sync_all
          call checkpoint_opt(iopt,opt)
          if(comm_is_root(nproc_id_global))then
             write(*,'(a,i5)')"  checkpoint data is printed: iopt=", iopt
@@ -312,7 +313,11 @@ call timer_end(LOG_WRITE_GS_RESULTS)
 call timer_begin(LOG_WRITE_GS_DATA)
 call checkpoint_gs(lg,mg,ng,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
 if(yn_opt=='y') then
-   if(.not.flag_opt_conv) call checkpoint_opt(nopt,opt,ofl%dir_out_restart)
+   if(.not.flag_opt_conv) then
+      call comm_sync_all
+      call checkpoint_opt(nopt_max,opt,ofl%dir_out_restart)
+      call comm_sync_all
+   endif
 endif
 call timer_end(LOG_WRITE_GS_DATA)
 
