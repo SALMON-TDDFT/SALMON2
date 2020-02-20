@@ -35,8 +35,7 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   integer :: nproc_k,nproc_ob
   integer :: nproc_d_o(3),nproc_d_g(3),nproc_d_o_mul,nproc_d_g_dm(3),nproc_d_g_mul_dm,nproc_ob_spin(2)
   integer :: i1,i2,i3,i4,i5,ix,iy,iz,ixs,iys,izs,nsize,ilocal_rank
-  integer :: ibox,icolor,ikey
-  integer :: npuy,npuz
+  integer :: ibox
   integer :: mesh(3),network(3),mesh_step(3)
   integer :: icolor_r,icolor_o,icolor_k,icolor_ro,icolor_ko
   integer :: ikey_ro,ikey_ko,nl
@@ -237,23 +236,11 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
 
 
 ! communicators for FFTE routine
-  npuy = nproc_d_g_dm(2)*nproc_d_o(2)
-  npuz = nproc_d_g_dm(3)*nproc_d_o(3)
+  info_field%icomm_ffte(1:3) = info_field%icomm(1:3)
 
-  icolor=info_field%id(3)+info_field%id(1)*npuz
-  ikey=info_field%id(2)
-  info_field%icomm_ffte(2) = comm_create_group(comm, icolor, ikey)
-  call comm_get_groupinfo(info_field%icomm_ffte(2), info_field%id_ffte(2), info_field%isize_ffte(2))
-
-  icolor=info_field%id(2)+info_field%id(1)*npuy
-  ikey=info_field%id(3)
-  info_field%icomm_ffte(3) = comm_create_group(comm, icolor, ikey)
-  call comm_get_groupinfo(info_field%icomm_ffte(3), info_field%id_ffte(3), info_field%isize_ffte(3))
-
-  icolor=info_field%id(2)+info_field%id(3)*npuy
-  ikey=info_field%id(1)
-  info_field%icomm_ffte(1) = comm_create_group(comm, icolor, ikey)
   call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
+  call comm_get_groupinfo(info_field%icomm_ffte(2), info_field%id_ffte(2), info_field%isize_ffte(2))
+  call comm_get_groupinfo(info_field%icomm_ffte(3), info_field%id_ffte(3), info_field%isize_ffte(3))
 
 contains
   subroutine check_network_form

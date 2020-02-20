@@ -19,7 +19,7 @@ module poisson_periodic_sub
 
 contains
 
-subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
+subroutine poisson_periodic(lg,mg,ng,system,info_field,trho,tVh,trhoG_ele,trhoG_ele_tmp,poisson)
   use structures, only: s_rgrid, s_field_parallel, s_dft_system, &
                         s_scalar, s_reciprocal_grid, s_poisson
   use communication, only: comm_summation
@@ -30,9 +30,10 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
   type(s_rgrid),intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
   type(s_dft_system),intent(in) :: system
-  type(s_scalar),intent(in)    :: srho
-  type(s_scalar),intent(inout) :: sVh
-  type(s_reciprocal_grid),intent(inout)  :: fg
+  real(8),intent(in)    :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8),intent(inout) :: tVh (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8)            :: trhoG_ele_tmp(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  complex(8),intent(out):: trhoG_ele(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   type(s_poisson) :: poisson
   !
   integer :: ix,iy,iz,kx,ky,kz,kkx,kky,kkz
@@ -46,12 +47,9 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
   do iy=lg%is(2),lg%ie(2)
   do ix=lg%is(1),lg%ie(1)
     poisson%ff1(ix,iy,iz)=0.d0
+    trhoG_ele_tmp(ix,iy,iz)=0.d0
   end do
   end do
-  end do
-!$OMP parallel do
-  do n=1,lg%num(1)*lg%num(2)*lg%num(3)
-    fg%zrhoG_ele_tmp(n)=0.d0
   end do
 
 !$OMP parallel do private(iz,iy,ix)
@@ -67,7 +65,7 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    poisson%trho2z(ix,iy,iz)=srho%f(ix,iy,iz)
+    poisson%trho2z(ix,iy,iz)=trho(ix,iy,iz)
   end do
   end do
   end do
@@ -148,17 +146,17 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
     gz = kkx*B(3,1) + kky*B(3,2) + kkz*B(3,3)
     g2=gx**2+gy**2+gz**2
     if(kx-1==0.and.ky-1==0.and.kz-1==0)then
-      fg%zrhoG_ele_tmp(n)=poisson%ff2x(kx,ky,kz) ! iwata
+      trhoG_ele_tmp(kx,ky,kz)=poisson%ff2x(kx,ky,kz) ! iwata
       poisson%ff1z(kx,ky,kz)=0.d0
     else
-      fg%zrhoG_ele_tmp(n)=poisson%ff2x(kx,ky,kz)
+      trhoG_ele_tmp(kx,ky,kz)=poisson%ff2x(kx,ky,kz) ! iwata
       poisson%ff1z(kx,ky,kz)=4.d0*Pi/g2*poisson%ff2x(kx,ky,kz)
     end if
   end do
   end do
   end do
 
-  call comm_summation(fg%zrhoG_ele_tmp,fg%zrhoG_ele,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
+  call comm_summation(trhoG_ele_tmp,trhoG_ele,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
   call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
 
 !$OMP parallel do private(iz,ky,kx)
@@ -185,7 +183,7 @@ subroutine poisson_periodic(lg,mg,ng,system,info_field,srho,sVh,fg,poisson)
   do iz = mg%is(3),mg%ie(3)
   do iy = mg%is(2),mg%ie(2)
   do ix = mg%is(1),mg%ie(1)
-    sVh%f(ix,iy,iz)=sum(poisson%egx(:,ix)*poisson%ff2(:,iy,iz))
+    tVh(ix,iy,iz)=sum(poisson%egx(:,ix)*poisson%ff2(:,iy,iz))
   end do
   end do
   end do
