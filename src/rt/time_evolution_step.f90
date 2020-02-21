@@ -35,7 +35,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
                     update_pseudo_rt
   use write_sub
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, allgatherv_vlocal
-  use fdtd_coulomb_gauge, only: ls_singlescale, fdtd_singlescale
+  use fdtd_coulomb_gauge, only: fdtd_singlescale
   use salmon_xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
@@ -62,7 +62,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   type(s_scalar), intent(inout) :: sVh_stock1,sVh_stock2,Vbox
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
-  type(ls_singlescale) :: singlescale
+  type(s_singlescale) :: singlescale
   type(s_reciprocal_grid) :: fg
   type(s_dft_energy) :: energy
   type(s_ewald_ion_ion) :: ewald

@@ -17,22 +17,7 @@
 
 ! for single-scale Maxwell-TDDFT method
 module fdtd_coulomb_gauge
-  use structures, only: s_sendrecv_grid
   implicit none
-
-  type ls_singlescale
-    integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
-    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
-    real(8),allocatable :: vec_Ac(:,:,:,:),vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
-    & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
-    & ,grad_dVh_dt(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
-    & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:),vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
-    & ,integral_poynting(:),Ac_zt(:,:)
-    real(8),allocatable :: box(:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
-    & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:),integral_poynting_tmp(:),integral_poynting_tmp2(:) &
-    & ,vec_Ac_ext(:,:,:,:),vec_Ac_ext_old(:,:,:,:)
-    type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
-  end type ls_singlescale
 
 contains
 
@@ -55,7 +40,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   type(s_sendrecv_grid)     :: srg_ng
   type(s_vector)            :: Ac     ! A/c, A: vector potential, c: speed of light
   type(s_scalar)            :: div_Ac ! div(A/c)
-  type(ls_singlescale)      :: fw     ! FDTD working arrays, etc.
+  type(s_singlescale)       :: fw     ! FDTD working arrays, etc.
   !
   integer,parameter :: mstep=100
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
@@ -380,34 +365,39 @@ contains
 
 end subroutine fdtd_singlescale
 
-subroutine init_singlescale(ng,lg,hgs,rho,Vh,j_e,srg_ng,fw)
+!===================================================================================================================================
+
+subroutine init_singlescale(comm,ng,lg,hgs,rho,Vh,j_e,srg_ng,fw)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
-  use salmon_global, only: sysname,base_directory
+  use salmon_global, only: sysname,base_directory,yn_restart
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use initialization_sub, only: set_bn
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time
+  use checkpoint_restart_sub, only: restart_singlescale
   implicit none
+  integer       ,intent(in) :: comm
   type(s_rgrid) ,intent(in) :: lg,ng
   real(8)       ,intent(in) :: hgs(3)
   type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_vector),intent(in) :: j_e    ! electron number current density (without rho*A/c)
   type(s_sendrecv_grid)     :: srg_ng
-  type(ls_singlescale)      :: fw
+  type(s_singlescale)       :: fw
   !
   character(100) :: filename
   integer :: ii,jj,ix,iy,iz
+  real(8) :: bnmat(4,4)
 
   fw%Energy_poynting = 0d0
   fw%Energy_joule = 0d0
 
-  call set_bn(fw%bnmat)
+  call set_bn(bnmat)
   do jj=1,3
     do ii=1,4
-      fw%coef_nab(ii,jj) = fw%bnmat(ii,4)/hgs(jj)
+      fw%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
     end do
   end do
 
@@ -503,6 +493,10 @@ subroutine init_singlescale(ng,lg,hgs,rho,Vh,j_e,srg_ng,fw)
   end do
   call update_overlap_real8(srg_ng, ng, fw%box)
   call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
+  
+  if(yn_restart=='y') then
+    call restart_singlescale(comm,lg,ng,fw)
+  end if
 
   return
 end subroutine init_singlescale

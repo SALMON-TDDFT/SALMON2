@@ -50,7 +50,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use force_sub, only: calc_force
   use hamiltonian
   use md_sub, only: init_md
-  use fdtd_coulomb_gauge, only: ls_singlescale,init_singlescale
+  use fdtd_coulomb_gauge, only: init_singlescale
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
@@ -89,7 +89,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
-  type(ls_singlescale) :: singlescale
+  type(s_singlescale) :: singlescale
   type(s_ofile) :: ofile
   
   integer :: itotNtime
@@ -436,7 +436,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%ie = ng%ie
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, info_field%icomm_all, srg_ng%neig)
     
-    call init_singlescale(ng,lg,system%hgs,srho,sVh,rt%j_e,srg_ng,singlescale)
+    call init_singlescale(info_field%icomm_all,ng,lg,system%hgs,srho,sVh,rt%j_e,srg_ng,singlescale)
   end if
   
 

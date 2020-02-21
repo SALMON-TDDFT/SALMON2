@@ -217,6 +217,7 @@ module communication
     module procedure comm_bcast_array4d_dcomplex
 
     ! 5-D array
+    module procedure comm_bcast_array5d_double
     module procedure comm_bcast_array5d_dcomplex
   end interface
 
@@ -1150,6 +1151,21 @@ contains
     use mpi, only: MPI_DOUBLE_PRECISION
     implicit none
     real(8), intent(inout)        :: val(:,:,:,:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    integer :: rank, ierr
+    if (present(root)) then
+      rank = root
+    else
+      rank = 0
+    end if
+    MPI_ERROR_CHECK(call MPI_Bcast(val, size(val), MPI_DOUBLE_PRECISION, rank, ngroup, ierr))
+  end subroutine
+  
+  subroutine comm_bcast_array5d_double(val, ngroup, root)
+    use mpi, only: MPI_DOUBLE_PRECISION
+    implicit none
+    real(8), intent(inout)        :: val(:,:,:,:,:)
     integer, intent(in)           :: ngroup
     integer, intent(in), optional :: root
     integer :: rank, ierr
