@@ -367,7 +367,7 @@ end subroutine fdtd_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(comm,ng,lg,hgs,rho,Vh,j_e,srg_ng,fw)
+subroutine init_singlescale(comm,ng,lg,hgs,rho,Vh,srg_ng,fw)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -383,7 +383,6 @@ subroutine init_singlescale(comm,ng,lg,hgs,rho,Vh,j_e,srg_ng,fw)
   type(s_rgrid) ,intent(in) :: lg,ng
   real(8)       ,intent(in) :: hgs(3)
   type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
-  type(s_vector),intent(in) :: j_e    ! electron number current density (without rho*A/c)
   type(s_sendrecv_grid)     :: srg_ng
   type(s_singlescale)       :: fw
   !
@@ -480,13 +479,11 @@ subroutine init_singlescale(comm,ng,lg,hgs,rho,Vh,j_e,srg_ng,fw)
   & ng%is_array(3):ng%ie_array(3)))
   fw%box = 0d0
 
-
 !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
     fw%box(ix,iy,iz) = Vh%f(ix,iy,iz)
-    fw%vec_je_old(1:3,ix,iy,iz) = j_e%v(1:3,ix,iy,iz)
     fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz)
   end do
   end do

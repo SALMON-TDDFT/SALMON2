@@ -756,6 +756,8 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
   character(256) ::  dir_file_out
   integer :: iu1_w
   real(8),allocatable :: matbox0(:,:,:,:,:),matbox1(:,:,:,:,:)
+  real(8),allocatable :: v0(:,:,:,:,:),v1(:,:,:,:,:)
+  real(8),allocatable :: b0(:,:,:,:),b1(:,:,:,:)
   integer :: ix,iy,iz
 
   iu1_w = 97
@@ -765,6 +767,12 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
     write(iu1_w) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
+    write(iu1_w) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    write(iu1_w) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    write(iu1_w) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     close(iu1_w)
   else
     ! write root process
@@ -785,13 +793,51 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     end do
     call comm_summation(matbox0,matbox1,9*lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
 
+    allocate(v0(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+    allocate(v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+
+!$omp workshare
+    v0 = 0d0
+!$omp end workshare
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      v0(1:3,ix,iy,iz,1) = singlescale%vec_je_old(1:3,ix,iy,iz)
+      v0(1:3,ix,iy,iz,2) = singlescale%vec_Ac_old(1:3,ix,iy,iz)
+    end do
+    end do
+    end do
+    call comm_summation(v0,v1,3*lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_rko)
+    
+    allocate(b0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
+    allocate(b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
+
+!$omp workshare
+    b0 = 0d0
+!$omp end workshare
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      b0(ix,iy,1:3,1) = singlescale%vec_Ac_boundary_bottom_old(ix,iy,1:3)
+      b0(ix,iy,1:3,2) = singlescale%vec_Ac_boundary_top_old   (ix,iy,1:3)
+      b0(ix,iy,1:3,3) = singlescale%vec_Ac_boundary_bottom    (ix,iy,1:3)
+      b0(ix,iy,1:3,4) = singlescale%vec_Ac_boundary_top       (ix,iy,1:3)
+    end do
+    end do
+    call comm_summation(b0,b1,3*lg%num(1)*lg%num(2)*4,info%icomm_rko)
+
     if(comm_is_root(nproc_id_global))then
       open(iu1_w,file=dir_file_out,form='unformatted')
       write(iu1_w) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
+      write(iu1_w) v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      write(iu1_w) b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
       close(iu1_w)
     end if
 
-    deallocate(matbox0,matbox1)
+    deallocate(matbox0,matbox1,v0,v1,b0,b1)
   end if
 
 end subroutine write_singlescale
@@ -1107,7 +1153,7 @@ subroutine restart_singlescale(comm,lg,ng,singlescale)
   !
   integer :: iu1_r
   integer :: ix,iy,iz
-  real(8),allocatable :: matbox1(:,:,:,:,:)
+  real(8),allocatable :: matbox1(:,:,:,:,:),matbox2(:,:,:,:,:),matbox3(:,:,:,:)
   character(100) :: dir_file_in
   character(256) :: gdir,wdir
   logical :: iself
@@ -1129,29 +1175,53 @@ subroutine restart_singlescale(comm,lg,ng,singlescale)
     ! read all processes
     open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
     read(iu1_r) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
+    read(iu1_r) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    read(iu1_r) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    read(iu1_r) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     close(iu1_r)
   else
     ! read root process
     allocate(matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
+    allocate(matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+    allocate(matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
 
     if(comm_is_root(nproc_id_global))then
       open(iu1_r,file=dir_file_in,form='unformatted')
       read(iu1_r) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
+      read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      read(iu1_r) matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
       close(iu1_r)
     end if
 
     call comm_bcast(matbox1,comm)
+    call comm_bcast(matbox2,comm)
+    call comm_bcast(matbox3,comm)
 
 !$omp parallel do collapse(2)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
       singlescale%vec_Ac_m(-1:1,ix,iy,iz,1:3) = matbox1(-1:1,ix,iy,iz,1:3)
+      singlescale%vec_je_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,1)
+      singlescale%vec_Ac_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,2)
     end do
+    end do
+    end do
+    
+    !$omp parallel do collapse(2)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      singlescale%vec_Ac_boundary_bottom_old(ix,iy,1:3) = matbox3(ix,iy,1:3,1)
+      singlescale%vec_Ac_boundary_top_old   (ix,iy,1:3) = matbox3(ix,iy,1:3,2)
+      singlescale%vec_Ac_boundary_bottom    (ix,iy,1:3) = matbox3(ix,iy,1:3,3)
+      singlescale%vec_Ac_boundary_top       (ix,iy,1:3) = matbox3(ix,iy,1:3,4)
     end do
     end do
 
-    deallocate(matbox1)
+    deallocate(matbox1,matbox2,matbox3)
   end if
 end subroutine restart_singlescale
 
