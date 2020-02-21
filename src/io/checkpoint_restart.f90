@@ -214,10 +214,10 @@ subroutine restart_opt(Miopt,opt)
 
 end subroutine restart_opt
 
-subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,idir)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_scalar
+subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,singlescale,idir)
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_scalar, s_singlescale
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump,use_singlescale
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
@@ -226,6 +226,7 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,id
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_scalar)          ,intent(in) :: sVh_stock1,sVh_stock2
+  type(s_singlescale)     ,intent(in) :: singlescale
   character(*),optional   ,intent(in) :: idir
 
   character(256) :: gdir,wdir
@@ -248,6 +249,9 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,id
   call write_Velocity(wdir,system)
   call write_bin(wdir,lg,mg,ng,system,info,spsi,iter &
                 ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
+  if(use_singlescale=='y') then
+    call write_singlescale(wdir,lg,ng,info,singlescale,is_self_checkpoint=iself)
+  end if
 end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
@@ -738,6 +742,108 @@ end subroutine write_Vh_stock
 
 !===================================================================================================================================
 
+subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
+  use structures
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  implicit none
+  character(*)            ,intent(in) :: odir
+  type(s_rgrid)           ,intent(in) :: lg,ng
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_singlescale)     ,intent(in) :: singlescale
+  logical                 ,intent(in) :: is_self_checkpoint
+  !
+  character(256) ::  dir_file_out
+  integer :: iu1_w
+  real(8),allocatable :: matbox0(:,:,:,:,:),matbox1(:,:,:,:,:)
+  real(8),allocatable :: v0(:,:,:,:,:),v1(:,:,:,:,:)
+  real(8),allocatable :: b0(:,:,:,:),b1(:,:,:,:)
+  integer :: ix,iy,iz
+
+  iu1_w = 97
+  dir_file_out = trim(odir)//"singlescale.bin"
+
+  if (is_self_checkpoint) then
+    ! write all processes
+    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
+    write(iu1_w) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
+    write(iu1_w) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    write(iu1_w) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    write(iu1_w) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    close(iu1_w)
+  else
+    ! write root process
+    allocate(matbox0(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
+    allocate(matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
+
+!$omp workshare
+    matbox0 = 0d0
+!$omp end workshare
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      matbox0(-1:1,ix,iy,iz,1:3) = singlescale%vec_Ac_m(-1:1,ix,iy,iz,1:3)
+    end do
+    end do
+    end do
+    call comm_summation(matbox0,matbox1,9*lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+
+    allocate(v0(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+    allocate(v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+
+!$omp workshare
+    v0 = 0d0
+!$omp end workshare
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      v0(1:3,ix,iy,iz,1) = singlescale%vec_je_old(1:3,ix,iy,iz)
+      v0(1:3,ix,iy,iz,2) = singlescale%vec_Ac_old(1:3,ix,iy,iz)
+    end do
+    end do
+    end do
+    call comm_summation(v0,v1,3*lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_rko)
+    
+    allocate(b0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
+    allocate(b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
+
+!$omp workshare
+    b0 = 0d0
+!$omp end workshare
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      b0(ix,iy,1:3,1) = singlescale%vec_Ac_boundary_bottom_old(ix,iy,1:3)
+      b0(ix,iy,1:3,2) = singlescale%vec_Ac_boundary_top_old   (ix,iy,1:3)
+      b0(ix,iy,1:3,3) = singlescale%vec_Ac_boundary_bottom    (ix,iy,1:3)
+      b0(ix,iy,1:3,4) = singlescale%vec_Ac_boundary_top       (ix,iy,1:3)
+    end do
+    end do
+    call comm_summation(b0,b1,3*lg%num(1)*lg%num(2)*4,info%icomm_rko)
+
+    if(comm_is_root(nproc_id_global))then
+      open(iu1_w,file=dir_file_out,form='unformatted')
+      write(iu1_w) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
+      write(iu1_w) v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      write(iu1_w) b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
+      close(iu1_w)
+    end if
+
+    deallocate(matbox0,matbox1,v0,v1,b0,b1)
+  end if
+
+end subroutine write_singlescale
+
+!===================================================================================================================================
+
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
@@ -1032,6 +1138,92 @@ subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoin
     deallocate(matbox1,matbox2)
   end if
 end subroutine read_Vh_stock
+
+!===================================================================================================================================
+
+subroutine restart_singlescale(comm,lg,ng,singlescale)
+  use structures, only: s_rgrid,s_singlescale
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  use salmon_global, only: directory_read_data,yn_self_checkpoint,yn_datafiles_dump
+  implicit none
+  integer      ,intent(in) :: comm
+  type(s_rgrid),intent(in) :: lg,ng
+  type(s_singlescale)      :: singlescale
+  !
+  integer :: iu1_r
+  integer :: ix,iy,iz
+  real(8),allocatable :: matbox1(:,:,:,:,:),matbox2(:,:,:,:,:),matbox3(:,:,:,:)
+  character(100) :: dir_file_in
+  character(256) :: gdir,wdir
+  logical :: iself
+
+  call generate_restart_directory_name(directory_read_data,gdir,wdir)
+
+  iself = (yn_self_checkpoint == 'y')
+  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+    wdir = gdir
+  end if
+
+  if (comm_is_root(nproc_id_global)) then
+     write(*,*) "The data for the single-scale Maxwell-TDDFT method is read from restart directory"
+  endif
+  iu1_r = 96
+  dir_file_in = trim(wdir)//"singlescale.bin"
+
+  if (iself) then
+    ! read all processes
+    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
+    read(iu1_r) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
+    read(iu1_r) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    read(iu1_r) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    read(iu1_r) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    close(iu1_r)
+  else
+    ! read root process
+    allocate(matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
+    allocate(matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+    allocate(matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
+
+    if(comm_is_root(nproc_id_global))then
+      open(iu1_r,file=dir_file_in,form='unformatted')
+      read(iu1_r) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
+      read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      read(iu1_r) matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
+      close(iu1_r)
+    end if
+
+    call comm_bcast(matbox1,comm)
+    call comm_bcast(matbox2,comm)
+    call comm_bcast(matbox3,comm)
+
+!$omp parallel do collapse(2)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      singlescale%vec_Ac_m(-1:1,ix,iy,iz,1:3) = matbox1(-1:1,ix,iy,iz,1:3)
+      singlescale%vec_je_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,1)
+      singlescale%vec_Ac_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,2)
+    end do
+    end do
+    end do
+    
+    !$omp parallel do collapse(2)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      singlescale%vec_Ac_boundary_bottom_old(ix,iy,1:3) = matbox3(ix,iy,1:3,1)
+      singlescale%vec_Ac_boundary_top_old   (ix,iy,1:3) = matbox3(ix,iy,1:3,2)
+      singlescale%vec_Ac_boundary_bottom    (ix,iy,1:3) = matbox3(ix,iy,1:3,3)
+      singlescale%vec_Ac_boundary_top       (ix,iy,1:3) = matbox3(ix,iy,1:3,4)
+    end do
+    end do
+
+    deallocate(matbox1,matbox2,matbox3)
+  end if
+end subroutine restart_singlescale
 
 !===================================================================================================================================
 !(currently not used: see subroutine "read_atomic_coordinates")

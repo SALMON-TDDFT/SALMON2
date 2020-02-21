@@ -33,7 +33,6 @@ use timer
 use global_variables_ms
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
-use fdtd_coulomb_gauge, only: ls_singlescale
 use checkpoint_restart_sub
 implicit none
 
@@ -61,7 +60,6 @@ type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
-type(ls_singlescale) :: singlescale
 type(s_ofile) :: ofile
 
 integer :: nmacro

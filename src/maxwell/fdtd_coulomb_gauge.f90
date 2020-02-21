@@ -17,22 +17,7 @@
 
 ! for single-scale Maxwell-TDDFT method
 module fdtd_coulomb_gauge
-  use structures, only: s_sendrecv_grid
   implicit none
-
-  type ls_singlescale
-    integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
-    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),bnmat(4,4)
-    real(8),allocatable :: vec_Ac(:,:,:,:),vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
-    & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
-    & ,grad_dVh_dt(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
-    & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:),vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
-    & ,integral_poynting(:),Ac_zt(:,:)
-    real(8),allocatable :: box(:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
-    & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:),integral_poynting_tmp(:),integral_poynting_tmp2(:) &
-    & ,vec_Ac_ext(:,:,:,:),vec_Ac_ext_old(:,:,:,:)
-    type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
-  end type ls_singlescale
 
 contains
 
@@ -55,12 +40,10 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   type(s_sendrecv_grid)     :: srg_ng
   type(s_vector)            :: Ac     ! A/c, A: vector potential, c: speed of light
   type(s_scalar)            :: div_Ac ! div(A/c)
-  type(ls_singlescale)      :: fw     ! FDTD working arrays, etc.
+  type(s_singlescale)       :: fw     ! FDTD working arrays, etc.
   !
   integer,parameter :: mstep=100
-  integer,dimension(3) :: ng_sta,ng_end,ng_num,mg_sta,mg_end,mg_num,lg_sta,lg_end,lg_num
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
-
   real(8) :: Hvol,dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
   real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
@@ -75,44 +58,14 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   Hvol = hgs(1)*hgs(2)*hgs(3)
   dt_m = dt / dble(mstep)
 
-  ng_sta = ng%is
-  ng_end = ng%ie
-  ng_num = ng%num
-  mg_sta = mg%is
-  mg_end = mg%ie
-  mg_num = mg%num
-  lg_sta = lg%is
-  lg_end = lg%ie
-  lg_num = lg%num
-
-  if(.not.allocated(fw%vec_Ac)) then
-    call init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
-    allocate(fw%box(ng%is_array(1):ng%ie_array(1), &
-    & ng%is_array(2):ng%ie_array(2), &
-    & ng%is_array(3):ng%ie_array(3)))
-    fw%box = 0d0
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
-      fw%box(ix,iy,iz) = Vh%f(ix,iy,iz)
-      fw%vec_je_old(1:3,ix,iy,iz) = j_e%v(1:3,ix,iy,iz)
-      fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz)
-    end do
-    end do
-    end do
-    call update_overlap_real8(srg_ng, ng, fw%box)
-    call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
-  end if
-
 !-----------------------------------------------------------------------------------------------------------------------------------
 
   fw%box = 0d0
   wrk = 0d0
 !$OMP parallel do collapse(2) private(ix,iy,iz,vec_je,rho_t) reduction(+:wrk)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(1:3,ix,iy,iz) )*0.5d0 ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
     rho_t  = ( rho%f(ix,iy,iz)     + fw%rho_old(ix,iy,iz)        )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
     fw%curr(ix,iy,iz,1:3) = vec_je + rho_t * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! curr(t): electron number current density
@@ -122,7 +75,7 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   end do
   end do
   end do
-  wrk = wrk/dble(lg_num(1)*lg_num(2)*lg_num(3))
+  wrk = wrk/dble(lg%num(1)*lg%num(2)*lg%num(3))
   call comm_summation(wrk,out_curr,3,comm)
 
 ! calculate grad_dVh_dt: gradient of d(Vh)/dt (Vh: Hartree potential)
@@ -130,9 +83,9 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh) ! grad[Vh(t+dt/2)]
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     fw%grad_dVh_dt(1:3,ix,iy,iz) = ( fw%grad_Vh(1:3,ix,iy,iz) - fw%grad_Vh_old(1:3,ix,iy,iz) ) /dt ! t differential
   end do
   end do
@@ -147,9 +100,9 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   do ii=1,mstep
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iz=ng_sta(3),ng_end(3)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
 
       fw%vec_Ac_m(-1,ix,iy,iz,1:3) = fw%vec_Ac_m(0,ix,iy,iz,1:3)
       fw%vec_Ac_m(0 ,ix,iy,iz,1:3) = fw%vec_Ac_m(1,ix,iy,iz,1:3)
@@ -161,36 +114,36 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
     do i1=1,3
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
         fw%box(ix,iy,iz) = fw%vec_Ac_m(0,ix,iy,iz,i1)
       end do
       end do
       end do
 
       call update_overlap_real8(fw%srg_eg, ng, fw%box)
-      if(ng_sta(3)==lg_sta(3))then
+      if(ng%is(3)==lg%is(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
-          fw%box(ix,iy,lg_sta(3)-1) = fw%vec_Ac_boundary_bottom(ix,iy,i1)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          fw%box(ix,iy,lg%is(3)-1) = fw%vec_Ac_boundary_bottom(ix,iy,i1)
         end do
         end do
       end if
-      if(ng_end(3)==lg_end(3))then
+      if(ng%ie(3)==lg%ie(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
-          fw%box(ix,iy,lg_end(3)+1) = fw%vec_Ac_boundary_top(ix,iy,i1)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          fw%box(ix,iy,lg%ie(3)+1) = fw%vec_Ac_boundary_top(ix,iy,i1)
         end do
         end do
       end if
 
   !$OMP parallel do collapse(2) private(ix,iy,iz,lap_A)
-      do iz=ng_sta(3),ng_end(3)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
         lap_A = ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix-1,iy,iz) + fw%box(ix+1,iy,iz) ) / Hgs(1)**2 &
               + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy-1,iz) + fw%box(ix,iy+1,iz) ) / Hgs(2)**2 &
               + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
@@ -204,9 +157,9 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   !   rotation & divergence of A
       if(ii==mstep/2) then
   !$OMP parallel do collapse(2) private(ix,iy,iz,wrk,dr,diff_A)
-        do iz=ng_sta(3),ng_end(3)
-        do iy=ng_sta(2),ng_end(2)
-        do ix=ng_sta(1),ng_end(1)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
         ! rot(A)
           wrk(1) = ( fw%box(ix+1,iy,iz) - fw%box(ix-1,iy,iz) ) / ( 2d0* Hgs(1) )
           wrk(2) = ( fw%box(ix,iy+1,iz) - fw%box(ix,iy-1,iz) ) / ( 2d0* Hgs(2) )
@@ -231,8 +184,8 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
     call pulse(tm+dt_m,0d0,   Aext0)
     call pulse(tm+dt_m,Hgs(3),Aext1)
   !$OMP parallel do collapse(2) private(ix,iy)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
       fw%vec_Ac_ext_old(ix,iy,0,1:3) = Aext0_old
       fw%vec_Ac_ext_old(ix,iy,1,1:3) = Aext1_old
       fw%vec_Ac_ext(ix,iy,0,1:3) = Aext0
@@ -243,31 +196,31 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 
   ! z axis: Mur absorbing boundary condition
     coef = ( cspeed_au * dt_m - Hgs(3) ) / ( cspeed_au * dt_m + Hgs(3) )
-    if(ng_sta(3)==lg_sta(3))then
+    if(ng%is(3)==lg%is(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
       ! absorbing boundary condition with the incident field vec_Ac_ext
         fw%vec_Ac_boundary_bottom(ix,iy,1:3) = fw%vec_Ac_ext(ix,iy,0,1:3) &
-                                        + ( fw%vec_Ac_m(0,ix,iy,lg_sta(3),1:3) - fw%vec_Ac_ext_old(ix,iy,1,1:3) )  &
-                                        + coef* ( ( fw%vec_Ac_m(1,ix,iy,lg_sta(3),1:3) - fw%vec_Ac_ext(ix,iy,1,1:3) ) &
+                                        + ( fw%vec_Ac_m(0,ix,iy,lg%is(3),1:3) - fw%vec_Ac_ext_old(ix,iy,1,1:3) )  &
+                                        + coef* ( ( fw%vec_Ac_m(1,ix,iy,lg%is(3),1:3) - fw%vec_Ac_ext(ix,iy,1,1:3) ) &
                                                 - ( fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) - fw%vec_Ac_ext_old(ix,iy,0,1:3) ) )
       end do
       end do
     end if
-    if(ng_end(3)==lg_end(3))then
+    if(ng%ie(3)==lg%ie(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iy=ng_sta(2),ng_end(2)
-      do ix=ng_sta(1),ng_end(1)
-        fw%vec_Ac_boundary_top(ix,iy,1:3) = fw%vec_Ac_m(0,ix,iy,lg_end(3),1:3)   &
-                                    + coef* ( fw%vec_Ac_m(1,ix,iy,lg_end(3),1:3) - fw%vec_Ac_boundary_top_old(ix,iy,1:3) )
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%vec_Ac_boundary_top(ix,iy,1:3) = fw%vec_Ac_m(0,ix,iy,lg%ie(3),1:3)   &
+                                    + coef* ( fw%vec_Ac_m(1,ix,iy,lg%ie(3),1:3) - fw%vec_Ac_boundary_top_old(ix,iy,1:3) )
       end do
       end do
     end if
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iy=ng_sta(2),ng_end(2)
-    do ix=ng_sta(1),ng_end(1)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
       fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) = fw%vec_Ac_boundary_bottom(ix,iy,1:3)
       fw%vec_Ac_boundary_top_old   (ix,iy,1:3) = fw%vec_Ac_boundary_top   (ix,iy,1:3)
     end do
@@ -286,9 +239,9 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   fw%vbox = 0d0
 
 !$OMP parallel do collapse(2) private(ix,iy,iz,wrk,wrk2,wrk3,wrk4) reduction(+:e_em_wrk,e_joule_wrk)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
 
     fw%vbox(1:3,ix,iy,iz) = ( fw%vec_Ac_m(1,ix,iy,iz,1:3) + fw%vec_Ac_old(1:3,ix,iy,iz) ) * 0.5d0 ! ( A(t+dt) + A(t) )/2
     fw%lgbox1(ix,iy,iz)   = fw%divergence_A(ix,iy,iz)
@@ -307,15 +260,15 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   end do
   end do
 
-  call comm_summation(fw%vbox,fw%vec_Ac,3*lg_num(1)*lg_num(2)*lg_num(3),comm)
-  call comm_summation(fw%lgbox1,fw%lgbox2,lg_num(1)*lg_num(2)*lg_num(3),comm)
+  call comm_summation(fw%vbox,fw%vec_Ac,3*lg%num(1)*lg%num(2)*lg%num(3),comm)
+  call comm_summation(fw%lgbox1,fw%lgbox2,lg%num(1)*lg%num(2)*lg%num(3),comm)
   call comm_summation(e_em_wrk,e_em,comm)
   call comm_summation(e_joule_wrk,e_joule,comm)
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=mg_sta(3),mg_end(3)
-  do iy=mg_sta(2),mg_end(2)
-  do ix=mg_sta(1),mg_end(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     Ac%v(:,ix,iy,iz) = fw%vec_Ac(:,ix,iy,iz) ! Ac(t+dt/2)
     div_Ac%f(ix,iy,iz) = fw%lgbox2(ix,iy,iz)
   end do
@@ -325,9 +278,9 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 ! stock old Ac, grad_Vh, j_e, & rho
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=ng_sta(3),ng_end(3)
-  do iy=ng_sta(2),ng_end(2)
-  do ix=ng_sta(1),ng_end(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
     fw%vec_Ac_old(:,ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,1:3) ! Ac(t+dt) --> Ac(t) of next step
     fw%grad_Vh_old(1:3,ix,iy,iz) = fw%grad_Vh(1:3,ix,iy,iz) ! grad[Vh(t-dt/2)] of next step
     fw%vec_je_old(1:3,ix,iy,iz) = j_e%v(1:3,ix,iy,iz) ! j_e(t-dt/2) of next step
@@ -340,26 +293,26 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 
   ! integral(A) @ z = 0 (bottom boundary)
   wrk = 0d0
-  wrk(1) = sum(fw%vec_Ac(1,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3)))
-  wrk(2) = sum(fw%vec_Ac(2,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3)))
-  wrk(3) = sum(fw%vec_Ac(3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3)))
-  out_Ab1 = wrk / dble(lg_num(1)*lg_num(2))
+  wrk(1) = sum(fw%vec_Ac(1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3)))
+  wrk(2) = sum(fw%vec_Ac(2,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3)))
+  wrk(3) = sum(fw%vec_Ac(3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3)))
+  out_Ab1 = wrk / dble(lg%num(1)*lg%num(2))
 
   ! integral(A) @ z = az (top boundary)
   wrk = 0d0
-  wrk(1) = sum(fw%vec_Ac(1,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_end(3)))
-  wrk(2) = sum(fw%vec_Ac(2,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_end(3)))
-  wrk(3) = sum(fw%vec_Ac(3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_end(3)))
-  out_Ab2 = wrk / dble(lg_num(1)*lg_num(2))
+  wrk(1) = sum(fw%vec_Ac(1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%ie(3)))
+  wrk(2) = sum(fw%vec_Ac(2,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%ie(3)))
+  wrk(3) = sum(fw%vec_Ac(3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%ie(3)))
+  out_Ab2 = wrk / dble(lg%num(1)*lg%num(2))
 
 ! Surface integral of the poynting vector S
   coef = Hgs(1)*Hgs(2)
   e_poynting_wrk = 0d0
-  if(ng_sta(3)==lg_sta(3)) then ! integral(S) @ z = 0 (bottom boundary)
-    e_poynting_wrk(1) = sum( fw%poynting_vector(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),lg_sta(3)) ) * coef
+  if(ng%is(3)==lg%is(3)) then ! integral(S) @ z = 0 (bottom boundary)
+    e_poynting_wrk(1) = sum( fw%poynting_vector(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3)) ) * coef
   end if
-  if(ng_end(3)==lg_end(3)) then ! integral(S) @ z = az (top boundary)
-    e_poynting_wrk(2) = sum( fw%poynting_vector(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),lg_end(3)) ) * coef
+  if(ng%ie(3)==lg%ie(3)) then ! integral(S) @ z = az (top boundary)
+    e_poynting_wrk(2) = sum( fw%poynting_vector(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%ie(3)) ) * coef
   end if
   call comm_summation(e_poynting_wrk,e_poynting,2,comm)
 
@@ -373,18 +326,18 @@ subroutine fdtd_singlescale(itt,comm,lg,mg,ng,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 ! for spatial distribution of excitation energy
   coef = Hgs(1)*Hgs(2)
   fw%integral_poynting_tmp = 0d0
-  do iz=ng_sta(3),ng_end(3)
-    fw%integral_poynting_tmp(iz) = sum( fw%poynting_vector(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),iz) ) * coef
+  do iz=ng%is(3),ng%ie(3)
+    fw%integral_poynting_tmp(iz) = sum( fw%poynting_vector(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),iz) ) * coef
   end do
-  call comm_summation(fw%integral_poynting_tmp,fw%integral_poynting_tmp2,lg_num(3),comm)
+  call comm_summation(fw%integral_poynting_tmp,fw%integral_poynting_tmp2,lg%num(3),comm)
   fw%integral_poynting = fw%integral_poynting + dt * fw%integral_poynting_tmp2
 
 ! for the vector potential Ax(z,t)
-  do iz=lg_sta(3),lg_end(3)
-    fw%Ac_zt(:,iz) = sum( fw%vec_Ac(:,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),iz) )/(lg_num(1)*lg_num(2))
+  do iz=lg%is(3),lg%ie(3)
+    fw%Ac_zt(:,iz) = sum( fw%vec_Ac(:,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),iz) )/(lg%num(1)*lg%num(2))
   end do
   if(comm_is_root(nproc_id_global)) then
-    do iz=lg_sta(3),lg_end(3)
+    do iz=lg%is(3),lg%ie(3)
       write(fw%fh_Ac_zt,fmt='(99(1X,E23.15E3))',advance='no') dble(iz)*hgs(3),fw%Ac_zt(1,iz),fw%Ac_zt(2,iz),fw%Ac_zt(3,iz)
     end do
     write(fw%fh_Ac_zt,'()')
@@ -410,109 +363,142 @@ contains
     return
   end subroutine pulse
 
-  subroutine init(ng_sta,ng_end,lg_sta,lg_end,hgs,fw)
-    use salmon_global, only: sysname,base_directory
-    use parallelization, only: nproc_id_global
-    use communication, only: comm_is_root
-    use initialization_sub, only: set_bn
-    use filesystem, only: open_filehandle
-    use inputoutput, only: t_unit_time
-    implicit none
-    integer,dimension(3),intent(in) :: ng_sta,ng_end,lg_sta,lg_end
-    real(8)  ,intent(in) :: hgs(3)
-    type(ls_singlescale) :: fw
-    !
-    character(100) :: filename
-    integer :: lg_num(3),ii,jj
-    lg_num = lg_end - lg_sta + 1
-
-    fw%Energy_poynting = 0d0
-    fw%Energy_joule = 0d0
-
-    call set_bn(fw%bnmat)
-    do jj=1,3
-      do ii=1,4
-        fw%coef_nab(ii,jj) = fw%bnmat(ii,4)/hgs(jj)
-      end do
-    end do
-
-    allocate( fw%vec_Ac     (3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) )
-    allocate( fw%vec_Ac_old (3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-    allocate( fw%curr         (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),3) )
-    allocate( fw%vec_je_old (3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-    allocate( fw%rho_old      (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-    allocate( fw%grad_dVh_dt(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-    allocate( fw%grad_Vh    (3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-    allocate( fw%grad_Vh_old(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) )
-
-  !1st element: time step (-1->m-1, 0->m, 1->m+1)
-  !5th element: components of A vector (1->Ax, 2->Ay, 3->Az)
-    allocate( fw%vec_Ac_m(-1:1,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3),1:3) )
-
-    allocate( fw%vec_Ac_boundary_bottom(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),1:3) &
-             ,fw%vec_Ac_boundary_bottom_old(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),1:3) &
-             ,fw%vec_Ac_boundary_top(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),1:3) &
-             ,fw%vec_Ac_boundary_top_old(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),1:3) )
-
-    allocate(fw%integral_poynting(lg_sta(3):lg_end(3)))
-
-    allocate(fw%rotation_A(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
-     & ,fw%poynting_vector(3,ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
-          & ,fw%divergence_A(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),ng_sta(3):ng_end(3)) &
-          & ,fw%vbox      (3,lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) &
-          & ,fw%lgbox1      (lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) &
-          & ,fw%lgbox2      (lg_sta(1):lg_end(1),lg_sta(2):lg_end(2),lg_sta(3):lg_end(3)) &
-          & ,fw%integral_poynting_tmp(lg_num(3)),fw%integral_poynting_tmp2(lg_num(3)) &
-          & ,fw%vec_Ac_ext    (ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),0:1,1:3) &
-          & ,fw%vec_Ac_ext_old(ng_sta(1):ng_end(1),ng_sta(2):ng_end(2),0:1,1:3) &
-          & ,fw%Ac_zt(3,lg_sta(3):lg_end(3)))
-
-    fw%vec_Ac = 0d0
-    fw%vec_Ac_old = 0d0
-    fw%vec_Ac_m = 0d0
-    fw%vec_Ac_boundary_bottom = 0d0
-    fw%vec_Ac_boundary_bottom_old = 0d0
-    fw%vec_Ac_boundary_top = 0d0
-    fw%vec_Ac_boundary_top_old = 0d0
-    fw%integral_poynting = 0d0
-    fw%curr = 0d0
-    fw%vec_je_old = 0d0
-
-    if(comm_is_root(nproc_id_global)) then
-      write(filename,"(2A,'_rt_micro.data')") trim(base_directory),trim(SYSname)
-      fw%fh_rt_micro = open_filehandle(filename)
-      write(fw%fh_rt_micro, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "time", trim(t_unit_time%name), &
-        & 2, "Ac_tot_x(z=0)", "a.u.", &
-        & 3, "Ac_tot_y(z=0)", "a.u.", &
-        & 4, "Ac_tot_z(z=0)", "a.u.", &
-        & 5, "Ac_tot_x(z=L)", "a.u.", &
-        & 6, "Ac_tot_y(z=L)", "a.u.", &
-        & 7, "Ac_tot_z(z=L)", "a.u.", &
-        & 8, "Ac_ext_x",      "a.u.", &
-        & 9, "Ac_ext_y",      "a.u.", &
-       & 10, "Ac_ext_z",      "a.u.", &
-       & 11, "J_x(w/o Ac)",   "a.u.", &
-       & 12, "J_y(w/o Ac)",   "a.u.", &
-       & 13, "J_z(w/o Ac)",   "a.u.", &
-       & 14, "E_electron",    "a.u.", &
-       & 15, "E_poynting(z=0)", "a.u.", &
-       & 16, "E_poynting(z=L)", "a.u.", &
-       & 17, "E_em",            "a.u.", &
-       & 18, "E_joule",         "a.u."
-
-    ! for spatial distribution of excitation energy
-      write(filename,"(2A,'_excitation.data')") trim(base_directory),trim(SYSname)
-      fw%fh_excitation = open_filehandle(filename)
-
-    ! for the vector potential Ac(z,t)
-      write(filename,"(2A,'_Ac_zt.data')") trim(base_directory),trim(SYSname)
-      fw%fh_Ac_zt = open_filehandle(filename)
-    end if
-
-  end subroutine init
-
 end subroutine fdtd_singlescale
+
+!===================================================================================================================================
+
+subroutine init_singlescale(comm,ng,lg,hgs,rho,Vh,srg_ng,fw)
+  use structures
+  use sendrecv_grid, only: update_overlap_real8
+  use stencil_sub, only: calc_gradient_field
+  use salmon_global, only: sysname,base_directory,yn_restart
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
+  use initialization_sub, only: set_bn
+  use filesystem, only: open_filehandle
+  use inputoutput, only: t_unit_time
+  use checkpoint_restart_sub, only: restart_singlescale
+  implicit none
+  integer       ,intent(in) :: comm
+  type(s_rgrid) ,intent(in) :: lg,ng
+  real(8)       ,intent(in) :: hgs(3)
+  type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
+  type(s_sendrecv_grid)     :: srg_ng
+  type(s_singlescale)       :: fw
+  !
+  character(100) :: filename
+  integer :: ii,jj,ix,iy,iz
+  real(8) :: bnmat(4,4)
+
+  fw%Energy_poynting = 0d0
+  fw%Energy_joule = 0d0
+
+  call set_bn(bnmat)
+  do jj=1,3
+    do ii=1,4
+      fw%coef_nab(ii,jj) = bnmat(ii,4)/hgs(jj)
+    end do
+  end do
+
+  allocate( fw%vec_Ac     (3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
+  allocate( fw%vec_Ac_old (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
+  allocate( fw%curr         (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3) )
+  allocate( fw%vec_je_old (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
+  allocate( fw%rho_old      (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
+  allocate( fw%grad_dVh_dt(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
+  allocate( fw%grad_Vh    (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
+  allocate( fw%grad_Vh_old(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
+
+!1st element: time step (-1->m-1, 0->m, 1->m+1)
+!5th element: components of A vector (1->Ax, 2->Ay, 3->Az)
+  allocate( fw%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3) )
+
+  allocate( fw%vec_Ac_boundary_bottom(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3) &
+           ,fw%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3) &
+           ,fw%vec_Ac_boundary_top(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3) &
+           ,fw%vec_Ac_boundary_top_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3) )
+
+  allocate(fw%integral_poynting(lg%is(3):lg%ie(3)))
+
+  allocate(fw%rotation_A(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
+   & ,fw%poynting_vector(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
+        & ,fw%divergence_A(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
+        & ,fw%vbox      (3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
+        & ,fw%lgbox1      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
+        & ,fw%lgbox2      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
+        & ,fw%integral_poynting_tmp(lg%num(3)),fw%integral_poynting_tmp2(lg%num(3)) &
+        & ,fw%vec_Ac_ext    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),0:1,1:3) &
+        & ,fw%vec_Ac_ext_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),0:1,1:3) &
+        & ,fw%Ac_zt(3,lg%is(3):lg%ie(3)))
+
+  fw%vec_Ac = 0d0
+  fw%vec_Ac_old = 0d0
+  fw%vec_Ac_m = 0d0
+  fw%vec_Ac_boundary_bottom = 0d0
+  fw%vec_Ac_boundary_bottom_old = 0d0
+  fw%vec_Ac_boundary_top = 0d0
+  fw%vec_Ac_boundary_top_old = 0d0
+  fw%integral_poynting = 0d0
+  fw%curr = 0d0
+  fw%vec_je_old = 0d0
+
+  if(comm_is_root(nproc_id_global)) then
+    write(filename,"(2A,'_rt_micro.data')") trim(base_directory),trim(SYSname)
+    fw%fh_rt_micro = open_filehandle(filename)
+    write(fw%fh_rt_micro, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+      & 1, "time", trim(t_unit_time%name), &
+      & 2, "Ac_tot_x(z=0)", "a.u.", &
+      & 3, "Ac_tot_y(z=0)", "a.u.", &
+      & 4, "Ac_tot_z(z=0)", "a.u.", &
+      & 5, "Ac_tot_x(z=L)", "a.u.", &
+      & 6, "Ac_tot_y(z=L)", "a.u.", &
+      & 7, "Ac_tot_z(z=L)", "a.u.", &
+      & 8, "Ac_ext_x",      "a.u.", &
+      & 9, "Ac_ext_y",      "a.u.", &
+     & 10, "Ac_ext_z",      "a.u.", &
+     & 11, "J_x(w/o Ac)",   "a.u.", &
+     & 12, "J_y(w/o Ac)",   "a.u.", &
+     & 13, "J_z(w/o Ac)",   "a.u.", &
+     & 14, "E_electron",    "a.u.", &
+     & 15, "E_poynting(z=0)", "a.u.", &
+     & 16, "E_poynting(z=L)", "a.u.", &
+     & 17, "E_em",            "a.u.", &
+     & 18, "E_joule",         "a.u."
+
+  ! for spatial distribution of excitation energy
+    write(filename,"(2A,'_excitation.data')") trim(base_directory),trim(SYSname)
+    fw%fh_excitation = open_filehandle(filename)
+
+  ! for the vector potential Ac(z,t)
+    write(filename,"(2A,'_Ac_zt.data')") trim(base_directory),trim(SYSname)
+    fw%fh_Ac_zt = open_filehandle(filename)
+  end if
+  
+  allocate(fw%box(ng%is_array(1):ng%ie_array(1), &
+  & ng%is_array(2):ng%ie_array(2), &
+  & ng%is_array(3):ng%ie_array(3)))
+  fw%box = 0d0
+
+!$OMP parallel do collapse(2) private(ix,iy,iz)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+    fw%box(ix,iy,iz) = Vh%f(ix,iy,iz)
+    fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz)
+  end do
+  end do
+  end do
+  call update_overlap_real8(srg_ng, ng, fw%box)
+  call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
+  
+  if(yn_restart=='y') then
+    call restart_singlescale(comm,lg,ng,fw)
+  end if
+
+  return
+end subroutine init_singlescale
+
+!===================================================================================================================================
 
 ! line integral \int_{{\bf r}_0 \rightarrow {\bf r}_1} {\bf A}({\bf r}) \cdot d{\bf x}
 ! path: r0 --> r1 = (ix1*Hx,iy1*Hy,iz1*Hz)

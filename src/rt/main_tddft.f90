@@ -28,7 +28,6 @@ use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
-use fdtd_coulomb_gauge, only: ls_singlescale
 use checkpoint_restart_sub
 implicit none
 
@@ -57,7 +56,7 @@ type(s_sendrecv_grid) :: srg,srg_ng
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
-type(ls_singlescale) :: singlescale
+type(s_singlescale) :: singlescale
 
 integer :: Mit
 integer :: nntime
@@ -98,9 +97,9 @@ TE : do itt=Mit+1,itotNtime
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
     if (mod(itt,2)==1) then
-      call checkpoint_rt(lg,mg,ng,system,info,spsi_out,itt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+      call checkpoint_rt(lg,mg,ng,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale)
     else
-      call checkpoint_rt(lg,mg,ng,system,info,spsi_in, itt,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+      call checkpoint_rt(lg,mg,ng,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale)
     endif
     call timer_end(LOG_CHECKPOINT_SELF)
     call comm_sync_all
@@ -145,7 +144,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call checkpoint_rt(lg,mg,ng,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,ofl%dir_out_restart)
+  call checkpoint_rt(lg,mg,ng,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,singlescale,ofl%dir_out_restart)
 end if
 
 call finalize_xc(xc_func)

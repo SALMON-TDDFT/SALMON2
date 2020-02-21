@@ -23,7 +23,7 @@ contains
 
 subroutine initialization_ms( &
                      nmacro, &
-                     Mit, itotNtime, system, energy, ewald, rt, md, singlescale,&
+                     Mit, itotNtime, system, energy, ewald, rt, md,&
                      stencil, fg, poisson,  &
                      lg, mg, ng,  &
                      info, info_field,  &
@@ -59,7 +59,6 @@ use inputoutput
   use force_sub, only: calc_force
   use hamiltonian
   use md_sub, only: init_md
-  use fdtd_coulomb_gauge, only: ls_singlescale
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
@@ -105,7 +104,6 @@ use inputoutput
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
-  type(ls_singlescale) :: singlescale
   type(s_ofile) :: ofile
 
   type(s_fdtd_system) :: fs
