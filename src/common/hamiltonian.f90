@@ -598,6 +598,7 @@ end subroutine update_kvector_nonlocalpt
 subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,ppg)
   use math_constants,only : zi
   use structures
+  use timer
 !  use fdtd_coulomb_gauge, only: line_integral
   implicit none
   integer           ,intent(in) :: ik_s,ik_e !,n_max
@@ -613,6 +614,9 @@ subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,ppg)
 !  real(8),allocatable :: A_lerp(:,:),line(:,:),wrk(:)
 !  Hgs = system%Hgs
 !  allocate(A_lerp(3,n_max),line(3,n_max),wrk(n_max),index(n_max))
+
+  call timer_begin(LOG_SS_UPDATE_NONLOCALPT_MICROAC)
+
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
   do ilma=1,ppg%nlma
     iatom = ppg%ia_tbl(ilma)
@@ -650,6 +654,9 @@ subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,ppg)
     end do
   end do
 !  deallocate(A_lerp,line,wrk,index)
+
+  call timer_end(LOG_SS_UPDATE_NONLOCALPT_MICROAC)
+
   return
 end subroutine update_kvector_nonlocalpt_microAc
 
