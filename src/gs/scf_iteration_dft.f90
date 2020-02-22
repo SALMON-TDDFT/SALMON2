@@ -110,7 +110,7 @@ if(step_initial_mix_zero.gt.1)then
                      iter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
                      poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-      call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+      call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
       if(comm_is_root(nproc_id_global)) write(*,*) "  no-mixing iter=", iter
 
    end do DFT_NoMix_Iteration
