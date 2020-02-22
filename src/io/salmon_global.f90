@@ -56,6 +56,8 @@ module salmon_global
   character(1)   :: yn_self_checkpoint
   integer        :: checkpoint_interval
   character(1)   :: yn_reset_step_restart
+  character(256) :: read_gs_restart_data
+  character(256) :: write_gs_restart_data
   real(8)        :: time_shutdown
   !remove later
   character(256) :: dump_filename

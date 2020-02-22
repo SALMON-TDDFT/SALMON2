@@ -215,38 +215,49 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   ! restart from binary
   if (yn_restart == 'y') then
      call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
-     i = mixing%num_rho_stock+1
-     !srho%f      => mg (orbital domain allocation)
-     !srho_s(j)%f => mg (orbital domain allocation)
-     !mixing%srho_in(i)%f => ng (density domain allocation)
-     do iz=ng%is(3),ng%ie(3)
-     do iy=ng%is(2),ng%ie(2)
-     do ix=ng%is(1),ng%ie(1)
-        srho_s(1)%f(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
-     end do
-     end do
-     end do
-     if(system%nspin==2) then
-        do jspin=1,system%nspin
-           do iz=ng%is(3),ng%ie(3)
-           do iy=ng%is(2),ng%ie(2)
-           do ix=ng%is(1),ng%ie(1)
-              srho_s(jspin)%f(ix,iy,iz) = mixing%srho_s_in(i,jspin)%f(ix,iy,iz)
-           end do
-           end do
-           end do
+     if(read_gs_restart_data=='wfn') then
+        call calc_density(system,srho_s,spsi,info,mg)
+     else 
+        i = mixing%num_rho_stock+1
+        !srho%f      => mg (orbital domain allocation)
+        !srho_s(j)%f => mg (orbital domain allocation)
+        !mixing%srho_in(i)%f => ng (density domain allocation)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+           srho_s(1)%f(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
         end do
+        end do
+        end do
+        if(system%nspin==2) then
+           do jspin=1,system%nspin
+              do iz=ng%is(3),ng%ie(3)
+              do iy=ng%is(2),ng%ie(2)
+              do ix=ng%is(1),ng%ie(1)
+                 srho_s(jspin)%f(ix,iy,iz) = mixing%srho_s_in(i,jspin)%f(ix,iy,iz)
+              end do
+              end do
+              end do
+           end do
+        endif
+
+        if( read_gs_restart_data=='rho_inout'.or. &
+            read_gs_restart_data=='rho'         )then
+           call init_wf(lg,mg,system,info,spsi,pinfo)
+        endif
      endif
-     if(yn_reset_step_restart=='y') Miter = 0
+
+     if(yn_reset_step_restart=='y' .or. &
+        (read_gs_restart_data=='rho'.or.read_gs_restart_data=='rho_inout') ) Miter=0
+
   else
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     call init_wf(lg,mg,system,info,spsi,pinfo)
+    call calc_density(system,srho_s,spsi,info,mg)
   end if
 
-  if(read_gs_dns_cube == 'n') then
-     if (yn_restart == 'n') call calc_density(system,srho_s,spsi,info,mg)
-  else
+  if(read_gs_dns_cube == 'y') then
      if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
      call read_dns(lg,mg,srho_s(1)%f) ! cube file only
   end if
@@ -255,6 +266,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   do jspin=1,nspin
      srho%f = srho%f + srho_s(jspin)%f
   end do
+
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)

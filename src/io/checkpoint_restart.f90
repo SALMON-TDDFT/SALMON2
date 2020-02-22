@@ -282,7 +282,7 @@ end subroutine restart_rt
 !===================================================================================================================================
 
 subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
-  use salmon_global, only: theory,calc_mode
+  use salmon_global, only: theory,calc_mode,write_gs_restart_data
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global, nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -297,9 +297,13 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   type(s_scalar) ,optional,intent(in) :: sVh_stock1,sVh_stock2
   logical        ,optional,intent(in) :: is_self_checkpoint
 
+  logical :: flag_GS, flag_RT
   integer :: iu1_w
   character(100) :: dir_file_out
   logical :: iself
+
+  flag_GS = (theory=='dft'.or.theory=='dft_md'.or.calc_mode=='GS')
+  flag_RT = (theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')
 
   if (present(is_self_checkpoint)) then
     iself = is_self_checkpoint
@@ -332,17 +336,28 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   end if
 
   !wave fucntion
-  call write_wavefunction(odir,lg,mg,system,info,spsi,iself)
+  if( flag_GS .and. &
+      (write_gs_restart_data=='rho_inout'.or.write_gs_restart_data=='rho'))then
+     ! this case => do not write wavefunction
+  else
+     call write_wavefunction(odir,lg,mg,system,info,spsi,iself)
+  endif
 
   !rho_inout
-  if((theory=='dft'.or.calc_mode=='GS'))then
-    if (present(mixing)) then
-      call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
-    end if
+  if( flag_GS.and. &
+     (write_gs_restart_data=='all'.or.write_gs_restart_data=='rho_inout'))then
+     if (present(mixing)) then
+        call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
+     end if
   end if
 
+  !rho (only for GS)
+  if( flag_GS .and. write_gs_restart_data=='rho' )then
+     call write_rho(odir,lg,ng,system,info,mixing)
+  endif
+
   !Vh_stock
-  if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')then
+  if( flag_RT )then
     if (present(sVh_stock1) .and. present(sVh_stock2)) then
       call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
     end if
@@ -356,7 +371,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_restart, theory,calc_mode,yn_datafiles_dump
+  use salmon_global, only: yn_restart, theory,calc_mode,yn_datafiles_dump,read_gs_restart_data
   implicit none
   character(*)              ,intent(in) :: idir
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
@@ -368,13 +383,16 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   type(s_scalar),optional,intent(inout) :: sVh_stock1,sVh_stock2
   logical       ,optional,intent(in)    :: is_self_checkpoint
 
+  logical :: flag_GS, flag_RT
   integer :: mk,mo
-
   real(8),allocatable :: roccbox(:,:,:)
   integer :: iu1_r
   character(256) :: dir_file_in
   integer :: comm,itt,nprocs
   logical :: iself
+
+  flag_GS = (theory=='dft'.or.theory=='dft_md'.or.calc_mode=='GS')
+  flag_RT = (theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')
 
   if (present(is_self_checkpoint)) then
     iself = is_self_checkpoint
@@ -433,17 +451,27 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   call comm_bcast(system%rocc,comm)
 
   !wave function
-  call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
-
+  if( flag_GS .and. &
+      (read_gs_restart_data=='rho_inout'.or.read_gs_restart_data=='rho') )then
+     ! this case => do not read wavefunction
+  else
+     call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
+  endif
   !rho_inout
-  if(theory=='dft'.or.calc_mode=='GS')then
+  if( flag_GS.and. &
+     (read_gs_restart_data=='all'.or.read_gs_restart_data=='rho_inout'))then
     if (present(mixing)) then
       call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
     end if
   end if
 
+  !rho (only for GS)
+  if( flag_GS .and. read_gs_restart_data=='rho' )then
+     call read_rho(idir,lg,ng,system,info,mixing)
+  endif
+
   !Vh_stock
-  if((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y')then
+  if( flag_RT .and. yn_restart=='y')then
     if (present(sVh_stock1) .and. present(sVh_stock2)) then
       call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
     end if
@@ -665,6 +693,78 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
     deallocate(matbox,matbox2)
   end if
 end subroutine write_rho_inout
+
+subroutine write_rho(odir,lg,ng,system,info,mixing)
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  implicit none
+  character(*)                        :: odir
+  type(s_rgrid)           ,intent(in) :: lg,ng
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_mixing)          ,intent(in) :: mixing
+  !
+  character(100) ::  dir_file_out
+  integer :: i,ix,iy,iz,is
+  integer :: iu1_w
+  real(8),allocatable :: matbox(:,:,:),matbox2(:,:,:)
+
+  iu1_w = 97
+  dir_file_out = trim(odir)//"rho.bin"
+
+  ! write root process
+  if(comm_is_root(nproc_id_global)) open(iu1_w,file=dir_file_out,form='unformatted')
+
+  allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+
+  !$omp parallel do collapse(2) private(iz,iy,ix)
+  do iz=lg%is(3),lg%ie(3)
+  do iy=lg%is(2),lg%ie(2)
+  do ix=lg%is(1),lg%ie(1)
+     matbox2(ix,iy,iz)=0.d0
+  end do
+  end do
+  end do
+
+  i=mixing%num_rho_stock+1
+  !$omp parallel do collapse(2) private(iz,iy,ix)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+     matbox2(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
+  end do
+  end do
+  end do
+  call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+  if(comm_is_root(nproc_id_global))then
+     write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  end if
+
+  if(system%nspin == 2)then
+     do is=1,2
+     i=mixing%num_rho_stock+1
+     !$omp parallel do collapse(2) private(iz,iy,ix)
+     do iz=ng%is(3),ng%ie(3)
+     do iy=ng%is(2),ng%ie(2)
+     do ix=ng%is(1),ng%ie(1)
+        matbox2(ix,iy,iz) = mixing%srho_s_in(i,is)%f(ix,iy,iz)
+     end do
+     end do
+     end do
+     call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+     if(comm_is_root(nproc_id_global))then
+        write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+     end if
+     end do
+  endif
+
+  if(comm_is_root(nproc_id_global)) close(iu1_w)
+
+  deallocate(matbox,matbox2)
+
+end subroutine write_rho
 
 !===================================================================================================================================
 
@@ -1074,6 +1174,71 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
   end if
 
 end subroutine read_rho_inout
+
+subroutine read_rho(idir,lg,ng,system,info,mixing)
+  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root, comm_summation, comm_bcast
+  implicit none
+  character(*), intent(in) :: idir
+  type(s_rgrid), intent(in)    :: lg,ng
+  type(s_dft_system),intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_mixing),intent(inout) :: mixing
+
+  integer :: iu1_r
+  integer :: i,ix,iy,iz,is
+  real(8),allocatable :: matbox(:,:,:)
+  character(100) :: dir_file_in
+
+  iu1_r = 96
+  dir_file_in = trim(idir)//"rho.bin"
+
+  ! read root process
+  if(comm_is_root(nproc_id_global)) open(iu1_r,file=dir_file_in,form='unformatted')
+
+  allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+
+  i = mixing%num_rho_stock+1
+  if(comm_is_root(nproc_id_global))then
+     read(iu1_r) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+  end if
+  call comm_bcast(matbox,info%icomm_rko)
+
+  !$omp parallel do collapse(2)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
+     mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+  end do
+  end do
+  end do
+
+  if(system%nspin == 2)then
+     do is=1,2
+        i = mixing%num_rho_stock+1
+        if(comm_is_root(nproc_id_global))then
+           read(iu1_r) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+        end if
+        call comm_bcast(matbox,info%icomm_rko)
+
+        !$omp parallel do collapse(2)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+           mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+        end do
+        end do
+        end do
+
+     end do
+  end if
+
+  if(comm_is_root(nproc_id_global)) close(iu1_r)
+
+  deallocate(matbox)
+
+end subroutine read_rho
 
 !===================================================================================================================================
 

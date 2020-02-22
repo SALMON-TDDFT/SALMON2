@@ -227,6 +227,8 @@ contains
       & yn_self_checkpoint,  &
       & checkpoint_interval, &
       & yn_reset_step_restart, &
+      & read_gs_restart_data,&
+      & write_gs_restart_data,&
       & time_shutdown,       &
       & dump_filename,     &  !remove later
       & modify_gs_wfn_k,   &  !remove later
@@ -575,6 +577,8 @@ contains
     yn_self_checkpoint    = 'n'
     checkpoint_interval   = 0
     yn_reset_step_restart = 'n'
+    read_gs_restart_data  = 'all'
+    write_gs_restart_data = 'all'
     time_shutdown         = -1d0
     !remove later
     dump_filename    = 'default'
@@ -971,6 +975,8 @@ contains
     call comm_bcast(yn_self_checkpoint    ,nproc_group_global)
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
     call comm_bcast(yn_reset_step_restart ,nproc_group_global)
+    call comm_bcast(read_gs_restart_data  ,nproc_group_global)
+    call comm_bcast(write_gs_restart_data ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
     !remove later
     call comm_bcast(dump_filename   ,nproc_group_global)
@@ -1740,6 +1746,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_step_restart', yn_reset_step_restart
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
