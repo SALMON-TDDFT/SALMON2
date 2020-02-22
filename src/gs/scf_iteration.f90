@@ -93,12 +93,13 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
       select case(iperiodic)
       case(0)
         call ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-
       case(3)
         call ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
       end select
     end if
   end if
+
+  if(mixing%flag_mix_zero) return
 
 ! density
   call timer_begin(LOG_CALC_RHO)
@@ -115,7 +116,6 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   do j=1,system%nspin
     srho%f = srho%f + srho_s(j)%f
   end do
-
 
   if(calc_mode/='DFT_BAND')then
 
