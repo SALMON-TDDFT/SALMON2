@@ -87,7 +87,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   call comm_summation(wrk,out_curr,3,info%icomm_rko)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
-! calculate grad_dVh_dt: gradient of d(Vh)/dt (Vh: Hartree potential)
+! gradient of d(Vh)/dt (Vh: Hartree potential)
   call timer_begin(LOG_SS_FDTD_COMM)
   call update_overlap_real8(srg_ng, ng, fw%box)
   call timer_end(LOG_SS_FDTD_COMM)
@@ -99,7 +99,8 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    fw%grad_dVh_dt(1:3,ix,iy,iz) = ( fw%grad_Vh(1:3,ix,iy,iz) - fw%grad_Vh_old(1:3,ix,iy,iz) ) /dt ! t differential
+    fw%current4pi(ix,iy,iz,1:3) = ( fw%grad_Vh(1:3,ix,iy,iz) - fw%grad_Vh_old(1:3,ix,iy,iz) ) /dt & ! d(grad(Vh))/dt
+                                & - 4d0*pi * fw%curr(ix,iy,iz,1:3) ! 4*pi* (electric current density)
   end do
   end do
   end do
@@ -167,7 +168,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
               + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
         fw%vec_Ac_m(1,ix,iy,iz,i1) = ( cspeed_au * dt_m )**2 * lap_A &
                                   + 2.d0* fw%box(ix,iy,iz) - fw%vec_Ac_m(-1,ix,iy,iz,i1) &
-                                  + dt_m**2 * ( fw%grad_dVh_dt(i1,ix,iy,iz) - 4d0*pi * fw%curr(ix,iy,iz,i1) )
+                                  + dt_m**2 * fw%current4pi(ix,iy,iz,i1)
       end do
       end do
       end do
@@ -494,7 +495,7 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
   allocate( fw%curr         (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3) )
   allocate( fw%vec_je_old (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
   allocate( fw%rho_old      (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
-  allocate( fw%grad_dVh_dt(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
+  allocate( fw%current4pi   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3) )
   allocate( fw%grad_Vh    (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
   allocate( fw%grad_Vh_old(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
 
