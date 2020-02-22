@@ -400,7 +400,6 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   if( flag_GS ) then
      if( read_gs_restart_data=='rho'.or.read_gs_restart_data=='rho_inout' ) then
         flag_read_info = .false.
-        flag_read_occ  = .false.
      endif
   endif
 
