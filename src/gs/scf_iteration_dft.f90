@@ -98,13 +98,31 @@ if(calc_mode=='DFT_BAND') then
    esp_old=0d0
 endif
 
+if(step_initial_mix_zero.gt.1)then
+   mixing%flag_mix_zero = .true.
+   DFT_NoMix_Iteration : do iter=1,step_initial_mix_zero
+
+      rion_update = check_rion_update() .or. (iter == 1)
+      call copy_density(iter,system%nspin,ng,srho_s,mixing)
+      call scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil,  &
+                     srg,srg_ng,spsi,shpsi,srho,srho_s,  &
+                     cg,ppg,V_local,  &
+                     iter,  &
+                     iditer_nosubspace_diag,mixing,iter,  &
+                     poisson,fg,sVh,xc_func,ppn,sVxc,energy)
+      call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+      if(comm_is_root(nproc_id_global)) write(*,*) "  no-mixing iter=", iter
+
+   end do DFT_NoMix_Iteration
+   mixing%flag_mix_zero = .false.
+endif
+
 flag_conv = .false.
 sum1=1d9
 
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
 
-   if(.not. mixing%flag_mix_zero)then
    if( sum1 < threshold ) then
       flag_conv = .true.
       if( ilevel_print.ge.2 .and. comm_is_root(nproc_id_global)) then
@@ -112,20 +130,11 @@ DFT_Iteration : do iter=Miter+1,nscf
       endif
       exit DFT_Iteration
    endif
-   endif
    if(calc_mode=='DFT_BAND')then
       if(all(band%check_conv_esp)) cycle DFT_Iteration
    end if
 
    Miter=Miter+1
-
-   if(theory=='dft' .and. yn_opt=='n')then
-      if(step_initial_mix_zero .ge. Miter) then
-         mixing%flag_mix_zero=.true.
-      else
-         mixing%flag_mix_zero=.false.
-      endif
-   endif
 
    if(calc_mode/='DFT_BAND')then
       ! for calc_total_energy_periodic
