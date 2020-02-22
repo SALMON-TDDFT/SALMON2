@@ -60,7 +60,7 @@ contains
     integer :: iaddr(3),irank
     integer :: ishape(3)
 
-    ishape(1:3) = proc_info%npdomain_general(1:3)
+    ishape(1:3) = proc_info%npdomain_orbital(1:3)
     iaddr(1:3)  = field_info%iaddress(1:3)
     iaddr(idir) = iaddr(idir) + idisp
 

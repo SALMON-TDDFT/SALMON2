@@ -192,7 +192,7 @@ contains
 !$omp end parallel do
     tot_exc = tot_exc*system%hvol
 
-    call comm_summation(tot_exc,E_xc,info%icomm_rko)
+    call comm_summation(tot_exc,E_xc,info%icomm_r)
 
     return
     

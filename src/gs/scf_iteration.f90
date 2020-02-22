@@ -109,7 +109,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
 
   select case(method_mixing)
     case ('simple') ; call simple_mixing(ng,system,1.d0-mixrate,mixrate,srho_s,mixing)
-    case ('broyden'); call wrapper_broyden(ng,system,srho_s,iter,mixing)
+    case ('broyden'); call wrapper_broyden(info%icomm_r,ng,system,srho_s,iter,mixing)
   end select
   call timer_end(LOG_CALC_RHO)
 

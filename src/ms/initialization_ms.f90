@@ -290,7 +290,7 @@ use inputoutput
   end if
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
-  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then
     sVh_stock1%f=sVh%f
   else if(yn_restart=='n')then
@@ -446,7 +446,7 @@ use inputoutput
   end if
   
   if(yn_restart /= 'y')then
-    call calc_dip(lg,ng,srho,rbox_array2)
+    call calc_dip(info%icomm_r,lg,ng,srho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   
   end if

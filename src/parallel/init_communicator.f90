@@ -34,7 +34,7 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   integer :: myrank,nproc
   integer :: nproc_k,nproc_ob
   integer :: nproc_d_o(3),nproc_d_g(3),nproc_d_o_mul,nproc_d_g_dm(3),nproc_d_g_mul_dm,nproc_ob_spin(2)
-  integer :: i1,i2,i3,i4,i5,ix,iy,iz,ixs,iys,izs,nsize,ilocal_rank
+  integer :: i1,i2,i3,i4,i5,ix,iy,iz
   integer :: ibox
   integer :: mesh(3),network(3),mesh_step(3)
   integer :: icolor_r,icolor_o,icolor_k,icolor_ro,icolor_ko
@@ -139,66 +139,30 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
             info%iaddress(3), &
             info%iaddress(4), &
             info%iaddress(5)) = myrank
-  call comm_summation(info%imap, comm)
+  call comm_summation(info%imap, info%icomm_rko)
 
 
 ! info_field
-  info_field%icomm_all = comm
-  info_field%id_all    = myrank
-  info_field%isize_all = nproc
+  info_field%icomm_all = info%icomm_r
+  info_field%id_all    = info%id_r
+  info_field%isize_all = info%isize_r
 
-  allocate(info_field%imap(0:nproc_d_g(1)-1, &
-                           0:nproc_d_g(2)-1, &
-                           0:nproc_d_g(3)-1))
+  allocate(info_field%imap(0:nproc_d_o(1)-1, &
+                           0:nproc_d_o(2)-1, &
+                           0:nproc_d_o(3)-1))
 
-  allocate(iranklists(product(nproc_d_g)))
+  allocate(iranklists(product(nproc_d_o)))
 
-  ! packing same id_r
-  ilocal_rank = 0
-  do iz=0,nproc_d_g(3)-1,nproc_d_g_dm(3)
-  do iy=0,nproc_d_g(2)-1,nproc_d_g_dm(2)
-  do ix=0,nproc_d_g(1)-1,nproc_d_g_dm(1)
-    ! search same id_r...
-    nsize = 0
-    do i5=0,nproc_k-1
-    do i4=0,nproc_ob-1
-    do i3=0,nproc_d_o(3)-1
-    do i2=0,nproc_d_o(2)-1
-    do i1=0,nproc_d_o(1)-1
-      ! `process_allocation` is not related (maybe...)
-      ibox = i3 * nproc_d_o(1) * nproc_d_o(2) + i2 * nproc_d_o(1) + i1
-      if (ibox == ilocal_rank) then
-        nsize = nsize + 1
-        iranklists(nsize) = info%imap(i1,i2,i3,i4,i5)
-      end if
-    end do
-    end do
-    end do
-    end do
-    end do
-
-    nsize = 0
-    do izs=iz,iz+nproc_d_g_dm(3)-1
-    do iys=iy,iy+nproc_d_g_dm(2)-1
-    do ixs=ix,ix+nproc_d_g_dm(1)-1
-      nsize = nsize + 1
-      info_field%imap(ixs,iys,izs) = iranklists(nsize)
-      if (iranklists(nsize) == myrank) then
-        info_field%iaddress = [ixs,iys,izs]
-      end if
-    end do
-    end do
-    end do
-    ilocal_rank = ilocal_rank + 1
-  end do
-  end do
-  end do
+  i5 = info%iaddress(5)
+  i4 = info%iaddress(4)
+  info_field%imap(:,:,:)   = info%imap(:,:,:,i4,i5)
+  info_field%iaddress(1:3) = info%iaddress(1:3)
 
 ! x-dir summation
   iz = info_field%iaddress(3)
   iy = info_field%iaddress(2)
   nl = 0
-  do ix=0,nproc_d_g(1)-1
+  do ix=0,nproc_d_o(1)-1
     nl = nl + 1
     iranklists(nl) = info_field%imap(ix,iy,iz)
   end do
@@ -209,7 +173,7 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   iz = info_field%iaddress(3)
   ix = info_field%iaddress(1)
   nl = 0
-  do iy=0,nproc_d_g(2)-1
+  do iy=0,nproc_d_o(2)-1
     nl = nl + 1
     iranklists(nl) = info_field%imap(ix,iy,iz)
   end do
@@ -220,7 +184,7 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   iy = info_field%iaddress(2)
   ix = info_field%iaddress(1)
   nl = 0
-  do iz=0,nproc_d_g(3)-1
+  do iz=0,nproc_d_o(3)-1
     nl = nl + 1
     iranklists(nl) = info_field%imap(ix,iy,iz)
   end do
@@ -230,21 +194,14 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
 ! xy-dir summation (for singlescale FDTD)
   iz = info_field%iaddress(3)
   nl = 0
-  do iy=0,nproc_d_g(2)-1
-  do ix=0,nproc_d_g(1)-1
+  do iy=0,nproc_d_o(2)-1
+  do ix=0,nproc_d_o(1)-1
     nl = nl + 1
     iranklists(nl) = info_field%imap(ix,iy,iz)
   end do
   end do
   info_field%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info_field%icomm_xy, info_field%id_xy, info_field%isize_xy)
-
-
-! for allgatherv_vlocal
-  info_field%icomm_v  = info%icomm_ko
-  info_field%ngo(1:3) = nproc_d_g_dm(1:3)
-  info_field%ngo_xyz  = nproc_d_g_mul_dm
-  info_field%nproc_o  = nproc_d_o_mul
 
 
 ! communicators for FFTE routine

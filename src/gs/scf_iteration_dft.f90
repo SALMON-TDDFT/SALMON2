@@ -142,7 +142,7 @@ DFT_Iteration : do iter=Miter+1,nscf
                      Miter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
                      poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )
