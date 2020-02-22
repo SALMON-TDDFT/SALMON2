@@ -400,6 +400,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   if( flag_GS ) then
      if( read_gs_restart_data=='rho'.or.read_gs_restart_data=='rho_inout' ) then
         flag_read_info = .false.
+        flag_read_occ  = .false.
      endif
   endif
 
@@ -490,8 +491,6 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   else if( flag_RT .and. yn_restart=='y')then
 
      call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
-     if(present(mixing)) &
-     call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
      if (present(sVh_stock1) .and. present(sVh_stock2)) &
      call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
 
