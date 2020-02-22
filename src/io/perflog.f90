@@ -278,7 +278,8 @@ contains
     call set(4, LOG_SSDG_PERIODIC_CALC,      'periodic calc.')
     call set(5, LOG_SSDG_PERIODIC_COMM_COLL, 'periodic comm. coll.')
     call set(6, LOG_SSDG_PERIODIC_HPSI,      'periodic hpsi')
-    call write_loadbalance(fd, 6, tsrc, headers, mode)
+    call set(7, LOG_SSDG_PERIODIC_EIGEN,     'periodic eigen')
+    call write_loadbalance(fd, 7, tsrc, headers, mode)
 
     call set(0, 0, 'subspace_diag so module')
     call set(1, LOG_SSDG_SO_ISOLATED_CALC,      'isolated calc.')

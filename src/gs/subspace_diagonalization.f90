@@ -339,9 +339,13 @@ end subroutine
     end if
     call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
 
-    call timer_begin(LOG_SSDG_PERIODIC_CALC)
-    call eigen_subdiag_periodic(hmat, evec, system%no, ierr)
 
+    call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
+    call eigen_subdiag_periodic(hmat, evec, system%no, ierr)
+    call timer_end(LOG_SSDG_PERIODIC_EIGEN)
+
+
+    call timer_begin(LOG_SSDG_PERIODIC_CALC)
     !$omp workshare
     wf2_block = 0d0
     !$omp end workshare
@@ -491,14 +495,18 @@ do ispin = 1, system%nspin
   end if
   call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
 
+
+  call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
 !  zhmat = hmat
 
-  call timer_begin(LOG_SSDG_PERIODIC_CALC)
 !  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
   call eigen_real8(hmat, eval, evec)
 
 !  evec = real(zevec)
+  call timer_end(LOG_SSDG_PERIODIC_EIGEN)
 
+
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
   !$omp workshare
   wf2_block = 0d0
   !$omp end workshare
@@ -668,13 +676,17 @@ subroutine ssdg_periodic_org(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   call comm_summation(mat1,mat2,no**2*nspin*nk,info%icomm_rko)
   call timer_end(LOG_SSDG_PERIODIC_COMM_COLL)
 
-  call timer_begin(LOG_SSDG_PERIODIC_CALC)
+
+  call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
   do ik=ik_s,ik_e
   do ispin=1,nspin
     call eigen_subdiag_periodic(mat2(:,:,ispin,ik),evec(:,:,ispin,ik),no,ierr)
   end do
   end do
+  call timer_end(LOG_SSDG_PERIODIC_EIGEN)
 
+
+  call timer_begin(LOG_SSDG_PERIODIC_CALC)
 !$omp workshare
   shpsi%zwf = 0d0
 !$omp end workshare

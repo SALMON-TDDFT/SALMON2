@@ -88,6 +88,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   call gram_schmidt(system, mg, info, spsi, pinfo)
 
 ! subspace diagonalization
+  call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
     if(miter>iditer_nosubspace_diag)then
       select case(iperiodic)
@@ -99,6 +100,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
       end select
     end if
   end if
+  call timer_end(LOG_CALC_SUBSPACE_DIAG)
 
 ! density
   call timer_begin(LOG_CALC_RHO)
