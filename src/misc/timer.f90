@@ -127,6 +127,7 @@ module timer
   integer,public,parameter :: LOG_SSDG_PERIODIC_CALC      = 230
   integer,public,parameter :: LOG_SSDG_PERIODIC_HPSI      = 231
   integer,public,parameter :: LOG_SSDG_PERIODIC_COMM_COLL = 232
+  integer,public,parameter :: LOG_SSDG_PERIODIC_EIGEN     = 239
 
   ! subspace_diagonalization_so module
   integer,public,parameter :: LOG_SSDG_SO_ISOLATED_CALC      = 233

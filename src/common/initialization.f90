@@ -456,12 +456,14 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
   type(s_rgrid),       intent(inout) :: mg,ng
   !
   integer :: nproc_domain_orbital(3),nproc_domain_general(3),nproc_k,nproc_ob
+  integer :: nproc_domain_general_dm(3)
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
   nproc_domain_orbital = pinfo%npdomain_orbital
   nproc_domain_general = pinfo%npdomain_general
+  nproc_domain_general_dm = pinfo%npdomain_general_dm
 
   if ( allocated(mg%is_all) ) deallocate(mg%is_all)
   if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)
@@ -556,11 +558,11 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
     ibox = info_field%imap(i1,i2,i3)
     npo = [i1,i2,i3]
     do j=1,3
-      nsize = (lg%num(j) + nproc_domain_general(j) - 1) / nproc_domain_general(j)
-      ng%is_all(j,ibox) = lg%is(j) + nsize * npo(j)
+      nsize = (mg%num(j) + nproc_domain_general_dm(j) - 1) / nproc_domain_general_dm(j)
+      ng%is_all(j,ibox) = mg%is(j) + nsize * mod(npo(j),nproc_domain_general_dm(j))
       ng%ie_all(j,ibox) = ng%is_all(j,ibox) + nsize - 1
-      if (ng%ie_all(j,ibox) > lg%num(j)) then
-        ng%ie_all(j,ibox) = lg%num(j)
+      if (ng%ie_all(j,ibox) > mg%ie(j)) then
+        ng%ie_all(j,ibox) = mg%ie(j)
       end if
     end do
   end do
