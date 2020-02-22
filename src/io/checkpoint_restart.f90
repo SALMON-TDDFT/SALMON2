@@ -418,34 +418,38 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   !information
   !first to be read
   if(flag_read_info) then
-  if(comm_is_root(nproc_id_global))then
-    dir_file_in = trim(idir)//"info.bin"
-    open(iu1_r,file=dir_file_in,form='unformatted')
+     if(comm_is_root(nproc_id_global))then
+        dir_file_in = trim(idir)//"info.bin"
+        open(iu1_r,file=dir_file_in,form='unformatted')
 
-    read(iu1_r) mk
-    read(iu1_r) mo
+        read(iu1_r) mk
+        read(iu1_r) mo
 
-    read(iu1_r) itt
-    read(iu1_r) nprocs
+        read(iu1_r) itt
+        read(iu1_r) nprocs
 
-    close(iu1_r)
-  end if
-  call comm_bcast(mk,comm)
-  call comm_bcast(mo,comm)
-  call comm_bcast(itt,comm)
-  call comm_bcast(nprocs,comm)
+        close(iu1_r)
+     end if
+     call comm_bcast(mk,comm)
+     call comm_bcast(mo,comm)
+     call comm_bcast(itt,comm)
+     call comm_bcast(nprocs,comm)
 
-  if((theory=='dft'.or.calc_mode=='GS').or.  &
-     ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
-    iter = itt
-  end if
+     if((theory=='dft'.or.calc_mode=='GS').or.  &
+       ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
+        iter = itt
+     end if
 
-  !debug check
-  if (yn_restart == 'y' .or. yn_datafiles_dump == 'y') then
-    if (nprocs /= nproc_size_global) then
-      stop 'number of processes do not match!'
-    end if
-  end if
+     !debug check
+     if (yn_restart == 'y' .or. yn_datafiles_dump == 'y') then
+        if (nprocs /= nproc_size_global) then
+           stop 'number of processes do not match!'
+        end if
+     end if
+
+  else
+     mk = system%nk
+     mo = system%no
   end if  !flag_read_info
 
   !occupation
