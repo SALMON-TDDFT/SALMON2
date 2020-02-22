@@ -404,7 +404,6 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
      endif
   endif
 
-
   if (present(is_self_checkpoint)) then
     iself = is_self_checkpoint
   else
@@ -436,7 +435,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
      call comm_bcast(nprocs,comm)
 
      if((theory=='dft'.or.calc_mode=='GS').or.  &
-       ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
+        ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
         iter = itt
      end if
 
@@ -446,56 +445,54 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
            stop 'number of processes do not match!'
         end if
      end if
-
   else
      mk = system%nk
      mo = system%no
-  end if  !flag_read_info
+  endif
 
   !occupation
   if(flag_read_occ) then
   if(comm_is_root(nproc_id_global))then
-    dir_file_in = trim(idir)//"occupation.bin"
-    open(iu1_r,file=dir_file_in,form='unformatted')
+     dir_file_in = trim(idir)//"occupation.bin"
+     open(iu1_r,file=dir_file_in,form='unformatted')
 
-    allocate(roccbox(mo,mk,system%nspin))
-    read(iu1_r) roccbox(1:mo,1:mk,1:system%nspin)
-    system%rocc(1:system%no,1:system%nk,1:system%nspin) = &
-    roccbox    (1:system%no,1:system%nk,1:system%nspin)
-    deallocate(roccbox)
+     allocate(roccbox(mo,mk,system%nspin))
+     read(iu1_r) roccbox(1:mo,1:mk,1:system%nspin)
+     system%rocc(1:system%no,1:system%nk,1:system%nspin) = &
+     roccbox    (1:system%no,1:system%nk,1:system%nspin)
+     deallocate(roccbox)
 
-    close(iu1_r)
+     close(iu1_r)
   end if
   call comm_bcast(system%rocc,comm)
-  end if  !flag_read_occ
-
-  ! wavecunction, rho, Vh_stack
-  if( flag_GS ) then
-
-     if( read_gs_restart_data=='all' ) then
-        call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
-        if(present(mixing))  &
-        call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
-
-     else if( read_gs_restart_data=='wfn' ) then
-        call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
-
-     else if( read_gs_restart_data=='rho_inout' ) then
-        if(present(mixing)) &
-        call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
-
-     else if( read_gs_restart_data=='rho' ) then
-        call read_rho(idir,lg,ng,system,info,mixing)
-     end if
-
-  else if( flag_RT .and. yn_restart=='y')then
-
-     call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
-     if (present(sVh_stock1) .and. present(sVh_stock2)) &
-     call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
-
   endif
 
+  !wave function
+  if( flag_GS .and. &
+      (read_gs_restart_data=='rho_inout'.or.read_gs_restart_data=='rho') )then
+     ! this case => do not read wavefunction
+  else
+     call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
+  endif
+  !rho_inout
+  if( flag_GS.and. &
+     (read_gs_restart_data=='all'.or.read_gs_restart_data=='rho_inout'))then
+    if (present(mixing)) then
+      call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
+    end if
+  end if
+
+  !rho (only for GS)
+  if( flag_GS .and. read_gs_restart_data=='rho' )then
+     call read_rho(idir,lg,ng,system,info,mixing)
+  endif
+
+  !Vh_stock
+  if( flag_RT .and. yn_restart=='y')then
+    if (present(sVh_stock1) .and. present(sVh_stock2)) then
+      call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
+    end if
+  end if
 
 end subroutine read_bin
 
