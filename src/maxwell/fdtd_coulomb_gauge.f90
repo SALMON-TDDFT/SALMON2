@@ -84,7 +84,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   call timer_end(LOG_SS_FDTD_CALC)
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(wrk,out_curr,3,info%icomm_rko)
+  call comm_summation(wrk,out_curr,3,info_field%icomm_all)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
 ! calculate grad_dVh_dt: gradient of d(Vh)/dt (Vh: Hartree potential)
@@ -280,10 +280,10 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   call timer_end(LOG_SS_FDTD_CALC)
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(fw%vbox,  fw%vec_Ac,3*mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
-  call comm_summation(fw%lgbox1,fw%lgbox2,  mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
-  call comm_summation(e_em_wrk,e_em,info%icomm_rko)
-  call comm_summation(e_joule_wrk,e_joule,info%icomm_rko)
+  call comm_summation(fw%vbox,  fw%vec_Ac,3*lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
+  call comm_summation(fw%lgbox1,fw%lgbox2,  lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
+  call comm_summation(e_em_wrk,e_em,info_field%icomm_all)
+  call comm_summation(e_joule_wrk,e_joule,info_field%icomm_all)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
   call timer_begin(LOG_SS_FDTD_CALC)
@@ -401,7 +401,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
 !  call timer_end(LOG_SS_FDTD_CALC)
 !
 !  call timer_begin(LOG_SS_FDTD_COMM_COLL)
-!  call comm_summation(fw%integral_poynting_tmp,fw%integral_poynting_tmp2,lg_num(3),info%icomm_rko)
+!  call comm_summation(fw%integral_poynting_tmp,fw%integral_poynting_tmp2,lg_num(3),info_field%icomm_all)
 !  call timer_end(LOG_SS_FDTD_COMM_COLL)
 !
 !  call timer_begin(LOG_SS_FDTD_CALC)
@@ -422,7 +422,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   call timer_end(LOG_SS_FDTD_CALC)
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(fw%Ac_zt_t,fw%Ac_zt,size(fw%Ac_zt),info%icomm_rko)
+  call comm_summation(fw%Ac_zt_t,fw%Ac_zt,size(fw%Ac_zt),info_field%icomm_all)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
   if(comm_is_root(info%icomm_rko)) then
@@ -489,7 +489,7 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
     end do
   end do
 
-  allocate( fw%vec_Ac     (3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) )
+  allocate( fw%vec_Ac     (3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) )
   allocate( fw%vec_Ac_old (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
   allocate( fw%curr         (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3) )
   allocate( fw%vec_je_old (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) )
@@ -512,9 +512,9 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
   allocate(fw%rotation_A(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
    & ,fw%poynting_vector(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
         & ,fw%divergence_A(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
-        & ,fw%vbox      (3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) &
-        & ,fw%lgbox1      (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) &
-        & ,fw%lgbox2      (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) &
+        & ,fw%vbox      (3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
+        & ,fw%lgbox1      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
+        & ,fw%lgbox2      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
         & ,fw%integral_poynting_tmp(lg%num(3)),fw%integral_poynting_tmp2(lg%num(3)) &
         & ,fw%vec_Ac_ext    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),0:1,1:3) &
         & ,fw%vec_Ac_ext_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),0:1,1:3) &

@@ -20,7 +20,7 @@ module dip
 contains
 
 !===================================================================================================================================
-subroutine subdip(itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
+subroutine subdip(comm,itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
   use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation
@@ -28,6 +28,7 @@ subroutine subdip(itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
   use salmon_global
   use inputoutput, only: yn_md
   implicit none
+  integer,intent(in) :: comm
   integer,intent(in) :: itt
   type(s_rgrid) ,intent(in) :: lg
   type(s_rgrid) ,intent(in) :: ng
@@ -47,7 +48,7 @@ subroutine subdip(itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
   Hvol   = system%Hvol
   Hgs(:) = system%Hgs(:)
 
-  call calc_dip(lg,ng,srho,rbox_array2)
+  call calc_dip(comm,lg,ng,srho,rbox_array2)
 
   !(ionic dipole) -- defined as plus charge (ordinary definition))
   rt%Dp_i(:,itt) = 0d0
@@ -102,11 +103,11 @@ subroutine subdip(itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
 
 end subroutine subdip
 
-subroutine calc_dip(lg,ng,srho,rbox_array2)
+subroutine calc_dip(comm,lg,ng,srho,rbox_array2)
   use structures, only: s_rgrid,s_scalar
-  use parallelization, only: nproc_group_global
   use communication, only: comm_summation
   implicit none
+  integer,       intent(in) :: comm
   type(s_rgrid) ,intent(in) :: lg
   type(s_rgrid) ,intent(in) :: ng
   type(s_scalar),intent(in) :: srho
@@ -196,7 +197,7 @@ subroutine calc_dip(lg,ng,srho,rbox_array2)
   end do
   rbox_array(4)=rbox
 
-  call comm_summation(rbox_array,rbox_array2,4,nproc_group_global)
+  call comm_summation(rbox_array,rbox_array2,4,comm)
 
 end subroutine calc_dip
 
