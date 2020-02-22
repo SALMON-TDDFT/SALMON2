@@ -384,6 +384,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   logical       ,optional,intent(in)    :: is_self_checkpoint
 
   logical :: flag_GS, flag_RT
+  logical :: flag_read_info, flag_read_occ
   integer :: mk,mo
   real(8),allocatable :: roccbox(:,:,:)
   integer :: iu1_r
@@ -393,6 +394,15 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
 
   flag_GS = (theory=='dft'.or.theory=='dft_md'.or.calc_mode=='GS')
   flag_RT = (theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')
+
+  flag_read_info = .true.
+  flag_read_occ  = .true.
+  if( flag_GS ) then
+     if( read_gs_restart_data=='rho'.or.read_gs_restart_data=='rho_inout' ) then
+        flag_read_info = .false.
+        flag_read_occ  = .false.
+     endif
+  endif
 
   if (present(is_self_checkpoint)) then
     iself = is_self_checkpoint
@@ -406,49 +416,56 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
 
   !information
   !first to be read
-  if(comm_is_root(nproc_id_global))then
-    dir_file_in = trim(idir)//"info.bin"
-    open(iu1_r,file=dir_file_in,form='unformatted')
+  if(flag_read_info) then
+     if(comm_is_root(nproc_id_global))then
+        dir_file_in = trim(idir)//"info.bin"
+        open(iu1_r,file=dir_file_in,form='unformatted')
 
-    read(iu1_r) mk
-    read(iu1_r) mo
+        read(iu1_r) mk
+        read(iu1_r) mo
 
-    read(iu1_r) itt
-    read(iu1_r) nprocs
+        read(iu1_r) itt
+        read(iu1_r) nprocs
 
-    close(iu1_r)
-  end if
-  call comm_bcast(mk,comm)
-  call comm_bcast(mo,comm)
-  call comm_bcast(itt,comm)
-  call comm_bcast(nprocs,comm)
+        close(iu1_r)
+     end if
+     call comm_bcast(mk,comm)
+     call comm_bcast(mo,comm)
+     call comm_bcast(itt,comm)
+     call comm_bcast(nprocs,comm)
 
-  if((theory=='dft'.or.calc_mode=='GS').or.  &
-     ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
-    iter = itt
-  end if
+     if((theory=='dft'.or.calc_mode=='GS').or.  &
+        ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
+        iter = itt
+     end if
 
-  !debug check
-  if (yn_restart == 'y' .or. yn_datafiles_dump == 'y') then
-    if (nprocs /= nproc_size_global) then
-      stop 'number of processes do not match!'
-    end if
-  end if
+     !debug check
+     if (yn_restart == 'y' .or. yn_datafiles_dump == 'y') then
+        if (nprocs /= nproc_size_global) then
+           stop 'number of processes do not match!'
+        end if
+     end if
+  else
+     mk = system%nk
+     mo = system%no
+  endif
 
   !occupation
+  if(flag_read_occ) then
   if(comm_is_root(nproc_id_global))then
-    dir_file_in = trim(idir)//"occupation.bin"
-    open(iu1_r,file=dir_file_in,form='unformatted')
+     dir_file_in = trim(idir)//"occupation.bin"
+     open(iu1_r,file=dir_file_in,form='unformatted')
 
-    allocate(roccbox(mo,mk,system%nspin))
-    read(iu1_r) roccbox(1:mo,1:mk,1:system%nspin)
-    system%rocc(1:system%no,1:system%nk,1:system%nspin) = &
-    roccbox    (1:system%no,1:system%nk,1:system%nspin)
-    deallocate(roccbox)
+     allocate(roccbox(mo,mk,system%nspin))
+     read(iu1_r) roccbox(1:mo,1:mk,1:system%nspin)
+     system%rocc(1:system%no,1:system%nk,1:system%nspin) = &
+     roccbox    (1:system%no,1:system%nk,1:system%nspin)
+     deallocate(roccbox)
 
-    close(iu1_r)
+     close(iu1_r)
   end if
   call comm_bcast(system%rocc,comm)
+  endif
 
   !wave function
   if( flag_GS .and. &
