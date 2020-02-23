@@ -19,7 +19,7 @@ module poisson_ffte_sub
 
 contains
 
-subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson)
+subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs,poisson)
   use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid,s_poisson
   use communication, only: comm_summation
   implicit none
@@ -34,6 +34,7 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson)
   real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
+  complex(8) :: trhoG_ele_tmp(lg%num(1),lg%num(2),lg%num(3))
   real(8) :: inv_lgnum3
 
   if(.not.allocated(poisson%coef) .or. &
@@ -63,24 +64,22 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson)
                     info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
                     info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
+  trhoG_ele_tmp=0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,iiy,iiz) &
-!$omp             shared(ng,lg,trhoG_ele,poisson,inv_lgnum3)
+!$omp             shared(ng,lg,trhoG_ele_tmp,poisson,inv_lgnum3)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
   do ix=1,lg%num(1)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
-    if (ix == 1 .and. iiy == 1 .and. iiz == 1) then
-      trhoG_ele(ix,iiy,iiz)=0d0
-    else
-      trhoG_ele(ix,iiy,iiz)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
-    end if
+    trhoG_ele_tmp(ix,iiy,iiz)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
     poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
   end do
   end do
   end do
 !$omp end parallel do
+  call comm_summation(trhoG_ele_tmp,trhoG_ele,size(trhoG_ele),info_field%icomm_all)
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
                     info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
