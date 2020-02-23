@@ -1032,9 +1032,6 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
       abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
 
-!test
-  flag_cuboid = .false. !!! hoge
-
   if( flag_cuboid ) then
      rps_max   = maxval( pp%rps(:)) + max(hx,hy,hz) + 1d-2
      mg_min(1) = minval( mx(1:ml) )
