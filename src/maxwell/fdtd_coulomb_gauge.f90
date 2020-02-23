@@ -425,7 +425,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   call comm_summation(fw%Ac_zt_t,fw%Ac_zt,size(fw%Ac_zt),info_field%icomm_all)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
-  if(comm_is_root(info%icomm_rko)) then
+  if(comm_is_root(info%id_rko)) then
     do iz=lg%is(3),lg%ie(3)
       write(fw%fh_Ac_zt,fmt='(99(1X,E23.15E3))',advance='no') dble(iz)*hgs(3),fw%Ac_zt(1,iz),fw%Ac_zt(2,iz),fw%Ac_zt(3,iz)
     end do
