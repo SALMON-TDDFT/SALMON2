@@ -648,7 +648,7 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
       end do
       end do
       end do
-      call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+      call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
       if(comm_is_root(nproc_id_global))then
         write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
       end if
@@ -663,7 +663,7 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
       end do
       end do
       end do
-      call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+      call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
       if(comm_is_root(nproc_id_global))then
         write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
       end if
@@ -680,7 +680,7 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
           end do
           end do
           end do
-          call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+          call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
           if(comm_is_root(nproc_id_global))then
             write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
           end if
@@ -695,7 +695,7 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
           end do
           end do
           end do
-          call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+          call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
           if(comm_is_root(nproc_id_global))then
             write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
           end if
@@ -754,7 +754,7 @@ subroutine write_rho(odir,lg,ng,system,info,mixing)
   end do
   end do
   end do
-  call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+  call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
   if(comm_is_root(nproc_id_global))then
      write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
   end if
@@ -770,7 +770,7 @@ subroutine write_rho(odir,lg,ng,system,info,mixing)
      end do
      end do
      end do
-     call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+     call comm_summation(matbox2,matbox,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
      if(comm_is_root(nproc_id_global))then
         write(iu1_w) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
      end if
@@ -833,7 +833,7 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoi
     end do
     end do
     end do
-    call comm_summation(matbox0,matbox1,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+    call comm_summation(matbox0,matbox1,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
     do iz=ng%is(3),ng%ie(3)
@@ -843,7 +843,7 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoi
     end do
     end do
     end do
-    call comm_summation(matbox0,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+    call comm_summation(matbox0,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
 
     if(comm_is_root(nproc_id_global))then
       open(iu1_w,file=dir_file_out,form='unformatted')
@@ -908,7 +908,7 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     end do
     end do
     end do
-    call comm_summation(matbox0,matbox1,9*lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+    call comm_summation(matbox0,matbox1,9*lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
 
     allocate(v0(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
     allocate(v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
@@ -926,7 +926,7 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     end do
     end do
     end do
-    call comm_summation(v0,v1,3*lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_rko)
+    call comm_summation(v0,v1,3*lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_r)
     
     allocate(b0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
     allocate(b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
@@ -944,7 +944,7 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
       b0(ix,iy,1:3,4) = singlescale%vec_Ac_boundary_top       (ix,iy,1:3)
     end do
     end do
-    call comm_summation(b0,b1,3*lg%num(1)*lg%num(2)*4,info%icomm_rko)
+    call comm_summation(b0,b1,3*lg%num(1)*lg%num(2)*4,info%icomm_r)
 
     if(comm_is_root(nproc_id_global))then
       open(iu1_w,file=dir_file_out,form='unformatted')
