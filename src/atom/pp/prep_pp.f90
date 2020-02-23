@@ -818,12 +818,15 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
   integer,intent(in),optional :: icomm_ko
-  integer :: a,i,ik,ix,iy,iz,j
-  integer :: nc,mps_tmp
+  integer :: a,i,ik,ix,iy,iz,j,ixyz
+  integer :: nc(3),mps_tmp
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: x,y,z,r,u,v,w
-  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
+  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3), xyz(3)
   integer :: irank,nproc,na,sa,ea
+  real(8) :: rion_min(3), rion_max(3), rps_max
+  integer :: mg_min(3), mg_max(3)
+  logical :: flag_cuboid
 
   if (present(icomm_ko)) then
     call comm_get_groupinfo(icomm_ko,irank,nproc)
@@ -836,22 +839,52 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
     ea = natom
   end if
 
-  matrix_a = 0d0
+  matrix_a      = 0d0
   matrix_a(1,1) = 1d0
   matrix_a(2,2) = 1d0
   matrix_a(3,3) = 1d0
   if(present(matrix_A0)) matrix_a = matrix_A0
 
-  al = 0d0
+  al      = 0d0
   al(1,1) = alx
   al(2,2) = aly
   al(3,3) = alz
   if(present(al0)) al = al0
 
+  flag_cuboid = .true.
+  if(present(al0)) then
+     if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
+         abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
+  endif
+
+  if( flag_cuboid ) then
+     rps_max   = maxval( pp%rps(:)) + max(hx,hy,hz) + 1d-2
+     mg_min(1) = minval( mx(1:ml) )
+     mg_min(2) = minval( my(1:ml) )
+     mg_min(3) = minval( mz(1:ml) )
+     mg_max(1) = maxval( mx(1:ml) )
+     mg_max(2) = maxval( my(1:ml) )
+     mg_max(3) = maxval( mz(1:ml) )
+  endif
+
+
   if(iperiodic==0)then
-    nc=0
+    nc(:)=0
   else if(iperiodic==3)then
-    nc=2
+    if( flag_cuboid ) then
+       do ixyz=1,3
+          rion_min(ixyz) = minval(rion(ixyz,:))
+          rion_max(ixyz) = maxval(rion(ixyz,:))
+          if( rion_min(ixyz) + 2d0*al(ixyz,ixyz) .gt. al(ixyz,ixyz) + rps_max .and. &
+              rion_max(ixyz) - 2d0*al(ixyz,ixyz) .lt.               - rps_max ) then
+             nc(ixyz) = 1
+          else
+             nc(ixyz) = 2
+          endif
+       enddo
+    else
+       nc(:)=2
+    endif
   end if
 
   if(iperiodic==0)then
@@ -883,14 +916,30 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 
   mps_tmp = 0
 !$omp parallel
-!$omp do private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w) &
+!$omp do private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
 !$omp    reduction(max:mps_tmp)
   do a=sa,ea
     ik=kion(a)
     j=0
-    do ix=-nc,nc
-    do iy=-nc,nc
-    do iz=-nc,nc
+    do ix=-nc(1),nc(1)
+      if( flag_cuboid ) then
+        xyz(1) = rion(1,a) + ix*al(1,1)
+        if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
+            xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
+      endif
+    do iy=-nc(2),nc(2)
+      if( flag_cuboid ) then
+        xyz(2) = rion(2,a) + iy*al(2,2)
+        if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
+            xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
+      endif
+    do iz=-nc(3),nc(3)
+      if( flag_cuboid ) then
+        xyz(3) = rion(3,a) + iz*al(3,3)
+        if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
+            xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
+      endif
+
       rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
       rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
       rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
@@ -947,11 +996,14 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
   integer,intent(in),optional :: icomm_ko
   integer :: a,i,ik,ix,iy,iz,j
-  integer :: nc
+  integer :: nc(3), ixyz
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: r,x,y,z,u,v,w
-  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3)
+  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3),xyz(3)
   integer :: irank,nproc,na,sa,ea
+  real(8) :: rion_min(3), rion_max(3), rps_max
+  integer :: mg_min(3), mg_max(3)
+  logical :: flag_cuboid
 
   if (present(icomm_ko)) then
     call comm_get_groupinfo(icomm_ko,irank,nproc)
@@ -967,6 +1019,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   matrix_a = 0d0
   matrix_a(1,1) = 1d0
   matrix_a(2,2) = 1d0
+
   matrix_a(3,3) = 1d0
   if(present(matrix_A0)) matrix_a = matrix_A0
 
@@ -976,11 +1029,40 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   al(3,3) = alz
   if(present(al0)) al = al0
 
+  flag_cuboid = .true.
+  if(present(al0)) then
+     if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
+         abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
+  endif
+
+  if( flag_cuboid ) then
+     rps_max   = maxval( pp%rps(:)) + max(hx,hy,hz) + 1d-2
+     mg_min(1) = minval( mx(1:ml) )
+     mg_min(2) = minval( my(1:ml) )
+     mg_min(3) = minval( mz(1:ml) )
+     mg_max(1) = maxval( mx(1:ml) )
+     mg_max(2) = maxval( my(1:ml) )
+     mg_max(3) = maxval( mz(1:ml) )
+  endif
+
 
   if(iperiodic==0)then
-    nc=0
+    nc(:)=0
   else if(iperiodic==3)then
-    nc=2
+    if( flag_cuboid ) then
+       do ixyz=1,3
+          rion_min(ixyz) = minval(rion(ixyz,:))
+          rion_max(ixyz) = maxval(rion(ixyz,:))
+          if( rion_min(ixyz) + 2d0*al(ixyz,ixyz) .gt. al(ixyz,ixyz) + rps_max .and. &
+              rion_max(ixyz) - 2d0*al(ixyz,ixyz) .lt.               - rps_max ) then
+             nc(ixyz) = 1
+          else
+             nc(ixyz) = 2
+          endif
+       enddo
+    else
+       nc(:)=2
+    endif
   end if
 
   if(iperiodic==0)then
@@ -1017,14 +1099,31 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   ppg%mps  = 0
 
 !$omp parallel do default(none) &
-!$omp    private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w) &
-!$omp    shared(sa,ea,natom,kion,nc,al,rion,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg)
+!$omp    private(a,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
+!$omp    shared(sa,ea,natom,kion,nc,al,rion,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg) &
+!$omp    shared(mg_min,mg_max,flag_cuboid,rps_max)
   do a=sa,ea
     ik=kion(a)
     j=0
-    do ix=-nc,nc
-    do iy=-nc,nc
-    do iz=-nc,nc
+    do ix=-nc(1),nc(1)
+      if( flag_cuboid ) then
+        xyz(1) = rion(1,a) + ix*al(1,1)
+        if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
+            xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
+      endif
+    do iy=-nc(2),nc(2)
+      if( flag_cuboid ) then
+        xyz(2) = rion(2,a) + iy*al(2,2)
+        if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
+            xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
+      endif
+    do iz=-nc(3),nc(3)
+      if( flag_cuboid ) then
+        xyz(3) = rion(3,a) + iz*al(3,3)
+        if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
+            xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
+      endif
+
       rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
       rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
       rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
