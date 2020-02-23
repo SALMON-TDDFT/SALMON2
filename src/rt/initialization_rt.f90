@@ -219,6 +219,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
+  spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
