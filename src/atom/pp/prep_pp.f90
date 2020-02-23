@@ -838,7 +838,6 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
     sa = 1
     ea = natom
   end if
-  !write(*,'(a,4i6)') "debug: irank, natom_mg=", irank, natom_mg, sa,ea
 
   matrix_a      = 0d0
   matrix_a(1,1) = 1d0
@@ -853,8 +852,10 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   if(present(al0)) al = al0
 
   flag_cuboid = .true.
-  if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
-      abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
+  if(present(al0)) then
+     if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
+         abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
+  endif
 
   if( flag_cuboid ) then
      rps_max   = maxval( pp%rps(:)) + max(hx,hy,hz) + 1d-2
@@ -1029,8 +1030,10 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   if(present(al0)) al = al0
 
   flag_cuboid = .true.
-  if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
-      abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
+  if(present(al0)) then
+     if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
+         abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
+  endif
 
   if( flag_cuboid ) then
      rps_max   = maxval( pp%rps(:)) + max(hx,hy,hz) + 1d-2
