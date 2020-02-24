@@ -373,7 +373,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
 !$omp parallel do private(ix,iy,iz) reduction(+:e_poy1)
     do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        e_poy1 = e_poy1 + fw%poynting_vector(3,ix,iy,lg%ie(3)) * coef
+        e_poy1 = e_poy1 + fw%poynting_vector(3,ix,iy,lg%is(3)) * coef
       end do
     end do
   end if
