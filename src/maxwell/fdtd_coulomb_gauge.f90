@@ -205,15 +205,6 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
     call pulse(tm,Hgs(3),Aext1_old)
     call pulse(tm+dt_m,0d0,   Aext0)
     call pulse(tm+dt_m,Hgs(3),Aext1)
-  !$OMP parallel do collapse(2) private(ix,iy)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      fw%vec_Ac_ext_old(ix,iy,0,1:3) = Aext0_old
-      fw%vec_Ac_ext_old(ix,iy,1,1:3) = Aext1_old
-      fw%vec_Ac_ext(ix,iy,0,1:3) = Aext0
-      fw%vec_Ac_ext(ix,iy,1,1:3) = Aext1
-    end do
-    end do
     out_Aext = Aext1
 
   ! z axis: Mur absorbing boundary condition
@@ -223,10 +214,10 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
       ! absorbing boundary condition with the incident field vec_Ac_ext
-        fw%vec_Ac_boundary_bottom(ix,iy,1:3) = fw%vec_Ac_ext(ix,iy,0,1:3) &
-                                        + ( fw%vec_Ac_m(0,ix,iy,lg%is(3),1:3) - fw%vec_Ac_ext_old(ix,iy,1,1:3) )  &
-                                        + coef* ( ( fw%vec_Ac_m(1,ix,iy,lg%is(3),1:3) - fw%vec_Ac_ext(ix,iy,1,1:3) ) &
-                                                - ( fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) - fw%vec_Ac_ext_old(ix,iy,0,1:3) ) )
+        fw%vec_Ac_boundary_bottom(ix,iy,1:3) = Aext0 &
+                                        + ( fw%vec_Ac_m(0,ix,iy,lg%is(3),1:3) - Aext1_old )  &
+                                        + coef* ( ( fw%vec_Ac_m(1,ix,iy,lg%is(3),1:3) - Aext1 ) &
+                                                - ( fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) - Aext0_old ) )
       end do
       end do
     end if
@@ -520,8 +511,6 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
         & ,fw%lgbox1      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
         & ,fw%lgbox2      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
         & ,fw%integral_poynting_tmp(lg%num(3)),fw%integral_poynting_tmp2(lg%num(3)) &
-        & ,fw%vec_Ac_ext    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),0:1,1:3) &
-        & ,fw%vec_Ac_ext_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),0:1,1:3) &
         & ,fw%Ac_zt(3,lg%is(3):lg%ie(3)) &
         & ,fw%Ac_zt_t(3,lg%is(3):lg%ie(3)))
 

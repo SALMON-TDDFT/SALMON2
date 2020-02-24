@@ -423,8 +423,7 @@ module structures
     & ,integral_poynting(:),Ac_zt(:,:),Ac_zt_t(:,:)
     real(8),allocatable :: box(:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:) &
-    & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) &
-    & ,vec_Ac_ext(:,:,:,:),vec_Ac_ext_old(:,:,:,:)
+    & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) 
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
   end type s_singlescale
 
