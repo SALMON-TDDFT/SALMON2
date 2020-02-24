@@ -408,13 +408,13 @@ subroutine check_ffte_condition(pinfo,lg)
   integer :: j,lg_num_tmp,ii
 
   if (yn_ffte == 'y') then
-    mx = mod(lg%num(1), pinfo%npdomain_general(2))
-    my = mod(lg%num(2), pinfo%npdomain_general(2))
-    if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_domain_general(2)'
+    mx = mod(lg%num(1), pinfo%npdomain_orbital(2))
+    my = mod(lg%num(2), pinfo%npdomain_orbital(2))
+    if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_domain_orbital(2)'
 
-    my = mod(lg%num(2), pinfo%npdomain_general(3))
-    mz = mod(lg%num(3), pinfo%npdomain_general(3))
-    if (my /= 0 .or. mz /= 0) stop 'Both lg%num(2) and lg%num(3) must be divisible by nproc_domain_general(3)'
+    my = mod(lg%num(2), pinfo%npdomain_orbital(3))
+    mz = mod(lg%num(3), pinfo%npdomain_orbital(3))
+    if (my /= 0 .or. mz /= 0) stop 'Both lg%num(2) and lg%num(3) must be divisible by nproc_domain_orbital(3)'
 
     ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
     do j=1,3
