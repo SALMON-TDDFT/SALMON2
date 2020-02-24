@@ -68,7 +68,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
   ! sendrecv_grid object for scalar potential updates
   call create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_ng, ng, 1, info_field%icomm_all, neig_ng)
+  call init_sendrecv_grid(srg_ng, ng, 1, info%icomm_rko, neig_ng)
 
 ! symmetry
 
@@ -77,11 +77,12 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
 ! for Poisson equation
 
   poisson%iterVh = 0 ! Iteration counter
+  fg%icomm_G = info%icomm_rko
   select case(iperiodic)
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
   case(3)
-    call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+    call init_reciprocal_grid(lg,ng,fg,system,poisson)
   end select
   call set_ig_bound(lg,ng,poisson)
 
@@ -456,20 +457,19 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
   type(s_rgrid),       intent(inout) :: mg,ng
   !
   integer :: nproc_domain_orbital(3),nproc_domain_general(3),nproc_k,nproc_ob
-  integer :: nproc_domain_general_dm(3)
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
   nproc_domain_orbital = pinfo%npdomain_orbital
   nproc_domain_general = pinfo%npdomain_general
-  nproc_domain_general_dm = pinfo%npdomain_general_dm
 
   if ( allocated(mg%is_all) ) deallocate(mg%is_all)
   if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)
   if ( allocated(ng%is_all) ) deallocate(ng%is_all)
   if ( allocated(ng%ie_all) ) deallocate(ng%ie_all)
-  allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1),ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
+  allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1))
+  allocate(ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
 
 ! +-------------------------------+
 ! | mg: r-space grid for orbitals |
@@ -552,26 +552,11 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
   ng%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
   ng%nd = Nd
 
-  do i3=0,nproc_domain_general(3)-1
-  do i2=0,nproc_domain_general(2)-1
-  do i1=0,nproc_domain_general(1)-1
-    ibox = info_field%imap(i1,i2,i3)
-    npo = [i1,i2,i3]
-    do j=1,3
-      nsize = (mg%num(j) + nproc_domain_general_dm(j) - 1) / nproc_domain_general_dm(j)
-      ng%is_all(j,ibox) = mg%is(j) + nsize * mod(npo(j),nproc_domain_general_dm(j))
-      ng%ie_all(j,ibox) = ng%is_all(j,ibox) + nsize - 1
-      if (ng%ie_all(j,ibox) > mg%ie(j)) then
-        ng%ie_all(j,ibox) = mg%ie(j)
-      end if
-    end do
-  end do
-  end do
-  end do
+  ng%is_all = mg%is_all
+  ng%ie_all = mg%ie_all
 
-  ng%is(1:3) = ng%is_all(:,myrank)
-  ng%ie(1:3) = ng%ie_all(:,myrank)
-
+  ng%is(1:3)  = ng%is_all(:,myrank)
+  ng%ie(1:3)  = ng%ie_all(:,myrank)
   ng%num(1:3) = ng%ie(1:3)-ng%is(1:3)+1
 
   ng%is_overlap(1:3) = ng%is(1:3)-nd
@@ -607,7 +592,7 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
 
 ! final check...
   do j=1,3
-    if (mg%is(j) > ng%is(j) .or. mg%ie(j) < ng%ie(j)) then
+    if (mg%is(j) /= ng%is(j) .or. mg%ie(j) /= ng%ie(j)) then
       stop 'invalid range: mg and ng, please check init_grid_parallel subroutine'
     end if
   end do
@@ -616,16 +601,16 @@ end subroutine init_grid_parallel
 
 !===================================================================================================================================
 
-subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+subroutine init_reciprocal_grid(lg,ng,fg,system,poisson)
   use inputoutput,     only : nelem,yn_ffte
   use math_constants,  only : pi,zi
-  use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_field_parallel,s_poisson
+  use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_poisson
+  use communication,   only : comm_get_groupinfo
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_dft_system),intent(in) :: system
-  type(s_field_parallel),intent(in) :: info_field
   type(s_poisson),intent(inout) :: poisson
   real(8) :: brl(3,3)
   integer :: n,myrank,nproc
@@ -638,11 +623,9 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   brl(:,:)=system%primitive_b(:,:)
 
-  fg%icomm_G = info_field%icomm_all
-  fg%ng = system%ngrid
+  call comm_get_groupinfo(fg%icomm_G,myrank,nproc)
 
-  nproc = info_field%isize_all
-  myrank = info_field%id_all
+  fg%ng = system%ngrid
 
   fg%ig_s = myrank*(fg%ng/nproc)+1
   fg%ig_e = (myrank+1)*(fg%ng/nproc)

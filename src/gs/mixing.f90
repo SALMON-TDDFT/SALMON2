@@ -84,11 +84,11 @@ end subroutine simple_mixing
 
 !===================================================================================================================================
 
-subroutine wrapper_broyden(ng,system,srho_s,iter,mixing)
+subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
   use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
-  use parallelization, only: nproc_group_global
   use broyden_sub
   implicit none
+  integer,intent(in) :: comm
   type(s_rgrid) :: ng
   type(s_dft_system),intent(in) :: system
   type(s_scalar),intent(inout) :: srho_s(system%nspin)
@@ -122,7 +122,7 @@ subroutine wrapper_broyden(ng,system,srho_s,iter,mixing)
     end do
 
     call broyden(vecr,vecr_in,vecr_out,ng%num(1)*ng%num(2)*ng%num(3),iter,    &
-                 mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global,&
+                 mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                  mixing%flag_mix_zero )
 
     do iz=ng%is(3),ng%ie(3)
@@ -167,7 +167,7 @@ subroutine wrapper_broyden(ng,system,srho_s,iter,mixing)
       end do
 
       call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),iter,  &
-                   mixing%num_rho_stock,mixing%num_rho_stock,nproc_group_global,&
+                   mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                    mixing%flag_mix_zero )
   
       do iz=ng%is(3),ng%ie(3)

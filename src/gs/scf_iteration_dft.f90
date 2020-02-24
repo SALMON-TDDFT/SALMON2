@@ -110,8 +110,22 @@ if(step_initial_mix_zero.gt.1)then
                      iter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
                      poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-      call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
-      if(comm_is_root(nproc_id_global)) write(*,*) "  no-mixing iter=", iter
+      call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+      call timer_begin(LOG_CALC_TOTAL_ENERGY)
+      call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+      select case(iperiodic)
+      case(0); call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+      case(3); call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
+      end select
+      call timer_end(LOG_CALC_TOTAL_ENERGY)
+      if(comm_is_root(nproc_id_global)) then
+         select case(iperiodic)
+         case(0); write(*,300) iter, energy%E_tot*au_energy_ev, poisson%iterVh
+         case(3); write(*,301) iter, energy%E_tot*au_energy_ev
+         end select
+300      format(2x,"no-mixing iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
+301      format(2x,"no-mixing iter =",i6,5x,"Total Energy =",f19.8)
+      endif
 
    end do DFT_NoMix_Iteration
    mixing%flag_mix_zero = .false.
@@ -151,7 +165,7 @@ DFT_Iteration : do iter=Miter+1,nscf
                      Miter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
                      poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-   call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )

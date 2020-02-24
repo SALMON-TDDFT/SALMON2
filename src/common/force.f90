@@ -83,7 +83,7 @@ contains
 
   ! Ewald sum
   call timer_begin(LOG_CALC_FORCE_ION_ION)
-    call force_ewald(system%Force,F_tmp,system,ewald,pp,nion,info%icomm_rko)
+    call force_ewald(system%Force,F_tmp,system,ewald,pp,nion,fg%icomm_G)
   call timer_end(LOG_CALC_FORCE_ION_ION)
   
   ! Fourier part (local part, etc.)
@@ -153,7 +153,7 @@ contains
       end do
       end do
       end do
-      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
+      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,fg%icomm_G)
     end if
   call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
@@ -258,7 +258,7 @@ contains
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
     !end do
-    call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
+    call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_G)
 
 !$omp parallel do private(ia)
     do ia=1,nion

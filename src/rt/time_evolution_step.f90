@@ -34,7 +34,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   use md_sub, only: time_evolution_step_md_part1,time_evolution_step_md_part2, &
                     update_pseudo_rt
   use write_sub
-  use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, allgatherv_vlocal
+  use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, update_vlocal
   use fdtd_coulomb_gauge, only: fdtd_singlescale
   use salmon_xc
   use em_field, only: calcVbox, calc_emfields
@@ -236,9 +236,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_out,stencil,sVxc,energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
-  call timer_begin(LOG_CALC_ALLGATHERV_VLOCAL) ! FIXME: wrong name
-  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
-  call timer_end(LOG_CALC_ALLGATHERV_VLOCAL)
+  call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
 
 ! result
 
@@ -302,7 +300,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(itt,rt,lg,ng,srho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(info%icomm_r,itt,rt,lg,ng,srho,rNe,poisson,energy%E_tot,system,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   !(force)

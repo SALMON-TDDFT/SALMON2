@@ -164,7 +164,6 @@ module structures
                              ! Inside core FFTE routine, x-direction is redundant and
                              ! yz-direction is parallel.
     integer :: id_ffte(3), isize_ffte(3)
-    integer :: icomm_v,ngo(3),ngo_xyz,nproc_o ! for allgatherv_vlocal
     integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
   end type s_field_parallel
 

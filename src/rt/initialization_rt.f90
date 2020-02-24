@@ -219,11 +219,12 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
+  spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
   call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
-  call allgatherv_vlocal(ng,mg,info_field,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then
     sVh_stock1%f=sVh%f
   else if(yn_restart=='n')then
@@ -373,7 +374,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   if(yn_restart /= 'y')then
-    call calc_dip(lg,ng,srho,rbox_array2)
+    call calc_dip(info%icomm_r,lg,ng,srho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
   if(comm_is_root(nproc_id_global))then
@@ -434,7 +435,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%nd = 1
     eg%is = ng%is
     eg%ie = ng%ie
-    call init_sendrecv_grid(singlescale%srg_eg, eg, 1, info_field%icomm_all, srg_ng%neig)
+    call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
 
     call init_singlescale(info_field%icomm_all,ng,mg,lg,system%hgs,srho,sVh,srg_ng,singlescale)
   end if
