@@ -8,7 +8,7 @@ set(OPENMP_FLAGS                "-Kopenmp -Nfjomplib")     # use Fujitsu OpenMP 
 set(LAPACK_FLAGS                "-SSL2BLAMP")
 set(ScaLAPACK_FLAGS             "-SCALAPACK -SSL2BLAMP")
 set(ADDITIONAL_MACRO            "")
-set(ADDITIONAL_OPTIMIZE_FLAGS   "")
+set(ADDITIONAL_OPTIMIZE_FLAGS   "-Knolargepage")
 
 set(Fortran_FLAGS_General       "-Kocl -Cpp -Nlst=t -Koptmsg=2 -Ncheck_std=03s")
 set(C_FLAGS_General             "-Kocl      -Nlst=t -Koptmsg=2 -Xg -std=gnu99")
