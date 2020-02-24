@@ -2303,13 +2303,6 @@ contains
       end select
     end select
 
-    ! NOTE: `calc_force` calculates incorrect values under these configuration
-    !       we should fix it.
-    if (yn_ffte == 'y') then
-      if (yn_md  == 'y') stop "invalid: yn_ffte=='y' and yn_md=='y'"
-      if (yn_opt == 'y') stop "invalid: yn_ffte=='y' and yn_optc=='y'"
-    end if
-
   end subroutine check_bad_input
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)
