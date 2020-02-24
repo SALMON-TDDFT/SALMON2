@@ -30,7 +30,7 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs
   real(8),intent(in)       :: hgs(3)
   type(s_poisson),intent(inout)         :: poisson
   integer :: ix,iy,iz
-  integer :: iiy,iiz
+  integer :: iiy,iiz,iix
   real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
@@ -66,16 +66,20 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs
 
   trhoG_ele_tmp=0d0
 !$omp parallel do collapse(2) default(none) &
-!$omp             private(iz,iy,ix,iiy,iiz) &
+!$omp             private(iz,iy,ix,iiy,iiz,iix) &
 !$omp             shared(ng,lg,trhoG_ele_tmp,poisson,inv_lgnum3)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
-  do ix=1,lg%num(1)
-    iiz=iz+ng%is(3)-1
-    iiy=iy+ng%is(2)-1
-    trhoG_ele_tmp(ix,iiy,iiz)=poisson%b_ffte(ix,iy,iz)*inv_lgnum3
-    poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
-  end do
+    do ix=1,ng%num(1)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
+      iix=ix+ng%is(1)-1
+      trhoG_ele_tmp(iix,iiy,iiz)=poisson%b_ffte(iix,iy,iz)*inv_lgnum3
+    end do
+
+    do ix=1,lg%num(1)
+      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
+    end do
   end do
   end do
 !$omp end parallel do
