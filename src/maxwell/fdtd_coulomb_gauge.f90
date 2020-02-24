@@ -21,7 +21,7 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,poisson,srg_ng,Ac,div_Ac,fw)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
@@ -32,21 +32,22 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   use inputoutput, only: t_unit_time
   use timer
   implicit none
-  integer       ,intent(in) :: itt
-  type(s_rgrid) ,intent(in) :: lg,mg,ng
+  integer                 ,intent(in) :: itt
+  type(s_rgrid)           ,intent(in) :: lg,mg,ng
+  type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
-  type(s_field_parallel),intent(in) :: info_field
-  real(8)       ,intent(in) :: hgs(3)
-  type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
-  type(s_vector),intent(in) :: j_e    ! electron number current density (without rho*A/c)
-  type(s_sendrecv_grid)     :: srg_ng
-  type(s_vector)            :: Ac     ! A/c, A: vector potential, c: speed of light
-  type(s_scalar)            :: div_Ac ! div(A/c)
-  type(s_singlescale)       :: fw     ! FDTD working arrays, etc.
+  type(s_field_parallel)  ,intent(in) :: info_field
+  type(s_scalar)          ,intent(in) :: rho,Vh ! electron number density & Hartree potential
+  type(s_vector)          ,intent(in) :: j_e    ! electron number current density (without rho*A/c)
+  type(s_poisson)         ,intent(in) :: poisson
+  type(s_sendrecv_grid)               :: srg_ng
+  type(s_vector)                      :: Ac     ! A/c, A: vector potential, c: speed of light
+  type(s_scalar)                      :: div_Ac ! div(A/c)
+  type(s_singlescale)                 :: fw     ! FDTD working arrays, etc.
   !
   integer,parameter :: mstep=100
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
-  real(8) :: Hvol,dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
+  real(8) :: Hvol,hgs(3),dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
   real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
   real(8) :: e_poy1,e_poy2,rtmp1(6),rtmp2(6)
@@ -60,7 +61,8 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,info,info_field,hgs,rho,Vh,j_e,srg_ng,A
   lcs(1,2,3) = 1; lcs(3,1,2) = 1; lcs(2,3,1) = 1
   lcs(1,3,2) = -1; lcs(2,1,3) = -1; lcs(3,2,1) = -1
 
-  Hvol = hgs(1)*hgs(2)*hgs(3)
+  hgs = system%hgs
+  Hvol = system%Hvol
   dt_m = dt / dble(mstep)
 
 !-----------------------------------------------------------------------------------------------------------------------------------
