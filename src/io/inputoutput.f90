@@ -795,7 +795,7 @@ contains
     newald = 4
     aewald = 0.5d0
     cutoff_r = -1d0
-    cutoff_r_buff =  2.0d0 / au_length_aa
+    cutoff_r_buff =  2.0d0
     cutoff_g = -1d0
 !! == default for &opt
     nopt                = 100
