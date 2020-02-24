@@ -21,7 +21,7 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,poisson,srg_ng,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,poisson,srg_ng,Ac,div_Ac,fw)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
@@ -39,6 +39,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,poiss
   type(s_field_parallel)  ,intent(in) :: info_field
   type(s_scalar)          ,intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_vector)          ,intent(in) :: j_e    ! electron number current density (without rho*A/c)
+  type(s_reciprocal_grid) ,intent(in) :: fg
   type(s_poisson)         ,intent(in) :: poisson
   type(s_sendrecv_grid)               :: srg_ng
   type(s_vector)                      :: Ac     ! A/c, A: vector potential, c: speed of light
