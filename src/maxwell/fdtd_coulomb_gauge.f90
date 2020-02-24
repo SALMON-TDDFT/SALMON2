@@ -112,8 +112,6 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
 
   ! FDTD loop: A(t) --> A(t+dt)
 
-  fw%rotation_A = 0d0
-  fw%divergence_A = 0d0
   do ii=1,mstep
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -176,27 +174,6 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
       end do
       end do
 
-  !   rotation & divergence of A
-      if(ii==mstep/2) then
-  !$OMP parallel do collapse(2) private(ix,iy,iz,wrk,dr,diff_A)
-        do iz=ng%is(3),ng%ie(3)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-        ! rot(A)
-          wrk(1) = ( fw%box(ix+1,iy,iz) - fw%box(ix-1,iy,iz) ) / ( 2d0* Hgs(1) )
-          wrk(2) = ( fw%box(ix,iy+1,iz) - fw%box(ix,iy-1,iz) ) / ( 2d0* Hgs(2) )
-          wrk(3) = ( fw%box(ix,iy,iz+1) - fw%box(ix,iy,iz-1) ) / ( 2d0* Hgs(3) )
-          fw%rotation_A(:,ix,iy,iz) = fw%rotation_A(:,ix,iy,iz) + lcs(:,1,i1) * wrk(1) + lcs(:,2,i1) * wrk(2) + lcs(:,3,i1) * wrk(3)
-
-        ! div(A)
-          dr = krd(:,i1)
-          diff_A = ( fw%box(ix+dr(1),iy+dr(2),iz+dr(3)) - fw%box(ix-dr(1),iy-dr(2),iz-dr(3)) ) / ( 2d0* Hgs(i1) )
-          fw%divergence_A(ix,iy,iz) = fw%divergence_A(ix,iy,iz) + diff_A
-        end do
-        end do
-        end do
-      end if
-
     end do ! i1 (spacial )
 
   ! external field
@@ -243,6 +220,60 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
+! divergence & rotation of Ac
+  fw%div_Ac = 0d0
+  fw%rot_Ac = 0d0
+  do i1=1,3
+  
+!$OMP parallel do collapse(2) private(ix,iy,iz)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      fw%box(ix,iy,iz) = fw%vec_Ac_m(1,ix,iy,iz,i1)
+    end do
+    end do
+    end do
+    call timer_begin(LOG_SS_FDTD_COMM)
+    call update_overlap_real8(fw%srg_eg, ng, fw%box)
+    call timer_end(LOG_SS_FDTD_COMM)
+    if(ng%is(3)==lg%is(3))then
+!$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%box(ix,iy,lg%is(3)-1) = fw%vec_Ac_boundary_bottom(ix,iy,i1)
+      end do
+      end do
+    end if
+    if(ng%ie(3)==lg%ie(3))then
+!$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%box(ix,iy,lg%ie(3)+1) = fw%vec_Ac_boundary_top(ix,iy,i1)
+      end do
+      end do
+    end if
+
+  !$OMP parallel do collapse(2) private(ix,iy,iz,wrk,dr,diff_A)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+    ! rot(A)
+      wrk(1) = ( fw%box(ix+1,iy,iz) - fw%box(ix-1,iy,iz) ) / ( 2d0* Hgs(1) )
+      wrk(2) = ( fw%box(ix,iy+1,iz) - fw%box(ix,iy-1,iz) ) / ( 2d0* Hgs(2) )
+      wrk(3) = ( fw%box(ix,iy,iz+1) - fw%box(ix,iy,iz-1) ) / ( 2d0* Hgs(3) )
+      fw%rot_Ac(:,ix,iy,iz) = fw%rot_Ac(:,ix,iy,iz) + lcs(:,1,i1) * wrk(1) + lcs(:,2,i1) * wrk(2) + lcs(:,3,i1) * wrk(3)
+    ! div(A)
+      dr = krd(:,i1)
+      diff_A = ( fw%box(ix+dr(1),iy+dr(2),iz+dr(3)) - fw%box(ix-dr(1),iy-dr(2),iz-dr(3)) ) / ( 2d0* Hgs(i1) )
+      fw%div_Ac(ix,iy,iz) = fw%div_Ac(ix,iy,iz) + diff_A
+    end do
+    end do
+    end do
+    
+  end do
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
   coef = cspeed_au / (4d0*pi)
   coef2 = Hvol / (8d0*pi)
   e_em_wrk = 0d0 ! for Electro-Magnetic energy
@@ -257,11 +288,11 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
   do ix=ng%is(1),ng%ie(1)
 
     fw%vbox(1:3,ix,iy,iz) = ( fw%vec_Ac_m(1,ix,iy,iz,1:3) + fw%vec_Ac_old(1:3,ix,iy,iz) ) * 0.5d0 ! ( A(t+dt) + A(t) )/2
-    fw%lgbox1(ix,iy,iz)   = fw%divergence_A(ix,iy,iz)
+    fw%lgbox1(ix,iy,iz)   = ( fw%div_Ac(ix,iy,iz) + fw%div_Ac_old(ix,iy,iz) ) * 0.5d0 ! div ( A(t+dt) + A(t) )/2
 
     wrk4 = ( fw%vec_Ac_m(1,ix,iy,iz,:) - fw%vec_Ac_old(:,ix,iy,iz) ) / dt ! (A(t+dt)-A(t))/dt
     wrk  = - (-1d0)*fw%grad_Vh(:,ix,iy,iz) - wrk4 ! E
-    wrk2 = cspeed_au * fw%rotation_A(:,ix,iy,iz)  ! B
+    wrk2 = cspeed_au * fw%rot_Ac(:,ix,iy,iz)      ! B
     wrk3 = - fw%curr(ix,iy,iz,1:3)                ! j
     fw%poynting_vector(:,ix,iy,iz) = coef * ( lcs(:,1,2) * wrk(1) * wrk2(2) + lcs(:,1,3) * wrk(1) * wrk2(3) &
                                             + lcs(:,2,1) * wrk(2) * wrk2(1) + lcs(:,2,3) * wrk(2) * wrk2(3) &
@@ -299,6 +330,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
     fw%vec_Ac_old(:,ix,iy,iz)    = fw%vec_Ac_m(1,ix,iy,iz,1:3) ! Ac(t+dt) --> Ac(t) of next step
+    fw%div_Ac_old(ix,iy,iz)      = fw%div_Ac(ix,iy,iz)      ! div Ac(t+dt) --> div Ac(t) of next step
     fw%grad_Vh_old(1:3,ix,iy,iz) = fw%grad_Vh(1:3,ix,iy,iz) ! grad[Vh(t-dt/2)] of next step
     fw%vec_je_old(1:3,ix,iy,iz)  = j_e%v(1:3,ix,iy,iz) ! j_e(t-dt/2) of next step
     fw%rho_old(ix,iy,iz)         = rho%f(ix,iy,iz)     ! rho(t-dt/2) of next step
@@ -504,9 +536,10 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
 
   allocate(fw%integral_poynting(lg%is(3):lg%ie(3)))
 
-  allocate(fw%rotation_A(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
+  allocate(fw%rot_Ac    (3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
    & ,fw%poynting_vector(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
-        & ,fw%divergence_A(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
+        & ,fw%div_Ac      (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
+        & ,fw%div_Ac_old  (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
         & ,fw%vbox      (3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
         & ,fw%lgbox1      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
         & ,fw%lgbox2      (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) &
