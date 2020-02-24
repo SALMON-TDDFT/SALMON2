@@ -291,8 +291,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
       call timer_begin(LOG_CALC_SINGLESCALE)
       call calc_microscopic_current(system,mg,stencil,info,spsi_out,rt%j_e)
       singlescale%E_electron = energy%E_tot
-      call fdtd_singlescale(itt,lg,mg,ng,info,info_field,system%hgs,srho, &
-      & sVh,rt%j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
+      call fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,srho, &
+      & sVh,rt%j_e,fg,poisson,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
       call timer_end(LOG_CALC_SINGLESCALE)
     end if

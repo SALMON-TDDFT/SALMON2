@@ -417,14 +417,13 @@ module structures
     real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3)
     real(8),allocatable :: vec_Ac(:,:,:,:),vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
     & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
-    & ,grad_dVh_dt(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
+    & ,current4pi(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
     & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:) &
     & ,vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
     & ,integral_poynting(:),Ac_zt(:,:),Ac_zt_t(:,:)
-    real(8),allocatable :: box(:,:,:),rotation_A(:,:,:,:),poynting_vector(:,:,:,:) &
-    & ,divergence_A(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:) &
-    & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) &
-    & ,vec_Ac_ext(:,:,:,:),vec_Ac_ext_old(:,:,:,:)
+    real(8),allocatable :: box(:,:,:),rot_Ac(:,:,:,:),poynting_vector(:,:,:,:) &
+    & ,div_Ac(:,:,:),div_Ac_old(:,:,:),vbox(:,:,:,:),lgbox1(:,:,:),lgbox2(:,:,:) &
+    & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) 
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
   end type s_singlescale
 
