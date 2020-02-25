@@ -428,6 +428,7 @@ module structures
   ! for yn_gbp
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
     real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)
+    real(8),allocatable :: Ac_fourier(:,:,:,:)
   end type s_singlescale
 
 !===================================================================================================================================

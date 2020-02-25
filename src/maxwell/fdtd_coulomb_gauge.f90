@@ -575,7 +575,7 @@ contains
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
 
-      fw%vec_Ac_m(1,ix,iy,iz,1:3) = fw%Ac_zt_m(iz,1,1:3)
+      fw%vec_Ac_m(1,ix,iy,iz,1:3) = fw%Ac_zt_m(iz,1,1:3) + fw%Ac_fourier(ix,iy,iz,1:3)
 
     end do
     end do
@@ -601,6 +601,128 @@ contains
   end subroutine fdtd_gbp
 
 end subroutine fdtd_singlescale
+
+!===================================================================================================================================
+
+subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs,poisson,j_e,singlescale)
+  use structures
+  use communication, only: comm_summation
+  implicit none
+  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
+  real(8),intent(in)       :: hgs(3)
+  type(s_poisson),intent(inout)         :: poisson
+  type(s_vector) ,intent(in) :: j_e
+  type(s_singlescale)      :: singlescale
+  integer :: ix,iy,iz
+  integer :: iiy,iiz,iix
+  real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
+  complex(8) :: trhoG_ele_tmp(lg%num(1),lg%num(2),lg%num(3))
+  real(8) :: inv_lgnum3
+  integer :: i
+
+  if(.not.allocated(poisson%coef) .or. &
+     .not.allocated(poisson%a_ffte) .or. &
+     .not.allocated(poisson%b_ffte) .or. &
+     .not.allocated(poisson%a_ffte_tmp))then
+    stop 'poisson_ffte: array is not allocated'
+  end if
+  
+  if(info_field%isize_ffte(1) < 4) stop "isize_ffte(1) must be > 3"
+
+  inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
+
+  poisson%a_ffte_tmp=0.d0
+  i = mod(info_field%id_ffte(1),4) ! i=0,1,2,3
+  if(i==0) then
+    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
+      poisson%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz) = trho(ng%is(1):ng%ie(1),iiy,iiz) ! charge density
+    end do
+    end do
+  else
+    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
+      poisson%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz) = j_e%v(i,ng%is(1):ng%ie(1),iiy,iiz) ! current density
+    end do
+    end do
+  end if
+  
+  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm_ffte(1))
+
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+  trhoG_ele_tmp=0d0
+  if(i==0) then
+    !$omp parallel do collapse(2) default(none) &
+    !$omp             private(iz,iy,ix,iiy,iiz,iix) &
+    !$omp             shared(ng,lg,trhoG_ele_tmp,poisson,inv_lgnum3)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+      do ix=1,ng%num(1)
+        iiz=iz+ng%is(3)-1
+        iiy=iy+ng%is(2)-1
+        iix=ix+ng%is(1)-1
+        trhoG_ele_tmp(iix,iiy,iiz)=poisson%b_ffte(iix,iy,iz)*inv_lgnum3
+      end do
+      do ix=1,lg%num(1)
+        poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
+      end do
+    end do
+    end do
+    !$omp end parallel do
+  else
+  
+!???????????
+  ! Maxwell eq.: poisson%b_ffte(ix,iy,iz)=j(G,t) --> poisson%b_ffte(ix,iy,iz)=Ac(G,t+dt)
+  
+  end if
+  call comm_summation(trhoG_ele_tmp,trhoG_ele,size(trhoG_ele),info_field%icomm_all)
+
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+  if(i==0) then
+    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
+      tvh(ng%is(1):ng%ie(1),iiy,iiz)=poisson%a_ffte(ng%is(1):ng%ie(1),iy,iz)
+    end do
+    end do
+  else
+    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
+      singlescale%Ac_fourier(ng%is(1):ng%ie(1),iiy,iiz,i) = poisson%a_ffte(ng%is(1):ng%ie(1),iy,iz)
+    end do
+    end do
+  end if
+  
+!???????????
+  ! MPI_bcast: tVh & singlescale%Ac_fourier
+
+  return
+end subroutine fourier_singlescale
 
 !===================================================================================================================================
 
@@ -680,12 +802,14 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
 ! gbp
   allocate( fw%curr4pi_zt(lg%is(3):lg%ie(3),3) )
   allocate(fw%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3))
+  allocate(fw%Ac_fourier(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
   fw%curr4pi_zt = 0d0
   fw%Ac_zt_m = 0d0
   fw%Ac_zt_boundary_bottom = 0d0
   fw%Ac_zt_boundary_top = 0d0
   fw%Ac_zt_boundary_bottom_old = 0d0
   fw%Ac_zt_boundary_top_old = 0d0
+  fw%Ac_fourier = 0d0
 
   if(comm_is_root(nproc_id_global)) then
     write(filename,"(2A,'_rt_micro.data')") trim(base_directory),trim(SYSname)
