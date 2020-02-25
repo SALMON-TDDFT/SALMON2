@@ -507,54 +507,42 @@ contains
 
   subroutine fdtd_gbp
     implicit none
+    
+    fw%tmp_zt = 0d0
+    do iz=ng%is(3),ng%ie(3)
+  !$omp parallel do collapse(2) private(iy,ix)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%tmp_zt(iz,1:3) = fw%tmp_zt(iz,1:3) + fw%current4pi(ix,iy,iz,1:3) / (lg%num(1)*lg%num(2))
+      end do
+      end do
+    end do
+  
+    call timer_begin(LOG_SS_FDTD_COMM_COLL)
+    call comm_summation(fw%tmp_zt,fw%curr4pi_zt,size(fw%curr4pi_zt),info_field%icomm_all)
+    call timer_end(LOG_SS_FDTD_COMM_COLL)
   
     do ii=1,mstep
 
-    !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+    !$OMP parallel do
+      do iz=lg%is(3),lg%ie(3)
 
-        fw%vec_Ac_m(-1,ix,iy,iz,1:3) = fw%vec_Ac_m(0,ix,iy,iz,1:3)
-        fw%vec_Ac_m(0 ,ix,iy,iz,1:3) = fw%vec_Ac_m(1,ix,iy,iz,1:3)
+        fw%Ac_zt_m(iz,-1,1:3) = fw%Ac_zt_m(iz,0,1:3)
+        fw%Ac_zt_m(iz,0 ,1:3) = fw%Ac_zt_m(iz,1,1:3)
 
       end do
-      end do
-      end do
 
+      fw%Ac_zt_m(lg%is(3)-1,0,1:3) = fw%Ac_zt_boundary_bottom(1:3)
+      fw%Ac_zt_m(lg%ie(3)+1,0,1:3) = fw%Ac_zt_boundary_top   (1:3)
+
+!$OMP parallel do collapse(2) private(i1,iz,lap_A)
       do i1=1,3
-
-        if(ng%is(3)==lg%is(3))then
-    !$OMP parallel do collapse(2) private(ix,iy,iz)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-            fw%box(ix,iy,lg%is(3)-1) = fw%vec_Ac_boundary_bottom(ix,iy,i1)
-          end do
-          end do
-        end if
-        if(ng%ie(3)==lg%ie(3))then
-    !$OMP parallel do collapse(2) private(ix,iy,iz)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-            fw%box(ix,iy,lg%ie(3)+1) = fw%vec_Ac_boundary_top(ix,iy,i1)
-          end do
-          end do
-        end if
-
-    !$OMP parallel do collapse(2) private(ix,iy,iz,lap_A)
-        do iz=ng%is(3),ng%ie(3)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-          lap_A = ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix-1,iy,iz) + fw%box(ix+1,iy,iz) ) / Hgs(1)**2 &
-                + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy-1,iz) + fw%box(ix,iy+1,iz) ) / Hgs(2)**2 &
-                + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
-          fw%vec_Ac_m(1,ix,iy,iz,i1) = ( cspeed_au * dt_m )**2 * lap_A &
-                                    + 2.d0* fw%box(ix,iy,iz) - fw%vec_Ac_m(-1,ix,iy,iz,i1) &
-                                    + dt_m**2 * fw%current4pi(ix,iy,iz,i1)
+        do iz=lg%is(3),lg%ie(3)
+          lap_A = ( - 2d0* fw%Ac_zt_m(iz,0,i1) + fw%Ac_zt_m(iz-1,0,i1) + fw%Ac_zt_m(iz+1,0,i1) ) / Hgs(3)**2
+          fw%Ac_zt_m(iz,1,i1) = ( cspeed_au * dt_m )**2 * lap_A &
+                                    + 2.d0* fw%Ac_zt_m(iz,0,i1) - fw%Ac_zt_m(iz,-1,i1) &
+                                    + dt_m**2 * fw%curr4pi_zt(iz,i1)
         end do
-        end do
-        end do
-
       end do ! i1 (spacial )
 
     ! external field
@@ -567,38 +555,48 @@ contains
 
     ! z axis: Mur absorbing boundary condition
       coef = ( cspeed_au * dt_m - Hgs(3) ) / ( cspeed_au * dt_m + Hgs(3) )
-      if(ng%is(3)==lg%is(3))then
-    !$OMP parallel do collapse(2) private(ix,iy,iz)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-        ! absorbing boundary condition with the incident field vec_Ac_ext
-          fw%vec_Ac_boundary_bottom(ix,iy,1:3) = Aext0 &
-                                          + ( fw%vec_Ac_m(0,ix,iy,lg%is(3),1:3) - Aext1_old )  &
-                                          + coef* ( ( fw%vec_Ac_m(1,ix,iy,lg%is(3),1:3) - Aext1 ) &
-                                                  - ( fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) - Aext0_old ) )
-        end do
-        end do
-      end if
-      if(ng%ie(3)==lg%ie(3))then
-    !$OMP parallel do collapse(2) private(ix,iy,iz)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-          fw%vec_Ac_boundary_top(ix,iy,1:3) = fw%vec_Ac_m(0,ix,iy,lg%ie(3),1:3)   &
-                                      + coef* ( fw%vec_Ac_m(1,ix,iy,lg%ie(3),1:3) - fw%vec_Ac_boundary_top_old(ix,iy,1:3) )
-        end do
-        end do
-      end if
 
-    !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) = fw%vec_Ac_boundary_bottom(ix,iy,1:3)
-        fw%vec_Ac_boundary_top_old   (ix,iy,1:3) = fw%vec_Ac_boundary_top   (ix,iy,1:3)
-      end do
-      end do
+    ! absorbing boundary condition with the incident field vec_Ac_ext
+      fw%Ac_zt_boundary_bottom = Aext0 &
+                                      + ( fw%Ac_zt_m(lg%is(3),0,1:3) - Aext1_old )  &
+                                      + coef* ( ( fw%Ac_zt_m(lg%is(3),1,1:3) - Aext1 ) &
+                                              - ( fw%Ac_zt_boundary_bottom_old(1:3) - Aext0_old ) )
+
+      fw%Ac_zt_boundary_top = fw%Ac_zt_m(lg%ie(3),0,1:3)   &
+                                  + coef* ( fw%Ac_zt_m(lg%ie(3),1,1:3) - fw%Ac_zt_boundary_top_old(1:3) )
+
+      fw%Ac_zt_boundary_bottom_old(1:3) = fw%Ac_zt_boundary_bottom(1:3)
+      fw%Ac_zt_boundary_top_old   (1:3) = fw%Ac_zt_boundary_top   (1:3)
 
     end do ! ii=1,mstep
-  
+    
+  !$OMP parallel do collapse(2) private(ix,iy,iz)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+
+      fw%vec_Ac_m(1,ix,iy,iz,1:3) = fw%Ac_zt_m(iz,1,1:3)
+
+    end do
+    end do
+    end do
+    
+    if(ng%is(3)==lg%is(3))then
+  !$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%vec_Ac_boundary_bottom(ix,iy,1:3) = fw%Ac_zt_boundary_bottom
+      end do
+      end do
+    end if
+    if(ng%ie(3)==lg%ie(3))then
+!$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%vec_Ac_boundary_top(ix,iy,1:3) = fw%Ac_zt_boundary_top
+      end do
+      end do
+    end if
     return
   end subroutine fdtd_gbp
 
@@ -663,8 +661,8 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
         & ,fw%div_Ac      (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
         & ,fw%div_Ac_old  (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
         & ,fw%integral_poynting_tmp(lg%num(3)),fw%integral_poynting_tmp2(lg%num(3)) &
-        & ,fw%Ac_zt(3,lg%is(3):lg%ie(3)) &
-        & ,fw%Ac_zt_t(3,lg%is(3):lg%ie(3)))
+!        & ,fw%Ac_zt(3,lg%is(3):lg%ie(3)) &
+        & ,fw%tmp_zt(3,lg%is(3):lg%ie(3)))
 
   fw%vec_Ac_old = 0d0
   fw%vec_Ac_m = 0d0
@@ -676,8 +674,18 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
   fw%integral_poynting = 0d0
   fw%curr = 0d0
   fw%vec_je_old = 0d0
-  fw%Ac_zt = 0d0
-  fw%Ac_zt_t = 0d0
+!  fw%Ac_zt = 0d0
+  fw%tmp_zt = 0d0
+  
+! gbp
+  allocate( fw%curr4pi_zt(lg%is(3):lg%ie(3),3) )
+  allocate(fw%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3))
+  fw%curr4pi_zt = 0d0
+  fw%Ac_zt_m = 0d0
+  fw%Ac_zt_boundary_bottom = 0d0
+  fw%Ac_zt_boundary_top = 0d0
+  fw%Ac_zt_boundary_bottom_old = 0d0
+  fw%Ac_zt_boundary_top_old = 0d0
 
   if(comm_is_root(nproc_id_global)) then
     write(filename,"(2A,'_rt_micro.data')") trim(base_directory),trim(SYSname)
