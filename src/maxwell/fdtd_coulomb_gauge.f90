@@ -606,7 +606,7 @@ end subroutine fdtd_singlescale
 
 subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs,poisson,j_e,singlescale)
   use structures
-  use communication, only: comm_summation
+  use communication, only: comm_summation,comm_bcast
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
@@ -633,11 +633,12 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   end if
   
   if(info_field%isize_ffte(1) < 4) stop "isize_ffte(1) must be > 3"
+  
+  i = mod(info_field%id_ffte(1),4) ! i=0,1,2,3
 
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
   poisson%a_ffte_tmp=0.d0
-  i = mod(info_field%id_ffte(1),4) ! i=0,1,2,3
   if(i==0) then
     !$OMP parallel do private(iiz,iiy,ix,iy,iz)
     do iz=1,ng%num(3)
@@ -718,8 +719,10 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
     end do
   end if
   
-!???????????
-  ! MPI_bcast: tVh & singlescale%Ac_fourier
+  call comm_bcast(tvh, info_field%icomm_ffte(1), 0)
+  call comm_bcast(singlescale%Ac_fourier(:,:,:,1), info_field%icomm_ffte(1), 1)
+  call comm_bcast(singlescale%Ac_fourier(:,:,:,2), info_field%icomm_ffte(1), 2)
+  call comm_bcast(singlescale%Ac_fourier(:,:,:,3), info_field%icomm_ffte(1), 3)
 
   return
 end subroutine fourier_singlescale
