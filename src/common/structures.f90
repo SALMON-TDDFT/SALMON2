@@ -425,6 +425,8 @@ module structures
     & ,div_Ac(:,:,:),div_Ac_old(:,:,:) &
     & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) 
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
+  ! for yn_gbp
+    
   end type s_singlescale
 
 !===================================================================================================================================
