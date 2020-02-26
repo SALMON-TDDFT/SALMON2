@@ -437,7 +437,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%ie = ng%ie
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
 
-    call init_singlescale(info_field%icomm_all,ng,mg,lg,system%hgs,srho,sVh,srg_ng,singlescale)
+    call init_singlescale(ng,mg,lg,info_field,system%hgs,srho,sVh,srg_ng,singlescale)
   end if
   
 

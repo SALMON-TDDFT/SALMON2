@@ -235,7 +235,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
-  if(yn_gbp=='y' .and. use_singlescale=='y') then
+  if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,mg,ng,info_field,srho%f,sVh%f,fg%zrhoG_ele, &
     & fg%zrhoG_ele_tmp,system%hgs,poisson,rt%j_e,singlescale)
   else
