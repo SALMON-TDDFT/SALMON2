@@ -149,6 +149,90 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
 end subroutine write_dns
 
 !===================================================================================================================================
+subroutine write_dns_ac_je(info,mg,system,rho,j_e,itt,action)
+  use structures, only: s_dft_system,s_orbital_parallel,s_rgrid,s_scalar,allocate_scalar,deallocate_scalar,s_vector
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
+  use salmon_global, only: kion,izatom
+  use filesystem, only: create_directory
+  implicit none
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_dft_system),intent(in) :: system
+  type(s_rgrid),intent(in)  :: mg
+  type(s_vector),intent(in) :: j_e
+  real(8),intent(in) :: rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  integer,intent(in) :: itt
+  character(3),intent(in) :: action
+  integer :: fp
+  real(8) :: dummy(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  character(10) :: filenum1, filenum2
+  character(256):: wdir1, wdir2, ofile
+
+  wdir1 = "output_ion/"
+  wdir2 = "output_dns_ac_je"
+  if(comm_is_root(info%id_ko)) then
+     write(filenum2,'(i6.6)') info%id_r
+     wdir2 = "output_dns_ac_je_idr"//trim(filenum2)//"/"
+  endif
+
+
+  if(action=='new') then
+
+     if(comm_is_root(nproc_id_global)) then
+        call create_directory(wdir1)
+     endif
+
+     if(comm_is_root(info%id_ko)) then
+        call create_directory(wdir2)  
+     endif
+
+  else
+
+     if(comm_is_root(nproc_id_global)) then
+
+        fp = 299
+        write(filenum1,'(i6.6)') itt
+        filenum1=adjustl(filenum1)
+        ofile =trim(wdir1)//"it"//trim(filenum1)//"_ion.bin"
+        open(fp,file=trim(ofile),form='unformatted',access='stream')
+        write(fp) system%nion
+        write(fp) system%Rion(1:3,1:system%nion)
+        write(fp) izatom(kion(1:system%nion))
+        close(fp)
+
+     endif
+
+     if(comm_is_root(info%id_ko)) then
+
+        fp = 300 + info%id_r
+        write(filenum1,'(i6.6)') itt
+        write(filenum2,'(i6.6)') info%id_r
+        filenum1=adjustl(filenum1)
+        filenum2=adjustl(filenum2)
+       !ofile= trim(wdir2)//"it"//trim(filenum1)//"_idr"//trim(filenum2)//".bin"
+        ofile= trim(wdir2)//"it"//trim(filenum1)//".bin"
+        open(fp,file=trim(ofile),form='unformatted',access='stream')
+        write(fp) mg%is(1), mg%ie(1),mg%is(2), mg%ie(2),mg%is(3), mg%ie(3)
+        write(fp) system%hgs(1:3)
+        write(fp) rho(      mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+        if(itt==0) then
+        dummy(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))=0d0
+        write(fp) dummy(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+        write(fp) dummy(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+        else
+        write(fp) j_e%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+        write(fp) system%Ac_micro%v( &
+                        1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+        endif
+        close(fp)
+        
+     endif
+
+  endif  !action
+
+end subroutine write_dns_ac_je
+
+!===================================================================================================================================
 
 subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   use salmon_global, only: format_voxel_data,theory
