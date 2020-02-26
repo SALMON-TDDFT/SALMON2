@@ -25,7 +25,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt
+  use salmon_global, only: dt,yn_gbp
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
   use communication, only: comm_is_root, comm_summation
@@ -112,111 +112,11 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
 
 ! FDTD loop: Ac(t) --> Ac(t+dt)
 
-  do ii=1,mstep
-
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-
-      fw%vec_Ac_m(-1,ix,iy,iz,1:3) = fw%vec_Ac_m(0,ix,iy,iz,1:3)
-      fw%vec_Ac_m(0 ,ix,iy,iz,1:3) = fw%vec_Ac_m(1,ix,iy,iz,1:3)
-
-    end do
-    end do
-    end do
-
-    do i1=1,3
-
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        fw%box(ix,iy,iz) = fw%vec_Ac_m(0,ix,iy,iz,i1)
-      end do
-      end do
-      end do
-      call timer_end(LOG_SS_FDTD_CALC)
-
-      call timer_begin(LOG_SS_FDTD_COMM)
-      call update_overlap_real8(fw%srg_eg, ng, fw%box)
-      call timer_end(LOG_SS_FDTD_COMM)
-
-      call timer_begin(LOG_SS_FDTD_CALC)
-      if(ng%is(3)==lg%is(3))then
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-          fw%box(ix,iy,lg%is(3)-1) = fw%vec_Ac_boundary_bottom(ix,iy,i1)
-        end do
-        end do
-      end if
-      if(ng%ie(3)==lg%ie(3))then
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-          fw%box(ix,iy,lg%ie(3)+1) = fw%vec_Ac_boundary_top(ix,iy,i1)
-        end do
-        end do
-      end if
-
-  !$OMP parallel do collapse(2) private(ix,iy,iz,lap_A)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        lap_A = ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix-1,iy,iz) + fw%box(ix+1,iy,iz) ) / Hgs(1)**2 &
-              + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy-1,iz) + fw%box(ix,iy+1,iz) ) / Hgs(2)**2 &
-              + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
-        fw%vec_Ac_m(1,ix,iy,iz,i1) = ( cspeed_au * dt_m )**2 * lap_A &
-                                  + 2.d0* fw%box(ix,iy,iz) - fw%vec_Ac_m(-1,ix,iy,iz,i1) &
-                                  + dt_m**2 * fw%current4pi(ix,iy,iz,i1)
-      end do
-      end do
-      end do
-
-    end do ! i1 (spacial )
-
-  ! external field
-    tm = ( dble(itt-1) + dble(ii-1)/dble(mstep) ) *dt
-    call pulse(tm,0d0,   Aext0_old)
-    call pulse(tm,Hgs(3),Aext1_old)
-    call pulse(tm+dt_m,0d0,   Aext0)
-    call pulse(tm+dt_m,Hgs(3),Aext1)
-    out_Aext = Aext1
-
-  ! z axis: Mur absorbing boundary condition
-    coef = ( cspeed_au * dt_m - Hgs(3) ) / ( cspeed_au * dt_m + Hgs(3) )
-    if(ng%is(3)==lg%is(3))then
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-      ! absorbing boundary condition with the incident field vec_Ac_ext
-        fw%vec_Ac_boundary_bottom(ix,iy,1:3) = Aext0 &
-                                        + ( fw%vec_Ac_m(0,ix,iy,lg%is(3),1:3) - Aext1_old )  &
-                                        + coef* ( ( fw%vec_Ac_m(1,ix,iy,lg%is(3),1:3) - Aext1 ) &
-                                                - ( fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) - Aext0_old ) )
-      end do
-      end do
-    end if
-    if(ng%ie(3)==lg%ie(3))then
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        fw%vec_Ac_boundary_top(ix,iy,1:3) = fw%vec_Ac_m(0,ix,iy,lg%ie(3),1:3)   &
-                                    + coef* ( fw%vec_Ac_m(1,ix,iy,lg%ie(3),1:3) - fw%vec_Ac_boundary_top_old(ix,iy,1:3) )
-      end do
-      end do
-    end if
-
-  !$OMP parallel do collapse(2) private(ix,iy,iz)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) = fw%vec_Ac_boundary_bottom(ix,iy,1:3)
-      fw%vec_Ac_boundary_top_old   (ix,iy,1:3) = fw%vec_Ac_boundary_top   (ix,iy,1:3)
-    end do
-    end do
-
-  end do ! ii=1,mstep
+  if(yn_gbp=='y') then
+    call fdtd_gbp
+  else
+    call fdtd
+  end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -423,30 +323,30 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
 !  call timer_begin(LOG_SS_FDTD_CALC)
 !  fw%integral_poynting = fw%integral_poynting + dt * fw%integral_poynting_tmp2
 
-  fw%Ac_zt_t = 0d0
-! for the vector potential Ax(z,t)
-  do iz=ng%is(3),ng%ie(3)
-!$omp parallel do collapse(2) private(iy,ix)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-        fw%Ac_zt_t(1,iz) = fw%Ac_zt_t(1,iz) + Ac%v(1,ix,iy,iz) / (lg%num(1)*lg%num(2))
-        fw%Ac_zt_t(2,iz) = fw%Ac_zt_t(2,iz) + Ac%v(2,ix,iy,iz) / (lg%num(1)*lg%num(2))
-        fw%Ac_zt_t(3,iz) = fw%Ac_zt_t(3,iz) + Ac%v(3,ix,iy,iz) / (lg%num(1)*lg%num(2))
-    end do
-    end do
-  end do
-  call timer_end(LOG_SS_FDTD_CALC)
-
-  call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(fw%Ac_zt_t,fw%Ac_zt,size(fw%Ac_zt),info_field%icomm_all)
-  call timer_end(LOG_SS_FDTD_COMM_COLL)
-
-  if(comm_is_root(info%id_rko)) then
-    do iz=lg%is(3),lg%ie(3)
-      write(fw%fh_Ac_zt,fmt='(99(1X,E23.15E3))',advance='no') dble(iz)*hgs(3),fw%Ac_zt(1,iz),fw%Ac_zt(2,iz),fw%Ac_zt(3,iz)
-    end do
-    write(fw%fh_Ac_zt,'()')
-  end if
+!  fw%Ac_zt_t = 0d0
+!! for the vector potential Ax(z,t)
+!  do iz=ng%is(3),ng%ie(3)
+!!$omp parallel do collapse(2) private(iy,ix)
+!    do iy=ng%is(2),ng%ie(2)
+!    do ix=ng%is(1),ng%ie(1)
+!        fw%Ac_zt_t(1,iz) = fw%Ac_zt_t(1,iz) + Ac%v(1,ix,iy,iz) / (lg%num(1)*lg%num(2))
+!        fw%Ac_zt_t(2,iz) = fw%Ac_zt_t(2,iz) + Ac%v(2,ix,iy,iz) / (lg%num(1)*lg%num(2))
+!        fw%Ac_zt_t(3,iz) = fw%Ac_zt_t(3,iz) + Ac%v(3,ix,iy,iz) / (lg%num(1)*lg%num(2))
+!    end do
+!    end do
+!  end do
+!  call timer_end(LOG_SS_FDTD_CALC)
+!
+!  call timer_begin(LOG_SS_FDTD_COMM_COLL)
+!  call comm_summation(fw%Ac_zt_t,fw%Ac_zt,size(fw%Ac_zt),info_field%icomm_all)
+!  call timer_end(LOG_SS_FDTD_COMM_COLL)
+!
+!  if(comm_is_root(info%id_rko)) then
+!    do iz=lg%is(3),lg%ie(3)
+!      write(fw%fh_Ac_zt,fmt='(99(1X,E23.15E3))',advance='no') dble(iz)*hgs(3),fw%Ac_zt(1,iz),fw%Ac_zt(2,iz),fw%Ac_zt(3,iz)
+!    end do
+!    write(fw%fh_Ac_zt,'()')
+!  end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -464,10 +364,16 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
   end do
   end do
   end do
+  
+  call timer_end(LOG_SS_FDTD_CALC)
+
+!-----------------------------------------------------------------------------------------------------------------------------------
 
   return
 
 contains
+
+!-----------------------------------------------------------------------------------------------------------------------------------
 
   subroutine pulse(t,r,A_ext)
     use em_field, only: calc_Ac_ext
@@ -482,16 +388,375 @@ contains
 
     return
   end subroutine pulse
+  
+!-----------------------------------------------------------------------------------------------------------------------------------
+  
+  subroutine fdtd
+    implicit none
+  
+    do ii=1,mstep
+
+    !$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+
+        fw%vec_Ac_m(-1,ix,iy,iz,1:3) = fw%vec_Ac_m(0,ix,iy,iz,1:3)
+        fw%vec_Ac_m(0 ,ix,iy,iz,1:3) = fw%vec_Ac_m(1,ix,iy,iz,1:3)
+
+      end do
+      end do
+      end do
+
+      do i1=1,3
+
+    !$OMP parallel do collapse(2) private(ix,iy,iz)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          fw%box(ix,iy,iz) = fw%vec_Ac_m(0,ix,iy,iz,i1)
+        end do
+        end do
+        end do
+        call timer_end(LOG_SS_FDTD_CALC)
+
+        call timer_begin(LOG_SS_FDTD_COMM)
+        call update_overlap_real8(fw%srg_eg, ng, fw%box)
+        call timer_end(LOG_SS_FDTD_COMM)
+
+        call timer_begin(LOG_SS_FDTD_CALC)
+        if(ng%is(3)==lg%is(3))then
+    !$OMP parallel do collapse(2) private(ix,iy,iz)
+          do iy=ng%is(2),ng%ie(2)
+          do ix=ng%is(1),ng%ie(1)
+            fw%box(ix,iy,lg%is(3)-1) = fw%vec_Ac_boundary_bottom(ix,iy,i1)
+          end do
+          end do
+        end if
+        if(ng%ie(3)==lg%ie(3))then
+    !$OMP parallel do collapse(2) private(ix,iy,iz)
+          do iy=ng%is(2),ng%ie(2)
+          do ix=ng%is(1),ng%ie(1)
+            fw%box(ix,iy,lg%ie(3)+1) = fw%vec_Ac_boundary_top(ix,iy,i1)
+          end do
+          end do
+        end if
+
+    !$OMP parallel do collapse(2) private(ix,iy,iz,lap_A)
+        do iz=ng%is(3),ng%ie(3)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          lap_A = ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix-1,iy,iz) + fw%box(ix+1,iy,iz) ) / Hgs(1)**2 &
+                + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy-1,iz) + fw%box(ix,iy+1,iz) ) / Hgs(2)**2 &
+                + ( - 2d0* fw%box(ix,iy,iz) + fw%box(ix,iy,iz-1) + fw%box(ix,iy,iz+1) ) / Hgs(3)**2
+          fw%vec_Ac_m(1,ix,iy,iz,i1) = ( cspeed_au * dt_m )**2 * lap_A &
+                                    + 2.d0* fw%box(ix,iy,iz) - fw%vec_Ac_m(-1,ix,iy,iz,i1) &
+                                    + dt_m**2 * fw%current4pi(ix,iy,iz,i1)
+        end do
+        end do
+        end do
+
+      end do ! i1 (spacial )
+
+    ! external field
+      tm = ( dble(itt-1) + dble(ii-1)/dble(mstep) ) *dt
+      call pulse(tm,0d0,   Aext0_old)
+      call pulse(tm,Hgs(3),Aext1_old)
+      call pulse(tm+dt_m,0d0,   Aext0)
+      call pulse(tm+dt_m,Hgs(3),Aext1)
+      out_Aext = Aext1
+
+    ! z axis: Mur absorbing boundary condition
+      coef = ( cspeed_au * dt_m - Hgs(3) ) / ( cspeed_au * dt_m + Hgs(3) )
+      if(ng%is(3)==lg%is(3))then
+    !$OMP parallel do collapse(2) private(ix,iy,iz)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+        ! absorbing boundary condition with the incident field vec_Ac_ext
+          fw%vec_Ac_boundary_bottom(ix,iy,1:3) = Aext0 &
+                                          + ( fw%vec_Ac_m(0,ix,iy,lg%is(3),1:3) - Aext1_old )  &
+                                          + coef* ( ( fw%vec_Ac_m(1,ix,iy,lg%is(3),1:3) - Aext1 ) &
+                                                  - ( fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) - Aext0_old ) )
+        end do
+        end do
+      end if
+      if(ng%ie(3)==lg%ie(3))then
+    !$OMP parallel do collapse(2) private(ix,iy,iz)
+        do iy=ng%is(2),ng%ie(2)
+        do ix=ng%is(1),ng%ie(1)
+          fw%vec_Ac_boundary_top(ix,iy,1:3) = fw%vec_Ac_m(0,ix,iy,lg%ie(3),1:3)   &
+                                      + coef* ( fw%vec_Ac_m(1,ix,iy,lg%ie(3),1:3) - fw%vec_Ac_boundary_top_old(ix,iy,1:3) )
+        end do
+        end do
+      end if
+
+    !$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%vec_Ac_boundary_bottom_old(ix,iy,1:3) = fw%vec_Ac_boundary_bottom(ix,iy,1:3)
+        fw%vec_Ac_boundary_top_old   (ix,iy,1:3) = fw%vec_Ac_boundary_top   (ix,iy,1:3)
+      end do
+      end do
+
+    end do ! ii=1,mstep
+  
+    return
+  end subroutine fdtd
+  
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+  subroutine fdtd_gbp
+    implicit none
+    
+    fw%tmp_zt = 0d0
+    do iz=ng%is(3),ng%ie(3)
+  !$omp parallel do collapse(2) private(iy,ix)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%tmp_zt(iz,1:3) = fw%tmp_zt(iz,1:3) + fw%current4pi(ix,iy,iz,1:3) / (lg%num(1)*lg%num(2))
+      end do
+      end do
+    end do
+  
+    call timer_begin(LOG_SS_FDTD_COMM_COLL)
+    call comm_summation(fw%tmp_zt,fw%curr4pi_zt,size(fw%curr4pi_zt),info_field%icomm_all)
+    call timer_end(LOG_SS_FDTD_COMM_COLL)
+  
+    do ii=1,mstep
+
+    !$OMP parallel do
+      do iz=lg%is(3),lg%ie(3)
+
+        fw%Ac_zt_m(iz,-1,1:3) = fw%Ac_zt_m(iz,0,1:3)
+        fw%Ac_zt_m(iz,0 ,1:3) = fw%Ac_zt_m(iz,1,1:3)
+
+      end do
+
+      fw%Ac_zt_m(lg%is(3)-1,0,1:3) = fw%Ac_zt_boundary_bottom(1:3)
+      fw%Ac_zt_m(lg%ie(3)+1,0,1:3) = fw%Ac_zt_boundary_top   (1:3)
+
+!$OMP parallel do collapse(2) private(i1,iz,lap_A)
+      do i1=1,3
+        do iz=lg%is(3),lg%ie(3)
+          lap_A = ( - 2d0* fw%Ac_zt_m(iz,0,i1) + fw%Ac_zt_m(iz-1,0,i1) + fw%Ac_zt_m(iz+1,0,i1) ) / Hgs(3)**2
+          fw%Ac_zt_m(iz,1,i1) = ( cspeed_au * dt_m )**2 * lap_A &
+                                    + 2.d0* fw%Ac_zt_m(iz,0,i1) - fw%Ac_zt_m(iz,-1,i1) &
+                                    + dt_m**2 * fw%curr4pi_zt(iz,i1)
+        end do
+      end do ! i1 (spacial )
+
+    ! external field
+      tm = ( dble(itt-1) + dble(ii-1)/dble(mstep) ) *dt
+      call pulse(tm,0d0,   Aext0_old)
+      call pulse(tm,Hgs(3),Aext1_old)
+      call pulse(tm+dt_m,0d0,   Aext0)
+      call pulse(tm+dt_m,Hgs(3),Aext1)
+      out_Aext = Aext1
+
+    ! z axis: Mur absorbing boundary condition
+      coef = ( cspeed_au * dt_m - Hgs(3) ) / ( cspeed_au * dt_m + Hgs(3) )
+
+    ! absorbing boundary condition with the incident field vec_Ac_ext
+      fw%Ac_zt_boundary_bottom = Aext0 &
+                                      + ( fw%Ac_zt_m(lg%is(3),0,1:3) - Aext1_old )  &
+                                      + coef* ( ( fw%Ac_zt_m(lg%is(3),1,1:3) - Aext1 ) &
+                                              - ( fw%Ac_zt_boundary_bottom_old(1:3) - Aext0_old ) )
+
+      fw%Ac_zt_boundary_top = fw%Ac_zt_m(lg%ie(3),0,1:3)   &
+                                  + coef* ( fw%Ac_zt_m(lg%ie(3),1,1:3) - fw%Ac_zt_boundary_top_old(1:3) )
+
+      fw%Ac_zt_boundary_bottom_old(1:3) = fw%Ac_zt_boundary_bottom(1:3)
+      fw%Ac_zt_boundary_top_old   (1:3) = fw%Ac_zt_boundary_top   (1:3)
+
+    end do ! ii=1,mstep
+    
+  !$OMP parallel do collapse(2) private(ix,iy,iz)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+
+      fw%vec_Ac_m(1,ix,iy,iz,1:3) = fw%Ac_zt_m(iz,1,1:3) + fw%Ac_fourier(ix,iy,iz,1:3)
+
+    end do
+    end do
+    end do
+    
+    if(ng%is(3)==lg%is(3))then
+  !$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%vec_Ac_boundary_bottom(ix,iy,1:3) = fw%Ac_zt_boundary_bottom
+      end do
+      end do
+    end if
+    if(ng%ie(3)==lg%ie(3))then
+!$OMP parallel do collapse(2) private(ix,iy,iz)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        fw%vec_Ac_boundary_top(ix,iy,1:3) = fw%Ac_zt_boundary_top
+      end do
+      end do
+    end if
+    return
+  end subroutine fdtd_gbp
 
 end subroutine fdtd_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
+subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs,poisson,j_e,singlescale)
+  use structures
+  use math_constants,only : zi,pi
+  use salmon_global,only: dt
+  use phys_constants, only: cspeed_au
+  use communication, only: comm_summation,comm_bcast
+  implicit none
+  type(s_rgrid),intent(in) :: lg
+  type(s_rgrid),intent(in) :: mg
+  type(s_rgrid),intent(in) :: ng
+  type(s_field_parallel),intent(in) :: info_field
+  real(8),intent(in)       :: hgs(3)
+  type(s_poisson),intent(inout)         :: poisson
+  type(s_vector) ,intent(in) :: j_e
+  type(s_singlescale)      :: singlescale
+  integer :: ix,iy,iz
+  integer :: iiy,iiz,iix
+  real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
+  complex(8) :: trhoG_ele_tmp(lg%num(1),lg%num(2),lg%num(3))
+  real(8) :: inv_lgnum3,vec_je(3)
+  integer :: i
+  complex(8) :: f0,f1,j0
+
+  if(.not.allocated(poisson%coef) .or. &
+     .not.allocated(poisson%a_ffte) .or. &
+     .not.allocated(poisson%b_ffte) .or. &
+     .not.allocated(poisson%a_ffte_tmp))then
+    stop 'poisson_ffte: array is not allocated'
+  end if
+  
+  if(info_field%isize_ffte(1) < 4) stop "isize_ffte(1) must be > 3"
+  
+  i = mod(info_field%id_ffte(1),4) ! i=0,1,2,3
+
+  inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
+
+  singlescale%b_ffte=0.d0
+  !$OMP parallel do collapse(2) private(iiz,iiy,ix,iy,iz,vec_je)
+  do iz=1,ng%num(3)
+  do iy=1,ng%num(2)
+    iiz=iz+ng%is(3)-1
+    iiy=iy+ng%is(2)-1
+    do ix=ng%is(1),ng%ie(1)
+      singlescale%b_ffte(ix,iy,iz,0) = trho(ix,iiy,iiz) ! charge density rho
+      vec_je = ( j_e%v(1:3,ix,iiy,iiz) + singlescale%vec_je_old(1:3,ix,iiy,iiz) )*0.5d0 ! j(t) = ( j(t+dt/2) + j(t-dt/2) )/2
+      singlescale%b_ffte(ix,iy,iz,1) = vec_je(1) ! current density j_x
+      singlescale%b_ffte(ix,iy,iz,2) = vec_je(2) ! current density j_y
+      singlescale%b_ffte(ix,iy,iz,3) = vec_je(3) ! current density j_z
+    end do
+  end do
+  end do
+  
+  call comm_summation(singlescale%b_ffte,singlescale%a_ffte,size(singlescale%a_ffte),info_field%icomm_ffte(1))
+
+  CALL PZFFT3DV_MOD(singlescale%a_ffte(:,:,:,i),singlescale%b_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3),   &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+  CALL PZFFT3DV_MOD(singlescale%a_ffte(:,:,:,i),singlescale%b_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3),   &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+  call comm_bcast(singlescale%b_ffte(:,:,:,0),info_field%icomm_ffte(1), 0)
+
+! Poisson eq.: singlescale%b_ffte(ix,iy,iz,0)=rho(G) --> poisson%b_ffte(ix,iy,iz)=Vh(G)
+  trhoG_ele_tmp=0d0
+  !$omp parallel do collapse(2) default(none) &
+  !$omp             private(iz,iy,ix,iiy,iiz,iix) &
+  !$omp             shared(ng,lg,trhoG_ele_tmp,poisson,singlescale,inv_lgnum3)
+  do iz=1,ng%num(3)
+  do iy=1,ng%num(2)
+    do ix=1,ng%num(1)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
+      iix=ix+ng%is(1)-1
+      trhoG_ele_tmp(iix,iiy,iiz) = singlescale%b_ffte(iix,iy,iz,0)*inv_lgnum3
+    end do
+    do ix=1,lg%num(1)
+      poisson%b_ffte(ix,iy,iz) = singlescale%b_ffte(ix,iy,iz,0)*poisson%coef(ix,iy,iz)
+    end do
+  end do
+  end do
+  !$omp end parallel do
+  call comm_summation(trhoG_ele_tmp,trhoG_ele,size(trhoG_ele),info_field%icomm_all)
+  
+! Maxwell eq.: singlescale%b_ffte(ix,iy,iz,i)=j(G,t) --> singlescale%b_ffte(ix,iy,iz,i)=Ac(G,t+dt)
+  if(i/=0) then
+    !$omp parallel do collapse(2) private(iz,iy,ix,f0,f1,j0)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+    do ix=1,lg%num(1)
+    ! j(transverse) = j - (1/(4*pi))* d(grad(phi))/dt
+      j0 = singlescale%b_ffte(ix,iy,iz,i) &
+      & - (1d0/(4d0*pi))* poisson%coef_nabla(ix,iy,iz,i) * ( poisson%b_ffte(ix,iy,iz) - singlescale%Vh_ffte_old(ix,iy,iz) )/dt
+    ! f(t) = Ac(t) + (4*pi/(c*G)**2)* j
+      f0 = singlescale%zAc_old(ix,iy,iz,i) + (1/cspeed_au**2)* poisson%coef(ix,iy,iz) * j0
+    ! f(t+dt) = 2* cos(c*G*dt) * f(t) - f(t-dt)
+      f1 = 2d0* poisson%coef_cGdt(ix,iy,iz)* f0 - singlescale%f_old(ix,iy,iz,i)
+    ! Ac(t+dt) = f(t+dt) - (4*pi/(c*G)**2)* j
+      singlescale%b_ffte(ix,iy,iz,i) = f1 - (1/cspeed_au**2)* poisson%coef(ix,iy,iz) * j0
+    ! Ac(gx=gy=0) --> 0
+      singlescale%b_ffte(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i) * poisson%coef_gxgy0(ix,iy,iz)
+    ! f(t-dt) for next step
+      singlescale%f_old(ix,iy,iz,i) = f0
+    ! Ac(t) for next step
+      singlescale%zAc_old(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i)
+    end do
+    end do
+    end do
+    !$omp end parallel do
+  end if
+  
+  !$omp parallel do collapse(2) private(iz,iy,ix,iiy,iiz,iix)
+  do iz=1,ng%num(3)
+  do iy=1,ng%num(2)
+  do ix=1,lg%num(1)
+    singlescale%b_ffte(ix,iy,iz,0)    = poisson%b_ffte(ix,iy,iz)
+    singlescale%Vh_ffte_old(ix,iy,iz) = poisson%b_ffte(ix,iy,iz)
+  end do
+  end do
+  end do
+  !$omp end parallel do
+
+  CALL PZFFT3DV_MOD(singlescale%b_ffte(:,:,:,i),singlescale%a_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3), &
+                    info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
+                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+
+  call comm_bcast(singlescale%a_ffte(:,:,:,0),info_field%icomm_ffte(1), 0)
+  call comm_bcast(singlescale%a_ffte(:,:,:,1),info_field%icomm_ffte(1), 1)
+  call comm_bcast(singlescale%a_ffte(:,:,:,2),info_field%icomm_ffte(1), 2)
+  call comm_bcast(singlescale%a_ffte(:,:,:,3),info_field%icomm_ffte(1), 3)
+  
+  !$OMP parallel do private(iiz,iiy,ix,iy,iz)
+  do iz=1,ng%num(3)
+  do iy=1,ng%num(2)
+    iiz=iz+ng%is(3)-1
+    iiy=iy+ng%is(2)-1
+    tvh(ng%is(1):ng%ie(1),iiy,iiz) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,0)
+    singlescale%Ac_fourier(ng%is(1):ng%ie(1),iiy,iiz,1:3) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,1:3)
+  end do
+  end do
+
+  return
+end subroutine fourier_singlescale
+
+!===================================================================================================================================
+
+subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
-  use salmon_global, only: sysname,base_directory,yn_restart
+  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,yn_gbp
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use initialization_sub, only: set_bn
@@ -499,12 +764,12 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
   use inputoutput, only: t_unit_time
   use checkpoint_restart_sub, only: restart_singlescale
   implicit none
-  integer       ,intent(in) :: comm
-  type(s_rgrid) ,intent(in) :: lg,mg,ng
-  real(8)       ,intent(in) :: hgs(3)
-  type(s_scalar),intent(in) :: rho,Vh ! electron number density & Hartree potential
-  type(s_sendrecv_grid)     :: srg_ng
-  type(s_singlescale)       :: fw
+  type(s_rgrid)         ,intent(in) :: lg,mg,ng
+  type(s_field_parallel),intent(in) :: info_field
+  real(8)               ,intent(in) :: hgs(3)
+  type(s_scalar)        ,intent(in) :: rho,Vh ! electron number density & Hartree potential
+  type(s_sendrecv_grid)             :: srg_ng
+  type(s_singlescale)               :: fw
   !
   character(100) :: filename
   integer :: ii,jj,ix,iy,iz
@@ -544,8 +809,8 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
         & ,fw%div_Ac      (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
         & ,fw%div_Ac_old  (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
         & ,fw%integral_poynting_tmp(lg%num(3)),fw%integral_poynting_tmp2(lg%num(3)) &
-        & ,fw%Ac_zt(3,lg%is(3):lg%ie(3)) &
-        & ,fw%Ac_zt_t(3,lg%is(3):lg%ie(3)))
+!        & ,fw%Ac_zt(3,lg%is(3):lg%ie(3)) &
+        & ,fw%tmp_zt(3,lg%is(3):lg%ie(3)))
 
   fw%vec_Ac_old = 0d0
   fw%vec_Ac_m = 0d0
@@ -557,8 +822,31 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
   fw%integral_poynting = 0d0
   fw%curr = 0d0
   fw%vec_je_old = 0d0
-  fw%Ac_zt = 0d0
-  fw%Ac_zt_t = 0d0
+!  fw%Ac_zt = 0d0
+  fw%tmp_zt = 0d0
+  
+! gbp
+  if(yn_gbp=='y') then
+    allocate( fw%curr4pi_zt(lg%is(3):lg%ie(3),3) )
+    allocate(fw%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3))
+    allocate(fw%Ac_fourier(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
+    allocate(fw%a_ffte(lg%num(1),ng%num(2),ng%num(3),0:3),fw%b_ffte(lg%num(1),ng%num(2),ng%num(3),0:3))
+    allocate(fw%Vh_ffte_old(lg%num(1),ng%num(2),ng%num(3)))
+    allocate(fw%zAc_old(lg%num(1),ng%num(2),ng%num(3),0:3),fw%f_old(lg%num(1),ng%num(2),ng%num(3),0:3))
+    fw%curr4pi_zt = 0d0
+    fw%Ac_zt_m = 0d0
+    fw%Ac_zt_boundary_bottom = 0d0
+    fw%Ac_zt_boundary_top = 0d0
+    fw%Ac_zt_boundary_bottom_old = 0d0
+    fw%Ac_zt_boundary_top_old = 0d0
+    fw%Ac_fourier = 0d0
+    fw%zAc_old = 0d0
+    fw%f_old = 0d0
+    if(yn_ffte=='y') then
+    ! Vh --> fw%Vh_ffte_old
+      call calc_Vh_ffte
+    end if
+  end if
 
   if(comm_is_root(nproc_id_global)) then
     write(filename,"(2A,'_rt_micro.data')") trim(base_directory),trim(SYSname)
@@ -583,13 +871,13 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
      & 17, "E_em",            "a.u.", &
      & 18, "E_joule",         "a.u."
 
-  ! for spatial distribution of excitation energy
-    write(filename,"(2A,'_excitation.data')") trim(base_directory),trim(SYSname)
-    fw%fh_excitation = open_filehandle(filename)
+!  ! for spatial distribution of excitation energy
+!    write(filename,"(2A,'_excitation.data')") trim(base_directory),trim(SYSname)
+!    fw%fh_excitation = open_filehandle(filename)
 
-  ! for the vector potential Ac(z,t)
-    write(filename,"(2A,'_Ac_zt.data')") trim(base_directory),trim(SYSname)
-    fw%fh_Ac_zt = open_filehandle(filename)
+!  ! for the vector potential Ac(z,t)
+!    write(filename,"(2A,'_Ac_zt.data')") trim(base_directory),trim(SYSname)
+!    fw%fh_Ac_zt = open_filehandle(filename)
   end if
   
   allocate(fw%box(ng%is_array(1):ng%ie_array(1), &
@@ -610,10 +898,40 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
   call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
   
   if(yn_restart=='y') then
-    call restart_singlescale(comm,lg,ng,fw)
+    call restart_singlescale(info_field%icomm_all,lg,ng,fw)
   end if
 
   return
+  
+contains
+
+  subroutine calc_Vh_ffte
+    use communication, only: comm_summation
+    implicit none
+    integer :: ix,iy,iz
+    integer :: iiy,iiz,iix
+
+    fw%b_ffte = 0d0
+  !$OMP parallel do private(iiz,iiy,ix)
+    do iz=1,ng%num(3)
+    do iy=1,ng%num(2)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
+      fw%b_ffte(ng%is(1):ng%ie(1),iy,iz,0) = Vh%f(ng%is(1):ng%ie(1),iiy,iiz)
+    end do
+    end do
+    call comm_summation(fw%b_ffte,fw%a_ffte,size(fw%a_ffte),info_field%icomm_ffte(1))
+
+    CALL PZFFT3DV_MOD(fw%a_ffte(:,:,:,0),fw%Vh_ffte_old,lg%num(1),lg%num(2),lg%num(3),   &
+                      info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
+                      info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+    CALL PZFFT3DV_MOD(fw%a_ffte(:,:,:,0),fw%Vh_ffte_old,lg%num(1),lg%num(2),lg%num(3),   &
+                      info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
+                      info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+  
+    return
+  end subroutine calc_Vh_ffte
+  
 end subroutine init_singlescale
 
 !===================================================================================================================================

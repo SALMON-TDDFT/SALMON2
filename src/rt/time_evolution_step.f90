@@ -35,7 +35,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
                     update_pseudo_rt
   use write_sub
   use hamiltonian, only: update_kvector_nonlocalpt, update_kvector_nonlocalpt_microAc, update_vlocal
-  use fdtd_coulomb_gauge, only: fdtd_singlescale
+  use fdtd_coulomb_gauge, only: fdtd_singlescale,fourier_singlescale
+  use sendrecv_grid, only: update_overlap_complex8
   use salmon_xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
@@ -220,13 +221,26 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     end do
   end if
   call timer_end(LOG_CALC_RHO)
+  
+  if(use_singlescale=='y') then
+    if(info%if_divide_rspace) then
+      call update_overlap_complex8(srg, mg, spsi_out%zwf)
+    end if
+    spsi_out%update_zwf_overlap = .true.
+    call calc_microscopic_current(system,mg,stencil,info,spsi_out,rt%j_e)
+  end if
 
   call timer_begin(LOG_CALC_HARTREE)
   if(iperiodic==0 .and. itt/=1)then
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
-  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
+    call fourier_singlescale(lg,mg,ng,info_field,srho%f,sVh%f,fg%zrhoG_ele, &
+    & fg%zrhoG_ele_tmp,system%hgs,poisson,rt%j_e,singlescale)
+  else
+    call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  end if
   if(iperiodic==0 .and. itt/=1)then
     sVh_stock1%f = sVh%f
   end if
@@ -289,7 +303,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
 
     if(use_singlescale=='y') then
       call timer_begin(LOG_CALC_SINGLESCALE)
-      call calc_microscopic_current(system,mg,stencil,info,spsi_out,rt%j_e)
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,srho, &
       & sVh,rt%j_e,fg,poisson,srg_ng,system%Ac_micro,system%div_Ac,singlescale)

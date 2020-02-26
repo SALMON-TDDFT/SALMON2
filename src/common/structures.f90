@@ -322,6 +322,7 @@ module structures
     complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
     complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
     integer :: n_multipole_xyz(3)                  ! number of multipoles
+    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),coef_cGdt(:,:,:) ! for sigle-scale Maxwell-TDDFT
   end type s_poisson
 
   type s_fdtd_system
@@ -420,11 +421,16 @@ module structures
     & ,current4pi(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
     & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:) &
     & ,vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
-    & ,integral_poynting(:),Ac_zt(:,:),Ac_zt_t(:,:)
+    & ,integral_poynting(:),Ac_zt(:,:),tmp_zt(:,:)
     real(8),allocatable :: box(:,:,:),rot_Ac(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,div_Ac(:,:,:),div_Ac_old(:,:,:) &
     & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) 
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
+  ! for yn_gbp
+    real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
+    real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)
+    real(8),allocatable :: Ac_fourier(:,:,:,:)
+    complex(8),allocatable :: a_ffte(:,:,:,:),b_ffte(:,:,:,:),Vh_ffte_old(:,:,:),zAc_old(:,:,:,:),f_old(:,:,:,:)
   end type s_singlescale
 
 !===================================================================================================================================
