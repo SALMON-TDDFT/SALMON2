@@ -99,6 +99,9 @@ module structures
     integer :: npdomain_orbital(3)    ! x,y,z
     integer :: npdomain_general(3)    ! x,y,z
     integer :: npdomain_general_dm(3) ! x,y,z
+    !for scalapack
+    logical :: flag_blacs_gridinit
+    integer :: context,iam,nprocs,myrow, mycol
   end type
 
 ! for persistent communication

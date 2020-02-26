@@ -262,6 +262,8 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      call read_dns(lg,mg,srho_s(1)%f) ! cube file only
   end if
 
+  if(yn_pdsyev=='y') pinfo%flag_blacs_gridinit=.false.
+
   srho%f = 0d0
   do jspin=1,nspin
      srho%f = srho%f + srho_s(jspin)%f

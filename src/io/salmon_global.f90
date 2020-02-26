@@ -162,6 +162,7 @@ module salmon_global
   integer        :: iditer_notemperature
   integer        :: step_initial_mix_zero
   character(1)   :: yn_gbp
+  character(1)   :: yn_pdsyev
 
 !! &emfield
   character(2)   :: trans_longi
