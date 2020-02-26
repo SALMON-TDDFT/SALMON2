@@ -429,8 +429,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   if(use_singlescale=='y') then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
-    call allocate_scalar(mg,system%div_Ac)
-    call allocate_vector(mg,system%Ac_micro)
 
     ! specialized in FDTD timestep
     eg%nd = 1
@@ -438,7 +436,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%ie = ng%ie
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
 
-    call init_singlescale(ng,mg,lg,info_field,system%hgs,srho,sVh,srg_ng,singlescale)
+    call init_singlescale(ng,mg,lg,info_field,system%hgs,srho,sVh &
+    & ,srg_ng,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit

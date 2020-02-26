@@ -752,7 +752,7 @@ end subroutine fourier_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw)
+subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -770,10 +770,15 @@ subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw)
   type(s_scalar)        ,intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_sendrecv_grid)             :: srg_ng
   type(s_singlescale)               :: fw
+  type(s_vector)                    :: Ac
+  type(s_scalar)                    :: div_Ac
   !
   character(100) :: filename
   integer :: ii,jj,ix,iy,iz
   real(8) :: bnmat(4,4)
+  
+  call allocate_scalar(mg,div_Ac)
+  call allocate_vector(mg,Ac)
 
   fw%Energy_poynting = 0d0
   fw%Energy_joule = 0d0
@@ -898,7 +903,7 @@ subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw)
   call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
   
   if(yn_restart=='y') then
-    call restart_singlescale(info_field%icomm_all,lg,ng,fw)
+    call restart_singlescale(info_field%icomm_all,lg,ng,fw,Ac,div_Ac)
   end if
 
   return

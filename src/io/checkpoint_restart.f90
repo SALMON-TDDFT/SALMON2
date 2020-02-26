@@ -250,7 +250,7 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,si
   call write_bin(wdir,lg,mg,ng,system,info,spsi,iter &
                 ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
   if(use_singlescale=='y') then
-    call write_singlescale(wdir,lg,ng,info,singlescale,is_self_checkpoint=iself)
+    call write_singlescale(wdir,lg,ng,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
   end if
 end subroutine checkpoint_rt
 
@@ -859,7 +859,7 @@ end subroutine write_Vh_stock
 
 !===================================================================================================================================
 
-subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
+subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_checkpoint)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -868,6 +868,8 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
   type(s_rgrid)           ,intent(in) :: lg,ng
   type(s_orbital_parallel),intent(in) :: info
   type(s_singlescale)     ,intent(in) :: singlescale
+  type(s_vector)          ,intent(in) :: Ac
+  type(s_scalar)          ,intent(in) :: div_Ac
   logical                 ,intent(in) :: is_self_checkpoint
   !
   character(256) ::  dir_file_out
@@ -875,6 +877,7 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
   real(8),allocatable :: matbox0(:,:,:,:,:),matbox1(:,:,:,:,:)
   real(8),allocatable :: v0(:,:,:,:,:),v1(:,:,:,:,:)
   real(8),allocatable :: b0(:,:,:,:),b1(:,:,:,:)
+  real(8),allocatable :: d0(:,:,:,:),d1(:,:,:,:)
   integer :: ix,iy,iz
 
   iu1_w = 97
@@ -884,12 +887,15 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
     write(iu1_w) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
+    write(iu1_w) Ac%v(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     write(iu1_w) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     write(iu1_w) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     write(iu1_w) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     write(iu1_w) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     write(iu1_w) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     write(iu1_w) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    write(iu1_w) div_Ac%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    write(iu1_w) singlescale%div_Ac_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     close(iu1_w)
   else
     ! write root process
@@ -910,8 +916,8 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     end do
     call comm_summation(matbox0,matbox1,9*lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
 
-    allocate(v0(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
-    allocate(v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+    allocate(v0(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
+    allocate(v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
 
 !$omp workshare
     v0 = 0d0
@@ -921,12 +927,13 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
-      v0(1:3,ix,iy,iz,1) = singlescale%vec_je_old(1:3,ix,iy,iz)
-      v0(1:3,ix,iy,iz,2) = singlescale%vec_Ac_old(1:3,ix,iy,iz)
+      v0(1:3,ix,iy,iz,1) = Ac%v(1:3,ix,iy,iz)
+      v0(1:3,ix,iy,iz,2) = singlescale%vec_je_old(1:3,ix,iy,iz)
+      v0(1:3,ix,iy,iz,3) = singlescale%vec_Ac_old(1:3,ix,iy,iz)
     end do
     end do
     end do
-    call comm_summation(v0,v1,3*lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_r)
+    call comm_summation(v0,v1,3*lg%num(1)*lg%num(2)*lg%num(3)*3,info%icomm_r)
     
     allocate(b0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
     allocate(b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
@@ -945,16 +952,35 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
     end do
     end do
     call comm_summation(b0,b1,3*lg%num(1)*lg%num(2)*4,info%icomm_r)
+    
+    allocate(d0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+    allocate(d1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+
+!$omp workshare
+    d0 = 0d0
+!$omp end workshare
+
+!$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      d0(ix,iy,iz,1) = div_Ac%f(ix,iy,iz)
+      d0(ix,iy,iz,2) = singlescale%div_Ac_old(ix,iy,iz)
+    end do
+    end do
+    end do
+    call comm_summation(d0,d1,lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_r)
 
     if(comm_is_root(nproc_id_global))then
       open(iu1_w,file=dir_file_out,form='unformatted')
       write(iu1_w) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
-      write(iu1_w) v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      write(iu1_w) v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       write(iu1_w) b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
+      write(iu1_w) d1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
       close(iu1_w)
     end if
 
-    deallocate(matbox0,matbox1,v0,v1,b0,b1)
+    deallocate(matbox0,matbox1,v0,v1,b0,b1,d0,d1)
   end if
 
 end subroutine write_singlescale
@@ -1323,8 +1349,8 @@ end subroutine read_Vh_stock
 
 !===================================================================================================================================
 
-subroutine restart_singlescale(comm,lg,ng,singlescale)
-  use structures, only: s_rgrid,s_singlescale
+subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
+  use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: directory_read_data,yn_self_checkpoint,yn_datafiles_dump
@@ -1332,10 +1358,12 @@ subroutine restart_singlescale(comm,lg,ng,singlescale)
   integer      ,intent(in) :: comm
   type(s_rgrid),intent(in) :: lg,ng
   type(s_singlescale)      :: singlescale
+  type(s_vector)           :: Ac
+  type(s_scalar)           :: div_Ac
   !
   integer :: iu1_r
   integer :: ix,iy,iz
-  real(8),allocatable :: matbox1(:,:,:,:,:),matbox2(:,:,:,:,:),matbox3(:,:,:,:)
+  real(8),allocatable :: matbox1(:,:,:,:,:),matbox2(:,:,:,:,:),matbox3(:,:,:,:),matbox4(:,:,:,:)
   character(100) :: dir_file_in
   character(256) :: gdir,wdir
   logical :: iself
@@ -1357,38 +1385,47 @@ subroutine restart_singlescale(comm,lg,ng,singlescale)
     ! read all processes
     open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
     read(iu1_r) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
+    read(iu1_r) Ac%v(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     read(iu1_r) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     read(iu1_r) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     read(iu1_r) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     read(iu1_r) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     read(iu1_r) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
     read(iu1_r) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
+    read(iu1_r) div_Ac%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    read(iu1_r) singlescale%div_Ac_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     close(iu1_r)
   else
     ! read root process
     allocate(matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
-    allocate(matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
+    allocate(matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
     allocate(matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
+    allocate(matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
 
     if(comm_is_root(nproc_id_global))then
       open(iu1_r,file=dir_file_in,form='unformatted')
       read(iu1_r) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
-      read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       read(iu1_r) matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
+      read(iu1_r) matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
       close(iu1_r)
     end if
 
     call comm_bcast(matbox1,comm)
     call comm_bcast(matbox2,comm)
     call comm_bcast(matbox3,comm)
+    call comm_bcast(matbox4,comm)
 
 !$omp parallel do collapse(2)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
       singlescale%vec_Ac_m(-1:1,ix,iy,iz,1:3) = matbox1(-1:1,ix,iy,iz,1:3)
-      singlescale%vec_je_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,1)
-      singlescale%vec_Ac_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,2)
+      Ac%v(1:3,ix,iy,iz)                   = matbox2(1:3,ix,iy,iz,1)
+      singlescale%vec_je_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,2)
+      singlescale%vec_Ac_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,3)
+      div_Ac%f(ix,iy,iz)               = matbox4(ix,iy,iz,1)
+      singlescale%div_Ac_old(ix,iy,iz) = matbox4(ix,iy,iz,2)
     end do
     end do
     end do
@@ -1403,7 +1440,7 @@ subroutine restart_singlescale(comm,lg,ng,singlescale)
     end do
     end do
 
-    deallocate(matbox1,matbox2,matbox3)
+    deallocate(matbox1,matbox2,matbox3,matbox4)
   end if
 end subroutine restart_singlescale
 
