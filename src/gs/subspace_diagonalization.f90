@@ -398,6 +398,7 @@ subroutine ssdg_periodic_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,
   use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
+  use salmon_global, only: yn_pdsyev
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
@@ -500,16 +501,22 @@ do ispin = 1, system%nspin
 !  zhmat = hmat
 
 !  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
-  call eigen_real8(hmat, eval, evec)
+  if(yn_pdsyev=='y') then
+     stop "open the subroutine eigen_real8_pdsyev in code"
+! OPEN here to use scalapack pdsyev
+!     call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
+  else
+     call eigen_real8_dsyev(hmat, eval, evec)
+  endif
 
 !  evec = real(zevec)
   call timer_end(LOG_SSDG_PERIODIC_EIGEN)
-
 
   call timer_begin(LOG_SSDG_PERIODIC_CALC)
   !$omp workshare
   wf2_block = 0d0
   !$omp end workshare
+
   do m = 0, pinfo%nporbital - 1
 
     if(m == info%id_o ) then
@@ -528,7 +535,6 @@ do ispin = 1, system%nspin
       &                one, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
       &                     evec(info%io_s_all(m):info%io_e_all(m), info%io_s:info%io_e), info%numo_all(m),  &
       &                one, wf2_block(:,:,:,1), nsize_rg )
-
   end do ! m
 
   ! Copy wave function
@@ -547,7 +553,7 @@ enddo ! im
 return
 
 contains
-  subroutine eigen_real8(h,e,v)
+  subroutine eigen_real8_dsyev(h,e,v)
     implicit none
     real(8), intent(in) :: h(:,:)
     real(8), intent(out) :: e(:)
@@ -562,7 +568,7 @@ contains
     call dsyev('V', 'U', n, v, n, e, work, lwork, info)
     deallocate(work)
     return
-  end subroutine eigen_real8
+  end subroutine eigen_real8_dsyev
 
 end subroutine ssdg_periodic_rblas
 !===================================================================================================================================
