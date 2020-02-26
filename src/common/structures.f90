@@ -429,6 +429,7 @@ module structures
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
     real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)
     real(8),allocatable :: Ac_fourier(:,:,:,:)
+    complex(8),allocatable :: a_ffte_tmp(:,:,:,:),a_ffte(:,:,:,:)
   end type s_singlescale
 
 !===================================================================================================================================

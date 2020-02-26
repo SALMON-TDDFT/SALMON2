@@ -638,33 +638,25 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
 
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
-  poisson%a_ffte_tmp=0.d0
-  if(i==0) then
-    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
-    do iz=1,ng%num(3)
-    do iy=1,ng%num(2)
-      iiz=iz+ng%is(3)-1
-      iiy=iy+ng%is(2)-1
-      poisson%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz) = trho(ng%is(1):ng%ie(1),iiy,iiz) ! charge density
-    end do
-    end do
-  else
-    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
-    do iz=1,ng%num(3)
-    do iy=1,ng%num(2)
-      iiz=iz+ng%is(3)-1
-      iiy=iy+ng%is(2)-1
-      poisson%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz) = j_e%v(i,ng%is(1):ng%ie(1),iiy,iiz) ! current density
-    end do
-    end do
-  end if
+  singlescale%a_ffte_tmp=0.d0
+  !$OMP parallel do private(iiz,iiy,ix,iy,iz)
+  do iz=1,ng%num(3)
+  do iy=1,ng%num(2)
+    iiz=iz+ng%is(3)-1
+    iiy=iy+ng%is(2)-1
+    singlescale%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz,0) = trho(ng%is(1):ng%ie(1),iiy,iiz)    ! charge density rho
+    singlescale%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz,1) = j_e%v(1,ng%is(1):ng%ie(1),iiy,iiz) ! current density j_x
+    singlescale%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz,2) = j_e%v(2,ng%is(1):ng%ie(1),iiy,iiz) ! current density j_y
+    singlescale%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz,3) = j_e%v(3,ng%is(1):ng%ie(1),iiy,iiz) ! current density j_z
+  end do
+  end do
   
-  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm_ffte(1))
+  call comm_summation(singlescale%a_ffte_tmp,singlescale%a_ffte,size(singlescale%a_ffte),info_field%icomm_ffte(1))
 
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+  CALL PZFFT3DV_MOD(singlescale%a_ffte(:,:,:,i),poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
                     info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
                     info_field%icomm_ffte(2),info_field%icomm_ffte(3))
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+  CALL PZFFT3DV_MOD(singlescale%a_ffte(:,:,:,i),poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
                     info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
                     info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
@@ -675,12 +667,12 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
     !$omp             shared(ng,lg,trhoG_ele_tmp,poisson,inv_lgnum3)
     do iz=1,ng%num(3)
     do iy=1,ng%num(2)
-      do ix=1,ng%num(1)
-        iiz=iz+ng%is(3)-1
-        iiy=iy+ng%is(2)-1
-        iix=ix+ng%is(1)-1
-        trhoG_ele_tmp(iix,iiy,iiz)=poisson%b_ffte(iix,iy,iz)*inv_lgnum3
-      end do
+!      do ix=1,ng%num(1)
+!        iiz=iz+ng%is(3)-1
+!        iiy=iy+ng%is(2)-1
+!        iix=ix+ng%is(1)-1
+!        trhoG_ele_tmp(iix,iiy,iiz)=poisson%b_ffte(iix,iy,iz)*inv_lgnum3 !????
+!      end do
       do ix=1,lg%num(1)
         poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
       end do
@@ -693,36 +685,26 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   ! Maxwell eq.: poisson%b_ffte(ix,iy,iz)=j(G,t) --> poisson%b_ffte(ix,iy,iz)=Ac(G,t+dt)
   
   end if
-  call comm_summation(trhoG_ele_tmp,trhoG_ele,size(trhoG_ele),info_field%icomm_all)
+!  call comm_summation(trhoG_ele_tmp,trhoG_ele,size(trhoG_ele),info_field%icomm_all) !?????
 
-  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
+  CALL PZFFT3DV_MOD(poisson%b_ffte,singlescale%a_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3), &
                     info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
                     info_field%icomm_ffte(2),info_field%icomm_ffte(3))
 
-  if(i==0) then
-    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
-    do iz=1,ng%num(3)
-    do iy=1,ng%num(2)
-      iiz=iz+ng%is(3)-1
-      iiy=iy+ng%is(2)-1
-      tvh(ng%is(1):ng%ie(1),iiy,iiz)=poisson%a_ffte(ng%is(1):ng%ie(1),iy,iz)
-    end do
-    end do
-  else
-    !$OMP parallel do private(iiz,iiy,ix,iy,iz)
-    do iz=1,ng%num(3)
-    do iy=1,ng%num(2)
-      iiz=iz+ng%is(3)-1
-      iiy=iy+ng%is(2)-1
-      singlescale%Ac_fourier(ng%is(1):ng%ie(1),iiy,iiz,i) = poisson%a_ffte(ng%is(1):ng%ie(1),iy,iz)
-    end do
-    end do
-  end if
+  call comm_bcast(singlescale%a_ffte(:,:,:,0),info_field%icomm_ffte(1), 0)
+  call comm_bcast(singlescale%a_ffte(:,:,:,1),info_field%icomm_ffte(1), 1)
+  call comm_bcast(singlescale%a_ffte(:,:,:,2),info_field%icomm_ffte(1), 2)
+  call comm_bcast(singlescale%a_ffte(:,:,:,3),info_field%icomm_ffte(1), 3)
   
-  call comm_bcast(tvh, info_field%icomm_ffte(1), 0)
-  call comm_bcast(singlescale%Ac_fourier(:,:,:,1), info_field%icomm_ffte(1), 1)
-  call comm_bcast(singlescale%Ac_fourier(:,:,:,2), info_field%icomm_ffte(1), 2)
-  call comm_bcast(singlescale%Ac_fourier(:,:,:,3), info_field%icomm_ffte(1), 3)
+  !$OMP parallel do private(iiz,iiy,ix,iy,iz)
+  do iz=1,ng%num(3)
+  do iy=1,ng%num(2)
+    iiz=iz+ng%is(3)-1
+    iiy=iy+ng%is(2)-1
+    tvh(ng%is(1):ng%ie(1),iiy,iiz) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,0)
+    singlescale%Ac_fourier(ng%is(1):ng%ie(1),iiy,iiz,1:3) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,1:3)
+  end do
+  end do
 
   return
 end subroutine fourier_singlescale
@@ -806,6 +788,7 @@ subroutine init_singlescale(comm,ng,mg,lg,hgs,rho,Vh,srg_ng,fw)
   allocate( fw%curr4pi_zt(lg%is(3):lg%ie(3),3) )
   allocate(fw%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3))
   allocate(fw%Ac_fourier(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
+  allocate(fw%a_ffte_tmp(lg%num(1),ng%num(2),ng%num(3),0:3),fw%a_ffte(lg%num(1),ng%num(2),ng%num(3),0:3))
   fw%curr4pi_zt = 0d0
   fw%Ac_zt_m = 0d0
   fw%Ac_zt_boundary_bottom = 0d0
