@@ -2,7 +2,7 @@
 
 TTM calculation is available during FDTD simulation.
 
-The implementation is followed by the paper
+The implementation is based on the following paper:
 
 > "Three-dimensional thermal response of a metal subwavelength tip under femtosecond laser illumination",
 > J. Houard, A. Vella, F. Vurillot, and B. Deconihou,
