@@ -956,9 +956,11 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,is_self_checkpoint)
 !$omp end workshare
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
+    do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
       d0(ix,iy,iz) = singlescale%div_Ac_old(ix,iy,iz)
+    end do
     end do
     end do
     call comm_summation(d0,d1,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
