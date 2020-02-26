@@ -77,7 +77,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
     vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(1:3,ix,iy,iz) )*0.5d0 ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
     rho_t  = ( rho%f(ix,iy,iz)     + fw%rho_old(ix,iy,iz)        )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
     fw%curr(ix,iy,iz,1:3) = vec_je + rho_t * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! curr(t): electron number current density
-    wrk = wrk + vec_je ! definition of out_curr?
+    wrk = wrk + fw%curr(ix,iy,iz,1:3)
 
     fw%box(ix,iy,iz) = Vh%f(ix,iy,iz) ! Vh(t+dt/2)
   end do
@@ -617,7 +617,7 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   type(s_field_parallel),intent(in) :: info_field
   real(8),intent(in)       :: hgs(3)
   type(s_poisson),intent(inout)         :: poisson
-  type(s_vector) ,intent(in) :: j_e
+  type(s_vector) ,intent(in) :: j_e ! electron number current density (without rho*A/c)
   type(s_singlescale)      :: singlescale
   integer :: ix,iy,iz
   integer :: iiy,iiz,iix
@@ -625,7 +625,7 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
   complex(8) :: trhoG_ele_tmp(lg%num(1),lg%num(2),lg%num(3))
-  real(8) :: inv_lgnum3,vec_je(3)
+  real(8) :: inv_lgnum3,vec_je(3),rho_t
   integer :: i
   complex(8) :: f0,f1,j0
 
@@ -643,7 +643,7 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
   singlescale%b_ffte=0.d0
-  !$OMP parallel do collapse(2) private(iiz,iiy,ix,iy,iz,vec_je)
+  !$OMP parallel do collapse(2) private(iiz,iiy,ix,iy,iz,vec_je,rho_t)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
@@ -651,6 +651,8 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
     do ix=ng%is(1),ng%ie(1)
       singlescale%b_ffte(ix,iy,iz,0) = trho(ix,iiy,iiz) ! charge density rho
       vec_je = ( j_e%v(1:3,ix,iiy,iiz) + singlescale%vec_je_old(1:3,ix,iiy,iiz) )*0.5d0 ! j(t) = ( j(t+dt/2) + j(t-dt/2) )/2
+      rho_t  = ( trho(ix,iiy,iiz) + singlescale%rho_old(ix,iiy,iiz) )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
+      vec_je = vec_je + rho_t * singlescale%vec_Ac_m(1,ix,iiy,iiz,1:3) ! electron number current density
       singlescale%b_ffte(ix,iy,iz,1) = vec_je(1) ! current density j_x
       singlescale%b_ffte(ix,iy,iz,2) = vec_je(2) ! current density j_y
       singlescale%b_ffte(ix,iy,iz,3) = vec_je(3) ! current density j_z
@@ -815,7 +817,7 @@ subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
         & ,fw%div_Ac_old  (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) &
         & ,fw%integral_poynting_tmp(lg%num(3)),fw%integral_poynting_tmp2(lg%num(3)) &
 !        & ,fw%Ac_zt(3,lg%is(3):lg%ie(3)) &
-        & ,fw%tmp_zt(3,lg%is(3):lg%ie(3)))
+        & ,fw%tmp_zt(lg%is(3):lg%ie(3),3))
 
   fw%vec_Ac_old = 0d0
   fw%vec_Ac_m = 0d0
