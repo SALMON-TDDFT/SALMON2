@@ -329,7 +329,8 @@ contains
       & skip_gsortho, &
       & iditer_notemperature, &
       & step_initial_mix_zero,&
-      & yn_gbp
+      & yn_gbp, &
+      & yn_pdsyev
 
     namelist/emfield/ &
       & trans_longi, &
@@ -672,6 +673,7 @@ contains
     iditer_notemperature = 10
     step_initial_mix_zero= -1
     yn_gbp        = 'n'
+    yn_pdsyev     = 'n'
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -1108,6 +1110,7 @@ contains
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
     call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
     call comm_bcast(yn_gbp                  ,nproc_group_global)
+    call comm_bcast(yn_pdsyev               ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1884,6 +1887,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_pdsyev', yn_pdsyev
 
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
@@ -2208,6 +2212,7 @@ contains
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_subspace_diagonalization)
+    call yn_argument_check(yn_pdsyev)
     call yn_argument_check(yn_local_field)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
