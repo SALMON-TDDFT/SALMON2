@@ -606,6 +606,8 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,poisson)
   use math_constants,  only : pi,zi
   use structures,      only : s_rgrid,s_reciprocal_grid,s_dft_system,s_poisson
   use communication,   only : comm_get_groupinfo
+  use phys_constants, only: cspeed_au
+  use salmon_global, only: dt
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: ng
@@ -702,8 +704,14 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,poisson)
       allocate(poisson%a_ffte    (lg%num(1),ng%num(2),ng%num(3)))
       allocate(poisson%a_ffte_tmp(lg%num(1),ng%num(2),ng%num(3)))
       allocate(poisson%b_ffte    (lg%num(1),ng%num(2),ng%num(3)))
+      allocate(poisson%coef_nabla(lg%num(1),ng%num(2),ng%num(3),3))
+      allocate(poisson%coef_gxgy0(lg%num(1),ng%num(2),ng%num(3)))
+      allocate(poisson%coef_cGdt (lg%num(1),ng%num(2),ng%num(3)))
     end if
     poisson%coef=0.d0
+    poisson%coef_nabla = 0d0
+    poisson%coef_gxgy0 = 1d0
+    poisson%coef_cGdt = 0d0
 
     do kz = 1,ng%num(3)
     do ky = 1,ng%num(2)
@@ -720,6 +728,14 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,poisson)
       else
         poisson%coef(kx,ky,kz)=4.d0*pi/G2
       end if
+      
+    ! for sigle-scale Maxwell-TDDFT
+      poisson%coef_nabla(kx,ky,kz,1) = -zi*fg%Gx(n)
+      poisson%coef_nabla(kx,ky,kz,2) = -zi*fg%Gy(n)
+      poisson%coef_nabla(kx,ky,kz,3) = -zi*fg%Gz(n)
+      if(kx==1.and.ky2==1) poisson%coef_gxgy0(kx,ky,kz) = 0d0
+      poisson%coef_cGdt(kx,ky,kz) = cos(cspeed_au*sqrt(G2)*dt)
+      
     end do
     end do
     end do
