@@ -262,7 +262,9 @@ module salmon_global
   character(1)   :: yn_out_pdos
   character(1)   :: yn_out_dns
   character(1)   :: yn_out_dns_rt
+  character(1)   :: yn_out_dns_ac_je
   integer        :: out_dns_rt_step
+  integer        :: out_dns_ac_je_step
   character(1)   :: out_old_dns
   character(1)   :: yn_out_dns_trans
   real(8)        :: out_dns_trans_energy

@@ -235,7 +235,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
-  if(yn_gbp=='y' .and. use_singlescale=='y') then
+  if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,mg,ng,info_field,srho%f,sVh%f,fg%zrhoG_ele, &
     & fg%zrhoG_ele_tmp,system%hgs,poisson,rt%j_e,singlescale)
   else
@@ -366,6 +366,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
       call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
+    end if
+  end if
+  if(yn_out_dns_ac_je=='y' .and. use_singlescale=='y')then
+    if(mod(itt,out_dns_ac_je_step)==0)then
+      call write_dns_ac_je(info,mg,system,srho%f,rt%j_e,itt,"bin")
     end if
   end if
   if(yn_out_elf_rt=='y')then
