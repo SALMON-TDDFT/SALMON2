@@ -355,6 +355,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
       call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
     end if
   end if
+  if(yn_out_dns_ac_je=='y' .and. use_singlescale=='y')then
+    if(mod(itt,out_dns_ac_je_step)==0)then
+      call write_dns_ac_je(info,mg,system,srho%f,rt%j_e,itt,"bin")
+    end if
+  end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
       call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out)

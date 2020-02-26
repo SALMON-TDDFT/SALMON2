@@ -405,6 +405,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
+         !!XXX bug XXX dnsdiff data is wrong as reference dns is srho%f now !AY
         call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
@@ -438,6 +439,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
 
     call init_singlescale(info_field%icomm_all,ng,mg,lg,system%hgs,srho,sVh,srg_ng,singlescale)
+
+    if(yn_out_dns_ac_je=='y')then
+       itt=Mit
+       call write_dns_ac_je(info,mg,system,srho%f,rt%j_e,itt,"new")
+       call write_dns_ac_je(info,mg,system,srho%f,rt%j_e,itt,"bin")
+    end if
+
   end if
   
 
