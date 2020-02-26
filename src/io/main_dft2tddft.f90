@@ -84,6 +84,7 @@ end if
 call timer_end(LOG_INIT_GS)
 
 
+call comm_sync_all
 call timer_begin(LOG_INIT_GS_RESTART)
 call generate_restart_directory_name(directory_read_data,gdir,pdir)
 call read_bin(pdir,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
@@ -111,11 +112,13 @@ call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)
 call timer_end(LOG_INIT_RT)
 
 
+call comm_sync_all
 call timer_begin(LOG_WRITE_RT_DATA)
 call convert_wave_function
 call timer_end(LOG_WRITE_RT_DATA)
 
 
+call comm_sync_all
 call timer_begin(LOG_WRITE_RT_RESULTS)
 call init_dir_out_restart(ofl)
 call generate_restart_directory_name(ofl%dir_out_restart,gdir,pdir)
