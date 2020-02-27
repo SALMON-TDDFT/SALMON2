@@ -19,9 +19,7 @@ module eigen_subdiag_sub
 contains
 
   subroutine eigen_real8_pdsyev(pinfo,info,h,e,v)
-    ! scalapack is used: --enable-scalapack must be put in configure
-    ! This is for test version for 4 nodes (assuming space grid is divided to 4 block)
-    ! still incorrect calculation.....
+    use mpi, only: MPI_PROC_NULL
     use structures, only: s_process_info, s_orbital_parallel
     use communication, only: comm_summation, comm_is_root
     use parallelization, only: nproc_id_global
@@ -31,165 +29,101 @@ contains
     real(8), intent(in)  :: h(:,:)
     real(8), intent(out) :: e(:)
     real(8), intent(out) :: v(:,:)
-    real(8), allocatable :: h_cp(:,:)
+    integer,parameter :: DLEN_ = 9
+    integer ::  DESCA(DLEN_)
+    integer :: n, nb, ip2, nprow, npcol, ictxt, myrow, mycol, np, nq, ierr,ii
+    integer :: k2, k1, i0, j0, i1, j1, i, j, trilwmin, lwork, liwork, ix,iy,iz
+    integer, allocatable :: iwork(:), usermap(:,:)
     real(8), allocatable :: h_div(:,:), v_div(:,:), v_tmp(:,:), work(:)
-    integer :: n, nb, lwork, i,j,ii,jj, iia,jja
-    integer :: nprow, npcol
-    integer :: context, iam, ierr, mycol, myrow, nprocs
-    integer :: lld_r,lld_c,numroc,indxg2p
-    integer :: qrmem,mpc0,nqc0,iroffc,icoffc,icrow,iccol,sizemqrleft
-    integer :: ic,jc,mb_c,nb_c,rsrc_c,csrc_c
-    integer :: nn,np,nq,nrc,ldc
-    integer,allocatable :: desca(:), descz(:)
+    integer :: NUMROC
 
     n  = ubound(h,1)
     nb = 1  !blocking factor -- probably parameter relating to efficiency
 
-    !XXXX change here 
-    if(pinfo%npdomain_orbital(1) > 1) then
-       nprow = pinfo%npdomain_orbital(1)
-       npcol = pinfo%npdomain_orbital(2)
-    else
-       nprow = pinfo%npdomain_orbital(2)
-       npcol = pinfo%npdomain_orbital(3)
-    endif
+    if(info%isize_r < 4) stop "nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3) must be >3"
 
-   !write(*,*) "nprow,npcol", nprow, npcol ; flush(6)
+    nprow = int(sqrt(dble(info%isize_r)))
+    do ip2=1,100
+      npcol=info%isize_r/nprow
+      if(npcol*nprow == info%isize_r) exit
+      nprow=nprow-1
+    end do
 
-    allocate( h_cp(n,n) )
-    h_cp = h
+    allocate( usermap(0:nprow-1, 0:npcol-1) )
+    usermap(:,:) = MPI_PROC_NULL
+
+    ii=0
+    do iz=0,pinfo%npdomain_orbital(3)-1
+    do iy=0,pinfo%npdomain_orbital(2)-1
+    do ix=0,pinfo%npdomain_orbital(1)-1
+      ii=ii+1
+      k1=mod(ii-1,nprow)
+      k2=mod((ii-1)/nprow,npcol)
+      usermap(k1,k2) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
+      if(ii == npcol*nprow) goto 100
+    end do
+    end do
+    end do
+  100 CONTINUE
+
+    call BLACS_PINFO( pinfo%iam, pinfo%nprocs )
+    call BLACS_SETUP( pinfo%iam, pinfo%nprocs )
+    call BLACS_GET( 0, 0, ictxt )
+    call BLACS_GRIDMAP( ictxt, usermap, nprow, nprow, npcol )
+    call BLACS_GRIDINFO( ictxt, nprow, npcol, myrow, mycol )
+    np = NUMROC( n, nb, myrow, 0, nprow )
+    nq = NUMROC( n, nb, mycol, 0, npcol )
+
+    call DESCINIT( desca, n, n, nb, nb, 0, 0, ictxt, np, ierr )
+    allocate( h_div(np,nq), v_div(np,nq) )
+
+    h_div=0d0
+    do k2=1,nq
+    do k1=1,np
+      i0 = (k1-1)/nb
+      j0 = (k2-1)/nb
+      i1 = MOD(k1-1,nb)
+      j1 = MOD(k2-1,nb)
+      i = (i0*nprow+myrow)*nb+i1+1
+      j = (j0*npcol+mycol)*nb+j1+1
+      if(i<=n.and.j<=n) then
+        h_div(k1,k2) = h(i,j)
+      end if
+    end do
+    end do
+
+    trilwmin = 3*n + MAX( nb*(np+1), 3*nb )
+    lwork = MAX( 1+6*n+2*np*nq, trilwmin ) + 2*n + 2*nb*nb
+    liwork = 2 + 7*n + 8*npcol
+    allocate( work(lwork+16), iwork(liwork+16) )
+
+    call PDSYEVD( 'V', 'U', n, h_div, 1, 1, DESCA, e, v_div, 1, 1, DESCA, work, lwork, iwork, liwork, ierr )
+
     allocate( v_tmp(n,n) )
-    v_tmp= 0d0 !unnecessary?
-    v    = 0d0 !unnecessary?
+    v_tmp=0d0
+    if( info%id_r <= nprow*npcol ) then
+      do k2=1,nq
+      do k1=1,np
+        i0 = (k1-1)/nb
+        j0 = (k2-1)/nb
+        i1 = MOD(k1-1,nb)
+        j1 = MOD(k2-1,nb)
+        i = (i0*nprow+myrow)*nb+i1+1
+        j = (j0*npcol+mycol)*nb+j1+1
+        if(i<=n.and.j<=n) then
+          v_tmp(i,j) = v_div(k1,k2)
+        end if
+      end do
+      end do
+    end if
 
+    call comm_summation(v_tmp,v,n*n,info%icomm_r)
 
-    if(.not.pinfo%flag_blacs_gridinit) then
+  !write(*,*) "test 11 v"
 
-       CALL BLACS_PINFO( pinfo%iam, pinfo%nprocs )
-       write(*,*) "iam,nprocs=", pinfo%iam, pinfo%nprocs ; flush(6)
+    deallocate( work, iwork, h_div, v_div, v_tmp )
 
-       IF( pinfo%nprocs .lt. 1 ) CALL BLACS_SETUP( pinfo%iam, NPROW*NPCOL )
-       write(*,*) "iam=", pinfo%iam ; flush(6)
-
-       CALL BLACS_GET( -1,0,pinfo%context )
-       CALL BLACS_GRIDINIT( pinfo%context, 'R', NPROW, NPCOL )
-       CALL BLACS_GRIDINFO( pinfo%context, NPROW,NPCOL, pinfo%myrow,pinfo%mycol )
-       pinfo%flag_blacs_gridinit = .true.
-
-       if(comm_is_root(nproc_id_global)) then
-          write(*,*) "  scalapack:pdsyev is used"
-          write(*,*) "    nprow, npcol = ", nprow, npcol
-       endif
-    endif
-
-    context = pinfo%context
-    iam     = pinfo%iam
-    nprocs  = pinfo%nprocs
-    myrow   = pinfo%myrow
-    mycol   = pinfo%mycol
-
-    !write(*,*) "    context = ", context
-    !write(*,*) "myrow,mycol", myrow,mycol ; flush(6)
-
-    lld_r = max(1,numroc(n, nb, myrow, 0, nprow))
-    lld_c = max(1,numroc(n, nb, mycol, 0, npcol))
-    allocate(desca(lld_r), descz(lld_r))
-    allocate( h_div(lld_r,lld_c), v_div(lld_r,lld_c) )
-
-    !write(*,*) "lld_r, lld_c=", lld_r, lld_c ; flush(6)
-
-    !(set lwork) : by manual (correct?)
-    qrmem = 2*n-2
-    ic = 1
-    jc = 1
-    mb_c = nb
-    nb_c = nb
-    rsrc_c = 0
-    csrc_c = 0
-    iroffc = mod(ic-1, mb_c)
-    icoffc = mod(jc-1, nb_c)
-    icrow = indxg2p(ic, mb_c, MYROW, rsrc_c, NPROW)
-    iccol = indxg2p(jc, nb_c, MYCOL, csrc_c, NPCOL)
-    mpc0  = numroc(n+iroffc, mb_c, MYROW, icrow, NPROW)
-    nqc0  = numroc(n+icoffc, nb_c, MYCOL, iccol, NPCOL)
-    sizemqrleft = max( (nb*(nb-1))/2, (nqc0 + mpc0)*nb ) + nb*nb
-    nn = max(n, nb, 2)
-    np = numroc(nn, nb, 0, 0, NPROW)
-    nq = numroc(max(n, nb, 2), nb, 0, 0, NPCOL)
-    nrc = numroc(n, nb, myrow, 0, NPROCS)
-    ldc = max(1, nrc)
-    lwork = 5*n + n*ldc + max(sizemqrleft, qrmem) + 1
-   !lwork = lwork * 5  !xxx larger in cases
-    allocate(work(lwork))
-
-
-    IF( MYROW.EQ.-1 ) GO TO 20
-
-    CALL DESCINIT( DESCA, n, n, nb, nb, 0, 0, context, lld_r, ierr )
-    if(ierr < 0) write(*,*) "error1 in pdsyev"
-    CALL DESCINIT( DESCZ, n, n, nb, nb, 0, 0, context, lld_r, ierr )
-    if(ierr < 0) write(*,*) "error2 in pdsyev"
-
-    !cut out and put into small divided block for each process
-    do i=1,lld_r
-    do j=1,lld_c
-       if(myrow+1==nprow) then
-          ii = n-lld_r+i
-       else
-          ii = myrow*lld_r+i
-       endif
-       if(mycol+1==npcol) then
-          jj = n-lld_c+j
-       else
-          jj = mycol*lld_c+j
-       endif
-       h_div(i,j) = h(ii,jj)
-    enddo
-    enddo
-
-    if(myrow+1==nprow) then
-       iia = n-lld_r+1
-    else
-       iia = myrow*lld_r+1
-    endif
-    if(mycol+1==npcol) then
-       jja = n-lld_c+1
-    else
-       jja = mycol*lld_c+1
-    endif
-
-
-    CALL PDSYEV( 'V','U', n, h_div,1,1,DESCA,e,v_div,1,1,DESCZ,work,lwork,ierr )
-!xxx    CALL PDSYEV( 'V','U', n, h_div,iia,jja,DESCA,e,v_div,iia,jja,DESCZ,work,lwork,ierr )
-!xxx    CALL PDSYEV( 'V','U', n, h_cp,iia,jja,DESCA,e,v_tmp,iia,jja,DESCZ,work,lwork,ierr )
-    if(ierr < 0) write(*,*) "error3 in pdsyev"
-
-   !write(*,*) "hoge",iam, DESCZ
-
-    !get together from each process to make n x n size
-    do i=1,lld_r
-    do j=1,lld_c
-       if(myrow+1==nprow) then
-          ii = n-lld_r+i
-       else
-          ii = myrow*lld_r+i
-       endif
-       if(mycol+1==npcol) then
-          jj = n-lld_c+j
-       else
-          jj = mycol*lld_c+j
-       endif
-       v_tmp(ii,jj) = v_div(i,j) 
-    enddo
-    enddo
-    call comm_summation(v_tmp, v, n*n, info%icomm_rko) !!!!xxxx
-
-
-20  continue
-!    CALL BLACS_GRIDEXIT( context )
-!    CALL BLACS_EXIT( 1 )
-
-    deallocate(work,h_div,v_div,v_tmp)
+    call BLACS_GRIDEXIT( ictxt )
 
     return
   end subroutine eigen_real8_pdsyev
@@ -199,12 +133,12 @@ subroutine eigen_subdiag(Rmat,evec,iter,ier2,pinfo)
   use parallelization, only: nproc_size_global
   use structures, only: s_process_info
   implicit none
-  
+
   integer :: iter,ier2
   real(8) :: Rmat(iter,iter)
   real(8) :: evec(iter,iter)
   type(s_process_info),intent(in) :: pinfo
-  
+
   character(1) :: JOBZ,UPLO
   integer :: N
   real(8) :: A(iter,iter)
@@ -212,9 +146,9 @@ subroutine eigen_subdiag(Rmat,evec,iter,ier2,pinfo)
   real(8) :: W(iter)
   real(8) :: WORK(3*iter-1)
   integer :: LWORK
-  
+
   ier2=0
-  
+
   if(nproc_size_global==1)then
     JOBZ='V'
     UPLO='L'
@@ -257,7 +191,7 @@ subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
   deallocate(WORK,RWORK)
 
 end subroutine eigen_subdiag_periodic
- 
+
 !
       subroutine SAMPLE_PDSYEV_CALL(Rmat,evec,iter,pinfo)
 !
@@ -293,7 +227,7 @@ end subroutine eigen_subdiag_periodic
       character(1) :: SCOPE,TOP
 !     ..
 !     .. Local Scalars ..
-      INTEGER            INFO, N, NB 
+      INTEGER            INFO, N, NB
 !      INTEGER            CONTEXT, I, IAM, INFO, MYCOL, MYROW, N, NB, NPCOL, NPROCS, NPROW
       integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
 !     ..
@@ -330,7 +264,7 @@ end subroutine eigen_subdiag_periodic
       end if
       NPCOL = nproc_size_global/NPROW
       LDA = iter
-      
+
       NP = max(N,NPROW)
       NQ = max(N,NPCOL)
       TRILWMIN = 3*N + max( NP+1, 3 )
@@ -376,8 +310,8 @@ end subroutine eigen_subdiag_periodic
 !
       do jj= 1, N
          do ii= 1, N
-           CALL PDELSET( A, ii, jj, DESCA, Rmat(ii,jj) ) 
-         end do  
+           CALL PDELSET( A, ii, jj, DESCA, Rmat(ii,jj) )
+         end do
       end do
 
       LIWORK=7*N+8*NPCOL+2
@@ -513,7 +447,7 @@ end subroutine eigen_subdiag_periodic
 !
       DO 20 J = 1, N
          DO 10 I = 1, N
-           CALL PDELSET( A, I, J, DESCA, Rmat(I,J) ) 
+           CALL PDELSET( A, I, J, DESCA, Rmat(I,J) )
 !            IF( I.EQ.J ) THEN
 !               CALL PDELSET( A, I, J, DESCA,  &
 !                             ( DBLE( N-I+1 ) ) / DBLE( N )+ONE /  &

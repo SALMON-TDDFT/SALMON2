@@ -291,6 +291,7 @@ end subroutine
         & wf2_block(:, :, :, jo))
     end do
 
+    wf_block_send = 0d0
     hmat_tmp = 0d0
     do m = 0, pinfo%nporbital - 1
 
@@ -349,6 +350,9 @@ end subroutine
     !$omp workshare
     wf2_block = 0d0
     !$omp end workshare
+
+    wf_block_send = 0d0
+
     do m = 0, pinfo%nporbital - 1
 
       if(m == info%id_o ) then
@@ -448,6 +452,7 @@ do ispin = 1, system%nspin
       & wf2_block(:, :, :, jo))
   end do
 
+  wf_block_send = 0d0
   hmat_tmp = 0d0
   do m = 0, pinfo%nporbital - 1
 
@@ -502,9 +507,11 @@ do ispin = 1, system%nspin
 
 !  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
   if(yn_pdsyev=='y') then
-     stop "open the subroutine eigen_real8_pdsyev in code"
+!     stop "open the subroutine eigen_real8_pdsyev in code"
 ! OPEN here to use scalapack pdsyev
-!     call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
+#ifdef USE_SCALAPACK
+     call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
+#endif
   else
      call eigen_real8_dsyev(hmat, eval, evec)
   endif
@@ -516,6 +523,8 @@ do ispin = 1, system%nspin
   !$omp workshare
   wf2_block = 0d0
   !$omp end workshare
+
+  wf_block_send = 0d0
 
   do m = 0, pinfo%nporbital - 1
 
