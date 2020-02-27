@@ -117,7 +117,8 @@ end subroutine checkpoint_gs
 
 subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_mixing
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,&
+                           yn_datafiles_dump,read_gs_restart_data
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
@@ -133,6 +134,9 @@ subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
   if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+    wdir = gdir
+  end if
+  if (read_gs_restart_data=='rho') then
     wdir = gdir
   end if
 
