@@ -36,7 +36,7 @@ module ttm
   real(8),allocatable :: rhs_e(:,:,:)
   real(8),allocatable :: rhs_l(:,:,:)
 
-  character(7) :: ttm_file = 'ttm.inp_ttm'
+  character(11) :: ttm_file = 'ttm.inp_ttm'
   logical :: DISPLAY=.false.
 
 contains
