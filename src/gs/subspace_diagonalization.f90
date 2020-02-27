@@ -503,7 +503,7 @@ do ispin = 1, system%nspin
 
 !  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
   if(yn_pdsyev=='y') then
-     stop "open the subroutine eigen_real8_pdsyev in code"
+!     stop "open the subroutine eigen_real8_pdsyev in code"
 ! OPEN here to use scalapack pdsyev
 !     call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
   else
