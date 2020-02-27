@@ -509,7 +509,9 @@ do ispin = 1, system%nspin
   if(yn_pdsyev=='y') then
 !     stop "open the subroutine eigen_real8_pdsyev in code"
 ! OPEN here to use scalapack pdsyev
-!     call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
+#ifdef USE_SCALAPACK
+     call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
+#endif
   else
      call eigen_real8_dsyev(hmat, eval, evec)
   endif
