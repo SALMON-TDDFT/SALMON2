@@ -40,7 +40,7 @@ contains
     n  = ubound(h,1)
     nb = 1  !blocking factor -- probably parameter relating to efficiency
 
-    if(info%isize_r < 4) stop
+    if(info%isize_r < 4) stop "nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3) must be >3"
 
     nprow = int(sqrt(dble(info%isize_r)))
     do ip2=1,100
@@ -60,7 +60,6 @@ contains
       k1=mod(ii-1,nprow)
       k2=mod((ii-1)/nprow,npcol)
       usermap(k1,k2) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
-      if(usermap(k1,k2)==info%id_rko) flag=.true.
       if(ii == npcol*nprow) goto 100
     end do
     end do
