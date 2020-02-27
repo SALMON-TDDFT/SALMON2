@@ -400,6 +400,7 @@ contains
 
     c = sum_f/sum_fnew
 
+    f=0.0d0
     tmp=0.0d0
     do ii = 1, num_points_in_myrnk
        ix = ijk_media_myrnk(1,ii)
