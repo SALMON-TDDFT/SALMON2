@@ -36,19 +36,17 @@ module ttm
   real(8),allocatable :: rhs_e(:,:,:)
   real(8),allocatable :: rhs_l(:,:,:)
 
-  character(7) :: ttm_file = 'ttm.dat'
+  character(11) :: ttm_file = 'ttm.inp_ttm'
   logical :: DISPLAY=.false.
 
 contains
 
   subroutine init_ttm_parameters( dt_em )
-    use communication, only: comm_get_globalinfo, comm_is_root
-    use phys_constants
-    use mpi
+    use communication, only: comm_get_globalinfo, comm_is_root, comm_bcast
     implicit none
     real(8), intent(in) :: dt_em
     integer, parameter :: unit=1111
-    integer :: npid, nprocs, ierr
+    integer :: npid, nprocs
     logical :: flag
     real(8), parameter :: atomic_unit_of_length = 5.29177210903d-11 ! [m] (+/- 8.0e-21)
     real(8), parameter :: hartree_joule_relationship = 4.3597447222071d-18 ! [J] (+/- 8.5e-30)
@@ -64,13 +62,13 @@ contains
     if( .not.flag )then
        if( DISPLAY )then
           write(*,*) "No TTM file ("//ttm_file//")."
-          write(*,*) "TTM is not used."
+          write(*,*) "Two-Temperature Model is not used."
        end if
        return
     else
        if( DISPLAY )then
           write(*,*) "TTM file ("//ttm_file//") is found."
-          write(*,*) "Calculation is performed with TTM."
+          write(*,*) "Calculation is performed with Two-Temperature Model."
        end if
        use_ttm = .true.
     end if
@@ -103,12 +101,12 @@ contains
        write(*,*) "Tini    =",tp%Tini
     end if
 
-    call MPI_Bcast(tp%g       ,1,MPI_REAL8,0,comm,ierr)
-    call MPI_Bcast(tp%Cl      ,1,MPI_REAL8,0,comm,ierr)
-    call MPI_Bcast(tp%kappa_e0,1,MPI_REAL8,0,comm,ierr)
-    call MPI_Bcast(tp%Ce_prime,1,MPI_REAL8,0,comm,ierr)
-    call MPI_Bcast(tp%zeta_bal,1,MPI_REAL8,0,comm,ierr)
-    call MPI_Bcast(tp%Tini    ,1,MPI_REAL8,0,comm,ierr)
+    call comm_bcast(tp%g       ,comm,0)
+    call comm_bcast(tp%Cl      ,comm,0)
+    call comm_bcast(tp%kappa_e0,comm,0)
+    call comm_bcast(tp%Ce_prime,comm,0)
+    call comm_bcast(tp%zeta_bal,comm,0)
+    call comm_bcast(tp%Tini    ,comm,0)
 
 ! Convert to the atomic unit
 !
@@ -123,20 +121,20 @@ contains
                               *atomic_unit_of_time
     tp%Ce_prime = tp%Ce_prime /hartree_joule_relationship*atomic_unit_of_length**3 &
                               *hartree_kelvin_relationship**2
-    tp%zeta_bal = tp%zeta_bal * 10.0d0
+    tp%zeta_bal = tp%zeta_bal /(atomic_unit_of_length*1.0d9)
     tp%Tini = tp%Tini /hartree_kelvin_relationship
 
   end subroutine init_ttm_parameters
 
   subroutine init_ttm_grid( hgs_in, is_a, is, ie, imedia )
-    use mpi
+    use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global
+    use communication, only: comm_summation
     implicit none
     real(8), intent(in) :: hgs_in(3)
     integer, intent(in) :: is_a(3), is(3), ie(3)
     integer, intent(in) :: imedia(is_a(1):,is_a(2):,is_a(3):)
     integer :: ii,ij,ix,iy,iz,i
-    integer :: ierr,nprcs,myrnk
-    integer,allocatable :: ircnt(:),idisp(:)
+    integer,allocatable :: ircnt(:),idisp(:),ijk_tmp(:,:)
 
     if ( DISPLAY ) write(*,'(a60)') repeat("-",39)//" init_ttm_grid(start)"
     hgs(1:3) = hgs_in(1:3)
@@ -160,26 +158,26 @@ contains
 
 ! ---
 
-    call MPI_Comm_size( comm, nprcs, ierr )
-    call MPI_Comm_rank( comm, myrnk, ierr )
+    allocate( ircnt(0:nproc_size_global-1) ); ircnt=0
+    allocate( idisp(0:nproc_size_global-1) ); idisp=0
 
-    allocate( ircnt(0:nprcs-1) ); ircnt=0
-    allocate( idisp(0:nprcs-1) ); idisp=0
+    idisp(nproc_id_global) = ii
+    call comm_summation( idisp, ircnt, nproc_size_global, nproc_group_global )
 
-    ircnt(myrnk) = ii
-    call MPI_Allreduce(MPI_IN_PLACE,ircnt,nprcs,MPI_INTEGER,MPI_SUM,comm,ierr)
-
-    do i=0,nprcs-1
+    idisp=0
+    do i=0,nproc_size_global-1
        idisp(i) = sum(ircnt(0:i)) - ircnt(i)
     end do
 
     ij=sum(ircnt)
     allocate( ijk_media_whole(3,ij) ); ijk_media_whole=0
+    allocate( ijk_tmp(3,ij) ); ijk_tmp=0
 
-    ircnt=3*ircnt
-    idisp=3*idisp
-    call MPI_Allgatherv(ijk_media_myrnk,ircnt(myrnk),MPI_INTEGER &
-                       ,ijk_media_whole,ircnt,idisp,MPI_INTEGER,comm,ierr)
+    do ii=1,ircnt(nproc_id_global)
+       ij=idisp(nproc_id_global)+ii
+       ijk_tmp(:,ij) = ijk_media_myrnk(:,ii)
+    end do
+    call comm_summation( ijk_tmp, ijk_media_whole, size(ijk_tmp), nproc_group_global )
 
 ! ---
 
@@ -199,7 +197,6 @@ contains
   subroutine init_ttm_alloc( srg, rg )
     use structures, only: s_rgrid, s_sendrecv_grid
     use sendrecv_grid, only: update_overlap_real8
-    use mpi
     implicit none
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
@@ -347,35 +344,36 @@ contains
 
 
   subroutine ttm_penetration( is, f )
-    use mpi
+    use communication, only: comm_summation
     implicit none
     integer, intent(in) :: is(3)   ! lower bounds of f 
     real(8), intent(inout) :: f(is(1):,is(2):,is(3):)
     integer :: num_points_in_myrnk,num_points_in_whole
-    integer :: ii,jj,ix,iy,iz,jx,jy,jz,ierr
+    integer :: ii,jj,ix,iy,iz,jx,jy,jz
     real(8) :: dx,dy,dz,r,rr,factor
-    real(8) :: sum_f,sum_fnew,c,const
-    real(8),allocatable :: fnew(:,:,:)
+    real(8) :: sum_f,sum_fnew,c,const,tmp
+    real(8),allocatable :: fnew(:,:,:), work(:,:,:)
 
-    const = tp%zeta_bal * 10.0d0/0.529177d0  ! (nm --> bohr)
-    const = 1.0d0/const
+    const = 1.0d0/tp%zeta_bal
 
     num_points_in_myrnk = size( ijk_media_myrnk,2 )
     num_points_in_whole = size( ijk_media_whole,2 ) 
 
-    sum_f=0.0d0
+    tmp=0.0d0
     do ii = 1, num_points_in_myrnk
        ix = ijk_media_myrnk(1,ii)
        iy = ijk_media_myrnk(2,ii)
        iz = ijk_media_myrnk(3,ii)
-       sum_f = sum_f + f(ix,iy,iz)
+       tmp = tmp + f(ix,iy,iz)
     end do
-    call MPI_Allreduce(MPI_IN_PLACE,sum_f,1,MPI_REAL8,MPI_SUM,comm,ierr)
+    call comm_summation( tmp, sum_f, comm )
 
     if ( sum_f == 0.0d0 ) return
 
     allocate( fnew(lb_array(1):ub_array(1),lb_array(2):ub_array(2),lb_array(3):ub_array(3)) )
     fnew=0.0d0
+    allocate( work(lb_array(1):ub_array(1),lb_array(2):ub_array(2),lb_array(3):ub_array(3)) )
+    work=0.0d0
 
     do ii = 1, num_points_in_myrnk
        ix = ijk_media_myrnk(1,ii)
@@ -391,26 +389,27 @@ contains
           rr = dx*dx + dy*dy + dz*dz
           r = sqrt(rr)
           factor=exp(-r*const)
-          fnew(jx,jy,jz) = fnew(jx,jy,jz) + factor*f(ix,iy,iz)
+          work(jx,jy,jz) = work(jx,jy,jz) + factor*f(ix,iy,iz)
        end do !jj
     end do !ii
 
-    call MPI_Allreduce(MPI_IN_PLACE,fnew,size(fnew),MPI_REAL8,MPI_SUM,comm,ierr)
+    call comm_summation( work, fnew, size(fnew), comm )
 
     sum_fnew = sum(fnew)
     if ( sum_fnew == 0.0d0 ) return
 
     c = sum_f/sum_fnew
 
-    sum_fnew=0.0d0
+    f=0.0d0
+    tmp=0.0d0
     do ii = 1, num_points_in_myrnk
        ix = ijk_media_myrnk(1,ii)
        iy = ijk_media_myrnk(2,ii)
        iz = ijk_media_myrnk(3,ii)
        f(ix,iy,iz) = c*fnew(ix,iy,iz)
-       sum_fnew = sum_fnew + f(ix,iy,iz)
+       tmp = tmp + f(ix,iy,iz)
     end do
-    call MPI_Allreduce(MPI_IN_PLACE,sum_fnew,1,MPI_REAL8,MPI_SUM,comm,ierr)
+    call comm_summation( tmp, sum_fnew, comm )
 
   end subroutine ttm_penetration
 

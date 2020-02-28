@@ -96,7 +96,8 @@ module fdtd_eh
   private :: allocate_poynting
   private :: calc_poynting_vector
   private :: calc_poynting_vector_div
-  private :: mpi_allreduce_sum_ji
+  integer,private,parameter :: unit2=3000
+  character(11),private,parameter :: file_unit2='ttm_rt.data'
 
 contains
   
@@ -119,7 +120,7 @@ contains
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
     use common_maxwell,  only: set_coo_em,find_point_em
-    use ttm
+    use ttm           ,  only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -355,7 +356,17 @@ contains
     if( use_ttm )then
        call init_ttm_grid( fs%hgs, fs%ng%is_array, fs%ng%is, fs%ng%ie, fs%imedia )
        call init_ttm_alloc( fs%srg_ng, fs%ng )
-    end if
+       if( comm_is_root(nproc_id_global) )then
+          open(unit2,file=file_unit2)
+          write(unit2,'("#",99(1X,I0,":",A))') &
+               1, "Time[fs]",                &
+               2, "EM_energy[eV]",           &
+               3, "EM_energy_in_medium[eV]", &
+               4, "T_ele[K]",                &
+               5, "T_lat[K]"
+          close(unit2)
+       end if
+    end if !use_ttm
 
     deallocate(fs%imedia); deallocate(fe%rmedia);
     if(comm_is_root(nproc_id_global)) then
@@ -1321,12 +1332,12 @@ contains
                                base_directory,t1_t2,t1_start,&
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
-    use inputoutput,     only: utime_from_au
+    use inputoutput,     only: utime_from_au, uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_size_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
     use math_constants,  only: pi
-    use ttm
+    use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
@@ -1336,7 +1347,9 @@ contains
     integer :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
-    real(8),allocatable :: work(:,:,:), work2(:,:,:)
+    real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
+    real(8) :: dV, tmp(4)
+    real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5 ! [K] (+/- 6.1e-07)
 
     !time-iteration
     do iter=fe%iter_sta,fe%iter_end
@@ -1434,19 +1447,36 @@ contains
             iy=fs%lg%is(2)-fe%Nd; jy=fs%lg%ie(2)+fe%Nd
             iz=fs%lg%is(3)-fe%Nd; jz=fs%lg%ie(3)+fe%Nd
             allocate( work(ix:jx,iy:jy,iz:jz) ); work=0.0d0
+            allocate( work1(ix:jx,iy:jy,iz:jz) ); work1=0.0d0
             allocate( work2(ix:jx,iy:jy,iz:jz) ); work2=0.0d0
             call ttm_get_temperatures( (/ix,iy,iz/), work, work2 )
-            call mpi_allreduce_sum_ji( nproc_group_global, work, work2 )
+            call comm_summation( work, work1, size(work), nproc_group_global )
+            work=work2
+            call comm_summation( work, work2, size(work), nproc_group_global )
             if( comm_is_root(nproc_id_global) )then
                unit1=unit1+1
-               do iz=lbound(work,3),ubound(work,3)
-               do ix=lbound(work,1),ubound(work,1)
-                  write(unit1,'(1x,2i8,2g20.10)') ix,iz,work(ix,0,iz),work2(ix,0,iz)
+               do iz=lbound(work1,3),ubound(work1,3)
+               do ix=lbound(work1,1),ubound(work1,1)
+                  write(unit1,'(1x,2i8,2g20.10)') ix,iz,work1(ix,0,iz),work2(ix,0,iz)
                end do
                write(unit1,*)
                end do
             end if
+!
+            dV=fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
+            tmp(3)=sum(u_energy)*dV*uenergy_from_au
+            tmp(4)=sum(u_energy_p)*dV*uenergy_from_au
+            call comm_summation( tmp(3:4), tmp(1:2), 2, nproc_group_global )
+            tmp(3)=sum(work1)/count(work1/=0.0d0)*hartree_kelvin_relationship
+            tmp(4)=sum(work2)/count(work2/=0.0d0)*hartree_kelvin_relationship
+            if( comm_is_root(nproc_id_global) )then
+               open(unit2,file=file_unit2,status='old',position='append')
+               write(unit2,"(F16.8,99(1X,E23.15E3))",advance='no') &
+                    iter*dt_em*utime_from_au, tmp(1:2), tmp(3:4)
+               close(unit2)
+            end if
             deallocate( work2 )
+            deallocate( work1 )
             deallocate( work )
          end if
       end if !use_ttm
@@ -2917,18 +2947,5 @@ contains
 !$omp end do
 !$omp end parallel
   end subroutine calc_poynting_vector_div
-
-  subroutine mpi_allreduce_sum_ji( comm, w1, w2 )
-    use mpi
-    implicit none
-    integer,intent(in) :: comm
-    real(8),intent(inout) :: w1(:,:,:)
-    real(8),optional,intent(inout) :: w2(:,:,:)
-    integer :: ierr
-    call MPI_Allreduce(MPI_IN_PLACE,w1,size(w1),MPI_REAL8,MPI_SUM,comm,ierr)
-    if( present(w2) )then
-       call MPI_Allreduce(MPI_IN_PLACE,w2,size(w2),MPI_REAL8,MPI_SUM,comm,ierr)
-    end if
-  end subroutine mpi_allreduce_sum_ji
 
 end module fdtd_eh
