@@ -1217,6 +1217,7 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
   end if
 
   if( property == 'initial' ) then
+  if(.not.allocated(ppg%save_udVtbl_a))then !<-- this is due to ARTED (to be removed)
      allocate( ppg%save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,nelem) )
      allocate( ppg%save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,nelem) )
      allocate( ppg%save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,nelem) )
@@ -1241,6 +1242,7 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
       end do
       deallocate(xn,yn,an,bn,cn,dn)
     enddo
+  end if
   end if
   
   do ia=1,natom
