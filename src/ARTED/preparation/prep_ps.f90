@@ -181,7 +181,6 @@ Subroutine prep_ps_periodic(property)
 
   endif  !for /= 'update_wo_realloc'
 
-  if(property /= 'update_wo_realloc') then
 
   if(property == 'initial') then
      allocate( ppg%save_udVtbl_a(Nrmax,0:2*Lmax+1,nelec) )
@@ -189,8 +188,6 @@ Subroutine prep_ps_periodic(property)
      allocate( ppg%save_udVtbl_c(Nrmax,0:2*Lmax+1,nelec) )
      allocate( ppg%save_udVtbl_d(Nrmax,0:2*Lmax+1,nelec) )
   endif
-
-  end if
 
   call calc_uv(pp,ppg,Lx,Ly,Lz,NL,Hx,Hy,Hz, property)
 

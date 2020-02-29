@@ -24,7 +24,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic,yn_ffte,nelem
+  use salmon_global, only: iperiodic,yn_ffte
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
@@ -1217,11 +1217,12 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
   end if
 
   if( property == 'initial' ) then
-  if(.not.allocated(ppg%save_udVtbl_a))then !<-- this is due to ARTED (to be removed)
-     allocate( ppg%save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,nelem) )
-     allocate( ppg%save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,nelem) )
-     allocate( ppg%save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,nelem) )
-     allocate( ppg%save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,nelem) )
+     if(.not.allocated(ppg%save_udVtbl_a)) then  !<-- due to ARTED, remove later
+       allocate( ppg%save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,nelem) )
+       allocate( ppg%save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,nelem) )
+       allocate( ppg%save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,nelem) )
+       allocate( ppg%save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,nelem) )
+     endif
 
     do ik=1,nelem
       allocate(xn(0:pp%nrps(ik)-1),yn(0:pp%nrps(ik)-1),an(0:pp%nrps(ik)-2) &
@@ -1243,13 +1244,12 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
       deallocate(xn,yn,an,bn,cn,dn)
     enddo
   end if
-  end if
   
   do ia=1,natom
      ik=kion(ia)
 
   !!$omp parallel
-  !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,duvr,ilma,l0,ll)
+  !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,ilma,l0,ll)
      do j=1,ppg%mps(ia)
        x=ppg%rxyz(1,j,ia)
        y=ppg%rxyz(2,j,ia)
@@ -1281,9 +1281,7 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
            lm=lm+1
            ilma=ppg%lma_tbl(lm,ia)
            ppg%uv( j,ilma)   = uvr(l)* ylm(x,y,z,ll,m)
-           ppg%duv(j,ilma,1) = uvr(l)*dylm(x,y,z,ll,m,1)
-           ppg%duv(j,ilma,2) = uvr(l)*dylm(x,y,z,ll,m,2)
-           ppg%duv(j,ilma,3) = uvr(l)*dylm(x,y,z,ll,m,3)
+!move here           ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol
          enddo
        enddo
        l0=l
@@ -1304,7 +1302,8 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
       if(pp%inorm(l,ik)==0) cycle
       do m=-ll,ll
         lma=lma+1
-        ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol
+!move
+        ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol !!!move
       enddo
     enddo
     l0=l
