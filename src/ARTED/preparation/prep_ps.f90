@@ -181,15 +181,20 @@ Subroutine prep_ps_periodic(property)
 
   endif  !for /= 'update_wo_realloc'
 
+  if(property /= 'update_wo_realloc') then
 
   if(property == 'initial') then
-     allocate( ppg%save_udVtbl_a(Nrmax,0:2*Lmax+1,nelec) )
-     allocate( ppg%save_udVtbl_b(Nrmax,0:2*Lmax+1,nelec) )
-     allocate( ppg%save_udVtbl_c(Nrmax,0:2*Lmax+1,nelec) )
-     allocate( ppg%save_udVtbl_d(Nrmax,0:2*Lmax+1,nelec) )
+     allocate( save_udVtbl_a(Nrmax,0:2*Lmax+1,NI) )
+     allocate( save_udVtbl_b(Nrmax,0:2*Lmax+1,NI) )
+     allocate( save_udVtbl_c(Nrmax,0:2*Lmax+1,NI) )
+     allocate( save_udVtbl_d(Nrmax,0:2*Lmax+1,NI) )
   endif
 
-  call calc_uv(pp,ppg,Lx,Ly,Lz,NL,Hx,Hy,Hz, property)
+  end if
+
+  call calc_uv(pp,ppg,save_udvtbl_a,save_udvtbl_b,save_udvtbl_c,save_udvtbl_d, &
+                   Lx,Ly,Lz,NL,Hx,Hy,Hz,  &
+                   flag_use_grad_wf_on_force,property)
 
   rinv_hxyz=1.d0/(Hx*Hy*Hz)
 

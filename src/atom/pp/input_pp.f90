@@ -284,9 +284,9 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   open(4,file=ps_file,status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
   pp%zps(ik)=int(rzps+1d-10)
-  if(pp%mr(ik) .gt.pp%nrmax0) stop 'Mr>Nrmax0 at Read_PS_KY'
+  if(pp%mr(ik).gt.pp%nrmax0) stop 'Mr>Nrmax0 at Read_PS_KY'
   if(pp%mlps(ik).gt.pp%lmax0) stop 'Mlps(ik)>Lmax0 at Read_PS_KY'
-  if(pp%mlps(ik).gt.pp%lmax)  stop 'Mlps(ik)>Lmax at Read_PS_KY'
+  if(pp%mlps(ik).gt.pp%lmax) stop 'Mlps(ik)>Lmax at Read_PS_KY'
   read(4,*) irPC,(rrc(l),l=0,pp%mlps(ik))
   rPC=real(irPC) !Radius for partial core correction: not working in this version
   do i=0,pp%mr(ik)

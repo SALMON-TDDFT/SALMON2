@@ -110,7 +110,7 @@ write(*,*) "----------- set_lma_tbl"
   end subroutine set_lma_tbl
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-  subroutine calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,property,hvol0)
+  subroutine calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,flag_use_grad_wf_on_force,property,hvol0)
   use salmon_global,  only : natom, kion, iperiodic, yn_domain_parallel
   use math_constants, only : pi
   use structures,     only : s_pp_info, s_pp_grid
@@ -120,6 +120,7 @@ write(*,*) "----------- set_lma_tbl"
   integer,intent(in) :: nl
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
   real(8),intent(in) :: hx,hy,hz
+  logical,intent(in) :: flag_use_grad_wf_on_force
   character(17),intent(in) :: property
   real(8),intent(in),optional :: hvol0
   real(8) :: save_udvtbl_a(pp%nrmax,0:2*pp%lmax+1,natom)
@@ -198,6 +199,27 @@ write(*,*) "----------- set_lma_tbl"
   do a=1,natom
 
     ik=kion(a)
+    if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+      allocate( xn(0:pp%nrps(ik)-1),yn(0:pp%nrps(ik)-1),an(0:pp%nrps(ik)-2) &
+               ,bn(0:pp%nrps(ik)-2),cn(0:pp%nrps(ik)-2),dn(0:pp%nrps(ik)-2) )
+      xn(0:pp%nrps(ik)-1) = pp%radnl(1:pp%nrps(ik),ik)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        select case( j_angular_momentum )
+        case(1); yn(0:pp%nrps(ik)-1) = pp%dudvtbl(1:pp%nrps(ik),l,ik)
+        case(2); yn(0:pp%nrps(ik)-1) = pp%dudvtbl_so(1:pp%nrps(ik),l,ik)
+        end select
+        call spline(pp%nrps(ik),xn,yn,an,bn,cn,dn)
+        dudvtbl_a(1:pp%nrps(ik)-1,l) = an(0:pp%nrps(ik)-2)
+        dudvtbl_b(1:pp%nrps(ik)-1,l) = bn(0:pp%nrps(ik)-2)
+        dudvtbl_c(1:pp%nrps(ik)-1,l) = cn(0:pp%nrps(ik)-2)
+        dudvtbl_d(1:pp%nrps(ik)-1,l) = dn(0:pp%nrps(ik)-2)
+      end do
+      l0=l
+      end do
+      deallocate(xn,yn,an,bn,cn,dn)
+    end if
  
     do j=1,ppg%mps(a)
 
@@ -217,6 +239,10 @@ write(*,*) "----------- set_lma_tbl"
       do l=l0,l0+pp%nproj(ll,ik)-1
         uvr(l) = save_udvtbl_a(intr,l,a)*xx**3 + save_udvtbl_b(intr,l,a)*xx**2 &
                + save_udvtbl_c(intr,l,a)*xx    + save_udvtbl_d(intr,l,a)
+        if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+          duvr(l) = dudvtbl_a(intr,l)*xx**3 + dudvtbl_b(intr,l)*xx**2 &
+                  + dudvtbl_c(intr,l)*xx    + dudvtbl_d(intr,l)
+        end if
       end do
       l0=l
       end do
@@ -243,12 +269,34 @@ write(*,*) "----------- set_lma_tbl"
             coef=sqrt( dble(ll+m+1)/dble(2*ll+1) )
 if ( a == 1 .and. j == 11 ) write(*,'("(1,1)",4i4,2f15.8)') l,ll,m,m,coef,abs(zylm(x,y,z,ll,m))
             ppg%uv_so(j,ilma,1,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+            if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+              if ( r > 1.0d-6 ) then
+                ppg%duv_so(j,ilma,1,1,1) = coef*(duvr(l)*(x/r)*zylm(x,y,z,ll,m)+uvr(l)*dzylm(x,y,z,ll,m,1))
+                ppg%duv_so(j,ilma,2,1,1) = coef*(duvr(l)*(y/r)*zylm(x,y,z,ll,m)+uvr(l)*dzylm(x,y,z,ll,m,2))
+                ppg%duv_so(j,ilma,3,1,1) = coef*(duvr(l)*(z/r)*zylm(x,y,z,ll,m)+uvr(l)*dzylm(x,y,z,ll,m,3))
+              else
+                ppg%duv_so(j,ilma,1,1,1) = coef*uvr(l)*dzylm(x,y,z,ll,m,1)
+                ppg%duv_so(j,ilma,2,1,1) = coef*uvr(l)*dzylm(x,y,z,ll,m,2)
+                ppg%duv_so(j,ilma,3,1,1) = coef*uvr(l)*dzylm(x,y,z,ll,m,3)
+              end if
+            end if
 !
 ! j=l+1/2, beta spin
 !
             coef=sqrt( dble(ll-m)/dble(2*ll+1) )
 if ( a == 1 .and. j == 11 ) write(*,'("(1,2)",4i4,2f15.8)') l,ll,m,m+1,coef,abs(zylm(x,y,z,ll,m+1))
             ppg%uv_so(j,ilma,1,2)=coef*uvr(l)*zylm(x,y,z,ll,m+1)
+            if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+              if ( r > 1.0d-6 ) then
+                ppg%duv_so(j,ilma,1,1,2) = coef*(duvr(l)*(x/r)*zylm(x,y,z,ll,m+1)+uvr(l)*dzylm(x,y,z,ll,m+1,1))
+                ppg%duv_so(j,ilma,2,1,2) = coef*(duvr(l)*(y/r)*zylm(x,y,z,ll,m+1)+uvr(l)*dzylm(x,y,z,ll,m+1,2))
+                ppg%duv_so(j,ilma,3,1,2) = coef*(duvr(l)*(z/r)*zylm(x,y,z,ll,m+1)+uvr(l)*dzylm(x,y,z,ll,m+1,3))
+              else
+                ppg%duv_so(j,ilma,1,1,2) = coef*uvr(l)*dzylm(x,y,z,ll,m+1,1)
+                ppg%duv_so(j,ilma,2,1,2) = coef*uvr(l)*dzylm(x,y,z,ll,m+1,2)
+                ppg%duv_so(j,ilma,3,1,2) = coef*uvr(l)*dzylm(x,y,z,ll,m+1,3)
+              end if
+            end if
 
           end do !m
 
@@ -263,12 +311,34 @@ if ( a == 1 .and. j == 11 ) write(*,'("(1,2)",4i4,2f15.8)') l,ll,m,m+1,coef,abs(
             coef=sqrt( dble(ll-m+1)/dble(2*ll+1) )
 if ( a == 1 .and. j == 11 ) write(*,'("(2,1)",4i4,2f15.8)') l,ll,m,m-1,coef,abs(zylm(x,y,z,ll,m-1))
             ppg%uv_so(j,ilma,2,1)=coef*uvr(l)*zylm(x,y,z,ll,m-1)
+            if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+              if ( r > 1.0d-6 ) then
+                ppg%duv_so(j,ilma,1,2,1) = coef*(duvr(l)*(x/r)*zylm(x,y,z,ll,m-1)+uvr(l)*dzylm(x,y,z,ll,m-1,1))
+                ppg%duv_so(j,ilma,2,2,1) = coef*(duvr(l)*(y/r)*zylm(x,y,z,ll,m-1)+uvr(l)*dzylm(x,y,z,ll,m-1,2))
+                ppg%duv_so(j,ilma,3,2,1) = coef*(duvr(l)*(z/r)*zylm(x,y,z,ll,m-1)+uvr(l)*dzylm(x,y,z,ll,m-1,3))
+              else
+                ppg%duv_so(j,ilma,1,2,1) = coef*uvr(l)*dzylm(x,y,z,ll,m-1,1)
+                ppg%duv_so(j,ilma,2,2,1) = coef*uvr(l)*dzylm(x,y,z,ll,m-1,2)
+                ppg%duv_so(j,ilma,3,2,1) = coef*uvr(l)*dzylm(x,y,z,ll,m-1,3)
+              end if
+            end if
 !
 ! j=l-1/2, beta spin
 !
             coef=-sqrt( dble(ll+m)/dble(2*ll+1) )
 if ( a == 1 .and. j == 11 ) write(*,'("(2,2)",4i4,2f15.8)') l,ll,m,m,coef,abs(zylm(x,y,z,ll,m))
             ppg%uv_so(j,ilma,2,2)=coef*uvr(l)*zylm(x,y,z,ll,m)
+            if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+              if ( r > 1.0d-6 ) then
+                ppg%duv_so(j,ilma,1,2,2) = coef*(duvr(l)*(x/r)*zylm(x,y,z,ll,m)+uvr(l)*dzylm(x,y,z,ll,m,1))
+                ppg%duv_so(j,ilma,2,2,2) = coef*(duvr(l)*(y/r)*zylm(x,y,z,ll,m)+uvr(l)*dzylm(x,y,z,ll,m,2))
+                ppg%duv_so(j,ilma,3,2,2) = coef*(duvr(l)*(z/r)*zylm(x,y,z,ll,m)+uvr(l)*dzylm(x,y,z,ll,m,3))
+              else
+                ppg%duv_so(j,ilma,1,2,2) = coef*uvr(l)*dzylm(x,y,z,ll,m,1)
+                ppg%duv_so(j,ilma,2,2,2) = coef*uvr(l)*dzylm(x,y,z,ll,m,2)
+                ppg%duv_so(j,ilma,3,2,2) = coef*uvr(l)*dzylm(x,y,z,ll,m,3)
+              end if
+            end if
 
           end do !m
 

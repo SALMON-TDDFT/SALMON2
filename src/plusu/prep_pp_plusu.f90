@@ -161,13 +161,14 @@ contains
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-  subroutine calc_uv_plusU(pp,ppg,property)
+  subroutine calc_uv_plusU(pp,ppg,flag_use_grad_wf_on_force,property)
     use salmon_global, only : natom, kion
     use salmon_math,   only : ylm, dylm
     use structures,    only : s_pp_info, s_pp_grid
     implicit none
     type(s_pp_info),intent(inout) :: pp
     type(s_pp_grid),intent(inout) :: ppg
+    logical,intent(in) :: flag_use_grad_wf_on_force
     character(17),intent(in) :: property
     real(8) :: save_upptbl_a(pp%nrmax,0:2*pp%lmax+1,natom)
     real(8) :: save_upptbl_b(pp%nrmax,0:2*pp%lmax+1,natom)
@@ -212,6 +213,25 @@ contains
 
       ik=kion(a)
 
+      if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+        allocate( xn(0:pp%nrps_ao(ik)-1),yn(0:pp%nrps_ao(ik)-1),an(0:pp%nrps_ao(ik)-2) &
+                 ,bn(0:pp%nrps_ao(ik)-2),cn(0:pp%nrps_ao(ik)-2),dn(0:pp%nrps_ao(ik)-2) )
+        xn(0:pp%nrps_ao(ik)-1) = pp%rad(1:pp%nrps_ao(ik),ik)
+        l0=0
+        do ll=0,pp%mlps(ik)
+        do l=l0,l0+pp%nproj(ll,ik)-1
+          yn(0:pp%nrps_ao(ik)-1) = pp%dupptbl_ao(1:pp%nrps_ao(ik),l,ik)
+          call spline(pp%nrps_ao(ik),xn,yn,an,bn,cn,dn)
+          dupptbl_a(1:pp%nrps_ao(ik)-1,l) = an(0:pp%nrps_ao(ik)-2)
+          dupptbl_b(1:pp%nrps_ao(ik)-1,l) = bn(0:pp%nrps_ao(ik)-2)
+          dupptbl_c(1:pp%nrps_ao(ik)-1,l) = cn(0:pp%nrps_ao(ik)-2)
+          dupptbl_d(1:pp%nrps_ao(ik)-1,l) = dn(0:pp%nrps_ao(ik)-2)
+        end do
+        l0=l
+        end do
+        deallocate(xn,yn,an,bn,cn,dn)
+      end if
+ 
       do j=1,ppg%mps_ao(a)
 
         x=ppg%rxyz_ao(1,j,a)
@@ -230,6 +250,10 @@ contains
         do l=l0,l0+pp%nproj(ll,ik)-1
           upp(l) = save_upptbl_a(intr,l,a)*xx**3 + save_upptbl_b(intr,l,a)*xx**2 &
                  + save_upptbl_c(intr,l,a)*xx    + save_upptbl_d(intr,l,a)
+          if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+            dupp(l) = dupptbl_a(intr,l)*xx**3 + dupptbl_b(intr,l)*xx**2 &
+                    + dupptbl_c(intr,l)*xx    + dupptbl_d(intr,l)
+          end if
         end do
         l0=l
         end do
@@ -242,6 +266,17 @@ contains
             lm=lm+1
             ilma=lma_tbl_ao(lm,a)
             ppg%phi_ao(j,ilma) = upp(l)*ylm(x,y,z,ll,m)
+            if ( .not.flag_use_grad_wf_on_force ) then !legacy for ion-force
+              if ( r > 1.0d-6 ) then
+                ppg%dphi_ao(j,ilma,1) = dupp(l)*(x/r)*ylm(x,y,z,ll,m) + upp(l)*dylm(x,y,z,ll,m,1)
+                ppg%dphi_ao(j,ilma,2) = dupp(l)*(y/r)*ylm(x,y,z,ll,m) + upp(l)*dylm(x,y,z,ll,m,2)
+                ppg%dphi_ao(j,ilma,3) = dupp(l)*(z/r)*ylm(x,y,z,ll,m) + upp(l)*dylm(x,y,z,ll,m,3)
+              else
+                ppg%dphi_ao(j,ilma,1) = upp(l)*dylm(x,y,z,ll,m,1)
+                ppg%dphi_ao(j,ilma,2) = upp(l)*dylm(x,y,z,ll,m,2)
+                ppg%dphi_ao(j,ilma,3) = upp(l)*dylm(x,y,z,ll,m,3)
+              end if
+            end if
           end do !m
         end do
         l0=l
