@@ -1217,12 +1217,10 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
   end if
 
   if( property == 'initial' ) then
-     if(.not.allocated(ppg%save_udVtbl_a)) then  !<-- due to ARTED, remove later
-       allocate( ppg%save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,nelem) )
-       allocate( ppg%save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,nelem) )
-       allocate( ppg%save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,nelem) )
-       allocate( ppg%save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,nelem) )
-     endif
+    allocate( ppg%save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,nelem) )
+    allocate( ppg%save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,nelem) )
+    allocate( ppg%save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,nelem) )
+    allocate( ppg%save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,nelem) )
 
     do ik=1,nelem
       allocate(xn(0:pp%nrps(ik)-1),yn(0:pp%nrps(ik)-1),an(0:pp%nrps(ik)-2) &
@@ -1261,6 +1259,7 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
        intr=ir-1
        if(intr.lt.0.or.intr.ge.pp%nrps(ik)) stop 'bad intr at prep_ps'
        xx = r - pp%radnl(intr,ik)
+
        l0=0
        do ll=0,pp%mlps(ik)
        do l=l0,l0+pp%nproj(ll,ik)-1
@@ -1280,8 +1279,7 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
          do m=-ll,ll
            lm=lm+1
            ilma=ppg%lma_tbl(lm,ia)
-           ppg%uv( j,ilma)   = uvr(l)* ylm(x,y,z,ll,m)
-!move here           ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol
+           ppg%uv(j,ilma)   = uvr(l)* ylm(x,y,z,ll,m)
          enddo
        enddo
        l0=l
@@ -1302,8 +1300,7 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
       if(pp%inorm(l,ik)==0) cycle
       do m=-ll,ll
         lma=lma+1
-!move
-        ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol !!!move
+        ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol
       enddo
     enddo
     l0=l
