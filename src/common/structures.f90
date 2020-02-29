@@ -274,6 +274,11 @@ module structures
     integer             :: ilocal_nlma         ! number of own nlma
     integer,allocatable :: ilocal_nlma2ilma(:) ! ilocal_nlma to global nlma
     integer,allocatable :: ilocal_nlma2ia(:)   ! ilocal_nlma to atom number (ia_tbl)
+    !
+    real(8),allocatable :: save_udVtbl_a(:,:,:)
+    real(8),allocatable :: save_udVtbl_b(:,:,:)
+    real(8),allocatable :: save_udVtbl_c(:,:,:)
+    real(8),allocatable :: save_udVtbl_d(:,:,:)
   end type s_pp_grid
 
   type s_pp_nlcc
