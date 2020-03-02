@@ -7,5 +7,5 @@
 # the input data for the following calculations.
 
 cp ../../samples/exercise_10_classicEM_rt/shape.cube ./
-
+cp ../../samples/ttm/ttm.inp_ttm ./
 
