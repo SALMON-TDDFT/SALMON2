@@ -2312,7 +2312,7 @@ contains
   !===========================================================================================
   != prepare mpi, grid, and sendrecv enviroments==============================================
   subroutine eh_mpi_grid_sr(fs,fe)
-    use salmon_global,     only: nproc_domain_orbital,nproc_domain_general,yn_periodic,nproc_k,nproc_ob
+    use salmon_global,     only: nproc_rgrid,yn_periodic,nproc_k,nproc_ob
     use parallelization,   only: nproc_group_global
     use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
     use init_communicator, only: init_communicator_dft
@@ -2329,10 +2329,9 @@ contains
     integer                           :: ii,iperi
     
     !set mpi condition
-    pinfo%npk              = nproc_k
-    pinfo%nporbital        = nproc_ob
-    pinfo%npdomain_orbital = nproc_domain_orbital
-    pinfo%npdomain_general = nproc_domain_general
+    pinfo%npk       = nproc_k
+    pinfo%nporbital = nproc_ob
+    pinfo%nprgrid    = nproc_rgrid
     call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,pinfo)
     call init_communicator_dft(nproc_group_global,pinfo,info,info_field)
     

@@ -27,7 +27,7 @@ contains
 subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
-                           nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general
+                           nproc_k,nproc_ob,nproc_rgrid
   use sendrecv_grid
   use init_communicator
   use init_poisson_sub
@@ -52,10 +52,9 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   call init_dft_system(lg,system,stencil)
 
 ! process distribution
-  pinfo%npk              = nproc_k
-  pinfo%nporbital        = nproc_ob
-  pinfo%npdomain_orbital = nproc_domain_orbital
-  pinfo%npdomain_general = nproc_domain_general
+  pinfo%npk       = nproc_k
+  pinfo%nporbital = nproc_ob
+  pinfo%nprgrid    = nproc_rgrid
   call init_process_distribution(system,comm,pinfo)
   call init_communicator_dft(comm,pinfo,info,info_field)
 
@@ -98,7 +97,7 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_domain_orbital,rion,rion_red,nelec,calc_mode,temperature,nelec_spin, &
+  & nproc_rgrid,rion,rion_red,nelec,calc_mode,temperature,nelec_spin, &
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
   use sym_sub, only: init_sym_sub
   implicit none
@@ -216,8 +215,8 @@ subroutine init_dft_system(lg,system,stencil)
   if(stencil%if_orthogonal) then
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*(1.d0/Hgs(1)**2+1.d0/Hgs(2)**2+1.d0/Hgs(3)**2)
   else
-    if(nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3)/=1) &
-                                                    stop "error: nonorthogonal lattice and r-space parallelization"
+    if(nproc_rgrid(1)*nproc_rgrid(2)*nproc_rgrid(3)/=1) &
+      stop "error: nonorthogonal lattice and r-space parallelization"
     stencil%coef_lap0 = -0.5d0*cNmat(0,Nd)*  &
                       & ( stencil%coef_F(1)/Hgs(1)**2 + stencil%coef_F(2)/Hgs(2)**2 + stencil%coef_F(3)/Hgs(3)**2 )
   end if
@@ -253,7 +252,7 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   type(s_process_info),intent(out) :: pinfo
   logical :: if_stop
 
-  if((pinfo%nporbital + sum(pinfo%npdomain_orbital) + sum(pinfo%npdomain_general)) == 0) then
+  if((pinfo%nporbital + sum(pinfo%nprgrid)) == 0) then
     ! Process distribution is automatically decided by SALMON.
     if (system%ngrid > 16**3) then
       call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,pinfo)
@@ -283,7 +282,6 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   else
     pinfo%nporbital_spin = 0
   end if
-  pinfo%npdomain_general_dm(1:3)=pinfo%npdomain_general(1:3)/pinfo%npdomain_orbital(1:3)
 end subroutine init_process_distribution
 
 !===================================================================================================================================
@@ -299,7 +297,7 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
-  nproc_domain_orbital = pinfo%npdomain_orbital
+  nproc_domain_orbital = pinfo%nprgrid
 
 ! for single-cell calculations
   info%im_s = 1
@@ -422,12 +420,12 @@ subroutine check_ffte_condition(pinfo,lg)
   integer :: j,lg_num_tmp,ii
 
   if (yn_ffte == 'y') then
-    mx = mod(lg%num(1), pinfo%npdomain_orbital(2))
-    my = mod(lg%num(2), pinfo%npdomain_orbital(2))
+    mx = mod(lg%num(1), pinfo%nprgrid(2))
+    my = mod(lg%num(2), pinfo%nprgrid(2))
     if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_domain_orbital(2)'
 
-    my = mod(lg%num(2), pinfo%npdomain_orbital(3))
-    mz = mod(lg%num(3), pinfo%npdomain_orbital(3))
+    my = mod(lg%num(2), pinfo%nprgrid(3))
+    mz = mod(lg%num(3), pinfo%nprgrid(3))
     if (my /= 0 .or. mz /= 0) stop 'Both lg%num(2) and lg%num(3) must be divisible by nproc_domain_orbital(3)'
 
     ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
@@ -470,13 +468,12 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
   type(s_rgrid),       intent(inout) :: lg
   type(s_rgrid),       intent(inout) :: mg,ng
   !
-  integer :: nproc_domain_orbital(3),nproc_domain_general(3),nproc_k,nproc_ob
+  integer :: nproc_domain_orbital(3),nproc_k,nproc_ob
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
-  nproc_domain_orbital = pinfo%npdomain_orbital
-  nproc_domain_general = pinfo%npdomain_general
+  nproc_domain_orbital = pinfo%nprgrid
 
   if ( allocated(mg%is_all) ) deallocate(mg%is_all)
   if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)

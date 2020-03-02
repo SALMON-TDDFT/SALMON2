@@ -19,9 +19,8 @@
 subroutine main_dft2tddft
 use structures
 use salmon_global, only: directory_read_data,calc_mode, &
-                         nproc_k,nproc_ob,nproc_domain_orbital,nproc_domain_general, &
-                         target_nproc_k,target_nproc_ob,target_nproc_domain_orbital, &
-                         target_nproc_domain_general, &
+                         nproc_k,nproc_ob,nproc_rgrid, &
+                         target_nproc_k,target_nproc_ob,target_nproc_rgrid, &
                          yn_periodic
 use communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
 use salmon_xc
@@ -66,10 +65,9 @@ call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 call init_dft_system(lg_scf,system_scf,stencil)
 
-pinfo_scf%npk                 = nproc_k
-pinfo_scf%nporbital           = nproc_ob
-pinfo_scf%npdomain_orbital    = nproc_domain_orbital
-pinfo_scf%npdomain_general    = nproc_domain_general
+pinfo_scf%npk       = nproc_k
+pinfo_scf%nporbital = nproc_ob
+pinfo_scf%nprgrid    = nproc_rgrid
 call init_process_distribution(system_scf,icomm,pinfo_scf)
 
 call init_communicator_dft(icomm,pinfo_scf,info_scf,info_field_scf)
@@ -98,10 +96,9 @@ call timer_begin(LOG_INIT_RT)
 calc_mode = 'RT' ! FIXME
 call init_dft_system(lg_rt,system_rt,stencil)
 
-pinfo_rt%npk                 = target_nproc_k
-pinfo_rt%nporbital           = target_nproc_ob
-pinfo_rt%npdomain_orbital    = target_nproc_domain_orbital
-pinfo_rt%npdomain_general    = target_nproc_domain_general
+pinfo_rt%npk       = target_nproc_k
+pinfo_rt%nporbital = target_nproc_ob
+pinfo_rt%nprgrid    = target_nproc_rgrid
 call init_process_distribution(system_rt,icomm,pinfo_rt)
 
 call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
