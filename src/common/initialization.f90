@@ -140,7 +140,6 @@ subroutine init_dft_system(lg,system,stencil)
   call init_sym_sub( system%primitive_a, system%primitive_b, epdir_re1 )
   call init_kvector(num_kgrid,system)
 
-  system%iperiodic = iperiodic
   system%nion = natom
 
   if(ispin==0)then

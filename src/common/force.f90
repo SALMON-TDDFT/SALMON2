@@ -30,7 +30,7 @@ contains
     use sym_vector_sub, only: sym_vector_xyz
     use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
-    use salmon_global, only: kion,cutoff_g,aEwald
+    use salmon_global, only: kion,cutoff_g,aEwald,iperiodic
     use timer
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
@@ -176,7 +176,7 @@ contains
 
        ! nonlocal part
        call timer_begin(LOG_CALC_FORCE_NONLOCAL)
-       if(system%iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+       if(iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
@@ -288,7 +288,7 @@ contains
     use structures
     use math_constants,only : pi,zi
     use salmon_math
-    use salmon_global, only: kion,NEwald,aEwald,cutoff_r
+    use salmon_global, only: iperiodic,kion,NEwald,aEwald,cutoff_r
     use communication, only: comm_summation
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -300,7 +300,7 @@ contains
     integer :: ix,iy,iz,ia,ib,ipair
     real(8) :: rr,rab(3),r(3)
 
-    select case(system%iperiodic)
+    select case(iperiodic)
     case(0)
 
       F_sum = 0d0
