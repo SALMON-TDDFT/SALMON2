@@ -636,9 +636,9 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
     stop 'poisson_ffte: array is not allocated'
   end if
   
-  if(info_field%isize_ffte(1) < 4) stop "isize_ffte(1) must be > 3"
+  if(info_field%isize(1) < 4) stop "isize(1) must be > 3"
   
-  i = mod(info_field%id_ffte(1),4) ! i=0,1,2,3
+  i = mod(info_field%id(1),4) ! i=0,1,2,3
 
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
@@ -660,16 +660,13 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   end do
   end do
   
-  call comm_summation(singlescale%b_ffte,singlescale%a_ffte,size(singlescale%a_ffte),info_field%icomm_ffte(1))
+  call comm_summation(singlescale%b_ffte,singlescale%a_ffte,size(singlescale%a_ffte),info_field%icomm(1))
 
   CALL PZFFT3DV_MOD(singlescale%a_ffte(:,:,:,i),singlescale%b_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
-                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
-  CALL PZFFT3DV_MOD(singlescale%a_ffte(:,:,:,i),singlescale%b_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
-                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+                    info_field%isize(2),info_field%isize(3),-1, &
+                    info_field%icomm(2),info_field%icomm(3))
 
-  call comm_bcast(singlescale%b_ffte(:,:,:,0),info_field%icomm_ffte(1), 0)
+  call comm_bcast(singlescale%b_ffte(:,:,:,0),info_field%icomm(1), 0)
 
 ! Poisson eq.: singlescale%b_ffte(ix,iy,iz,0)=rho(G) --> poisson%b_ffte(ix,iy,iz)=Vh(G)
   trhoG_ele_tmp=0d0
@@ -731,13 +728,13 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   !$omp end parallel do
 
   CALL PZFFT3DV_MOD(singlescale%b_ffte(:,:,:,i),singlescale%a_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3), &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
-                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+                    info_field%isize(2),info_field%isize(3),1, &
+                    info_field%icomm(2),info_field%icomm(3))
 
-  call comm_bcast(singlescale%a_ffte(:,:,:,0),info_field%icomm_ffte(1), 0)
-  call comm_bcast(singlescale%a_ffte(:,:,:,1),info_field%icomm_ffte(1), 1)
-  call comm_bcast(singlescale%a_ffte(:,:,:,2),info_field%icomm_ffte(1), 2)
-  call comm_bcast(singlescale%a_ffte(:,:,:,3),info_field%icomm_ffte(1), 3)
+  call comm_bcast(singlescale%a_ffte(:,:,:,0),info_field%icomm(1), 0)
+  call comm_bcast(singlescale%a_ffte(:,:,:,1),info_field%icomm(1), 1)
+  call comm_bcast(singlescale%a_ffte(:,:,:,2),info_field%icomm(1), 2)
+  call comm_bcast(singlescale%a_ffte(:,:,:,3),info_field%icomm(1), 3)
   
   !$OMP parallel do private(iiz,iiy,ix,iy,iz)
   do iz=1,ng%num(3)
@@ -927,14 +924,11 @@ contains
       fw%b_ffte(ng%is(1):ng%ie(1),iy,iz,0) = Vh%f(ng%is(1):ng%ie(1),iiy,iiz)
     end do
     end do
-    call comm_summation(fw%b_ffte,fw%a_ffte,size(fw%a_ffte),info_field%icomm_ffte(1))
+    call comm_summation(fw%b_ffte,fw%a_ffte,size(fw%a_ffte),info_field%icomm(1))
 
     CALL PZFFT3DV_MOD(fw%a_ffte(:,:,:,0),fw%Vh_ffte_old,lg%num(1),lg%num(2),lg%num(3),   &
-                      info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
-                      info_field%icomm_ffte(2),info_field%icomm_ffte(3))
-    CALL PZFFT3DV_MOD(fw%a_ffte(:,:,:,0),fw%Vh_ffte_old,lg%num(1),lg%num(2),lg%num(3),   &
-                      info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
-                      info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+                      info_field%isize(2),info_field%isize(3),-1, &
+                      info_field%icomm(2),info_field%icomm(3))
   
     return
   end subroutine calc_Vh_ffte

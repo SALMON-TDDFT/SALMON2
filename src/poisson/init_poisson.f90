@@ -324,8 +324,8 @@ subroutine init_poisson_fft(lg,ng,system,info_field,poisson)
   
   integer :: npuy,npuz
 
-  npuy=info_field%isize_ffte(2)
-  npuz=info_field%isize_ffte(3)
+  npuy=info_field%isize(2)
+  npuz=info_field%isize(3)
 
   if(.not.allocated(poisson%coef))then
     allocate(poisson%coef(lg%num(1),lg%num(2)/npuy,lg%num(3)/npuz))
@@ -351,8 +351,8 @@ subroutine init_poisson_fft(lg,ng,system,info_field,poisson)
   kz_sta=1
   kz_end=lg_num_2(3)/npuz
 
-  ky_shift=info_field%id_ffte(2)*lg_num_2(2)/npuy
-  kz_shift=info_field%id_ffte(3)*lg_num_2(3)/npuz
+  ky_shift=info_field%id(2)*lg_num_2(2)/npuy
+  kz_shift=info_field%id(3)*lg_num_2(3)/npuz
 
   do kz = kz_sta,kz_end
   do ky = ky_sta,ky_end

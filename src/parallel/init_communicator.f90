@@ -196,14 +196,6 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   info_field%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info_field%icomm_xy, info_field%id_xy, info_field%isize_xy)
 
-
-! communicators for FFTE routine
-  info_field%icomm_ffte(1:3) = info_field%icomm(1:3)
-
-  call comm_get_groupinfo(info_field%icomm_ffte(1), info_field%id_ffte(1), info_field%isize_ffte(1))
-  call comm_get_groupinfo(info_field%icomm_ffte(2), info_field%id_ffte(2), info_field%isize_ffte(2))
-  call comm_get_groupinfo(info_field%icomm_ffte(3), info_field%id_ffte(3), info_field%isize_ffte(3))
-
 end subroutine init_communicator_dft
 
 END MODULE init_communicator

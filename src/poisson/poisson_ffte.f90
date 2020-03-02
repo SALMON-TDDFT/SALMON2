@@ -47,7 +47,7 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
   poisson%a_ffte_tmp=0.d0
-!$OMP parallel do private(iiz,iiy,ix)
+!$OMP parallel do private(iiz,iiy,ix) collapse(2)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
@@ -55,26 +55,23 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs
     poisson%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz)=trho(ng%is(1):ng%ie(1),iiy,iiz)
   end do
   end do
-  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm_ffte(1))
+  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
 
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
-                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),-1, &
-                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+                    info_field%isize(2),info_field%isize(3),-1, &
+                    info_field%icomm(2),info_field%icomm(3))
 
-  trhoG_ele_tmp=0d0
+  trhoG_ele=0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,iiy,iiz,iix) &
-!$omp             shared(ng,lg,trhoG_ele_tmp,poisson,inv_lgnum3)
+!$omp             shared(ng,lg,trhoG_ele,poisson,inv_lgnum3)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     do ix=1,ng%num(1)
       iiz=iz+ng%is(3)-1
       iiy=iy+ng%is(2)-1
       iix=ix+ng%is(1)-1
-      trhoG_ele_tmp(iix,iiy,iiz)=poisson%b_ffte(iix,iy,iz)*inv_lgnum3
+      trhoG_ele(iix,iiy,iiz)=poisson%b_ffte(iix,iy,iz)*inv_lgnum3
     end do
 
     do ix=1,lg%num(1)
@@ -83,13 +80,12 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs
   end do
   end do
 !$omp end parallel do
-  call comm_summation(trhoG_ele_tmp,trhoG_ele,size(trhoG_ele),info_field%icomm_all)
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
-                    info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
-                    info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+                    info_field%isize(2),info_field%isize(3),1, &
+                    info_field%icomm(2),info_field%icomm(3))
 
-!$OMP parallel do private(iiz,iiy)
+!$OMP parallel do private(iiz,iiy) collapse(2)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
