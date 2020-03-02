@@ -40,7 +40,7 @@ module structures
   end type s_dmatrix
 
   type s_dft_system
-    integer :: iperiodic              ! iperiodic==0 --> isolated system, iperiodic==3 --> 3D periodic system
+    logical :: if_real_orbital
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
     real(8) :: hvol,hgs(3),primitive_a(3,3),det_a,primitive_b(3,3)
     real(8) :: rmatrix_a(3,3),rmatrix_b(3,3)

@@ -309,7 +309,7 @@ module salmon_pp
 
 !======================================================================
   subroutine calc_nlcc(pp, sys, rg, ppn)
-    use salmon_global,only : kion
+    use salmon_global,only : kion,iperiodic
     use structures, only : s_dft_system, s_pp_info, s_pp_nlcc, s_rgrid
     implicit none
     
@@ -340,10 +340,10 @@ module salmon_pp
     ppn%rho_nlcc = 0d0
     ppn%tau_nlcc = 0d0  
   
-    if (sys%iperiodic == 0) then
+    if (iperiodic == 0) then
       irepr_min = 0
       irepr_max = 0
-    elseif (sys%iperiodic == 3) then
+    elseif (iperiodic == 3) then
       irepr_min = -2
       irepr_max = +2
     else

@@ -21,7 +21,7 @@ module subspace_diagonalization
 
 contains
 
-subroutine ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg_rwf(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -197,11 +197,11 @@ subroutine ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   end do
   call timer_end(LOG_SSDG_ISOLATED_CALC)
 
-end subroutine ssdg_isolated
+end subroutine ssdg_rwf
 
 !===================================================================================================================================
 
-subroutine ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
   use salmon_global, only: yn_gbp
   use structures
   use communication, only: comm_summation,comm_bcast

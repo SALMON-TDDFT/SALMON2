@@ -30,8 +30,8 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
-  use Conjugate_Gradient, only: gscg_isolated,gscg_periodic
-  use subspace_diagonalization, only: ssdg_isolated,ssdg_periodic
+  use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
+  use subspace_diagonalization, only: ssdg_zwf,ssdg_rwf
   use density_matrix, only: calc_density
   use mixing_sub
   use hartree_sub, only: hartree
@@ -76,12 +76,11 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
 
 ! solve Kohn-Sham equation by minimization techniques
   call timer_begin(LOG_CALC_MINIMIZATION)
-  select case(iperiodic)
-  case(0)
-    call gscg_isolated(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-  case(3)
-    call gscg_periodic(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
-  end select
+  if(system%if_real_orbital) then
+    call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+  else
+    call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+  end if
   call timer_end(LOG_CALC_MINIMIZATION)
 
 ! Gram Schmidt orghonormalization
@@ -91,12 +90,11 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
     if(miter>iditer_nosubspace_diag)then
-      select case(iperiodic)
-      case(0)
-        call ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-      case(3)
-        call ssdg_periodic(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
-      end select
+      if(system%if_real_orbital) then
+        call ssdg_rwf(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+      else
+        call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+      end if
     end if
   end if
   call timer_end(LOG_CALC_SUBSPACE_DIAG)

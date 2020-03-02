@@ -37,8 +37,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   integer :: ik,io,is,iseed,a,ix,iy,iz
   real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
 
-  select case(yn_periodic)
-  case('n')
+  if(system%if_real_orbital) then
 
     Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
     do a=1,natom
@@ -71,7 +70,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
     end do
     end do
 
-  case('y')
+  else
 
     Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))
     Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))
@@ -102,7 +101,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
     end do
     end do
 
-  end select
+  end if
 
   call gram_schmidt(system, mg, info, spsi, pinfo)
 
