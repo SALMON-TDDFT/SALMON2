@@ -148,7 +148,7 @@ subroutine init_dft_system(lg,system,stencil)
       system%if_real_orbital = .true.
     case(3)
       if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)==1) then
-        system%if_real_orbital = .true.
+        system%if_real_orbital = .false. ! .true. (future work)
       else
         system%if_real_orbital = .false.
       end if
