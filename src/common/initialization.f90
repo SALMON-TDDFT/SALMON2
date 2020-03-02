@@ -139,6 +139,21 @@ subroutine init_dft_system(lg,system,stencil)
   call init_lattice(system,stencil)
   call init_sym_sub( system%primitive_a, system%primitive_b, epdir_re1 )
   call init_kvector(num_kgrid,system)
+  
+  if(calc_mode=='RT') then
+    system%if_real_orbital = .false.
+  else if(calc_mode=='GS') then
+    select case(iperiodic)
+    case(0)
+      system%if_real_orbital = .true.
+    case(3)
+      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)==1) then
+        system%if_real_orbital = .true.
+      else
+        system%if_real_orbital = .false.
+      end if
+    end select
+  end if
 
   system%nion = natom
 

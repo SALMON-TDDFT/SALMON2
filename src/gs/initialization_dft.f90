@@ -93,15 +93,14 @@ if(comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
 end if
 
-select case(iperiodic)
-case(0)
+if(system%if_real_orbital) then
   call allocate_orbital_real(system%nspin,mg,info,spsi)
   call allocate_orbital_real(system%nspin,mg,info,shpsi)
-case(3)
+else
   call allocate_orbital_complex(system%nspin,mg,info,spsi)
   call allocate_orbital_complex(system%nspin,mg,info,shpsi)
   call allocate_orbital_complex(system%nspin,mg,info,sttpsi)
-end select
+end if
 
 if(stencil%if_orthogonal) then
   if(comm_is_root(nproc_id_global)) write(*,*) "orthogonal cell: using al"

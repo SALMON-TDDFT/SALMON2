@@ -18,7 +18,7 @@ module Conjugate_Gradient
 
 contains
 
-subroutine gscg_isolated(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
@@ -322,11 +322,11 @@ subroutine inner_product(mg,system,info,psi1,psi2,rbox)
   call timer_begin(LOG_GSCG_ISOLATED_CALC)
 end subroutine inner_product
 
-end subroutine gscg_isolated
+end subroutine gscg_rwf
 
 !===================================================================================================================================
 
-subroutine gscg_periodic(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   use structures
   use timer
   use hamiltonian, only: hpsi
@@ -659,6 +659,6 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   call timer_begin(LOG_GSCG_PERIODIC_CALC)
 end subroutine inner_product
 
-end subroutine gscg_periodic
+end subroutine gscg_zwf
 
 end module Conjugate_Gradient
