@@ -32,7 +32,7 @@ contains
 
   integer :: j
   integer :: nproc_k, nproc_ob
-  integer,dimension(3) :: nproc_d_o,nproc_d_g
+  integer,dimension(3) :: nproc_d_o
   integer :: nproc_total_wf,nproc_total_g
   integer :: nproc_id_comm1, nproc_size_comm1
 
@@ -40,11 +40,9 @@ contains
 
   nproc_k   = pinfo%npk
   nproc_ob  = pinfo%nporbital
-  nproc_d_o = pinfo%npdomain_orbital
-  nproc_d_g = pinfo%npdomain_general
+  nproc_d_o = pinfo%nprgrid
 
   nproc_total_wf = nproc_k * nproc_ob * product(nproc_d_o(:))
-  nproc_total_g  = product(nproc_d_g(:))
 
   iok = .true.
 
@@ -54,29 +52,6 @@ contains
     print "(A,I7)", '  number of MPI process                              =', nproc_size_comm1
     iok = .false.
   end if
-
-  if(nproc_total_g/=nproc_size_comm1)then
-    print "(A)",    'product of nproc_domain_general is not correct'
-    print "(A,3I5)", '  product(nproc_domain_general) =', nproc_total_g
-    print "(A,3I5)", '  number of MPI process         =', nproc_size_comm1
-    iok = .false.
-  end if
-
-  do j=1,3
-    if(nproc_d_g(j)<nproc_d_o(j))then
-      print "('nproc_domain_general(',I1,') is smaller than nproc_domain_orbital(',I1,')')",j,j
-      print "('  nproc_domain_general(',I1,') = ',I5)", j, nproc_d_g(j)
-      print "('  nproc_domain_orbital(',I1,') = ',I5)", j, nproc_d_o(j)
-      iok = .false.
-    end if
-
-    if(mod(nproc_d_g(j),nproc_d_o(j))/=0)then
-      print "('nproc_domain_general(',I1,') is not mutiple of nproc_domain_orbital(',I1,')')",j,j
-      print "('  nproc_domain_general(',I1,') = ',I5)", j, nproc_d_g(j)
-      print "('  nproc_domain_orbital(',I1,') = ',I5)", j, nproc_d_o(j)
-      iok = .false.
-    end if
-  end do
 end function check_numcpu
 
 subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
@@ -89,7 +64,7 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
 
   integer :: ip
   integer :: nproc_k,nproc_ob
-  integer :: nproc_d_o(3),nproc_d_g(3)
+  integer :: nproc_d_o(3)
   integer :: nproc_size_comm1_tmp
 
   integer :: ii,icount
@@ -207,105 +182,9 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
     end select
   end do
 
-  ! general
-  if (iprefer_dist == iprefer_domain_distribution) then
-    nproc_d_g = nproc_d_o
-  else
-    nproc_size_comm1_tmp = nproc_size_comm1
-
-    num_factor2=0
-    do ii=1,26
-      if(mod(nproc_size_comm1_tmp,2)==0)then
-        num_factor2=num_factor2+1
-        nproc_size_comm1_tmp=nproc_size_comm1_tmp/2
-      end if
-    end do
-
-    num_factor3=0
-    do ii=1,17
-      if(mod(nproc_size_comm1_tmp,3)==0)then
-        num_factor3=num_factor3+1
-        nproc_size_comm1_tmp=nproc_size_comm1_tmp/3
-      end if
-    end do
-
-    num_factor5=0
-    do ii=1,11
-      if(mod(nproc_size_comm1_tmp,5)==0)then
-        num_factor5=num_factor5+1
-        nproc_size_comm1_tmp=nproc_size_comm1_tmp/5
-      end if
-    end do
-
-    if(nproc_size_comm1_tmp/=1)then
-      stop "In automatic process distribution, prime factors for number of processes must be combination of 2, 3 or 5."
-    end if
-
-    if(num_factor2>=3)then
-      nproc_d_g(1)=2
-      nproc_d_g(2)=2
-      nproc_d_g(3)=2
-      icount=0
-      ir_num_factor2=num_factor2-3
-    else if(num_factor2==2)then
-      nproc_d_g(1)=1
-      nproc_d_g(2)=2
-      nproc_d_g(3)=2
-      icount=2
-      ir_num_factor2=num_factor2-2
-    else if(num_factor2==1)then
-      nproc_d_g(1)=1
-      nproc_d_g(2)=1
-      nproc_d_g(3)=2
-      icount=1
-      ir_num_factor2=num_factor2-1
-    else
-      nproc_d_g(1)=1
-      nproc_d_g(2)=1
-      nproc_d_g(3)=1
-      icount=0
-      ir_num_factor2=num_factor2
-    end if
-
-    do ii=1,num_factor5
-      icount=icount+1
-      if(mod(icount,3)==1)then
-        nproc_d_g(3)=nproc_d_g(3)*5
-      else if(mod(icount,3)==2)then
-        nproc_d_g(2)=nproc_d_g(2)*5
-      else
-        nproc_d_g(1)=nproc_d_g(1)*5
-      end if
-    end do
-
-    do ii=1,num_factor3
-      icount=icount+1
-      if(mod(icount,3)==1)then
-        nproc_d_g(3)=nproc_d_g(3)*3
-      else if(mod(icount,3)==2)then
-        nproc_d_g(2)=nproc_d_g(2)*3
-      else
-        nproc_d_g(1)=nproc_d_g(1)*3
-      end if
-    end do
-
-    do ii=1,ir_num_factor2
-      icount=icount+1
-      if(mod(icount,3)==1)then
-        nproc_d_g(3)=nproc_d_g(3)*2
-      else if(mod(icount,3)==2)then
-        nproc_d_g(2)=nproc_d_g(2)*2
-      else
-        nproc_d_g(1)=nproc_d_g(1)*2
-      end if
-    end do
-  end if
-
-  pinfo%npk                      = nproc_k
-  pinfo%nporbital                = nproc_ob
-  pinfo%npdomain_orbital(1:3)    = nproc_d_o(1:3)
-  pinfo%npdomain_general(1:3)    = nproc_d_g(1:3)
-  pinfo%npdomain_general_dm(1:3) = pinfo%npdomain_general(1:3)/pinfo%npdomain_orbital(1:3)
+  pinfo%npk         = nproc_k
+  pinfo%nporbital   = nproc_ob
+  pinfo%nprgrid(1:3) = nproc_d_o(1:3)
 
 end subroutine set_numcpu_general
 

@@ -10,8 +10,7 @@
   yn_datafiles_dump = 'y'
   target_nproc_k = 1
   target_nproc_ob = 2
-  target_nproc_domain_orbital = 1,1,2
-  target_nproc_domain_general = 1,2,2
+  target_nproc_rgrid = 1,1,2
 /
 
 &units
@@ -22,8 +21,7 @@
   yn_domain_parallel='y'
   nproc_k = 4
   nproc_ob = 1
-  nproc_domain_orbital = 1,1,1
-  nproc_domain_general = 1,2,2
+  nproc_rgrid = 1,1,1
 /
 
 &system

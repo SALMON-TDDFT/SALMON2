@@ -100,8 +100,7 @@ contains
     if (comm_is_root(nproc_id_global)) then
       pinfo%npk = 1
       pinfo%nporbital = 1
-      pinfo%npdomain_orbital = 1
-      pinfo%npdomain_general = 1
+      pinfo%nprgrid = 1
       call optimization_log(pinfo)
     end if
 

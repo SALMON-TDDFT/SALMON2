@@ -518,7 +518,7 @@ subroutine init_code_optimization
   call switch_stencil_optimization(mg%num)
   call switch_openmp_parallelization(mg%num)
 
-  if(iperiodic==3 .and. product(pinfo%npdomain_orbital)==1) then
+  if(iperiodic==3 .and. product(pinfo%nprgrid)==1) then
      ignum = mg%num
   else
      ignum = mg%num + (nd*2)

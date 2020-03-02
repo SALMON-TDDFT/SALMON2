@@ -90,10 +90,9 @@ contains
     print *, '========== code optimization log =========='
     if (is_distributed_parallel()) then
       print *, 'MPI distribution:'
-      print *, '  nproc_k              :', pinfo%npk
-      print *, '  nproc_ob             :', pinfo%nporbital
-      print *, '  nproc_domain_orbital :', pinfo%npdomain_orbital
-      print *, '  nproc_domain_general :', pinfo%npdomain_general
+      print *, '  nproc_k    :', pinfo%npk
+      print *, '  nproc_ob   :', pinfo%nporbital
+      print *, '  nproc_rgrid :', pinfo%nprgrid
     end if
     print *, 'OpenMP parallelization:'
     print *, '  number of threads :', get_nthreads()

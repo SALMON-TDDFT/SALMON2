@@ -33,10 +33,9 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   !
   integer :: myrank,nproc
   integer :: nproc_k,nproc_ob
-  integer :: nproc_d_o(3),nproc_d_g(3),nproc_d_o_mul,nproc_d_g_dm(3),nproc_d_g_mul_dm,nproc_ob_spin(2)
+  integer :: nproc_d_o(3),nproc_ob_spin(2)
   integer :: i1,i2,i3,i4,i5,ix,iy,iz
   integer :: ibox
-  integer :: mesh(3),network(3),mesh_step(3)
   integer :: icolor_r,icolor_o,icolor_k,icolor_ro,icolor_ko
   integer :: ikey_ro,ikey_ko,nl
   integer,allocatable :: iranklists(:)
@@ -46,13 +45,7 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   nproc_k          = pinfo%npk
   nproc_ob         = pinfo%nporbital
   nproc_ob_spin    = pinfo%nporbital_spin
-  nproc_d_o        = pinfo%npdomain_orbital
-  nproc_d_g        = pinfo%npdomain_general
-  nproc_d_g_dm     = pinfo%npdomain_general_dm
-  nproc_d_o_mul    = product(nproc_d_o)
-  nproc_d_g_mul_dm = product(nproc_d_g_dm)
-
-  call check_network_form
+  nproc_d_o        = pinfo%nprgrid
 
 
 ! info
@@ -211,31 +204,6 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   call comm_get_groupinfo(info_field%icomm_ffte(2), info_field%id_ffte(2), info_field%isize_ffte(2))
   call comm_get_groupinfo(info_field%icomm_ffte(3), info_field%id_ffte(3), info_field%isize_ffte(3))
 
-contains
-  subroutine check_network_form
-    implicit none
-
-    mesh(:)      = nproc_d_o(:)
-    mesh_step(:) = nproc_d_g(:) / nproc_d_o(:)
-    network(:)   = mesh_step(:) * nproc_d_o(:)
-
-    if (comm_is_root(myrank)) then
-      print *, '================ MPI-Info ================='
-      print *, 'we assume the network is fat-tree.'
-      print *, 'we allocate the process as grid sequential...'
-
-      print '(A,5I4)', ' requested network (5D):',mesh,nproc_ob,nproc_k
-      print '(A,3I4)', ' assumed   network (3D):',network
-
-      if (product(mesh) * nproc_ob * nproc_k /= nproc) then
-        print *, 'invalid requested network' ; stop
-      end if
-
-      if (product(network) /= nproc) then
-        print *, 'invalid assumed network' ; stop
-      end if
-    end if
-  end subroutine check_network_form
 end subroutine init_communicator_dft
 
 END MODULE init_communicator
