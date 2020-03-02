@@ -83,8 +83,7 @@ module salmon_global
   character(1)   :: yn_domain_parallel
   integer        :: nproc_k
   integer        :: nproc_ob
-  integer        :: nproc_domain_orbital(3)
-  integer        :: nproc_domain_general(3)
+  integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
   character(32)  :: process_allocation
 
@@ -366,7 +365,6 @@ character(256),allocatable :: atom_name(:)
   character(1) :: yn_datafiles_dump
   integer      :: target_nproc_k
   integer      :: target_nproc_ob
-  integer      :: target_nproc_domain_orbital(3)
-  integer      :: target_nproc_domain_general(3)
+  integer      :: target_nproc_rgrid(3)
 
 end module salmon_global

@@ -28,7 +28,7 @@ contains
     integer :: iaddr(5),irank
     integer :: ishape(5)
 
-    ishape(1:5) = [proc_info%npdomain_orbital(1:3), proc_info%nporbital, proc_info%npk]
+    ishape(1:5) = [proc_info%nprgrid(1:3), proc_info%nporbital, proc_info%npk]
     iaddr(1:5)  = ob_info%iaddress(1:5)
     iaddr(idir) = iaddr(idir) + idisp
 
@@ -60,7 +60,7 @@ contains
     integer :: iaddr(3),irank
     integer :: ishape(3)
 
-    ishape(1:3) = proc_info%npdomain_orbital(1:3)
+    ishape(1:3) = proc_info%nprgrid(1:3)
     iaddr(1:3)  = field_info%iaddress(1:3)
     iaddr(idir) = iaddr(idir) + idisp
 

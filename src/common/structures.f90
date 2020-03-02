@@ -96,9 +96,7 @@ module structures
     integer :: npk
     integer :: nporbital
     integer :: nporbital_spin(2)
-    integer :: npdomain_orbital(3)    ! x,y,z
-    integer :: npdomain_general(3)    ! x,y,z
-    integer :: npdomain_general_dm(3) ! x,y,z
+    integer :: nprgrid(3)    ! x,y,z
     !for scalapack
     logical :: flag_blacs_gridinit
     integer :: context,iam,nprocs,myrow, mycol

@@ -249,8 +249,7 @@ contains
       & yn_domain_parallel, &
       & nproc_k, &
       & nproc_ob, &
-      & nproc_domain_orbital, &
-      & nproc_domain_general, &
+      & nproc_rgrid, &
       & yn_ffte, &
       & process_allocation
 
@@ -522,8 +521,7 @@ contains
       & yn_datafiles_dump, &
       & target_nproc_k, &
       & target_nproc_ob, &
-      & target_nproc_domain_orbital, &
-      & target_nproc_domain_general
+      & target_nproc_rgrid
 
 !! == default for &unit ==
     unit_system='au'
@@ -599,8 +597,7 @@ contains
     yn_domain_parallel   = 'n'
     nproc_k              = 0
     nproc_ob             = 0
-    nproc_domain_orbital = 0
-    nproc_domain_general = 0
+    nproc_rgrid           = 0
     yn_ffte              = 'n'
     process_allocation   = 'grid_sequential'
 !! == default for &system
@@ -866,8 +863,7 @@ contains
     yn_datafiles_dump = 'n'
     target_nproc_k  = 0
     target_nproc_ob = 0
-    target_nproc_domain_orbital = 0
-    target_nproc_domain_general = 0
+    target_nproc_rgrid = 0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1001,8 +997,7 @@ contains
     call comm_bcast(yn_domain_parallel  ,nproc_group_global)
     call comm_bcast(nproc_k             ,nproc_group_global)
     call comm_bcast(nproc_ob            ,nproc_group_global)
-    call comm_bcast(nproc_domain_orbital,nproc_group_global)
-    call comm_bcast(nproc_domain_general,nproc_group_global)
+    call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
@@ -1338,10 +1333,9 @@ contains
     call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
 !! == bcast for dft2tddft
     call comm_bcast(yn_datafiles_dump     ,nproc_group_global)
-    call comm_bcast(target_nproc_k             ,nproc_group_global)
-    call comm_bcast(target_nproc_ob            ,nproc_group_global)
-    call comm_bcast(target_nproc_domain_orbital,nproc_group_global)
-    call comm_bcast(target_nproc_domain_general,nproc_group_global)
+    call comm_bcast(target_nproc_k        ,nproc_group_global)
+    call comm_bcast(target_nproc_ob       ,nproc_group_global)
+    call comm_bcast(target_nproc_rgrid    ,nproc_group_global)
 
     if (yn_force_stencil_openmp_parallelization == 'y' .and. yn_force_stencil_sequential_computation == 'y') then
       if (comm_is_root(nproc_id_global)) then
@@ -1781,12 +1775,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_domain_parallel', yn_domain_parallel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_orbital(1)', nproc_domain_orbital(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_orbital(2)', nproc_domain_orbital(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_orbital(3)', nproc_domain_orbital(3)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(1)', nproc_domain_general(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(2)', nproc_domain_general(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_domain_general(3)', nproc_domain_general(3)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(1)', nproc_rgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 
@@ -2164,12 +2155,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_datafiles_dump', yn_datafiles_dump
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_k', target_nproc_k
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_ob', target_nproc_ob
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_orbital(1)', target_nproc_domain_orbital(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_orbital(2)', target_nproc_domain_orbital(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_orbital(3)', target_nproc_domain_orbital(3)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_general(1)', target_nproc_domain_general(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_general(2)', target_nproc_domain_general(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_domain_general(3)', target_nproc_domain_general(3)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(1)', target_nproc_rgrid(1)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(2)', target_nproc_rgrid(2)
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(3)', target_nproc_rgrid(3)
 
       close(fh_variables_log)
 

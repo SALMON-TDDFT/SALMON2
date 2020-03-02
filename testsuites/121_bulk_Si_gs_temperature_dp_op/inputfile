@@ -14,8 +14,7 @@
   yn_domain_parallel='y'
   nproc_k=1
   nproc_ob=4
-  nproc_domain_orbital=1,1,1
-  nproc_domain_general=1,2,2
+  nproc_rgrid=1,1,1
 /
 
 &system
