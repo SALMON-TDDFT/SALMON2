@@ -13,6 +13,9 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
+
+#include "config.h"
+
 module subspace_diagonalization
 
   use subspace_diagonalization_so, only: ssdg_periodic_so, SPIN_ORBIT_ON
@@ -119,7 +122,7 @@ subroutine ssdg_rwf(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
 
   call timer_begin(LOG_SSDG_ISOLATED_CALC)
   do ispin=1,nspin
-    call eigen_subdiag(mat2(:,:,ispin),evec(:,:,ispin),no,ierr,pinfo)
+    call eigen_subdiag(mat2(:,:,ispin),evec(:,:,ispin),no,ierr)
   end do
 
 !$omp workshare
@@ -507,10 +510,10 @@ do ispin = 1, system%nspin
 
 !  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
   if(yn_pdsyev=='y') then
-!     stop "open the subroutine eigen_real8_pdsyev in code"
-! OPEN here to use scalapack pdsyev
 #ifdef USE_SCALAPACK
      call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
+#else
+     stop "ScaLAPACK does not enabled, please check your build configuration."
 #endif
   else
      call eigen_real8_dsyev(hmat, eval, evec)
