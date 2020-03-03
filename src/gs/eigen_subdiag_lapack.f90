@@ -18,14 +18,12 @@ module eigen_subdiag_sub
 
 contains
 
-subroutine eigen_subdiag(Rmat,evec,iter,ier2,pinfo)
-  use structures, only: s_process_info
+subroutine eigen_subdiag(Rmat,evec,iter,ier2)
   implicit none
   
   integer :: iter,ier2
   real(8) :: Rmat(iter,iter)
   real(8) :: evec(iter,iter)
-  type(s_process_info),intent(in) :: pinfo
   
   character(1) :: JOBZ,UPLO
   integer :: N

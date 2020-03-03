@@ -123,7 +123,7 @@ contains
 
   call timer_begin(LOG_SSDG_SO_ISOLATED_CALC)
   do ispin=1,nspin
-    call eigen_subdiag(mat2(:,:,ispin),evec(:,:,ispin),no,ierr,pinfo)
+    call eigen_subdiag(mat2(:,:,ispin),evec(:,:,ispin),no,ierr)
   end do
 
 !$omp workshare

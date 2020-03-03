@@ -16,128 +16,156 @@
 module eigen_subdiag_sub
   implicit none
 
+  public :: eigen_real8_pdsyev
+  public :: eigen_subdiag, eigen_subdiag_periodic
+
+private
+
+  logical :: is_initialized = .false.
+
+  integer,allocatable,dimension(:,:) :: usermap
+  integer :: nprow,npcol
+  integer :: myrow,mycol
+
+  integer :: nrow_local,ncol_local,lda
+  integer,dimension(9) :: desca, descz
+  integer :: len_work = -1
+
 contains
 
-  subroutine eigen_real8_pdsyev(pinfo,info,h,e,v)
-    use mpi, only: MPI_PROC_NULL
+  subroutine init_scalapack(pinfo,info,n,nb)
     use structures, only: s_process_info, s_orbital_parallel
-    use communication, only: comm_summation, comm_is_root
-    use parallelization, only: nproc_id_global
     implicit none
-    type(s_process_info) :: pinfo
-    type(s_orbital_parallel),intent(in) :: info
-    real(8), intent(in)  :: h(:,:)
-    real(8), intent(out) :: e(:)
-    real(8), intent(out) :: v(:,:)
-    integer,parameter :: DLEN_ = 9
-    integer ::  DESCA(DLEN_)
-    integer :: n, nb, ip2, nprow, npcol, ictxt, myrow, mycol, np, nq, ierr,ii
-    integer :: k2, k1, i0, j0, i1, j1, i, j, trilwmin, lwork, liwork, ix,iy,iz
-    integer, allocatable :: iwork(:), usermap(:,:)
-    real(8), allocatable :: h_div(:,:), v_div(:,:), v_tmp(:,:), work(:)
     integer :: NUMROC
 
-    n  = ubound(h,1)
-    nb = 1  !blocking factor -- probably parameter relating to efficiency
-
-    if(info%isize_r < 4) stop "nproc_domain_orbital(1)*nproc_domain_orbital(2)*nproc_domain_orbital(3) must be >3"
+    type(s_process_info)                :: pinfo
+    type(s_orbital_parallel),intent(in) :: info
+    integer,intent(in) :: n,nb
+    integer :: ii,ix,iy,iz,k1,k2,ierr
+    integer :: ictxt
 
     nprow = int(sqrt(dble(info%isize_r)))
-    do ip2=1,100
+    do ii=1,100
       npcol=info%isize_r/nprow
       if(npcol*nprow == info%isize_r) exit
       nprow=nprow-1
     end do
 
-    allocate( usermap(0:nprow-1, 0:npcol-1) )
-    usermap(:,:) = MPI_PROC_NULL
+    if (npcol*nprow /= info%isize_r) &
+      stop 'eigen_subdiag_scalapack: fatal error, please check nprow and npcol'
 
-    ii=0
-    do iz=0,pinfo%npdomain_orbital(3)-1
-    do iy=0,pinfo%npdomain_orbital(2)-1
-    do ix=0,pinfo%npdomain_orbital(1)-1
+    allocate( usermap(nprow,npcol) )
+    usermap = - 1
+    ii = 0
+    do iz=0,pinfo%nprgrid(3)-1
+    do iy=0,pinfo%nprgrid(2)-1
+    do ix=0,pinfo%nprgrid(1)-1
       ii=ii+1
       k1=mod(ii-1,nprow)
-      k2=mod((ii-1)/nprow,npcol)
-      usermap(k1,k2) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
-      if(ii == npcol*nprow) goto 100
+      k2=(ii-1)/nprow
+      usermap(k1+1,k2+1) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
     end do
     end do
     end do
-  100 CONTINUE
+
+    if (ii /= info%isize_r) &
+      stop 'eigen_subdiag_scalapack: fatal error, please check usermap'
 
     call BLACS_PINFO( pinfo%iam, pinfo%nprocs )
-    call BLACS_SETUP( pinfo%iam, pinfo%nprocs )
+    IF (pinfo%nprocs < 1) THEN
+      pinfo%nprocs = info%isize_r
+      call BLACS_SETUP( pinfo%iam, pinfo%nprocs )
+    END IF
+
     call BLACS_GET( 0, 0, ictxt )
     call BLACS_GRIDMAP( ictxt, usermap, nprow, nprow, npcol )
     call BLACS_GRIDINFO( ictxt, nprow, npcol, myrow, mycol )
-    np = NUMROC( n, nb, myrow, 0, nprow )
-    nq = NUMROC( n, nb, mycol, 0, npcol )
+    nrow_local = NUMROC( n, nb, myrow, 0, nprow )
+    ncol_local = NUMROC( n, nb, mycol, 0, npcol )
+    lda        = max(1, nrow_local)
 
-    call DESCINIT( desca, n, n, nb, nb, 0, 0, ictxt, np, ierr )
-    allocate( h_div(np,nq), v_div(np,nq) )
+    call DESCINIT( desca, n, n, nb, nb, 0, 0, ictxt, lda, ierr )
+    call DESCINIT( descz, n, n, nb, nb, 0, 0, ictxt, lda, ierr )
+  end subroutine init_scalapack
 
-    h_div=0d0
-    do k2=1,nq
-    do k1=1,np
-      i0 = (k1-1)/nb
-      j0 = (k2-1)/nb
-      i1 = MOD(k1-1,nb)
-      j1 = MOD(k2-1,nb)
-      i = (i0*nprow+myrow)*nb+i1+1
-      j = (j0*npcol+mycol)*nb+j1+1
-      if(i<=n.and.j<=n) then
-        h_div(k1,k2) = h(i,j)
+  subroutine eigen_real8_pdsyev(pinfo,info,h,e,v)
+    use structures, only: s_process_info, s_orbital_parallel
+    use communication, only: comm_summation, comm_is_root
+    implicit none
+    type(s_process_info)                :: pinfo
+    type(s_orbital_parallel),intent(in) :: info
+    real(8), intent(in)  :: h(:,:)
+    real(8), intent(out) :: e(:)
+    real(8), intent(out) :: v(:,:)
+    integer :: n, nb
+    integer :: len_iwork, trilwmin, len_work0
+    integer :: i, j, ierr
+    integer :: i_loc, j_loc, proc_row, proc_col
+    real(8) :: rtmp(1)
+
+    integer, allocatable :: work(:), iwork(:)
+    real(8), allocatable :: h_div(:,:), v_div(:,:), v_tmp(:,:)
+
+    n  = ubound(h,1)
+    nb = 1  !blocking factor -- probably parameter relating to efficiency
+            !pdsyev uses block-cyclic distribution for efficient parallel-computation
+
+    if (.not. is_initialized) then
+      call init_scalapack(pinfo,info,n,nb)
+      is_initialized = .true.
+    end if
+
+    allocate( h_div(nrow_local,ncol_local), v_div(nrow_local,ncol_local), v_tmp(n,n) )
+
+    len_iwork = 2 + 7*n + 8*npcol
+    allocate( iwork(len_iwork) )
+
+    ! determine the working memory size from pdsyevd
+    if (len_work < 0) then
+      trilwmin = 3*n + max( nb*(nrow_local+1), 3*nb )
+      len_work0 = max( 1+6*n+2*nrow_local*ncol_local, trilwmin ) + 2*n
+      call PDSYEVD( 'V', 'U', n, h_div, nb, nb, desca, e, v_div, nb, nb, descz, rtmp, -1, iwork, len_iwork, ierr )
+      len_work = max( nint(rtmp(1))*10, len_work0*10 )
+    end if
+    allocate( work(len_work) )
+
+!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col)
+    do i=1,n
+    do j=1,n
+      call INFOG2L( i, j, desca, nprow, npcol, myrow, mycol, i_loc, j_loc, proc_row, proc_col )
+      if (myrow == proc_row .and. mycol == proc_col) then
+        h_div(i_loc,j_loc) = h(i,j)
       end if
     end do
     end do
 
-    trilwmin = 3*n + MAX( nb*(np+1), 3*nb )
-    lwork = MAX( 1+6*n+2*np*nq, trilwmin ) + 2*n + 2*nb*nb
-    liwork = 2 + 7*n + 8*npcol
-    allocate( work(lwork+16), iwork(liwork+16) )
+    call PDSYEVD( 'V', 'U', n, h_div, nb, nb, desca, e, v_div, nb, nb, descz, work, len_work, iwork, len_iwork, ierr )
 
-    call PDSYEVD( 'V', 'U', n, h_div, 1, 1, DESCA, e, v_div, 1, 1, DESCA, work, lwork, iwork, liwork, ierr )
-
-    allocate( v_tmp(n,n) )
     v_tmp=0d0
-    if( info%id_r <= nprow*npcol ) then
-      do k2=1,nq
-      do k1=1,np
-        i0 = (k1-1)/nb
-        j0 = (k2-1)/nb
-        i1 = MOD(k1-1,nb)
-        j1 = MOD(k2-1,nb)
-        i = (i0*nprow+myrow)*nb+i1+1
-        j = (j0*npcol+mycol)*nb+j1+1
-        if(i<=n.and.j<=n) then
-          v_tmp(i,j) = v_div(k1,k2)
-        end if
-      end do
-      end do
-    end if
+!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col)
+    do i=1,n
+    do j=1,n
+      call INFOG2L( i, j, descz, nprow, npcol, myrow, mycol, i_loc, j_loc, proc_row, proc_col )
+      if (myrow == proc_row .and. mycol == proc_col) then
+        v_tmp(i,j) = v_div(i_loc,j_loc)
+      end if
+    end do
+    end do
 
-    call comm_summation(v_tmp,v,n*n,info%icomm_r)
-
-  !write(*,*) "test 11 v"
+    call comm_summation(v_tmp, v, n*n, info%icomm_r)
 
     deallocate( work, iwork, h_div, v_div, v_tmp )
-
-    call BLACS_GRIDEXIT( ictxt )
 
     return
   end subroutine eigen_real8_pdsyev
 
 !----------------------------------------------------------------
-subroutine eigen_subdiag(Rmat,evec,iter,ier2,pinfo)
-  use parallelization, only: nproc_size_global
-  use structures, only: s_process_info
+subroutine eigen_subdiag(Rmat,evec,iter,ier2)
   implicit none
 
   integer :: iter,ier2
   real(8) :: Rmat(iter,iter)
   real(8) :: evec(iter,iter)
-  type(s_process_info),intent(in) :: pinfo
 
   character(1) :: JOBZ,UPLO
   integer :: N
@@ -149,18 +177,14 @@ subroutine eigen_subdiag(Rmat,evec,iter,ier2,pinfo)
 
   ier2=0
 
-  if(nproc_size_global==1)then
-    JOBZ='V'
-    UPLO='L'
-    N=iter
-    A=Rmat
-    LDA=iter
-    LWORK=3*iter-1
-    call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
-    evec=A
-  else
-    call SAMPLE_PDSYEV_CALL(Rmat,evec,iter,pinfo)
-  end if
+  JOBZ='V'
+  UPLO='L'
+  N=iter
+  A=Rmat
+  LDA=iter
+  LWORK=3*iter-1
+  call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
+  evec=A
 
 end subroutine eigen_subdiag
 
@@ -191,278 +215,5 @@ subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
   deallocate(WORK,RWORK)
 
 end subroutine eigen_subdiag_periodic
-
-!
-      subroutine SAMPLE_PDSYEV_CALL(Rmat,evec,iter,pinfo)
-!
-!
-!  -- ScaLAPACK routine (version 1.2) --
-!     University of Tennessee, Knoxville, Oak Ridge National Laboratory,
-!     and University of California, Berkeley.
-!     May 10, 1996
-!
-!     This routine contains a sample call to PDSYEV.
-!     When compiled and run, it produces output which can be
-!     pasted directly into matlab.
-!
-!     .. Parameters ..
-      use structures, only: s_process_info
-      use parallelization, only: nproc_size_global
-      integer :: iter
-      real(8) :: Rmat(iter,iter)
-      real(8) :: evec(iter,iter)
-      type(s_process_info),intent(in) :: pinfo
-      INTEGER            LWORK, MAXN
-      INTEGER            LIWORK
-      INTEGER,allocatable :: IWORK(:)
-      DOUBLE PRECISION   ZERO
-!      PARAMETER          ( LWORK = 264, MAXN = 100, ZERO = 0.0D+0 )
-      PARAMETER          ( MAXN = 20000, ZERO = 0.0D+0 )
-      INTEGER            LDA
-      DOUBLE PRECISION   MONE
-      INTEGER            MAXPROCS
-!      PARAMETER          ( LDA = MAXN, MONE = -1.0D+0, MAXPROCS = 512 )
-      PARAMETER          ( MONE = -1.0D+0, MAXPROCS = 2048 )
-      integer :: ii,jj
-      character(1) :: SCOPE,TOP
-!     ..
-!     .. Local Scalars ..
-      INTEGER            INFO, N, NB
-!      INTEGER            CONTEXT, I, IAM, INFO, MYCOL, MYROW, N, NB, NPCOL, NPROCS, NPROW
-      integer :: CONTEXT, IAM, MYCOL, MYROW, NPCOL, NPROCS2, NPROW
-!     ..
-!     .. Local Arrays ..
-      INTEGER            DESCA( 50 ), DESCZ( 50 )
-!      DOUBLE PRECISION   A( LDA, LDA ), W( MAXN ), WORK( LWORK ), Z( LDA, LDA )
-      DOUBLE PRECISION   A( iter, iter ), W( iter ), Z( iter, iter )
-      real(8), allocatable :: WORK( : )
-!     ..
-!     .. External Subroutines ..
-      EXTERNAL           BLACS_EXIT, BLACS_GET, BLACS_GRIDEXIT,   &
-                         BLACS_GRIDINFO, BLACS_GRIDINIT, BLACS_PINFO,&
-                         BLACS_SETUP, DESCINIT, PDLAMODHILB, PDLAPRNT,&
-                         PDSYEV
-      INTEGER :: NP,NQ,TRILWMIN
-
-!     ..
-!     .. Executable Statements ..
-!
-!
-!     Set up the problem
-!
-!      N = 4
-      N = iter
-      NB = 1
-!      NPROW = 2
-!      NPCOL = 2
-      if(pinfo%npdomain_orbital(1)>1)then
-        NPROW = pinfo%npdomain_orbital(1)
-      else if(pinfo%npdomain_orbital(2)>1)then
-        NPROW = pinfo%npdomain_orbital(2)
-      else
-        NPROW = pinfo%npdomain_orbital(3)
-      end if
-      NPCOL = nproc_size_global/NPROW
-      LDA = iter
-
-      NP = max(N,NPROW)
-      NQ = max(N,NPCOL)
-      TRILWMIN = 3*N + max( NP+1, 3 )
-      LWORK=max(1+6*N+2*NP*NQ, TRILWMIN) + 2*N
-      allocate(WORK(LWORK))
-!
-!
-!      if(iblacsinit==0)then
-!     Initialize the BLACS
-!
-        CALL BLACS_PINFO( IAM, NPROCS2 )
-        IF( ( NPROCS2.LT.1 ) ) THEN
-           CALL BLACS_SETUP( IAM, NPROW*NPCOL )
-        END IF
-!
-!
-!     Initialize a single BLACS context
-!
-        CALL BLACS_GET( -1, 0, CONTEXT )
-        CALL BLACS_GRIDINIT( CONTEXT, 'R', NPROW, NPCOL )
-        CALL BLACS_GRIDINFO( CONTEXT, NPROW, NPCOL, MYROW, MYCOL )
-!
-!      end if
-!     Bail out if this process is not a part of this context.
-!
-      IF( MYROW.EQ.-1 ) GO TO 20
-!
-!
-!     These are basic array descriptors
-!
-!      if(iblacsinit==0)then
-        CALL DESCINIT( DESCA, N, N, NB, NB, 0, 0, CONTEXT, LDA, INFO )
-        CALL DESCINIT( DESCZ, N, N, NB, NB, 0, 0, CONTEXT, LDA, INFO )
-!        CALL BLACS_GRIDINFO( DESCA( 2 ), NPROW, NPCOL, MYROW, MYCOL )
-!      end if
-!
-!     Build a matrix that you can create with
-!     a one line matlab command:  hilb(n) + diag([1:-1/n:1/n])
-!
-!      CALL PDLAMODHILB( N, A, 1, 1, DESCA, INFO, Rmat, iter )
-!
-!     Ask PDSYEV to compute the entire eigendecomposition
-!
-      do jj= 1, N
-         do ii= 1, N
-           CALL PDELSET( A, ii, jj, DESCA, Rmat(ii,jj) )
-         end do
-      end do
-
-      LIWORK=7*N+8*NPCOL+2
-      allocate(IWORK(LIWORK))
-
-      CALL PDSYEVD( 'V', 'L', N, A, 1, 1, DESCA, W, Z, 1, 1, DESCZ, WORK, LWORK, IWORK, LIWORK, INFO )
-
-      deallocate(IWORK)
-!
-!     Print out the eigenvectors
-!
-!      CALL PDLAPRNT( N, N, Z, 1, 1, DESCZ, 0, 0, 'Z', 6, WORK )
-
-
-!      evec2=0.d0
-
-!      if(mod(N,NPROW)==0)then
-!        maxii=N/NPROW
-!      else
-!        if(MYROW<mod(N,NPROW))then
-!          maxii=N/NPROW+1
-!        else
-!          maxii=N/NPROW
-!        end if
-!      end if
-
-!      if(mod(N,NPCOL)==0)then
-!        maxjj=N/NPCOL
-!      else
-!        if(MYCOL<mod(N,NPCOL))then
-!          maxjj=N/NPCOL+1
-!        else
-!          maxjj=N/NPCOL
-!        end if
-!      end if
-
-!      do jj=0,maxjj-1
-!      do ii=0,maxii-1
-!        evec2(ii*NPROW+(MYROW+1),jj*NPCOL+(MYCOL+1))=Z(ii+1,jj+1)
-!      end do
- !     end do
-
-!      call comm_summation(evec2,evec,N*N,nproc_group_global)
-
-      SCOPE='A'
-      TOP=' '
-      do jj=1,N
-        do ii=1,N
-          call PDELGET( SCOPE, TOP, evec(ii,jj), Z, ii, jj, DESCZ )
-        end do
-      end do
-
-!      CALL BLACS_GRIDEXIT( CONTEXT )
-!
-   20 CONTINUE
-!      iblacsinit=1
-!
-!      CALL BLACS_EXIT( 0 )
-!      CALL BLACS_EXIT( 1 )
-!
-!
-!     Uncomment this line on SUN systems to avoid the useless print out
-!
-!      CALL IEEE_FLAGS( 'clear', 'exception', 'underflow', '')
-!
-!
- 9999 FORMAT( 'W=diag([', 4D16.12, ']);' )
-!
-!      STOP
-
-      deallocate(WORK)
-
-      END SUBROUTINE SAMPLE_PDSYEV_CALL
-!
-      SUBROUTINE PDLAMODHILB( N, A, IA, JA, DESCA, INFO, Rmat,iter )
-!
-!  -- ScaLAPACK routine (version 1.2) --
-!     University of Tennessee, Knoxville, Oak Ridge National Laboratory,
-!     and University of California, Berkeley.
-!     May 10, 1996
-!
-!
-!
-!
-!     .. Parameters ..
-      integer :: iter
-      real(8) :: Rmat(iter,iter)
-      INTEGER            BLOCK_CYCLIC_2D, DLEN_, DT_, CTXT_, M_, N_,  &
-                         MB_, NB_, RSRC_, CSRC_, LLD_
-      PARAMETER          ( BLOCK_CYCLIC_2D = 1, DLEN_ = 9, DT_ = 1,  &
-                         CTXT_ = 2, M_ = 3, N_ = 4, MB_ = 5, NB_ = 6,  &
-                         RSRC_ = 7, CSRC_ = 8, LLD_ = 9 )
-      DOUBLE PRECISION   ONE
-      PARAMETER          ( ONE = 1.0D+0 )
-!     ..
-!     .. Scalar Arguments ..
-      INTEGER            IA, INFO, JA, N
-!     ..
-!     .. Array Arguments ..
-      INTEGER            DESCA( * )
-      DOUBLE PRECISION   A( * )
-!     ..
-!     .. Local Scalars ..
-      INTEGER            I, J, MYCOL, MYROW, NPCOL, NPROW
-!     ..
-!     .. External Subroutines ..
-      EXTERNAL           BLACS_GRIDINFO, PDELSET
-!     ..
-!     .. Intrinsic Functions ..
-      INTRINSIC          DBLE
-!     ..
-!     .. Executable Statements ..
-!
-!
-!     The matlab code for a real matrix is:
-!         hilb(n) + diag( [ 1:-1/n:1/n ] )
-!     The matlab code for a complex matrix is:
-!         hilb(N) + toeplitz( [ 1 (1:(N-1))*i ] )
-!
-!       This is just to keep ftnchek happy
-      IF( BLOCK_CYCLIC_2D*CSRC_*CTXT_*DLEN_*DT_*LLD_*MB_*M_*NB_*N_* RSRC_.LT.0 )RETURN
-!
-      INFO = 0
-!
-      CALL BLACS_GRIDINFO( DESCA( CTXT_ ), NPROW, NPCOL, MYROW, MYCOL )
-!
-!
-      IF( IA.NE.1 ) THEN
-         INFO = -3
-      ELSE IF( JA.NE.1 ) THEN
-         INFO = -4
-      END IF
-!
-      DO 20 J = 1, N
-         DO 10 I = 1, N
-           CALL PDELSET( A, I, J, DESCA, Rmat(I,J) )
-!            IF( I.EQ.J ) THEN
-!               CALL PDELSET( A, I, J, DESCA,  &
-!                             ( DBLE( N-I+1 ) ) / DBLE( N )+ONE /  &
-!                             ( DBLE( I+J )-ONE ) )   &
-!            ELSE
-!               CALL PDELSET( A, I, J, DESCA, ONE / ( DBLE( I+J )-ONE ) )
-!            END IF
-   10    CONTINUE
-   20 CONTINUE
-!
-!
-      RETURN
-!
-!     End of PDLAMODHLIB
-!
-      END SUBROUTINE
 
 end module eigen_subdiag_sub
