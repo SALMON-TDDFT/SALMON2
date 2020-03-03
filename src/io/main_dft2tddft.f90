@@ -129,6 +129,7 @@ if(comm_is_root(irank))then
   write(fh) system_scf%no
   write(fh) Miter
   write(fh) nprocs
+  write(fh) system_scf%if_real_orbital
   close(fh)
 
 !occupation

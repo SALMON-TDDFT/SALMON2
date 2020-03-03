@@ -327,6 +327,8 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
 
     write(iu1_w) iter               ! iteration number (same format for gs and rt calculations)
     write(iu1_w) nproc_size_global  ! number of process (to debug)
+    
+    write(iu1_w) system%if_real_orbital
 
     close(iu1_w)
   end if
@@ -394,7 +396,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   integer :: iu1_r
   character(256) :: dir_file_in
   integer :: comm,itt,nprocs
-  logical :: iself
+  logical :: iself,if_real_orbital
 
   flag_GS = (theory=='dft'.or.theory=='dft_md'.or.calc_mode=='GS')
   flag_RT = (theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT')
@@ -430,6 +432,8 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
 
         read(iu1_r) itt
         read(iu1_r) nprocs
+        
+        read(iu1_r) if_real_orbital
 
         close(iu1_r)
      end if
@@ -437,6 +441,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
      call comm_bcast(mo,comm)
      call comm_bcast(itt,comm)
      call comm_bcast(nprocs,comm)
+     call comm_bcast(if_real_orbital,comm)
 
      if((theory=='dft'.or.calc_mode=='GS').or.  &
         ((theory=='tddft_response'.or.theory=='tddft_pulse'.or.calc_mode=='RT').and.yn_restart=='y'))then
@@ -476,7 +481,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
       (read_gs_restart_data=='rho_inout'.or.read_gs_restart_data=='rho') )then
      ! this case => do not read wavefunction
   else
-     call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,iself)
+     call read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,iself)
   endif
   !rho_inout
   if( flag_GS.and. &
@@ -550,7 +555,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
     end if
   else
 #ifdef USE_MPI
-    call distributed_rw_wavefunction(odir,lg,mg,system,info,spsi,system%nk,system%no,write_mode)
+    call distributed_rw_wavefunction(odir,lg,mg,system,info,spsi,system%nk,system%no,system%if_real_orbital,write_mode)
 #else
     ! single process execution
     dir_file_out = trim(odir)//"wfn.bin"
@@ -991,15 +996,11 @@ end subroutine write_singlescale
 
 !===================================================================================================================================
 
-subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoint)
+subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
   use salmon_global, only: yn_datafiles_dump
   use communication, only: comm_is_root, comm_summation, comm_bcast
-#ifdef USE_MPI
-#else
-  use salmon_global, only: yn_periodic
-#endif
   implicit none
   character(*),            intent(in) :: idir
   type(s_rgrid),           intent(in) :: lg, mg
@@ -1007,7 +1008,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
   type(s_orbital_parallel),intent(in) :: info
   type(s_orbital)                     :: spsi
   integer,                 intent(in) :: mk, mo
-  logical,                 intent(in) :: is_self_checkpoint
+  logical,                 intent(in) :: if_real_orbital,is_self_checkpoint
 
   integer :: iu2_r
   character(256) :: dir_file_in
@@ -1046,13 +1047,13 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
     end if
   else
 #ifdef USE_MPI
-    call distributed_rw_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,read_mode)
+    call distributed_rw_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,read_mode)
 #else
     ! single process execution
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
 
-    if (yn_periodic == 'n') then
+    if (if_real_orbital) then
       allocate(ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
     else
       allocate(zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
@@ -1062,7 +1063,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
     do ik=1,mk
     do io=1,mo
     do is=1,system%nspin
-      if (yn_periodic == 'n') then
+      if (if_real_orbital) then
         read (iu2_r) ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
       else
         read (iu2_r) zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
@@ -1070,7 +1071,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,is_self_checkpoin
 
       if (info%ik_s <= ik .and. ik <= info%ik_e .and. &
           info%io_s <= io .and. io <= info%io_e) then
-        if (yn_periodic == 'n') then
+        if (if_real_orbital) then
           if (allocated(spsi%rwf)) then
             spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,im) = ddummy(:,:,:)
           else
@@ -1652,7 +1653,7 @@ end subroutine read_Velocity
 
 #ifdef USE_MPI
 #define MPI_CHECK(X) call X; call errcheck(ierr)
-subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,rw_mode)
+subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,rw_mode)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
   use salmon_global, only: yn_restart, yn_periodic
@@ -1664,6 +1665,7 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,rw_mod
   type(s_orbital_parallel),intent(in)    :: info
   type(s_orbital),         intent(inout) :: spsi
   integer,                 intent(in)    :: mk, mo
+  logical,                 intent(in)    :: if_real_orbital
   integer,                 intent(in)    :: rw_mode
 
   character(256) :: iofile
@@ -1687,10 +1689,7 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,rw_mod
   end if
 
   ! requires data conversion from double to double complex (for isolated system)
-  if (rw_mode == read_mode .and. &
-      yn_restart == 'n'    .and. &
-      yn_periodic == 'n'   .and. &
-      allocated(spsi%zwf)) then
+  if (rw_mode == read_mode .and. if_real_orbital) then
     source_type = MPI_DOUBLE
     call allocate_orbital_real(system%nspin,mg,info,dummy)
   end if
