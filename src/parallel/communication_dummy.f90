@@ -184,6 +184,13 @@ module communication
     ! 6-D array
     module procedure comm_summation_array6d_double
     module procedure comm_summation_array6d_dcomplex
+
+    ! in-place
+    module procedure comm_sum_ip_array1d_integer
+    module procedure comm_sum_ip_array2d_integer
+    module procedure comm_sum_ip_array3d_integer
+    module procedure comm_sum_ip_array3d_double
+    module procedure comm_sum_ip_array5d_integer
   end interface
 
   interface comm_bcast
@@ -212,6 +219,7 @@ module communication
     module procedure comm_bcast_array4d_dcomplex
 
     ! 5-D array
+    module procedure comm_bcast_array5d_double
     module procedure comm_bcast_array5d_dcomplex
   end interface
 
@@ -238,6 +246,7 @@ module communication
   interface comm_get_max
     ! scalar
     module procedure comm_get_maxloc
+    module procedure comm_get_max_integer
 
     ! 1-D array
     module procedure comm_get_max_array1d_double
@@ -951,6 +960,48 @@ contains
   end subroutine
 
 
+  subroutine comm_sum_ip_array1d_integer(values, ngroup)
+    implicit none
+    integer, intent(inout) :: values(:)
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array1d_integer")
+  end subroutine
+
+  subroutine comm_sum_ip_array2d_integer(values, ngroup)
+    implicit none
+    integer, intent(inout) :: values(:,:)
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array2d_integer")
+  end subroutine
+
+  subroutine comm_sum_ip_array3d_double(values, ngroup)
+    implicit none
+    real(8), intent(inout) :: values(:,:,:)
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array3d_double")
+  end subroutine
+
+  subroutine comm_sum_ip_array3d_integer(values, ngroup)
+    implicit none
+    integer, intent(inout) :: values(:,:,:)
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array3d_integer")
+  end subroutine
+
+  subroutine comm_sum_ip_array5d_integer(values, ngroup)
+    implicit none
+    integer, intent(inout) :: values(:,:,:,:,:)
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array5d_integer")
+  end subroutine
+
+
+
   subroutine comm_bcast_integer(val, ngroup, root)
     implicit none
     integer, intent(inout)        :: val
@@ -1049,7 +1100,7 @@ contains
     UNUSED_VARIABLE(root)
     !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array3d_double")
   end subroutine
-  
+
   subroutine comm_bcast_array4d_double(val, ngroup, root)
     implicit none
     real(8), intent(inout)        :: val(:,:,:,:)
@@ -1059,6 +1110,17 @@ contains
     UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
     !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array4d_double")
+  end subroutine
+
+  subroutine comm_bcast_array5d_double(val, ngroup, root)
+    implicit none
+    real(8), intent(inout)        :: val(:,:,:,:,:)
+    integer, intent(in)           :: ngroup
+    integer, intent(in), optional :: root
+    UNUSED_VARIABLE(val)
+    UNUSED_VARIABLE(ngroup)
+    UNUSED_VARIABLE(root)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array5d_double")
   end subroutine
 
   subroutine comm_bcast_array3d_dcomplex(val, ngroup, root)
@@ -1091,7 +1153,7 @@ contains
     UNUSED_VARIABLE(val)
     UNUSED_VARIABLE(ngroup)
     UNUSED_VARIABLE(root)
-    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array3d_dcomplex")
+    !NOP! ABORT_MESSAGE(ngroup,"comm_bcast_array5d_dcomplex")
   end subroutine
 
   subroutine comm_bcast_array1d_character(val, ngroup, root)
@@ -1152,8 +1214,8 @@ contains
     !NOP! ABORT_MESSAGE(ngroup,"comm_alltoall_array1d_complex")
     outvalue = invalue
   end subroutine
- 
- 
+
+
   subroutine comm_get_min_array1d_double(invalue, outvalue, N, ngroup)
     implicit none
     real(8), intent(in)  :: invalue(:)
@@ -1163,6 +1225,16 @@ contains
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_get_min_array1d_double")
     outvalue = invalue
+  end subroutine
+
+  subroutine comm_get_max_integer(svalue, ngroup)
+    use mpi, only: MPI_INTEGER, MPI_MAX, MPI_IN_PLACE
+    implicit none
+    integer, intent(inout) :: svalue
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(svalue)
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_get_max_integer")
   end subroutine
 
   subroutine comm_get_max_array1d_double(invalue, outvalue, N, ngroup)

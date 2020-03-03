@@ -1296,8 +1296,8 @@ contains
                       ngroup, ierr)
     call error_check(ierr)
   end subroutine
- 
- 
+
+
   subroutine comm_get_min_array1d_double(invalue, outvalue, N, ngroup)
     use mpi, only: MPI_DOUBLE_PRECISION, MPI_MIN
     implicit none
