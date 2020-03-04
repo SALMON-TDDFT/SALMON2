@@ -277,7 +277,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      ewald%yn_bookkeep='n'  !to be input keyword??
   case(3)
      ewald%yn_bookkeep='y'
-     call  init_nion_mpi(system,fg)
+     call  init_nion_div(system,lg,mg,info)
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
 
@@ -412,59 +412,3 @@ subroutine initialization_dft_md( Miter, rion_update,  &
 
 end subroutine initialization_dft_md
 
-subroutine init_nion_mpi(system,fg)
-  use structures, only: s_dft_system, s_reciprocal_grid
-  use inputoutput, only: num_kgrid
-  use communication, only: comm_get_groupinfo, comm_is_root
-  use parallelization, only: nproc_id_global
-  implicit none
-  type(s_dft_system)  :: system
-  type(s_reciprocal_grid) :: fg
-  integer :: irank,nproc,k
-
-  call comm_get_groupinfo(fg%icomm_G,irank,nproc)
-  !system%nion_r = (system%nion + 1) / nproc
-  !system%nion_s = system%nion_r * irank + 1
-  !system%nion_e = system%nion_s + system%nion_r - 1
-  !if (irank == nproc-1) system%nion_e = system%nion
-
-  if(nproc .le. system%nion) then
-     k = mod(system%nion,nproc)
-     if(k==0) then
-        system%nion_r = system%nion / nproc
-     else
-        system%nion_r = system%nion / nproc + 1
-     endif
-     system%nion_s = system%nion_r * irank + 1
-     system%nion_e = system%nion_s + system%nion_r - 1
-     if (irank == nproc-1) system%nion_e = system%nion
-     if (system%nion_e .gt. system%nion) system%nion_e = -1
-     if (system%nion_s .gt. system%nion) then
-        system%nion_s =  0
-        system%nion_e = -1
-     endif
-
-  else
-     if(irank+1.le.system%nion) then
-        system%nion_s = irank + 1
-        system%nion_e = system%nion_s
-     else
-        system%nion_s = 0
-        system%nion_e = -1
-     endif
-  endif
-
-  !if(comm_is_root(nproc_id_global)) then
-  !   write(*,*) "  #irank, nion_r, nion_s, nion_e"
-  !endif
-  !write(*,'(i6,3i6)')  irank, system%nion_r, system%nion_s, system%nion_e
-
-
-  !flag of gamma point only (currently not used..)
-  if( num_kgrid(1)==1.and.num_kgrid(2)==1.and.num_kgrid(3)==1 ) then
-     system%flag_k1x1x1 = .true.
-  else
-     system%flag_k1x1x1 = .false.
-  endif
-
-end subroutine init_nion_mpi

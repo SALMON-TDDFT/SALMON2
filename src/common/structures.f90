@@ -61,7 +61,8 @@ module structures
     real(8) :: vec_E_ext(3)  ! external electric potential for output
 
     logical :: flag_k1x1x1
-    integer :: nion_r,nion_s,nion_e
+    integer :: icomm_a, nion_mg
+    integer,allocatable :: ia_mg(:)
   end type s_dft_system
 
   type s_dft_energy

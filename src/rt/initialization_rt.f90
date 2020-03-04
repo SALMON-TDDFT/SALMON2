@@ -243,7 +243,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
      ewald%yn_bookkeep='n'  !to be input keyword??
   case(3)
      ewald%yn_bookkeep='y'
-     call  init_nion_mpi(system,fg)
+     call  init_nion_div(system,lg,mg,info)
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
   

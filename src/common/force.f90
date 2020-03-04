@@ -83,7 +83,8 @@ contains
 
   ! Ewald sum
   call timer_begin(LOG_CALC_FORCE_ION_ION)
-    call force_ewald(system%Force,F_tmp,system,ewald,pp,nion,fg%icomm_G)
+!    call force_ewald_rspace(system%Force,F_tmp,system,ewald,pp,nion,fg%icomm_G)
+    call force_ewald_rspace(system%Force,F_tmp,system,ewald,pp,nion,system%icomm_a)
   call timer_end(LOG_CALC_FORCE_ION_ION)
   
   ! Fourier part (local part, etc.)
@@ -284,7 +285,7 @@ contains
     return
   end subroutine calc_force
 
-  subroutine force_ewald(F_sum,F_tmp,system,ewald,pp,nion,comm)
+  subroutine force_ewald_rspace(F_sum,F_tmp,system,ewald,pp,nion,comm)
     use structures
     use math_constants,only : pi,zi
     use salmon_math
@@ -297,7 +298,7 @@ contains
     integer  ,intent(in) :: nion,comm
     real(8)              :: F_tmp(3,nion),F_tmp_l(3,nion),F_sum(3,nion)
     !
-    integer :: ix,iy,iz,ia,ib,ipair
+    integer :: ix,iy,iz,iia,ia,ib,ipair
     real(8) :: rr,rab(3),r(3)
 
     select case(iperiodic)
@@ -320,14 +321,16 @@ contains
       if(ewald%yn_bookkeep=='y') then
 
          F_tmp_l = 0d0
-!$omp parallel do private(ia,ipair,ix,iy,iz,ib,r,rab,rr)
-         do ia= system%nion_s, system%nion_e
+!$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+         do iia= 1,system%nion_mg
+        !do ia= system%nion_s, system%nion_e
         !do ia=1,nion
-            do ipair = 1,ewald%npair_bk(ia)
-               ix = ewald%bk(1,ipair,ia)
-               iy = ewald%bk(2,ipair,ia)
-               iz = ewald%bk(3,ipair,ia)
-               ib = ewald%bk(4,ipair,ia)
+            ia = system%ia_mg(iia)
+            do ipair = 1,ewald%npair_bk(iia)
+               ix = ewald%bk(1,ipair,iia)
+               iy = ewald%bk(2,ipair,iia)
+               iz = ewald%bk(3,ipair,iia)
+               ib = ewald%bk(4,ipair,iia)
               !if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
                r(1) = ix*system%primitive_a(1,1) &
                     + iy*system%primitive_a(1,2) &
@@ -357,37 +360,12 @@ contains
 
       else
 
-         do ia=1,nion
-            do ix=-NEwald,NEwald
-            do iy=-NEwald,NEwald
-            do iz=-NEwald,NEwald
-            do ib=1,nion
-               if (ix**2+iy**2+iz**2 == 0 .and. ia == ib) cycle
-               r(1) = ix*system%primitive_a(1,1) &
-                    + iy*system%primitive_a(1,2) &
-                    + iz*system%primitive_a(1,3)
-               r(2) = ix*system%primitive_a(2,1) &
-                    + iy*system%primitive_a(2,2) &
-                    + iz*system%primitive_a(2,3)
-               r(3) = ix*system%primitive_a(3,1) &
-                    + iy*system%primitive_a(3,2) &
-                    + iz*system%primitive_a(3,3)
-               rab(1) = system%Rion(1,ia)-r(1) - system%Rion(1,ib)
-               rab(2) = system%Rion(2,ia)-r(2) - system%Rion(2,ib)
-               rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
-               rr = sum(rab(:)**2)
-               F_tmp(:,ia) = F_tmp(:,ia) - pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*rab(:)/sqrt(rr)*(-erfc_salmon(sqrt(aEwald*rr))/rr &
-                                        -2*sqrt(aEwald/(rr*Pi))*exp(-aEwald*rr))
-            end do
-            end do
-            end do
-            end do
-         end do
+         stop  "must use book-keeping method for periodic condition"
 
       endif
       F_sum = F_sum + F_tmp
       
     end select
-  end subroutine force_ewald
+  end subroutine force_ewald_rspace
 end module force_sub
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130

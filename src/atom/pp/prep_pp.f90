@@ -142,7 +142,7 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
     select case(yn_ffte)
 !    case('n')
     case default
-      call calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,sVpsl)
+      call calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,sVpsl,property)
 !    case('y')
 !      call calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
     end select
@@ -389,7 +389,7 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl)
+subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,property)
   use salmon_global,only : natom, nelem, kion
   use communication, only: comm_summation
   use math_constants,only : pi,zi
@@ -407,6 +407,10 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl)
   real(8) :: g2,gd,s,g2sq,r1,dr,vloc_av
   complex(8) :: vg_tmp(fg%ng,nelem),rhoG_tmp(fg%ng),tmp_exp
   complex(8) :: vion(fg%ng),vion_tmp(fg%ng)
+  character(17) :: property
+
+
+  if( property == 'initial' ) then
 
   vion_tmp = 0d0
   vg_tmp = 0d0
@@ -439,6 +443,8 @@ subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl)
 !$omp end parallel
 
   call comm_summation(vg_tmp,fg%zVG_ion,fg%ng*nelem,fg%icomm_G)
+
+  endif
 
   !(Local pseudopotential: Vlocal in G-space(=Vion_G))
   vion_tmp = 0d0
@@ -749,7 +755,7 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   endif
 
   if( flag_cuboid ) then
-     rps_max   = maxval( pp%rps(:)) + max(hx,hy,hz) + 1d-2
+     rps_max   = maxval( pp%rps(:)) + 1.5d0*max(hx,hy,hz) + 1d-2
      mg_min(1) = minval( mx(1:ml) )
      mg_min(2) = minval( my(1:ml) )
      mg_min(3) = minval( mz(1:ml) )
