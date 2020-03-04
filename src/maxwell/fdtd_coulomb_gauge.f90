@@ -604,7 +604,7 @@ end subroutine fdtd_singlescale
 
 !===================================================================================================================================
 
-subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs,poisson,j_e,singlescale)
+subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson,j_e,singlescale)
   use structures
   use math_constants,only : zi,pi
   use salmon_global,only: dt
@@ -624,7 +624,6 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
-  complex(8) :: trhoG_ele_tmp(lg%num(1),lg%num(2),lg%num(3))
   real(8) :: inv_lgnum3,vec_je(3),rho_t
   integer :: i
   complex(8) :: f0,f1,j0
@@ -669,17 +668,17 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   call comm_bcast(singlescale%b_ffte(:,:,:,0),info_field%icomm(1), 0)
 
 ! Poisson eq.: singlescale%b_ffte(ix,iy,iz,0)=rho(G) --> poisson%b_ffte(ix,iy,iz)=Vh(G)
-  trhoG_ele_tmp=0d0
+  trhoG_ele=0d0
   !$omp parallel do collapse(2) default(none) &
   !$omp             private(iz,iy,ix,iiy,iiz,iix) &
-  !$omp             shared(ng,lg,trhoG_ele_tmp,poisson,singlescale,inv_lgnum3)
+  !$omp             shared(ng,lg,trhoG_ele,poisson,singlescale,inv_lgnum3)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     do ix=1,ng%num(1)
       iiz=iz+ng%is(3)-1
       iiy=iy+ng%is(2)-1
       iix=ix+ng%is(1)-1
-      trhoG_ele_tmp(iix,iiy,iiz) = singlescale%b_ffte(iix,iy,iz,0)*inv_lgnum3
+      trhoG_ele(iix,iiy,iiz) = singlescale%b_ffte(iix,iy,iz,0)*inv_lgnum3
     end do
     do ix=1,lg%num(1)
       poisson%b_ffte(ix,iy,iz) = singlescale%b_ffte(ix,iy,iz,0)*poisson%coef(ix,iy,iz)
@@ -687,8 +686,7 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_
   end do
   end do
   !$omp end parallel do
-  call comm_summation(trhoG_ele_tmp,trhoG_ele,size(trhoG_ele),info_field%icomm_all)
-  
+
 ! Maxwell eq.: singlescale%b_ffte(ix,iy,iz,i)=j(G,t) --> singlescale%b_ffte(ix,iy,iz,i)=Ac(G,t+dt)
   if(i/=0) then
     !$omp parallel do collapse(2) private(iz,iy,ix,f0,f1,j0)
