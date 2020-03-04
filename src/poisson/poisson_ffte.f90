@@ -19,7 +19,7 @@ module poisson_ffte_sub
 
 contains
 
-subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs,poisson)
+subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson)
   use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid,s_poisson
   use communication, only: comm_summation
   implicit none
@@ -34,7 +34,6 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,trhoG_ele_tmp,hgs
   real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
-  complex(8) :: trhoG_ele_tmp(lg%num(1),lg%num(2),lg%num(3))
   real(8) :: inv_lgnum3
 
   if(.not.allocated(poisson%coef) .or. &
