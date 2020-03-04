@@ -140,11 +140,10 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
   case(3)
     select case(yn_ffte)
-!    case('n')
-    case default
+    case('n')
       call calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,sVpsl,property)
-!    case('y')
-!      call calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
+    case('y')
+      call calc_Vpsl_periodic_FFTE(lg,mg,system,info_field,pp,poisson,sVpsl,fg)
     end select
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)
@@ -551,22 +550,21 @@ end subroutine calc_vpsl_periodic
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVpsl,fg)
+subroutine calc_Vpsl_periodic_FFTE(lg,mg,system,info_field,pp,poisson,sVpsl,fg)
   use structures
   use math_constants, only: pi,zi
   use communication, only: comm_summation
   use salmon_global, only: natom, nelem, kion
   implicit none
-  type(s_rgrid)     ,intent(in) :: lg,mg,ng
+  type(s_rgrid)     ,intent(in) :: lg,mg
   type(s_dft_system),intent(in) :: system
   type(s_field_parallel),intent(in) :: info_field
   type(s_pp_info)   ,intent(in) :: pp
-  type(s_pp_grid)   ,intent(in) :: ppg
   type(s_poisson)               :: poisson
   type(s_scalar)                :: sVpsl
   type(s_reciprocal_grid)       :: fg
   !
-  integer :: ik,n,i,a,kx,ky,kz,iy,iz,iiy,iiz
+  integer :: ik,n,i,a,ix,iy,iz,iiy,iiz
   real(8) :: g2sq,s,r1,dr,g2,gd,vloc_av
   complex(8) :: vg_tmp(fg%ng,nelem), rhoG_tmp(fg%ng), tmp_exp, vion_tmp(fg%ng), vion(fg%ng)
 
@@ -627,33 +625,38 @@ subroutine calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVp
   call comm_summation(vion_tmp,vion,fg%ng,fg%icomm_G)
 
   poisson%a_ffte_tmp=0.d0
+!$OMP parallel do private(iz,iy,ix,iiz,iiy,n) collapse(2)
+  do iz = 1,mg%num(3)
+  do iy = 1,mg%num(2)
+  do ix = mg%is(1),mg%ie(1)
+    iiz=iz+mg%is(3)-1
+    iiy=iy+mg%is(2)-1
 
-  !$OMP parallel do private(kz,ky,kx,n)
-    do kz = ng%is(3),ng%ie(3)
-    do ky = ng%is(2),ng%ie(2)
-    do kx = ng%is(1),ng%ie(1)
-      n=(kz-lg%is(3))*lg%num(2)*lg%num(1)+(ky-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
-      if(kx-1==0.and.ky-1==0.and.kz-1==0) then
-        poisson%a_ffte_tmp(kx,ky-ng%is(2)+1,kz-ng%is(3)+1) = 0d0
-      else
-        poisson%a_ffte_tmp(kx,ky-ng%is(2)+1,kz-ng%is(3)+1) = vion(n)
-      end if
-    end do
-    end do
-    end do
+    n = (iiz-lg%is(3))*lg%num(1)*lg%num(2) &
+      + (iiy-lg%is(2))*lg%num(1) &
+      + ( ix-lg%is(1)) &
+      + 1
 
-    call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
+    if (ix-1 == 0 .and. iy-1 == 0 .and. iz-1 == 0) then
+      poisson%a_ffte_tmp(ix,iy,iz) = 0d0
+    else
+      poisson%a_ffte_tmp(ix,iy,iz) = vion(n)
+    end if
+  end do
+  end do
+  end do
+  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
 
-    CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                      info_field%isize(2),info_field%isize(3),1, &
-                      info_field%icomm(2),info_field%icomm(3))
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+                    info_field%isize(2),info_field%isize(3),1, &
+                    info_field%icomm(2),info_field%icomm(3))
 
-!$OMP parallel do private(iiz,iiy)
-    do iz=1,ng%num(3)
-    do iy=1,ng%num(2)
-      iiz=iz+ng%is(3)-1
-      iiy=iy+ng%is(2)-1
-      sVpsl%f(ng%is(1):ng%ie(1),iiy,iiz)=poisson%b_ffte(ng%is(1):ng%ie(1),iy,iz)*fg%ng
+!$OMP parallel do private(iz,iy,iiz,iiy) collapse(2)
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+      iiz=iz+mg%is(3)-1
+      iiy=iy+mg%is(2)-1
+      sVpsl%f(mg%is(1):mg%ie(1),iiy,iiz)=poisson%b_ffte(mg%is(1):mg%ie(1),iy,iz)*fg%ng
     end do
     end do
 
