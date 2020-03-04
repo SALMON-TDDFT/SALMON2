@@ -455,7 +455,7 @@ do ispin = 1, system%nspin
       & wf2_block(:, :, :, jo))
   end do
 
-  wf_block_send = 0d0
+  wf_block_send = 0d0 !to fix NaN for large calc, but this may not real solution
   hmat_tmp = 0d0
   do m = 0, pinfo%nporbital - 1
 
@@ -527,7 +527,7 @@ do ispin = 1, system%nspin
   wf2_block = 0d0
   !$omp end workshare
 
-  wf_block_send = 0d0
+  wf_block_send = 0d0 !to fix NaN for large calc, but this may not real solution
 
   do m = 0, pinfo%nporbital - 1
 

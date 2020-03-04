@@ -828,6 +828,144 @@ end subroutine set_gridcoordinate
 
 !===================================================================================================================================
 
+subroutine init_nion_div(system,lg,mg,info)
+  use structures, only: s_dft_system, s_reciprocal_grid, s_rgrid, s_orbital_parallel
+  use inputoutput, only: num_kgrid
+  use communication, only: comm_summation, comm_get_groupinfo, comm_is_root
+  use parallelization, only: nproc_id_global
+  implicit none
+  type(s_dft_system)  :: system
+  type(s_rgrid) :: lg
+  type(s_rgrid) :: mg
+  type(s_orbital_parallel),intent(in) :: info
+  logical :: flag_cuboid
+  integer :: irank,nproc,k
+  integer :: ia,j,nc,ix,iy,iz,iia,nion_total
+  real(8) :: hgs(3), rion_tmp(3,system%nion), al0(3,3)
+  real(8) :: r_mg_min(3), r_mg_max(3), al_min(3), al_max(3), al_len(3)
+
+  al0(:,:) = system%primitive_a(:,:)
+  if( abs(al0(1,2)).ge.1d-10 .or. &
+      abs(al0(1,3)).ge.1d-10 .or. &
+      abs(al0(2,3)).ge.1d-10 )  then
+     flag_cuboid=.false. 
+  else
+     flag_cuboid = .true.
+  endif
+
+
+  if(flag_cuboid) then
+
+  nc = 2
+  hgs(:)    = system%hgs(:)
+
+  r_mg_min(:) = (mg%is(:)-1) * hgs(:)
+  r_mg_max(:) =  mg%ie(:)    * hgs(:)
+
+  al_min(:) = 0d0
+  al_max(:) = system%hgs(:)*dble(lg%num(:))
+  al_len(:) = al_max(:) - al_min(:)
+
+  system%nion_mg = 0  
+
+  do ia = 1,system%nion
+     j=1
+     do ix = -nc, nc
+        rion_tmp(j,ia) = system%Rion(j,ia) + ix*al_len(j)
+        if( rion_tmp(j,ia) .ge. al_min(j) .and. rion_tmp(j,ia) .lt. al_max(j) ) exit
+     enddo
+     j=2
+     do iy = -nc, nc
+        rion_tmp(j,ia) = system%Rion(j,ia) + iy*al_len(j)
+        if( rion_tmp(j,ia) .ge. al_min(j) .and. rion_tmp(j,ia) .lt. al_max(j) ) exit
+     enddo
+     j=3
+     do iz = -nc, nc
+        rion_tmp(j,ia) = system%Rion(j,ia) + iz*al_len(j)
+        if( rion_tmp(j,ia) .ge. al_min(j) .and. rion_tmp(j,ia) .lt. al_max(j) ) exit
+     enddo
+
+     if( (rion_tmp(1,ia).ge.r_mg_min(1) .and. rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
+         (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
+         (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
+        system%nion_mg = system%nion_mg + 1
+     endif
+  enddo
+
+  allocate( system%ia_mg(system%nion_mg) )
+
+  iia = 0  
+  do ia = 1,system%nion
+     if( (rion_tmp(1,ia).ge.r_mg_min(1) .and. rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
+         (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
+         (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
+        iia = iia + 1
+        system%ia_mg(iia) = ia
+     endif
+  enddo
+
+  if( system%nion_mg .ne. iia ) stop "Error1 in dividing atom in mg domain"
+
+  else !(flag_cuboid=.false.)
+
+     ! assuming r-space parallelization is not available in nonorthogonal lattice cell
+     system%nion_mg = system%nion
+     allocate( system%ia_mg(system%nion_mg) )
+     do ia=1,system%nion
+        system%ia_mg(ia) = ia
+     enddo
+
+  endif
+
+  !check
+  system%icomm_a = info%icomm_r
+  call comm_summation(system%nion_mg, nion_total, system%icomm_a)
+  if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
+
+  !write(*,*) "  #nion_mg=", system%nion_mg
+  !write(*,*) "  #check nion_total=", nion_total
+
+
+  !!(divide nion with all processes: not used now)
+  !call comm_get_groupinfo(fg%icomm_G,irank,nproc)
+  !
+  !if(nproc .le. system%nion) then
+  !   k = mod(system%nion,nproc)
+  !   if(k==0) then
+  !      system%nion_r = system%nion / nproc
+  !   else
+  !      system%nion_r = system%nion / nproc + 1
+  !   endif
+  !   system%nion_s = system%nion_r * irank + 1
+  !   system%nion_e = system%nion_s + system%nion_r - 1
+  !   if (irank == nproc-1) system%nion_e = system%nion
+  !   if (system%nion_e .gt. system%nion) system%nion_e = -1
+  !   if (system%nion_s .gt. system%nion) then
+  !      system%nion_s =  0
+  !      system%nion_e = -1
+  !   endif
+  !
+  !else
+  !   if(irank+1.le.system%nion) then
+  !      system%nion_s = irank + 1
+  !      system%nion_e = system%nion_s
+  !   else
+  !      system%nion_s = 0
+  !      system%nion_e = -1
+  !   endif
+  !endif
+
+  !flag of gamma point only (currently not used..)
+  if( num_kgrid(1)==1.and.num_kgrid(2)==1.and.num_kgrid(3)==1 ) then
+     system%flag_k1x1x1 = .true.
+  else
+     system%flag_k1x1x1 = .false.
+  endif
+
+end subroutine init_nion_div
+
+!===================================================================================================================================
+
 subroutine set_bN(bnmat)
   implicit none
   real(8) :: bnmat(4,4)
