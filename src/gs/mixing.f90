@@ -102,6 +102,7 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
 
   if(system%nspin==1)then
 
+!$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -110,11 +111,12 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
     end do
     end do
 
+!$omp parallel do private(i,iz,iy,ix) collapse(3)
     do i=1,mixing%num_rho_stock+1
        do iz=ng%is(3),ng%ie(3)
        do iy=ng%is(2),ng%ie(2)
        do ix=ng%is(1),ng%ie(1)
-          vecr_in(ix,iy,iz,i)=mixing%srho_in(i)%f(ix,iy,iz)
+          vecr_in(ix,iy,iz,i) =mixing%srho_in(i)%f(ix,iy,iz)
           vecr_out(ix,iy,iz,i)=mixing%srho_out(i)%f(ix,iy,iz)
        end do
        end do
@@ -125,6 +127,7 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
                  mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                  mixing%flag_mix_zero )
 
+!$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -133,6 +136,7 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
     end do
     end do
 
+!$omp parallel do private(i,iz,iy,ix) collapse(3)
     do i=1,mixing%num_rho_stock+1
        do iz=ng%is(3),ng%ie(3)
        do iy=ng%is(2),ng%ie(2)
@@ -147,6 +151,7 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
   else if(system%nspin==2)then
     
     do is=1,2
+!$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
@@ -155,6 +160,7 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
       end do
       end do
   
+!$omp parallel do private(i,iz,iy,ix) collapse(3)
       do i=1,mixing%num_rho_stock+1
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
@@ -169,7 +175,8 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
       call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),iter,  &
                    mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                    mixing%flag_mix_zero )
-  
+
+!$omp parallel do private(iz,iy,ix) collapse(2)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
@@ -178,6 +185,7 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
       end do
       end do
 
+!$omp parallel do private(i,iz,iy,ix) collapse(3)
       do i=1,mixing%num_rho_stock+1
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
@@ -246,7 +254,7 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
   integer :: ix,iy,iz
 
   if(Miter==1)then
-  !$OMP parallel do private(iz,iy,ix)
+!$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -255,7 +263,7 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
     end do
     end do
     if(nspin==2)then
-  !$OMP parallel do private(iz,iy,ix)
+!$OMP parallel do private(iz,iy,ix) collapse(2)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
@@ -268,7 +276,7 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
   end if
 
   do iiter=1,mixing%num_rho_stock
-  !$OMP parallel do private(iz,iy,ix)
+!$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -278,7 +286,7 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
     end do
   end do
   do iiter=1,mixing%num_rho_stock-1
-  !$OMP parallel do private(iz,iy,ix)
+!$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -291,7 +299,7 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
   if(nspin==2)then
     do iiter=1,mixing%num_rho_stock
       do is=1,2
-  !$OMP parallel do private(iz,iy,ix)
+!$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
@@ -303,7 +311,7 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
     end do
     do iiter=1,mixing%num_rho_stock-1
       do is=1,2
-  !$OMP parallel do private(iz,iy,ix)
+!$OMP parallel do private(iz,iy,ix) collapse(2)
         do iz=ng%is(3),ng%ie(3)
         do iy=ng%is(2),ng%ie(2)
         do ix=ng%is(1),ng%ie(1)
