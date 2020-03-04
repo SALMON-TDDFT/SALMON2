@@ -309,12 +309,16 @@ CONTAINS
     if(allocated(tpsi%rwf)) then
       do ispin=1,Nspin
         call timer_begin(LOG_EIGEN_ENERGY_CALC)
+!$omp parallel do collapse(2) default(none) &
+!$omp          private(ik,io) &
+!$omp          shared(info,wrk1,tpsi,htpsi,system,is,ie,ispin,im)
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           wrk1(io,ik) = sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
                         * htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
         end do
         end do
+!$omp end parallel do
         call timer_end(LOG_EIGEN_ENERGY_CALC)
 
         call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
@@ -322,6 +326,53 @@ CONTAINS
         energy%esp(:,:,ispin) = wrk2
         call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
       end do
+      
+      call timer_begin(LOG_EIGEN_ENERGY_CALC)
+    ! kinetic energy (E_kin)
+      E_tmp = 0d0
+!$omp parallel do collapse(3) default(none) &
+!$omp          reduction(+:E_tmp) &
+!$omp          private(ispin,ik,io) &
+!$omp          shared(Nspin,info,tpsi,ttpsi,system,is,ie,im)
+      do ispin=1,Nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) &
+                      * sum(  tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                           * ttpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) ) * system%Hvol
+        end do
+        end do
+      end do
+!$omp end parallel do
+      E_local(1) = E_tmp
+
+    ! nonlocal part (E_ion_nloc)
+      E_tmp = 0d0
+!$omp parallel do collapse(3) default(none) &
+!$omp          reduction(+:E_tmp) &
+!$omp          private(ispin,ik,io) &
+!$omp          shared(Nspin,info,tpsi,htpsi,ttpsi,system,is,ie,im,V_local)
+      do ispin=1,Nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+
+          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik) * system%hvol &
+            * sum( tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+              * (htpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                - (ttpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                   + V_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
+                   * tpsi%rwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,im) &
+                ) &
+              ) &
+            )
+
+        end do
+        end do
+      end do
+!$omp end parallel do
+      E_local(2) = E_tmp
+      call timer_end(LOG_EIGEN_ENERGY_CALC)
+      
     else
     ! eigen energies (esp)
       do ispin=1,Nspin
@@ -395,14 +446,14 @@ CONTAINS
       E_local(2) = E_tmp
       call timer_end(LOG_EIGEN_ENERGY_CALC)
 
-      call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
-      call comm_summation(E_local,E_sum,2,info%icomm_rko)
-
-      energy%E_kin      = E_sum(1)
-      energy%E_ion_nloc = E_sum(2)
-      call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
-
     end if
+    
+    call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
+    call comm_summation(E_local,E_sum,2,info%icomm_rko)
+
+    energy%E_kin      = E_sum(1)
+    energy%E_ion_nloc = E_sum(2)
+    call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
     deallocate(wrk1,wrk2)
     return

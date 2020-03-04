@@ -220,27 +220,51 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   ! subtraction
     call timer_begin(LOG_UHPSI_SUBTRACTION)
     if(present(ttpsi)) then
-!$omp parallel do collapse(6) default(none) &
-!$omp          private(im,ik,io,ispin,iz,iy,ix) &
-!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg) &
-!$omp          shared(ttpsi,htpsi,V_local,tpsi)
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          ttpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
-                                             - V_local(ispin)%f(ix,iy,iz) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+      if(allocated(tpsi%rwf)) then
+        !$omp parallel do collapse(6) default(none) &
+        !$omp          private(im,ik,io,ispin,iz,iy,ix) &
+        !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg) &
+        !$omp          shared(ttpsi,htpsi,V_local,tpsi)
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            ttpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) &
+                                               - V_local(ispin)%f(ix,iy,iz) * tpsi%rwf(ix,iy,iz,ispin,io,ik,im)
+          end do
+          end do
+          end do
         end do
         end do
         end do
-      end do
-      end do
-      end do
-      end do
-!$omp end parallel do
+        end do
+        !$omp end parallel do
+      else
+        !$omp parallel do collapse(6) default(none) &
+        !$omp          private(im,ik,io,ispin,iz,iy,ix) &
+        !$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg) &
+        !$omp          shared(ttpsi,htpsi,V_local,tpsi)
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            ttpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+                                               - V_local(ispin)%f(ix,iy,iz) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+          end do
+          end do
+          end do
+        end do
+        end do
+        end do
+        end do
+        !$omp end parallel do
+      end if
     end if
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
