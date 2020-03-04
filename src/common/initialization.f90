@@ -289,6 +289,10 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   else
     pinfo%nporbital_spin = 0
   end if
+
+#ifdef USE_SCALAPACK
+  pinfo%flag_blacs_gridinit = .false.
+#endif
 end subroutine init_process_distribution
 
 !===================================================================================================================================
