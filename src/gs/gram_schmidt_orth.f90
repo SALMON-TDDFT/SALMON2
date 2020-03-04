@@ -45,7 +45,7 @@ contains
     elseif(yn_gbp=='c') then
       call gram_schmidt_col_complex8_cblas(sys, rg, wfi, wf, pinfo)
     elseif(yn_gbp=='r') then
-      call gram_schmidt_col_complex8_rblas(sys, rg, wfi, wf, pinfo)
+      call gram_schmidt_col_rblas(sys, rg, wfi, wf, pinfo)
     elseif (allocated(wf%rwf)) then
       call gram_schmidt_col_real8(sys, rg, wfi, wf)
     elseif (allocated(wf%zwf)) then
@@ -359,7 +359,7 @@ contains
   !=======================================================================
 
 
-    subroutine gram_schmidt_col_complex8_rblas(sys, rg, wfi, wf, pinfo)
+    subroutine gram_schmidt_col_rblas(sys, rg, wfi, wf, pinfo)
       ! Only for the colinear L(S)DA:
       use timer
       use communication, only: comm_bcast, comm_summation
@@ -395,7 +395,7 @@ contains
         do io = wfi%io_s, wfi%io_e
           jo = io - wfi%io_s + 1
           call copy_data( &
-            & dreal( wf%zwf(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3), ispin, io, ik, im) ), &
+            &  wf%rwf(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3), ispin, io, ik, im) , &
             & wf_block(:, :, :, jo))
         end do
 
@@ -468,8 +468,8 @@ contains
         do io = wfi%io_s, wfi%io_e
           jo = io - wfi%io_s + 1
           call copy_data( &
-            & dcmplx(wf_block(:, :, :, jo)), &
-            & wf%zwf(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3), ispin, io, ik, im))
+            & wf_block(:, :, :, jo), &
+            & wf%rwf(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3), ispin, io, ik, im))
         end do
 
       end do !ispin
@@ -478,7 +478,7 @@ contains
 
       return
 
-    end subroutine gram_schmidt_col_complex8_rblas
+    end subroutine gram_schmidt_col_rblas
 
     !=======================================================================
 

@@ -448,10 +448,10 @@ do ispin = 1, system%nspin
   do io = info%io_s, info%io_e
     jo = io - info%io_s + 1
     call copy_data( &
-      & dreal( spsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) ), &
+      &  spsi%rwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) , &
       & wf1_block(:, :, :, jo))
     call copy_data( &
-      & dreal( shpsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) ), &
+      & shpsi%rwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) , &
       & wf2_block(:, :, :, jo))
   end do
 
@@ -553,8 +553,8 @@ do ispin = 1, system%nspin
   do io = info%io_s, info%io_e
     jo = io - info%io_s + 1
     call copy_data( &
-      & dcmplx( wf2_block(:, :, :, jo) ), &
-      & spsi%zwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) )
+      &  wf2_block(:, :, :, jo) , &
+      & spsi%rwf(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), ispin, io, ik, im) )
   end do
   call timer_end(LOG_SSDG_PERIODIC_CALC)
 

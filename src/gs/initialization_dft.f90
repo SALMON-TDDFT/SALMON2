@@ -96,6 +96,7 @@ end if
 if(system%if_real_orbital) then
   call allocate_orbital_real(system%nspin,mg,info,spsi)
   call allocate_orbital_real(system%nspin,mg,info,shpsi)
+  call allocate_orbital_real(system%nspin,mg,info,sttpsi)
 else
   call allocate_orbital_complex(system%nspin,mg,info,spsi)
   call allocate_orbital_complex(system%nspin,mg,info,shpsi)
