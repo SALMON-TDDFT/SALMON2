@@ -254,9 +254,9 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   use communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
-  type(s_dft_system),intent(in)    :: system
-  integer, intent(in)              :: icomm1 ! Communicator for single DFT system.
-  type(s_process_info),intent(out) :: pinfo
+  type(s_dft_system),intent(in)      :: system
+  integer, intent(in)                :: icomm1 ! Communicator for single DFT system.
+  type(s_process_info),intent(inout) :: pinfo
   logical :: if_stop
 
   if((pinfo%nporbital + sum(pinfo%nprgrid)) == 0) then
