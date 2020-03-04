@@ -160,12 +160,10 @@ module structures
     integer :: iaddress(3) ! address of MPI under 3-d field (X,Y,Z)
     integer,allocatable :: imap(:,:,:) ! address map
     integer :: icomm_all,id_all,isize_all ! communicator, process ID, & # of processes
-    integer :: icomm(3)  ! 1: x-direction, 2: y-direction, 3: z-direction
+    integer :: icomm(3) ! 1: x-direction, 2: y-direction, 3: z-direction
+                        ! Inside core FFTE routine, x-direction is redundant and
+                        ! yz-direction is parallel.
     integer :: id(3), isize(3)
-    integer :: icomm_ffte(3) ! 1: x-direction, 2: y-direction, 3: z-direction
-                             ! Inside core FFTE routine, x-direction is redundant and
-                             ! yz-direction is parallel.
-    integer :: id_ffte(3), isize_ffte(3)
     integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
   end type s_field_parallel
 
