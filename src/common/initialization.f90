@@ -27,7 +27,7 @@ contains
 subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
-                           nproc_k,nproc_ob,nproc_rgrid
+                           nproc_k,nproc_ob,nproc_rgrid,yn_ffte
   use sendrecv_grid
   use init_communicator
   use init_poisson_sub
@@ -82,6 +82,13 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
   case(3)
     call init_reciprocal_grid(lg,ng,fg,system,poisson)
+
+    if (yn_ffte == 'y') then
+      ! FFTE initialization step
+      call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
+                        info_field%isize(2),info_field%isize(3),0, &
+                        info_field%icomm(2),info_field%icomm(3))
+    end if
   end select
   call set_ig_bound(lg,ng,poisson)
 
@@ -739,14 +746,14 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,poisson)
       else
         poisson%coef(kx,ky,kz)=4.d0*pi/G2
       end if
-      
+
     ! for sigle-scale Maxwell-TDDFT
       poisson%coef_nabla(kx,ky,kz,1) = -zi*fg%Gx(n)
       poisson%coef_nabla(kx,ky,kz,2) = -zi*fg%Gy(n)
       poisson%coef_nabla(kx,ky,kz,3) = -zi*fg%Gz(n)
       if(kx==1.and.ky2==1) poisson%coef_gxgy0(kx,ky,kz) = 0d0
       poisson%coef_cGdt(kx,ky,kz) = cos(cspeed_au*sqrt(G2)*dt)
-      
+
     end do
     end do
     end do

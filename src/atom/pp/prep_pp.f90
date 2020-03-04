@@ -642,14 +642,11 @@ subroutine calc_Vpsl_periodic_FFTE(lg,mg,ng,system,info_field,pp,ppg,poisson,sVp
     end do
     end do
 
-    call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm_ffte(1))
+    call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
 
     CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                      info_field%isize_ffte(2),info_field%isize_ffte(3),0, &
-                      info_field%icomm_ffte(2),info_field%icomm_ffte(3))
-    CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                      info_field%isize_ffte(2),info_field%isize_ffte(3),1, &
-                      info_field%icomm_ffte(2),info_field%icomm_ffte(3))
+                      info_field%isize(2),info_field%isize(3),1, &
+                      info_field%icomm(2),info_field%icomm(3))
 
 !$OMP parallel do private(iiz,iiy)
     do iz=1,ng%num(3)
