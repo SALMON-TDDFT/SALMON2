@@ -1460,15 +1460,12 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   allocate(ppg%irange_atom(2,natom))
 
   ppg%ireferred_atom = .false.
-  do ilma=1,nlma
-    ia = ppg%ia_tbl(ilma)
-    ppg%ireferred_atom(ia) = ppg%ireferred_atom(ia) .or. (ppg%mps(ia) > 0)
-  end do
-  call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
-
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
+!$omp parallel do private(ia,ilma)
   do ia=1,natom
+    ppg%ireferred_atom(ia) = ppg%ireferred_atom(ia) .or. (ppg%mps(ia) > 0)
+
     ! forward search
     do ilma=1,nlma
       if (ppg%ia_tbl(ilma) == ia) then
@@ -1485,6 +1482,9 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
       end if
     end do
   end do
+!$omp end parallel do
+
+  call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
 
   do ia=1,natom
     n = 0
