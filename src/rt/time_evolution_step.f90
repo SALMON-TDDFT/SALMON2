@@ -237,7 +237,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   end if
   if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,mg,ng,info_field,srho%f,sVh%f,fg%zrhoG_ele, &
-    & fg%zrhoG_ele_tmp,system%hgs,poisson,rt%j_e,singlescale)
+    & system%hgs,poisson,rt%j_e,singlescale)
   else
     call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
   end if
