@@ -98,9 +98,15 @@ module structures
     integer :: nporbital
     integer :: nporbital_spin(2)
     integer :: nprgrid(3)    ! x,y,z
-    !for scalapack
+#ifdef USE_SCALAPACK
     logical :: flag_blacs_gridinit
-    integer :: context,iam,nprocs,myrow, mycol
+    integer :: iam,nprocs
+    integer,allocatable :: usermap(:,:)
+    integer :: nprow,npcol,myrow,mycol
+    integer :: nrow_local,ncol_local,lda
+    integer :: desca(9), descz(9)
+    integer :: len_work ! for PDSYEVD
+#endif
   end type
 
 ! for persistent communication
