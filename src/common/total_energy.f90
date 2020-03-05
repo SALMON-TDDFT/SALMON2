@@ -543,7 +543,11 @@ CONTAINS
       end do
 !$omp end parallel do
 
-      ewald%nmax_pair_bk = maxval(npair_bk_tmp)
+      if(system%nion_mg.le.0) then
+         ewald%nmax_pair_bk = 0
+      else
+         ewald%nmax_pair_bk = maxval(npair_bk_tmp)
+      endif
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
       allocate( ewald%bk(4,ewald%nmax_pair_bk,system%nion_mg) )
       allocate( ewald%npair_bk(system%nion_mg) )
