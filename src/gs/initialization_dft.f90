@@ -15,6 +15,8 @@
 !
 !=======================================================================
 
+#include "config.h"
+
 subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg, ng,  &
                                 pinfo, info, info_field,  &
@@ -261,8 +263,6 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
      call read_dns(lg,mg,srho_s(1)%f) ! cube file only
   end if
-
-  if(yn_pdsyev=='y') pinfo%flag_blacs_gridinit=.false.
 
   srho%f = 0d0
   do jspin=1,nspin
