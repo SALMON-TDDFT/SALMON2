@@ -474,7 +474,7 @@ CONTAINS
     type(s_reciprocal_grid),intent(in) :: fg
     !
     integer :: ix,iy,iz,iia,ia,ib,ig,ir,ipair
-    integer,allocatable :: npair_bk_tmp(:)
+    integer :: npair_bk_max, npair_bk_loc
     integer :: irank,nproc, k, ig_tmp,ig_sum
     real(8) :: rr,rab(3),r(3),g(3),G2
     real(8) :: r1, cutoff_erfc_r, tmp
@@ -507,14 +507,13 @@ CONTAINS
     !Book-keeping in ewald(ion-ion)
 
     !(check maximum number of pairs and allocate)
-    allocate(npair_bk_tmp(system%nion_mg))
-   !allocate(npair_bk_tmp(system%nion))
-    npair_bk_tmp(:) =0
-
-!$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr)
+    npair_bk_max = 0
+!$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) &
+!$omp             reduction(max:npair_bk_max)
     do iia=1,system%nion_mg
    !do ia=1,system%nion
        ia = system%ia_mg(iia)
+       npair_bk_loc = 0
        do ix=-NEwald,NEwald
        do iy=-NEwald,NEwald
        do iz=-NEwald,NEwald
@@ -534,16 +533,17 @@ CONTAINS
              rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
              rr = sum(rab(:)**2)
              if(rr .le. (cutoff_r+cutoff_r_buff)**2) then
-                npair_bk_tmp(iia) = npair_bk_tmp(iia) + 1
+                npair_bk_loc = npair_bk_loc + 1
              endif
           end do
         end do
         end do
         end do
+        npair_bk_max = max(npair_bk_max,npair_bk_loc)
       end do
 !$omp end parallel do
 
-      ewald%nmax_pair_bk = maxval(npair_bk_tmp)
+      ewald%nmax_pair_bk = npair_bk_max
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
       allocate( ewald%bk(4,ewald%nmax_pair_bk,system%nion_mg) )
       allocate( ewald%npair_bk(system%nion_mg) )
