@@ -31,7 +31,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   use timer
   use gram_schmidt_orth, only: gram_schmidt
   use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
-  use subspace_diagonalization, only: ssdg_zwf,ssdg_rwf
+  use subspace_diagonalization, only: ssdg
   use density_matrix, only: calc_density
   use mixing_sub
   use hartree_sub, only: hartree
@@ -90,11 +90,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
     if(miter>iditer_nosubspace_diag)then
-      if(system%if_real_orbital) then
-        call ssdg_rwf(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-      else
-        call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
-      end if
+      call ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
   end if
   call timer_end(LOG_CALC_SUBSPACE_DIAG)

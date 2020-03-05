@@ -24,7 +24,8 @@ module subspace_diagonalization
 
 contains
 
-subroutine ssdg_rwf(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+  use salmon_global, only: yn_gbp
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -37,6 +38,39 @@ subroutine ssdg_rwf(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_process_info)    ,intent(in) :: pinfo
+  type(s_stencil),intent(in) :: stencil
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_scalar) ,intent(in) :: vlocal(system%nspin)
+  type(s_orbital)            :: spsi,shpsi
+  type(s_sendrecv_grid)      :: srg
+
+  if (system%if_real_orbital) then
+    if (yn_gbp == 'r') then
+      call ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    else
+      call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+    end if
+  else
+    if (yn_gbp == 'c') then
+      call ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    else
+      call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+    end if
+  end if
+end subroutine
+
+subroutine ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+  use structures
+  use communication, only: comm_summation,comm_bcast
+  use timer
+  use hamiltonian, only: hpsi
+  use eigen_subdiag_sub
+  use sendrecv_grid, only: s_sendrecv_grid
+  use pack_unpack, only: copy_data
+  implicit none
+  type(s_rgrid)           ,intent(in) :: mg
+  type(s_dft_system)      ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)
@@ -204,41 +238,9 @@ end subroutine ssdg_rwf
 
 !===================================================================================================================================
 
-subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
-  use salmon_global, only: yn_gbp
-  use structures
-  use communication, only: comm_summation,comm_bcast
-  use timer
-  use hamiltonian, only: hpsi
-  use eigen_subdiag_sub
-  use sendrecv_grid, only: s_sendrecv_grid
-  use pack_unpack, only: copy_data
-  implicit none
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_stencil),intent(in) :: stencil
-  type(s_pp_grid),intent(in) :: ppg
-  type(s_scalar) ,intent(in) :: vlocal(system%nspin)
-  type(s_orbital)            :: spsi,shpsi
-  type(s_sendrecv_grid)      :: srg
-  type(s_process_info),intent(in) :: pinfo
-
-  if(yn_gbp=='c') then
-    call ssdg_periodic_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
-  elseif (yn_gbp=='r') then
-    call ssdg_periodic_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
-  else
-    call ssdg_periodic_org(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-  end if
-
-  return
-end subroutine
-
-  !
   !===================================================================================================================================
 
-  subroutine ssdg_periodic_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+  subroutine ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
     use communication, only: comm_summation,comm_bcast
     use timer
@@ -250,12 +252,12 @@ end subroutine
     type(s_rgrid)           ,intent(in) :: mg
     type(s_dft_system)      ,intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
+    type(s_process_info),intent(in) :: pinfo
     type(s_stencil),intent(in) :: stencil
     type(s_pp_grid),intent(in) :: ppg
     type(s_scalar) ,intent(in) :: vlocal(system%nspin)
     type(s_orbital)            :: spsi,shpsi
     type(s_sendrecv_grid)      :: srg
-    type(s_process_info),intent(in) :: pinfo
 
   complex(8),parameter :: zero = 0d0, one = 1d0
   integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,ierr,m
@@ -312,8 +314,8 @@ end subroutine
       call timer_begin(LOG_SSDG_PERIODIC_CALC)
       hmat_block_tmp = 0d0
       call zgemm('C', 'N', info%numo_all(m), info%numo, nsize_rg,  &
-        &   dcmplx(system%hvol), wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
-        &                        wf2_block(:,:,:,1), nsize_rg,  &
+        &   cmplx(system%hvol), wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
+        &                       wf2_block(:,:,:,1), nsize_rg,  &
         &                  zero, hmat_block_tmp(1:info%numo_all(m),1:info%numo), info%numo_all(m) )
       call timer_end(LOG_SSDG_PERIODIC_CALC)
 
@@ -392,12 +394,12 @@ end subroutine
 
 return
 
-end subroutine ssdg_periodic_cblas
+end subroutine ssdg_zwf_cblas
 !===================================================================================================================================
 
 !===================================================================================================================================
 
-subroutine ssdg_periodic_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,pinfo)
+subroutine ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -405,20 +407,20 @@ subroutine ssdg_periodic_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,
   use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
-  use salmon_global, only: yn_pdsyev
+  use salmon_global, only: yn_scalapack
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
+  type(s_process_info),intent(in) :: pinfo
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)
   type(s_orbital)            :: spsi,shpsi
   type(s_sendrecv_grid)      :: srg
-  type(s_process_info),intent(in) :: pinfo
 
 real(8),parameter :: zero = 0d0, one = 1d0
-integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,m !,ierr
+integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,m
 real(8),dimension(system%no,system%no) :: hmat,hmat_tmp,evec
 real(8) :: wf1_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
 real(8) :: wf2_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
@@ -509,7 +511,7 @@ do ispin = 1, system%nspin
 !  zhmat = hmat
 
 !  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
-  if(yn_pdsyev=='y') then
+  if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
      call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
 #else
@@ -582,12 +584,12 @@ contains
     return
   end subroutine eigen_real8_dsyev
 
-end subroutine ssdg_periodic_rblas
+end subroutine ssdg_rwf_rblas
 !===================================================================================================================================
 
 
 
-subroutine ssdg_periodic_org(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -788,6 +790,6 @@ subroutine ssdg_periodic_org(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   end do
   call timer_end(LOG_SSDG_PERIODIC_CALC)
 
-end subroutine ssdg_periodic_org
+end subroutine ssdg_zwf
 
 end module subspace_diagonalization
