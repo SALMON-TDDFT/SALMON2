@@ -86,35 +86,40 @@ contains
     call force_ewald_rspace(system%Force,F_tmp,system,ewald,pp,nion,info%icomm_r)
     call timer_end(LOG_CALC_FORCE_ION_ION)
   
-  ! Fourier part (local part, etc.)
-    F_tmp   = 0d0
-  !$omp parallel do private(ix,iy,iz,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-       if(fg%if_Gzero(ix,iy,iz)) cycle
-       g(1) = fg%vec_G(1,ix,iy,iz)
-       g(2) = fg%vec_G(2,ix,iy,iz)
-       g(3) = fg%vec_G(3,ix,iy,iz)
-       G2 = sum(g(:)**2)
-       if(G2 .gt. cutoff_g**2) cycle   !xxx
+    select case(iperiodic)
+    case(0)
+    ! F_loc = (nabla)rho * V is not implimented for isolated systems
+    case(3)
+    ! Fourier part (local part, etc.)
+      F_tmp   = 0d0
+    !$omp parallel do private(ix,iy,iz,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+         if(fg%if_Gzero(ix,iy,iz)) cycle
+         g(1) = fg%vec_G(1,ix,iy,iz)
+         g(2) = fg%vec_G(2,ix,iy,iz)
+         g(3) = fg%vec_G(3,ix,iy,iz)
+         G2 = sum(g(:)**2)
+         if(G2 .gt. cutoff_g**2) cycle   !xxx
 
-       rho_i = fg%zrhoG_ion(ix,iy,iz)
-       rho_e = fg%zrhoG_ele(ix,iy,iz)
+         rho_i = fg%zrhoG_ion(ix,iy,iz)
+         rho_e = fg%zrhoG_ele(ix,iy,iz)
 
-  !OCL swp
-       do ia=1,nion
-          r = system%Rion(1:3,ia)
-          Gd = sum(g(:)*r(:))
-          egd = exp(zI*Gd)
-          rtmp = pp%Zps(Kion(ia))* (4*Pi/G2) * exp(-G2/(4*aEwald))
-          VG = fg%zVG_ion(ix,iy,iz,kion(ia)) - 4d0*pi/G2*pp%zps(kion(ia))
-          F_tmp(:,ia) = F_tmp(:,ia) + g(:)* ( rtmp * aimag(rho_i*egd) + aimag(egd*rho_e*conjg(VG)) )
-       end do
-    end do
-    end do
-    end do
-  !$omp end parallel do
+    !OCL swp
+         do ia=1,nion
+            r = system%Rion(1:3,ia)
+            Gd = sum(g(:)*r(:))
+            egd = exp(zI*Gd)
+            rtmp = pp%Zps(Kion(ia))* (4*Pi/G2) * exp(-G2/(4*aEwald))
+            VG = fg%zVG_ion(ix,iy,iz,kion(ia)) - 4d0*pi/G2*pp%zps(kion(ia))
+            F_tmp(:,ia) = F_tmp(:,ia) + g(:)* ( rtmp * aimag(rho_i*egd) + aimag(egd*rho_e*conjg(VG)) )
+         end do
+      end do
+      end do
+      end do
+    !$omp end parallel do
+    end select
 
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     if(allocated(tpsi%rwf)) then
@@ -287,6 +292,8 @@ contains
     call timer_end(LOG_CALC_ION_FORCE)
     return
   end subroutine calc_force
+  
+!===================================================================================================================================
 
   subroutine force_ewald_rspace(F_sum,F_tmp,system,ewald,pp,nion,comm)
     use structures
