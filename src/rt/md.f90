@@ -72,9 +72,10 @@ subroutine set_initial_velocity(system,md)
   implicit none
   type(s_dft_system) :: system
   type(s_md) :: md
-  integer :: ia,ixyz,iseed
+  integer :: ia,ixyz,iseed, ii,nn
   real(8) :: rnd1,rnd2,rnd, sqrt_kT_im, kB_au, mass_au
   real(8) :: Temperature_ion, scale_v, Tion
+  real(8) :: nkT_max, v_max   ! to avoid very large velocity
   
   if (comm_is_root(nproc_id_global)) then
      write(*,*) "  Initial velocities with maxwell-boltzmann distribution was set"
@@ -83,16 +84,25 @@ subroutine set_initial_velocity(system,md)
 
   kB_au = kB/hartree2J  ![au/K]
 
+  nn = 100
+  nkT_max = 10d0 * kB_au * temperature0_ion_k  !maxium kinetic energy of atom
+
   iseed= 123
   do ia=1,natom
      mass_au = umass * system%Mass(Kion(ia))
      sqrt_kT_im = sqrt( kB_au * temperature0_ion_k / mass_au )
 
+     v_max = sqrt( nkT_max / mass_au )
+
      do ixyz=1,3
-        call quickrnd(iseed,rnd1)
-        call quickrnd(iseed,rnd2)
-        rnd = sqrt(-2d0*log(rnd1))*cos(2d0*Pi*rnd2)
-        system%Velocity(ixyz,ia) = rnd * sqrt_kT_im
+        do ii=1,nn
+           call quickrnd(iseed,rnd1)
+           call quickrnd(iseed,rnd2)
+           if(rnd1 .le. 1d-10) cycle
+           rnd = sqrt(-2d0*log(rnd1))*cos(2d0*Pi*rnd2)
+           system%Velocity(ixyz,ia) = rnd * sqrt_kT_im
+           if(abs(system%Velocity(ixyz,ia)) .le. v_max) exit
+        enddo
      enddo
   enddo
   
