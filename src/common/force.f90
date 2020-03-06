@@ -119,6 +119,12 @@ contains
       end do
       end do
     !$omp end parallel do
+      call comm_summation(F_tmp,F_sum,3*nion,info%icomm_r)
+      !$omp parallel do private(ia)
+      do ia=1,nion
+        system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
+      end do
+      !$omp end parallel do
     end select
 
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
@@ -173,6 +179,7 @@ contains
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc   = 0d0
 
+    F_tmp = 0d0
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
@@ -267,7 +274,7 @@ contains
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
     !end do
-    call comm_summation(F_tmp,F_sum,3*nion,info%icomm_r)
+    call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
 !$omp parallel do private(ia)
     do ia=1,nion
