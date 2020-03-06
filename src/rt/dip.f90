@@ -44,6 +44,7 @@ subroutine subdip(comm,itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
   real(8) :: rbox1
   real(8) :: time, Hvol,Hgs(3)
   
+  rbox1 = 0d0 !what's it? (no value causes crush)
   
   Hvol   = system%Hvol
   Hgs(:) = system%Hgs(:)
