@@ -27,12 +27,12 @@ CONTAINS
     use communication, only: comm_summation
     use timer
     implicit none
-    type(s_dft_system),intent(in) :: system
+    type(s_dft_system)      ,intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
-    type(s_rgrid)     ,intent(in) :: ng
-    type(s_pp_info)   ,intent(in) :: pp
-    type(s_scalar)    ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
-    type(s_dft_energy)            :: energy
+    type(s_rgrid)           ,intent(in) :: ng
+    type(s_pp_info)         ,intent(in) :: pp
+    type(s_scalar)          ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
+    type(s_dft_energy)                  :: energy
     !
     integer :: io,ik,ispin,Nspin
     integer :: ix,iy,iz,ia,ib
@@ -281,15 +281,15 @@ CONTAINS
     use spin_orbit_global, only: SPIN_ORBIT_ON
     use timer
     implicit none
-    type(s_dft_energy)         :: energy
-    type(s_orbital)            :: tpsi,htpsi,ttpsi
-    type(s_dft_system),intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
-    type(s_rgrid)  ,intent(in) :: mg
-    type(s_scalar) ,intent(in) :: V_local(system%Nspin)
-    type(s_stencil),intent(in) :: stencil
-    type(s_sendrecv_grid),intent(inout) :: srg
-    type(s_pp_grid),intent(in) :: ppg
+    type(s_dft_energy)                     :: energy
+    type(s_orbital)                        :: tpsi,htpsi,ttpsi
+    type(s_dft_system)      ,intent(in)    :: system
+    type(s_orbital_parallel),intent(in)    :: info
+    type(s_rgrid)           ,intent(in)    :: mg
+    type(s_scalar)          ,intent(in)    :: V_local(system%Nspin)
+    type(s_stencil)         ,intent(in)    :: stencil
+    type(s_sendrecv_grid)   ,intent(inout) :: srg
+    type(s_pp_grid)         ,intent(in)    :: ppg
     !
     integer :: ik,io,ispin,im,nk,no,is(3),ie(3),Nspin
     real(8) :: E_tmp,E_local(2),E_sum(2)
