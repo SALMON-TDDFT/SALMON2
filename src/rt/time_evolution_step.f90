@@ -270,7 +270,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
   select case(iperiodic)
   case(0)
 
-    call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+    call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,energy)
 
   case(3)
 
@@ -298,7 +298,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_fi
     end if
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
-    call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
+    call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
     if(use_singlescale=='y') then

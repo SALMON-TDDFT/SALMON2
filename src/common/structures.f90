@@ -305,13 +305,12 @@ module structures
   end type
 
   type s_reciprocal_grid
-    integer :: icomm_G
-    integer :: ng,iG_s,iG_e,iGzero
-    real(8),allocatable :: Gx(:),Gy(:),Gz(:)
-    complex(8),allocatable :: zrhoG_ion(:),zrhoG_ele(:),zVG_ion(:,:)
-    complex(8),allocatable :: zrhoG_ion_tmp(:),zrhoG_ele_tmp(:),zVG_ion_tmp(:,:) ! work arrays
+    logical,allocatable :: if_Gzero(:,:,:)
+    real(8),allocatable :: vec_G(:,:,:,:) ! G vector (reciplocal lattice vector)
+    complex(8),allocatable :: zrhoG_ion(:,:,:),zrhoG_ele(:,:,:),zVG_ion(:,:,:,:)
   end type s_reciprocal_grid
 
+! Poisson equation
   type s_poisson
   ! for poisson_cg (conjugate-gradient method)
     integer :: iterVh                              ! iteration number for poisson_cg
@@ -322,13 +321,14 @@ module structures
     integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
     integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
     real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
+  ! Fourier transform
+    real(8),allocatable :: coef(:,:,:) ! 4*pi/|G|^2 (coefficient of Poisson equation)
   ! for discrete Fourier transform (general)
     complex(8),allocatable :: ff1(:,:,:),ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:) &
                            & ,ff2(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
     real(8),allocatable    :: trho2z(:,:,:),trho3z(:,:,:)
     complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
   ! for FFTE
-    real(8),allocatable :: coef(:,:,:)             ! coefficient of Poisson equation
     complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
     complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
     complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
@@ -697,9 +697,8 @@ contains
 
   subroutine deallocate_reciprocal_grid(fg)
     type(s_reciprocal_grid) :: fg
-    DEAL(fg%Gx)
-    DEAL(fg%Gy)
-    DEAL(fg%Gz)
+    DEAL(fg%vec_G)
+    DEAL(fg%if_Gzero)
     DEAL(fg%zrhoG_ion)
     DEAL(fg%zrhoG_ele)
     DEAL(fg%zVG_ion)

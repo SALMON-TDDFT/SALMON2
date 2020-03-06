@@ -285,10 +285,10 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,energy)
   case(3)
      rion_update = .true. ! it's first calculation
-     call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
+     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,rion_update,energy)
   end select
 
 

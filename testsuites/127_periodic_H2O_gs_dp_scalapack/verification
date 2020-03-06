@@ -20,7 +20,7 @@ checklist = {
     # Force
     "Force": [
         -100, # Temporary value for result
-        -0.13765386E+00,  # Reference value 
+        -1.375385e-01,  # Reference value 
         2e-5,  # Permissible error 
     ], 
 } 
