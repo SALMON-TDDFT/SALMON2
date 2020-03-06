@@ -621,12 +621,13 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   use phys_constants, only: cspeed_au
   use salmon_global, only: dt,nelem,yn_ffte
   implicit none
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid),intent(in) :: ng
+  type(s_rgrid)          ,intent(in)    :: lg
+  type(s_rgrid)          ,intent(in)    :: ng
   type(s_reciprocal_grid),intent(inout) :: fg
-  type(s_dft_system),intent(in) :: system
-  type(s_field_parallel),intent(in) :: info_field
-  type(s_poisson),intent(inout) :: poisson
+  type(s_dft_system)     ,intent(in)    :: system
+  type(s_field_parallel) ,intent(in)    :: info_field
+  type(s_poisson)        ,intent(inout) :: poisson
+  !
   real(8) :: brl(3,3)
   integer :: ix,iy,iz,kx,ky,kz
   integer :: iix,iiy,iiz
@@ -647,7 +648,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
       allocate(poisson%a_ffte    (lg%num(1),ng%num(2),ng%num(3)))
       allocate(poisson%a_ffte_tmp(lg%num(1),ng%num(2),ng%num(3)))
       allocate(poisson%b_ffte    (lg%num(1),ng%num(2),ng%num(3)))
-    ! for sigle-scale Maxwell-TDDFT
+    ! for single-scale Maxwell-TDDFT
       allocate(poisson%coef_nabla(lg%num(1),lg%num(2),lg%num(3),3))
       allocate(poisson%coef_gxgy0(lg%num(1),lg%num(2),lg%num(3)))
       allocate(poisson%coef_cGdt (lg%num(1),lg%num(2),lg%num(3)))
@@ -683,7 +684,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
       poisson%coef(ix,iy,iz) = 4.d0*pi/G2
     end if
     if(yn_ffte=='y') then
-    ! for sigle-scale Maxwell-TDDFT
+    ! for single-scale Maxwell-TDDFT
       poisson%coef_nabla(ix,iy,iz,1) = -zi*g(1)
       poisson%coef_nabla(ix,iy,iz,2) = -zi*g(2)
       poisson%coef_nabla(ix,iy,iz,3) = -zi*g(3)

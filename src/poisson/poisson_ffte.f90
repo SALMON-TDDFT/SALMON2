@@ -28,7 +28,7 @@ subroutine poisson_ffte(lg,ng,info_field,trho,tvh,trhoG_ele,poisson)
   type(s_field_parallel),intent(in) :: info_field
   real(8)               ,intent(in) :: trho(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
   real(8)                           :: tvh (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  complex(8)                        :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
+  complex(8)                        :: trhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
   type(s_poisson)                   :: poisson
   !
   integer :: ix,iy,iz
