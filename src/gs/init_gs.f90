@@ -34,72 +34,82 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   type(s_orbital)                     :: spsi
   type(s_process_info)    ,intent(in) :: pinfo
   !
-  integer :: ik,io,is,iseed,a,ix,iy,iz
-  real(8) :: xx,yy,zz,x1,y1,z1,rr,rnd,Xmax,Ymax,Zmax
+  integer :: ik,io,is,a,ix,iy,iz,ip
+  real(8) :: xx,yy,zz,x1,y1,z1,rr,Xmax,Ymax,Zmax,q(3)
+
+  call init_wf_rand
 
   if(system%if_real_orbital) then
 
-    Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
-    do a=1,natom
-      if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
-      if ( abs(Rion(2,a)) > Ymax ) Ymax=abs(Rion(2,a))
-      if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
-    end do
+    if (yn_periodic == 'y') then
+      call gen_rwf_periodic
+    else
+      Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
+      do a=1,natom
+        if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
+        if ( abs(Rion(2,a)) > Ymax ) Ymax=abs(Rion(2,a))
+        if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
+      end do
 
-    Xmax=Xmax+1.d0/au_length_aa ; Ymax=Ymax+1.d0/au_length_aa ; Zmax=Zmax+1.d0/au_length_aa
+      Xmax=Xmax+1.d0/au_length_aa ; Ymax=Ymax+1.d0/au_length_aa ; Zmax=Zmax+1.d0/au_length_aa
 
-    iseed=123
-    do is=1,system%nspin
-    do io=1,system%no
-      call quickrnd_ns ; x1=Xmax*(2.d0*rnd-1.d0)
-      call quickrnd_ns ; y1=Ymax*(2.d0*rnd-1.d0)
-      call quickrnd_ns ; z1=Zmax*(2.d0*rnd-1.d0)
-      if(info%io_s <= io .and. io <= info%io_e) then
+      do is=1,system%nspin
+      do io=1,system%no
+        call random_number(q)
+        x1=Xmax*(2.d0*q(1)-1.d0)
+        y1=Ymax*(2.d0*q(2)-1.d0)
+        z1=Zmax*(2.d0*q(3)-1.d0)
+        if(info%io_s <= io .and. io <= info%io_e) then
 !$OMP parallel do collapse(2) private(iz,iy,ix,xx,yy,zz,rr)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
-          rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
-          spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
-        end do
-        end do
-        end do
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+            rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
+            spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
+          end do
+          end do
+          end do
 !$omp end parallel do
-      end if
-    end do
-    end do
+        end if
+      end do
+      end do
+    end if ! yn_periodic == 'y'
 
   else
 
-    Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))
-    Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))
-    Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))
+    if (yn_periodic == 'y') then
+      call gen_zwf_periodic
+    else
+      Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))
+      Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))
+      Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))
 
-    iseed=123
-    do is=1,system%nspin
-    do ik=1,system%nk
-    do io=1,system%no
-      call quickrnd_ns ; x1=Xmax*rnd
-      call quickrnd_ns ; y1=Ymax*rnd
-      call quickrnd_ns ; z1=Zmax*rnd
-      if(info%ik_s <= ik .and. ik <= info%ik_e .and.   &
-         info%io_s <= io .and. io <= info%io_e) then
+      do is=1,system%nspin
+      do ik=1,system%nk
+      do io=1,system%no
+        call random_number(q)
+        x1=Xmax*q(1)
+        y1=Ymax*q(2)
+        z1=Zmax*q(3)
+        if(info%ik_s <= ik .and. ik <= info%ik_e .and.   &
+           info%io_s <= io .and. io <= info%io_e) then
 !$OMP parallel do collapse(2) private(iz,iy,ix,xx,yy,zz,rr)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
-          rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
-          spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
-        end do
-        end do
-        end do
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+            rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
+            spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
+          end do
+          end do
+          end do
 !$omp end parallel do
-      end if
-    end do
-    end do
-    end do
+        end if
+      end do
+      end do
+      end do
+    end if ! yn_periodic == 'y'
 
   end if
 
@@ -109,11 +119,65 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
 
 CONTAINS
 
-  subroutine quickrnd_ns
-  implicit none
-  integer,parameter :: im=6075,ia=106,ic=1283
-  iseed=mod(iseed*ia+ic,im) ; rnd=real(iseed,8)/real(im,8)
-  end subroutine quickrnd_ns
+  ! cf. RSDFT
+  subroutine init_wf_rand
+    implicit none
+    integer :: s,k,n,i
+    integer,allocatable :: iseed(:)
+
+    call random_seed(size = n)
+    allocate(iseed(n))
+    iseed(:) = info%io_s &
+             + (mg%is(3) - lg%is(3)) * mg%num(2) * mg%num(1) &
+             + (mg%is(2) - lg%is(2)) * mg%num(1) &
+             + (mg%is(1) - lg%is(1))
+    call random_seed(put = iseed)
+    deallocate(iseed)
+  end subroutine
+
+  subroutine gen_rwf_periodic
+    implicit none
+    real(8) :: u
+
+    do ip=lbound(spsi%rwf,7),ubound(spsi%rwf,7)
+    do ik=lbound(spsi%rwf,6),ubound(spsi%rwf,6)
+    do io=lbound(spsi%rwf,5),ubound(spsi%rwf,5)
+    do is=lbound(spsi%rwf,4),ubound(spsi%rwf,4)
+    do iz=lbound(spsi%rwf,3),ubound(spsi%rwf,3)
+    do iy=lbound(spsi%rwf,2),ubound(spsi%rwf,2)
+    do ix=lbound(spsi%rwf,1),ubound(spsi%rwf,1)
+      call random_number(u)
+      spsi%rwf(ix,iy,iz,is,io,ik,ip) = u
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+  end subroutine
+
+  subroutine gen_zwf_periodic
+    implicit none
+    real(8) :: u(2)
+
+    do ip=lbound(spsi%zwf,7),ubound(spsi%zwf,7)
+    do ik=lbound(spsi%zwf,6),ubound(spsi%zwf,6)
+    do io=lbound(spsi%zwf,5),ubound(spsi%zwf,5)
+    do is=lbound(spsi%zwf,4),ubound(spsi%zwf,4)
+    do iz=lbound(spsi%zwf,3),ubound(spsi%zwf,3)
+    do iy=lbound(spsi%zwf,2),ubound(spsi%zwf,2)
+    do ix=lbound(spsi%zwf,1),ubound(spsi%zwf,1)
+      call random_number(u)
+      spsi%zwf(ix,iy,iz,is,io,ik,ip) = cmplx(u(1),u(2))
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+    end do
+  end subroutine
 
 END SUBROUTINE init_wf
 
