@@ -34,17 +34,17 @@ contains
     use timer
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
-    type(s_pp_info)         ,intent(in) :: pp
-    type(s_reciprocal_grid) ,intent(in) :: fg
-    type(s_orbital_parallel),intent(in) :: info
-    type(s_rgrid)  ,intent(in) :: mg
-    type(s_stencil),intent(in) :: stencil
-    type(s_sendrecv_grid)      :: srg
-    type(s_pp_grid),intent(in) :: ppg
-    type(s_orbital)            :: tpsi
-    type(s_ewald_ion_ion),intent(in) :: ewald
+    type(s_pp_info)         ,intent(in)    :: pp
+    type(s_reciprocal_grid) ,intent(in)    :: fg
+    type(s_orbital_parallel),intent(in)    :: info
+    type(s_rgrid)           ,intent(in)    :: mg
+    type(s_stencil)         ,intent(in)    :: stencil
+    type(s_sendrecv_grid)                  :: srg
+    type(s_pp_grid)         ,intent(in)    :: ppg
+    type(s_orbital)                        :: tpsi
+    type(s_ewald_ion_ion)   ,intent(in)    :: ewald
     !
-    integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j,ig
+    integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
     real(8) :: kAc(3), rtmp,g(3),r(3),G2,Gd
     complex(8) :: rho_i, rho_e, egd, VG
@@ -82,24 +82,25 @@ contains
     Nlma = ppg%Nlma
 
   ! Ewald sum
-  call timer_begin(LOG_CALC_FORCE_ION_ION)
-!    call force_ewald_rspace(system%Force,F_tmp,system,ewald,pp,nion,fg%icomm_G)
-    call force_ewald_rspace(system%Force,F_tmp,system,ewald,pp,nion,system%icomm_a)
-  call timer_end(LOG_CALC_FORCE_ION_ION)
+    call timer_begin(LOG_CALC_FORCE_ION_ION)
+    call force_ewald_rspace(system%Force,F_tmp,system,ewald,pp,nion,info%icomm_r)
+    call timer_end(LOG_CALC_FORCE_ION_ION)
   
   ! Fourier part (local part, etc.)
     F_tmp   = 0d0
-  !$omp parallel do private(ig,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
-    do ig=fg%ig_s,fg%ig_e
-       if(ig == fg%iGzero ) cycle
-       g(1) = fg%Gx(ig)
-       g(2) = fg%Gy(ig)
-       g(3) = fg%Gz(ig)
-       G2   = sum(g(:)**2)
+  !$omp parallel do private(ix,iy,iz,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+       if(fg%if_Gzero(ix,iy,iz)) cycle
+       g(1) = fg%vec_G(1,ix,iy,iz)
+       g(2) = fg%vec_G(2,ix,iy,iz)
+       g(3) = fg%vec_G(3,ix,iy,iz)
+       G2 = sum(g(:)**2)
        if(G2 .gt. cutoff_g**2) cycle   !xxx
 
-       rho_i = fg%zrhoG_ion(ig)
-       rho_e = fg%zrhoG_ele(ig)
+       rho_i = fg%zrhoG_ion(ix,iy,iz)
+       rho_e = fg%zrhoG_ele(ix,iy,iz)
 
   !OCL swp
        do ia=1,nion
@@ -107,13 +108,15 @@ contains
           Gd = sum(g(:)*r(:))
           egd = exp(zI*Gd)
           rtmp = pp%Zps(Kion(ia))* (4*Pi/G2) * exp(-G2/(4*aEwald))
-          VG = fg%zVG_ion(ig,kion(ia)) - 4d0*pi/g2*pp%zps(kion(ia))
+          VG = fg%zVG_ion(ix,iy,iz,kion(ia)) - 4d0*pi/G2*pp%zps(kion(ia))
           F_tmp(:,ia) = F_tmp(:,ia) + g(:)* ( rtmp * aimag(rho_i*egd) + aimag(egd*rho_e*conjg(VG)) )
        end do
     end do
+    end do
+    end do
   !$omp end parallel do
 
-  call timer_begin(LOG_CALC_FORCE_ELEC_ION)
+    call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     if(allocated(tpsi%rwf)) then
       allocate(tpsi%zwf(mg%is_array(1):mg%ie_array(1) &
                        ,mg%is_array(2):mg%ie_array(2) &
@@ -154,15 +157,15 @@ contains
       end do
       end do
       end do
-      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,fg%icomm_G)
+      call comm_summation(phipsibox,phipsibox2,Nlma_ao*Norb,info%icomm_r)
     end if
-  call timer_end(LOG_CALC_FORCE_ELEC_ION)
+    call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
     if(info%if_divide_rspace) then
        if(tpsi%update_zwf_overlap) call update_overlap_complex8(srg,mg,tpsi%zwf)
     end if
 
-  call timer_begin(LOG_CALC_FORCE_ELEC_ION)
+    call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc   = 0d0
 
     do ik=ik_s,ik_e
@@ -251,7 +254,7 @@ contains
     end do !ispin
     end do !io
     end do !ik
-  call timer_end(LOG_CALC_FORCE_ELEC_ION)
+    call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
 
     !do ia=1,nion
@@ -259,7 +262,7 @@ contains
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
     !end do
-    call comm_summation(F_tmp,F_sum,3*nion,fg%icomm_G)
+    call comm_summation(F_tmp,F_sum,3*nion,info%icomm_r)
 
 !$omp parallel do private(ia)
     do ia=1,nion

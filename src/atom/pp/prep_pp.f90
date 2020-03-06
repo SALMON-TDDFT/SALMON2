@@ -24,7 +24,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic,yn_ffte
+  use salmon_global, only: iperiodic
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
@@ -139,12 +139,7 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
   case(0)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
   case(3)
-    select case(yn_ffte)
-    case('n')
-      call calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,sVpsl,property)
-    case('y')
-      call calc_Vpsl_periodic_FFTE(lg,mg,system,info_field,pp,poisson,sVpsl,fg)
-    end select
+    call calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,sVpsl,property)
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -388,283 +383,183 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,ng,system,info_field,pp,fg,poisson,vpsl,property)
-  use salmon_global,only : natom, nelem, kion
+subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,property)
+  use salmon_global,only : natom, nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg,mg,ng
+  type(s_rgrid)         ,intent(in) :: lg,mg
   type(s_dft_system)    ,intent(in) :: system
   type(s_field_parallel),intent(in) :: info_field
   type(s_pp_info),intent(in) :: pp
   type(s_reciprocal_grid)    :: fg
   type(s_poisson)            :: poisson
   type(s_scalar)             :: vpsl
+  character(17)              :: property
   !
-  integer :: ia,i,n,ik,ix,iy,iz,kx,ky,kz
-  real(8) :: g2,gd,s,g2sq,r1,dr,vloc_av
-  complex(8) :: vg_tmp(fg%ng,nelem),rhoG_tmp(fg%ng),tmp_exp
-  complex(8) :: vion(fg%ng),vion_tmp(fg%ng)
-  character(17) :: property
-
+  integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
+  real(8) :: g(3),g2,gd,s,g2sq,r1,dr,vloc_av
+  complex(8) :: tmp_exp
+  complex(8) :: vion_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8) :: rhog_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
 
   if( property == 'initial' ) then
 
-  vion_tmp = 0d0
-  vg_tmp = 0d0
-
-!$omp parallel
-!$omp do private(ik,n,g2sq,s,r1,dr,i,vloc_av) collapse(2)
-  do ik=1,nelem
-    do n=fg%ig_s,fg%ig_e
-      g2sq=sqrt(fg%gx(n)**2+fg%gy(n)**2+fg%gz(n)**2)
-      s=0.d0
-      if (n == fg%iGzero) then
-        do i=2,pp%nrloc(ik)
-          r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-          dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-          vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-          s=s+4d0*pi*(r1**2*vloc_av+r1*pp%zps(ik))*dr
-        end do
-      else
-        do i=2,pp%nrloc(ik)
-          r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-          dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-          vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-          s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
-        end do
-      end if
-      vg_tmp(n,ik) = s
+    fg%zVG_ion = 0d0
+  !$omp parallel
+  !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
+    do ik=1,nelem
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        g(1) = fg%vec_G(1,ix,iy,iz)
+        g(2) = fg%vec_G(2,ix,iy,iz)
+        g(3) = fg%vec_G(3,ix,iy,iz)
+        g2sq = sqrt(g(1)**2+g(2)**2+g(3)**2)
+        s=0.d0
+        if (fg%if_Gzero(ix,iy,iz)) then
+          do i=2,pp%nrloc(ik)
+            r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
+            dr=pp%rad(i,ik)-pp%rad(i-1,ik)
+            vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+            s=s+4d0*pi*(r1**2*vloc_av+r1*pp%zps(ik))*dr
+          end do
+        else
+          do i=2,pp%nrloc(ik)
+            r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
+            dr=pp%rad(i,ik)-pp%rad(i-1,ik)
+            vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
+            s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
+          end do
+        end if
+        fg%zVG_ion(ix,iy,iz,ik) = s
+      end do
+      end do
+      end do
     end do
-  end do
-!$omp end do
-!$omp end parallel
-
-  call comm_summation(vg_tmp,fg%zVG_ion,fg%ng*nelem,fg%icomm_G)
+  !$omp end do
+  !$omp end parallel
 
   endif
 
   !(Local pseudopotential: Vlocal in G-space(=Vion_G))
   vion_tmp = 0d0
   rhog_tmp = 0d0
-!$omp parallel private(ia,ik)
   do ia=1,natom
     ik=kion(ia)
-!$omp do private(n,g2,gd,tmp_exp)
-    do n=fg%ig_s,fg%ig_e
-      gd = fg%gx(n)*system%rion(1,ia) + fg%gy(n)*system%rion(2,ia) + fg%gz(n)*system%rion(3,ia)
+!$omp parallel do private(ix,iy,iz,g,g2,gd,tmp_exp) 
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      g(1) = fg%vec_G(1,ix,iy,iz)
+      g(2) = fg%vec_G(2,ix,iy,iz)
+      g(3) = fg%vec_G(3,ix,iy,iz)
+      gd = g(1)*system%rion(1,ia) + g(2)*system%rion(2,ia) + g(3)*system%rion(3,ia)
+      g2 = g(1)**2 + g(2)**2 + g(3)**2
       tmp_exp = exp(-zi*gd)/system%det_A
-      vion_tmp(n)  = vion_tmp(n) + fg%zVG_ion(n,ik)*tmp_exp
-      rhoG_tmp(n) = rhoG_tmp(n) + pp%zps(ik)*tmp_exp
-      if(n == fg%iGzero) cycle
+      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + fg%zVG_ion(ix,iy,iz,ik)*tmp_exp
+      rhog_tmp(ix,iy,iz) = rhog_tmp(ix,iy,iz) + pp%zps(ik)*tmp_exp
+      if(fg%if_Gzero(ix,iy,iz)) cycle
       !(add coulomb as dvloc_g is given by Vloc - coulomb)
-      g2 = fg%gx(n)**2+fg%gy(n)**2+fg%gz(n)**2
-      vion_tmp(n) = vion_tmp(n) -4d0*pi/g2*pp%zps(ik)*tmp_exp
+      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) -4d0*pi/g2*pp%zps(ik)*tmp_exp
     end do
-!$omp end do
+    end do
+    end do
+!$omp end parallel do
   end do
-!$omp end parallel
-
-  call comm_summation(rhog_tmp,fg%zrhoG_ion,fg%ng,fg%icomm_G)
+  fg%zrhoG_ion = rhog_tmp
 
   !(Local pseudopotential: Vlocal(=Vpsl) in real-space)
 
 ! cf. poisson_periodic.f90
+  if(yn_ffte=='n') then
 
-!$OMP parallel do private(iz,iy,ix)
-  do iz=lg%is(3),lg%ie(3)
-  do iy=lg%is(2),lg%ie(2)
-  do ix=lg%is(1),lg%ie(1)
-    poisson%ff1(ix,iy,iz) = 0d0
-  end do
-  end do
-  end do
+  !$omp workshare
+    poisson%ff1x = 0d0
+  !$omp end workshare
+  
+  !$omp workshare
+    poisson%ff1y = 0d0
+  !$omp end workshare
+  
+  !$omp workshare
+    poisson%ff1z = 0d0
+  !$omp end workshare
 
-!$OMP parallel do private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=lg%is(2),lg%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    poisson%ff1y(ix,iy,iz) = 0d0
-  end do
-  end do
-  end do
-
-!$OMP parallel do private(iz,iy,ix)
-  do iz=lg%is(3),lg%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    poisson%ff1z(ix,iy,iz)=0.d0
-  end do
-  end do
-  end do
-
-  ! gather vion data
-  call comm_summation(vion_tmp,vion,fg%ng,fg%icomm_G)
-
-!$OMP parallel do private(kz,ky,kx,n)
-  do kz = ng%is(3),ng%ie(3)
-  do ky = ng%is(2),ng%ie(2)
-  do kx = ng%is(1),ng%ie(1)
-    n=(kz-lg%is(3))*lg%num(2)*lg%num(1)+(ky-lg%is(2))*lg%num(1)+kx-lg%is(1)+1
-    if(kx-1==0.and.ky-1==0.and.kz-1==0)then
-      poisson%ff1z(kx,ky,kz) = 0.d0
-    else
-      poisson%ff1z(kx,ky,kz) = vion(n)
-    end if
-  end do
-  end do
-  end do
-  call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
-
-!$OMP parallel do private(iz,ky,kx)
-  do iz = ng%is(3),ng%ie(3)
-  do ky = ng%is(2),ng%ie(2)
-  do kx = ng%is(1),ng%ie(1)
-    poisson%ff1y(kx,ky,iz)=sum(poisson%egz(:,iz)*poisson%ff2z(kx,ky,:))
-  end do
-  end do
-  end do
-  call comm_summation(poisson%ff1y,poisson%ff2y,ng%num(1)*lg%num(2)*ng%num(3),info_field%icomm(2))
-
-!$OMP parallel do private(iz,iy,kx)
-  do iz = ng%is(3),ng%ie(3)
-  do iy = ng%is(2),ng%ie(2)
-  do kx = ng%is(1),ng%ie(1)
-    poisson%ff1(kx,iy,iz)=sum(poisson%egy(:,iy)*poisson%ff2y(kx,:,iz))
-  end do
-  end do
-  end do
-  call comm_summation(poisson%ff1,poisson%ff2,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
-
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-  do iz = mg%is(3),mg%ie(3)
-  do iy = mg%is(2),mg%ie(2)
-  do ix = mg%is(1),mg%ie(1)
-    Vpsl%f(ix,iy,iz) = sum(poisson%egx(:,ix)*poisson%ff2(:,iy,iz))
-  end do
-  end do
-  end do
-
-end subroutine calc_vpsl_periodic
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-
-subroutine calc_Vpsl_periodic_FFTE(lg,mg,system,info_field,pp,poisson,sVpsl,fg)
-  use structures
-  use math_constants, only: pi,zi
-  use communication, only: comm_summation
-  use salmon_global, only: natom, nelem, kion
-  implicit none
-  type(s_rgrid)     ,intent(in) :: lg,mg
-  type(s_dft_system),intent(in) :: system
-  type(s_field_parallel),intent(in) :: info_field
-  type(s_pp_info)   ,intent(in) :: pp
-  type(s_poisson)               :: poisson
-  type(s_scalar)                :: sVpsl
-  type(s_reciprocal_grid)       :: fg
-  !
-  integer :: ik,n,i,a,ix,iy,iz,iiy,iiz
-  real(8) :: g2sq,s,r1,dr,g2,gd,vloc_av
-  complex(8) :: vg_tmp(fg%ng,nelem), rhoG_tmp(fg%ng), tmp_exp, vion_tmp(fg%ng), vion(fg%ng)
-
-  vg_tmp = 0d0
-
-!$omp parallel
-!$omp do private(ik,n,g2sq,s,r1,dr,i,vloc_av) collapse(2)
-  do ik=1,nelem
-    do n=fg%ig_s,fg%ig_e
-      g2sq=sqrt(fg%gx(n)**2+fg%gy(n)**2+fg%gz(n)**2)
-      s=0.d0
-      if (n == fg%iGzero) then
-        do i=2,pp%nrloc(ik)
-          r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-          dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-          vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-          s=s+4d0*pi*(r1**2*vloc_av+r1*pp%zps(ik))*dr
-        end do
-      else
-        do i=2,pp%nrloc(ik)
-          r1=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-          dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-          vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-          s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
-        end do
-      end if
-      vg_tmp(n,ik) = s
+  !$OMP parallel do private(kz,ky,kx)
+    do kz = mg%is(3),mg%ie(3)
+    do ky = mg%is(2),mg%ie(2)
+    do kx = mg%is(1),mg%ie(1)
+      poisson%ff1z(kx,ky,kz) = vion_tmp(kx,ky,kz)
     end do
-  end do
-!$omp end do
-!$omp end parallel
-
-  call comm_summation(vg_tmp,fg%zVG_ion,fg%ng*nelem,fg%icomm_G)
-
-  !(Local pseudopotential: Vlocal in G-space(=Vion_G))
-  vion_tmp = 0d0
-  rhog_tmp = 0d0
-!$omp parallel private(a,ik)
-  do a=1,natom
-    ik=kion(a)
-!$omp do private(n,g2,gd,tmp_exp)
-    do n=fg%ig_s,fg%ig_e
-      gd = fg%gx(n)*system%rion(1,a) + fg%gy(n)*system%rion(2,a) + fg%gz(n)*system%rion(3,a)
-      tmp_exp = exp(-zi*gd)/system%det_A
-      vion_tmp(n)  = vion_tmp(n) + fg%zVG_ion(n,ik)*tmp_exp
-      rhoG_tmp(n) = rhoG_tmp(n) + pp%zps(ik)*tmp_exp
-      if(n == fg%iGzero) cycle
-      !(add coulomb as dvloc_g is given by Vloc - coulomb)
-      g2 = fg%gx(n)**2+fg%gy(n)**2+fg%gz(n)**2
-      vion_tmp(n) = vion_tmp(n) -4d0*pi/g2*pp%zps(ik)*tmp_exp
     end do
-!$omp end do
-  end do
-!$omp end parallel
+    end do
+    call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*lg%num(3),info_field%icomm(3))
 
-  call comm_summation(rhog_tmp,fg%zrhoG_ion,fg%ng,fg%icomm_G)
+  !$OMP parallel do private(iz,ky,kx)
+    do iz = mg%is(3),mg%ie(3)
+    do ky = mg%is(2),mg%ie(2)
+    do kx = mg%is(1),mg%ie(1)
+      poisson%ff1y(kx,ky,iz)=sum(poisson%egz(:,iz)*poisson%ff2z(kx,ky,:))
+    end do
+    end do
+    end do
+    call comm_summation(poisson%ff1y,poisson%ff2y,mg%num(1)*lg%num(2)*mg%num(3),info_field%icomm(2))
 
-  call comm_summation(vion_tmp,vion,fg%ng,fg%icomm_G)
+  !$OMP parallel do private(iz,iy,kx)
+    do iz = mg%is(3),mg%ie(3)
+    do iy = mg%is(2),mg%ie(2)
+    do kx = mg%is(1),mg%ie(1)
+      poisson%ff1x(kx,iy,iz)=sum(poisson%egy(:,iy)*poisson%ff2y(kx,:,iz))
+    end do
+    end do
+    end do
+    call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*mg%num(2)*mg%num(3),info_field%icomm(1))
 
-  poisson%a_ffte_tmp=0.d0
-!$OMP parallel do private(iz,iy,ix,iiz,iiy,n) collapse(2)
-  do iz = 1,mg%num(3)
-  do iy = 1,mg%num(2)
-  do ix = mg%is(1),mg%ie(1)
-    iiz=iz+mg%is(3)-1
-    iiy=iy+mg%is(2)-1
+  !$OMP parallel do private(iz,iy,ix) collapse(2)
+    do iz = mg%is(3),mg%ie(3)
+    do iy = mg%is(2),mg%ie(2)
+    do ix = mg%is(1),mg%ie(1)
+      Vpsl%f(ix,iy,iz) = sum(poisson%egx(:,ix)*poisson%ff2x(:,iy,iz))
+    end do
+    end do
+    end do
+  
+  else
+  
+    poisson%a_ffte_tmp=0.d0
+  !$OMP parallel do private(iz,iy,ix,iiz,iiy) collapse(2)
+    do iz = 1,mg%num(3)
+    do iy = 1,mg%num(2)
+    do ix = mg%is(1),mg%ie(1)
+      iiz=iz+mg%is(3)-1
+      iiy=iy+mg%is(2)-1
+      poisson%a_ffte_tmp(ix,iy,iz) = vion_tmp(ix,iiy,iiz)
+    end do
+    end do
+    end do
+    call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
 
-    n = (iiz-lg%is(3))*lg%num(1)*lg%num(2) &
-      + (iiy-lg%is(2))*lg%num(1) &
-      + ( ix-lg%is(1)) &
-      + 1
+    CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+                      info_field%isize(2),info_field%isize(3),1, &
+                      info_field%icomm(2),info_field%icomm(3))
 
-    if (ix-1 == 0 .and. iy-1 == 0 .and. iz-1 == 0) then
-      poisson%a_ffte_tmp(ix,iy,iz) = 0d0
-    else
-      poisson%a_ffte_tmp(ix,iy,iz) = vion(n)
-    end if
-  end do
-  end do
-  end do
-  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
-
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize(2),info_field%isize(3),1, &
-                    info_field%icomm(2),info_field%icomm(3))
-
-!$OMP parallel do private(iz,iy,iiz,iiy) collapse(2)
+  !$OMP parallel do private(iz,iy,iiz,iiy) collapse(2)
     do iz=1,mg%num(3)
     do iy=1,mg%num(2)
       iiz=iz+mg%is(3)-1
       iiy=iy+mg%is(2)-1
-      sVpsl%f(mg%is(1):mg%ie(1),iiy,iiz)=poisson%b_ffte(mg%is(1):mg%ie(1),iy,iz)*fg%ng
+      Vpsl%f(mg%is(1):mg%ie(1),iiy,iiz) = poisson%b_ffte(mg%is(1):mg%ie(1),iy,iz)*system%ngrid
     end do
     end do
+  end if
 
   return
-
-end subroutine calc_Vpsl_periodic_FFTE
+end subroutine calc_vpsl_periodic
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
 subroutine init_mps(ppg)
   use salmon_global,only : natom
   use structures,only : s_pp_grid

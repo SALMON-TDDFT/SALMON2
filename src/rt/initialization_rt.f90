@@ -251,9 +251,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(energy,system,info,ng,pp,srho_s,sVh,sVxc)
+     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,energy)
   case(3)
-     call calc_Total_Energy_periodic(energy,ewald,system,pp,fg,.true.)
+     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,.true.,energy)
   end select
   energy%E_tot0 = energy%E_tot
   
