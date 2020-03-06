@@ -213,8 +213,8 @@ CONTAINS
       
       if(.not.fg%if_Gzero(ix,iy,iz)) then
         rho_i = fg%zrhoG_ion(ix,iy,iz)
-        E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)**(abs(rho_e)**2*0.5d0)     ! Hartree
-        E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)**(-rho_e*conjg(rho_i))     ! electron-ion (valence)
+        E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)     ! Hartree
+        E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))     ! electron-ion (valence)
       end if
 
       etmp = 0d0
