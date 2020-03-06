@@ -448,7 +448,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
   rhog_tmp = 0d0
   do ia=1,natom
     ik=kion(ia)
-!$omp parallel do private(ix,iy,iz,g,g2,gd,tmp_exp) 
+!$omp parallel do private(ix,iy,iz,g,g2,gd,tmp_exp)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -491,6 +491,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do kz = mg%is(3),mg%ie(3)
     do ky = mg%is(2),mg%ie(2)
     do kx = mg%is(1),mg%ie(1)
+      if(fg%if_Gzero(kx,ky,kz)) cycle
       poisson%ff1z(kx,ky,kz) = vion_tmp(kx,ky,kz)
     end do
     end do
@@ -535,6 +536,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do ix = mg%is(1),mg%ie(1)
       iiz=iz+mg%is(3)-1
       iiy=iy+mg%is(2)-1
+      if(fg%if_Gzero(ix,iiy,iiz)) cycle
       poisson%a_ffte_tmp(ix,iy,iz) = vion_tmp(ix,iiy,iiz)
     end do
     end do
