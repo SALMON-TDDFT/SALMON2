@@ -628,8 +628,7 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisso
   integer :: i
   complex(8) :: f0,f1,j0
 
-  if(.not.allocated(poisson%coef) .or. &
-     .not.allocated(poisson%a_ffte) .or. &
+  if(.not.allocated(poisson%a_ffte) .or. &
      .not.allocated(poisson%b_ffte) .or. &
      .not.allocated(poisson%a_ffte_tmp))then
     stop 'poisson_ffte: array is not allocated'
@@ -674,14 +673,14 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisso
   !$omp             shared(ng,lg,trhoG_ele,poisson,singlescale,inv_lgnum3)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
+    iiz=iz+ng%is(3)-1
+    iiy=iy+ng%is(2)-1
     do ix=1,ng%num(1)
-      iiz=iz+ng%is(3)-1
-      iiy=iy+ng%is(2)-1
       iix=ix+ng%is(1)-1
       trhoG_ele(iix,iiy,iiz) = singlescale%b_ffte(iix,iy,iz,0)*inv_lgnum3
     end do
     do ix=1,lg%num(1)
-      poisson%b_ffte(ix,iy,iz) = singlescale%b_ffte(ix,iy,iz,0)*poisson%coef(ix,iy,iz)
+      poisson%b_ffte(ix,iy,iz) = singlescale%b_ffte(ix,iy,iz,0)*poisson%coef(ix,iiy,iiz)
     end do
   end do
   end do
@@ -689,21 +688,23 @@ subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisso
 
 ! Maxwell eq.: singlescale%b_ffte(ix,iy,iz,i)=j(G,t) --> singlescale%b_ffte(ix,iy,iz,i)=Ac(G,t+dt)
   if(i/=0) then
-    !$omp parallel do collapse(2) private(iz,iy,ix,f0,f1,j0)
+    !$omp parallel do collapse(2) private(iz,iy,ix,iiz,iiy,f0,f1,j0)
     do iz=1,ng%num(3)
     do iy=1,ng%num(2)
     do ix=1,lg%num(1)
+      iiz=iz+ng%is(3)-1
+      iiy=iy+ng%is(2)-1
     ! j(transverse) = j - (1/(4*pi))* d(grad(phi))/dt
       j0 = singlescale%b_ffte(ix,iy,iz,i) &
-      & - (1d0/(4d0*pi))* poisson%coef_nabla(ix,iy,iz,i) * ( poisson%b_ffte(ix,iy,iz) - singlescale%Vh_ffte_old(ix,iy,iz) )/dt
+      & - (1d0/(4d0*pi))* poisson%coef_nabla(ix,iiy,iiz,i) * ( poisson%b_ffte(ix,iy,iz) - singlescale%Vh_ffte_old(ix,iy,iz) )/dt
     ! f(t) = Ac(t) + (4*pi/(c*G)**2)* j
-      f0 = singlescale%zAc_old(ix,iy,iz,i) + (1/cspeed_au**2)* poisson%coef(ix,iy,iz) * j0
+      f0 = singlescale%zAc_old(ix,iy,iz,i) + (1/cspeed_au**2)* poisson%coef(ix,iiy,iiz) * j0
     ! f(t+dt) = 2* cos(c*G*dt) * f(t) - f(t-dt)
-      f1 = 2d0* poisson%coef_cGdt(ix,iy,iz)* f0 - singlescale%f_old(ix,iy,iz,i)
+      f1 = 2d0* poisson%coef_cGdt(ix,iiy,iiz)* f0 - singlescale%f_old(ix,iy,iz,i)
     ! Ac(t+dt) = f(t+dt) - (4*pi/(c*G)**2)* j
-      singlescale%b_ffte(ix,iy,iz,i) = f1 - (1/cspeed_au**2)* poisson%coef(ix,iy,iz) * j0
+      singlescale%b_ffte(ix,iy,iz,i) = f1 - (1/cspeed_au**2)* poisson%coef(ix,iiy,iiz) * j0
     ! Ac(gx=gy=0) --> 0
-      singlescale%b_ffte(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i) * poisson%coef_gxgy0(ix,iy,iz)
+      singlescale%b_ffte(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i) * poisson%coef_gxgy0(ix,iiy,iiz)
     ! f(t-dt) for next step
       singlescale%f_old(ix,iy,iz,i) = f0
     ! Ac(t) for next step

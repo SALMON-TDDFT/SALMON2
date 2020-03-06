@@ -21,7 +21,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_isolated(energy,system,info,ng,pp,rho,Vh,Vxc)
+  SUBROUTINE calc_Total_Energy_isolated(system,info,ng,pp,rho,Vh,Vxc,energy)
     use structures
     use salmon_global, only: kion
     use communication, only: comm_summation
@@ -107,23 +107,25 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_periodic(energy,ewald,system,pp,fg,rion_update)
+  SUBROUTINE calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,rion_update,energy)
     use structures
     use salmon_math
     use math_constants,only : pi,zi
     use salmon_global, only: kion,NEwald,aEwald, cutoff_r
-    use communication, only: comm_summation,comm_get_groupinfo,comm_is_root
+    use communication, only: comm_summation,comm_is_root
     use parallelization, only: nproc_id_global
     use timer
     implicit none
-    type(s_dft_system) ,intent(in) :: system
-    type(s_pp_info)    ,intent(in) :: pp
-    type(s_reciprocal_grid),intent(in) :: fg
-    type(s_dft_energy)             :: energy
-    type(s_ewald_ion_ion)          :: ewald
-    logical,intent(in)             :: rion_update
+    type(s_rgrid)           ,intent(in) :: ng
+    type(s_dft_system)      ,intent(in) :: system
+    type(s_orbital_parallel),intent(in) :: info
+    type(s_pp_info)         ,intent(in) :: pp
+    type(s_reciprocal_grid) ,intent(in) :: fg
+    type(s_dft_energy)                  :: energy
+    type(s_ewald_ion_ion)               :: ewald
+    logical,intent(in)                  :: rion_update
     !
-    integer :: ix,iy,iz,iia,ia,ib,ig,zps1,zps2,ipair
+    integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(5),E_sum(5)
     real(8) :: etmp, E_iir
     complex(8) :: rho_e,rho_i
@@ -136,7 +138,6 @@ CONTAINS
     E_tmp = 0d0
     E_tmp_l = 0d0
     if (rion_update) then ! Ewald sum
-      call comm_get_groupinfo(fg%icomm_G,irank,nproc)
 
       if(ewald%yn_bookkeep=='y') then
 
@@ -178,16 +179,20 @@ CONTAINS
 
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_tmp_l) &
-!$omp          private(ig,g,G2,rho_i) &
-!$omp          shared(fg,aEwald,sysvol)
-      do ig=fg%ig_s,fg%ig_e
-        if(ig == fg%iGzero ) cycle
-        g(1) = fg%Gx(ig)
-        g(2) = fg%Gy(ig)
-        g(3) = fg%Gz(ig)
+!$omp          private(ix,iy,iz,g,g2,rho_i) &
+!$omp          shared(fg,aEwald,sysvol,ng)
+      do iz=ng%is(3),ng%ie(3)
+      do iy=ng%is(2),ng%ie(2)
+      do ix=ng%is(1),ng%ie(1)
+        if(fg%if_Gzero(ix,iy,iz)) cycle
+        g(1) = fg%vec_G(1,ix,iy,iz)
+        g(2) = fg%vec_G(2,ix,iy,iz)
+        g(3) = fg%vec_G(3,ix,iy,iz)
         G2 = g(1)**2 + g(2)**2 + g(3)**2
-        rho_i = fg%zrhoG_ion(ig)
+        rho_i = fg%zrhoG_ion(ix,iy,iz)
         E_tmp_l = E_tmp_l + sysvol*(4*Pi/G2)*(abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
+      end do
+      end do
       end do
 !$omp end parallel do
     end if
@@ -195,17 +200,19 @@ CONTAINS
     E_wrk = 0d0
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_wrk) &
-!$omp          private(ig,g,G2,rho_i,rho_e,ia,r,Gd,etmp) &
-!$omp          shared(fg,aEwald,system,sysvol,kion)
-    do ig=fg%ig_s,fg%ig_e
-      g(1) = fg%Gx(ig)
-      g(2) = fg%Gy(ig)
-      g(3) = fg%Gz(ig)
-      rho_e = fg%zrhoG_ele(ig)
-
-      if (ig /= fg%iGzero) then
-        G2 = g(1)**2 + g(2)**2 + g(3)**2
-        rho_i = fg%zrhoG_ion(ig)
+!$omp          private(ix,iy,iz,g,G2,rho_i,rho_e,ia,r,Gd,etmp) &
+!$omp          shared(ng,fg,aEwald,system,sysvol,kion)
+    do iz=ng%is(3),ng%ie(3)
+    do iy=ng%is(2),ng%ie(2)
+    do ix=ng%is(1),ng%ie(1)
+      g(1) = fg%vec_G(1,ix,iy,iz)
+      g(2) = fg%vec_G(2,ix,iy,iz)
+      g(3) = fg%vec_G(3,ix,iy,iz)
+      G2 = g(1)**2 + g(2)**2 + g(3)**2
+      rho_e = fg%zrhoG_ele(ix,iy,iz)
+      
+      if(.not.fg%if_Gzero(ix,iy,iz)) then
+        rho_i = fg%zrhoG_ion(ix,iy,iz)
         E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)     ! Hartree
         E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))     ! electron-ion (valence)
       end if
@@ -218,10 +225,12 @@ CONTAINS
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        etmp = etmp + conjg(rho_e)*fg%zVG_ion(ig,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+        etmp = etmp + conjg(rho_e)*fg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
       end do
       E_wrk(3) = E_wrk(3) + etmp
-    enddo
+    end do
+    end do
+    end do
 !$omp end parallel do
     call timer_end(LOG_TE_PERIODIC_CALC)
 
@@ -229,11 +238,8 @@ CONTAINS
 
     if (rion_update) then
       E_wrk(4) = E_tmp_l
-     !call comm_summation(E_wrk,E_sum,5,fg%icomm_G)
-      call comm_summation(E_wrk,E_sum,4,fg%icomm_G)  ! should improbe in future
-
-      call comm_summation(E_tmp,E_iir,system%icomm_a)
-      E_sum(5) = E_iir
+      E_wrk(5) = E_tmp
+      call comm_summation(E_wrk,E_sum,5,info%icomm_r)
 
   ! ion-ion energy
       zps1 = 0
@@ -248,7 +254,7 @@ CONTAINS
       E_sum(5) = E_sum(5) - Pi*zps1**2/(2*aEwald*sysvol) - sqrt(aEwald/Pi)*zps2
       energy%E_ion_ion = E_sum(5) + E_sum(4)
     else
-      call comm_summation(E_wrk,E_sum,3,fg%icomm_G)
+      call comm_summation(E_wrk,E_sum,3,info%icomm_r)
     end if
 
   ! Hartree energy
@@ -458,6 +464,8 @@ CONTAINS
     deallocate(wrk1,wrk2)
     return
   End Subroutine calc_eigen_energy
+  
+!===================================================================================================================================
 
   subroutine init_ewald(system,ewald,fg)
     use structures
@@ -596,59 +604,59 @@ CONTAINS
       !xxxxxxxxxxxxxx
       !currently, following part is under construction
 
-      !for G-space
-      ig_sum = 0
-      ig_tmp = 0
-      do ig=fg%ig_s,fg%ig_e
-         if(ig == fg%iGzero ) cycle
-         g(1) = fg%Gx(ig)
-         g(2) = fg%Gy(ig)
-         g(3) = fg%Gz(ig)
-         G2   = sum(g(:)**2)
-         if(G2 .gt. cutoff_g**2) cycle
-         ig_tmp = ig_tmp + 1
-      enddo
-      !this cause MPI communitation error ---- why??
-      call comm_summation(ig_tmp,ig_sum,1,nproc_group_global)
-      ewald%ng_bk = ig_sum
-
-      call comm_get_groupinfo(fg%icomm_G,irank,nproc)
-
-      if(nproc .le. ewald%ng_bk) then
-         k = mod(ewald%ng_bk,nproc)
-         if(k==0) then
-            ewald%ng_r = ewald%ng_bk / nproc
-         else
-            ewald%ng_r = ewald%ng_bk / nproc + 1
-         endif
-         ewald%ng_s = ewald%ng_r * irank + 1
-         ewald%ng_e = ewald%ng_s + ewald%ng_r - 1
-         if (irank == nproc-1) ewald%ng_e = ewald%ng_bk
-         if (ewald%ng_e .gt. ewald%ng_bk) ewald%ng_e = -1
-         if (ewald%ng_s .gt. ewald%ng_bk) then
-            ewald%ng_s =  0
-            ewald%ng_e = -1
-         endif
-
-      else
-         if(irank+1.le.ewald%ng_bk) then
-            ewald%ng_s = irank + 1
-            ewald%ng_e = ewald%ng_s
-         else
-            ewald%ng_s = 0
-            ewald%ng_e = -1
-         endif
-      endif
-
+!      !for G-space
+!      ig_sum = 0
+!      ig_tmp = 0
+!      do ig=fg%ig_s,fg%ig_e
+!         if(ig == fg%iGzero ) cycle
+!         g(1) = fg%Gx(ig)
+!         g(2) = fg%Gy(ig)
+!         g(3) = fg%Gz(ig)
+!         G2   = sum(g(:)**2)
+!         if(G2 .gt. cutoff_g**2) cycle
+!         ig_tmp = ig_tmp + 1
+!      enddo
+!      !this cause MPI communitation error ---- why??
+!      call comm_summation(ig_tmp,ig_sum,1,nproc_group_global)
+!      ewald%ng_bk = ig_sum
+!
+!      call comm_get_groupinfo(fg%icomm_G,irank,nproc)
+!
+!      if(nproc .le. ewald%ng_bk) then
+!         k = mod(ewald%ng_bk,nproc)
+!         if(k==0) then
+!            ewald%ng_r = ewald%ng_bk / nproc
+!         else
+!            ewald%ng_r = ewald%ng_bk / nproc + 1
+!         endif
+!         ewald%ng_s = ewald%ng_r * irank + 1
+!         ewald%ng_e = ewald%ng_s + ewald%ng_r - 1
+!         if (irank == nproc-1) ewald%ng_e = ewald%ng_bk
+!         if (ewald%ng_e .gt. ewald%ng_bk) ewald%ng_e = -1
+!         if (ewald%ng_s .gt. ewald%ng_bk) then
+!            ewald%ng_s =  0
+!            ewald%ng_e = -1
+!         endif
+!
+!      else
+!         if(irank+1.le.ewald%ng_bk) then
+!            ewald%ng_s = irank + 1
+!            ewald%ng_e = ewald%ng_s
+!         else
+!            ewald%ng_s = 0
+!            ewald%ng_e = -1
+!         endif
+!      endif
+!
 !      if(comm_is_root(nproc_id_global)) &
-
-      write(*,'(a,i8)') " number of G-points in ewald", ewald%ng_bk
-
-      if(comm_is_root(nproc_id_global)) then
-         write(*,*) "  #irank, ng_s, ng_e"
-      endif
-      write(*,'(3i6)')  irank, ewald%ng_s, ewald%ng_e
-      
+!
+!      write(*,'(a,i8)') " number of G-points in ewald", ewald%ng_bk
+!
+!      if(comm_is_root(nproc_id_global)) then
+!         write(*,*) "  #irank, ng_s, ng_e"
+!      endif
+!      write(*,'(3i6)')  irank, ewald%ng_s, ewald%ng_e
+!
 
   end subroutine init_ewald
 

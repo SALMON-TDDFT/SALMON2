@@ -19,25 +19,23 @@ module poisson_ffte_sub
 
 contains
 
-subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson)
+subroutine poisson_ffte(lg,ng,info_field,trho,tvh,trhoG_ele,poisson)
   use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid,s_poisson
   use communication, only: comm_summation
   implicit none
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
+  type(s_rgrid)         ,intent(in) :: lg
+  type(s_rgrid)         ,intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
-  real(8),intent(in)       :: hgs(3)
-  type(s_poisson),intent(inout)         :: poisson
+  real(8)               ,intent(in) :: trho(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  real(8)                           :: tvh (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  complex(8)                        :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
+  type(s_poisson)                   :: poisson
+  !
   integer :: ix,iy,iz
   integer :: iiy,iiz,iix
-  real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
   real(8) :: inv_lgnum3
 
-  if(.not.allocated(poisson%coef) .or. &
-     .not.allocated(poisson%a_ffte) .or. &
+  if(.not.allocated(poisson%a_ffte) .or. &
      .not.allocated(poisson%b_ffte) .or. &
      .not.allocated(poisson%a_ffte_tmp))then
     stop 'poisson_ffte: array is not allocated'
@@ -66,15 +64,14 @@ subroutine poisson_ffte(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson)
 !$omp             shared(ng,lg,trhoG_ele,poisson,inv_lgnum3)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
+    iiz=iz+ng%is(3)-1
+    iiy=iy+ng%is(2)-1
     do ix=1,ng%num(1)
-      iiz=iz+ng%is(3)-1
-      iiy=iy+ng%is(2)-1
       iix=ix+ng%is(1)-1
-      trhoG_ele(iix,iiy,iiz)=poisson%b_ffte(iix,iy,iz)*inv_lgnum3
+      trhoG_ele(iix,iiy,iiz) = poisson%b_ffte(iix,iy,iz)*inv_lgnum3
     end do
-
     do ix=1,lg%num(1)
-      poisson%b_ffte(ix,iy,iz)=poisson%b_ffte(ix,iy,iz)*poisson%coef(ix,iy,iz)
+      poisson%b_ffte(ix,iy,iz) = poisson%b_ffte(ix,iy,iz) * poisson%coef(ix,iiy,iiz)
     end do
   end do
   end do
