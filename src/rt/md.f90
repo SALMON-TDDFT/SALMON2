@@ -20,7 +20,7 @@ contains
 
 subroutine init_md(system,md)
   use structures, only: s_dft_system,s_md
-  use salmon_global, only: natom,yn_out_rvf_rt, ensemble, thermostat, &
+  use salmon_global, only: theory, step_update_ps, natom,yn_out_rvf_rt, ensemble, thermostat, &
       yn_set_ini_velocity,step_velocity_scaling,file_ini_velocity,yn_restart
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
@@ -31,9 +31,17 @@ subroutine init_md(system,md)
 
   if(yn_out_rvf_rt=='n') then
      if (comm_is_root(nproc_id_global)) &
-          write(*,*)" yn_out_rvf_rt --> y : changed for md option"
+          write(*,*)"  yn_out_rvf_rt --> y : changed for md option"
      yn_out_rvf_rt='y'
   endif
+
+  select case(theory)
+  case('dft_md')
+     if (comm_is_root(nproc_id_global)) &
+          write(*,*)"  step_update_ps --> 1 : changed for theory=dft_md"
+     step_update_ps = 1
+  end select
+
 
   allocate(md%Rion_last(3,natom))
   allocate(md%Force_last(3,natom))
