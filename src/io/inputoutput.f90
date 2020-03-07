@@ -298,7 +298,7 @@ contains
 
     namelist/kgrid/ &
       & num_kgrid, &
-      & file_kw
+      & file_kw   !currently not implemented (make later) ... only in ARTED code
 
     namelist/tgrid/ &
       & nt, &
@@ -597,7 +597,7 @@ contains
     yn_domain_parallel   = 'n'
     nproc_k              = 0
     nproc_ob             = 0
-    nproc_rgrid           = 0
+    nproc_rgrid          = 0
     yn_ffte              = 'n'
     process_allocation   = 'grid_sequential'
 !! == default for &system
@@ -815,9 +815,6 @@ contains
     thermostat            = 'nose-hoover'
     step_velocity_scaling = -1
     step_update_ps        = 10
-    select case(theory)
-    case('dft_md'); step_update_ps = 1
-    end select
     step_update_ps2       = 1
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'

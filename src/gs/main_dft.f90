@@ -199,6 +199,11 @@ if(theory=='dft_band')then
    call write_band(system,energy)
 end if
 
+! print k-point, but now only with yn_gbp option (no printing in default??)
+if(yn_gbp /= 'n') then
+   call write_k_data(system,stencil)
+endif
+
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
    select case(iperiodic)

@@ -63,6 +63,9 @@ contains
             & system%vec_k(3,ik) / system%primitive_b(3,3), &
             & wk !??????? wk=1 only (symmetry weight)
         end do !ik
+        write(fh_k, '("#",1X,A)') "coefficients (2*pi/a [a.u.]) in kx, ky, kz"
+        write(fh_k, '(3E23.15E3)') system%primitive_b(1,1), system%primitive_b(2,2), system%primitive_b(3,3) 
+
       else
         write(fh_k, '("#",1X,A)') "k-point distribution (nonorthogonal coordinate)"
         write(fh_k, '("#",1X,A,":",1X,A)') "brl", "reciprocal primitive vectors"
