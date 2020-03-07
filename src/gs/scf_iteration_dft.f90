@@ -114,7 +114,7 @@ if(step_initial_mix_zero.gt.1)then
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,rion_update,energy)
       end select
       call timer_end(LOG_CALC_TOTAL_ENERGY)
@@ -173,7 +173,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
    if(calc_mode/='DFT_BAND')then
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,rion_update,energy)
       end select
    end if

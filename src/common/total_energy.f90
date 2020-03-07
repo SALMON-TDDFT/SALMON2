@@ -21,7 +21,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_isolated(system,info,ng,pp,rho,Vh,Vxc,energy)
+  SUBROUTINE calc_Total_Energy_isolated(system,info,ng,pp,rho,Vh,Vxc,rion_update,energy)
     use structures
     use salmon_global, only: kion
     use communication, only: comm_summation
@@ -32,6 +32,7 @@ CONTAINS
     type(s_rgrid)           ,intent(in) :: ng
     type(s_pp_info)         ,intent(in) :: pp
     type(s_scalar)          ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
+    logical                 ,intent(in) :: rion_update
     type(s_dft_energy)                  :: energy
     !
     integer :: io,ik,ispin,Nspin
@@ -42,7 +43,7 @@ CONTAINS
 
     Nspin = system%Nspin
 
-!    if (Rion_update) then
+    if (Rion_update) then
       Eion = 0d0
 !$omp parallel do default(none) &
 !$omp          reduction(+:Eion) &
@@ -57,7 +58,8 @@ CONTAINS
         end do
       end do
 !$omp end parallel do
-!    end if
+      energy%E_ion_ion = Eion
+    end if
 
     Etot = 0d0
 !$omp parallel do collapse(3) default(none) &
@@ -93,11 +95,10 @@ CONTAINS
 
     call timer_begin(LOG_TE_ISOLATED_COMM_COLL)
 
-    call comm_summation(sum1,sum2,info%icomm_rko)
+    call comm_summation(sum1,sum2,info%icomm_r)
 
-    Etot = Etot + sum2*system%Hvol + energy%E_xc + Eion
+    Etot = Etot + sum2*system%Hvol + energy%E_xc + energy%E_ion_ion
 
-    energy%E_ion_ion = Eion
     energy%E_tot = Etot
 
     call timer_end(LOG_TE_ISOLATED_COMM_COLL)
@@ -117,13 +118,13 @@ CONTAINS
     use timer
     implicit none
     type(s_rgrid)           ,intent(in) :: ng
+    type(s_ewald_ion_ion)   ,intent(in) :: ewald
     type(s_dft_system)      ,intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
     type(s_pp_info)         ,intent(in) :: pp
     type(s_reciprocal_grid) ,intent(in) :: fg
+    logical                 ,intent(in) :: rion_update
     type(s_dft_energy)                  :: energy
-    type(s_ewald_ion_ion)               :: ewald
-    logical,intent(in)                  :: rion_update
     !
     integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(5),E_sum(5)
