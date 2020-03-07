@@ -604,26 +604,25 @@ end subroutine fdtd_singlescale
 
 !===================================================================================================================================
 
-subroutine fourier_singlescale(lg,mg,ng,info_field,trho,tvh,trhoG_ele,hgs,poisson,j_e,singlescale)
+subroutine fourier_singlescale(lg,ng,info_field,trho,j_e,tvh,trhoG_ele,poisson,singlescale)
   use structures
   use math_constants,only : zi,pi
   use salmon_global,only: dt
   use phys_constants, only: cspeed_au
   use communication, only: comm_summation,comm_bcast
   implicit none
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
+  type(s_rgrid)         ,intent(in) :: lg
+  type(s_rgrid)         ,intent(in) :: ng
   type(s_field_parallel),intent(in) :: info_field
-  real(8),intent(in)       :: hgs(3)
-  type(s_poisson),intent(inout)         :: poisson
-  type(s_vector) ,intent(in) :: j_e ! electron number current density (without rho*A/c)
-  type(s_singlescale)      :: singlescale
+  real(8)               ,intent(in) :: trho(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  type(s_vector)        ,intent(in) :: j_e ! electron number current density (without rho*A/c)
+  real(8)                           :: tvh(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  complex(8)                        :: trhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  type(s_poisson)                   :: poisson
+  type(s_singlescale)               :: singlescale
+  !
   integer :: ix,iy,iz
   integer :: iiy,iiz,iix
-  real(8) :: trho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8) :: tvh(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  complex(8) :: trhoG_ele(lg%num(1),lg%num(2),lg%num(3))
   real(8) :: inv_lgnum3,vec_je(3),rho_t
   integer :: i
   complex(8) :: f0,f1,j0
