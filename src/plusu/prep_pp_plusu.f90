@@ -176,11 +176,8 @@ contains
     integer :: a,ik,j,l,lm,m,ll,l0
     integer :: ilma,intr,ir
     real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
-    real(8) :: dupptbl_a(pp%nrmax,0:2*pp%lmax+1), dupptbl_b(pp%nrmax,0:2*pp%lmax+1)
-    real(8) :: dupptbl_c(pp%nrmax,0:2*pp%lmax+1), dupptbl_d(pp%nrmax,0:2*pp%lmax+1)
-    real(8) :: upp(0:2*pp%lmax+1),dupp(0:2*pp%lmax+1)
-    real(8) :: r,x,y,z
-    real(8) :: xx
+    real(8) :: upp(0:2*pp%lmax+1)
+    real(8) :: r,x,y,z, xx
 
     call set_nlma_ao( pp, ppg )
 

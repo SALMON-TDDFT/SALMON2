@@ -418,7 +418,7 @@ subroutine ssdg_periodic_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg,
   type(s_process_info),intent(in) :: pinfo
 
 real(8),parameter :: zero = 0d0, one = 1d0
-integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,ierr,m
+integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,m !,ierr
 real(8),dimension(system%no,system%no) :: hmat,hmat_tmp,evec
 real(8) :: wf1_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
 real(8) :: wf2_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)

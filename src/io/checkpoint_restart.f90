@@ -1656,7 +1656,7 @@ end subroutine read_Velocity
 subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,rw_mode)
   use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
-  use salmon_global, only: yn_restart, yn_periodic
+  use salmon_global, only: yn_periodic
   use mpi
   implicit none
   character(*),            intent(in)    :: iodir

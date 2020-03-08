@@ -129,13 +129,9 @@ write(*,*) "----------- set_lma_tbl"
   integer :: a,ik,j,l,lm,m,ll,l0
   integer :: ilma,intr,ir,j_angular_momentum
   real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
-  real(8) :: dudvtbl_a(pp%nrmax,0:2*pp%lmax+1), dudvtbl_b(pp%nrmax,0:2*pp%lmax+1)
-  real(8) :: dudvtbl_c(pp%nrmax,0:2*pp%lmax+1), dudvtbl_d(pp%nrmax,0:2*pp%lmax+1)
-  real(8) :: uvr(0:2*pp%lmax+1),duvr(0:2*pp%lmax+1)
-  real(8) :: r,x,y,z
-  real(8) :: xx
-  real(8) :: rshift(3)
-  real(8) :: hvol, coef
+  real(8) :: uvr(0:2*pp%lmax+1)
+  real(8) :: r,x,y,z, xx
+  real(8) :: rshift(3), hvol, coef
 
   hvol=hx*hy*hz
   if ( present(hvol0) ) hvol = hvol0

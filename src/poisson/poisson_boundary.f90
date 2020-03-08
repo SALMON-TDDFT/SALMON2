@@ -45,7 +45,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
                  ng%is_array(2):ng%ie_array(2),      &
                  ng%is_array(3):ng%ie_array(3))
   integer,parameter :: maxiter=1000
-  integer :: ii,jj,kk,ix,iy,iz,lm,ll,m,icen,pl,cl
+  integer :: ii,jj,ix,iy,iz,lm,ll,m,icen  !,kk,pl,cl
   integer :: ixbox,iybox,izbox
   integer :: j,k
   integer :: istart(0:info_field%isize_all-1),iend(0:info_field%isize_all-1)
@@ -56,8 +56,8 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   integer :: l2(25)
   real(8) :: xx,yy,zz,rr,sum1,xxxx,yyyy,zzzz,rrrr,sumbox1,sumbox2,sumbox3
   real(8) :: rholm2box
-  real(8),allocatable :: rholm(:,:),rholm2(:,:),rholm3(:,:)
-  integer :: tid
+  real(8),allocatable :: rholm(:,:),rholm2(:,:) !,rholm3(:,:)
+ !integer :: tid
   real(8) :: center_trho2(3)
   real(8),allocatable :: center_trho(:,:)
   real(8),allocatable :: center_trho_nume_deno(:,:)
@@ -71,7 +71,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   integer,allocatable :: ig_num(:)
   integer,allocatable :: ig(:,:,:)
   real(8),allocatable :: coordinate(:,:)
-  integer :: lmax_lmp_tmp !iwata
+ !integer :: lmax_lmp_tmp !iwata
   
   !------------------------- Boundary condition (multipole expansion)
 
