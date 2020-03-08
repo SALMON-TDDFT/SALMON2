@@ -85,6 +85,7 @@ module salmon_global
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
+  character(1)   :: yn_scalapack
   character(32)  :: process_allocation
 
 !! &system
@@ -161,7 +162,6 @@ module salmon_global
   integer        :: iditer_notemperature
   integer        :: step_initial_mix_zero
   character(1)   :: yn_gbp
-  character(1)   :: yn_pdsyev
 
 !! &emfield
   character(2)   :: trans_longi

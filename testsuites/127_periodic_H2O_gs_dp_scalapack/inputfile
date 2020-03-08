@@ -11,6 +11,7 @@
   nproc_k = 1
   nproc_ob = 2
   nproc_rgrid = 1,2,1
+  yn_scalapack = 'y'
 /
 
 &units
@@ -53,8 +54,7 @@
 &scf
   nscf = 250
   threshold=1d-12
-  yn_gbp    = 'r'
-  yn_pdsyev = 'y'
+  yn_gbp = 'r'
 /
 
 &atomic_coor

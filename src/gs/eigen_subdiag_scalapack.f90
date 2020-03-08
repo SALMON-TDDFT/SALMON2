@@ -22,18 +22,18 @@ module eigen_subdiag_sub
 private
 
 contains
-  !  nb: blocking factor
-  !      probably parameter relating to efficiency
-  !      pdsyev uses block-cyclic distribution for efficient parallel-computation
-  subroutine init_scalapack(pinfo,info,n,nb)
+  subroutine init_scalapack(pinfo,info,n)
     use structures, only: s_process_info, s_orbital_parallel
     implicit none
     integer :: NUMROC
 
+    integer,parameter :: iclose_comm = 1 ! 1: rko, 2: r
+
     type(s_process_info),intent(inout)  :: pinfo
     type(s_orbital_parallel),intent(in) :: info
-    integer,intent(in) :: n,nb
+    integer,intent(in) :: n
 
+    integer :: mb,nb  ! blocking factor
     integer :: ii,ix,iy,iz,k1,k2,ierr
     integer :: len_iwork,len_work0,trilwmin
     integer :: ictxt
@@ -41,48 +41,83 @@ contains
     integer, allocatable :: iwork(:)
     real(8), allocatable :: h_div(:,:), v_div(:,:), e(:)
 
-    pinfo%nprow = int(sqrt(dble(info%isize_r)))
-    do ii=1,100
-      pinfo%npcol=info%isize_r/pinfo%nprow
-      if(pinfo%npcol*pinfo%nprow == info%isize_r) exit
-      pinfo%nprow=pinfo%nprow-1
-    end do
+    select case(iclose_comm)
+    ! close on icomm_rko
+    case(1)
+      pinfo%npcol = int(sqrt(dble(info%isize_rko)))
+      do ii=1,100
+        pinfo%nprow=info%isize_rko/pinfo%npcol
+        if(pinfo%nprow*pinfo%npcol == info%isize_rko) exit
+        pinfo%npcol=pinfo%npcol+1
+      end do
+      if (pinfo%nprow*pinfo%npcol /= info%isize_rko) &
+        stop 'eigen_subdiag_scalapack: fatal error, please check nprow and npcol'
 
-    if (pinfo%npcol*pinfo%nprow /= info%isize_r) &
-      stop 'eigen_subdiag_scalapack: fatal error, please check nprow and npcol'
+      allocate( pinfo%usermap(pinfo%nprow,pinfo%npcol) )
+      pinfo%usermap = - 1
+      ii = 0
+      do k2=1,pinfo%npcol
+      do k1=1,pinfo%nprow
+        pinfo%usermap(k1,k2) = ii
+        ii = ii + 1
+      end do
+      end do
+      if (ii /= info%isize_rko) &
+        stop 'eigen_subdiag_scalapack: fatal error, please check usermap'
 
-    allocate( pinfo%usermap(pinfo%nprow,pinfo%npcol) )
-    pinfo%usermap = - 1
-    ii = 0
-    do iz=0,pinfo%nprgrid(3)-1
-    do iy=0,pinfo%nprgrid(2)-1
-    do ix=0,pinfo%nprgrid(1)-1
-      ii=ii+1
-      k1=mod(ii-1,pinfo%nprow)
-      k2=(ii-1)/pinfo%nprow
-      pinfo%usermap(k1+1,k2+1) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
-    end do
-    end do
-    end do
+    ! close on icomm_r
+    case(2)
+      pinfo%npcol = int(sqrt(dble(info%isize_r)))
+      do ii=1,100
+        pinfo%nprow=info%isize_r/pinfo%npcol
+        if(pinfo%nprow*pinfo%npcol == info%isize_r) exit
+        pinfo%npcol=pinfo%npcol+1
+      end do
+      if (pinfo%nprow*pinfo%npcol /= info%isize_r) &
+        stop 'eigen_subdiag_scalapack: fatal error, please check nprow and npcol'
 
-    if (ii /= info%isize_r) &
-      stop 'eigen_subdiag_scalapack: fatal error, please check usermap'
+      ii = 0
+      do iz=0,pinfo%nprgrid(3)-1
+      do iy=0,pinfo%nprgrid(2)-1
+      do ix=0,pinfo%nprgrid(1)-1
+        ii=ii+1
+        k1=mod(ii-1,pinfo%nprow)
+        k2=(ii-1)/pinfo%nprow
+        pinfo%usermap(k1+1,k2+1) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
+      end do
+      end do
+      end do
+      if (ii /= info%isize_r) &
+        stop 'eigen_subdiag_scalapack: fatal error, please check usermap'
+    end select
+
+    k1 = (n+pinfo%nprow-1)/pinfo%nprow
+    k2 = (n+pinfo%npcol-1)/pinfo%npcol
+    mb = min(k1,k2)
+    nb = mb
+
+    if (nb * pinfo%npcol /= n) then
+      k1 = max(nb*pinfo%npcol, n)
+      k1 = min(k1, (nb+1)*pinfo%npcol)
+      print *, '[WARNING] nb*npcol /=',n
+      print *, '          recommended value is',k1
+    end if
 
     call BLACS_PINFO( pinfo%iam, pinfo%nprocs )
-    IF (pinfo%nprocs < 1) THEN
-      pinfo%nprocs = info%isize_r
+    if (pinfo%nprocs < 1) then
+      !pinfo%nprocs = info%isize_rko
       call BLACS_SETUP( pinfo%iam, pinfo%nprocs )
-    END IF
+    end if
 
     call BLACS_GET( 0, 0, ictxt )
     call BLACS_GRIDMAP( ictxt, pinfo%usermap, pinfo%nprow, pinfo%nprow, pinfo%npcol )
     call BLACS_GRIDINFO( ictxt, pinfo%nprow, pinfo%npcol, pinfo%myrow, pinfo%mycol )
-    pinfo%nrow_local = NUMROC( n, nb, pinfo%myrow, 0, pinfo%nprow )
+    pinfo%nrow_local = NUMROC( n, mb, pinfo%myrow, 0, pinfo%nprow )
     pinfo%ncol_local = NUMROC( n, nb, pinfo%mycol, 0, pinfo%npcol )
     pinfo%lda        = max(1, pinfo%nrow_local)
 
-    call DESCINIT( pinfo%desca, n, n, nb, nb, 0, 0, ictxt, pinfo%lda, ierr )
-    call DESCINIT( pinfo%descz, n, n, nb, nb, 0, 0, ictxt, pinfo%lda, ierr )
+    call DESCINIT( pinfo%desca, n, n, mb, nb, 0, 0, ictxt, pinfo%lda, ierr )
+    call DESCINIT( pinfo%descz, n, n, mb, nb, 0, 0, ictxt, pinfo%lda, ierr )
 
     len_iwork = 2 + 7*n + 8*pinfo%npcol
     allocate( h_div(pinfo%nrow_local,pinfo%ncol_local), &
@@ -90,9 +125,9 @@ contains
               e(n), iwork(len_iwork) )
 
     ! determine the working memory size from PDSYEVD
-    trilwmin = 3*n + max( nb*(pinfo%nrow_local+1), 3*nb )
-    len_work0 = max( 1+6*n+2*pinfo%nrow_local*pinfo%ncol_local, trilwmin ) + 2*n
-    call PDSYEVD( 'V', 'U', n, h_div, nb, nb, pinfo%desca, e, v_div, nb, nb, pinfo%descz, &
+    trilwmin = 3*n + max( mb*(pinfo%nrow_local+1), 3*mb )
+    len_work0 = max( 1+6*n+2*pinfo%nrow_local*pinfo%ncol_local, trilwmin )
+    call PDSYEVD( 'V', 'L', n, h_div, 1, 1, pinfo%desca, e, v_div, 1, 1, pinfo%descz, &
                   rtmp, -1, iwork, len_iwork, ierr )
     pinfo%len_work = max( nint(rtmp(1))*10, len_work0*10 )
     deallocate( iwork, e, v_div, h_div )
@@ -109,17 +144,17 @@ contains
     real(8), intent(in)  :: h(:,:)
     real(8), intent(out) :: e(:)
     real(8), intent(out) :: v(:,:)
-    integer :: n, nb
+    integer :: n
     integer :: len_iwork
     integer :: i, j, ierr
     integer :: i_loc, j_loc, proc_row, proc_col
-    integer, allocatable :: work(:), iwork(:)
-    real(8), allocatable :: h_div(:,:), v_div(:,:), v_tmp(:,:)
+    integer, allocatable :: iwork(:)
+    real(8), allocatable :: work(:), h_div(:,:), v_div(:,:), v_tmp(:,:)
 
     n  = ubound(h,1)
 
     if (.not. pinfo%flag_blacs_gridinit) then
-      call init_scalapack(pinfo, info, n, 1)
+      call init_scalapack(pinfo, info, n)
     end if
 
     len_iwork = 2 + 7*n + 8*pinfo%npcol
@@ -128,7 +163,7 @@ contains
               v_div(pinfo%nrow_local,pinfo%ncol_local), &
               v_tmp(n,n), iwork(len_iwork), work(pinfo%len_work) )
 
-!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col)
+!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
     do i=1,n
     do j=1,n
       call INFOG2L( i, j, pinfo%desca, pinfo%nprow, pinfo%npcol, pinfo%myrow, pinfo%mycol, i_loc, j_loc, proc_row, proc_col )
@@ -138,11 +173,11 @@ contains
     end do
     end do
 
-    call PDSYEVD( 'V', 'U', n, h_div, nb, nb, pinfo%desca, e, v_div, nb, nb, pinfo%descz, &
+    call PDSYEVD( 'V', 'L', n, h_div, 1, 1, pinfo%desca, e, v_div, 1, 1, pinfo%descz, &
                   work, pinfo%len_work, iwork, len_iwork, ierr )
 
     v_tmp=0d0
-!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col)
+!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
     do i=1,n
     do j=1,n
       call INFOG2L( i, j, pinfo%descz, pinfo%nprow, pinfo%npcol, pinfo%myrow, pinfo%mycol, i_loc, j_loc, proc_row, proc_col )

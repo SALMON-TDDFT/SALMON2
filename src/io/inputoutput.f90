@@ -251,6 +251,7 @@ contains
       & nproc_ob, &
       & nproc_rgrid, &
       & yn_ffte, &
+      & yn_scalapack, &
       & process_allocation
 
     namelist/system/ &
@@ -328,8 +329,7 @@ contains
       & skip_gsortho, &
       & iditer_notemperature, &
       & step_initial_mix_zero,&
-      & yn_gbp, &
-      & yn_pdsyev
+      & yn_gbp
 
     namelist/emfield/ &
       & trans_longi, &
@@ -599,6 +599,7 @@ contains
     nproc_ob             = 0
     nproc_rgrid          = 0
     yn_ffte              = 'n'
+    yn_scalapack         = 'n'
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
@@ -670,7 +671,6 @@ contains
     iditer_notemperature = 10
     step_initial_mix_zero= -1
     yn_gbp        = 'n'
-    yn_pdsyev     = 'n'
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -996,6 +996,7 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
+    call comm_bcast(yn_scalapack        ,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
     call comm_bcast(yn_periodic,nproc_group_global)
@@ -1102,7 +1103,6 @@ contains
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
     call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
     call comm_bcast(yn_gbp                  ,nproc_group_global)
-    call comm_bcast(yn_pdsyev               ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1776,6 +1776,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 
       if(inml_system >0)ierr_nml = ierr_nml +1
@@ -1875,7 +1876,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_pdsyev', yn_pdsyev
 
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
@@ -2193,11 +2193,11 @@ contains
     call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_domain_parallel)
     call yn_argument_check(yn_ffte)
+    call yn_argument_check(yn_scalapack)
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_subspace_diagonalization)
-    call yn_argument_check(yn_pdsyev)
     call yn_argument_check(yn_local_field)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
@@ -2270,6 +2270,13 @@ contains
           end if
        end select
     end select
+
+    if (yn_scalapack == 'y') then
+#ifdef USE_SCALAPACK
+#else
+      stop 'ScaLAPACK does not supported, please reconfiguration and rebuild it.'
+#endif
+    end if
 
   ! for main_tddft
     select case(theory)
