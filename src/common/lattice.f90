@@ -101,36 +101,68 @@ end SUBROUTINE calc_inverse
 SUBROUTINE init_kvector(num_kgrid,system)
   use structures
   use sym_kvector, only: init_sym_kvector
+  use parallelization, only: nproc_id_global, nproc_group_global
+  use communication, only: comm_bcast, comm_sync_all, comm_is_root
+  use salmon_global, only: file_kw
   implicit none
-  integer,intent(in) :: num_kgrid(3)
+  integer            :: num_kgrid(3)
   type(s_dft_system) :: system
   !
-  integer :: ix,iy,iz
+  integer :: ix,iy,iz, i,iu
   integer :: ik,nk
-  real(8) :: shift_k(3),k(3),B(3,3)
+  real(8) :: shift_k(3),B(3,3)  !,k(3)
+  real(8),allocatable :: k(:,:), wtk(:)
 
-  nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+  B = system%primitive_b
+  shift_k(1:3) = 0.5d0
+
+  ! Read from file_kw
+  if(file_kw /= 'none') then
+     if (comm_is_root(nproc_id_global)) then
+        iu = 410
+        open(iu, file=file_kw, status="old")
+        read(iu, *) nk    !, nkxyz_dummy
+        allocate( k(3,nk), wtk(nk) )
+        do ik=1, nk
+           read(iu, *) i, k(1:3,ik), wtk(ik)
+        enddo
+        close(iu)
+     endif
+
+     call comm_bcast(nk,  nproc_group_global)
+     if(.not.allocated(k)) allocate( k(3,nk), wtk(nk) )
+     call comm_bcast(k,  nproc_group_global)
+     call comm_bcast(wtk,nproc_group_global)
+     if( abs(sum(wtk(:))-1d0).ge.1d-5 ) stop "error in wtk (wight of k-point)"
+
+     num_kgrid(:) = -1 
+
+  else
+     nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
+     allocate( k(3,nk), wtk(nk) )
+     do ik=1,nk
+        ix=mod(ik-1,num_kgrid(1))+1
+        iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
+        iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
+        k(1,ik) = (dble(ix)-shift_k(1))/dble(num_kgrid(1))-0.5d0
+        k(2,ik) = (dble(iy)-shift_k(2))/dble(num_kgrid(2))-0.5d0
+        k(3,ik) = (dble(iz)-shift_k(3))/dble(num_kgrid(3))-0.5d0
+     end do
+     wtk(:)  = 1d0/dble(nk)
+
+  endif
+
   system%nk = nk
   if ( allocated(system%vec_k) ) deallocate(system%vec_k)
   if ( allocated(system%wtk)   ) deallocate(system%wtk)
   allocate(system%vec_k(3,nk),system%wtk(nk))
+  system%wtk  = wtk
 
-  system%wtk  = 1d0/dble(nk)
-
-  B = system%primitive_b
-  shift_k(1:3) = 0.5d0
   do ik=1,nk
-    ix=mod(ik-1,num_kgrid(1))+1
-    iy=mod((ik-1)/num_kgrid(1),num_kgrid(2))+1
-    iz=mod((ik-1)/(num_kgrid(1)*num_kgrid(2)),num_kgrid(3))+1
-    k(1) = (dble(ix)-shift_k(1))/dble(num_kgrid(1))-0.5d0
-    k(2) = (dble(iy)-shift_k(2))/dble(num_kgrid(2))-0.5d0
-    k(3) = (dble(iz)-shift_k(3))/dble(num_kgrid(3))-0.5d0
-    system%vec_k(1,ik) = k(1)*B(1,1) + k(2)*B(1,2) + k(3)*B(1,3)
-    system%vec_k(2,ik) = k(1)*B(2,1) + k(2)*B(2,2) + k(3)*B(2,3)
-    system%vec_k(3,ik) = k(1)*B(3,1) + k(2)*B(3,2) + k(3)*B(3,3)
+    system%vec_k(1,ik) = k(1,ik)*B(1,1) + k(2,ik)*B(1,2) + k(3,ik)*B(1,3)
+    system%vec_k(2,ik) = k(1,ik)*B(2,1) + k(2,ik)*B(2,2) + k(3,ik)*B(2,3)
+    system%vec_k(3,ik) = k(1,ik)*B(3,1) + k(2,ik)*B(3,2) + k(3,ik)*B(3,3)
   end do
-
   call init_sym_kvector( system%vec_k, system%wtk, system%nk, B ) 
 
   return

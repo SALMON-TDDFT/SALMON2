@@ -298,7 +298,7 @@ contains
 
     namelist/kgrid/ &
       & num_kgrid, &
-      & file_kw   !currently not implemented (make later) ... only in ARTED code
+      & file_kw
 
     namelist/tgrid/ &
       & nt, &
