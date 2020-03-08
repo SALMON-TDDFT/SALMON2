@@ -22,7 +22,6 @@ subroutine main_tddft
 use math_constants, only: pi
 use salmon_global
 use structures
-use parallelization, only: nproc_id_global
 use communication, only: comm_is_root, comm_sync_all
 use salmon_xc, only: finalize_xc
 use timer
@@ -58,9 +57,7 @@ type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 
-integer :: Mit
-integer :: nntime
-integer :: itt,itotNtime
+integer :: Mit, itt,itotNtime
 
 call timer_begin(LOG_TOTAL)
 

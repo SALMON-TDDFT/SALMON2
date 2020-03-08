@@ -25,7 +25,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
                miter,   &
                iditer_nosubspace_diag,mixing,iter, &
                poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-  use salmon_global, only: calc_mode,iperiodic,method_mixing,mixrate &
+  use salmon_global, only: calc_mode,method_mixing,mixrate &
                         ,yn_subspace_diagonalization,ncg,ncg_init
   use structures
   use timer

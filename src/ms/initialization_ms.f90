@@ -112,7 +112,7 @@ use inputoutput
 
   
   integer :: itotNtime
-  integer :: iob, i,i1,i2,i3, iik,jspin, m, n
+  integer :: iob, i,iik,jspin, m, n  !,i1
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
   real(8) :: rbox_array2(4),tt

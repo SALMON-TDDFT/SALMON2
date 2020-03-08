@@ -820,14 +820,14 @@ subroutine init_nion_div(system,lg,mg,info)
   use structures, only: s_dft_system, s_reciprocal_grid, s_rgrid, s_orbital_parallel
   use inputoutput, only: num_kgrid
   use communication, only: comm_summation, comm_get_groupinfo, comm_is_root
-  use parallelization, only: nproc_id_global
+ !use parallelization, only: nproc_id_global
   implicit none
   type(s_dft_system)  :: system
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
   type(s_orbital_parallel),intent(in) :: info
   logical :: flag_cuboid
-  integer :: irank,nproc,k
+ !integer :: k,irank,nproc
   integer :: ia,j,nc,ix,iy,iz,iia,nion_total
   real(8) :: hgs(3), rion_tmp(3,system%nion), al0(3,3)
   real(8) :: r_mg_min(3), r_mg_max(3), al_min(3), al_max(3), al_len(3)

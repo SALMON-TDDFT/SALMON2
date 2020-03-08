@@ -26,7 +26,6 @@ subroutine main_ms
 use math_constants, only: pi
 use structures
 use inputoutput, only: nx_m, ny_m, nz_m
-use parallelization, only: nproc_group_global, nproc_size_global, nproc_id_global
 use communication, only: comm_is_root, comm_sync_all, comm_create_group, comm_get_groupinfo
 use salmon_xc, only: finalize_xc
 use timer

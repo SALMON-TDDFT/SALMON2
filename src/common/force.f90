@@ -306,7 +306,7 @@ contains
     use structures
     use math_constants,only : pi,zi
     use salmon_math
-    use salmon_global, only: iperiodic,kion,NEwald,aEwald,cutoff_r
+    use salmon_global, only: iperiodic,kion,aEwald,cutoff_r
     use communication, only: comm_summation
     implicit none
     type(s_dft_system),intent(in) :: system

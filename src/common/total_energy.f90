@@ -112,9 +112,8 @@ CONTAINS
     use structures
     use salmon_math
     use math_constants,only : pi,zi
-    use salmon_global, only: kion,NEwald,aEwald, cutoff_r
+    use salmon_global, only: kion,aEwald, cutoff_r
     use communication, only: comm_summation,comm_is_root
-    use parallelization, only: nproc_id_global
     use timer
     implicit none
     type(s_rgrid)           ,intent(in) :: ng
@@ -128,9 +127,8 @@ CONTAINS
     !
     integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(5),E_sum(5)
-    real(8) :: etmp, E_iir
+    real(8) :: etmp
     complex(8) :: rho_e,rho_i
-    integer :: irank,nproc,nion_r,nion_s,nion_e
 
     call timer_begin(LOG_TE_PERIODIC_CALC)
 
@@ -474,7 +472,7 @@ CONTAINS
 !    use math_constants,only : pi,zi
     use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g
     use communication, only: comm_is_root,comm_summation,comm_get_groupinfo
-    use parallelization, only: nproc_id_global,nproc_group_global
+    use parallelization, only: nproc_id_global
     use inputoutput, only: au_length_aa
     use timer
     implicit none
@@ -482,10 +480,10 @@ CONTAINS
     type(s_ewald_ion_ion) :: ewald
     type(s_reciprocal_grid),intent(in) :: fg
     !
-    integer :: ix,iy,iz,iia,ia,ib,ig,ir,ipair
+    integer :: ix,iy,iz,iia,ia,ib,ir,ipair   !,ig
     integer :: npair_bk_max, npair_bk_loc
-    integer :: irank,nproc, k, ig_tmp,ig_sum
-    real(8) :: rr,rab(3),r(3),g(3),G2
+   !integer :: k,irank, nproc, ig_tmp,ig_sum
+    real(8) :: rr,rab(3),r(3) !,g(3),G2
     real(8) :: r1, cutoff_erfc_r, tmp
 
     !(find cut off length)

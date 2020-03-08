@@ -30,10 +30,9 @@ contains
   type(s_process_info),intent(inout) :: pinfo
   logical :: iok
 
-  integer :: j
   integer :: nproc_k, nproc_ob
   integer,dimension(3) :: nproc_d_o
-  integer :: nproc_total_wf,nproc_total_g
+  integer :: nproc_total_wf
   integer :: nproc_id_comm1, nproc_size_comm1
 
   call comm_get_groupinfo(icomm1, nproc_id_comm1, nproc_size_comm1)
@@ -68,7 +67,6 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
   integer :: nproc_size_comm1_tmp
 
   integer :: ii,icount
-  integer :: ir_num_factor2  ! ir means ireduced
   integer :: num_factor2
   integer :: num_factor3
   integer :: num_factor5
