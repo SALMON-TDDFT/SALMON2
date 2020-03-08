@@ -35,12 +35,10 @@ contains
     !
     integer :: fh_k
     integer :: ik,NK
-    real(8) :: wk
     character(100) :: file_k_data
 
     NK = system%nk
     file_k_data = trim(sysname)//'_k.data'!??????
-    wk = 1.0 !??????? wk=1 only (symmetry weight)
 
     if (comm_is_root(nproc_id_global)) then
       fh_k = open_filehandle(file_k_data, status="replace")
@@ -61,7 +59,7 @@ contains
             & system%vec_k(1,ik) / system%primitive_b(1,1), &
             & system%vec_k(2,ik) / system%primitive_b(2,2), &
             & system%vec_k(3,ik) / system%primitive_b(3,3), &
-            & wk !??????? wk=1 only (symmetry weight)
+            & system%wtk(ik)
         end do !ik
         write(fh_k, '("#",1X,A)') "coefficients (2*pi/a [a.u.]) in kx, ky, kz"
         write(fh_k, '(3E23.15E3)') system%primitive_b(1,1), system%primitive_b(2,2), system%primitive_b(3,3) 
@@ -86,7 +84,7 @@ contains
             & system%vec_k(1,ik), &
             & system%vec_k(2,ik), &
             & system%vec_k(3,ik), &
-            & wk !??????? wk=1 only (symmetry weight)
+            & system%wtk(ik)
         end do !ik
       end if
       close(fh_k)
