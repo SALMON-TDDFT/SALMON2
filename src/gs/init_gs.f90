@@ -36,14 +36,23 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   !
   integer :: ik,io,is,a,ix,iy,iz,ip
   real(8) :: xx,yy,zz,x1,y1,z1,rr,Xmax,Ymax,Zmax,q(3)
+  real(8) :: Xzero,Yzero,Zzero
 
   call init_wf_rand
 
+  ! get offset (0-th element)
+  if (yn_periodic == 'y') then
+    Xzero = lg%coordinate(lg%num(1)/2+mod(lg%num(1),2),1)
+    Yzero = lg%coordinate(lg%num(2)/2+mod(lg%num(2),2),2)
+    Zzero = lg%coordinate(lg%num(3)/2+mod(lg%num(3),2),3)
+  else
+    Xzero = 0d0
+    Yzero = 0d0
+    Zzero = 0d0
+  end if
+
   if(system%if_real_orbital) then
 
-    if (yn_periodic == 'y') then
-      call gen_rwf_periodic
-    else
       Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
       do a=1,natom
         if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
@@ -51,7 +60,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
         if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
       end do
 
-      Xmax=Xmax+1.d0/au_length_aa ; Ymax=Ymax+1.d0/au_length_aa ; Zmax=Zmax+1.d0/au_length_aa
+      Xmax=Xmax-Xzero+1.d0/au_length_aa
+      Ymax=Ymax-Yzero+1.d0/au_length_aa
+      Zmax=Zmax-Zzero+1.d0/au_length_aa
 
       do is=1,system%nspin
       do io=1,system%no
@@ -64,7 +75,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+            xx=lg%coordinate(ix,1)-Xzero
+            yy=lg%coordinate(iy,2)-Yzero
+            zz=lg%coordinate(iz,3)-Zzero
             rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
             spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
           end do
@@ -74,16 +87,12 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
         end if
       end do
       end do
-    end if ! yn_periodic == 'y'
 
   else
 
-    if (yn_periodic == 'y') then
-      call gen_zwf_periodic
-    else
-      Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))
-      Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))
-      Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))
+      Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))-Xzero
+      Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))-Yzero
+      Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))-Zzero
 
       do is=1,system%nspin
       do ik=1,system%nk
@@ -98,7 +107,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+            xx=lg%coordinate(ix,1)-Xzero
+            yy=lg%coordinate(iy,2)-Yzero
+            zz=lg%coordinate(iz,3)-Zzero
             rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
             spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
           end do
@@ -109,7 +120,6 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
       end do
       end do
       end do
-    end if ! yn_periodic == 'y'
 
   end if
 
