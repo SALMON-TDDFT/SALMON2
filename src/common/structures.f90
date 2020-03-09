@@ -101,7 +101,7 @@ module structures
 #ifdef USE_SCALAPACK
     logical :: flag_blacs_gridinit
     integer :: iam,nprocs
-    integer,allocatable :: usermap(:,:)
+    integer,allocatable :: gridmap(:,:)
     integer :: nprow,npcol,myrow,mycol
     integer :: nrow_local,ncol_local,lda
     integer :: desca(9), descz(9)

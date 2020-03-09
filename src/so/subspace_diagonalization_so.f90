@@ -44,12 +44,13 @@ contains
     type(s_orbital)            :: spsi,shpsi
     type(s_sendrecv_grid)      :: srg
     !
-    integer :: nspin,no,io,io1,io2,ispin,io_s,io_e,is(3),ie(3),ix,iy,iz,ierr
+    integer :: nspin,no,io,io1,io2,ispin,io_s,io_e,is(3),ie(3),ix,iy,iz
     real(8)   ,dimension(system%nspin,system%no) :: rbox1,rbox2
     real(8),dimension(system%no,system%no,system%nspin) :: mat1,mat2,evec
     real(8) :: cbox
     real(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
     real(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+    real(8) :: eval(system%no)
 
     if ( info%im_s /= 1 .or. info%im_e /= 1 ) stop "error: im/=1 @ subspace_diag"
 
@@ -123,7 +124,7 @@ contains
 
   call timer_begin(LOG_SSDG_SO_ISOLATED_CALC)
   do ispin=1,nspin
-    call eigen_subdiag(mat2(:,:,ispin),evec(:,:,ispin),no,ierr)
+    call eigen_dsyev(mat2(:,:,ispin),eval,evec(:,:,ispin))
   end do
 
 !$omp workshare
@@ -223,11 +224,12 @@ contains
     type(s_orbital)            :: spsi,shpsi
     type(s_sendrecv_grid)      :: srg
     !
-    integer :: nspin,no,nk,ik,io1,io2,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,ierr
+    integer :: nspin,no,nk,ik,io1,io2,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz
     complex(8) :: cbox
     complex(8),allocatable :: mat1(:,:,:), mat2(:,:,:), evec(:,:,:)
     complex(8),allocatable :: wf_io1(:,:,:,:)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
+    real(8) :: eval(system%no)
 
     if ( info%im_s /= 1 .or. info%im_e /= 1 ) stop "error: im/=1 @ subspace_diag"
 
@@ -325,7 +327,7 @@ contains
 
     call timer_begin(LOG_SSDG_SO_PERIODIC_CALC)
     do ik=ik_s,ik_e
-      call eigen_subdiag_periodic( mat2(:,:,ik), evec(:,:,ik), no, ierr )
+      call eigen_zheev( mat2(:,:,ik), eval, evec(:,:,ik) )
     end do
 
 !$omp workshare
