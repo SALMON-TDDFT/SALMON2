@@ -346,13 +346,6 @@ module structures
     integer, allocatable :: imedia(:,:,:) ! Material information
   end type s_fdtd_system
 
-  type s_fdtd_field
-    type(s_scalar) :: phi, rho_em
-    type(s_vector) :: vec_e, vec_h, vec_a, vec_j_em
-    ! Experimental implementation
-    type(s_vector) :: vec_Ac, vec_Ac_old
-  end type s_fdtd_field
-
   type s_opt
      real(8),allocatable :: a_dRion(:), dFion(:)
      real(8),allocatable :: Hess_mat(:,:), Hess_mat_last(:,:)
