@@ -60,6 +60,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
 
 ! parallelization
   call check_ffte_condition(pinfo,lg)
+  call init_scalapack(pinfo,info,system)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,info_field,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
@@ -410,6 +411,39 @@ subroutine init_grid_whole(rsize,hgs,lg)
 
   return
 end subroutine init_grid_whole
+
+!===================================================================================================================================
+
+subroutine init_scalapack(pinfo,info,system)
+  use salmon_global, only: yn_scalapack
+#ifdef USE_SCALAPACK
+  use scalapack_module
+  use communication, only: comm_is_root,comm_sync_all
+#endif
+  use structures
+  implicit none
+  type(s_process_info)                :: pinfo
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_dft_system),intent(in)       :: system
+#ifdef USE_SCALAPACK
+  integer :: n
+#endif
+
+  if (yn_scalapack == 'y') then
+#ifdef USE_SCALAPACK
+    call create_gridmap(pinfo,info)
+    n = system%no
+    call init_blacs(pinfo,info,n)
+    if (n /= system%no) then
+      if (comm_is_root(info%id_rko)) then
+        print '(A,I6)', '[FATAL ERROR] nstate must be ',n
+      end if
+      call comm_sync_all
+      stop
+    end if
+#endif
+  end if
+end subroutine
 
 !===================================================================================================================================
 
