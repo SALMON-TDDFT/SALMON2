@@ -132,14 +132,15 @@ CONTAINS
   ! cf. RSDFT
   subroutine init_wf_rand
     implicit none
-    integer :: s,k,n,i
+    integer :: s,k,n,i,llen
     integer,allocatable :: iseed(:)
 
     call random_seed(size = n)
     allocate(iseed(n))
-    iseed(:) = info%io_s &
-             + (mg%is(3) - lg%is(3)) * mg%num(2) * mg%num(1) &
-             + (mg%is(2) - lg%is(2)) * mg%num(1) &
+    llen = product(lg%num)
+    iseed(:) = (info%ik_s * system%no + info%io_s) * llen &
+             + (mg%is(3) - lg%is(3)) * lg%num(2) * lg%num(1) &
+             + (mg%is(2) - lg%is(2)) * lg%num(1) &
              + (mg%is(1) - lg%is(1))
     call random_seed(put = iseed)
     deallocate(iseed)
