@@ -45,16 +45,13 @@ subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_sendrecv_grid)      :: srg
 
   if (system%if_real_orbital) then
-    if (yn_gbp == 'r') then
-      call ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-    else
-      call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-    end if
+    call ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    !call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
   else
-    if (yn_gbp == 'c') then
+    if (yn_gbp == 'y') then
       call ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
     else
-      call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+      call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
     end if
   end if
 end subroutine
@@ -376,7 +373,6 @@ end subroutine ssdg_rwf
         &                one, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
         &                     evec(info%io_s_all(m):info%io_e_all(m), info%io_s:info%io_e), info%numo_all(m),  &
         &                one, wf2_block(:,:,:,1), nsize_rg )
-
     end do ! m
 
     ! Copy wave function
