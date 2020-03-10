@@ -276,13 +276,6 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   call comm_bcast(if_stop, nproc_group_global)
   if (if_stop) stop 'fail: check_numcpu'
 
-  if (ispin==1) then
-    pinfo%nporbital_spin(1)=(pinfo%nporbital+1)/2
-    pinfo%nporbital_spin(2)= pinfo%nporbital   /2
-  else
-    pinfo%nporbital_spin = 0
-  end if
-
 #ifdef USE_SCALAPACK
   pinfo%flag_blacs_gridinit = .false.
 #endif
