@@ -27,7 +27,7 @@ contains
     implicit none
     integer :: NUMROC
 
-    integer,parameter :: iclose_comm = 1 ! 1: rko, 2: r
+    integer,parameter :: iclose_comm = 2 ! 1: rko, 2: r
 
     type(s_process_info),intent(inout)  :: pinfo
     type(s_orbital_parallel),intent(in) :: info
@@ -76,13 +76,15 @@ contains
       if (pinfo%nprow*pinfo%npcol /= info%isize_r) &
         stop 'eigen_subdiag_scalapack: fatal error, please check nprow and npcol'
 
+      allocate( pinfo%usermap(pinfo%nprow,pinfo%npcol) )
+      pinfo%usermap = -1
       ii = 0
       do iz=0,pinfo%nprgrid(3)-1
       do iy=0,pinfo%nprgrid(2)-1
       do ix=0,pinfo%nprgrid(1)-1
-        ii=ii+1
-        k1=mod(ii-1,pinfo%nprow)
-        k2=(ii-1)/pinfo%nprow
+        ii = ii + 1
+        k1 = mod(ii-1,pinfo%nprow)
+        k2 = (ii-1)/pinfo%nprow
         pinfo%usermap(k1+1,k2+1) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
       end do
       end do

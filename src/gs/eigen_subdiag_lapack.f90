@@ -66,9 +66,9 @@ subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
   allocate(WORK(LWORK))
   allocate(RWORK(3*iter-2))
 
-  call ZHEEV(JOBZ,UPLO,iter,Rmat,iter,W,WORK,LWORK,RWORK,ier2)
-
   evec(:,:)=Rmat(:,:)
+
+  call ZHEEV(JOBZ,UPLO,iter,evec,iter,W,WORK,LWORK,RWORK,ier2)
 
   deallocate(WORK,RWORK)
 
