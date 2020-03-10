@@ -96,7 +96,6 @@ module structures
   type s_process_info
     integer :: npk
     integer :: nporbital
-    integer :: nporbital_spin(2)
     integer :: nprgrid(3)    ! x,y,z
 #ifdef USE_SCALAPACK
     logical :: flag_blacs_gridinit
