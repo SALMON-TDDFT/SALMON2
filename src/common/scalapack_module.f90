@@ -37,10 +37,11 @@ contains
     ! close on icomm_rko
     case(1)
       pinfo%npcol = int(sqrt(dble(info%isize_rko)))
+      pinfo%npcol = pinfo%npcol + mod(pinfo%npcol,2)
       do ii=1,100
         pinfo%nprow=info%isize_rko/pinfo%npcol
         if(pinfo%nprow*pinfo%npcol == info%isize_rko) exit
-        pinfo%npcol=pinfo%npcol+1
+        pinfo%npcol=pinfo%npcol+2
       end do
       if (pinfo%nprow > pinfo%npcol) then
         k1          = pinfo%nprow
@@ -65,10 +66,11 @@ contains
     ! close on icomm_r
     case(2)
       pinfo%npcol = int(sqrt(dble(info%isize_r)))
+      pinfo%npcol = pinfo%npcol + mod(pinfo%npcol,2)
       do ii=1,100
         pinfo%nprow=info%isize_r/pinfo%npcol
         if(pinfo%nprow*pinfo%npcol == info%isize_r) exit
-        pinfo%npcol=pinfo%npcol+1
+        pinfo%npcol=pinfo%npcol+2
       end do
       if (pinfo%nprow > pinfo%npcol) then
         k1          = pinfo%nprow
@@ -184,11 +186,11 @@ contains
     call DESCINIT( pinfo%descz, n, n, mb, nb, 0, 0, ictxt, pinfo%lda, ierr )
 
     len_iwork = 2 + 7*n + 8*pinfo%npcol
+
+    ! determine the working memory size from PDSYEVD
     allocate( h_div(pinfo%nrow_local,pinfo%ncol_local), &
               v_div(pinfo%nrow_local,pinfo%ncol_local), &
               e(n), iwork(len_iwork) )
-
-    ! determine the working memory size from PDSYEVD
     trilwmin = 3*n + max( mb*(pinfo%nrow_local+1), 3*mb )
     len_work0 = max( 1+6*n+2*pinfo%nrow_local*pinfo%ncol_local, trilwmin )
     call PDSYEVD( 'V', 'L', n, h_div, 1, 1, pinfo%desca, e, v_div, 1, 1, pinfo%descz, &
