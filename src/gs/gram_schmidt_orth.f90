@@ -282,9 +282,9 @@ contains
           do jo1 = 1, wfi%numo
 
             ! normalize orbital jo1
-            norm2_tmp = ZDOTC( &
+            norm2_tmp = real( ZDOTC( &
              &      nsize_rg, wf_block(:,:,:,jo1), n_one, &
-             &                wf_block(:,:,:,jo1), n_one ) &
+             &                wf_block(:,:,:,jo1), n_one )) &
              &     * sys%hvol
             if (wfi%if_divide_rspace) then
               call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
