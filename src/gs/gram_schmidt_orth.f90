@@ -322,7 +322,7 @@ contains
           umat_tmp=0.d0
           if( wfi%id_o > m )then
             call zgemm(TRANSA, TRANSB, wfi%numo_max, wfi%numo, nsize_rg,  &
-              &   cmplx(sys%hvol), wf_block_send(:,:,:,1), nsize_rg,  &
+              &   one*sys%hvol, wf_block_send(:,:,:,1), nsize_rg,  &
               &                wf_block(:,:,:,1), nsize_rg,  &
               &          zero, umat_tmp, wfi%numo_max )
 
