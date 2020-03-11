@@ -25,7 +25,6 @@ module subspace_diagonalization
 contains
 
 subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-  use salmon_global, only: yn_gbp
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -48,11 +47,8 @@ subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
     call ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
     !call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
   else
-    if (yn_gbp == 'y') then
-      call ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-    else
-      call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
-    end if
+    call ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    !call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
   end if
 end subroutine
 

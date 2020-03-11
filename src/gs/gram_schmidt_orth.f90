@@ -23,7 +23,6 @@ module gram_schmidt_orth
 contains
 
   subroutine gram_schmidt(sys, rg, wfi, wf, pinfo)
-    use salmon_global, only: yn_gbp
     use timer
     implicit none
     type(s_dft_system),       intent(in)    :: sys
@@ -43,11 +42,8 @@ contains
       call gram_schmidt_col_rblas(sys, rg, wfi, wf, pinfo)
       !call gram_schmidt_col_real8(sys, rg, wfi, wf) !old fashion
     else
-      if (yn_gbp == 'y') then
-        call gram_schmidt_col_cblas(sys, rg, wfi, wf, pinfo)
-      else
-        call gram_schmidt_col_complex8(sys, rg, wfi, wf) !old fashion
-      end if
+      call gram_schmidt_col_cblas(sys, rg, wfi, wf, pinfo)
+      !call gram_schmidt_col_complex8(sys, rg, wfi, wf) !old fashion
     end if
 
     call timer_end(LOG_CALC_GRAM_SCHMIDT)
