@@ -47,6 +47,9 @@ def to_boolean(s):
 
 def gen_inputlist_map(filename):
   inputmap = {}
+  inputmap['nproc_k']            = 1
+  inputmap['nproc_ob']           = 1
+  inputmap['nproc_rgrid']        = [1,1,1]
   inputmap['yn_ffte']            = False
   inputmap['yn_scalapack']       = False
   inputmap['process_allocation'] = 'grid_sequential'
