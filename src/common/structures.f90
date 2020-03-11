@@ -328,13 +328,9 @@ module structures
   ! for Fourier transform
     complex(8),allocatable :: zrhoG_ele(:,:,:)     ! rho_ele(G): Fourier transform of the electron density
   ! for discrete Fourier transform (general)
-    complex(8),allocatable :: ff1(:,:,:),ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:) &
-                           & ,ff2(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
-    real(8),allocatable    :: trho2z(:,:,:),trho3z(:,:,:)
+    complex(8),allocatable :: ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
   ! for FFTE
-    complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
-    complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
-    complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
+    complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)        
   end type s_poisson
 
   type s_fdtd_system
