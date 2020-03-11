@@ -185,13 +185,12 @@ CONTAINS
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        if(fg%if_Gzero(ix,iy,iz)) cycle
         g(1) = fg%vec_G(1,ix,iy,iz)
         g(2) = fg%vec_G(2,ix,iy,iz)
         g(3) = fg%vec_G(3,ix,iy,iz)
         G2 = g(1)**2 + g(2)**2 + g(3)**2
         rho_i = ppg%zrhoG_ion(ix,iy,iz)
-        E_tmp_l = E_tmp_l + sysvol*(4*Pi/G2)*(abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
+        E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
       end do
       end do
       end do
@@ -201,7 +200,7 @@ CONTAINS
     E_wrk = 0d0
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_wrk) &
-!$omp          private(ix,iy,iz,g,G2,rho_i,rho_e,ia,r,Gd,etmp) &
+!$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd,etmp) &
 !$omp          shared(ng,fg,aEwald,system,sysvol,kion,poisson,ppg)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
@@ -209,14 +208,12 @@ CONTAINS
       g(1) = fg%vec_G(1,ix,iy,iz)
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
-      G2 = g(1)**2 + g(2)**2 + g(3)**2
-      rho_e = poisson%zrhoG_ele(ix,iy,iz)
       
-      if(.not.fg%if_Gzero(ix,iy,iz)) then
-        rho_i = ppg%zrhoG_ion(ix,iy,iz)
-        E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)     ! Hartree
-        E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))     ! electron-ion (valence)
-      end if
+      rho_e = poisson%zrhoG_ele(ix,iy,iz)
+      rho_i = ppg%zrhoG_ion(ix,iy,iz)
+      
+      E_wrk(1) = E_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
+      E_wrk(2) = E_wrk(2) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
 
       etmp = 0d0
 
