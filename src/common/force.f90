@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_force(system,pp,fg,info,mg,stencil,srg,ppg,tpsi,ewald)
+  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald)
     use structures
     use math_constants,only : zi,pi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
@@ -39,9 +39,10 @@ contains
     type(s_orbital_parallel),intent(in)    :: info
     type(s_rgrid)           ,intent(in)    :: mg
     type(s_stencil)         ,intent(in)    :: stencil
-    type(s_sendrecv_grid)                  :: srg
+    type(s_poisson)         ,intent(in)    :: poisson
+    type(s_sendrecv_grid)   ,intent(inout) :: srg
     type(s_pp_grid)         ,intent(in)    :: ppg
-    type(s_orbital)                        :: tpsi
+    type(s_orbital)         ,intent(inout) :: tpsi
     type(s_ewald_ion_ion)   ,intent(in)    :: ewald
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
@@ -103,8 +104,8 @@ contains
          G2 = sum(g(:)**2)
          if(G2 .gt. cutoff_g**2) cycle   !xxx
 
-         rho_i = fg%zrhoG_ion(ix,iy,iz)
-         rho_e = fg%zrhoG_ele(ix,iy,iz)
+         rho_i = ppg%zrhoG_ion(ix,iy,iz)
+         rho_e = poisson%zrhoG_ele(ix,iy,iz)
 
     !OCL swp
          do ia=1,nion
@@ -112,7 +113,7 @@ contains
             Gd = sum(g(:)*r(:))
             egd = exp(zI*Gd)
             rtmp = pp%Zps(Kion(ia))* (4*Pi/G2) * exp(-G2/(4*aEwald))
-            VG = fg%zVG_ion(ix,iy,iz,kion(ia)) - 4d0*pi/G2*pp%zps(kion(ia))
+            VG = ppg%zVG_ion(ix,iy,iz,kion(ia)) - 4d0*pi/G2*pp%zps(kion(ia))
             F_tmp(:,ia) = F_tmp(:,ia) + g(:)* ( rtmp * aimag(rho_i*egd) + aimag(egd*rho_e*conjg(VG)) )
          end do
       end do

@@ -19,18 +19,18 @@ module poisson_periodic_sub
 
 contains
 
-subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
+subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   use structures
   use communication, only: comm_summation
   use math_constants, only : pi
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg
-  type(s_rgrid)         ,intent(in) :: ng
-  type(s_field_parallel),intent(in) :: info_field
-  real(8)               ,intent(in) :: trho(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  real(8)                           :: tVh (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  complex(8)                        :: trhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  type(s_poisson)                   :: poisson
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: ng
+  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_scalar)         ,intent(in) :: rho
+  type(s_scalar)                     :: Vh
+  type(s_poisson)                    :: poisson
   !
   integer :: ix,iy,iz,kx,ky,kz
 
@@ -42,7 +42,7 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    poisson%trho2z(ix,iy,iz)=trho(ix,iy,iz)
+    poisson%trho2z(ix,iy,iz) = rho%f(ix,iy,iz)
   end do
   end do
   end do
@@ -57,7 +57,7 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do kz = ng%is(3),ng%ie(3)
   do iy = ng%is(2),ng%ie(2)
   do ix = ng%is(1),ng%ie(1)
-    poisson%ff1y(ix,iy,kz)=sum(poisson%egzc(kz,:)*poisson%trho3z(ix,iy,:))
+    poisson%ff1y(ix,iy,kz) = sum(fg%egzc(kz,:)*poisson%trho3z(ix,iy,:))
   end do
   end do
   end do
@@ -71,7 +71,7 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do kz = ng%is(3),ng%ie(3)
   do ky = ng%is(2),ng%ie(2)
   do ix = ng%is(1),ng%ie(1)
-    poisson%ff1x(ix,ky,kz)=sum(poisson%egyc(ky,:)*poisson%ff2y(ix,:,kz))
+    poisson%ff1x(ix,ky,kz) = sum(fg%egyc(ky,:)*poisson%ff2y(ix,:,kz))
   end do
   end do
   end do
@@ -82,7 +82,7 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do kz = ng%is(3),ng%ie(3)
   do ky = ng%is(2),ng%ie(2)
   do kx = ng%is(1),ng%ie(1)
-    poisson%ff1x(kx,ky,kz)=sum(poisson%egxc(kx,:)*poisson%ff2x(:,ky,kz))/dble(lg%num(1)*lg%num(2)*lg%num(3))
+    poisson%ff1x(kx,ky,kz) = sum(fg%egxc(kx,:)*poisson%ff2x(:,ky,kz))/dble(lg%num(1)*lg%num(2)*lg%num(3))
   end do
   end do
   end do
@@ -97,8 +97,8 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do kz = ng%is(3),ng%ie(3)
   do ky = ng%is(2),ng%ie(2)
   do kx = ng%is(1),ng%ie(1)
-    trhoG_ele(kx,ky,kz) = poisson%ff2x(kx,ky,kz)
-    poisson%ff1z(kx,ky,kz) = poisson%coef(kx,ky,kz)*poisson%ff2x(kx,ky,kz)
+    poisson%zrhoG_ele(kx,ky,kz) = poisson%ff2x(kx,ky,kz)
+    poisson%ff1z(kx,ky,kz) = fg%coef(kx,ky,kz)*poisson%ff2x(kx,ky,kz)
   end do
   end do
   end do
@@ -113,7 +113,7 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do iz = ng%is(3),ng%ie(3)
   do ky = ng%is(2),ng%ie(2)
   do kx = ng%is(1),ng%ie(1)
-    poisson%ff1y(kx,ky,iz)=sum(poisson%egz(:,iz)*poisson%ff2z(kx,ky,:))
+    poisson%ff1y(kx,ky,iz) = sum(fg%egz(:,iz)*poisson%ff2z(kx,ky,:))
   end do
   end do
   end do
@@ -127,7 +127,7 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do iz = ng%is(3),ng%ie(3)
   do iy = ng%is(2),ng%ie(2)
   do kx = ng%is(1),ng%ie(1)
-    poisson%ff1x(kx,iy,iz)=sum(poisson%egy(:,iy)*poisson%ff2y(kx,:,iz))
+    poisson%ff1x(kx,iy,iz) = sum(fg%egy(:,iy)*poisson%ff2y(kx,:,iz))
   end do
   end do
   end do
@@ -137,7 +137,7 @@ subroutine poisson_periodic(lg,ng,info_field,trho,tVh,trhoG_ele,poisson)
   do iz = ng%is(3),ng%ie(3)
   do iy = ng%is(2),ng%ie(2)
   do ix = ng%is(1),ng%ie(1)
-    tVh(ix,iy,iz)=sum(poisson%egx(:,ix)*poisson%ff2x(:,iy,iz))
+    Vh%f(ix,iy,iz) = sum(fg%egx(:,ix)*poisson%ff2x(:,iy,iz))
   end do
   end do
   end do
