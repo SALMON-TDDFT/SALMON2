@@ -306,10 +306,11 @@ module structures
 
   type s_reciprocal_grid
     logical,allocatable :: if_Gzero(:,:,:)
-    real(8),allocatable :: vec_G(:,:,:,:) ! G vector (reciplocal lattice vector)
-    real(8),allocatable :: coef(:,:,:) ! 4*pi/|G|^2 (coefficient of the Poisson equation)
+    real(8),allocatable :: vec_G(:,:,:,:)   ! G vector (reciprocal lattice vector)
+    real(8),allocatable :: coef(:,:,:)      ! 4*pi/|G|^2 (coefficient of the Poisson equation)
+    real(8),allocatable :: exp_ewald(:,:,:) ! exp(-|G|^2/(4*a_Ewald))
     complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
-    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),coef_cGdt(:,:,:) ! for sigle-scale Maxwell-TDDFT
+    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),coef_cGdt(:,:,:) ! for single-scale Maxwell-TDDFT
   end type s_reciprocal_grid
 
 ! Poisson equation
