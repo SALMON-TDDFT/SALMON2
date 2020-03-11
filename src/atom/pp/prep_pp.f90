@@ -447,7 +447,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
 
   endif
 
-  !(Local pseudopotential: Vlocal in G-space(=Vion_G))
+! vion_tmp=V_ion(G): local part of the pseudopotential in the G space
   vion_tmp = 0d0
   rhog_tmp = 0d0
   do ia=1,natom
@@ -470,10 +470,10 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
   end do
   ppg%zrhoG_ion = rhog_tmp
 
-  !(Local pseudopotential: Vlocal(=Vpsl) in real-space)
+! Vpsl=V_ion(r): local part of the pseudopotential in the r space
 
-! cf. poisson_periodic.f90
   if(yn_ffte=='n') then
+  ! cf. poisson_periodic.f90
 
   !$omp workshare
     poisson%ff1x = 0d0
@@ -528,6 +528,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
     end do
   
   else
+  ! cf. poisson_ffte.f90
   
     poisson%a_ffte_tmp=0.d0
   !$OMP parallel do private(iz,iy,ix,iiz,iiy) collapse(2)
