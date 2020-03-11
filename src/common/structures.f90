@@ -248,6 +248,7 @@ module structures
     integer,allocatable :: ia_tbl(:)
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
+    complex(8),allocatable :: zrhoG_ion(:,:,:),zVG_ion(:,:,:,:) ! rho_ion(G),V_ion(G): local part of pseudopotential
     !
     integer,allocatable :: ia_tbl_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
@@ -306,7 +307,9 @@ module structures
   type s_reciprocal_grid
     logical,allocatable :: if_Gzero(:,:,:)
     real(8),allocatable :: vec_G(:,:,:,:) ! G vector (reciplocal lattice vector)
-    complex(8),allocatable :: zrhoG_ion(:,:,:),zrhoG_ele(:,:,:),zVG_ion(:,:,:,:)
+    real(8),allocatable :: coef(:,:,:) ! 4*pi/|G|^2 (coefficient of the Poisson equation)
+    complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
+    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),coef_cGdt(:,:,:) ! for sigle-scale Maxwell-TDDFT
   end type s_reciprocal_grid
 
 ! Poisson equation
@@ -320,19 +323,17 @@ module structures
     integer,allocatable :: ig(:,:,:)               ! grid table for domains to which each multipole belongs
     integer,allocatable :: ig_bound(:,:,:)         ! grid table for boundaries
     real(8),allocatable :: wkbound(:), wkbound2(:) ! values on boundary represented in one-dimentional grid
-  ! Fourier transform
-    real(8),allocatable :: coef(:,:,:) ! 4*pi/|G|^2 (coefficient of Poisson equation)
+    integer :: n_multipole_xyz(3)                  ! number of multipoles
+  ! for Fourier transform
+    complex(8),allocatable :: zrhoG_ele(:,:,:)     ! rho_ele(G): Fourier transform of the electron density
   ! for discrete Fourier transform (general)
     complex(8),allocatable :: ff1(:,:,:),ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:) &
                            & ,ff2(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
     real(8),allocatable    :: trho2z(:,:,:),trho3z(:,:,:)
-    complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
   ! for FFTE
     complex(8),allocatable :: a_ffte(:,:,:)        ! input matrix for Fourier transformation
     complex(8),allocatable :: a_ffte_tmp(:,:,:)    ! work array to make input matrix
     complex(8),allocatable :: b_ffte(:,:,:)        ! output matrix for Fourier transformation
-    integer :: n_multipole_xyz(3)                  ! number of multipoles
-    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),coef_cGdt(:,:,:) ! for sigle-scale Maxwell-TDDFT
   end type s_poisson
 
   type s_fdtd_system
@@ -693,14 +694,5 @@ contains
     type(s_dmatrix) :: dm
     DEAL(dm%zrho_mat)
   end subroutine deallocate_dmatrix
-
-  subroutine deallocate_reciprocal_grid(fg)
-    type(s_reciprocal_grid) :: fg
-    DEAL(fg%vec_G)
-    DEAL(fg%if_Gzero)
-    DEAL(fg%zrhoG_ion)
-    DEAL(fg%zrhoG_ele)
-    DEAL(fg%zVG_ion)
-  end subroutine deallocate_reciprocal_grid
 
 end module structures

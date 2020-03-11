@@ -187,7 +187,7 @@ MD_Loop : do it=1,nt
                            band,1 )
 
    ! force
-   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi,ewald)
+   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
 
    call time_evolution_step_md_part2(system,md)
 

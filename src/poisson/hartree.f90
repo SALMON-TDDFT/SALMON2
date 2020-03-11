@@ -39,7 +39,7 @@ subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg
   type(s_stencil),intent(in) :: stencil
   type(s_scalar) ,intent(in) :: srho
   type(s_scalar)             :: sVh
-  type(s_reciprocal_grid)    :: fg
+  type(s_reciprocal_grid),intent(in) :: fg
 
   select case(iperiodic)
   case(0)
@@ -47,9 +47,9 @@ subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg
   case(3)
     select case(yn_ffte)
     case('n')
-      call poisson_periodic(lg,ng,info_field,srho%f,sVh%f,fg%zrhoG_ele,poisson)
+      call poisson_periodic(lg,ng,info_field,fg,srho,sVh,poisson)
     case('y')
-      call poisson_ffte(lg,ng,info_field,srho%f,sVh%f,fg%zrhoG_ele,poisson)
+      call poisson_ffte(lg,ng,info_field,fg,srho,sVh,poisson)
     end select
   end select
 

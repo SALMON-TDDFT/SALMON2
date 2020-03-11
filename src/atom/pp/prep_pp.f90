@@ -33,9 +33,9 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel)  ,intent(in) :: info_field
-  type(s_reciprocal_grid)             :: fg
+  type(s_reciprocal_grid) ,intent(in) :: fg
   type(s_poisson)                     :: poisson
-  type(s_pp_info)         ,intent(inout) :: pp
+  type(s_pp_info)                     :: pp
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: sVpsl
   !
@@ -139,7 +139,7 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
   case(0)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
   case(3)
-    call calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,sVpsl,property)
+    call calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,sVpsl,ppg,property)
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -383,20 +383,21 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,property)
+subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,property)
   use salmon_global,only : natom, nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg,mg
-  type(s_dft_system)    ,intent(in) :: system
-  type(s_field_parallel),intent(in) :: info_field
-  type(s_pp_info)       ,intent(in) :: pp
-  type(s_reciprocal_grid)           :: fg
-  type(s_poisson)                   :: poisson
-  type(s_scalar)                    :: vpsl
-  character(17)                     :: property
+  type(s_rgrid)          ,intent(in) :: lg,mg
+  type(s_dft_system)     ,intent(in) :: system
+  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_pp_info)        ,intent(in) :: pp
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_poisson)                    :: poisson
+  type(s_scalar)                     :: vpsl
+  type(s_pp_grid)                    :: ppg
+  character(17)                      :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
   real(8) :: g(3),g2,gd,s,g2sq,r1,dr,vloc_av
@@ -405,8 +406,11 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
   complex(8) :: rhog_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
 
   if( property == 'initial' ) then
+  
+    allocate(ppg%zrhoG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) & ! rho_ion(G)
+          & ,ppg%zVG_ion  (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)) ! V_ion(G)
 
-    fg%zVG_ion = 0d0
+    ppg%zVG_ion = 0d0
   !$omp parallel
   !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
     do ik=1,nelem
@@ -433,7 +437,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
             s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
           end do
         end if
-        fg%zVG_ion(ix,iy,iz,ik) = s
+        ppg%zVG_ion(ix,iy,iz,ik) = s
       end do
       end do
       end do
@@ -458,7 +462,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
       gd = g(1)*system%rion(1,ia) + g(2)*system%rion(2,ia) + g(3)*system%rion(3,ia)
       g2 = g(1)**2 + g(2)**2 + g(3)**2
       tmp_exp = exp(-zi*gd)/system%det_A
-      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + fg%zVG_ion(ix,iy,iz,ik)*tmp_exp
+      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + ppg%zVG_ion(ix,iy,iz,ik)*tmp_exp
       rhog_tmp(ix,iy,iz) = rhog_tmp(ix,iy,iz) + pp%zps(ik)*tmp_exp
       if(fg%if_Gzero(ix,iy,iz)) cycle
       !(add coulomb as dvloc_g is given by Vloc - coulomb)
@@ -468,7 +472,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     end do
 !$omp end parallel do
   end do
-  fg%zrhoG_ion = rhog_tmp
+  ppg%zrhoG_ion = rhog_tmp
 
   !(Local pseudopotential: Vlocal(=Vpsl) in real-space)
 
@@ -502,7 +506,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do iz = mg%is(3),mg%ie(3)
     do ky = mg%is(2),mg%ie(2)
     do kx = mg%is(1),mg%ie(1)
-      poisson%ff1y(kx,ky,iz)=sum(poisson%egz(:,iz)*poisson%ff2z(kx,ky,:))
+      poisson%ff1y(kx,ky,iz)=sum(fg%egz(:,iz)*poisson%ff2z(kx,ky,:))
     end do
     end do
     end do
@@ -512,7 +516,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do iz = mg%is(3),mg%ie(3)
     do iy = mg%is(2),mg%ie(2)
     do kx = mg%is(1),mg%ie(1)
-      poisson%ff1x(kx,iy,iz)=sum(poisson%egy(:,iy)*poisson%ff2y(kx,:,iz))
+      poisson%ff1x(kx,iy,iz)=sum(fg%egy(:,iy)*poisson%ff2y(kx,:,iz))
     end do
     end do
     end do
@@ -522,7 +526,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do iz = mg%is(3),mg%ie(3)
     do iy = mg%is(2),mg%ie(2)
     do ix = mg%is(1),mg%ie(1)
-      Vpsl%f(ix,iy,iz) = sum(poisson%egx(:,ix)*poisson%ff2x(:,iy,iz))
+      Vpsl%f(ix,iy,iz) = sum(fg%egx(:,ix)*poisson%ff2x(:,iy,iz))
     end do
     end do
     end do

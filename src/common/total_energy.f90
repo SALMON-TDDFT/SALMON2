@@ -108,7 +108,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,rion_update,energy)
+  SUBROUTINE calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     use structures
     use salmon_math
     use math_constants,only : pi,zi
@@ -121,7 +121,9 @@ CONTAINS
     type(s_dft_system)      ,intent(in) :: system
     type(s_orbital_parallel),intent(in) :: info
     type(s_pp_info)         ,intent(in) :: pp
+    type(s_pp_grid)         ,intent(in) :: ppg
     type(s_reciprocal_grid) ,intent(in) :: fg
+    type(s_poisson)         ,intent(in) :: poisson
     logical                 ,intent(in) :: rion_update
     type(s_dft_energy)                  :: energy
     !
@@ -179,7 +181,7 @@ CONTAINS
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_tmp_l) &
 !$omp          private(ix,iy,iz,g,g2,rho_i) &
-!$omp          shared(fg,aEwald,sysvol,ng)
+!$omp          shared(fg,aEwald,sysvol,ng,ppg)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
@@ -188,7 +190,7 @@ CONTAINS
         g(2) = fg%vec_G(2,ix,iy,iz)
         g(3) = fg%vec_G(3,ix,iy,iz)
         G2 = g(1)**2 + g(2)**2 + g(3)**2
-        rho_i = fg%zrhoG_ion(ix,iy,iz)
+        rho_i = ppg%zrhoG_ion(ix,iy,iz)
         E_tmp_l = E_tmp_l + sysvol*(4*Pi/G2)*(abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
       end do
       end do
@@ -200,7 +202,7 @@ CONTAINS
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_wrk) &
 !$omp          private(ix,iy,iz,g,G2,rho_i,rho_e,ia,r,Gd,etmp) &
-!$omp          shared(ng,fg,aEwald,system,sysvol,kion)
+!$omp          shared(ng,fg,aEwald,system,sysvol,kion,poisson,ppg)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -208,10 +210,10 @@ CONTAINS
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
       G2 = g(1)**2 + g(2)**2 + g(3)**2
-      rho_e = fg%zrhoG_ele(ix,iy,iz)
+      rho_e = poisson%zrhoG_ele(ix,iy,iz)
       
       if(.not.fg%if_Gzero(ix,iy,iz)) then
-        rho_i = fg%zrhoG_ion(ix,iy,iz)
+        rho_i = ppg%zrhoG_ion(ix,iy,iz)
         E_wrk(1) = E_wrk(1) + sysvol*(4*Pi/G2)*(abs(rho_e)**2*0.5d0)     ! Hartree
         E_wrk(2) = E_wrk(2) + sysvol*(4*Pi/G2)*(-rho_e*conjg(rho_i))     ! electron-ion (valence)
       end if
@@ -224,7 +226,7 @@ CONTAINS
       do ia=1,system%nion
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        etmp = etmp + conjg(rho_e)*fg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+        etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
       end do
       E_wrk(3) = E_wrk(3) + etmp
     end do

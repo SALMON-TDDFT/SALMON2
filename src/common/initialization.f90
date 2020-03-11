@@ -665,10 +665,10 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   allocate(fg%if_Gzero(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%coef(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(fg%coef(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   fg%if_Gzero = .false.
   fg%vec_G = 0d0
-  poisson%coef = 0d0
+  fg%coef = 0d0
   
   if(yn_ffte=='y') then
     if(.not.allocated(poisson%a_ffte))then
@@ -676,13 +676,13 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
       allocate(poisson%a_ffte_tmp(lg%num(1),ng%num(2),ng%num(3)))
       allocate(poisson%b_ffte    (lg%num(1),ng%num(2),ng%num(3)))
     ! for single-scale Maxwell-TDDFT
-      allocate(poisson%coef_nabla(lg%num(1),lg%num(2),lg%num(3),3))
-      allocate(poisson%coef_gxgy0(lg%num(1),lg%num(2),lg%num(3)))
-      allocate(poisson%coef_cGdt (lg%num(1),lg%num(2),lg%num(3)))
+      allocate(fg%coef_nabla(lg%num(1),lg%num(2),lg%num(3),3))
+      allocate(fg%coef_gxgy0(lg%num(1),lg%num(2),lg%num(3)))
+      allocate(fg%coef_cGdt (lg%num(1),lg%num(2),lg%num(3)))
     end if
-    poisson%coef_nabla = 0d0
-    poisson%coef_gxgy0 = 1d0
-    poisson%coef_cGdt  = 0d0
+    fg%coef_nabla = 0d0
+    fg%coef_gxgy0 = 1d0
+    fg%coef_cGdt  = 0d0
     
   ! FFTE initialization step
     call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
@@ -706,22 +706,29 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     fg%vec_G(3,ix,iy,iz) = g(3)
     G2 = g(1)**2+g(2)**2+g(3)**2
     if(fg%if_Gzero(ix,iy,iz)) then
-      poisson%coef(ix,iy,iz) = 0.d0
+      fg%coef(ix,iy,iz) = 0.d0
     else
-      poisson%coef(ix,iy,iz) = 4.d0*pi/G2
+      fg%coef(ix,iy,iz) = 4.d0*pi/G2
     end if
     if(yn_ffte=='y') then
     ! for single-scale Maxwell-TDDFT
-      poisson%coef_nabla(ix,iy,iz,1) = -zi*g(1)
-      poisson%coef_nabla(ix,iy,iz,2) = -zi*g(2)
-      poisson%coef_nabla(ix,iy,iz,3) = -zi*g(3)
-      if(ix==1.and.iy==1) poisson%coef_gxgy0(ix,iy,iz) = 0d0
-      poisson%coef_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
+      fg%coef_nabla(ix,iy,iz,1) = -zi*g(1)
+      fg%coef_nabla(ix,iy,iz,2) = -zi*g(2)
+      fg%coef_nabla(ix,iy,iz,3) = -zi*g(3)
+      if(ix==1.and.iy==1) fg%coef_gxgy0(ix,iy,iz) = 0d0
+      fg%coef_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
     end if
     
   enddo
   enddo
   enddo
+  
+  allocate(fg%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+  allocate(fg%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+  allocate(fg%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+  allocate(fg%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+  allocate(fg%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+  allocate(fg%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
   
   allocate(poisson%ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(poisson%ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
@@ -731,12 +738,6 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   allocate(poisson%ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
   allocate(poisson%ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
   allocate(poisson%ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
-  allocate(poisson%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
-  allocate(poisson%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
-  allocate(poisson%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
-  allocate(poisson%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
-  allocate(poisson%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
   allocate(poisson%trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
   allocate(poisson%trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
   
@@ -744,30 +745,28 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   do ix=lg%is(1),lg%ie(1)
     do kx=lg%is(1),lg%ie(1)
       tmp = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg%num(1))))
-      poisson%egx(kx,ix)  = tmp
-      poisson%egxc(kx,ix) = conjg(tmp)
+      fg%egx(kx,ix)  = tmp
+      fg%egxc(kx,ix) = conjg(tmp)
     end do
   end do
 !$OMP parallel do private(iy,ky,tmp)
   do iy=lg%is(2),lg%ie(2)
     do ky=lg%is(2),lg%ie(2)
       tmp = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg%num(2))))
-      poisson%egy(ky,iy)  = tmp
-      poisson%egyc(ky,iy) = conjg(tmp)
+      fg%egy(ky,iy)  = tmp
+      fg%egyc(ky,iy) = conjg(tmp)
     end do
   end do
 !$OMP parallel do private(iz,kz,tmp)
   do iz=lg%is(3),lg%ie(3)
     do kz=lg%is(3),lg%ie(3)
       tmp = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg%num(3))))
-      poisson%egz(kz,iz)  = tmp
-      poisson%egzc(kz,iz) = conjg(tmp)
+      fg%egz(kz,iz)  = tmp
+      fg%egzc(kz,iz) = conjg(tmp)
     end do
   end do
 
-  allocate(fg%zrhoG_ion(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) & ! rho_ion(G)
-        & ,fg%zrhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) & ! rho_ele(G)
-        & ,fg%zVG_ion  (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),nelem)) ! V_ion(G)
+  allocate(poisson%zrhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))) 
 
   return
 end subroutine init_reciprocal_grid

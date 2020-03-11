@@ -228,7 +228,7 @@ if(yn_out_tm  == 'y') then
 end if
 
 ! force
-   call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi,ewald)
+   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
       do iatom=1,natom
