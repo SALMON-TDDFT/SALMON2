@@ -180,17 +180,13 @@ CONTAINS
 
 !$omp parallel do default(none) &
 !$omp          reduction(+:E_tmp_l) &
-!$omp          private(ix,iy,iz,g,g2,rho_i) &
+!$omp          private(ix,iy,iz,rho_i) &
 !$omp          shared(fg,aEwald,sysvol,ng,ppg)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        g(1) = fg%vec_G(1,ix,iy,iz)
-        g(2) = fg%vec_G(2,ix,iy,iz)
-        g(3) = fg%vec_G(3,ix,iy,iz)
-        G2 = g(1)**2 + g(2)**2 + g(3)**2
         rho_i = ppg%zrhoG_ion(ix,iy,iz)
-        E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2*exp(-G2/(4*aEwald))*0.5d0) ! ewald (--> Rion_update)
+        E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2 * fg%exp_ewald(ix,iy,iz) *0.5d0) ! ewald (--> Rion_update)
       end do
       end do
       end do

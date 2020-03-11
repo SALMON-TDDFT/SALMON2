@@ -646,7 +646,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   use structures
   use math_constants,  only : pi,zi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,nelem,yn_ffte
+  use salmon_global, only: dt,nelem,yn_ffte,aEwald
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: ng
@@ -666,9 +666,11 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   allocate(fg%if_Gzero(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(fg%coef(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(fg%exp_ewald(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   fg%if_Gzero = .false.
   fg%vec_G = 0d0
   fg%coef = 0d0
+  fg%exp_ewald = 0d0
   
   if(yn_ffte=='y') then
     if(.not.allocated(poisson%a_ffte))then
@@ -710,6 +712,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     else
       fg%coef(ix,iy,iz) = 4.d0*pi/G2
     end if
+    fg%exp_ewald(ix,iy,iz) = exp(-G2/(4d0*aEwald))
     if(yn_ffte=='y') then
     ! for single-scale Maxwell-TDDFT
       fg%coef_nabla(ix,iy,iz,1) = -zi*g(1)

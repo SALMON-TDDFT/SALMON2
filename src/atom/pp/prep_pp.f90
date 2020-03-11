@@ -400,7 +400,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
   character(17)                      :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
-  real(8) :: g(3),g2,gd,s,g2sq,r1,dr,vloc_av
+  real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
   complex(8) :: tmp_exp
   complex(8) :: vion_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8) :: rhog_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
@@ -452,7 +452,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
   rhog_tmp = 0d0
   do ia=1,natom
     ik=kion(ia)
-!$omp parallel do private(ix,iy,iz,g,g2,gd,tmp_exp)
+!$omp parallel do private(ix,iy,iz,g,gd,tmp_exp)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -460,13 +460,9 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
       gd = g(1)*system%rion(1,ia) + g(2)*system%rion(2,ia) + g(3)*system%rion(3,ia)
-      g2 = g(1)**2 + g(2)**2 + g(3)**2
       tmp_exp = exp(-zi*gd)/system%det_A
-      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + ppg%zVG_ion(ix,iy,iz,ik)*tmp_exp
+      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp
       rhog_tmp(ix,iy,iz) = rhog_tmp(ix,iy,iz) + pp%zps(ik)*tmp_exp
-      if(fg%if_Gzero(ix,iy,iz)) cycle
-      !(add coulomb as dvloc_g is given by Vloc - coulomb)
-      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) -4d0*pi/g2*pp%zps(ik)*tmp_exp
     end do
     end do
     end do

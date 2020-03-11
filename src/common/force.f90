@@ -112,7 +112,7 @@ contains
             r = system%Rion(1:3,ia)
             Gd = sum(g(:)*r(:))
             egd = exp(zI*Gd)
-            rtmp = pp%Zps(Kion(ia))* fg%coef(ix,iy,iz) * exp(-G2/(4*aEwald))
+            rtmp = pp%Zps(Kion(ia))* fg%coef(ix,iy,iz) * fg%exp_ewald(ix,iy,iz)
             VG = ppg%zVG_ion(ix,iy,iz,kion(ia)) - fg%coef(ix,iy,iz) * pp%zps(kion(ia))
             F_tmp(:,ia) = F_tmp(:,ia) + g(:)* ( rtmp * aimag(rho_i*egd) + aimag(egd*rho_e*conjg(VG)) )
          end do
