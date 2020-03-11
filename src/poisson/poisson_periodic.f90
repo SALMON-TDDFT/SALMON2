@@ -35,19 +35,19 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   integer :: ix,iy,iz,kx,ky,kz
 
 !$omp workshare
-  poisson%trho2z = 0d0
+  poisson%ff1z = 0d0
 !$omp end workshare
 
 !$OMP parallel do private(iz,iy,ix)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    poisson%trho2z(ix,iy,iz) = rho%f(ix,iy,iz)
+    poisson%ff1z(ix,iy,iz) = cmplx(rho%f(ix,iy,iz))
   end do
   end do
   end do
 
-  call comm_summation(poisson%trho2z,poisson%trho3z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
+  call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
 
 !$omp workshare
   poisson%ff1y = 0d0
@@ -57,7 +57,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   do kz = ng%is(3),ng%ie(3)
   do iy = ng%is(2),ng%ie(2)
   do ix = ng%is(1),ng%ie(1)
-    poisson%ff1y(ix,iy,kz) = sum(fg%egzc(kz,:)*poisson%trho3z(ix,iy,:))
+    poisson%ff1y(ix,iy,kz) = sum(fg%egzc(kz,:)*poisson%ff2z(ix,iy,:))
   end do
   end do
   end do

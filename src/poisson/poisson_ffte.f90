@@ -35,24 +35,18 @@ subroutine poisson_ffte(lg,ng,info_field,fg,rho,Vh,poisson)
   integer :: iiy,iiz,iix
   real(8) :: inv_lgnum3
 
-  if(.not.allocated(poisson%a_ffte) .or. &
-     .not.allocated(poisson%b_ffte) .or. &
-     .not.allocated(poisson%a_ffte_tmp))then
-    stop 'poisson_ffte: array is not allocated'
-  end if
-
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
-  poisson%a_ffte_tmp=0.d0
+  poisson%b_ffte=0.d0
 !$OMP parallel do private(iiz,iiy,ix) collapse(2)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
-    poisson%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz) = rho%f(ng%is(1):ng%ie(1),iiy,iiz)
+    poisson%b_ffte(ng%is(1):ng%ie(1),iy,iz) = cmplx(rho%f(ng%is(1):ng%ie(1),iiy,iiz))
   end do
   end do
-  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
+  call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
 
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
                     info_field%isize(2),info_field%isize(3),-1, &
