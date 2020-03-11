@@ -218,6 +218,7 @@ module salmon_pp
     allocate(pp%tau_nlcc_tbl(nrmax,nelem))
   
     allocate(pp%vpp(0:nrmax0,0:2*lmax0+2),pp%upp(0:nrmax0,0:2*lmax0+1))
+    pp%vpp=0d0; pp%upp=0d0
     allocate(pp%dvpp(0:nrmax0,0:2*lmax0+2),pp%dupp(0:nrmax0,0:2*lmax0+1))
     allocate(pp%vpp_f(0:nrmax0,0:2*lmax0+2,nelem),pp%upp_f(0:nrmax0,0:2*lmax0+1,nelem))
 
