@@ -312,7 +312,7 @@ end subroutine ssdg_rwf
       call timer_begin(LOG_SSDG_PERIODIC_CALC)
       hmat_block_tmp = 0d0
       call zgemm('C', 'N', info%numo_all(m), info%numo, nsize_rg,  &
-        &   cmplx(system%hvol), wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
+        &   one*system%hvol, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
         &                       wf2_block(:,:,:,1), nsize_rg,  &
         &                  zero, hmat_block_tmp(1:info%numo_all(m),1:info%numo), info%numo_all(m) )
       call timer_end(LOG_SSDG_PERIODIC_CALC)
