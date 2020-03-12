@@ -235,6 +235,7 @@ end subroutine ssdg_rwf
   !===================================================================================================================================
 
   subroutine ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    use salmon_global, only: yn_scalapack
     use structures
     use communication, only: comm_summation,comm_bcast
     use timer
@@ -341,7 +342,17 @@ end subroutine ssdg_rwf
 
 
     call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
-    call eigen_zheev(hmat, eval, evec)
+
+    if(yn_scalapack=='y') then
+#ifdef USE_SCALAPACK
+     call eigen_pzheevd(pinfo, info, hmat, eval, evec)
+#else
+     stop "ScaLAPACK does not enabled, please check your build configuration."
+#endif
+    else
+      call eigen_zheev(hmat, eval, evec)
+    end if
+
     call timer_end(LOG_SSDG_PERIODIC_EIGEN)
 
 

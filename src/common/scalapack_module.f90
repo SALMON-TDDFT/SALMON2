@@ -154,11 +154,8 @@ contains
     integer,intent(in) :: m
 
     integer :: n,mb,nb
-    integer :: len_iwork,len_work0,trilwmin
+    integer :: len_iwork
     integer :: ictxt,ierr
-    real(8) :: rtmp(1)
-    integer, allocatable :: iwork(:)
-    real(8), allocatable :: h_div(:,:), v_div(:,:), e(:)
 
     if (pinfo%flag_blacs_gridinit) return
 
@@ -185,20 +182,58 @@ contains
     call DESCINIT( pinfo%desca, n, n, mb, nb, 0, 0, ictxt, pinfo%lda, ierr )
     call DESCINIT( pinfo%descz, n, n, mb, nb, 0, 0, ictxt, pinfo%lda, ierr )
 
+    ! determine the working memory size of PDSYEVD and PZHEEVD
     len_iwork = 2 + 7*n + 8*pinfo%npcol
-
-    ! determine the working memory size from PDSYEVD
-    allocate( h_div(pinfo%nrow_local,pinfo%ncol_local), &
-              v_div(pinfo%nrow_local,pinfo%ncol_local), &
-              e(n), iwork(len_iwork) )
-    trilwmin = 3*n + max( mb*(pinfo%nrow_local+1), 3*mb )
-    len_work0 = max( 1+6*n+2*pinfo%nrow_local*pinfo%ncol_local, trilwmin )
-    call PDSYEVD( 'V', 'L', n, h_div, 1, 1, pinfo%desca, e, v_div, 1, 1, pinfo%descz, &
-                  rtmp, -1, iwork, len_iwork, ierr )
-    pinfo%len_work = max( nint(rtmp(1))*10, len_work0*10 )
-    deallocate( iwork, e, v_div, h_div )
+    call set_from_pdsyevd
+    call set_from_pzheevd
 
     pinfo%flag_blacs_gridinit = .true.
+
+    return
+
+  contains
+    subroutine set_from_pdsyevd
+      implicit none
+      real(8), allocatable :: h_div(:,:), v_div(:,:), e(:)
+      real(8) :: rtmp(1)
+      integer :: itmp(1)
+      integer :: len_work0,trilwmin
+
+      allocate( h_div(pinfo%nrow_local,pinfo%ncol_local), &
+                v_div(pinfo%nrow_local,pinfo%ncol_local), e(n) )
+
+      trilwmin = 3*n + max( mb*(pinfo%nrow_local+1), 3*mb )
+      len_work0 = max( 1+6*n+2*pinfo%nrow_local*pinfo%ncol_local, trilwmin )
+
+      call PDSYEVD( 'V', 'L', n, h_div, 1, 1, pinfo%desca, e, v_div, 1, 1, pinfo%descz, &
+                    rtmp, -1, itmp, len_iwork, ierr )
+
+      pinfo%len_work = max( nint(rtmp(1))*10, len_work0*10 )
+
+      deallocate( e, v_div, h_div )
+    end subroutine
+
+    subroutine set_from_pzheevd
+      implicit none
+      complex(8), allocatable :: h_div(:,:), v_div(:,:)
+      real(8), allocatable    :: e(:)
+      real(8)    :: rtmp(1)
+      complex(8) :: ctmp(1)
+      integer    :: itmp(1)
+
+      allocate( h_div(pinfo%nrow_local,pinfo%ncol_local), &
+                v_div(pinfo%nrow_local,pinfo%ncol_local), e(n) )
+
+      call PZHEEVD( 'V', 'L', n, h_div, 1, 1, pinfo%desca, e, v_div, 1, 1, pinfo%descz, &
+                    ctmp, -1, rtmp, -1, itmp, len_iwork, ierr )
+
+      pinfo%len_work = max( pinfo%len_work, n+(pinfo%nrow_local+pinfo%ncol_local+mb)*mb )
+      pinfo%len_work = max( pinfo%len_work, nint(real(ctmp(1))) )
+
+      pinfo%len_rwork = max( nint(rtmp(1)), (1+8*n+2*pinfo%nrow_local*pinfo%ncol_local)*2 )
+
+      deallocate( e, v_div, h_div )
+    end subroutine
   end subroutine init_blacs
 
 end module scalapack_module
