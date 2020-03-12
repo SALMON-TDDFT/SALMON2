@@ -35,7 +35,7 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
   integer,parameter :: iter_mb=0
   real(8),parameter :: omega0=0.01d0
   integer :: iter_s,iter_e
-  integer :: i,j
+  integer :: i,j,k
   real(8),allocatable :: vecf(:,:)
   real(8) :: vecr_tmp(1:nl)
   real(8),allocatable :: del_vecf(:,:),del_vecx(:,:)
@@ -51,11 +51,21 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
      if(flag_mix_zero) amix=0d0
   endif
 
-  vecr_out(1:nl,iter_mod)=vecr(1:nl)
+!$omp parallel do private(i)
+  do i=1,nl
+    vecr_out(i,iter_mod)=vecr(i)
+  end do
+
   if (iter <= iter_mb+1) then
     allocate(vecf(1:nl,iter:iter))
-    vecf(1:nl,iter)=vecr_out(1:nl,iter_mod)-vecr_in(1:nl,iter_mod)
-    vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+amix*vecf(1:nl,iter)
+!$omp parallel do private(i)
+    do i=1,nl
+      vecf(i,iter) = vecr_out(i,iter_mod) - vecr_in(i,iter_mod)
+    end do
+!$omp parallel do private(i)
+    do i=1,nl
+      vecr_in(i,iter_mod+1) = vecr_in(i,iter_mod) + amix*vecf(i,iter)
+    end do
     deallocate(vecf)
   else
     iter_s=max(iter_mb+1+(iter_mod-iter),iter_mod-nmemory_mb)
@@ -72,23 +82,41 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
       allocate(ss_tmp2(iter_s:iter_e))
     end if
 
-    vecf(1:nl,iter_s:iter_mod)=vecr_out(1:nl,iter_s:iter_mod)  &
-                             -vecr_in(1:nl,iter_s:iter_mod)
-    omega_mb(iter_s:iter_e)=1.d0
+    omega_mb(:) = 1.d0 !???
+
+!$omp parallel do private(i,j) collapse(2)
+    do i=iter_s,iter_mod
+    do j=1,nl
+      vecf(j,i) = vecr_out(j,i) - vecr_in(j,i)
+    end do
+    end do
+
+!$omp parallel do private(i) collapse(2)
     do i=iter_s,iter_e
-      del_vecx(1:nl,i)=vecr_in(1:nl,i+1)-vecr_in(1:nl,i)
-      del_vecf(1:nl,i)=vecf(1:nl,i+1)-vecf(1:nl,i)
+    do j=1,nl
+      del_vecx(j,i)=vecr_in(j,i+1)-vecr_in(j,i)
+      del_vecf(j,i)=vecf   (j,i+1)-vecf   (j,i)
+    end do
     end do
 
     if(present(icomm)) then
+!$omp parallel do private(i,j,ss)
       do i=iter_s,iter_e
-        ss_tmp1(i)=sum(del_vecf(1:nl,i)**2)
+        ss = 0d0
+        do j=1,nl
+          ss = ss + del_vecf(j,i)**2
+        end do
+        ss_tmp1(i) = ss
       end do
       call comm_summation(ss_tmp1,ss_tmp2,iter_e-iter_s+1,icomm)
+
+!$omp parallel do private(i,j,ss) collapse(2)
       do i=iter_s,iter_e
-        ss=sqrt(ss_tmp2(i))
-        del_vecx(1:nl,i)=del_vecx(1:nl,i)/ss
-        del_vecf(1:nl,i)=del_vecf(1:nl,i)/ss
+      do j=1,nl
+        ss = sqrt(ss_tmp2(i))
+        del_vecx(j,i)=del_vecx(j,i)/ss
+        del_vecf(j,i)=del_vecf(j,i)/ss
+      end do
       end do
     else 
       do i=iter_s,iter_e
@@ -99,19 +127,26 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
     end if
 
     if(present(icomm)) then
+!$omp parallel do collapse(2) private(i,j,k,ss)
       do i=1,iter_e-iter_s+1
-        do j=1,iter_e-iter_s+1
-          aa_tmp1(i,j)=sum(del_vecf(1:nl,iter_s-1+i)*del_vecf(1:nl,iter_s-1+j))
+      do j=1,iter_e-iter_s+1
+        ss = 0d0
+        do k=1,nl
+          ss = ss + del_vecf(k,iter_s-1+i)*del_vecf(k,iter_s-1+j)
         end do
+        aa_tmp1(i,j) = ss
+      end do
       end do
       call comm_summation(aa_tmp1,aa,(iter_e-iter_s+1)**2,icomm)
+
+!$omp parallel do collapse(2) private(i,j)
       do i=1,iter_e-iter_s+1
-        do j=1,iter_e-iter_s+1
-          aa(i,j)=omega_mb(iter_s-1+i)*omega_mb(iter_s-1+j)*aa(i,j)
-          if(i==j)then
-            aa(i,j)=aa(i,j)+omega0**2
-          end if
-        end do
+      do j=1,iter_e-iter_s+1
+        aa(i,j)=omega_mb(iter_s-1+i)*omega_mb(iter_s-1+j)*aa(i,j)
+        if(i==j)then
+          aa(i,j)=aa(i,j)+omega0**2
+        end if
+      end do
       end do
     else
       do i=1,iter_e-iter_s+1
@@ -126,18 +161,34 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
 
     call matrix_inverse(aa)
 
-    beta(iter_s:iter_e,iter_s:iter_e)=aa(1:iter_e-iter_s+1,1:iter_e-iter_s+1)
+!$omp parallel do private(i,j) collapse(2)
+    do i=iter_s,iter_e
+    do j=iter_s,iter_e
+      beta(i,j) = aa(i-iter_s+1, j-iter_s+1)
+    end do
+    end do
+
     if(present(icomm)) then
+!$omp parallel do private(i,j,ss)
       do i=iter_s,iter_e
-        ss_tmp1(i)=sum(del_vecf(:,i)*vecf(:,iter_mod))
+        ss = 0d0
+        do j=1,nl
+          ss = ss + del_vecf(j,i)*vecf(j,iter_mod)
+        end do
+        ss_tmp1(i) = ss
       end do
       call comm_summation(ss_tmp1,ss_tmp2,iter_e-iter_s+1,icomm)
+
       vecr_tmp(1:nl)=0.d0
-      do i=iter_s,iter_e
-      do j=iter_s,iter_e
-         vecr_tmp(1:nl)=vecr_tmp(1:nl)&
-              &+omega_mb(i)*omega_mb(j)*beta(i,j)*ss_tmp2(i)*(amix*del_vecf(1:nl,j)+del_vecx(1:nl,j))
-      end do
+!$omp parallel do private(k,i,j,ss)
+      do k=1,nl
+        ss = 0d0
+        do j=iter_s,iter_e
+        do i=iter_s,iter_e
+          ss = ss + omega_mb(i) * omega_mb(j) * beta(i,j) * ss_tmp2(i) * (amix * del_vecf(k,j) + del_vecx(k,j))
+        end do
+        end do
+        vecr_tmp(k) = ss
       end do
     else 
       vecr_tmp(1:nl)=0.d0
@@ -148,11 +199,15 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
       end do
       end do
     end if
-  
-    vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+amix*vecf(1:nl,iter_mod)-vecr_tmp(1:nl)
+
+!$omp parallel do private(i)
+    do i=1,nl
+      vecr_in(i,iter_mod+1)=vecr_in(i,iter_mod)+amix*vecf(i,iter_mod)-vecr_tmp(i)
+    end do
 
     if(present(icomm)) then
       nnegative_tmp=0
+!$omp parallel do private(i) reduction(+:nnegative_tmp)
       do i=1,nl
         if(vecr_in(i,iter_mod+1) < 0.d0) then
           nnegative_tmp=nnegative_tmp+1
@@ -168,7 +223,10 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
       end do
     end if
     if(nnegative > 0) then
-      vecr_in(1:nl,iter_mod+1)=vecr_in(1:nl,iter_mod)+amix*vecf(1:nl,iter_mod)
+!$omp parallel do private(i)
+      do i=1,nl
+        vecr_in(i,iter_mod+1)=vecr_in(i,iter_mod)+amix*vecf(i,iter_mod)
+      end do
     end if
 
     deallocate(vecf,del_vecf,del_vecx,omega_mb,beta,aa,aa_tmp1)
@@ -176,7 +234,11 @@ subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_
       deallocate(ss_tmp1,ss_tmp2)
     end if
   end if
-  vecr(1:nl)=vecr_in(1:nl,iter_mod+1)
+
+!$omp parallel do private(i)
+  do i=1,nl
+    vecr(i)=vecr_in(i,iter_mod+1)
+  end do
 
   return
 end subroutine broyden
