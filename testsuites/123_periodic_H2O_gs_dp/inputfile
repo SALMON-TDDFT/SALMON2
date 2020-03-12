@@ -48,6 +48,7 @@
 
 
 &scf
+  ncg_init = 5
   nscf = 250
   threshold=1d-12
 /
