@@ -95,7 +95,7 @@ contains
     case(3)
     ! Fourier part (local part, etc.)
       
-      !$omp parallel do private(ix,iy,iz,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
+      !$omp parallel do collapse(2) private(ix,iy,iz,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
