@@ -136,7 +136,7 @@ contains
   subroutine write_performance(fd,mode)
     use parallelization
     use communication
-    use salmon_global, only: theory,yn_md,yn_opt
+    use salmon_global, only: theory,yn_gbp,use_singlescale,yn_ffte
     use timer
     implicit none
     integer, intent(in) :: fd, mode
@@ -202,7 +202,11 @@ contains
       call set( 2, LOG_CALC_VBOX            , 'Vbox')
       call set( 3, LOG_CALC_TIME_PROPAGATION, 'time propagation')
       call set( 4, LOG_CALC_RHO             , 'calculating rho')
-      call set( 5, LOG_CALC_HARTREE         , 'Hartree routine')
+      if (yn_gbp=='y' .and. use_singlescale=='y' .and. yn_ffte=='y') then
+        call set( 5, LOG_CALC_HARTREE       , 'Hartree+FDTD by FFTE')
+      else
+        call set( 5, LOG_CALC_HARTREE       , 'Hartree routine')
+      end if
       call set( 6, LOG_CALC_EXC_COR         , 'Exc_Cor routine')
       call set( 7, LOG_CALC_ALLGATHERV_VLOCAL, 'allgatherv_vlocal')
       call set( 8, LOG_CALC_DP              , 'calculating Dp')
