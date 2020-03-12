@@ -145,6 +145,7 @@ module salmon_global
   character(1)   :: yn_fix_func
 
 !! &scf
+  character(8)   :: method_init_wf
   character(8)   :: method_min
   integer        :: ncg,ncg_init
   character(8)   :: method_mixing
