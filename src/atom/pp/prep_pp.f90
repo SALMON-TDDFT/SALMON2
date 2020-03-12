@@ -139,7 +139,7 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
   case(0)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
   case(3)
-    call calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,sVpsl,ppg,property)
+    call calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,sVpsl,ppg,property)
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -383,7 +383,7 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,property)
+subroutine calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,vpsl,ppg,property)
   use salmon_global,only : natom, nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
@@ -391,6 +391,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
   implicit none
   type(s_rgrid)          ,intent(in) :: lg,mg
   type(s_dft_system)     ,intent(in) :: system
+  type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel) ,intent(in) :: info_field
   type(s_pp_info)        ,intent(in) :: pp
   type(s_reciprocal_grid),intent(in) :: fg
@@ -402,8 +403,8 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
   real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
   complex(8) :: tmp_exp
-  complex(8) :: vion_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  complex(8) :: rhog_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+  complex(8) :: vtmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
+  complex(8) :: vtmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
 
   if( property == 'initial' ) then
   
@@ -447,28 +448,29 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
 
   endif
 
-! vion_tmp=V_ion(G): local part of the pseudopotential in the G space
-  vion_tmp = 0d0
-  rhog_tmp = 0d0
-  do ia=1,natom
-    ik=kion(ia)
-!$omp parallel do private(ix,iy,iz,g,gd,tmp_exp)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      g(1) = fg%vec_G(1,ix,iy,iz)
-      g(2) = fg%vec_G(2,ix,iy,iz)
-      g(3) = fg%vec_G(3,ix,iy,iz)
+! vtmp(:,:,:,1)=V_ion(G): local part of the pseudopotential in the G space
+  vtmp1 = 0d0
+  !$omp parallel do collapse(2) private(ix,iy,iz,g,ia,ik,gd,tmp_exp)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    g(1) = fg%vec_G(1,ix,iy,iz)
+    g(2) = fg%vec_G(2,ix,iy,iz)
+    g(3) = fg%vec_G(3,ix,iy,iz)
+    do ia=info%ia_s,info%ia_e
+      ik=kion(ia)
       gd = g(1)*system%rion(1,ia) + g(2)*system%rion(2,ia) + g(3)*system%rion(3,ia)
       tmp_exp = exp(-zi*gd)/system%det_A
-      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp
-      rhog_tmp(ix,iy,iz) = rhog_tmp(ix,iy,iz) + pp%zps(ik)*tmp_exp
+      vtmp1(ix,iy,iz,1) = vtmp1(ix,iy,iz,1) + ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp ! V_ion(G)
+      vtmp1(ix,iy,iz,2) = vtmp1(ix,iy,iz,2) + pp%zps(ik)*tmp_exp ! rho_ion(G)
     end do
     end do
     end do
-!$omp end parallel do
   end do
-  ppg%zrhoG_ion = rhog_tmp
+  !$omp end parallel do
+  
+  call comm_summation(vtmp1,vtmp2,mg%num(1)*mg%num(2)*mg%num(3)*2,info%icomm_ko)
+  ppg%zrhoG_ion = vtmp2(:,:,:,2)
 
 ! Vpsl=V_ion(r): local part of the pseudopotential in the r space
 
@@ -491,8 +493,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
     do kz = mg%is(3),mg%ie(3)
     do ky = mg%is(2),mg%ie(2)
     do kx = mg%is(1),mg%ie(1)
-      if(fg%if_Gzero(kx,ky,kz)) cycle
-      poisson%ff1z(kx,ky,kz) = vion_tmp(kx,ky,kz)
+      poisson%ff1z(kx,ky,kz) = vtmp2(kx,ky,kz,1) ! V_ion(G)
     end do
     end do
     end do
@@ -537,8 +538,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
     do ix = mg%is(1),mg%ie(1)
       iiz=iz+mg%is(3)-1
       iiy=iy+mg%is(2)-1
-      if(fg%if_Gzero(ix,iiy,iiz)) cycle
-      poisson%b_ffte(ix,iy,iz) = vion_tmp(ix,iiy,iiz)
+      poisson%b_ffte(ix,iy,iz) = vtmp2(ix,iiy,iiz,1) ! V_ion(G)
     end do
     end do
     end do
