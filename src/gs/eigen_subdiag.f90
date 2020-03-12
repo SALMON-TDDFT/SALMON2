@@ -19,7 +19,7 @@
 module eigen_subdiag_sub
   use eigen_lapack, only: eigen_dsyev, eigen_zheev
 #ifdef USE_SCALAPACK
-  use eigen_scalapack, only: eigen_pdsyevd
+  use eigen_scalapack, only: eigen_pdsyevd, eigen_pzheevd
 #endif
   implicit none
 
