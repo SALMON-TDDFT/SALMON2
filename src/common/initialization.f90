@@ -60,6 +60,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
 
 ! parallelization
   call check_ffte_condition(pinfo,lg)
+  call init_scalapack(pinfo,info,system)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,info_field,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
@@ -275,13 +276,6 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   call comm_bcast(if_stop, nproc_group_global)
   if (if_stop) stop 'fail: check_numcpu'
 
-  if (ispin==1) then
-    pinfo%nporbital_spin(1)=(pinfo%nporbital+1)/2
-    pinfo%nporbital_spin(2)= pinfo%nporbital   /2
-  else
-    pinfo%nporbital_spin = 0
-  end if
-
 #ifdef USE_SCALAPACK
   pinfo%flag_blacs_gridinit = .false.
 #endif
@@ -296,7 +290,7 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   type(s_orbital_parallel)      :: info
   type(s_process_info)          :: pinfo
   !
-  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),m
+  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),m,na
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
@@ -341,6 +335,12 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
       info%irank_io(io) = io*nproc_ob/system%no
     end if
   end do
+
+! #ia: atom index (communicator=info%icomm_ko)
+  na = (system%nion + 1) / info%isize_ko
+  info%ia_s = na * info%id_ko + 1
+  info%ia_e = info%ia_s + na - 1
+  if (info%id_ko == info%isize_ko-1) info%ia_e = system%nion
 
 end subroutine init_orbital_parallel_singlecell
 
@@ -410,6 +410,39 @@ subroutine init_grid_whole(rsize,hgs,lg)
 
   return
 end subroutine init_grid_whole
+
+!===================================================================================================================================
+
+subroutine init_scalapack(pinfo,info,system)
+  use salmon_global, only: yn_scalapack
+#ifdef USE_SCALAPACK
+  use scalapack_module
+  use communication, only: comm_is_root,comm_sync_all
+#endif
+  use structures
+  implicit none
+  type(s_process_info)                :: pinfo
+  type(s_orbital_parallel),intent(in) :: info
+  type(s_dft_system),intent(in)       :: system
+#ifdef USE_SCALAPACK
+  integer :: n
+#endif
+
+  if (yn_scalapack == 'y') then
+#ifdef USE_SCALAPACK
+    call create_gridmap(pinfo,info)
+    n = system%no
+    call init_blacs(pinfo,info,n)
+    if (n /= system%no) then
+      if (comm_is_root(info%id_rko)) then
+        print '(A,I6)', '[FATAL ERROR] nstate must be ',n
+      end if
+      call comm_sync_all
+      stop
+    end if
+#endif
+  end if
+end subroutine
 
 !===================================================================================================================================
 
@@ -619,7 +652,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   use structures
   use math_constants,  only : pi,zi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,nelem,yn_ffte
+  use salmon_global, only: dt,nelem,yn_ffte,aEwald,use_singlescale
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: ng
@@ -636,35 +669,27 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   brl(:,:)=system%primitive_b(:,:)
 
-  allocate(fg%if_Gzero(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%coef(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(fg%if_Gzero (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+  allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+  allocate(fg%coef     (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+  allocate(fg%exp_ewald(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
   fg%if_Gzero = .false.
   fg%vec_G = 0d0
-  poisson%coef = 0d0
+  fg%coef = 0d0
+  fg%exp_ewald = 0d0
   
-  if(yn_ffte=='y') then
-    if(.not.allocated(poisson%a_ffte))then
-      allocate(poisson%a_ffte    (lg%num(1),ng%num(2),ng%num(3)))
-      allocate(poisson%a_ffte_tmp(lg%num(1),ng%num(2),ng%num(3)))
-      allocate(poisson%b_ffte    (lg%num(1),ng%num(2),ng%num(3)))
-    ! for single-scale Maxwell-TDDFT
-      allocate(poisson%coef_nabla(lg%num(1),lg%num(2),lg%num(3),3))
-      allocate(poisson%coef_gxgy0(lg%num(1),lg%num(2),lg%num(3)))
-      allocate(poisson%coef_cGdt (lg%num(1),lg%num(2),lg%num(3)))
-    end if
-    poisson%coef_nabla = 0d0
-    poisson%coef_gxgy0 = 1d0
-    poisson%coef_cGdt  = 0d0
-    
-  ! FFTE initialization step
-    call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
-                      info_field%isize(2),info_field%isize(3),0, &
-                      info_field%icomm(2),info_field%icomm(3))
+  if(yn_ffte=='y' .and. use_singlescale=='y') then
+  ! for single-scale Maxwell-TDDFT
+    allocate(fg%coef_nabla(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
+    allocate(fg%coef_gxgy0(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(fg%coef_cGdt (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    fg%coef_nabla = 0d0
+    fg%coef_gxgy0 = 1d0
+    fg%coef_cGdt  = 0d0
   end if
 
-  do iz=lg%is(3),lg%ie(3)
-  do iy=lg%is(2),lg%ie(2)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
   do ix=lg%is(1),lg%ie(1)
   
     if((ix-1)**2+(iy-1)**2+(iz-1)**2 == 0) fg%if_Gzero(ix,iy,iz) = .true.
@@ -679,68 +704,80 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
     fg%vec_G(3,ix,iy,iz) = g(3)
     G2 = g(1)**2+g(2)**2+g(3)**2
     if(fg%if_Gzero(ix,iy,iz)) then
-      poisson%coef(ix,iy,iz) = 0.d0
+      fg%coef(ix,iy,iz) = 0.d0
     else
-      poisson%coef(ix,iy,iz) = 4.d0*pi/G2
+      fg%coef(ix,iy,iz) = 4.d0*pi/G2
     end if
-    if(yn_ffte=='y') then
+    fg%exp_ewald(ix,iy,iz) = exp(-G2/(4d0*aEwald))
+    if(yn_ffte=='y' .and. use_singlescale=='y') then
     ! for single-scale Maxwell-TDDFT
-      poisson%coef_nabla(ix,iy,iz,1) = -zi*g(1)
-      poisson%coef_nabla(ix,iy,iz,2) = -zi*g(2)
-      poisson%coef_nabla(ix,iy,iz,3) = -zi*g(3)
-      if(ix==1.and.iy==1) poisson%coef_gxgy0(ix,iy,iz) = 0d0
-      poisson%coef_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
+      fg%coef_nabla(ix,iy,iz,1) = -zi*g(1)
+      fg%coef_nabla(ix,iy,iz,2) = -zi*g(2)
+      fg%coef_nabla(ix,iy,iz,3) = -zi*g(3)
+      if(ix==1.and.iy==1) fg%coef_gxgy0(ix,iy,iz) = 0d0
+      fg%coef_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
     end if
     
   enddo
   enddo
   enddo
   
-  allocate(poisson%ff1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-  allocate(poisson%ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
-  allocate(poisson%ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%ff2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-  allocate(poisson%ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
-  allocate(poisson%ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
-  allocate(poisson%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
-  allocate(poisson%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
-  allocate(poisson%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
-  allocate(poisson%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
-  allocate(poisson%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
-  allocate(poisson%trho2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-  allocate(poisson%trho3z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+  if(yn_ffte=='n') then
+  ! discrete Fourier transform (general)
   
-!$OMP parallel do private(ix,kx,tmp)
-  do ix=lg%is(1),lg%ie(1)
-    do kx=lg%is(1),lg%ie(1)
-      tmp = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg%num(1))))
-      poisson%egx(kx,ix)  = tmp
-      poisson%egxc(kx,ix) = conjg(tmp)
+    allocate(fg%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(fg%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
+    allocate(fg%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(fg%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
+    allocate(fg%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+    allocate(fg%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
+    
+    allocate(poisson%ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
+    allocate(poisson%ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    
+  !$OMP parallel do private(ix,kx,tmp)
+    do ix=lg%is(1),lg%ie(1)
+      do kx=lg%is(1),lg%ie(1)
+        tmp = exp(zI*(2.d0*Pi*dble((ix-1)*(kx-1))/dble(lg%num(1))))
+        fg%egx(kx,ix)  = tmp
+        fg%egxc(kx,ix) = conjg(tmp)
+      end do
     end do
-  end do
-!$OMP parallel do private(iy,ky,tmp)
-  do iy=lg%is(2),lg%ie(2)
-    do ky=lg%is(2),lg%ie(2)
-      tmp = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg%num(2))))
-      poisson%egy(ky,iy)  = tmp
-      poisson%egyc(ky,iy) = conjg(tmp)
+  !$OMP parallel do private(iy,ky,tmp)
+    do iy=lg%is(2),lg%ie(2)
+      do ky=lg%is(2),lg%ie(2)
+        tmp = exp(zI*(2.d0*Pi*dble((iy-1)*(ky-1))/dble(lg%num(2))))
+        fg%egy(ky,iy)  = tmp
+        fg%egyc(ky,iy) = conjg(tmp)
+      end do
     end do
-  end do
-!$OMP parallel do private(iz,kz,tmp)
-  do iz=lg%is(3),lg%ie(3)
-    do kz=lg%is(3),lg%ie(3)
-      tmp = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg%num(3))))
-      poisson%egz(kz,iz)  = tmp
-      poisson%egzc(kz,iz) = conjg(tmp)
+  !$OMP parallel do private(iz,kz,tmp)
+    do iz=lg%is(3),lg%ie(3)
+      do kz=lg%is(3),lg%ie(3)
+        tmp = exp(zI*(2.d0*Pi*dble((iz-1)*(kz-1))/dble(lg%num(3))))
+        fg%egz(kz,iz)  = tmp
+        fg%egzc(kz,iz) = conjg(tmp)
+      end do
     end do
-  end do
+    
+  else
+  ! FFTE
+  
+    allocate(poisson%a_ffte(lg%num(1),ng%num(2),ng%num(3)))
+    allocate(poisson%b_ffte(lg%num(1),ng%num(2),ng%num(3)))
 
-  allocate(fg%zrhoG_ion(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) & ! rho_ion(G)
-        & ,fg%zrhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)) & ! rho_ele(G)
-        & ,fg%zVG_ion  (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),nelem)) ! V_ion(G)
+  ! FFTE initialization step
+    call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
+                      info_field%isize(2),info_field%isize(3),0, &
+                      info_field%icomm(2),info_field%icomm(3))
+                      
+  end if
+
+  allocate(poisson%zrhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))) 
 
   return
 end subroutine init_reciprocal_grid
@@ -822,10 +859,11 @@ subroutine init_nion_div(system,lg,mg,info)
   use communication, only: comm_summation, comm_get_groupinfo, comm_is_root
  !use parallelization, only: nproc_id_global
   implicit none
-  type(s_dft_system)  :: system
-  type(s_rgrid) :: lg
-  type(s_rgrid) :: mg
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_dft_system),intent(in) :: system
+  type(s_rgrid)     ,intent(in) :: lg
+  type(s_rgrid)     ,intent(in) :: mg
+  type(s_orbital_parallel)      :: info
+  !
   logical :: flag_cuboid
  !integer :: k,irank,nproc
   integer :: ia,j,nc,ix,iy,iz,iia,nion_total
@@ -854,7 +892,7 @@ subroutine init_nion_div(system,lg,mg,info)
   al_max(:) = system%hgs(:)*dble(lg%num(:))
   al_len(:) = al_max(:) - al_min(:)
 
-  system%nion_mg = 0  
+  info%nion_mg = 0
 
   do ia = 1,system%nion
      j=1
@@ -876,11 +914,11 @@ subroutine init_nion_div(system,lg,mg,info)
      if( (rion_tmp(1,ia).ge.r_mg_min(1) .and. rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
          (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
          (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
-        system%nion_mg = system%nion_mg + 1
+        info%nion_mg = info%nion_mg + 1
      endif
   enddo
 
-  allocate( system%ia_mg(system%nion_mg) )
+  allocate( info%ia_mg(info%nion_mg) )
 
   iia = 0  
   do ia = 1,system%nion
@@ -888,26 +926,25 @@ subroutine init_nion_div(system,lg,mg,info)
          (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
          (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
         iia = iia + 1
-        system%ia_mg(iia) = ia
+        info%ia_mg(iia) = ia
      endif
   enddo
 
-  if( system%nion_mg .ne. iia ) stop "Error1 in dividing atom in mg domain"
+  if( info%nion_mg .ne. iia ) stop "Error1 in dividing atom in mg domain"
 
   else !(flag_cuboid=.false.)
 
      ! assuming r-space parallelization is not available in nonorthogonal lattice cell
-     system%nion_mg = system%nion
-     allocate( system%ia_mg(system%nion_mg) )
+     info%nion_mg = system%nion
+     allocate( info%ia_mg(info%nion_mg) )
      do ia=1,system%nion
-        system%ia_mg(ia) = ia
+        info%ia_mg(ia) = ia
      enddo
 
   endif
 
   !check
-  system%icomm_a = info%icomm_r
-  call comm_summation(system%nion_mg, nion_total, system%icomm_a)
+  call comm_summation(info%nion_mg, nion_total, info%icomm_r)
   if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
 
   !write(*,*) "  #nion_mg=", system%nion_mg
@@ -942,13 +979,6 @@ subroutine init_nion_div(system,lg,mg,info)
   !      system%nion_e = -1
   !   endif
   !endif
-
-  !flag of gamma point only (currently not used..)
-  if( num_kgrid(1)==1.and.num_kgrid(2)==1.and.num_kgrid(3)==1 ) then
-     system%flag_k1x1x1 = .true.
-  else
-     system%flag_k1x1x1 = .false.
-  endif
 
 end subroutine init_nion_div
 

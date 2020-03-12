@@ -25,7 +25,6 @@ module subspace_diagonalization
 contains
 
 subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-  use salmon_global, only: yn_gbp
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -45,17 +44,11 @@ subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_sendrecv_grid)      :: srg
 
   if (system%if_real_orbital) then
-    if (yn_gbp == 'r') then
-      call ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-    else
-      call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-    end if
+    call ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    !call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
   else
-    if (yn_gbp == 'c') then
-      call ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
-    else
-      call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-    end if
+    call ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    !call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
   end if
 end subroutine
 
@@ -77,12 +70,13 @@ subroutine ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_orbital)            :: spsi,shpsi
   type(s_sendrecv_grid)      :: srg
   !
-  integer :: nspin,no,io,io1,io2,ispin,io_s,io_e,is(3),ie(3),ix,iy,iz,ierr
+  integer :: nspin,no,io,io1,io2,ispin,io_s,io_e,is(3),ie(3),ix,iy,iz
   real(8)   ,dimension(system%nspin,system%no) :: rbox1,rbox2
   real(8),dimension(system%no,system%no,system%nspin) :: mat1,mat2,evec
   real(8) :: cbox
   real(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   real(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+  real(8) :: eval(system%no)
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ subspace_diag"
 
@@ -156,7 +150,7 @@ subroutine ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
 
   call timer_begin(LOG_SSDG_ISOLATED_CALC)
   do ispin=1,nspin
-    call eigen_subdiag(mat2(:,:,ispin),evec(:,:,ispin),no,ierr)
+    call eigen_dsyev(mat2(:,:,ispin),eval,evec(:,:,ispin))
   end do
 
 !$omp workshare
@@ -260,14 +254,14 @@ end subroutine ssdg_rwf
     type(s_sendrecv_grid)      :: srg
 
   complex(8),parameter :: zero = 0d0, one = 1d0
-  integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,ierr,m
+  integer :: im,ispin,ik,io,jo,io1,io2,nsize_rg,m
   complex(8),dimension(system%no,system%no) :: hmat,hmat_tmp,evec
   complex(8) :: wf1_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
   complex(8) :: wf2_block(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo)
   complex(8) :: wf_block_send(mg%is(1):mg%ie(1), mg%is(2):mg%ie(2), mg%is(3):mg%ie(3), info%numo_max)
   complex(8) :: hmat_block(info%numo_max, info%numo)
   complex(8) :: hmat_block_tmp(info%numo_max, info%numo)
-
+  real(8) :: eval(system%no)
 
   if ( SPIN_ORBIT_ON ) then
     call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
@@ -314,7 +308,7 @@ end subroutine ssdg_rwf
       call timer_begin(LOG_SSDG_PERIODIC_CALC)
       hmat_block_tmp = 0d0
       call zgemm('C', 'N', info%numo_all(m), info%numo, nsize_rg,  &
-        &   cmplx(system%hvol), wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
+        &   one*system%hvol, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
         &                       wf2_block(:,:,:,1), nsize_rg,  &
         &                  zero, hmat_block_tmp(1:info%numo_all(m),1:info%numo), info%numo_all(m) )
       call timer_end(LOG_SSDG_PERIODIC_CALC)
@@ -347,7 +341,7 @@ end subroutine ssdg_rwf
 
 
     call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
-    call eigen_subdiag_periodic(hmat, evec, system%no, ierr)
+    call eigen_zheev(hmat, eval, evec)
     call timer_end(LOG_SSDG_PERIODIC_EIGEN)
 
 
@@ -376,7 +370,6 @@ end subroutine ssdg_rwf
         &                one, wf_block_send(:,:,:,1:info%numo_all(m)), nsize_rg,  &
         &                     evec(info%io_s_all(m):info%io_e_all(m), info%io_s:info%io_e), info%numo_all(m),  &
         &                one, wf2_block(:,:,:,1), nsize_rg )
-
     end do ! m
 
     ! Copy wave function
@@ -510,15 +503,14 @@ do ispin = 1, system%nspin
   call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
 !  zhmat = hmat
 
-!  call eigen_subdiag_periodic(zhmat, zevec, system%no, ierr)
   if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
-     call eigen_real8_pdsyev(pinfo, info, hmat, eval, evec)
+     call eigen_pdsyevd(pinfo, info, hmat, eval, evec)
 #else
      stop "ScaLAPACK does not enabled, please check your build configuration."
 #endif
   else
-     call eigen_real8_dsyev(hmat, eval, evec)
+     call eigen_dsyev(hmat, eval, evec)
   endif
 
 !  evec = real(zevec)
@@ -565,25 +557,6 @@ enddo ! ik
 enddo ! im
 
 return
-
-contains
-  subroutine eigen_real8_dsyev(h,e,v)
-    implicit none
-    real(8), intent(in) :: h(:,:)
-    real(8), intent(out) :: e(:)
-    real(8), intent(out) :: v(:,:)
-    real(8), allocatable :: work(:)
-    integer :: n, lwork, info
-
-    n = ubound(h,1)
-    lwork = 3*n-1
-    allocate(work(lwork))
-    v=h
-    call dsyev('V', 'U', n, v, n, e, work, lwork, info)
-    deallocate(work)
-    return
-  end subroutine eigen_real8_dsyev
-
 end subroutine ssdg_rwf_rblas
 !===================================================================================================================================
 
@@ -607,12 +580,13 @@ subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_orbital)            :: spsi,shpsi
   type(s_sendrecv_grid)      :: srg
   !
-  integer :: nspin,no,nk,ik,io,io1,io2,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz,ierr
+  integer :: nspin,no,nk,ik,io,io1,io2,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),ix,iy,iz
   real(8)   ,dimension(system%nspin,system%no,system%nk) :: rbox1,rbox2
   complex(8),dimension(system%no,system%no,system%nspin,system%nk) :: mat1,mat2,evec
   complex(8) :: cbox
   complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   complex(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
+  real(8) :: eval(system%no)
 
   if ( SPIN_ORBIT_ON ) then
     call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
@@ -700,7 +674,7 @@ subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
   do ik=ik_s,ik_e
   do ispin=1,nspin
-    call eigen_subdiag_periodic(mat2(:,:,ispin,ik),evec(:,:,ispin,ik),no,ierr)
+    call eigen_zheev(mat2(:,:,ispin,ik),eval,evec(:,:,ispin,ik))
   end do
   end do
   call timer_end(LOG_SSDG_PERIODIC_EIGEN)

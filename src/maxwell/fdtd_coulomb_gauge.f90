@@ -604,34 +604,28 @@ end subroutine fdtd_singlescale
 
 !===================================================================================================================================
 
-subroutine fourier_singlescale(lg,ng,info_field,trho,j_e,tvh,trhoG_ele,poisson,singlescale)
+subroutine fourier_singlescale(lg,ng,info_field,fg,rho,j_e,Vh,poisson,singlescale)
   use structures
   use math_constants,only : zi,pi
   use salmon_global,only: dt
   use phys_constants, only: cspeed_au
   use communication, only: comm_summation,comm_bcast
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg
-  type(s_rgrid)         ,intent(in) :: ng
-  type(s_field_parallel),intent(in) :: info_field
-  real(8)               ,intent(in) :: trho(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  type(s_vector)        ,intent(in) :: j_e ! electron number current density (without rho*A/c)
-  real(8)                           :: tvh(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  complex(8)                        :: trhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  type(s_poisson)                   :: poisson
-  type(s_singlescale)               :: singlescale
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: ng
+  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_scalar)         ,intent(in) :: rho
+  type(s_vector)         ,intent(in) :: j_e ! electron number current density (without rho*A/c)
+  type(s_scalar)                     :: Vh
+  type(s_poisson)                    :: poisson
+  type(s_singlescale)                :: singlescale
   !
   integer :: ix,iy,iz
   integer :: iiy,iiz,iix
   real(8) :: inv_lgnum3,vec_je(3),rho_t
   integer :: i
   complex(8) :: f0,f1,j0
-
-  if(.not.allocated(poisson%a_ffte) .or. &
-     .not.allocated(poisson%b_ffte) .or. &
-     .not.allocated(poisson%a_ffte_tmp))then
-    stop 'poisson_ffte: array is not allocated'
-  end if
   
   if(info_field%isize(1) < 4) stop "isize(1) must be > 3"
   
@@ -646,13 +640,13 @@ subroutine fourier_singlescale(lg,ng,info_field,trho,j_e,tvh,trhoG_ele,poisson,s
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
     do ix=ng%is(1),ng%ie(1)
-      singlescale%b_ffte(ix,iy,iz,0) = trho(ix,iiy,iiz) ! charge density rho
+      singlescale%b_ffte(ix,iy,iz,0) = cmplx(rho%f(ix,iiy,iiz)) ! charge density rho
       vec_je = ( j_e%v(1:3,ix,iiy,iiz) + singlescale%vec_je_old(1:3,ix,iiy,iiz) )*0.5d0 ! j(t) = ( j(t+dt/2) + j(t-dt/2) )/2
-      rho_t  = ( trho(ix,iiy,iiz) + singlescale%rho_old(ix,iiy,iiz) )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
+      rho_t  = ( rho%f(ix,iiy,iiz) + singlescale%rho_old(ix,iiy,iiz) )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
       vec_je = vec_je + rho_t * singlescale%vec_Ac_m(1,ix,iiy,iiz,1:3) ! electron number current density
-      singlescale%b_ffte(ix,iy,iz,1) = vec_je(1) ! current density j_x
-      singlescale%b_ffte(ix,iy,iz,2) = vec_je(2) ! current density j_y
-      singlescale%b_ffte(ix,iy,iz,3) = vec_je(3) ! current density j_z
+      singlescale%b_ffte(ix,iy,iz,1) = cmplx(vec_je(1)) ! current density j_x
+      singlescale%b_ffte(ix,iy,iz,2) = cmplx(vec_je(2)) ! current density j_y
+      singlescale%b_ffte(ix,iy,iz,3) = cmplx(vec_je(3)) ! current density j_z
     end do
   end do
   end do
@@ -666,20 +660,20 @@ subroutine fourier_singlescale(lg,ng,info_field,trho,j_e,tvh,trhoG_ele,poisson,s
   call comm_bcast(singlescale%b_ffte(:,:,:,0),info_field%icomm(1), 0)
 
 ! Poisson eq.: singlescale%b_ffte(ix,iy,iz,0)=rho(G) --> poisson%b_ffte(ix,iy,iz)=Vh(G)
-  trhoG_ele=0d0
+  poisson%zrhoG_ele=0d0
   !$omp parallel do collapse(2) default(none) &
   !$omp             private(iz,iy,ix,iiy,iiz,iix) &
-  !$omp             shared(ng,lg,trhoG_ele,poisson,singlescale,inv_lgnum3)
+  !$omp             shared(ng,lg,poisson,singlescale,inv_lgnum3,fg)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
     do ix=1,ng%num(1)
       iix=ix+ng%is(1)-1
-      trhoG_ele(iix,iiy,iiz) = singlescale%b_ffte(iix,iy,iz,0)*inv_lgnum3
+      poisson%zrhoG_ele(iix,iiy,iiz) = singlescale%b_ffte(iix,iy,iz,0)*inv_lgnum3
     end do
     do ix=1,lg%num(1)
-      poisson%b_ffte(ix,iy,iz) = singlescale%b_ffte(ix,iy,iz,0)*poisson%coef(ix,iiy,iiz)
+      poisson%b_ffte(ix,iy,iz) = singlescale%b_ffte(ix,iy,iz,0)*fg%coef(ix,iiy,iiz)
     end do
   end do
   end do
@@ -695,15 +689,15 @@ subroutine fourier_singlescale(lg,ng,info_field,trho,j_e,tvh,trhoG_ele,poisson,s
       iiy=iy+ng%is(2)-1
     ! j(transverse) = j - (1/(4*pi))* d(grad(phi))/dt
       j0 = singlescale%b_ffte(ix,iy,iz,i) &
-      & - (1d0/(4d0*pi))* poisson%coef_nabla(ix,iiy,iiz,i) * ( poisson%b_ffte(ix,iy,iz) - singlescale%Vh_ffte_old(ix,iy,iz) )/dt
+      & - (1d0/(4d0*pi))* fg%coef_nabla(ix,iiy,iiz,i) * ( poisson%b_ffte(ix,iy,iz) - singlescale%Vh_ffte_old(ix,iy,iz) )/dt
     ! f(t) = Ac(t) + (4*pi/(c*G)**2)* j
-      f0 = singlescale%zAc_old(ix,iy,iz,i) + (1/cspeed_au**2)* poisson%coef(ix,iiy,iiz) * j0
+      f0 = singlescale%zAc_old(ix,iy,iz,i) + (1/cspeed_au**2)* fg%coef(ix,iiy,iiz) * j0
     ! f(t+dt) = 2* cos(c*G*dt) * f(t) - f(t-dt)
-      f1 = 2d0* poisson%coef_cGdt(ix,iiy,iiz)* f0 - singlescale%f_old(ix,iy,iz,i)
+      f1 = 2d0* fg%coef_cGdt(ix,iiy,iiz)* f0 - singlescale%f_old(ix,iy,iz,i)
     ! Ac(t+dt) = f(t+dt) - (4*pi/(c*G)**2)* j
-      singlescale%b_ffte(ix,iy,iz,i) = f1 - (1/cspeed_au**2)* poisson%coef(ix,iiy,iiz) * j0
+      singlescale%b_ffte(ix,iy,iz,i) = f1 - (1/cspeed_au**2)* fg%coef(ix,iiy,iiz) * j0
     ! Ac(gx=gy=0) --> 0
-      singlescale%b_ffte(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i) * poisson%coef_gxgy0(ix,iiy,iiz)
+      singlescale%b_ffte(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i) * fg%coef_gxgy0(ix,iiy,iiz)
     ! f(t-dt) for next step
       singlescale%f_old(ix,iy,iz,i) = f0
     ! Ac(t) for next step
@@ -739,7 +733,7 @@ subroutine fourier_singlescale(lg,ng,info_field,trho,j_e,tvh,trhoG_ele,poisson,s
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
-    tvh(ng%is(1):ng%ie(1),iiy,iiz) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,0)
+    Vh%f(ng%is(1):ng%ie(1),iiy,iiz) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,0)
     singlescale%Ac_fourier(ng%is(1):ng%ie(1),iiy,iiz,1:3) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,1:3)
   end do
   end do

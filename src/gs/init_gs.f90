@@ -23,7 +23,7 @@ contains
 
 SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   use structures
-  use inputoutput, only: au_length_aa
+  use inputoutput, only: au_length_aa, method_init_wf
   use salmon_global, only: yn_periodic,natom,rion
   use gram_schmidt_orth
   implicit none
@@ -36,14 +36,29 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   !
   integer :: ik,io,is,a,ix,iy,iz,ip
   real(8) :: xx,yy,zz,x1,y1,z1,rr,Xmax,Ymax,Zmax,q(3)
+  real(8) :: Xzero,Yzero,Zzero
 
   call init_wf_rand
 
+  ! get offset (0-th element)
+  if (yn_periodic == 'y') then
+    Xzero = lg%coordinate(lg%num(1)/2+mod(lg%num(1),2),1)
+    Yzero = lg%coordinate(lg%num(2)/2+mod(lg%num(2),2),2)
+    Zzero = lg%coordinate(lg%num(3)/2+mod(lg%num(3),2),3)
+  else
+    Xzero = 0d0
+    Yzero = 0d0
+    Zzero = 0d0
+  end if
+
   if(system%if_real_orbital) then
 
-    if (yn_periodic == 'y') then
-      call gen_rwf_periodic
-    else
+    select case(method_init_wf)
+
+    case ('random')
+      call gen_random_rwf
+
+    case ('gauss')
       Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
       do a=1,natom
         if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
@@ -51,7 +66,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
         if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
       end do
 
-      Xmax=Xmax+1.d0/au_length_aa ; Ymax=Ymax+1.d0/au_length_aa ; Zmax=Zmax+1.d0/au_length_aa
+      Xmax=Xmax-Xzero+1.d0/au_length_aa
+      Ymax=Ymax-Yzero+1.d0/au_length_aa
+      Zmax=Zmax-Zzero+1.d0/au_length_aa
 
       do is=1,system%nspin
       do io=1,system%no
@@ -64,7 +81,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+            xx=lg%coordinate(ix,1)-Xzero
+            yy=lg%coordinate(iy,2)-Yzero
+            zz=lg%coordinate(iz,3)-Zzero
             rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
             spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
           end do
@@ -74,16 +93,20 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
         end if
       end do
       end do
-    end if ! yn_periodic == 'y'
+
+    end select
 
   else
 
-    if (yn_periodic == 'y') then
-      call gen_zwf_periodic
-    else
-      Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))
-      Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))
-      Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))
+    select case(method_init_wf)
+
+    case ('random')
+      call gen_random_zwf
+
+    case ('gauss')
+      Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))-Xzero
+      Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))-Yzero
+      Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))-Zzero
 
       do is=1,system%nspin
       do ik=1,system%nk
@@ -98,7 +121,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            xx=lg%coordinate(ix,1) ; yy=lg%coordinate(iy,2) ; zz=lg%coordinate(iz,3)
+            xx=lg%coordinate(ix,1)-Xzero
+            yy=lg%coordinate(iy,2)-Yzero
+            zz=lg%coordinate(iz,3)-Zzero
             rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
             spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
           end do
@@ -109,7 +134,8 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
       end do
       end do
       end do
-    end if ! yn_periodic == 'y'
+
+    end select
 
   end if
 
@@ -122,22 +148,23 @@ CONTAINS
   ! cf. RSDFT
   subroutine init_wf_rand
     implicit none
-    integer :: s,k,n,i
+    integer :: s,k,n,i,llen
     integer,allocatable :: iseed(:)
 
     call random_seed(size = n)
     allocate(iseed(n))
-    iseed(:) = info%io_s &
-             + (mg%is(3) - lg%is(3)) * mg%num(2) * mg%num(1) &
-             + (mg%is(2) - lg%is(2)) * mg%num(1) &
-             + (mg%is(1) - lg%is(1))
+    llen = product(lg%num)
+    iseed(:) = (info%ik_s * system%no + info%io_s - 1) * llen &
+             + (mg%is(3) - lg%is(3) + 1) * lg%num(2) * lg%num(1) &
+             + (mg%is(2) - lg%is(2) + 1) * lg%num(1) &
+             + (mg%is(1) - lg%is(1) + 1)
     call random_seed(put = iseed)
     deallocate(iseed)
   end subroutine
 
-  subroutine gen_rwf_periodic
+  subroutine gen_random_rwf
     implicit none
-    real(8) :: u
+    real(8) :: u(3),v(3)
 
     do ip=lbound(spsi%rwf,7),ubound(spsi%rwf,7)
     do ik=lbound(spsi%rwf,6),ubound(spsi%rwf,6)
@@ -146,8 +173,9 @@ CONTAINS
     do iz=lbound(spsi%rwf,3),ubound(spsi%rwf,3)
     do iy=lbound(spsi%rwf,2),ubound(spsi%rwf,2)
     do ix=lbound(spsi%rwf,1),ubound(spsi%rwf,1)
+      v = dble([ix, iy, iz])
       call random_number(u)
-      spsi%rwf(ix,iy,iz,is,io,ik,ip) = u
+      spsi%rwf(ix,iy,iz,is,io,ik,ip) = product(sign(u(1:3),v(1:3)))
     end do
     end do
     end do
@@ -157,7 +185,7 @@ CONTAINS
     end do
   end subroutine
 
-  subroutine gen_zwf_periodic
+  subroutine gen_random_zwf
     implicit none
     real(8) :: u(2)
 

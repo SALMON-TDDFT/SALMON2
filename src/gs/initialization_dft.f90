@@ -280,15 +280,15 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      ewald%yn_bookkeep='y'
      call  init_nion_div(system,lg,mg,info)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald,fg)
 
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+  rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
      call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
   case(3)
-     rion_update = .true. ! it's first calculation
-     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,rion_update,energy)
+     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
 
 
@@ -394,7 +394,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           band, 1 )
 
   call init_md(system,md)
-  call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi,ewald)
+  call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
 
   md%Uene0 = energy%E_tot
   md%E_tot0= energy%E_tot + md%Tene

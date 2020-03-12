@@ -59,6 +59,7 @@ module salmon_global
   character(256) :: read_gs_restart_data
   character(256) :: write_gs_restart_data
   real(8)        :: time_shutdown
+  character(1)   :: yn_gbp
   !remove later
   character(256) :: dump_filename
   character(20)  :: modify_gs_wfn_k  !changed from modify_initial_guess
@@ -144,6 +145,7 @@ module salmon_global
   character(1)   :: yn_fix_func
 
 !! &scf
+  character(8)   :: method_init_wf
   character(8)   :: method_min
   integer        :: ncg,ncg_init
   character(8)   :: method_mixing
@@ -161,7 +163,6 @@ module salmon_global
   character(1)   :: skip_gsortho
   integer        :: iditer_notemperature
   integer        :: step_initial_mix_zero
-  character(1)   :: yn_gbp
 
 !! &emfield
   character(2)   :: trans_longi

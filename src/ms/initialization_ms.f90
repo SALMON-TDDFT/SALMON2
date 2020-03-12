@@ -308,7 +308,7 @@ use inputoutput
   case(0)
      call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,.true.,energy)
   case(3)
-     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,.true.,energy)
+     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,.true.,energy)
   end select
   energy%E_tot0 = energy%E_tot
   
@@ -509,7 +509,7 @@ use inputoutput
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in,ewald)
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format
      write(comment_line,10) -1, 0.0d0

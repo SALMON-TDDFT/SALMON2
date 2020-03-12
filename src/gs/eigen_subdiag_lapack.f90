@@ -13,65 +13,46 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-module eigen_subdiag_sub
+module eigen_lapack
   implicit none
+
+  public :: eigen_dsyev, eigen_zheev
 
 contains
 
-subroutine eigen_subdiag(Rmat,evec,iter,ier2)
-  implicit none
-  
-  integer :: iter,ier2
-  real(8) :: Rmat(iter,iter)
-  real(8) :: evec(iter,iter)
-  
-  character(1) :: JOBZ,UPLO
-  integer :: N
-  real(8) :: A(iter,iter)
-  integer :: LDA
-  real(8) :: W(iter)
-  real(8) :: WORK(3*iter-1)
-  integer :: LWORK
-  
-  ier2=0
-  
-  JOBZ='V'
-  UPLO='L'
-  N=iter
-  A=Rmat
-  LDA=iter
-  LWORK=3*iter-1
-  call DSYEV(JOBZ,UPLO,N,A,LDA,W,WORK,LWORK,ier2)
-  evec=A
+  subroutine eigen_dsyev(h,e,v)
+    implicit none
+    real(8), intent(in) :: h(:,:)
+    real(8), intent(out) :: e(:)
+    real(8), intent(out) :: v(:,:)
+    real(8), allocatable :: work(:)
+    integer :: n, lwork, info
 
-end subroutine eigen_subdiag
+    n = ubound(h,1)
+    lwork = 3*n-1
+    allocate(work(lwork))
+    v=h
+    call dsyev('V', 'U', n, v, n, e, work, lwork, info)
+    deallocate(work)
+    return
+  end subroutine eigen_dsyev
 
-subroutine eigen_subdiag_periodic(Rmat,evec,iter,ier2)
-  implicit none
-  character :: JOBZ, UPLO
-  integer :: LWORK
-  integer :: iter,ier2
-  real(8),allocatable :: RWORK(:)
-  real(8) :: W(iter)
-  complex(8) :: Rmat(iter,iter)
-  complex(8),allocatable :: WORK(:)
-  complex(8) :: evec(iter,iter)
+  subroutine eigen_zheev(h,e,v)
+    implicit none
+    complex(8), intent(in)  :: h(:,:)
+    real(8), intent(out) :: e(:)
+    complex(8), intent(out) :: v(:,:)
+    complex(8), allocatable :: work(:)
+    real(8), allocatable :: rwork(:)
+    integer :: n,lwork,info
 
-  ier2=0
+    n = ubound(h,1)
+    lwork = 2*n-1
+    allocate(work(lwork), rwork(3*n-2))
+    v=h
+    call ZHEEV('V', 'U', n, v, n, e, work, lwork, rwork, info)
+    deallocate(work, rwork)
+    return
+  end subroutine eigen_zheev
 
-  JOBZ='V'
-  UPLO='U'
-
-  LWORK=2*iter-1
-  allocate(WORK(LWORK))
-  allocate(RWORK(3*iter-2))
-
-  call ZHEEV(JOBZ,UPLO,iter,Rmat,iter,W,WORK,LWORK,RWORK,ier2)
-
-  evec(:,:)=Rmat(:,:)
-
-  deallocate(WORK,RWORK)
-
-end subroutine eigen_subdiag_periodic
- 
-end module eigen_subdiag_sub
+end module eigen_lapack

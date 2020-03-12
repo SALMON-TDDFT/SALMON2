@@ -54,7 +54,6 @@
 &scf
   nscf = 250
   threshold=1d-12
-  yn_gbp = 'r'
 /
 
 &atomic_coor

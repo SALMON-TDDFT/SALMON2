@@ -103,6 +103,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt,t_max
   type(s_rgrid) :: eg
+  logical :: rion_update
   
   call timer_begin(LOG_INIT_RT)
 
@@ -245,15 +246,16 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
      ewald%yn_bookkeep='y'
      call  init_nion_div(system,lg,mg,info)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald,fg)
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
+  rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,.true.,energy)
+     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
   case(3)
-     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,fg,.true.,energy)
+     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
   
@@ -470,7 +472,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     call calc_force(system,pp,fg,info,mg,stencil,srg,ppg,spsi_in,ewald)
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format
      write(comment_line,10) -1, 0.0d0

@@ -33,9 +33,9 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel)  ,intent(in) :: info_field
-  type(s_reciprocal_grid)             :: fg
+  type(s_reciprocal_grid) ,intent(in) :: fg
   type(s_poisson)                     :: poisson
-  type(s_pp_info)         ,intent(inout) :: pp
+  type(s_pp_info)                     :: pp
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: sVpsl
   !
@@ -106,7 +106,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 call timer_begin(LOG_INIT_PS_CALC_NPS)
   call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                   hx,hy,hz,system%primitive_a,system%rmatrix_A,info%icomm_ko)
+                                   hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
 call timer_end(LOG_INIT_PS_CALC_NPS)
 
 call timer_begin(LOG_INIT_PS_CALC_JXYZ)
@@ -114,7 +114,7 @@ call timer_begin(LOG_INIT_PS_CALC_JXYZ)
 
   call calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info%icomm_ko)
+                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
 call timer_end(LOG_INIT_PS_CALC_JXYZ)
 
 call timer_begin(LOG_INIT_PS_LMA_UV)
@@ -139,7 +139,7 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
   case(0)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
   case(3)
-    call calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,sVpsl,property)
+    call calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,sVpsl,ppg,property)
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -383,30 +383,34 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,property)
+subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,property)
   use salmon_global,only : natom, nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg,mg
-  type(s_dft_system)    ,intent(in) :: system
-  type(s_field_parallel),intent(in) :: info_field
-  type(s_pp_info)       ,intent(in) :: pp
-  type(s_reciprocal_grid)           :: fg
-  type(s_poisson)                   :: poisson
-  type(s_scalar)                    :: vpsl
-  character(17)                     :: property
+  type(s_rgrid)          ,intent(in) :: lg,mg
+  type(s_dft_system)     ,intent(in) :: system
+  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_pp_info)        ,intent(in) :: pp
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_poisson)                    :: poisson
+  type(s_scalar)                     :: vpsl
+  type(s_pp_grid)                    :: ppg
+  character(17)                      :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
-  real(8) :: g(3),g2,gd,s,g2sq,r1,dr,vloc_av
+  real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
   complex(8) :: tmp_exp
   complex(8) :: vion_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   complex(8) :: rhog_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
 
   if( property == 'initial' ) then
+  
+    allocate(ppg%zrhoG_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) & ! rho_ion(G)
+          & ,ppg%zVG_ion  (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),nelem)) ! V_ion(G)
 
-    fg%zVG_ion = 0d0
+    ppg%zVG_ion = 0d0
   !$omp parallel
   !$omp do private(ik,ix,iy,iz,g,g2sq,s,r1,dr,i,vloc_av) collapse(3)
     do ik=1,nelem
@@ -433,7 +437,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
             s=s+4d0*pi*sin(g2sq*r1)/g2sq*(r1*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
           end do
         end if
-        fg%zVG_ion(ix,iy,iz,ik) = s
+        ppg%zVG_ion(ix,iy,iz,ik) = s
       end do
       end do
       end do
@@ -443,12 +447,12 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
 
   endif
 
-  !(Local pseudopotential: Vlocal in G-space(=Vion_G))
+! vion_tmp=V_ion(G): local part of the pseudopotential in the G space
   vion_tmp = 0d0
   rhog_tmp = 0d0
   do ia=1,natom
     ik=kion(ia)
-!$omp parallel do private(ix,iy,iz,g,g2,gd,tmp_exp)
+!$omp parallel do private(ix,iy,iz,g,gd,tmp_exp)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -456,24 +460,20 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
       gd = g(1)*system%rion(1,ia) + g(2)*system%rion(2,ia) + g(3)*system%rion(3,ia)
-      g2 = g(1)**2 + g(2)**2 + g(3)**2
       tmp_exp = exp(-zi*gd)/system%det_A
-      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + fg%zVG_ion(ix,iy,iz,ik)*tmp_exp
+      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp
       rhog_tmp(ix,iy,iz) = rhog_tmp(ix,iy,iz) + pp%zps(ik)*tmp_exp
-      if(fg%if_Gzero(ix,iy,iz)) cycle
-      !(add coulomb as dvloc_g is given by Vloc - coulomb)
-      vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) -4d0*pi/g2*pp%zps(ik)*tmp_exp
     end do
     end do
     end do
 !$omp end parallel do
   end do
-  fg%zrhoG_ion = rhog_tmp
+  ppg%zrhoG_ion = rhog_tmp
 
-  !(Local pseudopotential: Vlocal(=Vpsl) in real-space)
+! Vpsl=V_ion(r): local part of the pseudopotential in the r space
 
-! cf. poisson_periodic.f90
   if(yn_ffte=='n') then
+  ! cf. poisson_periodic.f90
 
   !$omp workshare
     poisson%ff1x = 0d0
@@ -502,7 +502,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do iz = mg%is(3),mg%ie(3)
     do ky = mg%is(2),mg%ie(2)
     do kx = mg%is(1),mg%ie(1)
-      poisson%ff1y(kx,ky,iz)=sum(poisson%egz(:,iz)*poisson%ff2z(kx,ky,:))
+      poisson%ff1y(kx,ky,iz)=sum(fg%egz(:,iz)*poisson%ff2z(kx,ky,:))
     end do
     end do
     end do
@@ -512,7 +512,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do iz = mg%is(3),mg%ie(3)
     do iy = mg%is(2),mg%ie(2)
     do kx = mg%is(1),mg%ie(1)
-      poisson%ff1x(kx,iy,iz)=sum(poisson%egy(:,iy)*poisson%ff2y(kx,:,iz))
+      poisson%ff1x(kx,iy,iz)=sum(fg%egy(:,iy)*poisson%ff2y(kx,:,iz))
     end do
     end do
     end do
@@ -522,14 +522,15 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
     do iz = mg%is(3),mg%ie(3)
     do iy = mg%is(2),mg%ie(2)
     do ix = mg%is(1),mg%ie(1)
-      Vpsl%f(ix,iy,iz) = sum(poisson%egx(:,ix)*poisson%ff2x(:,iy,iz))
+      Vpsl%f(ix,iy,iz) = sum(fg%egx(:,ix)*poisson%ff2x(:,iy,iz))
     end do
     end do
     end do
   
   else
+  ! cf. poisson_ffte.f90
   
-    poisson%a_ffte_tmp=0.d0
+    poisson%b_ffte=0.d0
   !$OMP parallel do private(iz,iy,ix,iiz,iiy) collapse(2)
     do iz = 1,mg%num(3)
     do iy = 1,mg%num(2)
@@ -537,11 +538,11 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,propert
       iiz=iz+mg%is(3)-1
       iiy=iy+mg%is(2)-1
       if(fg%if_Gzero(ix,iiy,iiz)) cycle
-      poisson%a_ffte_tmp(ix,iy,iz) = vion_tmp(ix,iiy,iiz)
+      poisson%b_ffte(ix,iy,iz) = vion_tmp(ix,iiy,iiz)
     end do
     end do
     end do
-    call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
+    call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
 
     CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
                       info_field%isize(2),info_field%isize(3),1, &
@@ -599,9 +600,9 @@ subroutine finalize_jxyz(ppg)
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,icomm_ko)
+subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
   use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
-  use structures,only : s_pp_info,s_pp_grid
+  use structures
   use communication, only: comm_get_max,comm_get_groupinfo
   implicit none
   type(s_pp_info) :: pp
@@ -612,7 +613,8 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  integer,intent(in),optional :: icomm_ko
+  type(s_orbital_parallel),intent(in),optional :: info
+  !
   integer :: ia,i,ik,ix,iy,iz,j,ixyz
   integer :: nc(3),mps_tmp
   real(8) :: tmpx,tmpy,tmpz
@@ -623,12 +625,9 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
 
-  if (present(icomm_ko)) then
-    call comm_get_groupinfo(icomm_ko,irank,nproc)
-    na   = (natom + 1) / nproc
-    ia_s = na * irank + 1
-    ia_e = ia_s + na - 1
-    if (irank == nproc-1) ia_e = natom
+  if (present(info)) then
+    ia_s = info%ia_s
+    ia_e = info%ia_e
   else
     ia_s = 1
     ia_e = natom
@@ -769,16 +768,16 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 !$omp end parallel
 
   ppg%nps=mps_tmp
-  if (present(icomm_ko)) then
-    call comm_get_max(ppg%nps,icomm_ko)
+  if (present(info)) then
+    call comm_get_max(ppg%nps,info%icomm_ko)
   end if
 
 end subroutine calc_nps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,icomm_ko)
+subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
   use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
-  use structures,only : s_pp_info,s_pp_grid
+  use structures
   use communication,only: comm_get_groupinfo,comm_summation
   implicit none
   type(s_pp_info) :: pp
@@ -789,7 +788,8 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  integer,intent(in),optional :: icomm_ko
+  type(s_orbital_parallel),intent(in),optional :: info
+  !
   integer :: ia,i,ik,ix,iy,iz,j
   integer :: nc(3), ixyz
   real(8) :: tmpx,tmpy,tmpz
@@ -800,12 +800,9 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
 
-  if (present(icomm_ko)) then
-    call comm_get_groupinfo(icomm_ko,irank,nproc)
-    na   = (natom + 1) / nproc
-    ia_s = na * irank + 1
-    ia_e = ia_s + na - 1
-    if (irank == nproc-1) ia_e = natom
+  if (present(info)) then
+    ia_s = info%ia_s
+    ia_e = info%ia_e
   else
     ia_s = 1
     ia_e = natom
@@ -958,13 +955,13 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   end do
 !$omp end parallel do
 
-  if (present(icomm_ko)) then
-    call comm_summation(ppg%jxyz,icomm_ko)
-    call comm_summation(ppg%jxx, icomm_ko)
-    call comm_summation(ppg%jyy, icomm_ko)
-    call comm_summation(ppg%jzz, icomm_ko)
-    call comm_summation(ppg%rxyz,icomm_ko)
-    call comm_summation(ppg%mps, icomm_ko)
+  if (present(info)) then
+    call comm_summation(ppg%jxyz,info%icomm_ko)
+    call comm_summation(ppg%jxx, info%icomm_ko)
+    call comm_summation(ppg%jyy, info%icomm_ko)
+    call comm_summation(ppg%jzz, info%icomm_ko)
+    call comm_summation(ppg%rxyz,info%icomm_ko)
+    call comm_summation(ppg%mps, info%icomm_ko)
   end if
 
 end subroutine calc_jxyz

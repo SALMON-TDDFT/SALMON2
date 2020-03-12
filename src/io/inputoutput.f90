@@ -230,6 +230,7 @@ contains
       & read_gs_restart_data,&
       & write_gs_restart_data,&
       & time_shutdown,       &
+      & yn_gbp,            &
       & dump_filename,     &  !remove later
       & modify_gs_wfn_k,   &  !remove later
       & read_gs_wfn_k,     &  !remove later
@@ -311,6 +312,7 @@ contains
       & yn_fix_func
 
     namelist/scf/ &
+      & method_init_wf, &
       & method_min, &
       & ncg, &
       & ncg_init, &
@@ -328,8 +330,7 @@ contains
       & omp_loop, &
       & skip_gsortho, &
       & iditer_notemperature, &
-      & step_initial_mix_zero,&
-      & yn_gbp
+      & step_initial_mix_zero
 
     namelist/emfield/ &
       & trans_longi, &
@@ -581,6 +582,7 @@ contains
     read_gs_restart_data  = 'all'
     write_gs_restart_data = 'all'
     time_shutdown         = -1d0
+    yn_gbp        = 'n'
     !remove later
     dump_filename    = 'default'
     modify_gs_wfn_k  = 'n'
@@ -652,6 +654,7 @@ contains
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
 !! == default for &scf
+    method_init_wf = 'gauss'
     method_min    = 'cg'
     ncg           = 4
     ncg_init      = 4
@@ -670,7 +673,6 @@ contains
     skip_gsortho  = 'n'
     iditer_notemperature = 10
     step_initial_mix_zero= -1
-    yn_gbp        = 'n'
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -977,6 +979,7 @@ contains
     call comm_bcast(read_gs_restart_data  ,nproc_group_global)
     call comm_bcast(write_gs_restart_data ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
+    call comm_bcast(yn_gbp                ,nproc_group_global)
     !remove later
     call comm_bcast(dump_filename   ,nproc_group_global)
     call comm_bcast(modify_gs_wfn_k ,nproc_group_global)
@@ -1065,6 +1068,7 @@ contains
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
 !! == bcast for &scf
+    call comm_bcast(method_init_wf        ,nproc_group_global)
     call comm_bcast(method_min            ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
     call comm_bcast(ncg_init                ,nproc_group_global)
@@ -1102,7 +1106,6 @@ contains
     call comm_bcast(skip_gsortho            ,nproc_group_global)
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
     call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
-    call comm_bcast(yn_gbp                  ,nproc_group_global)
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1749,6 +1752,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
       !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'modify_gs_wfn_k', trim(modify_gs_wfn_k)
@@ -1857,6 +1861,7 @@ contains
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_wf', method_init_wf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
@@ -1875,7 +1880,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'skip_gsortho', skip_gsortho
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
 
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
@@ -2219,6 +2223,12 @@ contains
     call yn_argument_check(yn_force_stencil_openmp_parallelization)
     call yn_argument_check(yn_force_stencil_sequential_computation)
     call yn_argument_check(yn_want_communication_overlapping)
+    call yn_argument_check(yn_gbp)
+
+    select case(method_init_wf)
+    case ('gauss','random') ; continue
+    case default            ; stop 'method_init_wf must be gauss or random'
+    end select
 
     if(iperiodic==0.or.(iperiodic==3.and.yn_domain_parallel=='y')) then
       select case(convergence)

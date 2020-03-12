@@ -19,59 +19,53 @@ module poisson_ffte_sub
 
 contains
 
-subroutine poisson_ffte(lg,ng,info_field,trho,tvh,trhoG_ele,poisson)
-  use structures, only: s_rgrid,s_field_parallel,s_reciprocal_grid,s_poisson
+subroutine poisson_ffte(lg,ng,info_field,fg,rho,Vh,poisson)
+  use structures
   use communication, only: comm_summation
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg
-  type(s_rgrid)         ,intent(in) :: ng
-  type(s_field_parallel),intent(in) :: info_field
-  real(8)               ,intent(in) :: trho(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  real(8)                           :: tvh (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  complex(8)                        :: trhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-  type(s_poisson)                   :: poisson
+  type(s_rgrid)          ,intent(in) :: lg
+  type(s_rgrid)          ,intent(in) :: ng
+  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_scalar)         ,intent(in) :: rho
+  type(s_scalar)                     :: Vh
+  type(s_poisson)                    :: poisson
   !
   integer :: ix,iy,iz
   integer :: iiy,iiz,iix
   real(8) :: inv_lgnum3
 
-  if(.not.allocated(poisson%a_ffte) .or. &
-     .not.allocated(poisson%b_ffte) .or. &
-     .not.allocated(poisson%a_ffte_tmp))then
-    stop 'poisson_ffte: array is not allocated'
-  end if
-
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
-  poisson%a_ffte_tmp=0.d0
+  poisson%b_ffte=0.d0
 !$OMP parallel do private(iiz,iiy,ix) collapse(2)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
-    poisson%a_ffte_tmp(ng%is(1):ng%ie(1),iy,iz)=trho(ng%is(1):ng%ie(1),iiy,iiz)
+    poisson%b_ffte(ng%is(1):ng%ie(1),iy,iz) = cmplx(rho%f(ng%is(1):ng%ie(1),iiy,iiz))
   end do
   end do
-  call comm_summation(poisson%a_ffte_tmp,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
+  call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
 
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
                     info_field%isize(2),info_field%isize(3),-1, &
                     info_field%icomm(2),info_field%icomm(3))
 
-  trhoG_ele=0d0
+  poisson%zrhoG_ele=0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,iiy,iiz,iix) &
-!$omp             shared(ng,lg,trhoG_ele,poisson,inv_lgnum3)
+!$omp             shared(ng,lg,poisson,inv_lgnum3,fg)
   do iz=1,ng%num(3)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
     do ix=1,ng%num(1)
       iix=ix+ng%is(1)-1
-      trhoG_ele(iix,iiy,iiz) = poisson%b_ffte(iix,iy,iz)*inv_lgnum3
+      poisson%zrhoG_ele(iix,iiy,iiz) = poisson%b_ffte(iix,iy,iz)*inv_lgnum3
     end do
     do ix=1,lg%num(1)
-      poisson%b_ffte(ix,iy,iz) = poisson%b_ffte(ix,iy,iz) * poisson%coef(ix,iiy,iiz)
+      poisson%b_ffte(ix,iy,iz) = poisson%b_ffte(ix,iy,iz) * fg%coef(ix,iiy,iiz)
     end do
   end do
   end do
@@ -86,7 +80,7 @@ subroutine poisson_ffte(lg,ng,info_field,trho,tvh,trhoG_ele,poisson)
   do iy=1,ng%num(2)
     iiz=iz+ng%is(3)-1
     iiy=iy+ng%is(2)-1
-    tvh(ng%is(1):ng%ie(1),iiy,iiz)=poisson%a_ffte(ng%is(1):ng%ie(1),iy,iz)
+    Vh%f(ng%is(1):ng%ie(1),iiy,iiz) = poisson%a_ffte(ng%is(1):ng%ie(1),iy,iz)
   end do
   end do
 
