@@ -450,15 +450,15 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
 ! vion_tmp=V_ion(G): local part of the pseudopotential in the G space
   vion_tmp = 0d0
   rhog_tmp = 0d0
-  do ia=1,natom
-    ik=kion(ia)
-!$omp parallel do private(ix,iy,iz,g,gd,tmp_exp)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      g(1) = fg%vec_G(1,ix,iy,iz)
-      g(2) = fg%vec_G(2,ix,iy,iz)
-      g(3) = fg%vec_G(3,ix,iy,iz)
+  !$omp parallel do collapse(2) private(ix,iy,iz,g,ia,ik,gd,tmp_exp)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    g(1) = fg%vec_G(1,ix,iy,iz)
+    g(2) = fg%vec_G(2,ix,iy,iz)
+    g(3) = fg%vec_G(3,ix,iy,iz)
+    do ia=1,natom
+      ik=kion(ia)
       gd = g(1)*system%rion(1,ia) + g(2)*system%rion(2,ia) + g(3)*system%rion(3,ia)
       tmp_exp = exp(-zi*gd)/system%det_A
       vion_tmp(ix,iy,iz) = vion_tmp(ix,iy,iz) + ( ppg%zVG_ion(ix,iy,iz,ik) - fg%coef(ix,iy,iz)*pp%zps(ik) ) *tmp_exp
@@ -466,8 +466,8 @@ subroutine calc_vpsl_periodic(lg,mg,system,info_field,pp,fg,poisson,vpsl,ppg,pro
     end do
     end do
     end do
-!$omp end parallel do
   end do
+  !$omp end parallel do
   ppg%zrhoG_ion = rhog_tmp
 
 ! Vpsl=V_ion(r): local part of the pseudopotential in the r space
