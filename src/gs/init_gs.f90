@@ -23,7 +23,7 @@ contains
 
 SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   use structures
-  use inputoutput, only: au_length_aa
+  use inputoutput, only: au_length_aa, method_init_wf
   use salmon_global, only: yn_periodic,natom,rion
   use gram_schmidt_orth
   implicit none
@@ -53,6 +53,12 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
 
   if(system%if_real_orbital) then
 
+    select case(method_init_wf)
+
+    case ('random')
+      call gen_random_rwf
+
+    case ('gauss')
       Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
       do a=1,natom
         if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
@@ -88,8 +94,16 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
       end do
       end do
 
+    end select
+
   else
 
+    select case(method_init_wf)
+
+    case ('random')
+      call gen_random_zwf
+
+    case ('gauss')
       Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))-Xzero
       Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))-Yzero
       Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))-Zzero
@@ -121,6 +135,8 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
       end do
       end do
 
+    end select
+
   end if
 
   call gram_schmidt(system, mg, info, spsi, pinfo)
@@ -138,17 +154,17 @@ CONTAINS
     call random_seed(size = n)
     allocate(iseed(n))
     llen = product(lg%num)
-    iseed(:) = (info%ik_s * system%no + info%io_s) * llen &
-             + (mg%is(3) - lg%is(3)) * lg%num(2) * lg%num(1) &
-             + (mg%is(2) - lg%is(2)) * lg%num(1) &
-             + (mg%is(1) - lg%is(1))
+    iseed(:) = (info%ik_s * system%no + info%io_s - 1) * llen &
+             + (mg%is(3) - lg%is(3) + 1) * lg%num(2) * lg%num(1) &
+             + (mg%is(2) - lg%is(2) + 1) * lg%num(1) &
+             + (mg%is(1) - lg%is(1) + 1)
     call random_seed(put = iseed)
     deallocate(iseed)
   end subroutine
 
-  subroutine gen_rwf_periodic
+  subroutine gen_random_rwf
     implicit none
-    real(8) :: u
+    real(8) :: u(3),v(3)
 
     do ip=lbound(spsi%rwf,7),ubound(spsi%rwf,7)
     do ik=lbound(spsi%rwf,6),ubound(spsi%rwf,6)
@@ -157,8 +173,9 @@ CONTAINS
     do iz=lbound(spsi%rwf,3),ubound(spsi%rwf,3)
     do iy=lbound(spsi%rwf,2),ubound(spsi%rwf,2)
     do ix=lbound(spsi%rwf,1),ubound(spsi%rwf,1)
+      v = dble([ix, iy, iz])
       call random_number(u)
-      spsi%rwf(ix,iy,iz,is,io,ik,ip) = u
+      spsi%rwf(ix,iy,iz,is,io,ik,ip) = product(sign(u(1:3),v(1:3)))
     end do
     end do
     end do
@@ -168,7 +185,7 @@ CONTAINS
     end do
   end subroutine
 
-  subroutine gen_zwf_periodic
+  subroutine gen_random_zwf
     implicit none
     real(8) :: u(2)
 
