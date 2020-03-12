@@ -280,7 +280,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      ewald%yn_bookkeep='y'
      call  init_nion_div(system,lg,mg,info)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald,fg)
 
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
   rion_update = .true. ! it's first calculation

@@ -143,9 +143,9 @@ CONTAINS
       if(ewald%yn_bookkeep=='y') then
 
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
-         do iia=1,system%nion_mg
+         do iia=1,info%nion_mg
         !do ia=1,system%nion
-            ia = system%ia_mg(iia)
+            ia = info%ia_mg(iia)
             do ipair = 1,ewald%npair_bk(iia)
                ix = ewald%bk(1,ipair,iia)
                iy = ewald%bk(2,ipair,iia)
@@ -461,7 +461,7 @@ CONTAINS
   
 !===================================================================================================================================
 
-  subroutine init_ewald(system,ewald,fg)
+  subroutine init_ewald(system,info,ewald,fg)
     use structures
     use salmon_math
 !    use math_constants,only : pi,zi
@@ -472,6 +472,7 @@ CONTAINS
     use timer
     implicit none
     type(s_dft_system) ,intent(in) :: system
+    type(s_orbital_parallel),intent(in) :: info
     type(s_ewald_ion_ion) :: ewald
     type(s_reciprocal_grid),intent(in) :: fg
     !
@@ -512,9 +513,9 @@ CONTAINS
     npair_bk_max = 0
 !$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) &
 !$omp             reduction(max:npair_bk_max)
-    do iia=1,system%nion_mg
+    do iia=1,info%nion_mg
    !do ia=1,system%nion
-       ia = system%ia_mg(iia)
+       ia = info%ia_mg(iia)
        npair_bk_loc = 0
        do ix=-NEwald,NEwald
        do iy=-NEwald,NEwald
@@ -547,8 +548,8 @@ CONTAINS
 
       ewald%nmax_pair_bk = npair_bk_max
       ewald%nmax_pair_bk = nint(ewald%nmax_pair_bk * 1.5d0)
-      allocate( ewald%bk(4,ewald%nmax_pair_bk,system%nion_mg) )
-      allocate( ewald%npair_bk(system%nion_mg) )
+      allocate( ewald%bk(4,ewald%nmax_pair_bk,info%nion_mg) )
+      allocate( ewald%npair_bk(info%nion_mg) )
 
       if(comm_is_root(nproc_id_global)) then
          write(*,820) " number of ion-ion pair(/atom) used for allocation of bookkeeping=", ewald%nmax_pair_bk
@@ -557,9 +558,9 @@ CONTAINS
       endif
 
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
-    do iia=1,system%nion_mg
+    do iia=1,info%nion_mg
    !do ia=1,system%nion
-       ia = system%ia_mg(iia)
+       ia = info%ia_mg(iia)
        ipair = 0
        do ix=-NEwald,NEwald
        do iy=-NEwald,NEwald

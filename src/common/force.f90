@@ -84,7 +84,7 @@ contains
 
   ! Ewald sum
     call timer_begin(LOG_CALC_FORCE_ION_ION)
-    call force_ewald_rspace(system%Force,F_tmp,system,ewald,pp,nion,info%icomm_r)
+    call force_ewald_rspace(system%Force,F_tmp,system,info,ewald,pp,nion,info%icomm_r)
     call timer_end(LOG_CALC_FORCE_ION_ION)
   
     select case(iperiodic)
@@ -303,7 +303,7 @@ contains
   
 !===================================================================================================================================
 
-  subroutine force_ewald_rspace(F_sum,F_tmp,system,ewald,pp,nion,comm)
+  subroutine force_ewald_rspace(F_sum,F_tmp,system,info,ewald,pp,nion,comm)
     use structures
     use math_constants,only : pi,zi
     use salmon_math
@@ -311,6 +311,7 @@ contains
     use communication, only: comm_summation
     implicit none
     type(s_dft_system),intent(in) :: system
+    type(s_orbital_parallel),intent(in) :: info
     type(s_ewald_ion_ion),intent(in) :: ewald
     type(s_pp_info)   ,intent(in) :: pp
     integer  ,intent(in) :: nion,comm
@@ -340,10 +341,10 @@ contains
 
          F_tmp_l = 0d0
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
-         do iia= 1,system%nion_mg
+         do iia= 1,info%nion_mg
         !do ia= system%nion_s, system%nion_e
         !do ia=1,nion
-            ia = system%ia_mg(iia)
+            ia = info%ia_mg(iia)
             do ipair = 1,ewald%npair_bk(iia)
                ix = ewald%bk(1,ipair,iia)
                iy = ewald%bk(2,ipair,iia)
