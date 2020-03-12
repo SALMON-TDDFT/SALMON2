@@ -106,7 +106,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
 call timer_begin(LOG_INIT_PS_CALC_NPS)
   call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                   hx,hy,hz,system%primitive_a,system%rmatrix_A,info%icomm_ko)
+                                   hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
 call timer_end(LOG_INIT_PS_CALC_NPS)
 
 call timer_begin(LOG_INIT_PS_CALC_JXYZ)
@@ -114,7 +114,7 @@ call timer_begin(LOG_INIT_PS_CALC_JXYZ)
 
   call calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info%icomm_ko)
+                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
 call timer_end(LOG_INIT_PS_CALC_JXYZ)
 
 call timer_begin(LOG_INIT_PS_LMA_UV)
@@ -600,9 +600,9 @@ subroutine finalize_jxyz(ppg)
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,icomm_ko)
+subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
   use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
-  use structures,only : s_pp_info,s_pp_grid
+  use structures
   use communication, only: comm_get_max,comm_get_groupinfo
   implicit none
   type(s_pp_info) :: pp
@@ -613,7 +613,8 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  integer,intent(in),optional :: icomm_ko
+  type(s_orbital_parallel),intent(in),optional :: info
+  !
   integer :: ia,i,ik,ix,iy,iz,j,ixyz
   integer :: nc(3),mps_tmp
   real(8) :: tmpx,tmpy,tmpz
@@ -624,12 +625,9 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
 
-  if (present(icomm_ko)) then
-    call comm_get_groupinfo(icomm_ko,irank,nproc)
-    na   = (natom + 1) / nproc
-    ia_s = na * irank + 1
-    ia_e = ia_s + na - 1
-    if (irank == nproc-1) ia_e = natom
+  if (present(info)) then
+    ia_s = info%ia_s
+    ia_e = info%ia_e
   else
     ia_s = 1
     ia_e = natom
@@ -770,16 +768,16 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 !$omp end parallel
 
   ppg%nps=mps_tmp
-  if (present(icomm_ko)) then
-    call comm_get_max(ppg%nps,icomm_ko)
+  if (present(info)) then
+    call comm_get_max(ppg%nps,info%icomm_ko)
   end if
 
 end subroutine calc_nps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,icomm_ko)
+subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
   use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
-  use structures,only : s_pp_info,s_pp_grid
+  use structures
   use communication,only: comm_get_groupinfo,comm_summation
   implicit none
   type(s_pp_info) :: pp
@@ -790,7 +788,8 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  integer,intent(in),optional :: icomm_ko
+  type(s_orbital_parallel),intent(in),optional :: info
+  !
   integer :: ia,i,ik,ix,iy,iz,j
   integer :: nc(3), ixyz
   real(8) :: tmpx,tmpy,tmpz
@@ -801,12 +800,9 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
 
-  if (present(icomm_ko)) then
-    call comm_get_groupinfo(icomm_ko,irank,nproc)
-    na   = (natom + 1) / nproc
-    ia_s = na * irank + 1
-    ia_e = ia_s + na - 1
-    if (irank == nproc-1) ia_e = natom
+  if (present(info)) then
+    ia_s = info%ia_s
+    ia_e = info%ia_e
   else
     ia_s = 1
     ia_e = natom
@@ -959,13 +955,13 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   end do
 !$omp end parallel do
 
-  if (present(icomm_ko)) then
-    call comm_summation(ppg%jxyz,icomm_ko)
-    call comm_summation(ppg%jxx, icomm_ko)
-    call comm_summation(ppg%jyy, icomm_ko)
-    call comm_summation(ppg%jzz, icomm_ko)
-    call comm_summation(ppg%rxyz,icomm_ko)
-    call comm_summation(ppg%mps, icomm_ko)
+  if (present(info)) then
+    call comm_summation(ppg%jxyz,info%icomm_ko)
+    call comm_summation(ppg%jxx, info%icomm_ko)
+    call comm_summation(ppg%jyy, info%icomm_ko)
+    call comm_summation(ppg%jzz, info%icomm_ko)
+    call comm_summation(ppg%rxyz,info%icomm_ko)
+    call comm_summation(ppg%mps, info%icomm_ko)
   end if
 
 end subroutine calc_jxyz

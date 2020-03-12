@@ -59,10 +59,6 @@ module structures
     real(8) :: vec_Ac_ext(3) ! external vector potential for output
     real(8) :: vec_E(3)      ! total electric field for output
     real(8) :: vec_E_ext(3)  ! external electric potential for output
-
-    logical :: flag_k1x1x1
-    integer :: icomm_a, nion_mg
-    integer,allocatable :: ia_mg(:)
   end type s_dft_system
 
   type s_dft_energy
@@ -159,6 +155,10 @@ module structures
     integer,allocatable :: io_e_all(:) ! io_e for all orbital ranks
     integer,allocatable :: numo_all(:) ! numo for all orbital ranks
     integer :: numo_max ! max value of numo_all
+  ! for atom
+    integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
+    integer :: nion_mg
+    integer,allocatable :: ia_mg(:)
   end type s_orbital_parallel
 
   type s_field_parallel
