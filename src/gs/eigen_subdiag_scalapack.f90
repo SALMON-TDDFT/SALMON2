@@ -77,4 +77,63 @@ contains
     return
   end subroutine eigen_pdsyevd
 
+  subroutine eigen_pzheevd(pinfo,info,h,e,v)
+    use structures, only: s_process_info, s_orbital_parallel
+    use communication, only: comm_summation, comm_is_root
+    implicit none
+    type(s_process_info),intent(in)     :: pinfo
+    type(s_orbital_parallel),intent(in) :: info
+    complex(8), intent(in)  :: h(:,:)
+    real(8), intent(out)    :: e(:)
+    complex(8), intent(out) :: v(:,:)
+
+    complex(8), allocatable :: h_div(:,:), v_div(:,:), v_tmp(:,:)
+    complex(8), allocatable :: work(:), rwork(:)
+    integer, allocatable    :: iwork(:)
+    integer :: n, len_iwork
+    integer :: i, j, ierr
+    integer :: i_loc, j_loc, proc_row, proc_col
+
+    if (.not. pinfo%flag_blacs_gridinit) &
+      stop 'eigen_subdiag_scalapack: ScaLAPACK not initialized.'
+
+    n  = ubound(h,1)
+    len_iwork = 2 + 7*n + 8*pinfo%npcol
+
+    allocate( h_div(pinfo%nrow_local,pinfo%ncol_local), &
+              v_div(pinfo%nrow_local,pinfo%ncol_local), &
+              v_tmp(n,n), work(pinfo%len_work), rwork(pinfo%len_rwork), &
+              iwork(len_iwork) )
+
+!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
+    do i=1,n
+    do j=1,n
+      call INFOG2L( i, j, pinfo%desca, pinfo%nprow, pinfo%npcol, pinfo%myrow, pinfo%mycol, i_loc, j_loc, proc_row, proc_col )
+      if (pinfo%myrow == proc_row .and. pinfo%mycol == proc_col) then
+        h_div(i_loc,j_loc) = h(i,j)
+      end if
+    end do
+    end do
+
+    call PZHEEVD( 'V', 'L', n, h_div, 1, 1, pinfo%desca, e, v_div, 1, 1, pinfo%descz, &
+                  work, pinfo%len_work, rwork, pinfo%len_rwork, iwork, len_iwork, ierr )
+
+    v_tmp=0d0
+!$omp parallel do private(i,j,i_loc,j_loc,proc_row,proc_col) collapse(2)
+    do i=1,n
+    do j=1,n
+      call INFOG2L( i, j, pinfo%descz, pinfo%nprow, pinfo%npcol, pinfo%myrow, pinfo%mycol, i_loc, j_loc, proc_row, proc_col )
+      if (pinfo%myrow == proc_row .and. pinfo%mycol == proc_col) then
+        v_tmp(i,j) = v_div(i_loc,j_loc)
+      end if
+    end do
+    end do
+
+    call comm_summation(v_tmp, v, n*n, info%icomm_r)
+
+    deallocate( iwork, rwork, work, v_tmp, v_div, h_div )
+
+    return
+  end subroutine eigen_pzheevd
+
 end module eigen_scalapack

@@ -100,7 +100,8 @@ module structures
     integer :: nprow,npcol,myrow,mycol
     integer :: nrow_local,ncol_local,lda
     integer :: desca(9), descz(9)
-    integer :: len_work ! for PDSYEVD
+    integer :: len_work  ! for PDSYEVD, PZHEEVD
+    integer :: len_rwork ! for PZHEEVD
 #endif
   end type
 
