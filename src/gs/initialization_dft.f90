@@ -266,7 +266,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      srho%f = srho%f + srho_s(jspin)%f
   end do
 
-  call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
 

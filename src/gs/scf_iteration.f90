@@ -116,7 +116,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
   if(calc_mode/='DFT_BAND')then
 
     call timer_begin(LOG_CALC_HARTREE)
-    call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
+    call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
