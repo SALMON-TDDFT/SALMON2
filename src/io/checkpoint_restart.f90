@@ -81,14 +81,14 @@ end subroutine generate_restart_directory_name
 
 
 subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_mixing)          ,intent(in) :: mixing
@@ -116,13 +116,13 @@ subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
 end subroutine checkpoint_gs
 
 subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
-  use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_mixing
+  use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_mixing
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,&
                            yn_datafiles_dump,read_gs_restart_data
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
-  type(s_orbital_parallel)  ,intent(in) :: info
+  type(s_parallel_info)  ,intent(in) :: info
   type(s_orbital)        ,intent(inout) :: spsi
   integer                  ,intent(out) :: iter
   type(s_mixing)         ,intent(inout) :: mixing
@@ -219,14 +219,14 @@ subroutine restart_opt(Miopt,opt)
 end subroutine restart_opt
 
 subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,singlescale,idir)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_scalar, s_singlescale
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump,use_singlescale
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_scalar)          ,intent(in) :: sVh_stock1,sVh_stock2
@@ -259,12 +259,12 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,si
 end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
-  use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
+  use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
-  type(s_orbital_parallel)  ,intent(in) :: info
+  type(s_parallel_info)  ,intent(in) :: info
   type(s_orbital)        ,intent(inout) :: spsi
   integer                  ,intent(out) :: iter
   type(s_scalar)         ,intent(inout) :: sVh_stock1,sVh_stock2
@@ -287,14 +287,14 @@ end subroutine restart_rt
 
 subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
   use salmon_global, only: theory,calc_mode,write_gs_restart_data
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, s_mixing, s_scalar
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global, nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)            ,intent(in) :: odir
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_mixing) ,optional,intent(in) :: mixing
@@ -374,7 +374,7 @@ end subroutine write_bin
 !===================================================================================================================================
 
 subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
-  use structures, only: s_rgrid, s_dft_system,s_orbital_parallel, s_orbital, s_mixing, s_scalar
+  use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use salmon_global, only: yn_restart, theory,calc_mode,yn_datafiles_dump,read_gs_restart_data
@@ -382,7 +382,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   character(*)              ,intent(in) :: idir
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
-  type(s_orbital_parallel)  ,intent(in) :: info
+  type(s_parallel_info)  ,intent(in) :: info
   type(s_orbital)        ,intent(inout) :: spsi
   integer                  ,intent(out) :: iter
   type(s_mixing),optional,intent(inout) :: mixing
@@ -510,13 +510,13 @@ end subroutine read_bin
 
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   use salmon_global, only: yn_datafiles_dump
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*),            intent(in) :: odir
   type(s_rgrid),           intent(in) :: lg, mg
   type(s_dft_system),      intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital)                     :: spsi
   logical,                 intent(in) :: is_self_checkpoint
 
@@ -591,14 +591,14 @@ end subroutine write_wavefunction
 !===================================================================================================================================
 
 subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)                        :: odir
   type(s_rgrid)           ,intent(in) :: lg,ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_mixing)          ,intent(in) :: mixing
   logical                 ,intent(in) :: is_self_checkpoint
   !
@@ -721,14 +721,14 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
 end subroutine write_rho_inout
 
 subroutine write_rho(odir,lg,ng,system,info,mixing)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)                        :: odir
   type(s_rgrid)           ,intent(in) :: lg,ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_mixing)          ,intent(in) :: mixing
   !
   character(100) ::  dir_file_out
@@ -795,13 +795,13 @@ end subroutine write_rho
 !===================================================================================================================================
 
 subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
-  use structures, only: s_rgrid, s_orbital_parallel, s_scalar
+  use structures, only: s_rgrid, s_parallel_info, s_scalar
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)   :: odir
   type(s_rgrid), intent(in)    :: lg,ng
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_scalar),intent(in) :: sVh_stock1,sVh_stock2
   logical,intent(in) :: is_self_checkpoint
 
@@ -876,7 +876,7 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
   implicit none
   character(*)            ,intent(in) :: odir
   type(s_rgrid)           ,intent(in) :: lg,ng
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_singlescale)     ,intent(in) :: singlescale
   type(s_vector)          ,intent(in) :: Ac
   type(s_scalar)          ,intent(in) :: div_Ac
@@ -1040,7 +1040,7 @@ end subroutine write_singlescale
 !===================================================================================================================================
 
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,is_self_checkpoint)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
   use salmon_global, only: yn_datafiles_dump
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -1048,7 +1048,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
   character(*),            intent(in) :: idir
   type(s_rgrid),           intent(in) :: lg, mg
   type(s_dft_system),      intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital)                     :: spsi
   integer,                 intent(in) :: mk, mo
   logical,                 intent(in) :: if_real_orbital,is_self_checkpoint
@@ -1142,14 +1142,14 @@ end subroutine read_wavefunction
 !===================================================================================================================================
 
 subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,ng
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_mixing),intent(inout) :: mixing
   logical,intent(in) :: is_self_checkpoint
 
@@ -1267,14 +1267,14 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
 end subroutine read_rho_inout
 
 subroutine read_rho(idir,lg,ng,system,info,mixing)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_mixing
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,ng
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_mixing),intent(inout) :: mixing
 
   integer :: iu1_r
@@ -1334,13 +1334,13 @@ end subroutine read_rho
 !===================================================================================================================================
 
 subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
-  use structures, only: s_rgrid, s_orbital_parallel, s_scalar
+  use structures, only: s_rgrid, s_parallel_info, s_scalar
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,ng
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
   logical,intent(in) :: is_self_checkpoint
 
@@ -1737,7 +1737,7 @@ end subroutine read_Velocity
 #ifdef USE_MPI
 #define MPI_CHECK(X) call X; call errcheck(ierr)
 subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,rw_mode)
-  use structures, only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital, &
+  use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
   use salmon_global, only: yn_periodic
   use mpi
@@ -1745,7 +1745,7 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
   character(*),            intent(in)    :: iodir
   type(s_rgrid),           intent(in)    :: lg, mg
   type(s_dft_system),      intent(in)    :: system
-  type(s_orbital_parallel),intent(in)    :: info
+  type(s_parallel_info),intent(in)    :: info
   type(s_orbital),         intent(inout) :: spsi
   integer,                 intent(in)    :: mk, mo
   logical,                 intent(in)    :: if_real_orbital

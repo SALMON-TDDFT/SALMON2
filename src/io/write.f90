@@ -105,7 +105,7 @@ contains
     use filesystem, only: open_filehandle
     implicit none
     type(s_dft_system) ,intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
     type(s_sendrecv_grid),intent(inout) :: srg
@@ -1082,7 +1082,7 @@ contains
 !===================================================================================================================================
 
   subroutine write_prod_dk_data(rgrid_lg, rgrid_mg, system, wf_info, wavefunction)
-    use structures,           only: s_rgrid, s_dft_system, s_orbital_parallel, s_orbital
+    use structures,           only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
     use parallelization,      only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem,          only: open_filehandle
@@ -1091,7 +1091,7 @@ contains
     implicit none
     type(s_rgrid),        intent(in) :: rgrid_lg, rgrid_mg
     type(s_dft_system),       intent(in) :: system
-    type(s_orbital_parallel),      intent(in) :: wf_info
+    type(s_parallel_info),      intent(in) :: wf_info
     type(s_orbital), intent(in) :: wavefunction
 
     ! Specify the neighboring k-grid region to consider:
@@ -1386,7 +1386,7 @@ contains
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_pp_info)         ,intent(in) :: pp
     type(s_dft_energy)      ,intent(in) :: energy
     type(s_orbital)         ,intent(in) :: tpsi
@@ -1604,7 +1604,7 @@ contains
     integer                 ,intent(in) :: itt
     type(s_rgrid)           ,intent(in) :: mg
     type(s_dft_system)      ,intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)         ,intent(in) :: tpsi,tpsi0
     !
     integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)

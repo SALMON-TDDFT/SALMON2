@@ -21,9 +21,9 @@ module hartree_sub
 contains
 
 !===================================================================================================================================
-subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+subroutine hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
   use inputoutput, only: iperiodic,yn_ffte
-  use structures, only: s_rgrid,s_dft_system,s_field_parallel,s_poisson,  &
+  use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
   use poisson_cg_sub
   use poisson_periodic_sub
@@ -32,7 +32,7 @@ subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  type(s_field_parallel),intent(in) :: info_field
+  type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in) :: system
   type(s_poisson),intent(inout) :: poisson
   type(s_sendrecv_grid),intent(inout) :: srg_ng
@@ -43,13 +43,13 @@ subroutine hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg
 
   select case(iperiodic)
   case(0)
-    call poisson_cg(lg,mg,ng,info_field,system,poisson,srho%f,sVh%f,srg_ng,stencil)
+    call poisson_cg(lg,mg,ng,info,system,poisson,srho%f,sVh%f,srg_ng,stencil)
   case(3)
     select case(yn_ffte)
     case('n')
-      call poisson_periodic(lg,ng,info_field,fg,srho,sVh,poisson)
+      call poisson_periodic(lg,ng,info,fg,srho,sVh,poisson)
     case('y')
-      call poisson_ffte(lg,ng,info_field,fg,srho,sVh,poisson)
+      call poisson_ffte(lg,ng,info,fg,srho,sVh,poisson)
     end select
   end select
 

@@ -50,8 +50,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_process_info) :: pinfo
-type(s_orbital_parallel) :: info
-type(s_field_parallel) :: info_field
+type(s_parallel_info) :: info
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
@@ -86,13 +85,13 @@ call timer_begin(LOG_INIT_GS)
 it=0
 
 ! please move folloings into initialization_dft 
-call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
+call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg, ng,  &
-                          pinfo, info, info_field,  &
+                          pinfo, info,  &
                           srg, srg_ng,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
@@ -101,8 +100,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
 
 call initialization2_dft( it, nspin, rion_update,  &
                           system, energy, ewald, stencil, fg, poisson,&
-                          lg, mg, ng,  &
-                          info, info_field,   &
+                          lg, mg, ng, info,   &
                           srg, srg_ng,  &
                           srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
@@ -112,7 +110,7 @@ call initialization2_dft( it, nspin, rion_update,  &
 call initialization_dft_md( it, rion_update,  &
                           system, md, energy, ewald, stencil, fg, poisson,&
                           lg, mg, ng,  &
-                          info, info_field, pinfo,  &
+                          info, pinfo,  &
                           srg, srg_ng,  &
                           srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
@@ -151,7 +149,7 @@ MD_Loop : do it=1,nt
 
    call time_evolution_step_md_part1(it,system,md)
 
-   call update_pseudo_rt(it,info,info_field,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+   call update_pseudo_rt(it,info,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
 
    if(allocated(rho_old%f))    deallocate(rho_old%f)
    if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
@@ -174,7 +172,7 @@ MD_Loop : do it=1,nt
    call scf_iteration_dft( Miter,rion_update,sum1,  &
                            system,energy,ewald,  &
                            lg,mg,ng,  &
-                           info,info_field,pinfo,  &
+                           info,pinfo,  &
                            poisson,fg,  &
                            cg,mixing,  &
                            stencil,  &

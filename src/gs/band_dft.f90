@@ -48,11 +48,11 @@ subroutine init_band_dft(system,band)
 end subroutine init_band_dft
 
 subroutine calc_band_write(iter_band_kpt,system,band,info)
-  use structures, only: s_dft_system,s_band_dft,s_orbital_parallel
+  use structures, only: s_dft_system,s_band_dft,s_parallel_info
   implicit none
   type(s_dft_system), intent(inout)  :: system
   type(s_band_dft), intent(inout) ::band
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   integer :: iter_band_kpt, ik
 
    band%check_conv_esp=.false.

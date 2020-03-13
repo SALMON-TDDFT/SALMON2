@@ -40,8 +40,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_dft_system)  :: system
 type(s_rt) :: rt
-type(s_orbital_parallel) :: info
-type(s_field_parallel) :: info_field
+type(s_parallel_info) :: info
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func

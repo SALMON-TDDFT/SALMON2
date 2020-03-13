@@ -15,7 +15,7 @@
 !
 !=======================================================================
 module gram_schmidt_orth
-  use structures, only: s_dft_system, s_rgrid, s_orbital_parallel, s_orbital, s_process_info
+  use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital, s_process_info
   use pack_unpack, only: copy_data
   use gram_schmidt_so_sub, only: gram_schmidt_so, SPIN_ORBIT_ON
   implicit none
@@ -27,7 +27,7 @@ contains
     implicit none
     type(s_dft_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_orbital_parallel),      intent(in)    :: wfi
+    type(s_parallel_info),      intent(in)    :: wfi
     type(s_orbital), intent(inout) :: wf
     type(s_process_info) :: pinfo
 
@@ -58,7 +58,7 @@ contains
     implicit none
     type(s_dft_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_orbital_parallel),      intent(in)    :: wfi
+    type(s_parallel_info),      intent(in)    :: wfi
     type(s_orbital), intent(inout) :: wf
 
     integer :: nsize_rg
@@ -234,7 +234,7 @@ contains
     implicit none
     type(s_dft_system),       intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_orbital_parallel),      intent(in)    :: wfi
+    type(s_parallel_info),      intent(in)    :: wfi
     type(s_orbital), intent(inout) :: wf
     type(s_process_info) :: pinfo
 
@@ -358,7 +358,7 @@ contains
       implicit none
       type(s_dft_system),       intent(in)    :: sys
       type(s_rgrid),        intent(in)    :: rg
-      type(s_orbital_parallel),      intent(in)    :: wfi
+      type(s_parallel_info),      intent(in)    :: wfi
       type(s_orbital), intent(inout) :: wf
       type(s_process_info) :: pinfo
 
@@ -483,7 +483,7 @@ contains
       implicit none
       type(s_dft_system),       intent(in)    :: sys
       type(s_rgrid),        intent(in)    :: rg
-      type(s_orbital_parallel),      intent(in)    :: wfi
+      type(s_parallel_info),      intent(in)    :: wfi
       type(s_orbital), intent(inout) :: wf
 
       integer :: nsize_rg

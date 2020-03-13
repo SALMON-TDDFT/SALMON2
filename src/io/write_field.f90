@@ -150,13 +150,13 @@ end subroutine write_dns
 
 !===================================================================================================================================
 subroutine write_dns_ac_je(info,mg,system,rho,j_e,itt,action)
-  use structures, only: s_dft_system,s_orbital_parallel,s_rgrid,s_scalar,allocate_scalar,deallocate_scalar,s_vector
+  use structures, only: s_dft_system,s_parallel_info,s_rgrid,s_scalar,allocate_scalar,deallocate_scalar,s_vector
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use salmon_global, only: kion,izatom
   use filesystem, only: create_directory
   implicit none
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in) :: system
   type(s_rgrid),intent(in)  :: mg
   type(s_vector),intent(in) :: j_e
@@ -247,7 +247,7 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   integer                 ,intent(in) :: itt
   type(s_rgrid)           ,intent(in) :: lg,mg,ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_stencil)         ,intent(in) :: stencil
   type(s_scalar)          ,intent(in) :: srho
   type(s_sendrecv_grid)               :: srg,srg_ng
@@ -421,7 +421,7 @@ end subroutine write_elf
 
 !===================================================================================================================================
 
-subroutine write_estatic(lg,ng,hgs,stencil,info_field,sVh,srg_ng,itt)
+subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_ng,itt)
   use salmon_global, only: format_voxel_data
   use structures
   use sendrecv_grid, only: update_overlap_real8
@@ -432,7 +432,7 @@ subroutine write_estatic(lg,ng,hgs,stencil,info_field,sVh,srg_ng,itt)
   type(s_rgrid)   ,intent(in) :: lg,ng
   real(8)         ,intent(in) :: hgs(3)
   type(s_stencil) ,intent(in) :: stencil
-  type(s_field_parallel),intent(in) :: info_field
+  type(s_parallel_info),intent(in) :: info
   type(s_scalar)  ,intent(in) :: sVh
   type(s_sendrecv_grid)       :: srg_ng
   integer,intent(in),optional :: itt
@@ -473,7 +473,7 @@ subroutine write_estatic(lg,ng,hgs,stencil,info_field,sVh,srg_ng,itt)
     end do
     end do
  
-    call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),info_field%icomm_all)
+    call comm_summation(rmat,rmat2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
   
     write(filenum, '(i6.6)') itt
     if(jj==1)then
@@ -511,7 +511,7 @@ subroutine write_psi(lg,mg,system,info,spsi)
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital),intent(in) :: spsi
   !
   integer :: io,ik,ispin,ix,iy,iz

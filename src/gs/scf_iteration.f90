@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
+subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
                srg,srg_ng,spsi,shpsi,srho,srho_s, &
                cg,ppg,vlocal,  &
                miter,   &
@@ -42,8 +42,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   type(s_rgrid),         intent(in)    :: mg
   type(s_rgrid),         intent(in)    :: ng
   type(s_dft_system),    intent(in)    :: system
-  type(s_orbital_parallel),intent(in)  :: info
-  type(s_field_parallel),intent(in)    :: info_field
+  type(s_parallel_info), intent(in)    :: info
   type(s_process_info),  intent(in)    :: pinfo
   type(s_orbital),       intent(inout) :: spsi,shpsi
   type(s_scalar),        intent(inout) :: srho
@@ -116,7 +115,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil, &
   if(calc_mode/='DFT_BAND')then
 
     call timer_begin(LOG_CALC_HARTREE)
-    call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+    call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)

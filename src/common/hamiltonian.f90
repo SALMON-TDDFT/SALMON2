@@ -37,7 +37,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use code_optimization, only: stencil_is_parallelized_by_omp
   implicit none
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_rgrid)  ,intent(in) :: mg
   type(s_scalar) ,intent(in) :: V_local(system%Nspin)
   type(s_stencil),intent(in) :: stencil

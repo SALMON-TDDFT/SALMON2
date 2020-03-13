@@ -135,8 +135,8 @@ module structures
     logical :: if_pcomm_complex8_initialized
   end type s_sendrecv_grid
 
-  type s_orbital_parallel
-    integer :: iaddress(5)   ! address of MPI under wavefunction (X,Y,Z,O,K)
+  type s_parallel_info
+    integer :: iaddress(5) ! address of MPI under orbital wavefunction (ix,iy,iz,io,ik)
     integer,allocatable :: imap(:,:,:,:,:) ! address map
     logical :: if_divide_rspace
     logical :: if_divide_orbit
@@ -151,30 +151,25 @@ module structures
     integer :: io_s,io_e,numo ! io=io_s,...,io_e, numo=io_e-io_s+1
                               ! For calc_mode='RT' and temperature<0, these values are calculated from nelec.
                               ! In other cases, these are calculated from nstate.
+  ! sub-communicators of icomm_r (r-space)
+    integer :: icomm_x,id_x,isize_x ! x-axis
+    integer :: icomm_y,id_y,isize_y ! y-axis
+    integer :: icomm_z,id_z,isize_z ! z-axis
+    integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
+  ! for orbital index #io
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
     integer,allocatable :: io_s_all(:) ! io_s for all orbital ranks
     integer,allocatable :: io_e_all(:) ! io_e for all orbital ranks
     integer,allocatable :: numo_all(:) ! numo for all orbital ranks
     integer :: numo_max ! max value of numo_all
-  ! for atom
+  ! for atom index #ia
     integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
     integer :: nion_mg
     integer,allocatable :: ia_mg(:)
-  end type s_orbital_parallel
-
-  type s_field_parallel
-    integer :: iaddress(3) ! address of MPI under 3-d field (X,Y,Z)
-    integer,allocatable :: imap(:,:,:) ! address map
-    integer :: icomm_all,id_all,isize_all ! communicator, process ID, & # of processes
-    integer :: icomm(3) ! 1: x-direction, 2: y-direction, 3: z-direction
-                        ! Inside core FFTE routine, x-direction is redundant and
-                        ! yz-direction is parallel.
-    integer :: id(3), isize(3)
-    integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
-  end type s_field_parallel
+  end type s_parallel_info
 
   type s_orbital
-  ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e (cf. s_orbital_parallel)
+  ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e (cf. s_parallel_info)
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: ztmp(:,:,:,:)
@@ -517,7 +512,7 @@ contains
     implicit none
     integer                 ,intent(in) :: nspin
     type(s_rgrid)           ,intent(in) :: mg
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_dmatrix)                     :: dmat
     integer :: im,is,ix,iy,iz
     allocate(dmat%zrho_mat(mg%Nd,mg%ndir,mg%is(1)-mg%Nd:mg%ie(1),mg%is(2)-mg%Nd:mg%ie(2),mg%is(3)-mg%Nd:mg%ie(3), &
@@ -540,7 +535,7 @@ contains
     implicit none
     integer                 ,intent(in) :: nspin
     type(s_rgrid)           ,intent(in) :: mg
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)                     :: psi
     integer :: im,ik,io,is,iz,iy,ix
     allocate(psi%rwf(mg%is_array(1):mg%ie_array(1),  &
@@ -569,7 +564,7 @@ contains
     implicit none
     integer                 ,intent(in) :: nspin
     type(s_rgrid)           ,intent(in) :: mg
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)                     :: psi
     integer :: im,ik,io,is,iz,iy,ix
     allocate(psi%zwf(mg%is_array(1):mg%ie_array(1),  &
@@ -618,11 +613,6 @@ contains
     DEAL(rg%idy)
     DEAL(rg%idz)
   end subroutine deallocate_rgrid
-
-  subroutine deallocate_orbital_parallel(info)
-    type(s_orbital_parallel) :: info
-    DEAL(info%irank_io)
-  end subroutine deallocate_orbital_parallel
 
   subroutine deallocate_orbital(psi)
     type(s_orbital) :: psi

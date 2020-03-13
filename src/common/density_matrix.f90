@@ -34,7 +34,7 @@ contains
     use timer
     implicit none
     type(s_dft_system),intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_sendrecv_grid)      :: srg
     type(s_orbital)            :: psi
@@ -137,7 +137,7 @@ contains
     use sym_rho_sub, only: sym_rho
     implicit none
     type(s_dft_system),intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_rgrid)  ,intent(in) :: mg
     type(s_orbital),intent(in) :: psi
     type(s_scalar) :: rho(system%nspin,info%im_s:info%im_e)
@@ -271,7 +271,7 @@ contains
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_sendrecv_grid)      :: srg
     type(s_orbital)            :: psi
     type(s_pp_grid),intent(in) :: ppg
@@ -283,14 +283,14 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
-    logical :: is_orbital_parallel
+    logical :: is_parallel_info
 
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
-    is_orbital_parallel = .not. stencil_is_parallelized_by_omp
+    is_parallel_info = .not. stencil_is_parallelized_by_omp
 
     nspin = system%nspin
     ngrid = system%ngrid
@@ -319,7 +319,7 @@ contains
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
-!$omp             reduction(+:wrk4) if(is_orbital_parallel)
+!$omp             reduction(+:wrk4) if(is_parallel_info)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
@@ -432,7 +432,7 @@ contains
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_orbital),intent(in) :: psi
     type(s_pp_grid),intent(in) :: ppg
     type(s_dmatrix),intent(in) :: dmat
@@ -443,14 +443,14 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
-    logical :: is_orbital_parallel
+    logical :: is_parallel_info
 
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
 
-    is_orbital_parallel = .not. stencil_is_parallelized_by_omp
+    is_parallel_info = .not. stencil_is_parallelized_by_omp
 
     nspin = system%nspin
     ngrid = system%ngrid
@@ -472,7 +472,7 @@ contains
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
-!$omp             reduction(+:wrk3) if(is_orbital_parallel)
+!$omp             reduction(+:wrk3) if(is_parallel_info)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
@@ -670,7 +670,7 @@ contains
     type(s_dft_system)      ,intent(in) :: system
     type(s_rgrid)           ,intent(in) :: mg
     type(s_stencil)         ,intent(in) :: stencil
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_orbital)         ,intent(in) :: psi
 !    type(s_dmatrix),intent(in) :: dmat
     type(s_vector)                      :: curr ! electron number current density (without rho*A/c)

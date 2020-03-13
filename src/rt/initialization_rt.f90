@@ -24,8 +24,7 @@ contains
 subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
-                     lg, mg, ng,  &
-                     info, info_field,  &
+                     lg, mg, ng, info,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_ng,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
@@ -69,8 +68,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_dft_system)  :: system
   type(s_rt) :: rt
   type(s_process_info) :: pinfo
-  type(s_orbital_parallel) :: info
-  type(s_field_parallel) :: info_field
+  type(s_parallel_info) :: info
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
   type(s_xc_functional) :: xc_func
@@ -163,7 +161,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   
   
-  call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   
   call init_code_optimization
   
@@ -180,7 +178,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call allocate_scalar(mg,sVxc(jspin))
   end do
   call read_pslfile(system,pp,ppg)
-  call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
@@ -223,7 +221,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
-  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then
@@ -414,7 +412,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
         call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,ng,system%hgs,stencil,info_field,sVh,srg_ng,itt)
+        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_ng,itt)
       end if
     end do
   
@@ -438,7 +436,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%ie = ng%ie
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
 
-    call init_singlescale(ng,lg,info,info_field,system%hgs,srho,sVh &
+    call init_singlescale(ng,lg,info,system%hgs,srho,sVh &
     & ,srg_ng,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then

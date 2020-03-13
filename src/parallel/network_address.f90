@@ -20,9 +20,9 @@ contains
   ! convert 5-D address to rank
   function get_orbital_neighbour_rank(ob_info, proc_info, idir, idisp) result(irank)
     use salmon_global, only: yn_periodic
-    use structures, only: s_orbital_parallel, s_process_info
+    use structures, only: s_parallel_info, s_process_info
     implicit none
-    type(s_orbital_parallel), intent(in) :: ob_info
+    type(s_parallel_info), intent(in) :: ob_info
     type(s_process_info),     intent(in) :: proc_info
     integer,                  intent(in) :: idir, idisp
     integer :: iaddr(5),irank
@@ -50,18 +50,18 @@ contains
   end function get_orbital_neighbour_rank
 
   ! convert 3-D address to rank
-  function get_field_neighbour_rank(field_info, proc_info, idir, idisp) result(irank)
+  function get_field_neighbour_rank(info, proc_info, idir, idisp) result(irank)
     use salmon_global, only: yn_periodic
-    use structures, only: s_field_parallel, s_process_info
+    use structures, only: s_parallel_info, s_process_info
     implicit none
-    type(s_field_parallel), intent(in) :: field_info
+    type(s_parallel_info),  intent(in) :: info
     type(s_process_info),   intent(in) :: proc_info
     integer,                intent(in) :: idir, idisp
     integer :: iaddr(3),irank
     integer :: ishape(3)
 
     ishape(1:3) = proc_info%nprgrid(1:3)
-    iaddr(1:3)  = field_info%iaddress(1:3)
+    iaddr(1:3)  = info%iaddress(1:3)
     iaddr(idir) = iaddr(idir) + idisp
 
     if (yn_periodic == 'y') then
@@ -77,7 +77,7 @@ contains
     if (iaddr(idir) < 0) then
       irank = -1
     else
-      irank = field_info%imap(iaddr(1),iaddr(2),iaddr(3))
+      irank = info%imap(iaddr(1),iaddr(2),iaddr(3),info%iaddress(4),info%iaddress(5))
     end if
   end function get_field_neighbour_rank
 

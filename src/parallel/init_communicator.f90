@@ -20,16 +20,15 @@ CONTAINS
 
 !===================================================================================================================================
 
-subroutine init_communicator_dft(comm,pinfo,info,info_field)
+subroutine init_communicator_dft(comm,pinfo,info)
   use salmon_global, only: process_allocation
-  use structures, only: s_orbital_parallel, s_field_parallel, s_process_info
+  use structures, only: s_process_info, s_parallel_info
   use communication, only: comm_create_group, comm_get_groupinfo, &
                            comm_is_root, comm_summation, comm_create_group_byid
   implicit none
-  integer,      intent(in) :: comm
-  type(s_process_info), intent(in) :: pinfo
-  type(s_orbital_parallel) :: info
-  type(s_field_parallel)   :: info_field
+  integer             ,intent(in) :: comm
+  type(s_process_info),intent(in) :: pinfo
+  type(s_parallel_info)           :: info
   !
   integer :: myrank,nproc
   integer :: nproc_k,nproc_ob
@@ -173,65 +172,53 @@ subroutine init_communicator_dft(comm,pinfo,info,info_field)
   info%icomm_ko = comm_create_group_byid(comm, iranklists(1:nl))
   call comm_get_groupinfo(info%icomm_ko, info%id_ko, info%isize_ko)
 
-
-! info_field
-  info_field%icomm_all = info%icomm_r
-  info_field%id_all    = info%id_r
-  info_field%isize_all = info%isize_r
-
-  allocate(info_field%imap(0:nproc_d_o(1)-1, &
-                           0:nproc_d_o(2)-1, &
-                           0:nproc_d_o(3)-1))
-
   i5 = info%iaddress(5)
   i4 = info%iaddress(4)
-  info_field%imap(:,:,:)   = info%imap(:,:,:,i4,i5)
-  info_field%iaddress(1:3) = info%iaddress(1:3)
 
 ! x-dir summation
-  iz = info_field%iaddress(3)
-  iy = info_field%iaddress(2)
+  iz = info%iaddress(3)
+  iy = info%iaddress(2)
   nl = 0
   do ix=0,nproc_d_o(1)-1
     nl = nl + 1
-    iranklists(nl) = info_field%imap(ix,iy,iz)
+    iranklists(nl) = info%imap(ix,iy,iz,i4,i5)
   end do
-  info_field%icomm(1) = comm_create_group_byid(comm, iranklists(1:nl))
-  call comm_get_groupinfo(info_field%icomm(1), info_field%id(1), info_field%isize(1))
+  info%icomm_x = comm_create_group_byid(comm, iranklists(1:nl))
+  call comm_get_groupinfo(info%icomm_x, info%id_x, info%isize_x)
 
 ! y-dir summation
-  iz = info_field%iaddress(3)
-  ix = info_field%iaddress(1)
+  iz = info%iaddress(3)
+  ix = info%iaddress(1)
   nl = 0
   do iy=0,nproc_d_o(2)-1
     nl = nl + 1
-    iranklists(nl) = info_field%imap(ix,iy,iz)
+    iranklists(nl) = info%imap(ix,iy,iz,i4,i5)
   end do
-  info_field%icomm(2) = comm_create_group_byid(comm, iranklists(1:nl))
-  call comm_get_groupinfo(info_field%icomm(2), info_field%id(2), info_field%isize(2))
+  info%icomm_y = comm_create_group_byid(comm, iranklists(1:nl))
+  call comm_get_groupinfo(info%icomm_y, info%id_y, info%isize_y)
 
 ! z-dir summation
-  iy = info_field%iaddress(2)
-  ix = info_field%iaddress(1)
+  iy = info%iaddress(2)
+  ix = info%iaddress(1)
   nl = 0
   do iz=0,nproc_d_o(3)-1
     nl = nl + 1
-    iranklists(nl) = info_field%imap(ix,iy,iz)
+    iranklists(nl) = info%imap(ix,iy,iz,i4,i5)
   end do
-  info_field%icomm(3) = comm_create_group_byid(comm, iranklists(1:nl))
-  call comm_get_groupinfo(info_field%icomm(3), info_field%id(3), info_field%isize(3))
+  info%icomm_z = comm_create_group_byid(comm, iranklists(1:nl))
+  call comm_get_groupinfo(info%icomm_z, info%id_z, info%isize_z)
 
 ! xy-dir summation (for singlescale FDTD)
-  iz = info_field%iaddress(3)
+  iz = info%iaddress(3)
   nl = 0
   do iy=0,nproc_d_o(2)-1
   do ix=0,nproc_d_o(1)-1
     nl = nl + 1
-    iranklists(nl) = info_field%imap(ix,iy,iz)
+    iranklists(nl) = info%imap(ix,iy,iz,i4,i5)
   end do
   end do
-  info_field%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
-  call comm_get_groupinfo(info_field%icomm_xy, info_field%id_xy, info_field%isize_xy)
+  info%icomm_xy = comm_create_group_byid(comm, iranklists(1:nl))
+  call comm_get_groupinfo(info%icomm_xy, info%id_xy, info%isize_xy)
 
 end subroutine init_communicator_dft
 

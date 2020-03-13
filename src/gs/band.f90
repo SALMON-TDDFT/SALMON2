@@ -21,14 +21,14 @@ module band
 
     !> Calculate inner-product between bloch states at neightboring k-grid.
     subroutine calc_kgrid_prod(sys, lg, mg, par, wf, nk1, nk2, nk3, ndk, ik3d_tbl, prod_dk)
-        use structures, only: s_dft_system, s_rgrid, s_orbital_parallel, s_orbital
+        use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
         use pack_unpack, only: copy_data
         use communication, only: comm_summation, comm_is_root
         use math_constants, only: zI
         implicit none
         type(s_dft_system), intent(in) :: sys
         type(s_rgrid), intent(in) :: lg, mg
-        type(s_orbital_parallel), intent(in) :: par
+        type(s_parallel_info), intent(in) :: par
         type(s_orbital), intent(in) :: wf
         integer, intent(in) :: nk1, nk2, nk3, ndk
         integer, intent(out) :: ik3d_tbl(1:3, nk1*nk2*nk3)

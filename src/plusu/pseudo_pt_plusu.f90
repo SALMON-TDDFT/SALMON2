@@ -34,7 +34,7 @@ contains
     use timer
     implicit none
     integer,intent(in) :: nspin
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital),intent(in) :: tpsi
     type(s_orbital) :: htpsi
@@ -156,7 +156,7 @@ contains
 #endif
     implicit none
     integer        ,intent(in) :: nspin
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital),intent(in) :: tpsi
     complex(8)    ,allocatable :: phipsibox (:,:,:,:,:)

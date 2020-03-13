@@ -18,7 +18,7 @@
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,ewald,  &
                               lg,mg,ng,  &
-                              info,info_field,pinfo,  &
+                              info,pinfo,  &
                               poisson,fg,  &
                               cg,mixing,  &
                               stencil,  &
@@ -65,8 +65,7 @@ real(8) :: rNebox1,rNebox2
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
-type(s_orbital_parallel) :: info
-type(s_field_parallel) :: info_field
+type(s_parallel_info) :: info
 type(s_process_info),intent(in) :: pinfo
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
@@ -104,7 +103,7 @@ if(step_initial_mix_zero.gt.1)then
 
       rion_update = check_rion_update() .or. (iter == 1)
       call copy_density(iter,system%nspin,ng,srho_s,mixing)
-      call scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil,  &
+      call scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil,  &
                      srg,srg_ng,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      iter,  &
@@ -159,7 +158,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       end if
    end if
    call copy_density(Miter,system%nspin,ng,srho_s,mixing)
-   call scf_iteration_step(lg,mg,ng,system,info,info_field,pinfo,stencil,  &
+   call scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil,  &
                      srg,srg_ng,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &
@@ -218,7 +217,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,info_field%icomm_all)
+      call comm_summation(sum0,sum1,info%icomm_r)
       if(system%nspin==1)then
          sum1 = sum1*system%Hvol/dble(nelec)
       else if(system%nspin==2)then
@@ -238,7 +237,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,info_field%icomm_all)
+      call comm_summation(sum0,sum1,info%icomm_r)
       if(convergence=='norm_rho_dng')then
          sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
@@ -252,7 +251,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,info_field%icomm_all)
+      call comm_summation(sum0,sum1,info%icomm_r)
       if(convergence=='norm_pot_dng')then
          sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
@@ -310,7 +309,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    end do
    end do
    end do
-   call comm_summation(rNebox1,rNebox2,info_field%icomm_all)
+   call comm_summation(rNebox1,rNebox2,info%icomm_r)
    if( ilevel_print.ge.2 ) then
    if(comm_is_root(nproc_id_global))then
       write(*,*) "Ne=",rNebox2*system%Hvol

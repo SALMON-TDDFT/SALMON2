@@ -21,9 +21,9 @@ contains
 
 !============================ Hartree potential (Solve Poisson equation)
 
-subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
+subroutine poisson_boundary(lg,mg,ng,info,system,poisson,trho,wk2)
   use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
-  use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson
+  use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_poisson
   use salmon_math, only: ylm
   use communication, only: comm_summation
   
@@ -35,7 +35,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  type(s_field_parallel),intent(in) :: info_field
+  type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in) :: system
   type(s_poisson),intent(inout) :: poisson
   real(8) :: trho(mg%is(1):mg%ie(1),    &
@@ -48,7 +48,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   integer :: ii,jj,ix,iy,iz,lm,ll,m,icen  !,kk,pl,cl
   integer :: ixbox,iybox,izbox
   integer :: j,k
-  integer :: istart(0:info_field%isize_all-1),iend(0:info_field%isize_all-1)
+  integer :: istart(0:info%isize_r-1),iend(0:info%isize_r-1)
   integer :: icount
   integer,allocatable :: itrho(:)
   integer :: num_center
@@ -72,6 +72,17 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   integer,allocatable :: ig(:,:,:)
   real(8),allocatable :: coordinate(:,:)
  !integer :: lmax_lmp_tmp !iwata
+  integer :: comm_xyz(3),nproc_xyz(3),myrank_xyz(3)
+  
+  comm_xyz(1) = info%icomm_x
+  comm_xyz(2) = info%icomm_y
+  comm_xyz(3) = info%icomm_z
+  nproc_xyz(1) = info%isize_x
+  nproc_xyz(2) = info%isize_y
+  nproc_xyz(3) = info%isize_z
+  myrank_xyz(1) = info%id_x
+  myrank_xyz(2) = info%id_y
+  myrank_xyz(3) = info%id_z
   
   !------------------------- Boundary condition (multipole expansion)
 
@@ -234,7 +245,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
     center_trho_nume_deno2(4,poisson%ipole_tbl(ii))=sum1
   end do
   
-  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,info_field%icomm_all)
+  call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,info%icomm_r)
   
   do ii=1,poisson%npole_total
     if(center_trho_nume_deno(4,ii)*hvol>=1.d-12)then
@@ -335,13 +346,13 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   
   end select
   
-  if(info_field%isize_all==1)then
+  if(info%isize_r==1)then
   !$OMP parallel do
     do icen=1,num_center
       rholm(:,icen)=rholm2(:,icen)
     end do
   else
-    call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,info_field%icomm_all)
+    call comm_summation(rholm2,rholm,(lmax_lmp+1)**2*num_center,info%icomm_r)
   end if
   
   !$OMP parallel do private(iz,iy,ix) collapse(2)
@@ -363,9 +374,9 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
     icount=ng%num(1)*ng%num(2)*ng%num(3)/ng%num(k)*2*ndh
 
   !$OMP parallel do
-    do ii=0,info_field%isize(k)-1
-      istart(ii)=ii*icount/info_field%isize(k)+1
-      iend(ii)=(ii+1)*icount/info_field%isize(k)
+    do ii=0,nproc_xyz(k)-1
+      istart(ii)=ii*icount/nproc_xyz(k)+1
+      iend(ii)=(ii+1)*icount/nproc_xyz(k)
     end do
           
     do ll=0,lmax_lmp
@@ -376,7 +387,7 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
   
   !$OMP parallel do &
   !$OMP private(xx,yy,zz,rr,xxxx,yyyy,zzzz,lm,ll,sum1,ylm2,rrrr,xp2,yp2,zp2,xy,yz,xz,rinv,rbox,deno,icen)
-    do jj=istart(info_field%id(k)),iend(info_field%id(k))
+    do jj=istart(myrank_xyz(k)),iend(myrank_xyz(k))
       do icen=1,num_center
         if(itrho(icen)==1)then
           xx=coordinate(poisson%ig_bound(1,jj,k),1)-center_trho(1,icen)
@@ -442,25 +453,25 @@ subroutine poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,wk2)
       end do
     end do
   
-    if(info_field%isize_all==1)then
+    if(info%isize_r==1)then
   !$OMP parallel do
       do jj=1,icount
         poisson%wkbound(jj)=poisson%wkbound2(jj)
       end do
     else
       call comm_summation( &
-        poisson%wkbound2,              poisson%wkbound,              icount/2, info_field%icomm(k), 0                    )
+        poisson%wkbound2,              poisson%wkbound,              icount/2, comm_xyz(k), 0                    )
       call comm_summation( &
-        poisson%wkbound2(icount/2+1:), poisson%wkbound(icount/2+1:), icount/2, info_field%icomm(k), info_field%isize(k)-1)
+        poisson%wkbound2(icount/2+1:), poisson%wkbound(icount/2+1:), icount/2, comm_xyz(k), nproc_xyz(k)-1)
     end if
   
-    if(info_field%id(k)==0) then
+    if(myrank_xyz(k)==0) then
   !$OMP parallel do
       do jj=1,icount/2
         wk2(poisson%ig_bound(1,jj,k),poisson%ig_bound(2,jj,k),poisson%ig_bound(3,jj,k))=poisson%wkbound(jj)
       end do
     end if
-    if(info_field%id(k)==info_field%isize(k)-1) then
+    if(myrank_xyz(k)==nproc_xyz(k)-1) then
   !$OMP parallel do
       do jj=icount/2+1,icount
         wk2(poisson%ig_bound(1,jj,k),poisson%ig_bound(2,jj,k),poisson%ig_bound(3,jj,k))=poisson%wkbound(jj)

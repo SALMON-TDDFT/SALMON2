@@ -59,7 +59,7 @@ contains
     type(s_sendrecv_grid)               :: srg_ng, srg
     type(s_scalar)          ,intent(in) :: srho_s(system%nspin)
     type(s_pp_nlcc)         ,intent(in) :: ppn
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)                     :: spsi
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)                      :: sVxc(system%nspin)

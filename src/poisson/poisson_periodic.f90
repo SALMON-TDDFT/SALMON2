@@ -19,14 +19,14 @@ module poisson_periodic_sub
 
 contains
 
-subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
+subroutine poisson_periodic(lg,ng,info,fg,rho,Vh,poisson)
   use structures
   use communication, only: comm_summation
   use math_constants, only : pi
   implicit none
   type(s_rgrid)          ,intent(in) :: lg
   type(s_rgrid)          ,intent(in) :: ng
-  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_parallel_info)  ,intent(in) :: info
   type(s_reciprocal_grid),intent(in) :: fg
   type(s_scalar)         ,intent(in) :: rho
   type(s_scalar)                     :: Vh
@@ -47,7 +47,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   end do
   end do
 
-  call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
+  call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info%icomm_z)
 
 !$omp workshare
   poisson%ff1y = 0d0
@@ -61,7 +61,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   end do
   end do
   end do
-  call comm_summation(poisson%ff1y,poisson%ff2y,ng%num(1)*lg%num(2)*ng%num(3),info_field%icomm(2))
+  call comm_summation(poisson%ff1y,poisson%ff2y,ng%num(1)*lg%num(2)*ng%num(3),info%icomm_y)
 
 !$omp workshare
   poisson%ff1x = 0.d0
@@ -76,7 +76,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   end do
   end do
 
-  call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*ng%num(2)*ng%num(3),info_field%icomm(1))
+  call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*ng%num(2)*ng%num(3),info%icomm_x)
 
 !$OMP parallel do private(kz,ky,kx)
   do kz = ng%is(3),ng%ie(3)
@@ -87,7 +87,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   end do
   end do
 
-  call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*ng%num(2)*ng%num(3),info_field%icomm(1))
+  call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*ng%num(2)*ng%num(3),info%icomm_x)
 
 !$omp workshare
   poisson%ff1z = 0.d0
@@ -103,7 +103,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   end do
   end do
 
-  call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info_field%icomm(3))
+  call comm_summation(poisson%ff1z,poisson%ff2z,ng%num(1)*ng%num(2)*lg%num(3),info%icomm_z)
 
 !$omp workshare
   poisson%ff1y = 0.d0
@@ -117,7 +117,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   end do
   end do
   end do
-  call comm_summation(poisson%ff1y,poisson%ff2y,ng%num(1)*lg%num(2)*ng%num(3),info_field%icomm(2))
+  call comm_summation(poisson%ff1y,poisson%ff2y,ng%num(1)*lg%num(2)*ng%num(3),info%icomm_y)
 
 !$omp workshare
   poisson%ff1x = 0.d0
@@ -131,7 +131,7 @@ subroutine poisson_periodic(lg,ng,info_field,fg,rho,Vh,poisson)
   end do
   end do
   end do
-  call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*ng%num(2)*ng%num(3),info_field%icomm(1))
+  call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*ng%num(2)*ng%num(3),info%icomm_x)
 
 !$OMP parallel do private(iz,iy,ix)
   do iz = ng%is(3),ng%ie(3)

@@ -73,7 +73,7 @@ subroutine read_wfn(lg,mg,psi,info,system)
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system) ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital) :: psi
   !
   character(7),parameter :: filename="wfn.bin"
@@ -156,7 +156,7 @@ subroutine write_wfn(lg,mg,psi,info,system)
   implicit none
   type(s_rgrid),intent(in) :: lg,mg
   type(s_dft_system) ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital),intent(in) :: psi
   !
   character(7),parameter :: filename="wfn.bin"
