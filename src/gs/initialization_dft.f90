@@ -200,8 +200,8 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   end select
 
   select case(method_mixing)
-  case ('simple','broyden') ; continue
-  case default ; stop 'Specify either "simple" or "broyden" for method_mixing.'
+  case ('simple','broyden','pulay') ; continue
+  case default ; stop 'Specify any one of "simple" or "broyden" or "pulay" for method_mixing.'
   end select
 
 
