@@ -95,6 +95,7 @@ module structures
     integer :: nprgrid(3)    ! x,y,z
 #ifdef USE_SCALAPACK
     logical :: flag_blacs_gridinit
+    integer :: icomm_sl ! for summation
     integer :: iam,nprocs
     integer,allocatable :: gridmap(:,:)
     integer :: nprow,npcol,myrow,mycol

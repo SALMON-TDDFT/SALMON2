@@ -247,11 +247,11 @@ if __name__ == '__main__':
   # ScaLAPACK checking...
   if inputmap['yn_scalapack']:
     n      = inputmap['nstate']
-    nprocs = list_prod(inputmap['nproc_rgrid'])
+    nprocs = inputmap['nproc_ob']
     nprow,npcol = get_sl_process_grid_size(n, nprocs)
     if (nprow*npcol != nprocs):
       print '[ScaLAPACK] nprow*npcol = {} != {}'.format(nprow*npcol,nprocs)
-      print '            please check the nproc_rgrid'
+      print '            please check the nproc_ob'
       fail_exit()
     mb,nb = get_sl_blocking_factor(n, nprow, npcol)
     if (nb*npcol != n):

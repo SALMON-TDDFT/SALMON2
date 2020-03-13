@@ -29,13 +29,16 @@ contains
     type(s_process_info),intent(inout)  :: pinfo
     type(s_parallel_info),intent(in) :: info
 
-    integer,parameter :: iclose_comm = 2 ! 1: rko, 2: r
+    integer,parameter :: iclose_comm = 3 ! 1: rko, 2: r, 3: o
     integer :: ii,ix,iy,iz
     integer :: k1,k2
+    integer :: px,py,pz,po,pk
 
     select case(iclose_comm)
     ! close on icomm_rko
     case(1)
+      pinfo%icomm_sl = info%icomm_rko
+
       pinfo%npcol = int(sqrt(dble(info%isize_rko)))
       pinfo%npcol = pinfo%npcol + mod(pinfo%npcol,2)
       do ii=1,100
@@ -65,6 +68,8 @@ contains
 
     ! close on icomm_r
     case(2)
+      pinfo%icomm_sl = info%icomm_r
+
       pinfo%npcol = int(sqrt(dble(info%isize_r)))
       pinfo%npcol = pinfo%npcol + mod(pinfo%npcol,2)
       do ii=1,100
@@ -82,6 +87,8 @@ contains
 
       allocate( pinfo%gridmap(pinfo%nprow,pinfo%npcol) )
       pinfo%gridmap = -1
+      pk = info%iaddress(5)
+      po = info%iaddress(4)
       ii = 0
       do iz=0,pinfo%nprgrid(3)-1
       do iy=0,pinfo%nprgrid(2)-1
@@ -89,11 +96,46 @@ contains
         ii = ii + 1
         k1 = mod(ii-1,pinfo%nprow)
         k2 = (ii-1)/pinfo%nprow
-        pinfo%gridmap(k1+1,k2+1) = info%imap(ix,iy,iz,info%iaddress(4),info%iaddress(5))
+        pinfo%gridmap(k1+1,k2+1) = info%imap(ix,iy,iz,po,pk)
       end do
       end do
       end do
       if (ii /= info%isize_r) &
+        stop 'scalapack_module: fatal error, please check gridmap'
+
+    ! close on icomm_o
+    case(3)
+      pinfo%icomm_sl = info%icomm_o
+
+      pinfo%npcol = int(sqrt(dble(info%isize_o)))
+      pinfo%npcol = pinfo%npcol + mod(pinfo%npcol,2)
+      do ii=1,100
+        pinfo%nprow=info%isize_o/pinfo%npcol
+        if(pinfo%nprow*pinfo%npcol == info%isize_o) exit
+        pinfo%npcol=pinfo%npcol+2
+      end do
+      if (pinfo%nprow > pinfo%npcol) then
+        k1          = pinfo%nprow
+        pinfo%nprow = pinfo%npcol
+        pinfo%npcol = k1
+      end if
+      if (pinfo%nprow*pinfo%npcol /= info%isize_o) &
+        stop 'scalapack_module: fatal error, please check nprow and npcol'
+
+      allocate( pinfo%gridmap(pinfo%nprow,pinfo%npcol) )
+      pinfo%gridmap = - 1
+      pk = info%iaddress(5)
+      pz = info%iaddress(3)
+      py = info%iaddress(2)
+      px = info%iaddress(1)
+      ii = 0
+      do k2=1,pinfo%npcol
+      do k1=1,pinfo%nprow
+        pinfo%gridmap(k1,k2) = info%imap(px,py,pz,ii,pk)
+        ii = ii + 1
+      end do
+      end do
+      if (ii /= info%isize_o) &
         stop 'scalapack_module: fatal error, please check gridmap'
     end select
   end subroutine create_gridmap
