@@ -20,8 +20,7 @@ subroutine main_dft2tddft
 use structures
 use salmon_global, only: directory_read_data,calc_mode, &
                          nproc_k,nproc_ob,nproc_rgrid, &
-                         target_nproc_k,target_nproc_ob,target_nproc_rgrid, &
-                         yn_periodic
+                         target_nproc_k,target_nproc_ob,target_nproc_rgrid
 use communication, only: comm_get_globalinfo,comm_bcast,comm_is_root,comm_sync_all
 use salmon_xc
 use timer
@@ -73,15 +72,15 @@ call init_communicator_dft(icomm,pinfo_scf,info_scf)
 call init_grid_parallel(irank,nprocs,pinfo_scf,info_scf,lg_scf,mg_scf,ng_scf)
 call init_orbital_parallel_singlecell(system_scf,info_scf,pinfo_scf)
 
-if (yn_periodic == 'y') then
-  call allocate_orbital_complex(system_scf%nspin,mg_scf,info_scf,spsi)
-else
+if (system_scf%if_real_orbital) then
   call allocate_orbital_real(system_scf%nspin,mg_scf,info_scf,spsi)
+else
+  call allocate_orbital_complex(system_scf%nspin,mg_scf,info_scf,spsi)
 end if
 call timer_end(LOG_INIT_GS)
 
 
-call comm_sync_all
+!call comm_sync_all
 call timer_begin(LOG_INIT_GS_RESTART)
 call generate_restart_directory_name(directory_read_data,gdir,pdir)
 call read_bin(pdir,lg_scf,mg_scf,ng_scf,system_scf,info_scf,spsi,Miter)
@@ -108,13 +107,13 @@ call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)
 call timer_end(LOG_INIT_RT)
 
 
-call comm_sync_all
+!call comm_sync_all
 call timer_begin(LOG_WRITE_RT_DATA)
 call convert_wave_function
 call timer_end(LOG_WRITE_RT_DATA)
 
 
-call comm_sync_all
+!call comm_sync_all
 call timer_begin(LOG_WRITE_RT_RESULTS)
 call init_dir_out_restart(ofl)
 call generate_restart_directory_name(ofl%dir_out_restart,gdir,pdir)
@@ -151,9 +150,9 @@ use communication, only: comm_summation, comm_create_group_byid, &
 implicit none
 integer,allocatable    :: is_ref(:,:,:),is_ref_srank(:,:,:),is_ref_rrank(:,:,:)
 integer,allocatable    :: irank_src(:,:),irank_dst(:,:)
-real(8),allocatable    :: dbuf1(:,:,:,:),dbuf2(:,:,:,:)
-complex(8),allocatable :: zbuf1(:,:,:,:),zbuf2(:,:,:,:)
-integer :: ik,io,is,jrank,krank
+real(8),allocatable    :: dbuf1(:,:,:,:,:),dbuf2(:,:,:,:,:)
+complex(8),allocatable :: zbuf1(:,:,:,:,:),zbuf2(:,:,:,:,:)
+integer :: ik,io,is,jrank,krank,nb_s,nb_r,ib,ibuf,ibuf2
 integer :: ix,iy,iz
 
 ! get referrer
@@ -207,122 +206,239 @@ end do
 
 
 ! conversion
+nb_s = max_prime_factor(info_scf%numo)
+nb_r = min(info_rt%numo,nb_s)
+call comm_bcast(nb_s,info_scf%icomm_rko)
+call comm_bcast(nb_r,info_scf%icomm_rko)
+if (nb_s < nb_r) stop 'error: info_scf%numo < info_rt%numo'
+
+if (comm_is_root(info_scf%id_rko)) then
+  print *, 'DFT  : # of kgrid, # of orbital =',system_scf%nk,system_scf%no
+  print *, '       # of orbital / process =',info_scf%numo
+  print *, 'TDDFT: # of kgrid, # of orbital =',system_rt%nk,system_rt%no
+  print *, '       # of orbital / process =',info_rt%numo
+  print *, 'blocking factor =',nb_s,nb_r
+end if
+
 if (allocated(spsi%rwf)) then
   allocate(dbuf1(lg_scf%is(1):lg_scf%ie(1), &
                  lg_scf%is(2):lg_scf%ie(2), &
-                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin,nb_s))
   allocate(dbuf2(lg_scf%is(1):lg_scf%ie(1), &
                  lg_scf%is(2):lg_scf%ie(2), &
-                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin,nb_s))
 end if
 if (allocated(spsi%zwf)) then
   allocate(zbuf1(lg_scf%is(1):lg_scf%ie(1), &
                  lg_scf%is(2):lg_scf%ie(2), &
-                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin,nb_s))
   allocate(zbuf2(lg_scf%is(1):lg_scf%ie(1), &
                  lg_scf%is(2):lg_scf%ie(2), &
-                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin))
+                 lg_scf%is(3):lg_scf%ie(3),system_scf%nspin,nb_s))
 end if
 
-do ik=1,system_scf%nk
-do io=1,system_scf%no
-  ! gather rgrid data
+ibuf = 0
+
+do ik=1,system_rt%nk
+do io=1,system_rt%no,nb_s
+
+if (comm_is_root(info_scf%id_rko)) then
+  print '(3(A,I6))', 'Disributed... ik,io =',ik,',',io
+end if
+
+if (allocated(dbuf1)) dbuf1=0d0
+if (allocated(zbuf1)) zbuf1=0d0
+
+! gather rgrid data
+do ib=io,min(system_rt%no,io+nb_s-1)
+  ibuf = ibuf + 1
   if (info_scf%ik_s <= ik .and. ik <= info_scf%ik_e .and. &
-      info_scf%io_s <= io .and. io <= info_scf%io_e) then
+      info_scf%io_s <= ib .and. ib <= info_scf%io_e) then
     if (allocated(dbuf1)) then
-      dbuf1 = 0d0
 !$omp parallel do collapse(3) default(none) &
 !$omp             private(ix,iy,iz,is) &
 !$omp             shared(system_scf,mg_scf,dbuf1,spsi) &
-!$omp             shared(ik,io)
+!$omp             shared(ik,ib,ibuf)
       do is=1,system_scf%nspin
       do iz=mg_scf%is(3),mg_scf%ie(3)
       do iy=mg_scf%is(2),mg_scf%ie(2)
       do ix=mg_scf%is(1),mg_scf%ie(1)
-        dbuf1(ix,iy,iz,is) = spsi%rwf(ix,iy,iz,is,io,ik,1)
+        dbuf1(ix,iy,iz,is,ibuf) = spsi%rwf(ix,iy,iz,is,ib,ik,1)
       end do
       end do
       end do
       end do
 !$omp end parallel do
-      call comm_summation(dbuf1,dbuf2,size(dbuf1),info_scf%icomm_r)
     end if
     if (allocated(zbuf1)) then
-      zbuf1 = 0d0
 !$omp parallel do collapse(3) default(none) &
 !$omp             private(ix,iy,iz,is) &
 !$omp             shared(system_scf,mg_scf,zbuf1,spsi) &
-!$omp             shared(ik,io)
+!$omp             shared(ik,ib,ibuf)
       do is=1,system_scf%nspin
       do iz=mg_scf%is(3),mg_scf%ie(3)
       do iy=mg_scf%is(2),mg_scf%ie(2)
       do ix=mg_scf%is(1),mg_scf%ie(1)
-        zbuf1(ix,iy,iz,is) = spsi%zwf(ix,iy,iz,is,io,ik,1)
+        zbuf1(ix,iy,iz,is,ibuf) = spsi%zwf(ix,iy,iz,is,ib,ik,1)
       end do
       end do
       end do
       end do
 !$omp end parallel do
-      call comm_summation(zbuf1,zbuf2,size(zbuf1),info_scf%icomm_r)
     end if
   end if
+end do
 
-  ! send data from representive SCF rank to RT rank
+  if (info_scf%ik_s <= ik .and. ik <= info_scf%ik_e .and. &
+      info_scf%io_s <= io .and. io <= info_scf%io_e) then
+    if (allocated(dbuf1)) call comm_summation(dbuf1,dbuf2,size(dbuf1),info_scf%icomm_r)
+    if (allocated(zbuf1)) call comm_summation(zbuf1,zbuf2,size(zbuf1),info_scf%icomm_r)
+  end if
+
+! send data from representive SCF rank to RT rank
   jrank = irank_src(io,ik)
   krank = irank_dst(io,ik)
-  if (jrank >= 0 .and. krank >= 0) then
-    if (jrank == krank) then
-      ! sender == receiver
-    else if (jrank == irank) then
-      if (allocated(dbuf2)) call comm_send(dbuf2, krank, io*system_scf%nk+ik, icomm)
-      if (allocated(zbuf2)) call comm_send(zbuf2, krank, io*system_scf%nk+ik, icomm)
-    else if (krank == irank) then
-      if (allocated(dbuf2)) call comm_recv(dbuf2, jrank, io*system_scf%nk+ik, icomm)
-      if (allocated(zbuf2)) call comm_recv(zbuf2, jrank, io*system_scf%nk+ik, icomm)
-    end if
+  if (jrank == krank) then
+    ! sender == receiver
+  else if (jrank == irank) then
+    if (allocated(dbuf2)) call comm_send(dbuf2, krank, io*system_scf%nk+ik, icomm)
+    if (allocated(zbuf2)) call comm_send(zbuf2, krank, io*system_scf%nk+ik, icomm)
+  else if (krank == irank) then
+    if (allocated(dbuf2)) call comm_recv(dbuf2, jrank, io*system_scf%nk+ik, icomm)
+    if (allocated(zbuf2)) call comm_recv(zbuf2, jrank, io*system_scf%nk+ik, icomm)
   end if
 
-  ! scatter rgrid data
+! scatter rgrid data
+ibuf = 0
+do ibuf2=1,nb_s/nb_r
   if (info_rt%ik_s <= ik .and. ik <= info_rt%ik_e .and. &
       info_rt%io_s <= io .and. io <= info_rt%io_e) then
-    if (allocated(dbuf2)) then
-      call comm_bcast(dbuf2, info_rt%icomm_r)
+    if (allocated(dbuf2)) call comm_bcast(dbuf2, info_rt%icomm_r)
+    if (allocated(zbuf2)) call comm_bcast(zbuf2, info_rt%icomm_r)
+  end if
+
+  do ib=io,min(system_rt%no,io+(nb_s/nb_r)*nb_r-1)
+    ibuf = ibuf + 1
+    if (info_rt%ik_s <= ik .and. ik <= info_rt%ik_e .and. &
+        info_rt%io_s <= ib .and. ib <= info_rt%io_e) then
+      if (allocated(dbuf2)) then
 !$omp parallel do collapse(3) default(none) &
 !$omp             private(ix,iy,iz,is) &
 !$omp             shared(system_rt,mg_rt,dbuf2,shpsi) &
-!$omp             shared(ik,io)
-      do is=1,system_rt%nspin
-      do iz=mg_rt%is(3),mg_rt%ie(3)
-      do iy=mg_rt%is(2),mg_rt%ie(2)
-      do ix=mg_rt%is(1),mg_rt%ie(1)
-        shpsi%zwf(ix,iy,iz,is,io,ik,1) = cmplx(dbuf2(ix,iy,iz,is))
-      end do
-      end do
-      end do
-      end do
+!$omp             shared(ik,ib,ibuf)
+        do is=1,system_rt%nspin
+        do iz=mg_rt%is(3),mg_rt%ie(3)
+        do iy=mg_rt%is(2),mg_rt%ie(2)
+        do ix=mg_rt%is(1),mg_rt%ie(1)
+          shpsi%zwf(ix,iy,iz,is,ib,ik,1) = cmplx(dbuf2(ix,iy,iz,is,ibuf))
+        end do
+        end do
+        end do
+        end do
 !$omp end parallel do
-    end if
-    if (allocated(zbuf2)) then
-      call comm_bcast(zbuf2, info_rt%icomm_r)
+      end if
+      if (allocated(zbuf2)) then
 !$omp parallel do collapse(3) default(none) &
 !$omp             private(ix,iy,iz,is) &
 !$omp             shared(system_rt,mg_rt,zbuf2,shpsi) &
-!$omp             shared(ik,io)
-      do is=1,system_rt%nspin
-      do iz=mg_rt%is(3),mg_rt%ie(3)
-      do iy=mg_rt%is(2),mg_rt%ie(2)
-      do ix=mg_rt%is(1),mg_rt%ie(1)
-        shpsi%zwf(ix,iy,iz,is,io,ik,1) = zbuf2(ix,iy,iz,is)
-      end do
-      end do
-      end do
-      end do
+!$omp             shared(ik,ib,ibuf)
+        do is=1,system_rt%nspin
+        do iz=mg_rt%is(3),mg_rt%ie(3)
+        do iy=mg_rt%is(2),mg_rt%ie(2)
+        do ix=mg_rt%is(1),mg_rt%ie(1)
+          shpsi%zwf(ix,iy,iz,is,ib,ik,1) = zbuf2(ix,iy,iz,is,ibuf)
+        end do
+        end do
+        end do
+        end do
 !$omp end parallel do
+      end if
     end if
+  end do
+end do
+
+  ibuf = nb_s - ibuf
+  if (allocated(dbuf1)) then
+!$omp parallel do collapse(4) default(none) &
+!$omp             private(ix,iy,iz,is) &
+!$omp             shared(system_scf,lg_scf,dbuf1,dbuf2) &
+!$omp             shared(ik,ib,ibuf,ibuf2,nb_s)
+    do ibuf2=1,ibuf
+    do is=1,system_scf%nspin
+    do iz=lg_scf%is(3),lg_scf%ie(3)
+    do iy=lg_scf%is(2),lg_scf%ie(2)
+    do ix=lg_scf%is(1),lg_scf%ie(1)
+      dbuf1(ix,iy,iz,is,ibuf2) = dbuf2(ix,iy,iz,is,nb_s - ibuf + ibuf2)
+    end do
+    end do
+    end do
+    end do
+    end do
+!$omp end parallel do
   end if
+  if (allocated(zbuf1)) then
+!$omp parallel do collapse(4) default(none) &
+!$omp             private(ix,iy,iz,is) &
+!$omp             shared(system_scf,lg_scf,zbuf1,zbuf2) &
+!$omp             shared(ik,ib,ibuf,ibuf2,nb_s)
+    do ibuf2=1,ibuf
+    do is=1,system_scf%nspin
+    do iz=lg_scf%is(3),lg_scf%ie(3)
+    do iy=lg_scf%is(2),lg_scf%ie(2)
+    do ix=lg_scf%is(1),lg_scf%ie(1)
+      zbuf1(ix,iy,iz,is,ibuf2) = zbuf2(ix,iy,iz,is,nb_s - ibuf + ibuf2)
+    end do
+    end do
+    end do
+    end do
+    end do
+!$omp end parallel do
+  end if
+
 end do
 end do
 
 end subroutine convert_wave_function
+
+function max_prime_factor(n)
+  implicit none
+  integer,intent(in) :: n
+  integer :: max_prime_factor,i,m
+  i = 2
+  m = n
+  do
+    if (i * i > m) exit
+    do
+      if (mod(m, i) == 0) then
+        m = m / i
+      else
+        exit
+      end if
+    end do
+    i = i + 1
+  end do
+  max_prime_factor = m
+end function max_prime_factor
+
+function gcp(i,j)
+  implicit none
+  integer,intent(in) :: i,j
+  integer :: gcp,k,m,n
+
+  m = i
+  n = j
+  do
+    k = mod(m, n)
+    if(k==0) exit
+    m = n
+    n = k
+  end do
+
+  if (n > 1) then
+    gcp = n
+  else
+    gcp = 0
+  end if
+end function gcp
 
 end subroutine main_dft2tddft
