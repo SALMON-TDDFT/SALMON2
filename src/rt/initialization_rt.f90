@@ -438,7 +438,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%ie = ng%ie
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
 
-    call init_singlescale(ng,mg,lg,info_field,system%hgs,srho,sVh &
+    call init_singlescale(ng,mg,lg,info,info_field,system%hgs,srho,sVh &
     & ,srg_ng,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then
