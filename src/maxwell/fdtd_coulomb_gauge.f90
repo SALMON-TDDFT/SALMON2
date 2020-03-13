@@ -21,7 +21,7 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,poisson,srg_ng,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
@@ -33,14 +33,12 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
   use timer
   implicit none
   integer                 ,intent(in) :: itt
-  type(s_rgrid)           ,intent(in) :: lg,mg,ng
+  type(s_rgrid)           ,intent(in) :: lg,ng
   type(s_dft_system)      ,intent(in) :: system
   type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel)  ,intent(in) :: info_field
   type(s_scalar)          ,intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_vector)          ,intent(in) :: j_e    ! electron number current density (without rho*A/c)
-  type(s_reciprocal_grid) ,intent(in) :: fg
-  type(s_poisson)         ,intent(in) :: poisson
   type(s_sendrecv_grid)               :: srg_ng
   type(s_vector)                      :: Ac     ! A/c, A: vector potential, c: speed of light
   type(s_scalar)                      :: div_Ac ! div(A/c)
@@ -107,6 +105,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
   end do
   end do
   end do
+  call timer_end(LOG_SS_FDTD_CALC)
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -122,6 +121,7 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
 
 ! divergence & rotation of Ac(t+dt)
 
+  call timer_begin(LOG_SS_FDTD_CALC)
   fw%div_Ac = 0d0
   fw%rot_Ac = 0d0
   do i1=1,3
@@ -178,9 +178,9 @@ subroutine fdtd_singlescale(itt,lg,mg,ng,system,info,info_field,rho,Vh,j_e,fg,po
 ! Ac & div_Ac for TDDFT
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
-  do iz=mg%is(3),mg%ie(3)
-  do iy=mg%is(2),mg%ie(2)
-  do ix=mg%is(1),mg%ie(1)
+  do iz=ng%is(3),ng%ie(3)
+  do iy=ng%is(2),ng%ie(2)
+  do ix=ng%is(1),ng%ie(1)
 
     Ac%v(1:3,ix,iy,iz) = ( fw%vec_Ac_m(1,ix,iy,iz,1:3) + fw%vec_Ac_old(1:3,ix,iy,iz) ) * 0.5d0 ! Ac(t+dt/2) = ( A(t+dt) + A(t) )/2
     div_Ac%f(ix,iy,iz)   = ( fw%div_Ac(ix,iy,iz) + fw%div_Ac_old(ix,iy,iz) ) * 0.5d0 ! div ( A(t+dt) + A(t) )/2
@@ -393,7 +393,8 @@ contains
   
   subroutine fdtd
     implicit none
-  
+
+    call timer_begin(LOG_SS_FDTD_CALC)
     do ii=1,mstep
 
     !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -499,7 +500,9 @@ contains
       end do
 
     end do ! ii=1,mstep
-  
+
+    call timer_end(LOG_SS_FDTD_CALC)
+
     return
   end subroutine fdtd
   
@@ -507,7 +510,8 @@ contains
 
   subroutine fdtd_gbp
     implicit none
-    
+
+    call timer_begin(LOG_SS_FDTD_CALC)
     fw%tmp_zt = 0d0
     do iz=ng%is(3),ng%ie(3)
   !$omp parallel do collapse(2) private(iy,ix)
@@ -517,11 +521,13 @@ contains
       end do
       end do
     end do
-  
+    call timer_end(LOG_SS_FDTD_CALC)
+
     call timer_begin(LOG_SS_FDTD_COMM_COLL)
     call comm_summation(fw%tmp_zt,fw%curr4pi_zt,size(fw%curr4pi_zt),info_field%icomm_all)
     call timer_end(LOG_SS_FDTD_COMM_COLL)
-  
+
+    call timer_begin(LOG_SS_FDTD_CALC)
     do ii=1,mstep
 
     !$OMP parallel do
@@ -569,7 +575,7 @@ contains
       fw%Ac_zt_boundary_top_old   (1:3) = fw%Ac_zt_boundary_top   (1:3)
 
     end do ! ii=1,mstep
-    
+
   !$OMP parallel do collapse(2) private(ix,iy,iz)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
@@ -580,7 +586,7 @@ contains
     end do
     end do
     end do
-    
+
     if(ng%is(3)==lg%is(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
       do iy=ng%is(2),ng%ie(2)
@@ -589,6 +595,7 @@ contains
       end do
       end do
     end if
+
     if(ng%ie(3)==lg%ie(3))then
 !$OMP parallel do collapse(2) private(ix,iy,iz)
       do iy=ng%is(2),ng%ie(2)
@@ -597,6 +604,8 @@ contains
       end do
       end do
     end if
+    call timer_end(LOG_SS_FDTD_CALC)
+
     return
   end subroutine fdtd_gbp
 
@@ -743,7 +752,7 @@ end subroutine fourier_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
+subroutine init_singlescale(ng,lg,info,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -755,7 +764,8 @@ subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   use inputoutput, only: t_unit_time
   use checkpoint_restart_sub, only: restart_singlescale
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg,mg,ng
+  type(s_rgrid)         ,intent(in) :: lg,ng
+  type(s_orbital_parallel),intent(in) :: info
   type(s_field_parallel),intent(in) :: info_field
   real(8)               ,intent(in) :: hgs(3)
   type(s_scalar)        ,intent(in) :: rho,Vh ! electron number density & Hartree potential
@@ -768,8 +778,8 @@ subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   integer :: ii,jj,ix,iy,iz
   real(8) :: bnmat(4,4)
   
-  call allocate_scalar(mg,div_Ac)
-  call allocate_vector(mg,Ac)
+  call allocate_scalar(ng,div_Ac)
+  call allocate_vector(ng,Ac)
 
   fw%Energy_poynting = 0d0
   fw%Energy_joule = 0d0
@@ -894,7 +904,7 @@ subroutine init_singlescale(ng,mg,lg,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
   
   if(yn_restart=='y') then
-    call restart_singlescale(info_field%icomm_all,lg,ng,fw,Ac,div_Ac)
+    call restart_singlescale(info%icomm_rko,lg,ng,fw,Ac,div_Ac)
   end if
 
   return

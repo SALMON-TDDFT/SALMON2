@@ -103,6 +103,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt,t_max
   type(s_rgrid) :: eg
+  logical :: rion_update
   
   call timer_begin(LOG_INIT_RT)
 
@@ -245,15 +246,16 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
      ewald%yn_bookkeep='y'
      call  init_nion_div(system,lg,mg,info)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald,fg)
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
+  rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,.true.,energy)
+     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
   case(3)
-     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,.true.,energy)
+     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
   
@@ -436,7 +438,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%ie = ng%ie
     call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
 
-    call init_singlescale(ng,mg,lg,info_field,system%hgs,srho,sVh &
+    call init_singlescale(ng,lg,info,info_field,system%hgs,srho,sVh &
     & ,srg_ng,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then

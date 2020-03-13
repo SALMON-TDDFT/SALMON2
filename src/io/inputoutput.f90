@@ -312,6 +312,7 @@ contains
       & yn_fix_func
 
     namelist/scf/ &
+      & method_init_wf, &
       & method_min, &
       & ncg, &
       & ncg_init, &
@@ -655,6 +656,7 @@ contains
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
 !! == default for &scf
+    method_init_wf = 'gauss'
     method_min    = 'cg'
     ncg           = 4
     ncg_init      = 4
@@ -1070,6 +1072,7 @@ contains
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
 !! == bcast for &scf
+    call comm_bcast(method_init_wf        ,nproc_group_global)
     call comm_bcast(method_min            ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
     call comm_bcast(ncg_init                ,nproc_group_global)
@@ -1864,6 +1867,7 @@ contains
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_wf', method_init_wf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
@@ -2228,6 +2232,11 @@ contains
     call yn_argument_check(yn_force_stencil_sequential_computation)
     call yn_argument_check(yn_want_communication_overlapping)
     call yn_argument_check(yn_gbp)
+
+    select case(method_init_wf)
+    case ('gauss','random') ; continue
+    case default            ; stop 'method_init_wf must be gauss or random'
+    end select
 
     if(iperiodic==0.or.(iperiodic==3.and.yn_domain_parallel=='y')) then
       select case(convergence)

@@ -290,7 +290,7 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   type(s_orbital_parallel)      :: info
   type(s_process_info)          :: pinfo
   !
-  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),m
+  integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),m,na
 
   nproc_k              = pinfo%npk
   nproc_ob             = pinfo%nporbital
@@ -335,6 +335,12 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
       info%irank_io(io) = io*nproc_ob/system%no
     end if
   end do
+
+! #ia: atom index (communicator=info%icomm_ko)
+  na = (system%nion + 1) / info%isize_ko
+  info%ia_s = na * info%id_ko + 1
+  info%ia_e = info%ia_s + na - 1
+  if (info%id_ko == info%isize_ko-1) info%ia_e = system%nion
 
 end subroutine init_orbital_parallel_singlecell
 
@@ -853,10 +859,11 @@ subroutine init_nion_div(system,lg,mg,info)
   use communication, only: comm_summation, comm_get_groupinfo, comm_is_root
  !use parallelization, only: nproc_id_global
   implicit none
-  type(s_dft_system)  :: system
-  type(s_rgrid) :: lg
-  type(s_rgrid) :: mg
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_dft_system),intent(in) :: system
+  type(s_rgrid)     ,intent(in) :: lg
+  type(s_rgrid)     ,intent(in) :: mg
+  type(s_orbital_parallel)      :: info
+  !
   logical :: flag_cuboid
  !integer :: k,irank,nproc
   integer :: ia,j,nc,ix,iy,iz,iia,nion_total
@@ -885,7 +892,7 @@ subroutine init_nion_div(system,lg,mg,info)
   al_max(:) = system%hgs(:)*dble(lg%num(:))
   al_len(:) = al_max(:) - al_min(:)
 
-  system%nion_mg = 0  
+  info%nion_mg = 0
 
   do ia = 1,system%nion
      j=1
@@ -907,11 +914,11 @@ subroutine init_nion_div(system,lg,mg,info)
      if( (rion_tmp(1,ia).ge.r_mg_min(1) .and. rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
          (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
          (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
-        system%nion_mg = system%nion_mg + 1
+        info%nion_mg = info%nion_mg + 1
      endif
   enddo
 
-  allocate( system%ia_mg(system%nion_mg) )
+  allocate( info%ia_mg(info%nion_mg) )
 
   iia = 0  
   do ia = 1,system%nion
@@ -919,26 +926,25 @@ subroutine init_nion_div(system,lg,mg,info)
          (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
          (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
         iia = iia + 1
-        system%ia_mg(iia) = ia
+        info%ia_mg(iia) = ia
      endif
   enddo
 
-  if( system%nion_mg .ne. iia ) stop "Error1 in dividing atom in mg domain"
+  if( info%nion_mg .ne. iia ) stop "Error1 in dividing atom in mg domain"
 
   else !(flag_cuboid=.false.)
 
      ! assuming r-space parallelization is not available in nonorthogonal lattice cell
-     system%nion_mg = system%nion
-     allocate( system%ia_mg(system%nion_mg) )
+     info%nion_mg = system%nion
+     allocate( info%ia_mg(info%nion_mg) )
      do ia=1,system%nion
-        system%ia_mg(ia) = ia
+        info%ia_mg(ia) = ia
      enddo
 
   endif
 
   !check
-  system%icomm_a = info%icomm_r
-  call comm_summation(system%nion_mg, nion_total, system%icomm_a)
+  call comm_summation(info%nion_mg, nion_total, info%icomm_r)
   if( nion_total .ne. system%nion ) stop "Error2 in dividing atom in mg domain"
 
   !write(*,*) "  #nion_mg=", system%nion_mg
@@ -973,13 +979,6 @@ subroutine init_nion_div(system,lg,mg,info)
   !      system%nion_e = -1
   !   endif
   !endif
-
-  !flag of gamma point only (currently not used..)
-  if( num_kgrid(1)==1.and.num_kgrid(2)==1.and.num_kgrid(3)==1 ) then
-     system%flag_k1x1x1 = .true.
-  else
-     system%flag_k1x1x1 = .false.
-  endif
 
 end subroutine init_nion_div
 

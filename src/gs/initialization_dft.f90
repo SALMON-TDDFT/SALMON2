@@ -280,14 +280,14 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      ewald%yn_bookkeep='y'
      call  init_nion_div(system,lg,mg,info)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,ewald,fg)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald,fg)
 
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+  rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
      call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
   case(3)
-     rion_update = .true. ! it's first calculation
      call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
 
