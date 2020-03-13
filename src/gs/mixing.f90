@@ -221,7 +221,7 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
   real(8) :: ss
   real(8) :: rc
 
-  if(iter==1)then
+  if(iter==1.or.nmemory_p==1)then
 
     call simple_mixing(mg,system,1.d0-beta_p,beta_p,srho_s,mixing)
 
