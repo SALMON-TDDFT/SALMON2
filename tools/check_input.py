@@ -270,8 +270,11 @@ if __name__ == '__main__':
   print '[INFO]'
   print 'wave function size per MPI process'
   for i in range(0,3):
-    print 'num_rgrid[{}] / nproc_rgrid[{}] = {}'.format(i,i,float(num_rgrid[i])/nproc_rgrid[i])
+    print 'num_rgrid[{}] / nproc_rgrid[{}] = {}'.format(i,i,float(inputmap['num_rgrid'][i])/inputmap['nproc_rgrid'][i])
   print '# of orbital = {}'.format(float(inputmap['nstate'])/inputmap['nproc_ob'])
+
+  sx = inputmap['nproc_ob'] * inputmap['nproc_k'] / nprocs_per_node
+  sy = list_prod(inputmap['nproc_rgrid'])
 
 
   print ''
@@ -280,3 +283,12 @@ if __name__ == '__main__':
   print 'please replace the following inputlists.'
   print ''
   print_inputlists(inputmap)
+
+  print ''
+  print '# =============================================== #'
+  print 'If you use mesh-torus network type system,'
+  print 'probably, the following node shape is suitable to run the application.'
+  print ''
+  print 'NXxNY = {}x{}'.format(sx,sy)
+  print 'NX = (nproc_ob * nproc_k) / # of process per node'
+  print 'NY = product(nproc_rgrid)'
