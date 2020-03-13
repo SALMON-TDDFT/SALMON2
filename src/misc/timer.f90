@@ -139,6 +139,7 @@ module timer
 
   ! force module
   integer,public,parameter :: LOG_CALC_FORCE_ION_ION  = 261
+  integer,public,parameter :: LOG_CALC_FORCE_FOURIER  = 273
   integer,public,parameter :: LOG_CALC_FORCE_ELEC_ION = 262
   integer,public,parameter :: LOG_CALC_FORCE_GTPSI    = 263
   integer,public,parameter :: LOG_CALC_FORCE_DDEN     = 264

@@ -136,7 +136,7 @@ contains
   subroutine write_performance(fd,mode)
     use parallelization
     use communication
-    use salmon_global, only: theory,yn_md,yn_opt
+    use salmon_global, only: theory,yn_gbp,use_singlescale,yn_ffte
     use timer
     implicit none
     integer, intent(in) :: fd, mode
@@ -160,20 +160,23 @@ contains
       call set(5, LOG_DEINIT_GS_ITERATION, 'deinit. scf iter.')
       call set(6, LOG_WRITE_GS_RESULTS   , 'writing scf data')
       call set(7, LOG_WRITE_GS_DATA     , 'writing LDA data')
-      call set(8, LOG_WRITE_GS_INFO    , 'writing LDA infos')
+      call set(8, LOG_WRITE_GS_INFO     , 'writing LDA infos')
       call write_loadbalance(fd, 8, tsrc, headers, mode)
 
       call set(0, 0, 'in scf iterations')
-      call set(1, LOG_CALC_MINIMIZATION , 'Minimization')
-      call set(2, LOG_CALC_GRAM_SCHMIDT , 'Gram Schmidt')
-      call set(3, LOG_CALC_SUBSPACE_DIAG, 'subspace-diag.')
-      call set(4, LOG_CALC_RHO          , 'calculating rho')
-      call set(5, LOG_CALC_HARTREE      , 'Hartree routine')
-      call set(6, LOG_CALC_EXC_COR      , 'Exc_Cor routine')
-      call set(7, LOG_CALC_TOTAL_ENERGY , 'calculating Etot')
-      call set(8, LOG_CALC_ESP          , 'calculating esp')
-      call set(9, LOG_CALC_ION_FORCE    , 'calc force')
-      call write_loadbalance(fd, 9, tsrc, headers, mode)
+      call set( 1, LOG_CALC_MINIMIZATION  , 'Minimization')
+      call set( 2, LOG_CALC_GRAM_SCHMIDT  , 'Gram Schmidt')
+      call set( 3, LOG_CALC_SUBSPACE_DIAG , 'subspace-diag.')
+      call set( 4, LOG_CALC_RHO           , 'calculating rho')
+      call set( 5, LOG_CALC_HARTREE       , 'Hartree routine')
+      call set( 6, LOG_CALC_EXC_COR       , 'Exc_Cor routine')
+      call set( 7, LOG_CALC_TOTAL_ENERGY  , 'calculating Etot')
+      call set( 8, LOG_CALC_ESP           , 'calculating esp')
+      call set( 9, LOG_CALC_ION_FORCE     , 'calc force')
+      call set(10, LOG_MD_TEVOL_PART1     , 'MD-opt time-evol. part1')
+      call set(11, LOG_MD_TEVOL_PART2     , 'MD-opt time-evol. part2')
+      call set(12, LOG_MD_UPDATE_PSEUDO_PT, 'update pseudo-pt')
+      call write_loadbalance(fd, 12, tsrc, headers, mode)
     case('dft2tddft')
       call set(0, 0, 'DFT data redistribution')
       call set(1, LOG_INIT_GS         , 'gs initialization')
@@ -199,7 +202,11 @@ contains
       call set( 2, LOG_CALC_VBOX            , 'Vbox')
       call set( 3, LOG_CALC_TIME_PROPAGATION, 'time propagation')
       call set( 4, LOG_CALC_RHO             , 'calculating rho')
-      call set( 5, LOG_CALC_HARTREE         , 'Hartree routine')
+      if (yn_gbp=='y' .and. use_singlescale=='y' .and. yn_ffte=='y') then
+        call set( 5, LOG_CALC_HARTREE       , 'Hartree+FDTD by FFTE')
+      else
+        call set( 5, LOG_CALC_HARTREE       , 'Hartree routine')
+      end if
       call set( 6, LOG_CALC_EXC_COR         , 'Exc_Cor routine')
       call set( 7, LOG_CALC_ALLGATHERV_VLOCAL, 'allgatherv_vlocal')
       call set( 8, LOG_CALC_DP              , 'calculating Dp')
@@ -212,25 +219,20 @@ contains
       call set(15, LOG_CALC_CURRENT_ION     , 'calc_current_ion')
       call set(16, LOG_CALC_TOTAL_ENERGY_PERIODIC, 'calc_total_energy_periodic')
       call set(17, LOG_CALC_SINGLESCALE     , 'calc singlescale')
-      call set(18, LOG_CALC_ION_FORCE    , 'calc force')
-      call set(19, LOG_WRITE_RT_INFOS       , 'writing info etc.')
-      call set(20, LOG_RT_ANALYSIS          , 'analysis calc.')
-      call set(21, LOG_RT_MISC              , 'misc.')
-      call write_loadbalance(fd, 21, tsrc, headers, mode)
+      call set(18, LOG_CALC_ION_FORCE       , 'calc force')
+      call set(19, LOG_MD_TEVOL_PART1       , 'MD-opt time-evol. part1')
+      call set(20, LOG_MD_TEVOL_PART2       , 'MD-opt time-evol. part2')
+      call set(21, LOG_MD_UPDATE_PSEUDO_PT  , 'update pseudo-pt')
+      call set(22, LOG_WRITE_RT_INFOS       , 'writing info etc.')
+      call set(23, LOG_RT_ANALYSIS          , 'analysis calc.')
+      call set(24, LOG_RT_MISC              , 'misc.')
+      call write_loadbalance(fd, 24, tsrc, headers, mode)
     case default
       stop 'invalid theory'
     end select
 
-    if (theory == 'dft_md' .or. yn_md == 'y' .or. yn_opt == 'y') then
-      call set(0, 0, 'MD or opt. routines')
-      call set(1, LOG_MD_TEVOL_PART1     , 'time-evol. part1')
-      call set(2, LOG_MD_TEVOL_PART2     , 'time-evol. part2')
-      call set(3, LOG_MD_UPDATE_PSEUDO_PT, 'update pseudo-pt')
-      call write_loadbalance(fd, 3, tsrc, headers, mode)
-    end if
-
     if (theory == 'single_scale_maxwell_tddft') then
-      call set(0, 0, 'singlescale maxwell-tddft')
+      call set(0, 0, 'in singlescale maxwell-tddft')
       call set(1, LOG_SS_FDTD_CALC,      'FDTD calc')
       call set(2, LOG_SS_FDTD_COMM,      'FDTD halo comm')
       call set(3, LOG_SS_FDTD_COMM_COLL, 'FDTD coll comm')
@@ -293,12 +295,13 @@ contains
     call set(0, 0, 'force module')
     call set(1, LOG_CALC_ION_FORCE,      'total')
     call set(2, LOG_CALC_FORCE_ION_ION,  'calc ion-ion')
-    call set(3, LOG_CALC_FORCE_ELEC_ION, 'calc electron-ion')
-    call set(4, LOG_CALC_FORCE_GTPSI,    '::calc gtpsi')
-    call set(5, LOG_CALC_FORCE_DDEN,     '::calc dden')
-    call set(6, LOG_CALC_FORCE_NONLOCAL, '::calc nonlocal')
-    call set(7, LOG_CALC_FORCE_LOCAL,    'calc local')
-    call write_loadbalance(fd, 7, tsrc, headers, mode)
+    call set(3, LOG_CALC_FORCE_FOURIER,  'calc fouier')
+    call set(4, LOG_CALC_FORCE_ELEC_ION, 'calc electron-ion')
+    call set(5, LOG_CALC_FORCE_GTPSI,    '::calc gtpsi')
+    call set(6, LOG_CALC_FORCE_DDEN,     '::calc dden')
+    call set(7, LOG_CALC_FORCE_NONLOCAL, '::calc nonlocal')
+    call set(8, LOG_CALC_FORCE_LOCAL,    'calc local')
+    call write_loadbalance(fd, 8, tsrc, headers, mode)
 
     call set(0, 0, 'init_ps')
     call set(1, LOG_INIT_PS_TOTAL,      'total')

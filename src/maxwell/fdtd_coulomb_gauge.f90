@@ -105,6 +105,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
   end do
   end do
   end do
+  call timer_end(LOG_SS_FDTD_CALC)
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -120,6 +121,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
 
 ! divergence & rotation of Ac(t+dt)
 
+  call timer_begin(LOG_SS_FDTD_CALC)
   fw%div_Ac = 0d0
   fw%rot_Ac = 0d0
   do i1=1,3
@@ -391,7 +393,8 @@ contains
   
   subroutine fdtd
     implicit none
-  
+
+    call timer_begin(LOG_SS_FDTD_CALC)
     do ii=1,mstep
 
     !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -497,7 +500,9 @@ contains
       end do
 
     end do ! ii=1,mstep
-  
+
+    call timer_end(LOG_SS_FDTD_CALC)
+
     return
   end subroutine fdtd
   
@@ -505,7 +510,8 @@ contains
 
   subroutine fdtd_gbp
     implicit none
-    
+
+    call timer_begin(LOG_SS_FDTD_CALC)
     fw%tmp_zt = 0d0
     do iz=ng%is(3),ng%ie(3)
   !$omp parallel do collapse(2) private(iy,ix)
@@ -515,11 +521,13 @@ contains
       end do
       end do
     end do
-  
+    call timer_end(LOG_SS_FDTD_CALC)
+
     call timer_begin(LOG_SS_FDTD_COMM_COLL)
     call comm_summation(fw%tmp_zt,fw%curr4pi_zt,size(fw%curr4pi_zt),info_field%icomm_all)
     call timer_end(LOG_SS_FDTD_COMM_COLL)
-  
+
+    call timer_begin(LOG_SS_FDTD_CALC)
     do ii=1,mstep
 
     !$OMP parallel do
@@ -567,7 +575,7 @@ contains
       fw%Ac_zt_boundary_top_old   (1:3) = fw%Ac_zt_boundary_top   (1:3)
 
     end do ! ii=1,mstep
-    
+
   !$OMP parallel do collapse(2) private(ix,iy,iz)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
@@ -578,7 +586,7 @@ contains
     end do
     end do
     end do
-    
+
     if(ng%is(3)==lg%is(3))then
   !$OMP parallel do collapse(2) private(ix,iy,iz)
       do iy=ng%is(2),ng%ie(2)
@@ -587,6 +595,7 @@ contains
       end do
       end do
     end if
+
     if(ng%ie(3)==lg%ie(3))then
 !$OMP parallel do collapse(2) private(ix,iy,iz)
       do iy=ng%is(2),ng%ie(2)
@@ -595,6 +604,8 @@ contains
       end do
       end do
     end if
+    call timer_end(LOG_SS_FDTD_CALC)
+
     return
   end subroutine fdtd_gbp
 

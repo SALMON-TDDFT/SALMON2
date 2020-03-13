@@ -86,15 +86,16 @@ contains
     call timer_begin(LOG_CALC_FORCE_ION_ION)
     call force_ewald_rspace(system%Force,F_tmp,system,info,ewald,pp,nion,info%icomm_r)
     call timer_end(LOG_CALC_FORCE_ION_ION)
-  
+
+
+    call timer_begin(LOG_CALC_FORCE_FOURIER)
     F_tmp   = 0d0
-  
+
     select case(iperiodic)
     case(0)
     ! F_loc = (nabla)rho * V is not implimented for isolated systems
     case(3)
-    ! Fourier part (local part, etc.)
-      
+    ! Fourier part (local part, etc)
       !$omp parallel do collapse(2) private(ix,iy,iz,ia,r,g,G2,Gd,rho_i,rho_e,rtmp,egd,VG) reduction(+:F_tmp)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -122,8 +123,9 @@ contains
       end do
       end do
       !$omp end parallel do
-    
     end select
+    call timer_end(LOG_CALC_FORCE_FOURIER)
+
 
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     if(allocated(tpsi%rwf)) then
