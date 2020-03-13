@@ -911,6 +911,10 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
       write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       write(iu1_w) singlescale%zAc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
       write(iu1_w) singlescale%f_old  (1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      write(iu1_w) singlescale%Ac_zt_boundary_bottom
+      write(iu1_w) singlescale%Ac_zt_boundary_top
+      write(iu1_w) singlescale%Ac_zt_boundary_bottom_old
+      write(iu1_w) singlescale%Ac_zt_boundary_top_old
     end if
     close(iu1_w)
   else
@@ -1019,6 +1023,10 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
         write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,2)
+        write(iu1_w) singlescale%Ac_zt_boundary_bottom
+        write(iu1_w) singlescale%Ac_zt_boundary_top
+        write(iu1_w) singlescale%Ac_zt_boundary_bottom_old
+        write(iu1_w) singlescale%Ac_zt_boundary_top_old
       end if
       close(iu1_w)
     end if
@@ -1439,6 +1447,10 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
       read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       read(iu1_r) singlescale%zAc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
       read(iu1_r) singlescale%f_old  (1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      read(iu1_r) singlescale%Ac_zt_boundary_bottom
+      read(iu1_r) singlescale%Ac_zt_boundary_top
+      read(iu1_r) singlescale%Ac_zt_boundary_bottom_old
+      read(iu1_r) singlescale%Ac_zt_boundary_top_old
     end if
     close(iu1_r)
   else
@@ -1458,6 +1470,10 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
       if(yn_gbp=='y') then
         read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         read(iu1_r) zbox(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:2)
+        read(iu1_r) singlescale%Ac_zt_boundary_bottom
+        read(iu1_r) singlescale%Ac_zt_boundary_top
+        read(iu1_r) singlescale%Ac_zt_boundary_bottom_old
+        read(iu1_r) singlescale%Ac_zt_boundary_top_old
       end if
       close(iu1_r)
     end if
@@ -1469,6 +1485,10 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
     if(yn_gbp=='y') then
       call comm_bcast(singlescale%Ac_zt_m,comm)
       call comm_bcast(zbox,comm)
+      call comm_bcast(singlescale%Ac_zt_boundary_bottom,comm)
+      call comm_bcast(singlescale%Ac_zt_boundary_top,comm)
+      call comm_bcast(singlescale%Ac_zt_boundary_bottom_old,comm)
+      call comm_bcast(singlescale%Ac_zt_boundary_top_old,comm)
     end if
 
 !$omp parallel do collapse(2)
@@ -1499,7 +1519,7 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
       !$omp parallel do collapse(2)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
-      do ix=1,lg%ie(1)
+      do ix=1,lg%num(1)
         singlescale%zAc_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,1)
         singlescale%f_old  (ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,2)
       end do
