@@ -70,7 +70,7 @@ contains
     end do
     end do
 
-    call comm_summation(v_tmp, v, n*n, info%icomm_r)
+    call comm_summation(v_tmp, v, n*n, pinfo%icomm_sl)
 
     deallocate( work, iwork, h_div, v_div, v_tmp )
 
@@ -129,7 +129,7 @@ contains
     end do
     end do
 
-    call comm_summation(v_tmp, v, n*n, info%icomm_r)
+    call comm_summation(v_tmp, v, n*n, pinfo%icomm_sl)
 
     deallocate( iwork, rwork, work, v_tmp, v_div, h_div )
 
