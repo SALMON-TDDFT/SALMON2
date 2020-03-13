@@ -36,7 +36,7 @@ contains
     type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in)    :: pp
     type(s_reciprocal_grid) ,intent(in)    :: fg
-    type(s_parallel_info),intent(in)    :: info
+    type(s_parallel_info)   ,intent(in)    :: info
     type(s_rgrid)           ,intent(in)    :: mg
     type(s_stencil)         ,intent(in)    :: stencil
     type(s_poisson)         ,intent(in)    :: poisson

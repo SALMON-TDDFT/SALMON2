@@ -131,7 +131,7 @@ if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   rion_update = .true.
   call dealloc_init_ps(ppg)
-  call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   call calc_nlcc(pp, system, mg, ppn)
   call timer_end(LOG_INIT_GS)
 end if

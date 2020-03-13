@@ -471,13 +471,13 @@ module sendrecv_grid
 
   end subroutine update_overlap_complex8
 
-  subroutine create_sendrecv_neig_mg(neig_mg, ob_para_info, pinfo, iperiodic)
+  subroutine create_sendrecv_neig_orbital(neig_mg, info, pinfo, iperiodic)
     use network_address, only: get_neighbour => get_orbital_neighbour_rank
     use structures, only: s_parallel_info,s_process_info
     use communication, only: comm_proc_null
     implicit none
     integer, intent(out) :: neig_mg(1:2, 1:3)
-    type(s_parallel_info), intent(in) :: ob_para_info
+    type(s_parallel_info), intent(in) :: info
     type(s_process_info), intent(in)     :: pinfo
     integer, intent(in) :: iperiodic
     !
@@ -490,16 +490,16 @@ module sendrecv_grid
         case(2); idisp = -1
       end select
 
-      neig_mg(iside,idir) = get_neighbour(ob_para_info, pinfo, idir, idisp)
+      neig_mg(iside,idir) = get_neighbour(info, pinfo, idir, idisp)
 
       if (neig_mg(iside,idir) < 0 .and. iperiodic == 0) then
         neig_mg(iside,idir) = comm_proc_null
       end if
     end do
     end do
-  end subroutine create_sendrecv_neig_mg
+  end subroutine create_sendrecv_neig_orbital
 
-  subroutine create_sendrecv_neig_ng(neig_ng, pinfo, info, iperiodic)
+  subroutine create_sendrecv_neig_scalar(neig_ng, info, pinfo, iperiodic)
     use network_address, only: get_neighbour => get_field_neighbour_rank
     use structures, only: s_process_info,s_parallel_info
     use communication, only: comm_proc_null
@@ -525,7 +525,7 @@ module sendrecv_grid
       end if
     end do
     end do
-  end subroutine create_sendrecv_neig_ng
+  end subroutine create_sendrecv_neig_scalar
 
 end module sendrecv_grid
 

@@ -246,7 +246,7 @@ use inputoutput
     call allocate_scalar(mg,sVxc(jspin))
   end do
   call read_pslfile(system,pp,ppg)
-  call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)

@@ -18,18 +18,18 @@ module network_address
 
 contains
   ! convert 5-D address to rank
-  function get_orbital_neighbour_rank(ob_info, proc_info, idir, idisp) result(irank)
+  function get_orbital_neighbour_rank(info, proc_info, idir, idisp) result(irank)
     use salmon_global, only: yn_periodic
     use structures, only: s_parallel_info, s_process_info
     implicit none
-    type(s_parallel_info), intent(in) :: ob_info
-    type(s_process_info),     intent(in) :: proc_info
-    integer,                  intent(in) :: idir, idisp
+    type(s_parallel_info), intent(in) :: info
+    type(s_process_info),  intent(in) :: proc_info
+    integer,               intent(in) :: idir, idisp
     integer :: iaddr(5),irank
     integer :: ishape(5)
 
     ishape(1:5) = [proc_info%nprgrid(1:3), proc_info%nporbital, proc_info%npk]
-    iaddr(1:5)  = ob_info%iaddress(1:5)
+    iaddr(1:5)  = info%iaddress(1:5)
     iaddr(idir) = iaddr(idir) + idisp
 
     if (yn_periodic == 'y') then
@@ -45,7 +45,7 @@ contains
     if (iaddr(idir) < 0) then
       irank = -1
     else
-      irank = ob_info%imap(iaddr(1),iaddr(2),iaddr(3),iaddr(4),iaddr(5))
+      irank = info%imap(iaddr(1),iaddr(2),iaddr(3),iaddr(4),iaddr(5))
     end if
   end function get_orbital_neighbour_rank
 
