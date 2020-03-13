@@ -19,7 +19,7 @@ module prep_pp_sub
 
 contains
 
-subroutine init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
+subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   use structures
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
@@ -29,7 +29,7 @@ subroutine init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
   implicit none
-  type(s_rgrid)           ,intent(in) :: lg,mg,ng
+  type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info)   ,intent(in) :: info
   type(s_reciprocal_grid) ,intent(in) :: fg

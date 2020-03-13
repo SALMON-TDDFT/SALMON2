@@ -70,7 +70,7 @@ call init_process_distribution(system_scf,icomm,pinfo_scf)
 
 call init_communicator_dft(icomm,pinfo_scf,info_scf)
 call init_grid_parallel(irank,nprocs,pinfo_scf,info_scf,lg_scf,mg_scf,ng_scf)
-call init_orbital_parallel_singlecell(system_scf,info_scf,pinfo_scf)
+call init_parallel_dft(system_scf,info_scf,pinfo_scf)
 
 if (system_scf%if_real_orbital) then
   call allocate_orbital_real(system_scf%nspin,mg_scf,info_scf,spsi)
@@ -101,7 +101,7 @@ call init_process_distribution(system_rt,icomm,pinfo_rt)
 
 call init_communicator_dft(icomm,pinfo_rt,info_rt)
 call init_grid_parallel(irank,nprocs,pinfo_rt,info_rt,lg_rt,mg_rt,ng_rt)
-call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)
+call init_parallel_dft(system_rt,info_rt,pinfo_rt)
 
 call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)
 call timer_end(LOG_INIT_RT)

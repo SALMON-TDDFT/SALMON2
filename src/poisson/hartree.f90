@@ -21,33 +21,31 @@ module hartree_sub
 contains
 
 !===================================================================================================================================
-subroutine hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
+subroutine hartree(lg,ng,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
   use inputoutput, only: iperiodic,yn_ffte
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
-  use poisson_cg_sub
-  use poisson_periodic_sub
-  use poisson_ffte_sub
+  use poisson_isolated
+  use poisson_periodic
   implicit none
-  type(s_rgrid),intent(in) :: lg
-  type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
-  type(s_parallel_info),intent(in) :: info
-  type(s_dft_system),intent(in) :: system
-  type(s_poisson),intent(inout) :: poisson
-  type(s_sendrecv_grid),intent(inout) :: srg_ng
-  type(s_stencil),intent(in) :: stencil
-  type(s_scalar) ,intent(in) :: srho
-  type(s_scalar)             :: sVh
-  type(s_reciprocal_grid),intent(in) :: fg
+  type(s_rgrid)          ,intent(in)    :: lg
+  type(s_rgrid)          ,intent(in)    :: ng
+  type(s_parallel_info)  ,intent(in)    :: info
+  type(s_dft_system)     ,intent(in)    :: system
+  type(s_reciprocal_grid),intent(in)    :: fg
+  type(s_poisson)        ,intent(inout) :: poisson
+  type(s_sendrecv_grid)  ,intent(inout) :: srg_ng
+  type(s_stencil)        ,intent(in)    :: stencil
+  type(s_scalar)         ,intent(in)    :: srho
+  type(s_scalar)         ,intent(inout) :: sVh
 
   select case(iperiodic)
   case(0)
-    call poisson_cg(lg,mg,ng,info,system,poisson,srho%f,sVh%f,srg_ng,stencil)
+    call poisson_cg(lg,ng,info,system,poisson,srho%f,sVh%f,srg_ng,stencil)
   case(3)
     select case(yn_ffte)
     case('n')
-      call poisson_periodic(lg,ng,info,fg,srho,sVh,poisson)
+      call poisson_ft(lg,ng,info,fg,srho,sVh,poisson)
     case('y')
       call poisson_ffte(lg,ng,info,fg,srho,sVh,poisson)
     end select

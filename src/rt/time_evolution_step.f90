@@ -237,7 +237,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,stencil
   if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,ng,info,fg,srho,rt%j_e,sVh,poisson,singlescale)
   else
-    call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
+    call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
   end if
   if(iperiodic==0 .and. itt/=1)then
     sVh_stock1%f = sVh%f
