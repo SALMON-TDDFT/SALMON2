@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
                            nproc_k,nproc_ob,nproc_rgrid
@@ -36,8 +36,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   implicit none
   integer      ,intent(in) :: comm
   type(s_process_info)     :: pinfo
-  type(s_orbital_parallel) :: info
-  type(s_field_parallel)   :: info_field
+  type(s_parallel_info)    :: info
   type(s_rgrid)            :: lg,mg,ng
   type(s_dft_system)       :: system
   type(s_stencil)          :: stencil
@@ -56,18 +55,18 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   pinfo%nporbital = nproc_ob
   pinfo%nprgrid    = nproc_rgrid
   call init_process_distribution(system,comm,pinfo)
-  call init_communicator_dft(comm,pinfo,info,info_field)
+  call init_communicator_dft(comm,pinfo,info)
 
 ! parallelization
   call check_ffte_condition(pinfo,lg)
   call init_scalapack(pinfo,info,system)
-  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,info_field,lg,mg,ng) ! lg --> mg & ng
+  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg,ng) ! lg --> mg & ng
   call init_orbital_parallel_singlecell(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_mg(neig, info, pinfo, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
   ! sendrecv_grid object for scalar potential updates
-  call create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic) ! neighboring node array
+  call create_sendrecv_neig_ng(neig_ng, pinfo, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info%icomm_rko, neig_ng)
 
 ! symmetry
@@ -81,7 +80,7 @@ subroutine init_dft(comm,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisso
   case(0)
     if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
   case(3)
-    call init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+    call init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   end select
   call set_ig_bound(lg,ng,poisson)
 
@@ -287,7 +286,7 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   use structures
   implicit none
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel)      :: info
+  type(s_parallel_info)      :: info
   type(s_process_info)          :: pinfo
   !
   integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),m,na
@@ -422,7 +421,7 @@ subroutine init_scalapack(pinfo,info,system)
   use structures
   implicit none
   type(s_process_info)                :: pinfo
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in)       :: system
 #ifdef USE_SCALAPACK
   integer :: n
@@ -492,15 +491,14 @@ end subroutine check_ffte_condition
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(myrank,nproc,pinfo,info,info_field,lg,mg,ng)
+subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg,ng)
   use communication, only: comm_is_root
   use salmon_global, only: yn_periodic
-  use structures, only: s_process_info,s_rgrid,s_orbital_parallel,s_field_parallel
+  use structures, only: s_process_info,s_rgrid,s_parallel_info
   implicit none
   integer,             intent(in)    :: myrank,nproc
   type(s_process_info),intent(in)    :: pinfo
-  type(s_orbital_parallel),intent(in):: info
-  type(s_field_parallel),intent(in)  :: info_field
+  type(s_parallel_info),intent(in)   :: info
   type(s_rgrid),       intent(inout) :: lg
   type(s_rgrid),       intent(inout) :: mg,ng
   !
@@ -648,7 +646,7 @@ end subroutine init_grid_parallel
 
 !===================================================================================================================================
 
-subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
+subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   use structures
   use math_constants,  only : pi,zi
   use phys_constants, only: cspeed_au
@@ -658,7 +656,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
   type(s_rgrid)          ,intent(in)    :: ng
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_dft_system)     ,intent(in)    :: system
-  type(s_field_parallel) ,intent(in)    :: info_field
+  type(s_parallel_info)  ,intent(in)    :: info
   type(s_poisson)        ,intent(inout) :: poisson
   !
   real(8) :: brl(3,3)
@@ -772,8 +770,8 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info_field,poisson)
 
   ! FFTE initialization step
     call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
-                      info_field%isize(2),info_field%isize(3),0, &
-                      info_field%icomm(2),info_field%icomm(3))
+                      info%isize_y,info%isize_z,0, &
+                      info%icomm_y,info%icomm_z)
                       
   end if
 
@@ -854,7 +852,7 @@ end subroutine set_gridcoordinate
 !===================================================================================================================================
 
 subroutine init_nion_div(system,lg,mg,info)
-  use structures, only: s_dft_system, s_reciprocal_grid, s_rgrid, s_orbital_parallel
+  use structures, only: s_dft_system, s_reciprocal_grid, s_rgrid, s_parallel_info
   use inputoutput, only: num_kgrid
   use communication, only: comm_summation, comm_get_groupinfo, comm_is_root
  !use parallelization, only: nproc_id_global
@@ -862,7 +860,7 @@ subroutine init_nion_div(system,lg,mg,info)
   type(s_dft_system),intent(in) :: system
   type(s_rgrid)     ,intent(in) :: lg
   type(s_rgrid)     ,intent(in) :: mg
-  type(s_orbital_parallel)      :: info
+  type(s_parallel_info)      :: info
   !
   logical :: flag_cuboid
  !integer :: k,irank,nproc

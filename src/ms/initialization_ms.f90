@@ -25,8 +25,7 @@ subroutine initialization_ms( &
                      nmacro, &
                      Mit, itotNtime, system, energy, ewald, rt, md,&
                      stencil, fg, poisson,  &
-                     lg, mg, ng,  &
-                     info, info_field,  &
+                     lg, mg, ng, info,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_ng,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
@@ -84,8 +83,7 @@ use inputoutput
   type(s_dft_system)  :: system
   type(s_rt) :: rt
   type(s_process_info) :: pinfo
-  type(s_orbital_parallel) :: info
-  type(s_field_parallel) :: info_field
+  type(s_parallel_info) :: info
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
   type(s_xc_functional) :: xc_func
@@ -231,7 +229,7 @@ use inputoutput
   ! | initialization |
   ! +----------------+
   
-  call init_dft(nproc_group_macropoint,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+  call init_dft(nproc_group_macropoint,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
   
   call init_code_optimization
   
@@ -248,7 +246,7 @@ use inputoutput
     call allocate_scalar(mg,sVxc(jspin))
   end do
   call read_pslfile(system,pp,ppg)
-  call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
@@ -288,7 +286,7 @@ use inputoutput
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
-  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then
@@ -484,7 +482,7 @@ use inputoutput
         call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,ng,system%hgs,stencil,info_field,sVh,srg_ng,itt)
+        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_ng,itt)
       end if
     end do
   

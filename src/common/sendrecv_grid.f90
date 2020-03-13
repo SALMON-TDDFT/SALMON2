@@ -473,11 +473,11 @@ module sendrecv_grid
 
   subroutine create_sendrecv_neig_mg(neig_mg, ob_para_info, pinfo, iperiodic)
     use network_address, only: get_neighbour => get_orbital_neighbour_rank
-    use structures, only: s_orbital_parallel,s_process_info
+    use structures, only: s_parallel_info,s_process_info
     use communication, only: comm_proc_null
     implicit none
     integer, intent(out) :: neig_mg(1:2, 1:3)
-    type(s_orbital_parallel), intent(in) :: ob_para_info
+    type(s_parallel_info), intent(in) :: ob_para_info
     type(s_process_info), intent(in)     :: pinfo
     integer, intent(in) :: iperiodic
     !
@@ -499,14 +499,14 @@ module sendrecv_grid
     end do
   end subroutine create_sendrecv_neig_mg
 
-  subroutine create_sendrecv_neig_ng(neig_ng, pinfo, info_field, iperiodic)
+  subroutine create_sendrecv_neig_ng(neig_ng, pinfo, info, iperiodic)
     use network_address, only: get_neighbour => get_field_neighbour_rank
-    use structures, only: s_process_info,s_field_parallel
+    use structures, only: s_process_info,s_parallel_info
     use communication, only: comm_proc_null
     implicit none
     integer, intent(out) :: neig_ng(1:2, 1:3)
     type(s_process_info), intent(in)   :: pinfo
-    type(s_field_parallel), intent(in) :: info_field
+    type(s_parallel_info), intent(in) :: info
     integer, intent(in) :: iperiodic
     !
     integer :: idir,iside,idisp
@@ -518,7 +518,7 @@ module sendrecv_grid
         case(2); idisp = -1
       end select
 
-      neig_ng(iside,idir) = get_neighbour(info_field, pinfo, idir, idisp)
+      neig_ng(iside,idir) = get_neighbour(info, pinfo, idir, idisp)
 
       if (neig_ng(iside,idir) < 0 .and. iperiodic == 0) then
         neig_ng(iside,idir) = comm_proc_null

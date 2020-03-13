@@ -21,11 +21,11 @@ module eigen_scalapack
 contains
 
   subroutine eigen_pdsyevd(pinfo,info,h,e,v)
-    use structures, only: s_process_info, s_orbital_parallel
+    use structures, only: s_process_info, s_parallel_info
     use communication, only: comm_summation, comm_is_root
     implicit none
     type(s_process_info),intent(in)     :: pinfo
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     real(8), intent(in)  :: h(:,:)
     real(8), intent(out) :: e(:)
     real(8), intent(out) :: v(:,:)
@@ -78,11 +78,11 @@ contains
   end subroutine eigen_pdsyevd
 
   subroutine eigen_pzheevd(pinfo,info,h,e,v)
-    use structures, only: s_process_info, s_orbital_parallel
+    use structures, only: s_process_info, s_parallel_info
     use communication, only: comm_summation, comm_is_root
     implicit none
     type(s_process_info),intent(in)     :: pinfo
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     complex(8), intent(in)  :: h(:,:)
     real(8), intent(out)    :: e(:)
     complex(8), intent(out) :: v(:,:)

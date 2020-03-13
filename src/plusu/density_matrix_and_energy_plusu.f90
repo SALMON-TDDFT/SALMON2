@@ -29,11 +29,11 @@ module density_matrix_and_energy_plusU_sub
 contains
 
   subroutine calc_density_matrix_and_energy_plusU( psi, ppg, info, system, E_U )
-    use structures, only: s_orbital, s_pp_grid, s_orbital_parallel, s_dft_system
+    use structures, only: s_orbital, s_pp_grid, s_parallel_info, s_dft_system
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_pp_grid),intent(in) :: ppg
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_dft_system),intent(in) :: system
     real(8),intent(out) :: E_U
     integer :: Nlma,Nspin

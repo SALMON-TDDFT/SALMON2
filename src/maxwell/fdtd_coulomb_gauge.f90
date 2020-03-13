@@ -21,7 +21,7 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
@@ -35,8 +35,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
   integer                 ,intent(in) :: itt
   type(s_rgrid)           ,intent(in) :: lg,ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_field_parallel)  ,intent(in) :: info_field
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_scalar)          ,intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_vector)          ,intent(in) :: j_e    ! electron number current density (without rho*A/c)
   type(s_sendrecv_grid)               :: srg_ng
@@ -85,7 +84,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
   call timer_end(LOG_SS_FDTD_CALC)
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(wrk,out_curr,3,info_field%icomm_all)
+  call comm_summation(wrk,out_curr,3,info%icomm_r)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
 ! gradient of d(Vh)/dt (Vh: Hartree potential)
@@ -219,8 +218,8 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
   call timer_end(LOG_SS_FDTD_CALC)
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(e_em_wrk,e_em,info_field%icomm_all)
-  call comm_summation(e_joule_wrk,e_joule,info_field%icomm_all)
+  call comm_summation(e_em_wrk,e_em,info%icomm_r)
+  call comm_summation(e_joule_wrk,e_joule,info%icomm_r)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
   call timer_begin(LOG_SS_FDTD_CALC)
@@ -256,7 +255,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
   rtmp1 = [wrk, wrk3]
-  call comm_summation(rtmp1,rtmp2,6,info_field%icomm_xy)
+  call comm_summation(rtmp1,rtmp2,6,info%icomm_xy)
   wrk (1:3) = rtmp2(1:3)
   wrk3(1:3) = rtmp2(4:6)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
@@ -289,7 +288,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
   e_poynting_wrk = [e_poy1, e_poy2]
-  call comm_summation(e_poynting_wrk,e_poynting,2,info_field%icomm_xy)
+  call comm_summation(e_poynting_wrk,e_poynting,2,info%icomm_xy)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
   call timer_begin(LOG_SS_FDTD_CALC)
@@ -317,7 +316,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
 !  call timer_end(LOG_SS_FDTD_CALC)
 !
 !  call timer_begin(LOG_SS_FDTD_COMM_COLL)
-!  call comm_summation(fw%integral_poynting_tmp,fw%integral_poynting_tmp2,lg_num(3),info_field%icomm_all)
+!  call comm_summation(fw%integral_poynting_tmp,fw%integral_poynting_tmp2,lg_num(3),info%icomm_r)
 !  call timer_end(LOG_SS_FDTD_COMM_COLL)
 !
 !  call timer_begin(LOG_SS_FDTD_CALC)
@@ -338,7 +337,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,info_field,rho,Vh,j_e,srg_ng,A
 !  call timer_end(LOG_SS_FDTD_CALC)
 !
 !  call timer_begin(LOG_SS_FDTD_COMM_COLL)
-!  call comm_summation(fw%Ac_zt_t,fw%Ac_zt,size(fw%Ac_zt),info_field%icomm_all)
+!  call comm_summation(fw%Ac_zt_t,fw%Ac_zt,size(fw%Ac_zt),info%icomm_r)
 !  call timer_end(LOG_SS_FDTD_COMM_COLL)
 !
 !  if(comm_is_root(info%id_rko)) then
@@ -524,7 +523,7 @@ contains
     call timer_end(LOG_SS_FDTD_CALC)
 
     call timer_begin(LOG_SS_FDTD_COMM_COLL)
-    call comm_summation(fw%tmp_zt,fw%curr4pi_zt,size(fw%curr4pi_zt),info_field%icomm_all)
+    call comm_summation(fw%tmp_zt,fw%curr4pi_zt,size(fw%curr4pi_zt),info%icomm_r)
     call timer_end(LOG_SS_FDTD_COMM_COLL)
 
     call timer_begin(LOG_SS_FDTD_CALC)
@@ -613,7 +612,7 @@ end subroutine fdtd_singlescale
 
 !===================================================================================================================================
 
-subroutine fourier_singlescale(lg,ng,info_field,fg,rho,j_e,Vh,poisson,singlescale)
+subroutine fourier_singlescale(lg,ng,info,fg,rho,j_e,Vh,poisson,singlescale)
   use structures
   use math_constants,only : zi,pi
   use salmon_global,only: dt
@@ -622,7 +621,7 @@ subroutine fourier_singlescale(lg,ng,info_field,fg,rho,j_e,Vh,poisson,singlescal
   implicit none
   type(s_rgrid)          ,intent(in) :: lg
   type(s_rgrid)          ,intent(in) :: ng
-  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_parallel_info)  ,intent(in) :: info
   type(s_reciprocal_grid),intent(in) :: fg
   type(s_scalar)         ,intent(in) :: rho
   type(s_vector)         ,intent(in) :: j_e ! electron number current density (without rho*A/c)
@@ -636,9 +635,9 @@ subroutine fourier_singlescale(lg,ng,info_field,fg,rho,j_e,Vh,poisson,singlescal
   integer :: i
   complex(8) :: f0,f1,j0
   
-  if(info_field%isize(1) < 4) stop "isize(1) must be > 3"
+  if(info%isize_x < 4) stop "isize(1) must be > 3"
   
-  i = mod(info_field%id(1),4) ! i=0,1,2,3
+  i = mod(info%id_x,4) ! i=0,1,2,3
 
   inv_lgnum3=1.d0/(lg%num(1)*lg%num(2)*lg%num(3))
 
@@ -660,13 +659,13 @@ subroutine fourier_singlescale(lg,ng,info_field,fg,rho,j_e,Vh,poisson,singlescal
   end do
   end do
   
-  call comm_summation(singlescale%b_ffte,singlescale%a_ffte,size(singlescale%a_ffte),info_field%icomm(1))
+  call comm_summation(singlescale%b_ffte,singlescale%a_ffte,size(singlescale%a_ffte),info%icomm_x)
 
   CALL PZFFT3DV_MOD(singlescale%a_ffte(:,:,:,i),singlescale%b_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize(2),info_field%isize(3),-1, &
-                    info_field%icomm(2),info_field%icomm(3))
+                    info%isize_y,info%isize_z,-1, &
+                    info%icomm_y,info%icomm_z)
 
-  call comm_bcast(singlescale%b_ffte(:,:,:,0),info_field%icomm(1), 0)
+  call comm_bcast(singlescale%b_ffte(:,:,:,0),info%icomm_x, 0)
 
 ! Poisson eq.: singlescale%b_ffte(ix,iy,iz,0)=rho(G) --> poisson%b_ffte(ix,iy,iz)=Vh(G)
   poisson%zrhoG_ele=0d0
@@ -729,13 +728,13 @@ subroutine fourier_singlescale(lg,ng,info_field,fg,rho,j_e,Vh,poisson,singlescal
   !$omp end parallel do
 
   CALL PZFFT3DV_MOD(singlescale%b_ffte(:,:,:,i),singlescale%a_ffte(:,:,:,i),lg%num(1),lg%num(2),lg%num(3), &
-                    info_field%isize(2),info_field%isize(3),1, &
-                    info_field%icomm(2),info_field%icomm(3))
+                    info%isize_y,info%isize_z,1, &
+                    info%icomm_y,info%icomm_z)
 
-  call comm_bcast(singlescale%a_ffte(:,:,:,0),info_field%icomm(1), 0)
-  call comm_bcast(singlescale%a_ffte(:,:,:,1),info_field%icomm(1), 1)
-  call comm_bcast(singlescale%a_ffte(:,:,:,2),info_field%icomm(1), 2)
-  call comm_bcast(singlescale%a_ffte(:,:,:,3),info_field%icomm(1), 3)
+  call comm_bcast(singlescale%a_ffte(:,:,:,0),info%icomm_x, 0)
+  call comm_bcast(singlescale%a_ffte(:,:,:,1),info%icomm_x, 1)
+  call comm_bcast(singlescale%a_ffte(:,:,:,2),info%icomm_x, 2)
+  call comm_bcast(singlescale%a_ffte(:,:,:,3),info%icomm_x, 3)
   
   !$OMP parallel do private(iiz,iiy,ix,iy,iz)
   do iz=1,ng%num(3)
@@ -752,7 +751,7 @@ end subroutine fourier_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(ng,lg,info,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
+subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -765,8 +764,7 @@ subroutine init_singlescale(ng,lg,info,info_field,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac
   use checkpoint_restart_sub, only: restart_singlescale
   implicit none
   type(s_rgrid)         ,intent(in) :: lg,ng
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_field_parallel),intent(in) :: info_field
+  type(s_parallel_info) ,intent(in) :: info
   real(8)               ,intent(in) :: hgs(3)
   type(s_scalar)        ,intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_sendrecv_grid)             :: srg_ng
@@ -926,11 +924,11 @@ contains
       fw%b_ffte(ng%is(1):ng%ie(1),iy,iz,0) = Vh%f(ng%is(1):ng%ie(1),iiy,iiz)
     end do
     end do
-    call comm_summation(fw%b_ffte,fw%a_ffte,size(fw%a_ffte),info_field%icomm(1))
+    call comm_summation(fw%b_ffte,fw%a_ffte,size(fw%a_ffte),info%icomm_x)
 
     CALL PZFFT3DV_MOD(fw%a_ffte(:,:,:,0),fw%Vh_ffte_old,lg%num(1),lg%num(2),lg%num(3),   &
-                      info_field%isize(2),info_field%isize(3),-1, &
-                      info_field%icomm(2),info_field%icomm(3))
+                      info%isize_y,info%isize_z,-1, &
+                      info%icomm_y,info%icomm_z)
   
     return
   end subroutine calc_Vh_ffte

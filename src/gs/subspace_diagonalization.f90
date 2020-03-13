@@ -35,7 +35,7 @@ subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_process_info)    ,intent(in) :: pinfo
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
@@ -63,7 +63,7 @@ subroutine ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)
@@ -246,7 +246,7 @@ end subroutine ssdg_rwf
     implicit none
     type(s_rgrid)           ,intent(in) :: mg
     type(s_dft_system)      ,intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_process_info),intent(in) :: pinfo
     type(s_stencil),intent(in) :: stencil
     type(s_pp_grid),intent(in) :: ppg
@@ -415,7 +415,7 @@ subroutine ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_process_info),intent(in) :: pinfo
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
@@ -584,7 +584,7 @@ subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)

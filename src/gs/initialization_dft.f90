@@ -19,7 +19,7 @@
 
 subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg, ng,  &
-                                pinfo, info, info_field,  &
+                                pinfo, info,  &
                                 srg, srg_ng,  &
                                 srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                                 spsi, shpsi, sttpsi,  &
@@ -50,8 +50,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_process_info) :: pinfo
-type(s_orbital_parallel) :: info
-type(s_field_parallel) :: info_field
+type(s_parallel_info) :: info
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
@@ -72,7 +71,7 @@ integer,parameter :: Nd = 4
 
 integer :: jspin
 
-!call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
+!call init_dft(nproc_group_global,pinfo,info,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 
 call init_code_optimization
 
@@ -88,7 +87,7 @@ do jspin=1,system%nspin
   call allocate_scalar(mg,sVxc(jspin))
 end do
 call read_pslfile(system,pp,ppg)
-call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
 call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
 if(comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
@@ -138,8 +137,7 @@ end subroutine initialization1_dft
 
 subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 system,energy,ewald,stencil,fg,poisson,&
-                                lg,mg,ng,  &
-                                info,info_field,  &
+                                lg,mg,ng,info,  &
                                 srg,srg_ng,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
@@ -174,8 +172,7 @@ implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
-type(s_orbital_parallel) :: info
-type(s_field_parallel) :: info_field
+type(s_parallel_info) :: info
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
@@ -269,7 +266,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      srho%f = srho%f + srho_s(jspin)%f
   end do
 
-  call hartree(lg,mg,ng,info_field,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
 
@@ -298,7 +295,7 @@ end subroutine initialization2_dft
 subroutine initialization_dft_md( Miter, rion_update,  &
                                 system,md,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,ng,  &
-                                info,info_field,pinfo,  &
+                                info,pinfo,  &
                                 srg,srg_ng,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
@@ -335,8 +332,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_rgrid) :: mg
   type(s_rgrid) :: ng
   type(s_process_info) :: pinfo
-  type(s_orbital_parallel) :: info
-  type(s_field_parallel) :: info_field
+  type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_ng
   type(s_orbital) :: spsi,shpsi,sttpsi
   type(s_dft_system) :: system
@@ -381,7 +377,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   call scf_iteration_dft( Miter,rion_update,sum1,  &
                           system,energy,ewald,  &
                           lg,mg,ng,  &
-                          info,info_field,pinfo,  &
+                          info,pinfo,  &
                           poisson,fg,  &
                           cg,mixing,  &
                           stencil,  &

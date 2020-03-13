@@ -28,7 +28,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer           ,intent(in) :: ncg
   type(s_rgrid)     ,intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_stencil)   ,intent(in) :: stencil
   type(s_pp_grid)   ,intent(in) :: ppg
   type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
@@ -222,7 +222,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital),intent(in) :: psi
   type(s_orbital)            :: gk
   !
@@ -288,7 +288,7 @@ subroutine inner_product(mg,system,info,psi1,psi2,rbox)
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital),intent(in) :: psi1,psi2
   real(8),intent(out) :: rbox(system%nspin,system%no)
   !
@@ -336,7 +336,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer           ,intent(in) :: ncg
   type(s_rgrid)     ,intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_stencil)   ,intent(in) :: stencil
   type(s_pp_grid)   ,intent(in) :: ppg
   type(s_scalar)    ,intent(in) :: vlocal(system%nspin)
@@ -550,7 +550,7 @@ subroutine orthogonalization(mg,system,info,psi,gk)
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital),intent(in) :: psi
   type(s_orbital)            :: gk
   !
@@ -623,7 +623,7 @@ subroutine inner_product(mg,system,info,psi1,psi2,zbox)
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_orbital),intent(in) :: psi1,psi2
   complex(8),intent(out) :: zbox(system%nspin,system%no,system%nk)
   !

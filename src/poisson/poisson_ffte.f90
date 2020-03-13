@@ -19,13 +19,13 @@ module poisson_ffte_sub
 
 contains
 
-subroutine poisson_ffte(lg,ng,info_field,fg,rho,Vh,poisson)
+subroutine poisson_ffte(lg,ng,info,fg,rho,Vh,poisson)
   use structures
   use communication, only: comm_summation
   implicit none
   type(s_rgrid)          ,intent(in) :: lg
   type(s_rgrid)          ,intent(in) :: ng
-  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_parallel_info)  ,intent(in) :: info
   type(s_reciprocal_grid),intent(in) :: fg
   type(s_scalar)         ,intent(in) :: rho
   type(s_scalar)                     :: Vh
@@ -46,11 +46,11 @@ subroutine poisson_ffte(lg,ng,info_field,fg,rho,Vh,poisson)
     poisson%b_ffte(ng%is(1):ng%ie(1),iy,iz) = cmplx(rho%f(ng%is(1):ng%ie(1),iiy,iiz))
   end do
   end do
-  call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
+  call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_x)
 
   CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                    info_field%isize(2),info_field%isize(3),-1, &
-                    info_field%icomm(2),info_field%icomm(3))
+                    info%isize_y,info%isize_z,-1, &
+                    info%icomm_y,info%icomm_z)
 
   poisson%zrhoG_ele=0d0
 !$omp parallel do collapse(2) default(none) &
@@ -72,8 +72,8 @@ subroutine poisson_ffte(lg,ng,info_field,fg,rho,Vh,poisson)
 !$omp end parallel do
 
   CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(1),lg%num(2),lg%num(3), &
-                    info_field%isize(2),info_field%isize(3),1, &
-                    info_field%icomm(2),info_field%icomm(3))
+                    info%isize_y,info%isize_z,1, &
+                    info%icomm_y,info%icomm_z)
 
 !$OMP parallel do private(iiz,iiy) collapse(2)
   do iz=1,ng%num(3)

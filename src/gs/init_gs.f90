@@ -30,7 +30,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
 
   type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_orbital)                     :: spsi
   type(s_process_info)    ,intent(in) :: pinfo
   !

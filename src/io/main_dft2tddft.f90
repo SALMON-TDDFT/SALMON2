@@ -37,8 +37,7 @@ type(s_rgrid)            :: lg_scf,lg_rt
 type(s_rgrid)            :: mg_scf,mg_rt
 type(s_rgrid)            :: ng_scf,ng_rt
 type(s_process_info)     :: pinfo_scf,pinfo_rt
-type(s_orbital_parallel) :: info_scf,info_rt
-type(s_field_parallel)   :: info_field_scf,info_field_rt
+type(s_parallel_info)    :: info_scf,info_rt
 type(s_orbital)          :: spsi,shpsi
 type(s_dft_system)       :: system_scf,system_rt
 type(s_stencil)          :: stencil
@@ -70,8 +69,8 @@ pinfo_scf%nporbital = nproc_ob
 pinfo_scf%nprgrid    = nproc_rgrid
 call init_process_distribution(system_scf,icomm,pinfo_scf)
 
-call init_communicator_dft(icomm,pinfo_scf,info_scf,info_field_scf)
-call init_grid_parallel(irank,nprocs,pinfo_scf,info_scf,info_field_scf,lg_scf,mg_scf,ng_scf)
+call init_communicator_dft(icomm,pinfo_scf,info_scf)
+call init_grid_parallel(irank,nprocs,pinfo_scf,info_scf,lg_scf,mg_scf,ng_scf)
 call init_orbital_parallel_singlecell(system_scf,info_scf,pinfo_scf)
 
 if (yn_periodic == 'y') then
@@ -101,8 +100,8 @@ pinfo_rt%nporbital = target_nproc_ob
 pinfo_rt%nprgrid    = target_nproc_rgrid
 call init_process_distribution(system_rt,icomm,pinfo_rt)
 
-call init_communicator_dft(icomm,pinfo_rt,info_rt,info_field_rt)
-call init_grid_parallel(irank,nprocs,pinfo_rt,info_rt,info_field_rt,lg_rt,mg_rt,ng_rt)
+call init_communicator_dft(icomm,pinfo_rt,info_rt)
+call init_grid_parallel(irank,nprocs,pinfo_rt,info_rt,lg_rt,mg_rt,ng_rt)
 call init_orbital_parallel_singlecell(system_rt,info_rt,pinfo_rt)
 
 call allocate_orbital_complex(system_rt%nspin,mg_rt,info_rt,shpsi)

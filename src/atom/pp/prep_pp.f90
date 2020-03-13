@@ -19,7 +19,7 @@ module prep_pp_sub
 
 contains
 
-subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+subroutine init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
   use structures
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
@@ -31,8 +31,7 @@ subroutine init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
   implicit none
   type(s_rgrid)           ,intent(in) :: lg,mg,ng
   type(s_dft_system)      ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_field_parallel)  ,intent(in) :: info_field
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_reciprocal_grid) ,intent(in) :: fg
   type(s_poisson)                     :: poisson
   type(s_pp_info)                     :: pp
@@ -139,7 +138,7 @@ call timer_begin(LOG_INIT_PS_CALC_VPSL)
   case(0)
     call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
   case(3)
-    call calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,sVpsl,ppg,property)
+    call calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,sVpsl,ppg,property)
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -383,7 +382,7 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,vpsl,ppg,property)
+subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,vpsl,ppg,property)
   use salmon_global,only : natom, nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
@@ -391,8 +390,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,vpsl,pp
   implicit none
   type(s_rgrid)          ,intent(in) :: lg,mg
   type(s_dft_system)     ,intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
-  type(s_field_parallel) ,intent(in) :: info_field
+  type(s_parallel_info)  ,intent(in) :: info
   type(s_pp_info)        ,intent(in) :: pp
   type(s_reciprocal_grid),intent(in) :: fg
   type(s_poisson)                    :: poisson
@@ -497,7 +495,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,vpsl,pp
     end do
     end do
     end do
-    call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*lg%num(3),info_field%icomm(3))
+    call comm_summation(poisson%ff1z,poisson%ff2z,mg%num(1)*mg%num(2)*lg%num(3),info%icomm_z)
 
   !$OMP parallel do private(iz,ky,kx)
     do iz = mg%is(3),mg%ie(3)
@@ -507,7 +505,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,vpsl,pp
     end do
     end do
     end do
-    call comm_summation(poisson%ff1y,poisson%ff2y,mg%num(1)*lg%num(2)*mg%num(3),info_field%icomm(2))
+    call comm_summation(poisson%ff1y,poisson%ff2y,mg%num(1)*lg%num(2)*mg%num(3),info%icomm_y)
 
   !$OMP parallel do private(iz,iy,kx)
     do iz = mg%is(3),mg%ie(3)
@@ -517,7 +515,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,vpsl,pp
     end do
     end do
     end do
-    call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*mg%num(2)*mg%num(3),info_field%icomm(1))
+    call comm_summation(poisson%ff1x,poisson%ff2x,lg%num(1)*mg%num(2)*mg%num(3),info%icomm_x)
 
   !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz = mg%is(3),mg%ie(3)
@@ -542,11 +540,11 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,info_field,pp,fg,poisson,vpsl,pp
     end do
     end do
     end do
-    call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info_field%icomm(1))
+    call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_x)
 
     CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                      info_field%isize(2),info_field%isize(3),1, &
-                      info_field%icomm(2),info_field%icomm(3))
+                      info%isize_y,info%isize_z,1, &
+                      info%icomm_y,info%icomm_z)
 
   !$OMP parallel do private(iz,iy,iiz,iiy) collapse(2)
     do iz=1,mg%num(3)
@@ -613,7 +611,7 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  type(s_orbital_parallel),intent(in),optional :: info
+  type(s_parallel_info),intent(in),optional :: info
   !
   integer :: ia,i,ik,ix,iy,iz,j,ixyz
   integer :: nc(3),mps_tmp
@@ -788,7 +786,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
   real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  type(s_orbital_parallel),intent(in),optional :: info
+  type(s_parallel_info),intent(in),optional :: info
   !
   integer :: ia,i,ik,ix,iy,iz,j
   integer :: nc(3), ixyz

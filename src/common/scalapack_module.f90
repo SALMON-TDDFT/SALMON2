@@ -24,10 +24,10 @@ private
 
 contains
   subroutine create_gridmap(pinfo,info)
-    use structures, only: s_process_info, s_orbital_parallel
+    use structures, only: s_process_info, s_parallel_info
     implicit none
     type(s_process_info),intent(inout)  :: pinfo
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
 
     integer,parameter :: iclose_comm = 2 ! 1: rko, 2: r
     integer :: ii,ix,iy,iz
@@ -116,11 +116,11 @@ contains
   end subroutine get_blocking_factor
 
   subroutine get_appropriate_matsize(pinfo,info,n)
-    use structures, only: s_process_info, s_orbital_parallel
+    use structures, only: s_process_info, s_parallel_info
     use communication, only: comm_is_root
     implicit none
     type(s_process_info),intent(in)     :: pinfo
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     integer,intent(inout) :: n
     integer :: mb,nb  ! blocking factor
     integer :: k
@@ -145,12 +145,12 @@ contains
   end subroutine get_appropriate_matsize
 
   subroutine init_blacs(pinfo,info,m)
-    use structures, only: s_process_info, s_orbital_parallel
+    use structures, only: s_process_info, s_parallel_info
     implicit none
     integer :: NUMROC
 
     type(s_process_info),intent(inout)  :: pinfo
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     integer,intent(in) :: m
 
     integer :: n,mb,nb

@@ -20,9 +20,9 @@ module poisson_cg_sub
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil)
+subroutine poisson_cg(lg,mg,ng,info,system,poisson,trho,tVh,srg_ng,stencil)
   use inputoutput, only: threshold_cg
-  use structures, only: s_rgrid,s_field_parallel,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
+  use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
   use communication, only: comm_is_root, comm_summation
   use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
@@ -33,7 +33,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
   type(s_rgrid),intent(in) :: ng
-  type(s_field_parallel),intent(in) :: info_field
+  type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in) :: system
   type(s_poisson),intent(inout) :: poisson
   real(8) :: trho(mg%is(1):mg%ie(1),    &
@@ -60,7 +60,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
                 ng%is_array(2):ng%ie_array(2),   &
                 ng%is_array(3):ng%ie_array(3))
   
-  call poisson_boundary(lg,mg,ng,info_field,system,poisson,trho,pk)
+  call poisson_boundary(lg,mg,ng,info,system,poisson,trho,pk)
   
 !------------------------- C-G minimization
   
@@ -114,9 +114,9 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   end do
   end do
   
-  if(info_field%isize_all==1)then
+  if(info%isize_r==1)then
   else
-    call comm_summation(sum1,sum2,info_field%icomm_all)
+    call comm_summation(sum1,sum2,info%icomm_r)
     sum1=sum2
   end if
   
@@ -135,10 +135,10 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
     end do
     end do
   
-    if(info_field%isize_all==1)then
+    if(info%isize_r==1)then
       tottmp=totbox
     else
-      call comm_summation(totbox,tottmp,info_field%icomm_all)
+      call comm_summation(totbox,tottmp,info%icomm_r)
     end if
   
     ak=sum1/tottmp/system%hvol
@@ -163,10 +163,10 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
     end do
     end do
   
-    if(info_field%isize_all==1)then
+    if(info%isize_r==1)then
       tottmp=totbox
     else
-      call comm_summation(totbox,tottmp,info_field%icomm_all)
+      call comm_summation(totbox,tottmp,info%icomm_r)
     end if
   
     sum2=tottmp*system%hvol
@@ -187,7 +187,7 @@ subroutine poisson_cg(lg,mg,ng,info_field,system,poisson,trho,tVh,srg_ng,stencil
   end do iteration
   
   poisson%iterVh=iter
-  if ( poisson%iterVh>maxiter .and. comm_is_root(info_field%id_all)) then
+  if ( poisson%iterVh>maxiter .and. comm_is_root(info%id_r)) then
      write(*,*) "Warning:Vh iteration is not converged"
      write(*,'("||tVh(i)-tVh(i-1)||**2/(# of grids) = ",e15.8)') &
                                 sum2/dble(lg%num(1)*lg%num(2)*lg%num(3))

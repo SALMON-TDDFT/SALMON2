@@ -28,7 +28,7 @@ CONTAINS
     use timer
     implicit none
     type(s_dft_system)      ,intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_rgrid)           ,intent(in) :: ng
     type(s_pp_info)         ,intent(in) :: pp
     type(s_scalar)          ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
@@ -119,7 +119,7 @@ CONTAINS
     type(s_rgrid)           ,intent(in) :: ng
     type(s_ewald_ion_ion)   ,intent(in) :: ewald
     type(s_dft_system)      ,intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info)   ,intent(in) :: info
     type(s_pp_info)         ,intent(in) :: pp
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_reciprocal_grid) ,intent(in) :: fg
@@ -278,7 +278,7 @@ CONTAINS
     type(s_dft_energy)                     :: energy
     type(s_orbital)                        :: tpsi,htpsi,ttpsi
     type(s_dft_system)      ,intent(in)    :: system
-    type(s_orbital_parallel),intent(in)    :: info
+    type(s_parallel_info)   ,intent(in)    :: info
     type(s_rgrid)           ,intent(in)    :: mg
     type(s_scalar)          ,intent(in)    :: V_local(system%Nspin)
     type(s_stencil)         ,intent(in)    :: stencil
@@ -472,7 +472,7 @@ CONTAINS
     use timer
     implicit none
     type(s_dft_system) ,intent(in) :: system
-    type(s_orbital_parallel),intent(in) :: info
+    type(s_parallel_info),intent(in) :: info
     type(s_ewald_ion_ion) :: ewald
     type(s_reciprocal_grid),intent(in) :: fg
     !

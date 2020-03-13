@@ -28,7 +28,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_stencil),intent(in) :: stencil
   type(s_sendrecv_grid),intent(inout) :: srg
   type(s_orbital),intent(inout) :: tspsi_in

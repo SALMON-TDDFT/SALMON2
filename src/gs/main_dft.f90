@@ -55,8 +55,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_process_info) :: pinfo
-type(s_orbital_parallel) :: info
-type(s_field_parallel) :: info_field
+type(s_parallel_info) :: info
 type(s_sendrecv_grid) :: srg, srg_ng
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
@@ -90,13 +89,13 @@ call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
 ! please move folloings into initialization_dft
-call init_dft(nproc_group_global,pinfo,info,info_field,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
+call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg, ng,  &
-                          pinfo, info, info_field,  &
+                          pinfo, info,  &
                           srg, srg_ng,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
@@ -105,8 +104,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
 
 call initialization2_dft( Miter, nspin, rion_update,  &
                           system, energy, ewald, stencil, fg, poisson,&
-                          lg, mg, ng,  &
-                          info, info_field,   &
+                          lg, mg, ng, info,   &
                           srg, srg_ng,  &
                           srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
@@ -133,7 +131,7 @@ if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   rion_update = .true.
   call dealloc_init_ps(ppg)
-  call init_ps(lg,mg,ng,system,info,info_field,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
   call calc_nlcc(pp, system, mg, ppn)
   call timer_end(LOG_INIT_GS)
 end if
@@ -182,7 +180,7 @@ call timer_begin(LOG_GS_ITERATION)
 call scf_iteration_dft( Miter,rion_update,sum1,  &
                         system,energy,ewald,  &
                         lg,mg,ng,  &
-                        info,info_field,pinfo,  &
+                        info,pinfo,  &
                         poisson,fg,  &
                         cg,mixing,  &
                         stencil,  &

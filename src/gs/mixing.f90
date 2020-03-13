@@ -208,11 +208,11 @@ end subroutine wrapper_broyden
 
 subroutine pulay(mg,info,system,srho_s,iter,mixing)
   use salmon_global, only: nmemory_p, beta_p
-  use structures, only: s_rgrid,s_orbital_parallel,s_dft_system,s_scalar,s_mixing,allocate_scalar,deallocate_scalar
+  use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_scalar,s_mixing,allocate_scalar,deallocate_scalar
   use communication, only: comm_summation
   implicit none
   type(s_rgrid),intent(in)            :: mg
-  type(s_orbital_parallel),intent(in) :: info
+  type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in)       :: system
   type(s_scalar),intent(inout)        :: srho_s(system%nspin)
   integer,intent(in)                  :: iter
