@@ -182,6 +182,7 @@ subroutine init_dft_system(lg,system,stencil)
   if ( allocated(system%Force) ) deallocate(system%Force)
   allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
   allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
+  system%Velocity(:,:) =0d0
 
   if(iflag_atom_coor==ntype_atom_coor_reduced) then
     Rion = matmul(system%primitive_a,Rion_red) ! [ a1, a2, a3 ] * R_ion
