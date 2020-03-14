@@ -400,6 +400,18 @@ module structures
     logical,allocatable :: check_conv_esp(:,:,:)
   end type s_band_dft
 
+! DFT_k_expand
+!(k-expand; just for gbp, temporal)
+  type s_k_expand
+     integer :: nk, nkx,nky,nkz
+     integer,allocatable :: isupercell(:,:)
+     real(8),allocatable :: k_vec(:,:)
+     integer :: nk_new, no_new
+     integer :: natom, num_rgrid(3), nelec, nstate
+     real(8) :: al(3)
+     integer,allocatable :: myrank(:), iaddress(:,:)
+  end type s_k_expand
+
 ! +----------------------------------+
 ! | for TDDFT real-time calculations |
 ! +----------------------------------+
