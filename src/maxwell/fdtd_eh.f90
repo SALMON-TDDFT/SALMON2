@@ -2316,7 +2316,7 @@ contains
     use parallelization,   only: nproc_group_global
     use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
     use init_communicator, only: init_communicator_dft
-    use sendrecv_grid,     only: create_sendrecv_neig_ng,init_sendrecv_grid
+    use sendrecv_grid,     only: create_sendrecv_neig_scalar,init_sendrecv_grid
     use structures,        only: s_fdtd_system, s_parallel_info, s_process_info
     use initialization_sub
     implicit none
@@ -2370,7 +2370,7 @@ contains
     elseif(yn_periodic=='y') then
       iperi=3
     end if
-    call create_sendrecv_neig_ng(neig_ng_eh,pinfo,info,iperi) ! neighboring node array
+    call create_sendrecv_neig_scalar(neig_ng_eh,info,pinfo,iperi) ! neighboring node array
     call init_sendrecv_grid(fs%srg_ng,fs%ng,1,info%icomm_r,neig_ng_eh)
     
     return

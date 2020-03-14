@@ -178,7 +178,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call allocate_scalar(mg,sVxc(jspin))
   end do
   call read_pslfile(system,pp,ppg)
-  call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
@@ -221,7 +221,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
-  call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then

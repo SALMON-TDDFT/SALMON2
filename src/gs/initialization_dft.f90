@@ -87,7 +87,7 @@ do jspin=1,system%nspin
   call allocate_scalar(mg,sVxc(jspin))
 end do
 call read_pslfile(system,pp,ppg)
-call init_ps(lg,mg,ng,system,info,fg,poisson,pp,ppg,sVpsl)
+call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
 call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
 if(comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
@@ -266,7 +266,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      srho%f = srho%f + srho_s(jspin)%f
   end do
 
-  call hartree(lg,mg,ng,info,system,poisson,srg_ng,stencil,srho,sVh,fg)
+  call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
   call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
 

@@ -67,7 +67,7 @@ contains
     if(theory=="maxwell ") return
 
     select case(theory)
-    case('dft')
+    case('dft','dft2tddft')
        calc_mode='GS'
     case('dft_md')
        yn_md='y'

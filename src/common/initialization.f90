@@ -61,12 +61,12 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_n
   call check_ffte_condition(pinfo,lg)
   call init_scalapack(pinfo,info,system)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg,ng) ! lg --> mg & ng
-  call init_orbital_parallel_singlecell(system,info,pinfo)
+  call init_parallel_dft(system,info,pinfo)
   ! sendrecv_grid object for wavefunction updates
-  call create_sendrecv_neig_mg(neig, info, pinfo, iperiodic) ! neighboring node array
+  call create_sendrecv_neig_orbital(neig, info, pinfo, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
-  ! sendrecv_grid object for scalar potential updates
-  call create_sendrecv_neig_ng(neig_ng, pinfo, info, iperiodic) ! neighboring node array
+  ! sendrecv_grid object for scalar field updates
+  call create_sendrecv_neig_scalar(neig_ng, info, pinfo, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_ng, ng, 1, info%icomm_rko, neig_ng)
 
 ! symmetry
@@ -283,7 +283,7 @@ end subroutine init_process_distribution
 
 !===================================================================================================================================
 
-subroutine init_orbital_parallel_singlecell(system,info,pinfo)
+subroutine init_parallel_dft(system,info,pinfo)
   use structures
   implicit none
   type(s_dft_system),intent(in) :: system
@@ -342,7 +342,7 @@ subroutine init_orbital_parallel_singlecell(system,info,pinfo)
   info%ia_e = info%ia_s + na - 1
   if (info%id_ko == info%isize_ko-1) info%ia_e = system%nion
 
-end subroutine init_orbital_parallel_singlecell
+end subroutine init_parallel_dft
 
 !===================================================================================================================================
 
