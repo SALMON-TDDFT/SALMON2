@@ -90,7 +90,7 @@ logical :: rion_update, flag_conv
 integer :: i,j
 
 real(8),allocatable :: esp_old(:,:,:)
-real(8) :: tol_esp_diff
+real(8) :: tol_esp_diff, ene_gap
 
 if(calc_mode=='DFT_BAND') then
    allocate( esp_old(system%no,system%nk,system%nspin) )
@@ -116,14 +116,15 @@ if(step_initial_mix_zero.gt.1)then
       case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
+      call get_band_gap(system,energy,ene_gap)
       call timer_end(LOG_CALC_TOTAL_ENERGY)
       if(comm_is_root(nproc_id_global)) then
          select case(iperiodic)
-         case(0); write(*,300) iter, energy%E_tot*au_energy_ev, poisson%iterVh
-         case(3); write(*,301) iter, energy%E_tot*au_energy_ev
+         case(0); write(*,300) iter, energy%E_tot*au_energy_ev, ene_gap, poisson%iterVh
+         case(3); write(*,301) iter, energy%E_tot*au_energy_ev, ene_gap
          end select
-300      format(2x,"no-mixing iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
-301      format(2x,"no-mixing iter =",i6,5x,"Total Energy =",f19.8)
+300      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
+301      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
       endif
 
    end do DFT_NoMix_Iteration
@@ -170,6 +171,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )
    end if
    call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+   call get_band_gap(system,energy,ene_gap)
    if(calc_mode/='DFT_BAND')then
       select case(iperiodic)
       case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
@@ -262,12 +264,12 @@ DFT_Iteration : do iter=Miter+1,nscf
       write(*,*) '-----------------------------------------------'
       select case(iperiodic)
       case(0)
-         write(*,100) Miter,energy%E_tot*au_energy_ev, poisson%iterVh
+         write(*,100) Miter,energy%E_tot*au_energy_ev, ene_gap, poisson%iterVh
       case(3)
-         write(*,101) Miter,energy%E_tot*au_energy_ev
+         write(*,101) Miter,energy%E_tot*au_energy_ev, ene_gap
       end select
-100   format(1x,"iter =",i6,5x,"Total Energy =",f19.8,5x,"Vh iteration =",i4)
-101   format(1x,"iter =",i6,5x,"Total Energy =",f19.8)
+100   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
+101   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
 
       do is=1,system%nspin
          if(system%nspin==2.and.is==1) write(*,*) "for up-spin"
@@ -342,6 +344,29 @@ if(.not.flag_conv) then
    endif
 endif
 
-
-
 end subroutine scf_iteration_dft
+
+subroutine  get_band_gap(system,energy,gap)
+    use structures
+    use salmon_global, only: nelec
+    use inputoutput, only: au_energy_ev
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_dft_energy),intent(in) :: energy
+    integer :: ik
+    real(8) :: gap
+    real(8),dimension(system%nk) :: esp_vb_max, esp_cb_min
+    if(nelec/2>=system%no) then
+       gap = 1d99
+       return
+    endif
+
+    do ik=1,system%nk
+       esp_vb_max(ik)=maxval(energy%esp(1:nelec/2,ik,:))
+       esp_cb_min(ik)=minval(energy%esp(nelec/2+1:system%no,ik,:))
+    end do
+    ! 'Fundamental gap' (see write_band_information)
+    gap = minval(esp_cb_min(:))-maxval(esp_vb_max(:))
+  end subroutine get_band_gap

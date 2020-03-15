@@ -99,6 +99,8 @@ subroutine init_dft_system(lg,system,stencil)
   & nproc_rgrid,rion,rion_red,nelec,calc_mode,temperature,nelec_spin, &
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
   use sym_sub, only: init_sym_sub
+  use communication, only: comm_is_root
+  use parallelization, only: nproc_id_global
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -152,6 +154,9 @@ subroutine init_dft_system(lg,system,stencil)
       end if
     end select
   end if
+  if(comm_is_root(nproc_id_global)) then
+     write(*,*) "  use of real value orbitals = ", system%if_real_orbital
+  endif
 
   system%nion = natom
 
