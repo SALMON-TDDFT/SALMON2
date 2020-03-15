@@ -88,7 +88,8 @@ contains
     complex(8), intent(out) :: v(:,:)
 
     complex(8), allocatable :: h_div(:,:), v_div(:,:), v_tmp(:,:)
-    complex(8), allocatable :: work(:), rwork(:)
+    complex(8), allocatable :: work(:)
+    real(8), allocatable    :: rwork(:)
     integer, allocatable    :: iwork(:)
     integer :: n, len_iwork
     integer :: i, j, ierr
