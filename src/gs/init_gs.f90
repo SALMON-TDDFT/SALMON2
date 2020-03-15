@@ -147,6 +147,7 @@ CONTAINS
 
   ! cf. RSDFT
   subroutine init_wf_rand
+    use salmon_global, only: iseed_number_change
     implicit none
     integer :: s,k,n,i,llen
     integer,allocatable :: iseed(:)
@@ -157,7 +158,7 @@ CONTAINS
     iseed(:) = (info%ik_s * system%no + info%io_s - 1) * llen &
              + (mg%is(3) - lg%is(3) + 1) * lg%num(2) * lg%num(1) &
              + (mg%is(2) - lg%is(2) + 1) * lg%num(1) &
-             + (mg%is(1) - lg%is(1) + 1)
+             + (mg%is(1) - lg%is(1) + 1) + iseed_number_change
     call random_seed(put = iseed)
     deallocate(iseed)
   end subroutine
