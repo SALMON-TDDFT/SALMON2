@@ -1406,15 +1406,13 @@ contains
 
         call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
-        !(needed??)
-        !iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-        !if (yn_datafiles_dump /= 'y' .and. .not. iself) then
-        !   wdir = gdir
-        !end if
-
         icount = icount + 1
         if_cartesian = .true.
-        filename_tmp = trim(gdir)//"atomic_coor.txt"
+        if(yn_datafiles_dump == 'y') then
+           filename_tmp = trim(gdir)//"rank_000000/atomic_coor.txt"
+        else
+           filename_tmp = trim(gdir)//"atomic_coor.txt"
+        endif
         iflag_atom_coor = ntype_atom_coor_cartesian
       end if
 
