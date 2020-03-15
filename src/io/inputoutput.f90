@@ -230,6 +230,8 @@ contains
       & read_gs_restart_data,&
       & write_gs_restart_data,&
       & time_shutdown,       &
+      & method_wf_distributor, &
+      & nblock_wf_distribute, &
       & yn_gbp,            &
       & dump_filename,     &  !remove later
       & modify_gs_wfn_k,   &  !remove later
@@ -586,6 +588,8 @@ contains
     read_gs_restart_data  = 'all'
     write_gs_restart_data = 'all'
     time_shutdown         = -1d0
+    method_wf_distributor = 'single'
+    nblock_wf_distribute = 16
     yn_gbp        = 'n'
     !remove later
     dump_filename    = 'default'
@@ -987,6 +991,8 @@ contains
     call comm_bcast(read_gs_restart_data  ,nproc_group_global)
     call comm_bcast(write_gs_restart_data ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
+    call comm_bcast(method_wf_distributor ,nproc_group_global)
+    call comm_bcast(nblock_wf_distribute  ,nproc_group_global)
     call comm_bcast(yn_gbp                ,nproc_group_global)
     !remove later
     call comm_bcast(dump_filename   ,nproc_group_global)
@@ -1762,6 +1768,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
       !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
@@ -2238,6 +2246,11 @@ contains
     call yn_argument_check(yn_force_stencil_sequential_computation)
     call yn_argument_check(yn_want_communication_overlapping)
     call yn_argument_check(yn_gbp)
+
+    select case(method_wf_distributor)
+    case ('single','slice') ; continue
+    case default            ; stop 'method_wf_distributor must be single or slice'
+    end select
 
     select case(method_init_wf)
     case ('gauss','random') ; continue
