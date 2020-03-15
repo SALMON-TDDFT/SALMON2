@@ -75,6 +75,7 @@ subroutine main_dft_k_expand
   
   !change theory input keyword : behave like dft(gs) calc
   theory = 'dft'
+  calc_mode='GS'
   
   !check condition
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
@@ -125,14 +126,14 @@ subroutine main_dft_k_expand
   do ik=1,kex%nk
      if(kex%myrank(ik)==0) then
         wdir0 = wdir(ik)
-        call write_info_bin(     wdir0,kex,system)
+        call write_info_bin(     wdir0,kex,system,Miter)
         call write_atomic_coor(  wdir0,kex,system)
         call write_atomic_vel(   wdir0,kex,system)
         call write_occ_bin(      wdir0,kex,system)
      endif
   enddo
   call write_rho_inout_bin(wdir0,kex,system,lg,mg,info,mixing)
-  call write_wfn_bin(wdir,kex,system,lg,mg,info,mixing)
+  call write_wfn_bin(wdir,kex,system,spsi,lg,mg,info,mixing)
 
 
   !(log)
@@ -345,14 +346,14 @@ subroutine get_print_rank_numbers(kex,info,pinfo)
   end subroutine generate_restart_directory_name_k_expand
 
 
-  subroutine write_info_bin(odir,kex,system)
+  subroutine write_info_bin(odir,kex,system,iter)
     use parallelization, only: nproc_size_global
     implicit none
     type(s_k_expand) :: kex
     type(s_dft_system) :: system
     character(*)    :: odir
     character(1024) :: dir_file_out
-    logical :: if_real_orbital
+    logical :: if_real_orbital_tmp
     integer :: iu3, iter, nprocs
 
     iu3 = 93
@@ -361,15 +362,16 @@ subroutine get_print_rank_numbers(kex,info,pinfo)
 
     kex%nk_new = 1
     kex%no_new = system%no * kex%nk
-    iter       = 0
+    ! should comm  (kex%nk_new, kex%no_new)
+    !iter       = 0
     nprocs     = nproc_size_global * kex%nk
-    if_real_orbital = .false.
+    if_real_orbital_tmp = .false.
   
     write(iu3) kex%nk_new
     write(iu3) kex%no_new
     write(iu3) iter
     write(iu3) nprocs
-    write(iu3) if_real_orbital
+    write(iu3) if_real_orbital_tmp
 
     write(*,*) "info_bin:", kex%nk_new, kex%no_new, iter, nprocs
     
@@ -480,13 +482,15 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
   integer :: ix_add, iy_add, iz_add,iix,iiy,iiz
   real(8) :: norm
   real(8),allocatable :: rho_in_new(:,:,:,:), rho_out_new(:,:,:,:)
-  real(8),allocatable :: tmp1_rho_new(:,:,:),tmp2_rho_new(:,:,:)
+  real(8),allocatable :: tmp1_rho_in_new(:,:,:), tmp2_rho_in_new(:,:,:)
+  real(8),allocatable :: tmp1_rho_out_new(:,:,:),tmp2_rho_out_new(:,:,:)
 
   lg_is_new(:) = lg%is(:)
   lg_ie_new(1) = lg%ie(1) * kex%nkx
   lg_ie_new(2) = lg%ie(2) * kex%nky
   lg_ie_new(3) = lg%ie(3) * kex%nkz
 
+  nval = lg_ie_new(1)*lg_ie_new(2)*lg_ie_new(3)
   num_rho_stock = mixing%num_rho_stock
 
   allocate( rho_in_new( lg_ie_new(1),lg_ie_new(2),lg_ie_new(3),num_rho_stock+1))
@@ -504,62 +508,77 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
   enddo
   enddo
 
-  allocate( tmp1_rho_new(lg_ie_new(1),lg_ie_new(2),lg_ie_new(3)) )
-  allocate( tmp2_rho_new(lg_ie_new(1),lg_ie_new(2),lg_ie_new(3)) )
-  tmp1_rho_new = 0d0
-  tmp2_rho_new = 0d0
+  allocate( tmp1_rho_in_new(lg_ie_new(1),lg_ie_new(2),lg_ie_new(3)) )
+  allocate( tmp2_rho_in_new(lg_ie_new(1),lg_ie_new(2),lg_ie_new(3)) )
+  allocate( tmp1_rho_out_new(lg_ie_new(1),lg_ie_new(2),lg_ie_new(3)) )
+  allocate( tmp2_rho_out_new(lg_ie_new(1),lg_ie_new(2),lg_ie_new(3)) )
+
+  tmp1_rho_in_new  = 0d0
+  tmp2_rho_in_new  = 0d0
+  tmp1_rho_out_new = 0d0
+  tmp2_rho_out_new = 0d0
 
 
-  !do i=1,num_rho_stock+1
-  i= num_rho_stock+1
-  do ixyz=1,kex%nk
+  do i=1,num_rho_stock+1
+     do ixyz=1,kex%nk
 
-     ix_add = lg%ie(1) * (kex%isupercell(1,ixyz)-1)
-     iy_add = lg%ie(2) * (kex%isupercell(2,ixyz)-1)
-     iz_add = lg%ie(3) * (kex%isupercell(3,ixyz)-1)
+        ix_add = lg%ie(1) * (kex%isupercell(1,ixyz)-1)
+        iy_add = lg%ie(2) * (kex%isupercell(2,ixyz)-1)
+        iz_add = lg%ie(3) * (kex%isupercell(3,ixyz)-1)
 
-     !$omp parallel do collapse(2) private(ix,iy,iz,iix,iiy,iiz)
-     do iz= ng%is(3),ng%ie(3)
-     do iy= ng%is(2),ng%ie(2)
-     do ix= ng%is(1),ng%ie(1)
+        !$omp parallel do collapse(2) private(ix,iy,iz,iix,iiy,iiz)
+        do iz= ng%is(3),ng%ie(3)
+        do iy= ng%is(2),ng%ie(2)
+        do ix= ng%is(1),ng%ie(1)
 
-        iix = ix + ix_add
-        iiy = iy + iy_add
-        iiz = iz + iz_add
-        tmp1_rho_new(iix,iiy,iiz) = mixing%srho_in(i)%f(ix,iy,iz)
+           iix = ix + ix_add
+           iiy = iy + iy_add
+           iiz = iz + iz_add
+           tmp1_rho_in_new(iix,iiy,iiz)  = mixing%srho_in(i)%f(ix,iy,iz)
+
+           if(i.le.num_rho_stock) &
+           tmp1_rho_out_new(iix,iiy,iiz) = mixing%srho_out(i)%f(ix,iy,iz)
+
+        enddo
+        enddo
+        enddo
 
      enddo
-     enddo
-     enddo
 
-  enddo
-  !enddo
+     call comm_summation(tmp1_rho_in_new, tmp2_rho_in_new,  nval,info%icomm_r)
 
-  nval = lg_ie_new(1)*lg_ie_new(2)*lg_ie_new(3)
-  call comm_summation(tmp1_rho_new,tmp2_rho_new, nval,info%icomm_r)
+     norm = sum( tmp2_rho_in_new(:,:,:) )*system%hvol
+     write(*,*) "norm of rho in density", i,real(norm)
+     !tmp2_rho_in_new(:,:,:) = tmp2_rho_in_new(:,:,:)/norm
+
+     rho_in_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3),i) = &
+            tmp2_rho_in_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3))
+
+
+     if(i.le.num_rho_stock) then
+        call comm_summation(tmp1_rho_out_new,tmp2_rho_out_new, nval,info%icomm_r)
+
+        norm = sum( tmp2_rho_out_new(:,:,:) )*system%hvol
+        write(*,*) "norm of rho out density", i, real(norm)
+
+        rho_out_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3),i) = &
+             tmp2_rho_out_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3))
+     endif
+
+
+     !for check
+     !ofile_cube="rho.cube"
+     !call  write_cube(tmp2_rho_in_new,lg_ie_new(1),lg_ie_new(2),lg_ie_new(3),system%hgs,ofile_cube)
+
+  enddo ! i
 
 
   !only print process only from here
   do ik=1,kex%nk
      if(kex%myrank(ik)==0) then
 
-        !check norm
-        norm = sum( tmp2_rho_new(:,:,:) )*system%hvol
-        write(*,*) "norm of rho density", real(norm)
-        !tmp2_rho_new(:,:,:) = tmp2_rho_new(:,:,:)/norm
-
-        !for check
-        !ofile_cube="rho.cube"
-        !call  write_cube(tmp2_rho_new,lg_ie_new(1),lg_ie_new(2),lg_ie_new(3),system%hgs,ofile_cube)
-
-        i= num_rho_stock+1
-        rho_in_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3),i) = &
-             tmp2_rho_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3))
-
-        !(read and write: rho_inout.bin)
         iu1 = 91
         dir_file_out = trim(odir)//"/rho_inout.bin"
-       !open(iu1,file=dir_file_out,form='unformatted',access='stream',status="unknown")
         open(iu1,file=dir_file_out,form='unformatted')
         do i=1,num_rho_stock+1
            write(iu1) rho_in_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3),i)
@@ -572,15 +591,16 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
      endif
   enddo
 
-  deallocate(rho_in_new,rho_out_new, tmp1_rho_new,tmp2_rho_new)
+  deallocate(rho_in_new,rho_out_new, tmp1_rho_in_new,tmp2_rho_in_new)
 
 end subroutine write_rho_inout_bin
 
 
-subroutine write_wfn_bin(odir,kex,system,lg,mg,info,mixing)
+subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
   implicit none
   type(s_k_expand) :: kex
   type(s_dft_system) :: system
+  type(s_orbital) :: spsi
   type(s_rgrid) :: lg,mg
   type(s_parallel_info) :: info
   type(s_mixing)  :: mixing
@@ -595,28 +615,28 @@ subroutine write_wfn_bin(odir,kex,system,lg,mg,info,mixing)
   complex(8) :: ai,ekr
   complex(8),allocatable :: zwf_ekr(:,:,:,:)
 
-!  !check norm -> later normalize to improbe accuracy
-!  im = 1
-!  is = 1 
-!  tmp_norm(system%nk,system%no) = 0d0
-!
-!  do ik= info%ik_s,info%ik_e
-!  do io= info%io_s,info%io_e
-!     tmp_norm(ik,io) = sum(abs(spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,io,ik,im))**2)
-!  enddo
-!  enddo
-!
-!  call comm_summation(tmp_norm,norm_all,system%nk*system%no,info%icomm_r)
-!
-!  do ik= info%ik_s,info%ik_e
-!  do io= info%io_s,info%io_e
-!     norm_all(ik,io) = norm_all(ik,io) * system%hvol
-!     scale = 1d0/sqrt(norm_all(ik,io))
-!     write(*,'(a,2i6,f20.12)') "norm of orbital   ", ik,io, norm_all(ik,io)
-!     spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,io,ik,im)= &
-!     spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,io,ik,im)*scale
-!  enddo
-!  enddo
+  !!check norm -> later normalize to improbe accuracy
+  !im = 1
+  !is = 1 
+  !tmp_norm(system%nk,system%no) = 0d0
+  !
+  !do ik= info%ik_s,info%ik_e
+  !do io= info%io_s,info%io_e
+  !    tmp_norm(ik,io) = sum(abs(spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,io,ik,im))**2)
+  !enddo
+  !enddo
+  !
+  !call comm_summation(tmp_norm,norm_all,system%nk*system%no,info%icomm_r)
+  !
+  !do ik= info%ik_s,info%ik_e
+  !do io= info%io_s,info%io_e
+  !   norm_all(ik,io) = norm_all(ik,io) * system%hvol
+  !   scale = 1d0/sqrt(norm_all(ik,io))
+  !   write(*,'(a,2i6,f20.12)') "norm of orbital   ", ik,io, norm_all(ik,io)
+  !   spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,io,ik,im)= &
+  !   spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),is,io,ik,im)*scale
+  !enddo
+  !enddo
 !--------------------
 
   ai        = ( 0d0, 1d0 )
@@ -667,7 +687,7 @@ subroutine write_wfn_bin(odir,kex,system,lg,mg,info,mixing)
 
               ekr = exp(ai * sum(kex%k_vec(:,ik)*r(:)) ) * scale
               zwf_ekr(ix,iy,iz,info%io_s:info%io_e) = &
-                      spsi%zwf(ix,iy,iz,is,info%io_s:info%io_e,ik,im)* ekr
+                     spsi%zwf(ix,iy,iz,is,info%io_s:info%io_e,ik,im)* ekr
 
            enddo
         enddo
@@ -675,7 +695,6 @@ subroutine write_wfn_bin(odir,kex,system,lg,mg,info,mixing)
 
      !write
      write(iu) zwf_ekr(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),info%io_s:info%io_e)
-
 
     ! !for check
     ! if(ip_o==20) then
@@ -691,7 +710,8 @@ subroutine write_wfn_bin(odir,kex,system,lg,mg,info,mixing)
      close(iu)
 
   enddo
-  deallocate( zwf_ekr )
+
+  if(allocated(zwf_ekr)) deallocate( zwf_ekr )
 
 end subroutine write_wfn_bin
 
