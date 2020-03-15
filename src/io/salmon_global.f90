@@ -165,6 +165,7 @@ module salmon_global
   character(1)   :: skip_gsortho
   integer        :: iditer_notemperature
   integer        :: step_initial_mix_zero
+  integer        :: iseed_number_change
 
 !! &emfield
   character(2)   :: trans_longi
