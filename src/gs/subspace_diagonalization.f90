@@ -583,7 +583,9 @@ subroutine ssdg_rwf_rblas_red_mem(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vl
   use timer
   use hamiltonian, only: hpsi
   use eigen_subdiag_sub
+#ifdef USE_SCALAPACK
   use eigen_scalapack
+#endif
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
   use salmon_global, only: yn_scalapack
