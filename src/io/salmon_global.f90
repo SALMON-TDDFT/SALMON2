@@ -47,7 +47,7 @@ module salmon_global
   character(16)  :: use_potential_model
   character(1)   :: yn_md
   character(1)   :: yn_opt
-!! &control      
+!! &control
   character(256) :: sysname
   character(256) :: base_directory
   integer        :: output_buffer_interval
@@ -79,7 +79,7 @@ module salmon_global
   character(16)  :: unit_length
   character(16)  :: unit_energy
   character(16)  :: unit_charge
-                 
+
 !! &parallel
   character(1)   :: yn_domain_parallel
   integer        :: nproc_k
@@ -87,6 +87,7 @@ module salmon_global
   integer        :: nproc_rgrid(3)
   character(1)   :: yn_ffte
   character(1)   :: yn_scalapack
+  character(1)   :: yn_scalapack_red_mem
   character(32)  :: process_allocation
 
 !! &system
@@ -210,7 +211,7 @@ module salmon_global
   ! The input variables nxvac(l|r)_m do not recommend to use,
   ! However I tempolary remain them for the reason of the compatibility.
   ! Please use  n(x|y|z)_origin_m to provide the same functionality.
-  integer        :: nxvacl_m 
+  integer        :: nxvacl_m
   integer        :: nxvacr_m
   integer        :: nx_origin_m
   integer        :: ny_origin_m
@@ -248,7 +249,7 @@ module salmon_global
   real(8)        :: obs_loc_em(200,3)
   character(1)   :: yn_obs_plane_em(200)
   character(1)   :: yn_wf_em
-  
+
 !! &analysis
   character(2)   :: projection_option
   character(4)   :: projection_decomp
@@ -352,9 +353,9 @@ module salmon_global
 
 !! &atomic_coor
 !! &atomic_red_coor
-integer,allocatable :: kion(:)    
-real(8),allocatable :: rion(:,:)  
-real(8),allocatable :: rion_red(:,:)  
+integer,allocatable :: kion(:)
+real(8),allocatable :: rion(:,:)
+real(8),allocatable :: rion_red(:,:)
 character(1),allocatable :: flag_opt_atom(:)
 character(256),allocatable :: atom_name(:)
 

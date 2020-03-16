@@ -162,7 +162,7 @@ contains
           ! Beginning of 'atomic_positions' part
           if (text == '&atomic_coor') then
             cur = fh_atomic_coor
-            if_nml_coor =.true. 
+            if_nml_coor =.true.
             cycle
           end if
           if (text == '&atomic_red_coor') then
@@ -253,6 +253,7 @@ contains
       & nproc_rgrid, &
       & yn_ffte, &
       & yn_scalapack, &
+      & yn_scalapack_red_mem, &
       & process_allocation
 
     namelist/system/ &
@@ -492,7 +493,7 @@ contains
       & iwrite_projection, &
       & itwproj, &
       & iwrite_projnum, &
-      & itcalc_ene 
+      & itcalc_ene
 
     namelist/group_hartree/ &
       & lmax_lmp
@@ -562,7 +563,7 @@ contains
 
     call initialize_inputoutput_units
 
-!! == default for &calculation 
+!! == default for &calculation
     theory              = 'tddft'
     calc_mode           = 'none'   !remove later
     use_ehrenfest_md    = 'n'  !remove later
@@ -570,7 +571,7 @@ contains
     use_ms_maxwell      = 'n'  !remove later
     use_geometry_opt    = 'n'  !remove later
     use_singlescale     = 'n'  !remove later
-    use_potential_model = 'n'  
+    use_potential_model = 'n'
     yn_md               = 'n'
     yn_opt              = 'n'
 !! == default for &control
@@ -605,6 +606,7 @@ contains
     nproc_rgrid          = 0
     yn_ffte              = 'n'
     yn_scalapack         = 'n'
+    yn_scalapack_red_mem = 'n'
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
@@ -712,7 +714,7 @@ contains
     vec_dipole_source  = 0d0
     cood_dipole_source = 0d0
     rad_dipole_source  = 2d0 ! a.u.
-    
+
 !! == default for &multiscale
     fdtddim    = '1d'
     twod_shape = 'periodic'
@@ -1006,6 +1008,7 @@ contains
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
     call comm_bcast(yn_scalapack        ,nproc_group_global)
+    call comm_bcast(yn_scalapack_red_mem ,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
     call comm_bcast(yn_periodic,nproc_group_global)
@@ -1166,7 +1169,7 @@ contains
     cood_dipole_source = cood_dipole_source * ulength_to_au
     call comm_bcast(rad_dipole_source,nproc_group_global)
     rad_dipole_source = rad_dipole_source * ulength_to_au
-    
+
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
     call comm_bcast(twod_shape,nproc_group_global)
@@ -1273,7 +1276,7 @@ contains
     call comm_bcast(layout_multipole  ,nproc_group_global)
     call comm_bcast(num_multipole_xyz ,nproc_group_global)
     call comm_bcast(threshold_cg      ,nproc_group_global)
-    threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3 
+    threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3
 !! == bcast for &ewald
     call comm_bcast(newald        ,nproc_group_global)
     call comm_bcast(aewald        ,nproc_group_global)
@@ -1448,9 +1451,9 @@ contains
     rion_red = 0d0
     kion = 0
     flag_opt_atom = 'n'
-    
+
     if (0 < natom) then
-      
+
       if (comm_is_root(nproc_id_global))then
         fh_atomic_coor = get_filehandle()
         open(fh_atomic_coor, file=filename_tmp, status='old')
@@ -1465,7 +1468,7 @@ contains
               atom_name(i) = char_atom
            end do
            rion = rion*ulength_to_au
-              
+
         case(ntype_atom_coor_reduced)
            do i=1,natom
               if(yn_opt == 'y')then
@@ -1478,7 +1481,7 @@ contains
 
         end select
         close(fh_atomic_coor)
-        
+
       end if
 
       call comm_bcast(rion,nproc_group_global)
@@ -1553,7 +1556,7 @@ contains
     if(iflag_unit_length == ntype_unit_length_aa)then
       t_unit_length%name     = 'Angstrom'
       t_unit_length_inv%name = '1/Angstrom'
-    else 
+    else
       t_unit_length%name     = 'a.u.'
       t_unit_length_inv%name = 'a.u.'
       t_unit_length%conv = 1d0
@@ -1566,7 +1569,7 @@ contains
     if(iflag_unit_energy == ntype_unit_energy_ev)then
       t_unit_energy%name     = 'eV'
       t_unit_energy_inv%name = '1/eV'
-    else 
+    else
       t_unit_energy%name     = 'a.u.'
       t_unit_energy_inv%name = 'a.u.'
       t_unit_energy%conv = 1d0
@@ -1579,7 +1582,7 @@ contains
     if(iflag_unit_time == ntype_unit_time_fs)then
       t_unit_time%name     = 'fs'
       t_unit_time_inv%name = '1/fs'
-    else 
+    else
       t_unit_time%name     = 'a.u.'
       t_unit_time_inv%name = 'a.u.'
       t_unit_time%conv = 1d0
@@ -1592,7 +1595,7 @@ contains
        iflag_unit_length == ntype_unit_length_aa &
          )then
       t_unit_spectrum_dipole%name  = 'fs*Angstrom'
-    else 
+    else
       t_unit_spectrum_dipole%name  = 'a.u.'
       t_unit_spectrum_dipole%conv  = 1d0
     end if
@@ -1603,7 +1606,7 @@ contains
        iflag_unit_length == ntype_unit_length_aa &
          )then
       t_unit_spectrum_dipole_square%name  = 'fs^2*Angstrom^2'
-    else 
+    else
       t_unit_spectrum_dipole_square%name  = 'a.u.'
       t_unit_spectrum_dipole_square%conv  = 1d0
     end if
@@ -1614,7 +1617,7 @@ contains
        iflag_unit_length == ntype_unit_length_aa &
          )then
       t_unit_current%name  = '1/fs*Angstrom^2'
-    else 
+    else
       t_unit_current%name  = 'a.u.'
       t_unit_current%conv  = 1d0
     end if
@@ -1624,7 +1627,7 @@ contains
     if(iflag_unit_length == ntype_unit_length_aa &
          )then
       t_unit_spectrum_current%name  = '1/Angstrom^2'
-    else 
+    else
       t_unit_spectrum_current%name  = 'a.u.'
       t_unit_spectrum_current%conv  = 1d0
     end if
@@ -1634,7 +1637,7 @@ contains
     if(iflag_unit_length == ntype_unit_length_aa &
          )then
       t_unit_spectrum_current_square%name  = '1/Angstrom^4'
-    else 
+    else
       t_unit_spectrum_current_square%name  = 'a.u.'
       t_unit_spectrum_current_square%conv  = 1d0
     end if
@@ -1647,7 +1650,7 @@ contains
        iflag_unit_charge == ntype_unit_charge_au &
          )then
       t_unit_ac%name     = 'fs*V/Angstrom'
-    else 
+    else
       t_unit_ac%name     = 'a.u.'
       t_unit_ac%conv     = 1d0
     end if
@@ -1660,7 +1663,7 @@ contains
          )then
       t_unit_elec%name     = 'V/Angstrom'
       t_unit_elec%conv     = 51.42206707d0
-    else 
+    else
       t_unit_elec%name     = 'a.u.'
       t_unit_elec%conv     = 1d0
     end if
@@ -1673,7 +1676,7 @@ contains
          )then
       t_unit_spectrum_elec%name     = 'fs*V/Angstrom'
       t_unit_spectrum_elec%conv     = utime_from_au*51.42206707d0
-    else 
+    else
       t_unit_spectrum_elec%name     = 'a.u.'
       t_unit_spectrum_elec%conv     = 1d0
     end if
@@ -1686,7 +1689,7 @@ contains
          )then
       t_unit_spectrum_elec_square%name     = 'fs^2*V^2/Angstrom^2'
       t_unit_spectrum_elec_square%conv     = utime_from_au**2*51.42206707d0**2
-    else 
+    else
       t_unit_spectrum_elec_square%name     = 'a.u.'
       t_unit_spectrum_elec_square%conv     = 1d0
     end if
@@ -1699,7 +1702,7 @@ contains
          )then
       t_unit_polarizability%name  = 'Augstrom^2/V'
       t_unit_polarizability%conv = ulength_from_au**2/51.42206707d0
-    else 
+    else
       t_unit_polarizability%name  = 'a.u.'
       t_unit_polarizability%conv  = 1d0
     end if
@@ -1712,7 +1715,7 @@ contains
          )then
       t_unit_conductivity%name  = '1/fs*V*Angstrom'
       t_unit_conductivity%conv = 1.d0/utime_from_au/51.42206707d0/ulength_from_au
-    else 
+    else
       t_unit_conductivity%name  = 'a.u.'
       t_unit_conductivity%conv  = 1d0
     end if
@@ -1788,6 +1791,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack_red_mem', yn_scalapack_red_mem
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 
       if(inml_system >0)ierr_nml = ierr_nml +1
@@ -2207,6 +2211,7 @@ contains
     call yn_argument_check(yn_domain_parallel)
     call yn_argument_check(yn_ffte)
     call yn_argument_check(yn_scalapack)
+    call yn_argument_check(yn_scalapack_red_mem)
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)

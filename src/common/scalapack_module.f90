@@ -188,6 +188,7 @@ contains
 
   subroutine init_blacs(pinfo,info,m)
     use structures, only: s_process_info, s_parallel_info
+    use communication, only: comm_summation
     implicit none
     integer :: NUMROC
 
@@ -198,6 +199,9 @@ contains
     integer :: n,mb,nb
     integer :: len_iwork
     integer :: ictxt,ierr
+
+    integer :: npo, i, j, i_loc, j_loc, proc_row, proc_col, ip
+    integer,allocatable :: icount(:)
 
     if (pinfo%flag_blacs_gridinit) return
 
@@ -230,6 +234,50 @@ contains
     call set_from_pzheevd
 
     pinfo%flag_blacs_gridinit = .true.
+
+!-----------
+
+    npo = pinfo%nporbital
+    allocate( pinfo%ndiv(0:npo-1), icount(0:npo-1) )
+
+    icount = 0
+    do i = 1, n
+    do j = 1, n
+      call INFOG2L( i, j, pinfo%desca, pinfo%nprow, pinfo%npcol, pinfo%myrow, pinfo%mycol, i_loc, j_loc, proc_row, proc_col )
+      if (pinfo%myrow == proc_row .and. pinfo%mycol == proc_col) then
+        ip = info%irank_io(j)
+        icount( ip ) = icount( ip ) + 1
+      end if
+    end do
+    end do
+    pinfo%ndiv = icount
+
+    allocate( pinfo%i_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1), &
+              pinfo%j_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1), &
+              pinfo%iloc_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1), &
+              pinfo%jloc_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1) )
+
+    icount(:) = 0
+    pinfo%i_tbl = 0
+    pinfo%j_tbl = 0
+    pinfo%iloc_tbl = 0
+    pinfo%jloc_tbl = 0
+
+    do i = 1, n
+    do j = 1, n
+      call INFOG2L( i, j, pinfo%desca, pinfo%nprow, pinfo%npcol, pinfo%myrow, pinfo%mycol, i_loc, j_loc, proc_row, proc_col )
+      if (pinfo%myrow == proc_row .and. pinfo%mycol == proc_col) then
+        ip = info%irank_io(j)
+        icount( ip ) = icount( ip ) + 1
+        pinfo%i_tbl( icount(ip), ip ) = i
+        pinfo%j_tbl( icount(ip), ip ) = j
+        pinfo%iloc_tbl( icount(ip), ip ) = i_loc
+        pinfo%jloc_tbl( icount(ip), ip ) = j_loc
+      end if
+    end do
+    end do
+
+    deallocate(icount)
 
     return
 
