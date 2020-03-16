@@ -1739,7 +1739,7 @@ end subroutine read_Velocity
 subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,rw_mode)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
-  use salmon_global, only: yn_periodic
+  use salmon_global, only: yn_periodic,method_wf_distributor,nblock_wf_distribute
   use mpi
   implicit none
   character(*),            intent(in)    :: iodir
@@ -1760,10 +1760,6 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
 
   type(s_orbital) :: dummy
 
-  ! create single shared file
-  iofile = trim(iodir)//"wfn.bin"
-  icomm = info%icomm_rko
-
   ! determine source type
   if (allocated(spsi%rwf)) then
     source_type = MPI_DOUBLE
@@ -1771,87 +1767,227 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
     source_type = MPI_DOUBLE_COMPLEX
   end if
 
-  ! requires data conversion from double to double complex (for isolated system)
   if (rw_mode == read_mode .and. if_real_orbital) then
     source_type = MPI_DOUBLE
-    call allocate_orbital_real(system%nspin,mg,info,dummy)
   end if
 
-  minfo = MPI_INFO_NULL
-  select case(rw_mode)
-    case (write_mode)
-      iopen_flag = ior(MPI_MODE_CREATE,MPI_MODE_WRONLY)
+  call set_mpi_info
 
-      ! NOTE: Tuning parameter for distributed file system (eg. lustre)
-      !       use all OSS (Object Storage Server)
-      MPI_CHECK(MPI_Info_create(minfo, ierr))
-      MPI_CHECK(MPI_Info_set(minfo, 'striping_factor', '-1', ierr))
-    case (read_mode)
-      iopen_flag = MPI_MODE_RDONLY
-    case default
-      stop 'iopen_flag'
+  select case(method_wf_distributor)
+  ! create single shared file
+  case('single')
+    call write_all
+  ! sliced shared file
+  case ('slice')
+    call write_sliced
+  case default
+    stop 'rw_wavefunction: fatal error'
   end select
 
-  ! create MPI_Type (Window) of process-local wave function
-  gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, info%numo, info%numk, 1]
-  lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, info%numo, info%numk, 1]
-  lstart = [mg%is(1:3)       - mg%is_array(1:3) + 1, 1,            1,         1,         1] - 1
-
-  MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, local_type, ierr))
-  MPI_CHECK(MPI_Type_commit(local_type, ierr))
-
-  ! create MPI_Type (Window) of global wave function
-  gsize  = [lg%ie(1:3) - lg%is(1:3) + 1, system%nspin, mo,        mk,        1]
-  lstart = [mg%is(1:3)                 , 1,            info%io_s, info%ik_s, 1] - 1
-  if (yn_periodic == 'n') then
-    lstart(1:3) = lstart(1:3) + lg%num(1:3)/2
-  end if
-
-  MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, global_type, ierr))
-  MPI_CHECK(MPI_Type_commit(global_type, ierr))
-
-  ! write/read file
-  MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
-  MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
-
-  select case(rw_mode)
-    case (write_mode)
-      if (allocated(spsi%rwf)) then
-        MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
-      else if (allocated(spsi%zwf)) then
-        MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
-      end if
-    case (read_mode)
-      if (allocated(spsi%rwf)) then
-        if (source_type /= MPI_DOUBLE) stop 'source_type /= MPI_DOUBLE'
-        MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
-      else if (allocated(spsi%zwf)) then
-        if (source_type == MPI_DOUBLE) then
-          ! convert from double to double complex
-          ! NOTE: When simulating large-scale isolated system, it's possible that
-          !       SALMON hangs by failing memory allocation.
-          MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
-          spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:) &
-            = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
-        else
-          MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
-        end if
-      end if
-  end select
-
-  MPI_CHECK(MPI_File_close(mfile, ierr))
-
-  MPI_CHECK(MPI_Type_free(global_type, ierr))
-  MPI_CHECK(MPI_Type_free( local_type, ierr))
-
+  call free_mpi_info
   call deallocate_orbital(dummy)
 
-  select case(rw_mode)
-    case (write_mode)
-      MPI_CHECK(MPI_Info_free(minfo, ierr))
-  end select
-
 contains
+  subroutine write_all
+    implicit none
+
+    iofile = trim(iodir)//"wfn.bin"
+    icomm = info%icomm_rko
+
+    ! requires data conversion from double to double complex
+    if (source_type == MPI_DOUBLE) then
+      call allocate_orbital_real(system%nspin,mg,info,dummy)
+    end if
+
+    ! create MPI_Type (Window) of process-local wave function
+    gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, info%numo, info%numk, 1]
+    lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, info%numo, info%numk, 1]
+    lstart = [mg%is(1:3)       - mg%is_array(1:3) + 1, 1,            1,         1,         1] - 1
+
+    MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, local_type, ierr))
+    MPI_CHECK(MPI_Type_commit(local_type, ierr))
+
+    ! create MPI_Type (Window) of global wave function
+    gsize  = [lg%ie(1:3) - lg%is(1:3) + 1, system%nspin, mo,        mk,        1]
+    lstart = [mg%is(1:3)                 , 1,            info%io_s, info%ik_s, 1] - 1
+    if (yn_periodic == 'n') then
+      lstart(1:3) = lstart(1:3) + lg%num(1:3)/2
+    end if
+
+    MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, global_type, ierr))
+    MPI_CHECK(MPI_Type_commit(global_type, ierr))
+
+    ! write/read file
+    MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+    MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
+
+    select case(rw_mode)
+      case (write_mode)
+        if (allocated(spsi%rwf)) then
+          MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+        else if (allocated(spsi%zwf)) then
+          MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+        end if
+      case (read_mode)
+        if (allocated(spsi%rwf)) then
+          if (source_type /= MPI_DOUBLE) stop 'source_type /= MPI_DOUBLE'
+          MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+        else if (allocated(spsi%zwf)) then
+          if (source_type == MPI_DOUBLE) then
+            ! convert from double to double complex
+            ! NOTE: When simulating large-scale isolated system, it's possible that
+            !       SALMON hangs by failing memory allocation.
+            MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+            spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:) &
+              = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
+          else
+            MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+          end if
+        end if
+    end select
+
+    MPI_CHECK(MPI_File_close(mfile, ierr))
+    MPI_CHECK(MPI_Type_free(global_type, ierr))
+    MPI_CHECK(MPI_Type_free( local_type, ierr))
+  end subroutine write_all
+
+  subroutine write_sliced
+    use filesystem
+    use communication, only: comm_is_root
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io,nb
+    logical :: check
+    type(s_parallel_info) :: dummy_info
+
+    icomm = info%icomm_r
+    nblock_orbital = min(mo,nblock_wf_distribute)
+
+    ! requires data conversion from double to double complex
+    dummy_info%io_s = 1
+    dummy_info%io_e = 1 !nblock_orbital
+    dummy_info%ik_s = 1
+    dummy_info%ik_e = 1
+    dummy_info%im_s = 1
+    dummy_info%im_e = 1
+    if (rw_mode == read_mode .and. if_real_orbital) then
+      call allocate_orbital_real(system%nspin,mg,dummy_info,dummy)
+    end if
+
+    ! create MPI_Type (Window) of process-local wave function
+    gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, 1, 1, 1]
+    lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, 1, 1, 1]
+    lstart = [mg%is(1:3)       - mg%is_array(1:3) + 1, 1,            1, 1, 1] - 1
+
+    MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, local_type, ierr))
+    MPI_CHECK(MPI_Type_commit(local_type, ierr))
+
+    ! create MPI_Type (Window) of global wave function
+    gsize  = [lg%ie(1:3) - lg%is(1:3) + 1, system%nspin, 1, 1, 1]
+    lstart = [mg%is(1:3)                 , 1,            1, 1, 1] - 1
+    if (yn_periodic == 'n') then
+      lstart(1:3) = lstart(1:3) + lg%num(1:3)/2
+    end if
+
+    MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, global_type, ierr))
+    MPI_CHECK(MPI_Type_commit(global_type, ierr))
+
+    ! create all directory...
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e,nblock_orbital-1
+      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+      if (nb >= info%io_s) then
+        write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+        if (comm_is_root(info%id_r)) then
+          call create_directory(iofile)
+        end if
+      end if
+    end do
+    end do
+
+    ! check own path
+    do while(.true.)
+      check = .true.
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e,nblock_orbital-1
+        nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+        write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+        check = check .and. directory_exists(iofile)
+      end do
+      end do
+      if (check) exit
+    end do
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+      write (iofile,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(iodir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+
+      ! write/read file
+      MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+      MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
+
+      select case(rw_mode)
+        case (write_mode)
+          if (allocated(spsi%rwf)) then
+            MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+          else if (allocated(spsi%zwf)) then
+            MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+          end if
+        case (read_mode)
+          if (allocated(spsi%rwf)) then
+            if (source_type /= MPI_DOUBLE) stop 'source_type /= MPI_DOUBLE'
+            MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+          else if (allocated(spsi%zwf)) then
+            if (source_type == MPI_DOUBLE) then
+              ! convert from double to double complex
+              ! NOTE: When simulating large-scale isolated system, it's possible that
+              !       SALMON hangs by failing memory allocation.
+              MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf(:,:,:,:,1,1,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+              spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,io,ik,1) &
+                = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,1,1,1))
+            else
+              MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf(:,:,:,:,io,ik,1), 1, local_type, MPI_STATUS_IGNORE, ierr))
+            end if
+          end if
+      end select
+
+      MPI_CHECK(MPI_File_close(mfile, ierr))
+    end do
+    end do
+
+    MPI_CHECK(MPI_Type_free(global_type, ierr))
+    MPI_CHECK(MPI_Type_free( local_type, ierr))
+  end subroutine write_sliced
+
+  subroutine set_mpi_info
+    implicit none
+
+    minfo = MPI_INFO_NULL
+    select case(rw_mode)
+      case (write_mode)
+        iopen_flag = ior(MPI_MODE_CREATE,MPI_MODE_WRONLY)
+
+        ! NOTE: Tuning parameter for distributed file system (eg. lustre)
+        !       use all OSS (Object Storage Server)
+        MPI_CHECK(MPI_Info_create(minfo, ierr))
+        MPI_CHECK(MPI_Info_set(minfo, 'striping_factor', '-1', ierr))
+      case (read_mode)
+        iopen_flag = MPI_MODE_RDONLY
+      case default
+        stop 'iopen_flag'
+    end select
+  end subroutine set_mpi_info
+
+  subroutine free_mpi_info
+    implicit none
+
+    select case(rw_mode)
+      case (write_mode)
+        MPI_CHECK(MPI_Info_free(minfo, ierr))
+    end select
+  end subroutine
+
   subroutine errcheck(errcode)
     use mpi, only: MPI_MAX_ERROR_STRING, MPI_SUCCESS
     use communication, only: comm_finalize

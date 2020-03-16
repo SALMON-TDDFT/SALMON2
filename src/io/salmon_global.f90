@@ -59,6 +59,8 @@ module salmon_global
   character(256) :: read_gs_restart_data
   character(256) :: write_gs_restart_data
   real(8)        :: time_shutdown
+  character(20)  :: method_wf_distributor
+  integer        :: nblock_wf_distribute
   character(1)   :: yn_gbp
   !remove later
   character(256) :: dump_filename
