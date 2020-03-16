@@ -103,6 +103,7 @@ module structures
     integer :: desca(9), descz(9)
     integer :: len_work  ! for PDSYEVD, PZHEEVD
     integer :: len_rwork ! for PZHEEVD
+    integer,allocatable :: ndiv(:), i_tbl(:,:), j_tbl(:,:), iloc_tbl(:,:), jloc_tbl(:,:)
 #endif
   end type
 
@@ -327,7 +328,7 @@ module structures
   ! for discrete Fourier transform (general)
     complex(8),allocatable :: ff1x(:,:,:),ff1y(:,:,:),ff1z(:,:,:),ff2x(:,:,:),ff2y(:,:,:),ff2z(:,:,:)
   ! for FFTE
-    complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)        
+    complex(8),allocatable :: a_ffte(:,:,:),b_ffte(:,:,:)
   end type s_poisson
 
   type s_fdtd_system
@@ -428,7 +429,7 @@ module structures
     type(s_scalar) :: vonf, eonf(3)
     type(s_vector) :: j_e ! microscopic electron number current density
   end type s_rt
-  
+
 ! single-scale Maxwell-TDDFT method
   type s_singlescale
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
@@ -441,7 +442,7 @@ module structures
     & ,integral_poynting(:),Ac_zt(:,:),tmp_zt(:,:)
     real(8),allocatable :: box(:,:,:),rot_Ac(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,div_Ac(:,:,:),div_Ac_old(:,:,:) &
-    & ,integral_poynting_tmp(:),integral_poynting_tmp2(:) 
+    & ,integral_poynting_tmp(:),integral_poynting_tmp2(:)
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
   ! for yn_gbp
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old

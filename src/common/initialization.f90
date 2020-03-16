@@ -59,9 +59,9 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_n
 
 ! parallelization
   call check_ffte_condition(pinfo,lg)
-  call init_scalapack(pinfo,info,system)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg,ng) ! lg --> mg & ng
   call init_parallel_dft(system,info,pinfo)
+  call init_scalapack(pinfo,info,system)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_orbital(neig, info, pinfo, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
@@ -139,7 +139,7 @@ subroutine init_dft_system(lg,system,stencil)
   call init_lattice(system,stencil)
   call init_sym_sub( system%primitive_a, system%primitive_b, epdir_re1 )
   call init_kvector(num_kgrid,system)
-  
+
   if(calc_mode=='RT') then
     system%if_real_orbital = .false.
   else if(calc_mode=='GS') then
@@ -148,7 +148,7 @@ subroutine init_dft_system(lg,system,stencil)
       system%if_real_orbital = .true.
     case(3)
       if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)==1) then
-        system%if_real_orbital = .true. 
+        system%if_real_orbital = .true.
       else
         system%if_real_orbital = .false.
       end if
@@ -681,7 +681,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   fg%vec_G = 0d0
   fg%coef = 0d0
   fg%exp_ewald = 0d0
-  
+
   if(yn_ffte=='y' .and. use_singlescale=='y') then
   ! for single-scale Maxwell-TDDFT
     allocate(fg%coef_nabla(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
@@ -695,7 +695,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=lg%is(1),lg%ie(1)
-  
+
     if((ix-1)**2+(iy-1)**2+(iz-1)**2 == 0) fg%if_Gzero(ix,iy,iz) = .true.
     iix=ix-1-lg%num(1)*(1+sign(1,(ix-1-(lg%num(1)+1)/2)))/2
     iiy=iy-1-lg%num(2)*(1+sign(1,(iy-1-(lg%num(2)+1)/2)))/2
@@ -721,28 +721,28 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
       if(ix==1.and.iy==1) fg%coef_gxgy0(ix,iy,iz) = 0d0
       fg%coef_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
     end if
-    
+
   enddo
   enddo
   enddo
-  
+
   if(yn_ffte=='n') then
   ! discrete Fourier transform (general)
-  
+
     allocate(fg%egx(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
     allocate(fg%egxc(lg%is(1):lg%ie(1),lg%is(1):lg%ie(1)))
     allocate(fg%egy(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
     allocate(fg%egyc(lg%is(2):lg%ie(2),lg%is(2):lg%ie(2)))
     allocate(fg%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
     allocate(fg%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
-    
+
     allocate(poisson%ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
     allocate(poisson%ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
     allocate(poisson%ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
     allocate(poisson%ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
     allocate(poisson%ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
     allocate(poisson%ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-    
+
   !$OMP parallel do private(ix,kx,tmp)
     do ix=lg%is(1),lg%ie(1)
       do kx=lg%is(1),lg%ie(1)
@@ -767,10 +767,10 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
         fg%egzc(kz,iz) = conjg(tmp)
       end do
     end do
-    
+
   else
   ! FFTE
-  
+
     allocate(poisson%a_ffte(lg%num(1),ng%num(2),ng%num(3)))
     allocate(poisson%b_ffte(lg%num(1),ng%num(2),ng%num(3)))
 
@@ -778,10 +778,10 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
     call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
                       info%isize_y,info%isize_z,0, &
                       info%icomm_y,info%icomm_z)
-                      
+
   end if
 
-  allocate(poisson%zrhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))) 
+  allocate(poisson%zrhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
 
   return
 end subroutine init_reciprocal_grid
@@ -878,7 +878,7 @@ subroutine init_nion_div(system,lg,mg,info)
   if( abs(al0(1,2)).ge.1d-10 .or. &
       abs(al0(1,3)).ge.1d-10 .or. &
       abs(al0(2,3)).ge.1d-10 )  then
-     flag_cuboid=.false. 
+     flag_cuboid=.false.
   else
      flag_cuboid = .true.
   endif
@@ -924,7 +924,7 @@ subroutine init_nion_div(system,lg,mg,info)
 
   allocate( info%ia_mg(info%nion_mg) )
 
-  iia = 0  
+  iia = 0
   do ia = 1,system%nion
      if( (rion_tmp(1,ia).ge.r_mg_min(1) .and. rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
          (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
