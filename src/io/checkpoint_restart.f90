@@ -1856,7 +1856,7 @@ contains
     use communication, only: comm_is_root
     implicit none
     integer :: nblock_orbital
-    integer :: ik,io,nb
+    integer :: ik,io,nb,io_e
     logical :: check
     type(s_parallel_info) :: dummy_info
 
@@ -1893,30 +1893,38 @@ contains
     MPI_CHECK(MPI_Type_commit(global_type, ierr))
 
     ! create all directory...
-    do ik=info%ik_s,info%ik_e
-    do io=info%io_s,info%io_e,nblock_orbital-1
-      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      if (nb >= info%io_s) then
-        write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
-        if (comm_is_root(info%id_r)) then
-          call create_directory(iofile)
-        end if
+    if (rw_mode == write_mode) then
+      if (mod(info%io_e,nblock_orbital) > 0) then
+        io_e = (info%io_e / nblock_orbital + 1) * nblock_orbital
+      else
+        io_e = info%io_e
       end if
-    end do
-    end do
 
-    ! check own path
-    do while(.true.)
-      check = .true.
       do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e,nblock_orbital-1
+      do io=info%io_s,io_e,nblock_orbital
         nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-        write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
-        check = check .and. directory_exists(iofile)
+        if (nb >= (info%io_s - nblock_orbital + 1)) then
+          write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+          if (comm_is_root(info%id_r)) then
+            call create_directory(iofile)
+          end if
+        end if
       end do
       end do
-      if (check) exit
-    end do
+
+      ! check own path
+      do while(.true.)
+        check = .true.
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,io_e,nblock_orbital
+          nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+          write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
+          check = check .and. directory_exists(iofile)
+        end do
+        end do
+        if (check) exit
+      end do
+    end if
 
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
