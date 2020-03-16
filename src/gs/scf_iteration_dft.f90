@@ -120,8 +120,8 @@ if(step_initial_mix_zero.gt.1)then
       call timer_end(LOG_CALC_TOTAL_ENERGY)
       if(comm_is_root(nproc_id_global)) then
          select case(iperiodic)
-         case(0); write(*,300) iter, energy%E_tot*au_energy_ev, ene_gap, poisson%iterVh
-         case(3); write(*,301) iter, energy%E_tot*au_energy_ev, ene_gap
+         case(0); write(*,300) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, poisson%iterVh
+         case(3); write(*,301) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
          end select
 300      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 301      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
@@ -264,9 +264,9 @@ DFT_Iteration : do iter=Miter+1,nscf
       write(*,*) '-----------------------------------------------'
       select case(iperiodic)
       case(0)
-         write(*,100) Miter,energy%E_tot*au_energy_ev, ene_gap, poisson%iterVh
+         write(*,100) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, poisson%iterVh
       case(3)
-         write(*,101) Miter,energy%E_tot*au_energy_ev, ene_gap
+         write(*,101) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
       end select
 100   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 101   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
