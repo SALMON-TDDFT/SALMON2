@@ -31,6 +31,7 @@ contains
     use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
     use salmon_global, only: kion,cutoff_g,aEwald,iperiodic
+    use code_optimization, only: stencil_is_parallelized_by_omp
     use timer
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
@@ -58,8 +59,11 @@ contains
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
     integer :: Norb,iorb,ilocal
+    logical :: is_parallel_info
 
     call timer_begin(LOG_CALC_ION_FORCE)
+
+    is_parallel_info = .not. stencil_is_parallelized_by_omp
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
@@ -136,10 +140,6 @@ contains
       tpsi%zwf = cmplx(tpsi%rwf)
     end if
 
-    allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
-                    ,mg%is_array(2):mg%ie_array(2) &
-                    ,mg%is_array(3):mg%ie_array(3)))
-
   ! uVpsibox2 = < uV | exp(ikr) | psi >
     call calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
@@ -177,20 +177,36 @@ contains
     end if
 
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
-    kAc   = 0d0
+    kAc = 0d0
 
+!$omp parallel default(none) &
+!$omp   firstprivate(kAc) &
+!$omp   private(ik,io,ispin,rtmp,ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w,dphipsi_lma,dphipsi,Nproj_pairs) &
+!$omp   private(jlma,l,n,m1,m2,ddm_mms_nla,gtpsi) &
+!$omp   shared(im,ik_s,ik_e,io_s,io_e,nspin,tpsi,mg,stencil,system,ppg,uVpsibox2,iperiodic) &
+!$omp   shared(PLUS_U_ON,Nlma_ao,phipsibox2,iorb,zF_tmp,U_eff,dm_mms_nla) &
+!$omp   reduction(+:F_tmp) &
+!$omp   if(is_parallel_info)
+
+    if (.not. allocated(gtpsi)) then
+      allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &
+                      ,mg%is_array(2):mg%ie_array(2) &
+                      ,mg%is_array(3):mg%ie_array(3)))
+    end if
+
+!$omp do collapse(2)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
 
        ! gtpsi = (nabla) psi
-       call timer_begin(LOG_CALC_FORCE_GTPSI)
+       !call timer_begin(LOG_CALC_FORCE_GTPSI)
        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gtpsi,mg%is_array,mg%ie_array,mg%is,mg%ie &
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-       call timer_end(LOG_CALC_FORCE_GTPSI)
+       !call timer_end(LOG_CALC_FORCE_GTPSI)
 
        ! nonlocal part
-       call timer_begin(LOG_CALC_FORCE_NONLOCAL)
+       !call timer_begin(LOG_CALC_FORCE_NONLOCAL)
        if(iperiodic==3) kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * system%Hvol
 
@@ -217,7 +233,7 @@ contains
           F_tmp(3,ia) = F_tmp(3,ia) - rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
        end do
 !$omp end parallel do
-       call timer_end(LOG_CALC_FORCE_NONLOCAL)
+       !call timer_end(LOG_CALC_FORCE_NONLOCAL)
 
        if( PLUS_U_ON )then
           if( .not.allocated(dphipsi_lma) )then
@@ -265,6 +281,11 @@ contains
     end do !ispin
     end do !io
     end do !ik
+!$omp end do
+
+    if (allocated(gtpsi)) deallocate(gtpsi)
+
+!$omp end parallel
     call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
 
@@ -288,7 +309,8 @@ contains
     end if
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)
-    deallocate(F_tmp,F_sum,gtpsi,uVpsibox,uVpsibox2)
+    if(allocated(gtpsi)) deallocate(gtpsi)
+    deallocate(F_tmp,F_sum,uVpsibox,uVpsibox2)
     if( PLUS_U_ON )then
       deallocate( phipsibox, phipsibox2 )
       deallocate( dphipsi_lma )
