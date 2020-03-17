@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,stencil,xc_func,srg,srg_ng, &
+SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func,srg,srg_ng, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
@@ -40,6 +40,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,stencil
   use salmon_xc
   use em_field, only: calcVbox, calc_emfields
   use dip, only: subdip
+  use gram_schmidt_orth, only: gram_schmidt
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -49,6 +50,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,stencil
   type(s_dft_system),intent(inout) :: system
   type(s_rt),intent(inout) :: rt
   type(s_parallel_info),intent(in) :: info
+  type(s_process_info),intent(in) :: pinfo
   type(s_stencil),intent(inout) :: stencil
   type(s_xc_functional),intent(in) :: xc_func
   type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
@@ -196,6 +198,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,stencil
     
   end if
   call timer_end(LOG_CALC_TIME_PROPAGATION)
+  
+  ! Gram Schmidt orghonormalization
+  if((gram_schmidt_interval >= 1) .and. (mod(itt,gram_schmidt_interval) == 0)) then
+    call gram_schmidt(system, mg, info, spsi_out, pinfo)
+  end if
 
   call timer_begin(LOG_CALC_RHO)
   call calc_density(system,srho_s,spsi_out,info,mg)

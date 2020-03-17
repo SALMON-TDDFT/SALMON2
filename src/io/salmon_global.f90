@@ -141,6 +141,7 @@ module salmon_global
 !! &tgrid
   integer        :: nt
   real(8)        :: dt
+  integer        :: gram_schmidt_interval
 
 !! &propagation
   integer        :: n_hamil
