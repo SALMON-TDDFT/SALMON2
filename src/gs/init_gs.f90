@@ -34,13 +34,22 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   type(s_orbital)                     :: spsi
   type(s_process_info)    ,intent(in) :: pinfo
   !
-  integer :: ik,io,is,a,ix,iy,iz,ip
+  integer :: ik,io,is,a,ix,iy,iz,ip, ig,ngauss
   real(8) :: xx,yy,zz,x1,y1,z1,rr,Xmax,Ymax,Zmax,q(3)
   real(8) :: Xzero,Yzero,Zzero
 
   call init_wf_rand
 
-  ! get offset (0-th element)
+  select case(method_init_wf)
+  case ('gauss'  ) ; ngauss=1
+  case ('gauss2' ) ; ngauss=2
+  case ('gauss3' ) ; ngauss=3
+  case ('gauss4' ) ; ngauss=4
+  case ('gauss5' ) ; ngauss=5
+  case ('gauss10') ; ngauss=10
+  end select
+
+  ! get offset (0-th element) : Xzero means center
   if (yn_periodic == 'y') then
     Xzero = lg%coordinate(lg%num(1)/2+mod(lg%num(1),2),1)
     Yzero = lg%coordinate(lg%num(2)/2+mod(lg%num(2),2),2)
@@ -58,7 +67,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
     case ('random')
       call gen_random_rwf
 
-    case ('gauss')
+    case ('gauss','gauss2','gauss3','gauss4','gauss5','gauss10')
       Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
       do a=1,natom
         if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
@@ -72,6 +81,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
 
       do is=1,system%nspin
       do io=1,system%no
+      do ig=1,ngauss
         call random_number(q)
         x1=Xmax*(2.d0*q(1)-1.d0)
         y1=Ymax*(2.d0*q(2)-1.d0)
@@ -85,12 +95,18 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
             yy=lg%coordinate(iy,2)-Yzero
             zz=lg%coordinate(iz,3)-Zzero
             rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
-            spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
+            if(ig==1) then
+              spsi%rwf(ix,iy,iz,is,io,1,1) = exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
+            else
+              spsi%rwf(ix,iy,iz,is,io,1,1) = spsi%rwf(ix,iy,iz,is,io,1,1) &
+                   + exp(-0.5d0*(rr*au_length_aa)**2)*(au_length_aa)**(3/2)
+            endif
           end do
           end do
           end do
 !$omp end parallel do
         end if
+      end do !ig
       end do
       end do
 
@@ -103,7 +119,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
     case ('random')
       call gen_random_zwf
 
-    case ('gauss')
+    case ('gauss','gauss2','gauss3','gauss4','gauss5','gauss10')
       Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))-Xzero
       Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))-Yzero
       Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))-Zzero
@@ -111,6 +127,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
       do is=1,system%nspin
       do ik=1,system%nk
       do io=1,system%no
+      do ig=1,ngauss
         call random_number(q)
         x1=Xmax*q(1)
         y1=Ymax*q(2)
@@ -125,12 +142,17 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
             yy=lg%coordinate(iy,2)-Yzero
             zz=lg%coordinate(iz,3)-Zzero
             rr=sqrt((xx-x1)**2+(yy-y1)**2+(zz-z1)**2)
-            spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
+            if(ig==1) then
+               spsi%zwf(ix,iy,iz,is,io,ik,1) = exp(-0.5d0*rr**2)
+            else
+               spsi%zwf(ix,iy,iz,is,io,ik,1) = spsi%zwf(ix,iy,iz,is,io,ik,1) + exp(-0.5d0*rr**2)
+            endif
           end do
           end do
           end do
 !$omp end parallel do
         end if
+      end do !ig
       end do
       end do
       end do
