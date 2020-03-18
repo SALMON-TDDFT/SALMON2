@@ -89,11 +89,11 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
 
 ! gradient of d(Vh)/dt (Vh: Hartree potential)
   call timer_begin(LOG_SS_FDTD_COMM)
-  call update_overlap_real8(srg_scalar, ng, fw%box)
+  call update_overlap_real8(srg_scalar, ng, fw%box1)
   call timer_end(LOG_SS_FDTD_COMM)
 
   call timer_begin(LOG_SS_FDTD_CALC)
-  call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh) ! grad[Vh(t+dt/2)]
+  call calc_gradient_field(ng,fw%coef_nab,fw%box1,fw%grad_Vh) ! grad[Vh(t+dt/2)]
 
   !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=ng%is(3),ng%ie(3)
@@ -134,7 +134,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
     end do
     end do
     call timer_begin(LOG_SS_FDTD_COMM)
-    call update_overlap_real8(fw%srg_eg, ng, fw%box)
+    call update_overlap_real8(fw%srg_eg, fw%eg, fw%box)
     call timer_end(LOG_SS_FDTD_COMM)
     if(ng%is(3)==lg%is(3))then
 !$OMP parallel do collapse(2) private(ix,iy,iz)
@@ -421,7 +421,7 @@ contains
         call timer_end(LOG_SS_FDTD_CALC)
 
         call timer_begin(LOG_SS_FDTD_COMM)
-        call update_overlap_real8(fw%srg_eg, ng, fw%box)
+        call update_overlap_real8(fw%srg_eg, fw%eg, fw%box)
         call timer_end(LOG_SS_FDTD_COMM)
 
         call timer_begin(LOG_SS_FDTD_CALC)
@@ -762,6 +762,7 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time
   use checkpoint_restart_sub, only: restart_singlescale
+  use sendrecv_grid, only: init_sendrecv_grid
   implicit none
   type(s_rgrid)         ,intent(in) :: lg,ng
   type(s_parallel_info) ,intent(in) :: info
@@ -884,26 +885,37 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
 !    fw%fh_Ac_zt = open_filehandle(filename)
   end if
   
-  allocate(fw%box(ng%is_array(1):ng%ie_array(1), &
+  allocate(fw%box1(ng%is_array(1):ng%ie_array(1), &
   & ng%is_array(2):ng%ie_array(2), &
   & ng%is_array(3):ng%ie_array(3)))
-  fw%box = 0d0
+  fw%box1 = 0d0
 
 !$OMP parallel do collapse(2) private(ix,iy,iz)
   do iz=ng%is(3),ng%ie(3)
   do iy=ng%is(2),ng%ie(2)
   do ix=ng%is(1),ng%ie(1)
-    fw%box(ix,iy,iz) = Vh%f(ix,iy,iz)
+    fw%box1(ix,iy,iz) = Vh%f(ix,iy,iz)
     fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz)
   end do
   end do
   end do
-  call update_overlap_real8(srg_scalar, ng, fw%box)
-  call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
+  call update_overlap_real8(srg_scalar, ng, fw%box1)
+  call calc_gradient_field(ng,fw%coef_nab,fw%box1,fw%grad_Vh_old)
   
   if(yn_restart=='y') then
     call restart_singlescale(info%icomm_rko,lg,ng,fw,Ac,div_Ac)
   end if
+  
+! specialized in FDTD timestep
+  fw%eg%nd = 1
+  fw%eg%is = ng%is
+  fw%eg%ie = ng%ie
+  fw%eg%is_array = ng%is - 1
+  fw%eg%ie_array = ng%ie + 1
+  call init_sendrecv_grid(fw%srg_eg, fw%eg, 1, srg_scalar%icomm, srg_scalar%neig)
+  allocate(fw%box(fw%eg%is_array(1):fw%eg%ie_array(1), &
+                & fw%eg%is_array(2):fw%eg%ie_array(2), &
+                & fw%eg%is_array(3):fw%eg%ie_array(3)))
 
   return
   

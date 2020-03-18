@@ -100,7 +100,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt,t_max
-  type(s_rgrid) :: eg
   logical :: rion_update
   
   call timer_begin(LOG_INIT_RT)
@@ -426,12 +425,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   if(use_singlescale=='y') then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
-
-    ! specialized in FDTD timestep
-    eg%nd = 1
-    eg%is = ng%is
-    eg%ie = ng%ie
-    call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_scalar%icomm, srg_scalar%neig)
 
     call init_singlescale(ng,lg,info,system%hgs,srho,sVh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
