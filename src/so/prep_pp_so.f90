@@ -433,6 +433,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   logical,allocatable :: ireferred_atom_comm_r(:,:)
   integer,allocatable :: iranklist(:)
 stop "xxxx"
+#if 0
   call comm_get_groupinfo(icomm_r, irank_r, isize_r)
 
   nlma = ppg%Nlma
@@ -481,6 +482,7 @@ stop "xxxx"
 
     ppg%icomm_atom(ia) = comm_create_group_byid(icomm_r, iranklist(1:n))
   end do
+#endif
 end subroutine init_uvpsi_summation
 
 subroutine finalize_uvpsi_summation(ppg)
