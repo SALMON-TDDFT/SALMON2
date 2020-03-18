@@ -54,7 +54,7 @@ type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
-type(s_sendrecv_grid) :: srg,srg_ng
+type(s_sendrecv_grid) :: srg,srg_scalar
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
@@ -84,7 +84,7 @@ nmacro = nx_m * ny_m * nz_m
 !                         lg, mg, ng,  &
 !                         info, info_field,  &
 !                         xc_func, dmat, ofl, j_e,  &
-!                         srg, srg_ng,  &
+!                         srg, srg_scalar,  &
 !                         spsi_in, spsi_out, tpsi, srho, srho_s,  &
 !                         V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
 !                         pp, ppg, ppn )
@@ -94,7 +94,7 @@ nmacro = nx_m * ny_m * nz_m
 !                         lg, mg, ng,  &
 !                         info, info_field,  &
 !                         xc_func, dmat, ofl, j_e,  &
-!                         srg, srg_ng,  &
+!                         srg, srg_scalar,  &
 !                         spsi_in, spsi_out, tpsi, srho, srho_s,  &
 !                         V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
 !                         pp, ppg, ppn )
@@ -105,11 +105,11 @@ nmacro = nx_m * ny_m * nz_m
 
 !   if(mod(itt,2)==1)then
 !     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
-!      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+!      & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
 !      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
 !   else
 !     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,info_field,stencil,xc_func &
-!      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+!      & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
 !      & ,sVpsl,dmat,fg,energy,md,ofl,poisson,j_e,singlescale)
 !   end if
 

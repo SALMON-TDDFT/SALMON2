@@ -47,7 +47,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_ng, srg, srho_s, ppn, info, spsi, stencil, sVxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, srho_s, ppn, info, spsi, stencil, sVxc, E_xc)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -56,7 +56,7 @@ contains
     type(s_dft_system)      ,intent(in) :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
     type(s_rgrid)           ,intent(in) :: mg
-    type(s_sendrecv_grid)               :: srg_ng, srg
+    type(s_sendrecv_grid)               :: srg_scalar, srg
     type(s_scalar)          ,intent(in) :: srho_s(system%nspin)
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_parallel_info)   ,intent(in) :: info
@@ -123,7 +123,7 @@ contains
       enddo
 !$omp end parallel do
 
-      call update_overlap_real8(srg_ng, mg, rhd)
+      call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,rhd,grho)
       call calc_laplacian_field(mg,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
       & ,lrho( 1:mg%num(1), 1:mg%num(2), 1:mg%num(3) ) )

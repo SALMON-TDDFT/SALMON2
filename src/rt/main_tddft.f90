@@ -51,7 +51,7 @@ type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
-type(s_sendrecv_grid) :: srg,srg_ng
+type(s_sendrecv_grid) :: srg,srg_scalar
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
 type(s_pp_nlcc) :: ppn
@@ -67,7 +67,7 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                         lg, mg, ng,  &
                         info,pinfo,  &
                         xc_func, dmat, ofl,  &
-                        srg, srg_ng,  &
+                        srg, srg_scalar,  &
                         spsi_in, spsi_out, tpsi, srho, srho_s,  &
                         V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                         pp, ppg, ppn )
@@ -82,11 +82,11 @@ TE : do itt=Mit+1,itotNtime
 
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+     & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   else
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func &
-     & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if
 

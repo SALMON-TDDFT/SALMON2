@@ -21,7 +21,7 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_scalar,Ac,div_Ac,fw)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
@@ -38,7 +38,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
   type(s_parallel_info)   ,intent(in) :: info
   type(s_scalar)          ,intent(in) :: rho,Vh ! electron number density & Hartree potential
   type(s_vector)          ,intent(in) :: j_e    ! electron number current density (without rho*A/c)
-  type(s_sendrecv_grid)               :: srg_ng
+  type(s_sendrecv_grid)               :: srg_scalar
   type(s_vector)                      :: Ac     ! A/c, A: vector potential, c: speed of light
   type(s_scalar)                      :: div_Ac ! div(A/c)
   type(s_singlescale)                 :: fw     ! FDTD working arrays, etc.
@@ -89,7 +89,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_ng,Ac,div_Ac,fw
 
 ! gradient of d(Vh)/dt (Vh: Hartree potential)
   call timer_begin(LOG_SS_FDTD_COMM)
-  call update_overlap_real8(srg_ng, ng, fw%box)
+  call update_overlap_real8(srg_scalar, ng, fw%box)
   call timer_end(LOG_SS_FDTD_COMM)
 
   call timer_begin(LOG_SS_FDTD_CALC)
@@ -751,7 +751,7 @@ end subroutine fourier_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
+subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -767,7 +767,7 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   type(s_parallel_info) ,intent(in) :: info
   real(8)               ,intent(in) :: hgs(3)
   type(s_scalar)        ,intent(in) :: rho,Vh ! electron number density & Hartree potential
-  type(s_sendrecv_grid)             :: srg_ng
+  type(s_sendrecv_grid)             :: srg_scalar
   type(s_singlescale)               :: fw
   type(s_vector)                    :: Ac
   type(s_scalar)                    :: div_Ac
@@ -898,7 +898,7 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_ng,fw,Ac,div_Ac)
   end do
   end do
   end do
-  call update_overlap_real8(srg_ng, ng, fw%box)
+  call update_overlap_real8(srg_scalar, ng, fw%box)
   call calc_gradient_field(ng,fw%coef_nab,fw%box,fw%grad_Vh_old)
   
   if(yn_restart=='y') then

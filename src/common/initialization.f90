@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
                            nproc_k,nproc_ob,nproc_rgrid
@@ -42,7 +42,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_n
   type(s_stencil)          :: stencil
   type(s_reciprocal_grid)  :: fg
   type(s_poisson)          :: poisson
-  type(s_sendrecv_grid)    :: srg,srg_ng
+  type(s_sendrecv_grid)    :: srg,srg_scalar
   type(s_ofile)            :: ofile
   !
   integer,dimension(2,3) :: neig,neig_ng
@@ -67,7 +67,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_n
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
   ! sendrecv_grid object for scalar field updates
   call create_sendrecv_neig_scalar(neig_ng, info, pinfo, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_ng, ng, 1, info%icomm_rko, neig_ng)
+  call init_sendrecv_grid(srg_scalar, ng, 1, info%icomm_rko, neig_ng)
 
 ! symmetry
 

@@ -22,7 +22,7 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               poisson,fg,  &
                               cg,mixing,  &
                               stencil,  &
-                              srg,srg_ng,   &
+                              srg,srg_scalar,   &
                               spsi,shpsi,sttpsi,  &
                               srho,srho_s,  &
                               V_local,sVh,sVxc,sVpsl,xc_func,  &
@@ -67,7 +67,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_parallel_info) :: info
 type(s_process_info),intent(in) :: pinfo
-type(s_sendrecv_grid) :: srg, srg_ng
+type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson) :: poisson
@@ -104,7 +104,7 @@ if(step_initial_mix_zero.gt.1)then
       rion_update = check_rion_update() .or. (iter == 1)
       call copy_density(iter,system%nspin,ng,srho_s,mixing)
       call scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil,  &
-                     srg,srg_ng,spsi,shpsi,srho,srho_s,  &
+                     srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      iter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
@@ -160,7 +160,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    end if
    call copy_density(Miter,system%nspin,ng,srho_s,mixing)
    call scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil,  &
-                     srg,srg_ng,spsi,shpsi,srho,srho_s,  &
+                     srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &
                      iditer_nosubspace_diag,mixing,iter,  &

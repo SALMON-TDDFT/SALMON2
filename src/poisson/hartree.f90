@@ -21,7 +21,7 @@ module hartree_sub
 contains
 
 !===================================================================================================================================
-subroutine hartree(lg,ng,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
+subroutine hartree(lg,ng,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
   use inputoutput, only: iperiodic,yn_ffte
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
@@ -34,14 +34,14 @@ subroutine hartree(lg,ng,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
   type(s_dft_system)     ,intent(in)    :: system
   type(s_reciprocal_grid),intent(in)    :: fg
   type(s_poisson)        ,intent(inout) :: poisson
-  type(s_sendrecv_grid)  ,intent(inout) :: srg_ng
+  type(s_sendrecv_grid)  ,intent(inout) :: srg_scalar
   type(s_stencil)        ,intent(in)    :: stencil
   type(s_scalar)         ,intent(in)    :: srho
   type(s_scalar)         ,intent(inout) :: sVh
 
   select case(iperiodic)
   case(0)
-    call poisson_cg(lg,ng,info,system,poisson,srho%f,sVh%f,srg_ng,stencil)
+    call poisson_cg(lg,ng,info,system,poisson,srho%f,sVh%f,srg_scalar,stencil)
   case(3)
     select case(yn_ffte)
     case('n')

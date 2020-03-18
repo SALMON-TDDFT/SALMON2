@@ -49,7 +49,7 @@ subroutine main_dft_k_expand
   type(s_rgrid) :: ng
   type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
-  type(s_sendrecv_grid) :: srg, srg_ng
+  type(s_sendrecv_grid) :: srg, srg_scalar
   type(s_orbital) :: spsi,shpsi,sttpsi
   type(s_dft_system) :: system
   type(s_poisson) :: poisson
@@ -81,14 +81,14 @@ subroutine main_dft_k_expand
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(process_allocation /= 'orbital_sequential') stop "error: process_allocation must be orbital_sequential"
 
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
+  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofl)
   allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
   call initialization1_dft( system, energy, stencil, fg, poisson,  &
                             lg, mg, ng,  &
                             pinfo, info,  &
-                            srg, srg_ng,  &
+                            srg, srg_scalar,  &
                             srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                             spsi, shpsi, sttpsi,  &
                             pp, ppg, ppn,  &

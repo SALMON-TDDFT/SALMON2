@@ -20,7 +20,7 @@ module scf_iteration_sub
 contains
 
 subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
-               srg,srg_ng,spsi,shpsi,srho,srho_s, &
+               srg,srg_scalar,spsi,shpsi,srho,srho_s, &
                cg,ppg,vlocal,  &
                miter,   &
                iditer_nosubspace_diag,mixing,iter, &
@@ -49,7 +49,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg
-  type(s_sendrecv_grid), intent(inout) :: srg_ng
+  type(s_sendrecv_grid), intent(inout) :: srg_scalar
   type(s_pp_grid),       intent(in)    :: ppg
   type(s_cg),            intent(inout) :: cg
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
@@ -116,11 +116,11 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
   if(calc_mode/='DFT_BAND')then
 
     call timer_begin(LOG_CALC_HARTREE)
-    call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
   end if

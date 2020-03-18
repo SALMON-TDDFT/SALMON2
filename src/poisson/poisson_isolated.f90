@@ -20,7 +20,7 @@ module poisson_isolated
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
-subroutine poisson_cg(lg,ng,info,system,poisson,trho,tVh,srg_ng,stencil)
+subroutine poisson_cg(lg,ng,info,system,poisson,trho,tVh,srg_scalar,stencil)
   use inputoutput, only: threshold_cg
   use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_poisson,s_sendrecv_grid,s_stencil
   use communication, only: comm_is_root, comm_summation
@@ -39,7 +39,7 @@ subroutine poisson_cg(lg,ng,info,system,poisson,trho,tVh,srg_ng,stencil)
   real(8) :: tVh(ng%is(1):ng%ie(1),    &
                  ng%is(2):ng%ie(2),      &
                  ng%is(3):ng%ie(3))
-  type(s_sendrecv_grid),intent(inout) :: srg_ng
+  type(s_sendrecv_grid),intent(inout) :: srg_scalar
   type(s_stencil),intent(in) :: stencil
   
   integer,parameter :: maxiter=1000
@@ -79,7 +79,7 @@ subroutine poisson_cg(lg,ng,info,system,poisson,trho,tVh,srg_ng,stencil)
   end do
   end do
   end do
-  call update_overlap_real8(srg_ng, ng, pk)
+  call update_overlap_real8(srg_scalar, ng, pk)
   call laplacian_poisson(ng,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
 !$omp parallel do private(iz,iy,ix) collapse(2)
@@ -119,7 +119,7 @@ subroutine poisson_cg(lg,ng,info,system,poisson,trho,tVh,srg_ng,stencil)
   
   iteration : do iter=1,maxiter
   
-    call update_overlap_real8(srg_ng, ng, pk)
+    call update_overlap_real8(srg_scalar, ng, pk)
     call laplacian_poisson(ng,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
     totbox=0d0
