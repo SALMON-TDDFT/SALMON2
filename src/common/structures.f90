@@ -441,10 +441,11 @@ module structures
     & ,vec_Ac_boundary_bottom(:,:,:),vec_Ac_boundary_bottom_old(:,:,:) &
     & ,vec_Ac_boundary_top(:,:,:),vec_Ac_boundary_top_old(:,:,:) &
     & ,integral_poynting(:),Ac_zt(:,:),tmp_zt(:,:)
-    real(8),allocatable :: box(:,:,:),rot_Ac(:,:,:,:),poynting_vector(:,:,:,:) &
+    real(8),allocatable :: box(:,:,:),box1(:,:,:),rot_Ac(:,:,:,:),poynting_vector(:,:,:,:) &
     & ,div_Ac(:,:,:),div_Ac_old(:,:,:) &
     & ,integral_poynting_tmp(:),integral_poynting_tmp2(:)
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
+    type(s_rgrid)         :: eg
   ! for yn_gbp
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
     real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)

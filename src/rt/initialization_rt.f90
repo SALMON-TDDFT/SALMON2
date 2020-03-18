@@ -24,7 +24,7 @@ contains
 subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
-                     lg, mg, ng, info,pinfo,  &
+                     lg, mg, info,pinfo,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
@@ -64,7 +64,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_rgrid) :: ng
+  type(s_rgrid) :: ng_tmp
   type(s_dft_system)  :: system
   type(s_rt) :: rt
   type(s_process_info) :: pinfo
@@ -100,7 +100,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt,t_max
-  type(s_rgrid) :: eg
   logical :: rion_update
   
   call timer_begin(LOG_INIT_RT)
@@ -161,7 +160,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   
   
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng_tmp,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   
   call init_code_optimization
   
@@ -197,7 +196,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  call restart_rt(lg,mg,ng,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+  call restart_rt(lg,mg,mg,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
@@ -251,9 +250,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
+     call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
   case(3)
-     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
   
@@ -371,7 +370,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   if(yn_restart /= 'y')then
-    call calc_dip(info%icomm_r,lg,ng,srho,rbox_array2)
+    call calc_dip(info%icomm_r,lg,mg,srho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
   if(comm_is_root(nproc_id_global))then
@@ -403,13 +402,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     do itt=0,0
       if(yn_out_dns_rt=='y')then
          !!XXX bug XXX dnsdiff data is wrong as reference dns is srho%f now !AY
-        call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
+        call write_dns(lg,mg,mg,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,spsi_in)
+        call write_elf(itt,lg,mg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_scalar,itt)
+        call write_estatic(lg,mg,system%hgs,stencil,info,sVh,srg_scalar,itt)
       end if
     end do
   
@@ -427,13 +426,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
 
-    ! specialized in FDTD timestep
-    eg%nd = 1
-    eg%is = ng%is
-    eg%ie = ng%ie
-    call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_scalar%icomm, srg_scalar%neig)
-
-    call init_singlescale(ng,lg,info,system%hgs,srho,sVh &
+    call init_singlescale(mg,lg,info,system%hgs,srho,sVh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then

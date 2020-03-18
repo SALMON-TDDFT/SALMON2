@@ -32,7 +32,6 @@ implicit none
 
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
-type(s_rgrid) :: ng
 type(s_dft_system)  :: system
 type(s_rt) :: rt
 type(s_parallel_info) :: info
@@ -64,7 +63,7 @@ call timer_begin(LOG_TOTAL)
 call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                         singlescale,  &
                         stencil, fg, poisson,  &
-                        lg, mg, ng,  &
+                        lg, mg,   &
                         info,pinfo,  &
                         xc_func, dmat, ofl,  &
                         srg, srg_scalar,  &
@@ -81,11 +80,11 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,itotNtime
 
   if(mod(itt,2)==1)then
-    call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func &
+    call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,pinfo,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   else
-    call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func &
+    call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,pinfo,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if
@@ -94,9 +93,9 @@ TE : do itt=Mit+1,itotNtime
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
     if (mod(itt,2)==1) then
-      call checkpoint_rt(lg,mg,ng,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale)
     else
-      call checkpoint_rt(lg,mg,ng,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale)
     endif
     call timer_end(LOG_CHECKPOINT_SELF)
     call comm_sync_all
@@ -141,7 +140,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call checkpoint_rt(lg,mg,ng,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,singlescale,ofl%dir_out_restart)
+  call checkpoint_rt(lg,mg,mg,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,singlescale,ofl%dir_out_restart)
 end if
 
 call finalize_xc(xc_func)
