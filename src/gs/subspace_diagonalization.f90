@@ -416,7 +416,7 @@ subroutine ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg
   use eigen_subdiag_sub
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
-  use salmon_global, only: yn_scalapack
+  use salmon_global, only: yn_eigenexa,yn_scalapack
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
@@ -519,7 +519,13 @@ do ispin = 1, system%nspin
   call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
 !  zhmat = hmat
 
-  if(yn_scalapack=='y') then
+  if(yn_eigenexa=='y') then
+#ifdef USE_EIGENEXA
+     call eigen_pdsyevd_ex(pinfo, info, hmat, eval, evec)
+#else
+     stop "EigenExa does not enabled, please check your build configuration."
+#endif
+  else if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
      call eigen_pdsyevd(pinfo, info, hmat, eval, evec)
 #else
@@ -588,7 +594,7 @@ subroutine ssdg_rwf_rblas_red_mem(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vl
 #endif
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
-  use salmon_global, only: yn_scalapack
+  use salmon_global, only: yn_eigenexa,yn_scalapack
   implicit none
   type(s_rgrid)           ,intent(in) :: mg
   type(s_dft_system)      ,intent(in) :: system
@@ -690,9 +696,14 @@ do ispin = 1, system%nspin
   call timer_begin(LOG_SSDG_PERIODIC_EIGEN)
 !  zhmat = hmat
 
-  if(yn_scalapack=='y') then
+  if(yn_eigenexa=='y') then
+#ifdef USE_EIGENEXA
+     call eigen_pdsyevd_ex_red_mem(system, pinfo, info, hmat, eval, evec)
+#else
+     stop "EigenExa does not enabled, please check your build configuration."
+#endif
+  else if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
-!     call eigen_pdsyevd(pinfo, info, hmat, eval, evec)
      call eigen_pdsyevd_red_mem(system, pinfo, info, hmat, eval, evec)
 #else
      stop "ScaLAPACK does not enabled, please check your build configuration."

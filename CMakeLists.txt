@@ -45,6 +45,7 @@ endif ()
 ## For third party libraries
 option_set(USE_MPI                 "Use MPI parallelization" OFF)
 option_set(USE_SCALAPACK           "Use ScaLAPACK Library"   OFF)
+option_set(USE_EIGENEXA            "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC               "Use Libxc library"       OFF)
 
 option_set(BUILD_REQUIRED_PACKAGES "Request build and static link required packages" OFF)
@@ -88,6 +89,7 @@ if (BUILD_REQUIRED_PACKAGES)
 else ()
   include(${CMAKE_SOURCE_DIR}/cmakefiles/find_required_packages.cmake)
 endif ()
+include(${CMAKE_SOURCE_DIR}/cmakefiles/build_eigenexa.cmake)
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
 set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
 

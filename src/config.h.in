@@ -16,6 +16,7 @@
 
 #cmakedefine USE_MPI
 #cmakedefine USE_SCALAPACK
+#cmakedefine USE_EIGENEXA
 #cmakedefine USE_LIBXC
 
 #cmakedefine USE_OPT_DOMAIN_IS_POW2

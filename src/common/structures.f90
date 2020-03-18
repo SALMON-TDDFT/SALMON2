@@ -105,6 +105,9 @@ module structures
     integer :: len_rwork ! for PZHEEVD
     integer,allocatable :: ndiv(:), i_tbl(:,:), j_tbl(:,:), iloc_tbl(:,:), jloc_tbl(:,:)
 #endif
+#ifdef USE_EIGENEXA
+    logical :: flag_eigenexa_init
+#endif
   end type
 
 ! for persistent communication
