@@ -222,10 +222,10 @@ CONTAINS
     end do
 !$omp end parallel do
     call timer_end(LOG_TE_PERIODIC_CALC)
-    
-    call comm_summation(etmp,E_wrk(3),info%icomm_ko) ! for atom index #ia
 
     call timer_begin(LOG_TE_PERIODIC_COMM_COLL)
+    
+    call comm_summation(etmp,E_wrk(3),info%icomm_ko) ! for atom index #ia
 
     if (rion_update) then
       E_wrk(4) = E_tmp_l
