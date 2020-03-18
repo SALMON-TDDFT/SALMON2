@@ -90,6 +90,7 @@ module salmon_global
   character(1)   :: yn_ffte
   character(1)   :: yn_scalapack
   character(1)   :: yn_scalapack_red_mem
+  character(1)   :: yn_eigenexa
   character(32)  :: process_allocation
 
 !! &system

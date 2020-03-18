@@ -62,6 +62,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng_tmp,system,stencil,fg,poisson,srg,s
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg,ng_tmp) ! lg --> mg & ng
   call init_parallel_dft(system,info,pinfo)
   call init_scalapack(pinfo,info,system)
+  call init_eigenexa(pinfo,info,system)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_orbital(neig, info, pinfo, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
@@ -284,6 +285,9 @@ subroutine init_process_distribution(system,icomm1,pinfo)
 #ifdef USE_SCALAPACK
   pinfo%flag_blacs_gridinit = .false.
 #endif
+#ifdef USE_EIGENEXA
+  pinfo%flag_eigenexa_init = .false.
+#endif
 end subroutine init_process_distribution
 
 !===================================================================================================================================
@@ -445,6 +449,27 @@ subroutine init_scalapack(pinfo,info,system)
       call comm_sync_all
       stop
     end if
+#endif
+  end if
+end subroutine
+
+!===================================================================================================================================
+
+subroutine init_eigenexa(pinfo,info,system)
+  use salmon_global, only: yn_eigenexa
+#ifdef USE_EIGENEXA
+  use eigenexa_module, only: init_eigenexa_mod => init_eigenexa
+  use communication, only: comm_is_root,comm_sync_all
+#endif
+  use structures
+  implicit none
+  type(s_process_info)             :: pinfo
+  type(s_parallel_info),intent(in) :: info
+  type(s_dft_system),intent(in)    :: system
+
+  if (yn_eigenexa == 'y') then
+#ifdef USE_EIGENEXA
+    call init_eigenexa_mod(pinfo,info,system%no)
 #endif
   end if
 end subroutine
