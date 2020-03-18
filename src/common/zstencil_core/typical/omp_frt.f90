@@ -113,4 +113,5 @@ subroutine zstencil_typical_omp(is_array,ie_array,is,ie,idx,idy,idz &
 
   end do
   end do
+!$omp end parallel do
 end subroutine
