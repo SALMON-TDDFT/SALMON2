@@ -56,7 +56,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_process_info) :: pinfo
 type(s_parallel_info) :: info
-type(s_sendrecv_grid) :: srg, srg_ng
+type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson) :: poisson
@@ -89,14 +89,14 @@ call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
 ! please move folloings into initialization_dft
-call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
+call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg, ng,  &
                           pinfo, info,  &
-                          srg, srg_ng,  &
+                          srg, srg_scalar,  &
                           srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
@@ -105,7 +105,7 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
 call initialization2_dft( Miter, nspin, rion_update,  &
                           system, energy, ewald, stencil, fg, poisson,&
                           lg, mg, ng, info,   &
-                          srg, srg_ng,  &
+                          srg, srg_scalar,  &
                           srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
@@ -184,7 +184,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         poisson,fg,  &
                         cg,mixing,  &
                         stencil,  &
-                        srg,srg_ng,   &
+                        srg,srg_scalar,   &
                         spsi,shpsi,sttpsi,  &
                         srho,srho_s,  &
                         V_local,sVh,sVxc,sVpsl,xc_func,  &
@@ -308,7 +308,7 @@ if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
 if(yn_out_dns =='y') call write_dns(lg,mg,ng,srho%f,system%hgs)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
-if(yn_out_elf =='y') call write_elf(0,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi)
+if(yn_out_elf =='y') call write_elf(0,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,spsi)
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 

@@ -26,7 +26,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      stencil, fg, poisson,  &
                      lg, mg, ng, info,pinfo,  &
                      xc_func, dmat, ofl,  &
-                     srg, srg_ng,  &
+                     srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
                      V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                      pp, ppg, ppn )
@@ -83,7 +83,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_dmatrix) :: dmat
   type(s_orbital) :: spsi_in,spsi_out
   type(s_orbital) :: tpsi ! temporary wavefunctions
-  type(s_sendrecv_grid) :: srg,srg_ng
+  type(s_sendrecv_grid) :: srg,srg_scalar
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
@@ -161,7 +161,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   
   
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   
   call init_code_optimization
   
@@ -221,8 +221,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
-  call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
-  call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then
     sVh_stock1%f=sVh%f
@@ -367,9 +367,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   if(num_dipole_source>=1)then
     call allocate_scalar(mg,rt%vonf)
-    do i=1,3
-      call allocate_scalar(mg,rt%eonf(i))
-    end do
     call set_vonf(mg,lg,system%Hgs,rt)
   end if
   
@@ -409,10 +406,10 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
         call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
+        call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_ng,itt)
+        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_scalar,itt)
       end if
     end do
   
@@ -434,10 +431,10 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     eg%nd = 1
     eg%is = ng%is
     eg%ie = ng%ie
-    call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_ng%icomm, srg_ng%neig)
+    call init_sendrecv_grid(singlescale%srg_eg, eg, 1, srg_scalar%icomm, srg_scalar%neig)
 
     call init_singlescale(ng,lg,info,system%hgs,srho,sVh &
-    & ,srg_ng,singlescale,system%Ac_micro,system%div_Ac)
+    & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit

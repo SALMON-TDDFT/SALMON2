@@ -20,7 +20,7 @@
 subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg, ng,  &
                                 pinfo, info,  &
-                                srg, srg_ng,  &
+                                srg, srg_scalar,  &
                                 srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                                 spsi, shpsi, sttpsi,  &
                                 pp, ppg, ppn,  &
@@ -51,7 +51,7 @@ type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_process_info) :: pinfo
 type(s_parallel_info) :: info
-type(s_sendrecv_grid) :: srg, srg_ng
+type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson) :: poisson
@@ -71,7 +71,7 @@ integer,parameter :: Nd = 4
 
 integer :: jspin
 
-!call init_dft(nproc_group_global,pinfo,info,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
+!call init_dft(nproc_group_global,pinfo,info,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 
 call init_code_optimization
 
@@ -138,7 +138,7 @@ end subroutine initialization1_dft
 subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 system,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,ng,info,  &
-                                srg,srg_ng,  &
+                                srg,srg_scalar,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
@@ -173,7 +173,7 @@ type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_rgrid) :: ng
 type(s_parallel_info) :: info
-type(s_sendrecv_grid) :: srg, srg_ng
+type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson) :: poisson
@@ -266,8 +266,8 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
      srho%f = srho%f + srho_s(jspin)%f
   end do
 
-  call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
-  call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
 
   select case(iperiodic)
@@ -296,7 +296,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                                 system,md,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,ng,  &
                                 info,pinfo,  &
-                                srg,srg_ng,  &
+                                srg,srg_scalar,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
@@ -333,7 +333,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_rgrid) :: ng
   type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
-  type(s_sendrecv_grid) :: srg, srg_ng
+  type(s_sendrecv_grid) :: srg, srg_scalar
   type(s_orbital) :: spsi,shpsi,sttpsi
   type(s_dft_system) :: system
   type(s_md) :: md
@@ -381,7 +381,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           poisson,fg,  &
                           cg,mixing,  &
                           stencil,  &
-                          srg,srg_ng,   &
+                          srg,srg_scalar,   &
                           spsi,shpsi,sttpsi,  &
                           srho,srho_s,  &
                           V_local,sVh,sVxc,sVpsl,xc_func,  &

@@ -441,9 +441,6 @@ subroutine set_vonf(mg,lg,Hgs,rt)
   end if
 
   rt%vonf%f=0.d0
-  rt%eonf(1)%f=0.d0
-  rt%eonf(2)%f=0.d0
-  rt%eonf(3)%f=0.d0
 
   do i=1,num_dipole_source
     do iiz=-max_icell,max_icell
@@ -460,36 +457,12 @@ subroutine set_vonf(mg,lg,Hgs,rt)
                         -(vec_dipole_source(1,i)*(lg%coordinate(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg%num(1))*Hgs(1))) &
                          +vec_dipole_source(2,i)*(lg%coordinate(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg%num(2))*Hgs(2))) &
                          +vec_dipole_source(3,i)*(lg%coordinate(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg%num(3))*Hgs(3))))/rr**3
-          rt%eonf(1)%f(ix,iy,iz)=rt%eonf(1)%f(ix,iy,iz)  &
-                    +(3.d0*(vec_dipole_source(1,i)*(lg%coordinate(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg%num(1))*Hgs(1)))/rr &
-                           +vec_dipole_source(2,i)*(lg%coordinate(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg%num(2))*Hgs(2)))/rr &
-                           +vec_dipole_source(3,i)*(lg%coordinate(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg%num(3))*Hgs(3)))/rr)* &
-                              (lg%coordinate(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg%num(1))*Hgs(1)))/rr &
-                        -vec_dipole_source(1,i)) /rr**3
-          rt%eonf(2)%f(ix,iy,iz)=rt%eonf(2)%f(ix,iy,iz)  &
-                    +(3.d0*(vec_dipole_source(1,i)*(lg%coordinate(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg%num(1))*Hgs(1)))/rr &
-                           +vec_dipole_source(2,i)*(lg%coordinate(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg%num(2))*Hgs(2)))/rr &
-                           +vec_dipole_source(3,i)*(lg%coordinate(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg%num(3))*Hgs(3)))/rr)* &
-                              (lg%coordinate(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg%num(2))*Hgs(2)))/rr &
-                        -vec_dipole_source(2,i)) /rr**3
-          rt%eonf(3)%f(ix,iy,iz)=rt%eonf(3)%f(ix,iy,iz)  &
-                    +(3.d0*(vec_dipole_source(1,i)*(lg%coordinate(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg%num(1))*Hgs(1)))/rr &
-                           +vec_dipole_source(2,i)*(lg%coordinate(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg%num(2))*Hgs(2)))/rr &
-                           +vec_dipole_source(3,i)*(lg%coordinate(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg%num(3))*Hgs(3)))/rr)* &
-                              (lg%coordinate(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg%num(3))*Hgs(3)))/rr &
-                          -vec_dipole_source(3,i)) /rr**3
         else
           rt%vonf%f(ix,iy,iz)=rt%vonf%f(ix,iy,iz)  &
                         -(vec_dipole_source(1,i)*(lg%coordinate(ix,1)-(cood_dipole_source(1,i)+dble(iix*lg%num(1))*Hgs(1))) &
                          +vec_dipole_source(2,i)*(lg%coordinate(iy,2)-(cood_dipole_source(2,i)+dble(iiy*lg%num(2))*Hgs(2))) &
                          +vec_dipole_source(3,i)*(lg%coordinate(iz,3)-(cood_dipole_source(3,i)+dble(iiz*lg%num(3))*Hgs(3))))&
                                                                                                         /rad_dipole_source**3
-          rt%eonf(1)%f(ix,iy,iz)=rt%eonf(1)%f(ix,iy,iz)  &
-                         +vec_dipole_source(1,i)/rad_dipole_source**3
-          rt%eonf(2)%f(ix,iy,iz)=rt%eonf(2)%f(ix,iy,iz)  &
-                         +vec_dipole_source(2,i)/rad_dipole_source**3
-          rt%eonf(3)%f(ix,iy,iz)=rt%eonf(3)%f(ix,iy,iz)  &
-                         +vec_dipole_source(3,i)/rad_dipole_source**3
         end if
       end do
       end do

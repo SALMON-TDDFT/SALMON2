@@ -27,7 +27,7 @@ subroutine initialization_ms( &
                      stencil, fg, poisson,  &
                      lg, mg, ng, info,  &
                      xc_func, dmat, ofl,  &
-                     srg, srg_ng,  &
+                     srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
                      V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                      pp, ppg, ppn,  &
@@ -98,7 +98,7 @@ use inputoutput
   type(s_dmatrix) :: dmat
   type(s_orbital) :: spsi_in,spsi_out
   type(s_orbital) :: tpsi ! temporary wavefunctions
-  type(s_sendrecv_grid) :: srg,srg_ng
+  type(s_sendrecv_grid) :: srg,srg_scalar
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
@@ -229,7 +229,7 @@ use inputoutput
   ! | initialization |
   ! +----------------+
   
-  call init_dft(nproc_group_macropoint,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofile)
+  call init_dft(nproc_group_macropoint,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   
   call init_code_optimization
   
@@ -286,8 +286,8 @@ use inputoutput
     sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
     sVh_stock2%f = sVh_stock1%f
   end if
-  call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
-  call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then
     sVh_stock1%f=sVh%f
@@ -437,9 +437,6 @@ use inputoutput
   
   if(num_dipole_source>=1)then
     call allocate_scalar(mg,rt%vonf)
-    do i=1,3
-      call allocate_scalar(mg,rt%eonf(i))
-    end do
     call set_vonf(mg,lg,system%Hgs,rt)
   end if
   
@@ -479,10 +476,10 @@ use inputoutput
         call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_in)
+        call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_ng,itt)
+        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_scalar,itt)
       end if
     end do
   

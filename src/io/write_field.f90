@@ -234,7 +234,7 @@ end subroutine write_dns_ac_je
 
 !===================================================================================================================================
 
-subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
+subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
   use salmon_global, only: format_voxel_data,theory
   use structures
   use math_constants, only: pi
@@ -250,7 +250,7 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
   type(s_parallel_info),intent(in) :: info
   type(s_stencil)         ,intent(in) :: stencil
   type(s_scalar)          ,intent(in) :: srho
-  type(s_sendrecv_grid)               :: srg,srg_ng
+  type(s_sendrecv_grid)               :: srg,srg_scalar
   type(s_orbital)                     :: tpsi
   !
   real(8):: elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
@@ -368,7 +368,7 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,tpsi)
     end do
     end do
     
-    call update_overlap_real8(srg_ng, ng, box)
+    call update_overlap_real8(srg_scalar, ng, box)
     call calc_gradient_field(ng,stencil%coef_nab,box,gradrho)
 
     do iz=ng%is(3),ng%ie(3)
@@ -421,7 +421,7 @@ end subroutine write_elf
 
 !===================================================================================================================================
 
-subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_ng,itt)
+subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_scalar,itt)
   use salmon_global, only: format_voxel_data
   use structures
   use sendrecv_grid, only: update_overlap_real8
@@ -434,7 +434,7 @@ subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_ng,itt)
   type(s_stencil) ,intent(in) :: stencil
   type(s_parallel_info),intent(in) :: info
   type(s_scalar)  ,intent(in) :: sVh
-  type(s_sendrecv_grid)       :: srg_ng
+  type(s_sendrecv_grid)       :: srg_scalar
   integer,intent(in),optional :: itt
   !
   integer :: ix,iy,iz,jj
@@ -459,7 +459,7 @@ subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_ng,itt)
   end do
   end do
 
-  call update_overlap_real8(srg_ng, ng, box)
+  call update_overlap_real8(srg_scalar, ng, box)
   call calc_gradient_field(ng,stencil%coef_nab,box,grad_Vh)
 
   do jj=1,3
