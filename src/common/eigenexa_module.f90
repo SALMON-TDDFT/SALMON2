@@ -32,43 +32,43 @@ contains
 
     integer :: npo, i, j, ip
     integer,allocatable :: icount(:)
-    integer :: is(2),ie(2)
-    integer :: irow,icol
+    integer :: i_loc,j_loc,prow,pcol
 
     if (pinfo%flag_eigenexa_init) return
 
-    call eigen_init(info%icomm_o)
+    pinfo%icomm_sl = info%icomm_o
+
+    call eigen_init(pinfo%icomm_sl)
     call eigen_get_procs(pinfo%nprocs, pinfo%nprow, pinfo%npcol)
     call eigen_get_id   (pinfo%iam,    pinfo%myrow, pinfo%mycol)
 
     call eigen_get_matdims(n, pinfo%nrow_local, pinfo%ncol_local)
 
-    pinfo%icomm_sl = info%icomm_o
+    pinfo%flag_eigenexa_init = .true.
 
     ! --- for reduce memory
+    ! MEMO: ScaLAPACK is block-cyclic distribution of matrix
+    !       EigenExa  is       cyclic distribution of matrix
     npo = pinfo%nprocs
     allocate( pinfo%ndiv(0:npo-1), icount(0:npo-1) )
 
-    is(2) = eigen_loop_start(1, pinfo%npcol, pinfo%mycol)
-    ie(2) = eigen_loop_end  (n, pinfo%npcol, pinfo%mycol)
-    is(1) = eigen_loop_start(1, pinfo%nprow, pinfo%myrow)
-    ie(1) = eigen_loop_end  (n, pinfo%nprow, pinfo%myrow)
-
     icount = 0
-    do j = is(2),ie(2)
-    do i = is(1),ie(1)
-      icol = eigen_translate_l2g(j, pinfo%npcol, pinfo%mycol)
-      irow = eigen_translate_l2g(i, pinfo%nprow, pinfo%myrow)
-      ip = info%irank_io(icol)
-      icount( ip ) = icount( ip ) + 1
+    do i = 1,n !row
+    do j = 1,n !col
+      prow = eigen_owner_node(i, pinfo%nprow, pinfo%myrow)
+      pcol = eigen_owner_node(j, pinfo%npcol, pinfo%mycol)
+      if (pinfo%myrow == prow .and. pinfo%mycol == pcol) then
+        ip = info%irank_io(j)
+        icount( ip ) = icount( ip ) + 1
+      end if
     end do
     end do
     pinfo%ndiv = icount
 
-    allocate( pinfo%i_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1), &
-              pinfo%j_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1), &
-              pinfo%iloc_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1), &
-              pinfo%jloc_tbl( max(1,pinfo%ndiv(info%id_o)), 0:npo-1) )
+    allocate( pinfo%i_tbl( maxval(pinfo%ndiv), 0:npo-1), &
+              pinfo%j_tbl( maxval(pinfo%ndiv), 0:npo-1), &
+              pinfo%iloc_tbl( maxval(pinfo%ndiv), 0:npo-1), &
+              pinfo%jloc_tbl( maxval(pinfo%ndiv), 0:npo-1) )
 
     icount(:) = 0
     pinfo%i_tbl = 0
@@ -76,22 +76,25 @@ contains
     pinfo%iloc_tbl = 0
     pinfo%jloc_tbl = 0
 
-    do j = is(2),ie(2)
-    do i = is(1),ie(1)
-      icol = eigen_translate_l2g(j, pinfo%npcol, pinfo%mycol)
-      irow = eigen_translate_l2g(i, pinfo%nprow, pinfo%myrow)
-      ip = info%irank_io(icol)
-      icount( ip ) = icount( ip ) + 1
-      pinfo%i_tbl( icount(ip), ip ) = irow
-      pinfo%j_tbl( icount(ip), ip ) = icol
-      pinfo%iloc_tbl( icount(ip), ip ) = i
-      pinfo%jloc_tbl( icount(ip), ip ) = j
+    do i = 1,n !row
+    do j = 1,n !col
+      i_loc = eigen_translate_g2l(i, pinfo%nprow, pinfo%myrow)
+      j_loc = eigen_translate_g2l(j, pinfo%npcol, pinfo%mycol)
+      prow = eigen_owner_node(i, pinfo%nprow, pinfo%myrow)
+      pcol = eigen_owner_node(j, pinfo%npcol, pinfo%mycol)
+      if (pinfo%myrow == prow .and. pinfo%mycol == pcol) then
+        ip = info%irank_io(j)
+        icount( ip ) = icount( ip ) + 1
+        pinfo%i_tbl( icount(ip), ip ) = i
+        pinfo%j_tbl( icount(ip), ip ) = j
+        pinfo%iloc_tbl( icount(ip), ip ) = i_loc
+        pinfo%jloc_tbl( icount(ip), ip ) = j_loc
+      end if
     end do
     end do
 
     deallocate(icount)
 
-    pinfo%flag_eigenexa_init = .true.
     return
 
   end subroutine init_eigenexa
