@@ -34,7 +34,7 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
   integer    :: ix,iy,iz
   integer    :: endx,endy,endz
-  real(8)    :: kAc(3),div
+  real(8)    :: kAc1,kAc2,kAc3,div
   complex(8) :: v,w,psi0
   complex(8) :: t1,t2,t3,t4,t5,t6,t7,t8
 
@@ -52,16 +52,18 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 !OCL swp
   do ix=is(1),endx
     psi0   = tpsi(ix,iy,iz)
-    kAc(:) = Ac(:,ix,iy,iz) + k(:)
+    kAc1   = Ac(1,ix,iy,iz) + k(1)
+    kAc2   = Ac(2,ix,iy,iz) + k(2)
+    kAc3   = Ac(3,ix,iy,iz) + k(3)
     div    = div_Ac(ix,iy,iz)
     htpsi(ix,iy,iz) = (V_local(ix,iy,iz) + lap0) * psi0 &
-                    + 0.5d0 * (kAc(1)*kAc(1) + kAc(2)*kAc(2) + kAc(3)*kAc(3)) * psi0 &
+                    + 0.5d0 * (kAc1*kAc1 + kAc2*kAc2 + kAc3*kAc3) * psi0 &
                     - zi * 0.5d0 * div * psi0 ! deviation from the Coulomb gauge condition (for numerical stability)
   end do
 
 !OCL swp
   do ix=is(1),endx
-    kAc(:) = Ac(:,ix,iy,iz) + k(:)
+    kAc1 = Ac(1,ix,iy,iz) + k(1)
 
     t8 = DX(-4) ; t7 = DX(-3) ; t6 = DX(-2) ; t5 = DX(-1)
     t1 = DX( 1) ; t2 = DX( 2) ; t3 = DX( 3) ; t4 = DX( 4)
@@ -80,12 +82,13 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
     htpsi(ix,iy,iz) = htpsi(ix,iy,iz) &
                     - 0.5d0 * v &
-                    - zi * (kAc(1) * w)
+                    - zi * (kAc1 * w)
   end do
 
 !OCL swp
+!OCL swp_freg_rate(105)
   do ix=is(1),endx
-    kAc(:) = Ac(:,ix,iy,iz) + k(:)
+    kAc2 = Ac(2,ix,iy,iz) + k(2)
 
     t8 = DY(-4) ; t7 = DY(-3) ; t6 = DY(-2) ; t5 = DY(-1)
     t1 = DY( 1) ; t2 = DY( 2) ; t3 = DY( 3) ; t4 = DY( 4)
@@ -104,16 +107,18 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
     htpsi(ix,iy,iz) = htpsi(ix,iy,iz) &
                     - 0.5d0 * v &
-                    - zi * (kAc(2) * w)
+                    - zi * (kAc2 * w)
   end do
 
 !OCL swp
+!OCL swp_freg_rate(105)
   do ix=is(1),endx
-    kAc(:) = Ac(:,ix,iy,iz) + k(:)
+    kAc3 = Ac(3,ix,iy,iz) + k(3)
 
     t8 = DZ(-4) ; t7 = DZ(-3) ; t6 = DZ(-2) ; t5 = DZ(-1)
     t1 = DZ( 1) ; t2 = DZ( 2) ; t3 = DZ( 3) ; t4 = DZ( 4)
 
+  ! laplacian of psi
     v =  lapt(1,3)*(t1+t5) &
       & +lapt(2,3)*(t2+t6) &
       & +lapt(3,3)*(t3+t7) &
@@ -127,7 +132,7 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
     htpsi(ix,iy,iz) = htpsi(ix,iy,iz) &
                     - 0.5d0 * v &
-                    - zi * (kAc(3) * w)
+                    - zi * (kAc3 * w)
   end do
 
   end do
