@@ -107,7 +107,7 @@ SUBROUTINE ne2mu(energy,system)
           do p5=1,(no+4)/5
              p1=5*(p5-1)+1
              p2=5*p5 ; if ( p2 > no ) p2=no
-             write(*,'(1x,5(i3,f8.4,1x))')  (io,system%rocc(io,ik,jspin),io=p1,p2)
+             write(*,'(1x,5(i6,f8.4,1x))')  (io,system%rocc(io,ik,jspin),io=p1,p2)
           end do
         endif
     end do
