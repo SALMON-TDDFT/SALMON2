@@ -437,9 +437,6 @@ use inputoutput
   
   if(num_dipole_source>=1)then
     call allocate_scalar(mg,rt%vonf)
-    do i=1,3
-      call allocate_scalar(mg,rt%eonf(i))
-    end do
     call set_vonf(mg,lg,system%Hgs,rt)
   end if
   
