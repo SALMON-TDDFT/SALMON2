@@ -175,20 +175,45 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       
     else if(stencil%if_orthogonal .and. if_singlescale) then
     ! orthogonal lattice, single-scale Maxwell-TDDFT
-    
-      do im=im_s,im_e
-      do ik=ik_s,ik_e
-      do io=io_s,io_e
-      do ispin=1,Nspin
-        call zstencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
-                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
-                      ,V_local(ispin)%f,system%Ac_micro%v,system%div_Ac%f,stencil%coef_lap0 &
-                      ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
-      end do
-      end do
-      end do
-      end do
-      
+
+      if(stencil_is_parallelized_by_omp) then
+        ! OpenMP parallelization: rgrid
+
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call zstencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                        ,V_local(ispin)%f,system%Ac_micro%v,system%div_Ac%f,stencil%coef_lap0 &
+                        ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
+        end do
+        end do
+        end do
+        end do
+
+      else
+        ! OpenMP parallelization: k-point & orbital indices
+
+!$omp parallel do collapse(4) default(none) &
+!$omp          private(im,ik,io,ispin) &
+!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,system,stencil)
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call zstencil_microAc(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                        ,V_local(ispin)%f,system%Ac_micro%v,system%div_Ac%f,stencil%coef_lap0 &
+                        ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
+        end do
+        end do
+        end do
+        end do
+!$omp end parallel do
+
+      end if
+
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
     
