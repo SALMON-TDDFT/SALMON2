@@ -178,7 +178,7 @@ CONTAINS
 
       endif
 
-!$omp parallel do default(none) &
+!$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_tmp_l) &
 !$omp          private(ix,iy,iz,rho_i) &
 !$omp          shared(fg,aEwald,sysvol,ng,ppg)
@@ -193,11 +193,12 @@ CONTAINS
 !$omp end parallel do
     end if
 
+    etmp = 0d0
     E_wrk = 0d0
-!$omp parallel do default(none) &
-!$omp          reduction(+:E_wrk) &
-!$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd,etmp) &
-!$omp          shared(ng,fg,aEwald,system,sysvol,kion,poisson,ppg)
+!$omp parallel do collapse(2) default(none) &
+!$omp          reduction(+:E_wrk,etmp) &
+!$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
+!$omp          shared(ng,fg,aEwald,system,sysvol,kion,poisson,ppg,info)
     do iz=ng%is(3),ng%ie(3)
     do iy=ng%is(2),ng%ie(2)
     do ix=ng%is(1),ng%ie(1)
@@ -211,17 +212,11 @@ CONTAINS
       E_wrk(1) = E_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
       E_wrk(2) = E_wrk(2) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
 
-      etmp = 0d0
-
-#if _OPENMP >= 201307
-!$omp simd reduction(+:etmp)
-#endif
-      do ia=1,system%nion
+      do ia=info%ia_s,info%ia_e
         r = system%Rion(1:3,ia)
         Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
         etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
       end do
-      E_wrk(3) = E_wrk(3) + etmp
     end do
     end do
     end do
@@ -229,6 +224,8 @@ CONTAINS
     call timer_end(LOG_TE_PERIODIC_CALC)
 
     call timer_begin(LOG_TE_PERIODIC_COMM_COLL)
+    
+    call comm_summation(etmp,E_wrk(3),info%icomm_ko) ! for atom index #ia
 
     if (rion_update) then
       E_wrk(4) = E_tmp_l

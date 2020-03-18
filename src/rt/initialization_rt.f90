@@ -24,7 +24,7 @@ contains
 subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
-                     lg, mg, ng, info,  &
+                     lg, mg, ng, info,pinfo,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_ng,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &

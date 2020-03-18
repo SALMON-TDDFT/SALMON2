@@ -268,9 +268,10 @@ module structures
     real(8),allocatable :: rxyz_ao(:,:,:)
     real(8) :: Hvol
     ! for localized communication when calculating non-local pseudo-pt.
-    integer,allocatable :: irange_atom(:,:)  ! uVpsi range for atom: n = (1,ia), m = (2,ia)
-    logical,allocatable :: ireferred_atom(:) ! uVpsi(n:m) is referred in this process
-    integer,allocatable :: icomm_atom(:)     ! communicator for uVpsi(n:m)
+    integer,allocatable :: irange_atom(:,:)    ! uVpsi range for atom: n = (1,ia), m = (2,ia)
+    logical,allocatable :: ireferred_atom(:)   ! uVpsi(n:m) is referred in this process
+    logical,allocatable :: ireferred_atom_comm_r(:,:)
+    integer,allocatable :: icomm_atom(:)       ! communicator for uVpsi(n:m)
     ! for reducing pseudo-potential parallelization costs.
     integer             :: ilocal_nlma         ! number of own nlma
     integer,allocatable :: ilocal_nlma2ilma(:) ! ilocal_nlma to global nlma

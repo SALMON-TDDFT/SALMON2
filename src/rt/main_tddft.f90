@@ -36,6 +36,7 @@ type(s_rgrid) :: ng
 type(s_dft_system)  :: system
 type(s_rt) :: rt
 type(s_parallel_info) :: info
+type(s_process_info) :: pinfo
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
@@ -64,7 +65,7 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                         singlescale,  &
                         stencil, fg, poisson,  &
                         lg, mg, ng,  &
-                        info,  &
+                        info,pinfo,  &
                         xc_func, dmat, ofl,  &
                         srg, srg_ng,  &
                         spsi_in, spsi_out, tpsi, srho, srho_s,  &
@@ -80,11 +81,11 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,itotNtime
 
   if(mod(itt,2)==1)then
-    call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,stencil,xc_func &
+    call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   else
-    call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,stencil,xc_func &
+    call time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func &
      & ,srg,srg_ng,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
      & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if

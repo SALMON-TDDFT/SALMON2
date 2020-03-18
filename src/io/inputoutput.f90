@@ -307,7 +307,8 @@ contains
 
     namelist/tgrid/ &
       & nt, &
-      & dt
+      & dt, &
+      & gram_schmidt_interval
 
     namelist/propagation/ &
       & n_hamil, &
@@ -658,6 +659,7 @@ contains
 !! == default for &tgrid
     nt = 0
     dt = 0
+    gram_schmidt_interval = 0
 !! == default for &propagation
     n_hamil     = 4
     propagator  = 'middlepoint'
@@ -1078,6 +1080,7 @@ contains
     call comm_bcast(nt,nproc_group_global)
     call comm_bcast(dt,nproc_group_global)
     dt = dt * utime_to_au
+    call comm_bcast(gram_schmidt_interval,nproc_group_global)
 !! == bcast for &propagation
     call comm_bcast(n_hamil    ,nproc_group_global)
     call comm_bcast(propagator ,nproc_group_global)
@@ -1871,6 +1874,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', inml_tgrid
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nt', nt
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt', dt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'gram_schmidt_interval', gram_schmidt_interval
 
       if(inml_propagation >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'propagation', inml_propagation
@@ -2254,6 +2258,7 @@ contains
 
     select case(method_init_wf)
     case ('gauss','random') ; continue
+    case ('gauss2','gauss3','gauss4','gauss5','gauss10') ; continue
     case default            ; stop 'method_init_wf must be gauss or random'
     end select
 

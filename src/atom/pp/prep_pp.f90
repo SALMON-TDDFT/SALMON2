@@ -1330,8 +1330,10 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   use structures,    only: s_pp_grid
   use salmon_global, only: natom
   use communication, only: comm_get_groupinfo &
-                                 ,comm_allgather &
-                                 ,comm_create_group_byid
+                          ,comm_allgather &
+                          ,comm_create_group_byid &
+                          ,comm_group_null &
+                          ,comm_free_group
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
   integer,intent(in) :: icomm_r
@@ -1339,7 +1341,8 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   integer :: ilma,ia
   integer :: irank_r,isize_r,n,i
   integer :: nlma
-  logical,allocatable :: ireferred_atom_comm_r(:,:)
+  logical :: is_all,t,u
+  logical,allocatable :: ireferred_atom_comm_r(:,:),iupdated(:)
   integer,allocatable :: iranklist(:)
 
   call comm_get_groupinfo(icomm_r, irank_r, isize_r)
@@ -1348,11 +1351,19 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
 
   allocate(iranklist(isize_r))
   allocate(ireferred_atom_comm_r(natom,isize_r))
-  allocate(ppg%ireferred_atom(natom))
-  allocate(ppg%icomm_atom(natom))
+  allocate(iupdated(natom))
   allocate(ppg%irange_atom(2,natom))
+  allocate(ppg%ireferred_atom(natom))
+  if (.not. allocated(ppg%ireferred_atom_comm_r)) then
+    allocate(ppg%ireferred_atom_comm_r(natom,isize_r))
+    ppg%ireferred_atom_comm_r = .false.
+  end if
+  if (.not. allocated(ppg%icomm_atom)) then
+    allocate(ppg%icomm_atom(natom))
+    ppg%icomm_atom(:) = comm_group_null
+  end if
 
-  ppg%ireferred_atom = .false.
+  ppg%ireferred_atom(:) = .false.
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
 !$omp parallel do private(ia,ilma)
@@ -1379,16 +1390,34 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
 
   call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
 
+  iupdated = .false.
+!$omp parallel do private(ia,i,is_all,t,u)
   do ia=1,natom
-    n = 0
     do i=1,isize_r
-      if (ireferred_atom_comm_r(ia,i)) then
-        n = n + 1
-        iranklist(n) = i - 1
+      t = ppg%ireferred_atom_comm_r(ia,i)
+      u = ireferred_atom_comm_r(ia,i)
+      if (t .neqv. u) then
+        iupdated(ia) = .true.
+        exit
       end if
     end do
+  end do
+!$omp end parallel do
 
-    ppg%icomm_atom(ia) = comm_create_group_byid(icomm_r, iranklist(1:n))
+  ppg%ireferred_atom_comm_r = ireferred_atom_comm_r
+
+  do ia=1,natom
+    if (iupdated(ia)) then
+      call comm_free_group(ppg%icomm_atom(ia))
+      n = 0
+      do i=1,isize_r
+        if (ppg%ireferred_atom_comm_r(ia,i)) then
+          n = n + 1
+          iranklist(n) = i - 1
+        end if
+      end do
+      ppg%icomm_atom(ia) = comm_create_group_byid(icomm_r, iranklist(1:n))
+    end if
   end do
 end subroutine init_uvpsi_summation
 
@@ -1397,16 +1426,9 @@ subroutine finalize_uvpsi_summation(ppg)
   use communication, only: comm_free_group
   implicit none
   type(s_pp_grid),intent(inout) :: ppg
-  integer :: ia
 
   if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
   if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
-  if (allocated(ppg%icomm_atom)) then
-    do ia=1,size(ppg%icomm_atom)
-      call comm_free_group(ppg%icomm_atom(ia))
-    end do
-    deallocate(ppg%icomm_atom)
-  end if
 end subroutine
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
