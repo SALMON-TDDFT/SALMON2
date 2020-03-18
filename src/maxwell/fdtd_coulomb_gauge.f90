@@ -89,7 +89,7 @@ subroutine fdtd_singlescale(itt,lg,ng,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
 
 ! gradient of d(Vh)/dt (Vh: Hartree potential)
   call timer_begin(LOG_SS_FDTD_COMM)
-  call update_overlap_real8(srg_scalar, ng, fw%box1)
+  if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, ng, fw%box1)
   call timer_end(LOG_SS_FDTD_COMM)
 
   call timer_begin(LOG_SS_FDTD_CALC)
@@ -899,7 +899,7 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   end do
   end do
   end do
-  call update_overlap_real8(srg_scalar, ng, fw%box1)
+  if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, ng, fw%box1)
   call calc_gradient_field(ng,fw%coef_nab,fw%box1,fw%grad_Vh_old)
   
   if(yn_restart=='y') then

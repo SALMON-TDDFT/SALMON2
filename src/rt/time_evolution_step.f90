@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func,srg,srg_scalar, &
+SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,pinfo,stencil,xc_func,srg,srg_scalar, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
@@ -46,7 +46,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   integer,intent(in)       :: itotNtime
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
   type(s_dft_system),intent(inout) :: system
   type(s_rt),intent(inout) :: rt
   type(s_parallel_info),intent(in) :: info
@@ -132,7 +131,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
-     call update_pseudo_rt(itt,info,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+     call update_pseudo_rt(itt,info,system,lg,mg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
@@ -242,7 +241,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
     sVh_stock2%f = sVh_stock1%f
   end if
   if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
-    call fourier_singlescale(lg,ng,info,fg,srho,rt%j_e,sVh,poisson,singlescale)
+    call fourier_singlescale(lg,mg,info,fg,srho,rt%j_e,sVh,poisson,singlescale)
   else
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
   end if
@@ -275,7 +274,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   select case(iperiodic)
   case(0)
 
-    call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
+    call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
 
   case(3)
 
@@ -303,13 +302,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
     end if
 
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
-    call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+    call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
     if(use_singlescale=='y') then
       call timer_begin(LOG_CALC_SINGLESCALE)
       singlescale%E_electron = energy%E_tot
-      call fdtd_singlescale(itt,lg,ng,system,info,srho, &
+      call fdtd_singlescale(itt,lg,mg,system,info,srho, &
       & sVh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
       call timer_end(LOG_CALC_SINGLESCALE)
@@ -318,7 +317,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(info%icomm_r,itt,rt,lg,ng,srho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(info%icomm_r,itt,rt,lg,mg,srho,rNe,poisson,energy%E_tot,system,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   !(force)
@@ -370,7 +369,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
+      call write_dns(lg,mg,mg,srho%f,system%hgs,srho%f,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. use_singlescale=='y')then
@@ -380,12 +379,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,spsi_out)
+      call write_elf(itt,lg,mg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_out)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_scalar,itt)
+      call write_estatic(lg,mg,system%hgs,stencil,info,sVh,srg_scalar,itt)
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)

@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+subroutine init_dft(comm,pinfo,info,lg,mg,ng_tmp,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
                            nproc_k,nproc_ob,nproc_rgrid
@@ -37,7 +37,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_s
   integer      ,intent(in) :: comm
   type(s_process_info)     :: pinfo
   type(s_parallel_info)    :: info
-  type(s_rgrid)            :: lg,mg,ng
+  type(s_rgrid)            :: lg,mg,ng_tmp
   type(s_dft_system)       :: system
   type(s_stencil)          :: stencil
   type(s_reciprocal_grid)  :: fg
@@ -59,7 +59,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_s
 
 ! parallelization
   call check_ffte_condition(pinfo,lg)
-  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg,ng) ! lg --> mg & ng
+  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg,ng_tmp) ! lg --> mg & ng
   call init_parallel_dft(system,info,pinfo)
   call init_scalapack(pinfo,info,system)
   ! sendrecv_grid object for wavefunction updates
@@ -67,7 +67,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_s
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
   ! sendrecv_grid object for scalar field updates
   call create_sendrecv_neig_scalar(neig_ng, info, pinfo, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_scalar, ng, 1, info%icomm_rko, neig_ng)
+  call init_sendrecv_grid(srg_scalar, mg, 1, info%icomm_rko, neig_ng)
 
 ! symmetry
 
@@ -78,11 +78,11 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_s
   poisson%iterVh = 0 ! Iteration counter
   select case(iperiodic)
   case(0)
-    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,ng,poisson)
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,mg,poisson)
   case(3)
-    call init_reciprocal_grid(lg,ng,fg,system,info,poisson)
+    call init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   end select
-  call set_ig_bound(lg,ng,poisson)
+  call set_ig_bound(lg,mg,poisson)
 
 ! output files
 
