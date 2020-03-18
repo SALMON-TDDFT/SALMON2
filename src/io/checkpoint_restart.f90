@@ -449,7 +449,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
      end if
 
      !debug check
-     if (yn_restart == 'y' .or. yn_datafiles_dump == 'y') then
+     if (yn_restart == 'y' .and. yn_datafiles_dump == 'y') then
         if (nprocs /= nproc_size_global) then
            stop 'number of processes do not match!'
         end if

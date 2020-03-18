@@ -35,6 +35,7 @@ program main
   end select
 
   !GCEED: (main)
+  if(nproc_id_global==0) write(*,*)"  theory= ", trim(theory)
   select case(theory)
   case('dft','dft_band')              ; call main_dft
   case('dft_md')                      ; call main_dft_md
