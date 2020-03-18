@@ -98,13 +98,15 @@ subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
   logical :: iself
 
   if (present(odir)) then
+    ! save wavefunction
     call generate_restart_directory_name(odir,gdir,wdir)
+    iself = .false.
   else
     call generate_checkpoint_directory_name('gs',iter,gdir,wdir)
     call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+    iself = (yn_self_checkpoint == 'y')
   end if
 
-  iself = (yn_self_checkpoint == 'y')
   if (iself .or. yn_datafiles_dump == 'y') then
     call create_directory(wdir)
   else
@@ -237,13 +239,15 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,si
   logical :: iself
 
   if (present(idir)) then
+    ! save wavefunction
     call generate_restart_directory_name(idir,gdir,wdir)
+    iself = .false.
   else
     call generate_checkpoint_directory_name('rt',iter,gdir,wdir)
     call atomic_create_directory(gdir,nproc_group_global,nproc_id_global)
+    iself = (yn_self_checkpoint == 'y')
   end if
 
-  iself = (yn_self_checkpoint == 'y')
   if (iself .or. yn_datafiles_dump == 'y') then
     call create_directory(wdir)
   else
