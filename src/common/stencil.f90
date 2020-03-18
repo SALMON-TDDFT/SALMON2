@@ -354,27 +354,27 @@ end subroutine zstencil_microAc
 
 !===================================================================================================================================
 
-# define DDX(dt) (ix+(dt)),iy,iz
-# define DDY(dt) ix,(iy+(dt)),iz
-# define DDZ(dt) ix,iy,(iz+(dt))
+# define DDX(dt) mg%idx(ix+(dt)),iy,iz
+# define DDY(dt) ix,mg%idy(iy+(dt)),iz
+# define DDZ(dt) ix,iy,mg%idz(iz+(dt))
 
-subroutine calc_gradient_field(ng,nabt,box,grad)
+subroutine calc_gradient_field(mg,nabt,box,grad)
   use structures
   implicit none
-  type(s_rgrid),intent(in) :: ng
+  type(s_rgrid),intent(in) :: mg
   real(8)      ,intent(in) :: nabt(4,3)
-  real(8)      ,intent(in) :: box(ng%is_array(1):ng%ie_array(1), &
-                                & ng%is_array(2):ng%ie_array(2), &
-                                & ng%is_array(3):ng%ie_array(3))
-  real(8)                  :: grad(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  real(8)      ,intent(in) :: box(mg%is_array(1):mg%ie_array(1), &
+                                & mg%is_array(2):mg%ie_array(2), &
+                                & mg%is_array(3):mg%ie_array(3))
+  real(8)                  :: grad(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   !
   integer :: ix,iy,iz
   real(8) :: w(3)
 !$OMP parallel
 !$OMP do private(iz,iy,ix,w)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     w(1) =  nabt(1,1)*(box(DDX(1)) - box(DDX(-1))) &
          & +nabt(2,1)*(box(DDX(2)) - box(DDX(-2))) &
          & +nabt(3,1)*(box(DDX(3)) - box(DDX(-3))) &
@@ -395,23 +395,23 @@ subroutine calc_gradient_field(ng,nabt,box,grad)
 !$OMP end parallel
 end subroutine calc_gradient_field
 
-subroutine calc_laplacian_field(ng,lapt,lap0,box,lap)
+subroutine calc_laplacian_field(mg,lapt,lap0,box,lap)
   use structures
   implicit none
-  type(s_rgrid),intent(in) :: ng
+  type(s_rgrid),intent(in) :: mg
   real(8)      ,intent(in) :: lapt(4,3),lap0
-  real(8)      ,intent(in) :: box(ng%is_array(1):ng%ie_array(1), &
-                                & ng%is_array(2):ng%ie_array(2), &
-                                & ng%is_array(3):ng%ie_array(3))
-  real(8)                  :: lap(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+  real(8)      ,intent(in) :: box(mg%is_array(1):mg%ie_array(1), &
+                                & mg%is_array(2):mg%ie_array(2), &
+                                & mg%is_array(3):mg%ie_array(3))
+  real(8)                  :: lap(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   !
   integer :: ix,iy,iz
   real(8) :: v
 !$OMP parallel
 !$OMP do private(iz,iy,ix,v)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     v = lapt(1,1)*( box(DDX(1)) + box(DDX(-1)) ) &
     & + lapt(2,1)*( box(DDX(2)) + box(DDX(-2)) ) &
     & + lapt(3,1)*( box(DDX(3)) + box(DDX(-3)) ) &
