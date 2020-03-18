@@ -47,7 +47,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, ng, mg, srg_ng, srg, srho_s, ppn, info, spsi, stencil, sVxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_ng, srg, srho_s, ppn, info, spsi, stencil, sVxc, E_xc)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -55,7 +55,7 @@ contains
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_xc_functional)   ,intent(in) :: xc_func
-    type(s_rgrid)           ,intent(in) :: ng, mg
+    type(s_rgrid)           ,intent(in) :: mg
     type(s_sendrecv_grid)               :: srg_ng, srg
     type(s_scalar)          ,intent(in) :: srho_s(system%nspin)
     type(s_pp_nlcc)         ,intent(in) :: ppn
@@ -67,21 +67,21 @@ contains
     !
     integer :: ix,iy,iz,is,nspin
     real(8) :: tot_exc
-    real(8) :: rho_tmp(ng%num(1), ng%num(2), ng%num(3))
-    real(8) :: rho_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
-    real(8) :: eexc_tmp(ng%num(1), ng%num(2), ng%num(3))
-    real(8) :: vxc_tmp(ng%num(1), ng%num(2), ng%num(3))
-    real(8) :: vxc_s_tmp(ng%num(1), ng%num(2), ng%num(3), 2)
+    real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
+    real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
+    real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
+    real(8) :: vxc_tmp(mg%num(1), mg%num(2), mg%num(3))
+    real(8) :: vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:), grho(:,:,:,:), lrho(:,:,:), j(:,:,:,:), tau(:,:,:)
 
     nspin = system%nspin
 
     if(nspin==1)then
 !$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=1,ng%num(3)
-      do iy=1,ng%num(2)
-      do ix=1,ng%num(1)
-        rho_tmp(ix,iy,iz)=srho_s(1)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        rho_tmp(ix,iy,iz)=srho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -90,10 +90,10 @@ contains
 !$omp parallel private(is,iz,iy,ix)
       do is=1,2
 !$omp do collapse(2)
-      do iz=1,ng%num(3)
-      do iy=1,ng%num(2)
-      do ix=1,ng%num(1)
-        rho_s_tmp(ix,iy,iz,is)=srho_s(is)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        rho_s_tmp(ix,iy,iz,is)=srho_s(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -104,35 +104,35 @@ contains
 
     if(xc_func%use_gradient) then ! meta GGA
     
-      allocate (rhd (ng%is_array(1):ng%ie_array(1), &
-                     ng%is_array(2):ng%ie_array(2), &
-                     ng%is_array(3):ng%ie_array(3)))
-      allocate (grho(3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)), &
-              & lrho(ng%num(1), ng%num(2), ng%num(3)) )
-      allocate (delr(ng%num(1), ng%num(2), ng%num(3) ,3), &
-                j   (ng%num(1), ng%num(2), ng%num(3) ,3), &
-                tau (ng%num(1), ng%num(2), ng%num(3)) )
+      allocate (rhd (mg%is_array(1):mg%ie_array(1), &
+                     mg%is_array(2):mg%ie_array(2), &
+                     mg%is_array(3):mg%ie_array(3)))
+      allocate (grho(3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)), &
+              & lrho(mg%num(1), mg%num(2), mg%num(3)) )
+      allocate (delr(mg%num(1), mg%num(2), mg%num(3) ,3), &
+                j   (mg%num(1), mg%num(2), mg%num(3) ,3), &
+                tau (mg%num(1), mg%num(2), mg%num(3)) )
 
 !$omp parallel do collapse(2) private(ix,iy,iz)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         rhd(ix,iy,iz)=dble(srho_s(1)%f(ix,iy,iz))
       enddo
       enddo
       enddo
 !$omp end parallel do
 
-      call update_overlap_real8(srg_ng, ng, rhd)
-      call calc_gradient_field(ng,stencil%coef_nab,rhd,grho)
-      call calc_laplacian_field(ng,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
-      & ,lrho( 1:ng%num(1), 1:ng%num(2), 1:ng%num(3) ) )
+      call update_overlap_real8(srg_ng, mg, rhd)
+      call calc_gradient_field(mg,stencil%coef_nab,rhd,grho)
+      call calc_laplacian_field(mg,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
+      & ,lrho( 1:mg%num(1), 1:mg%num(2), 1:mg%num(3) ) )
       
 !$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=1,ng%num(3)
-      do iy=1,ng%num(2)
-      do ix=1,ng%num(1)
-        delr(ix,iy,iz,1:3) = grho(1:3,ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        delr(ix,iy,iz,1:3) = grho(1:3,mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -156,10 +156,10 @@ contains
 
     if(nspin==1)then
 !$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=1,ng%num(3)
-      do iy=1,ng%num(2)
-      do ix=1,ng%num(1)
-        sVxc(1)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        sVxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
       end do
       end do
       end do
@@ -168,10 +168,10 @@ contains
 !$omp parallel private(is,iz,iy,ix)
       do is=1,2
 !$omp do collapse(2)
-      do iz=1,ng%num(3)
-      do iy=1,ng%num(2)
-      do ix=1,ng%num(1)
-        sVxc(is)%f(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        sVxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
       end do
       end do
       end do
@@ -182,9 +182,9 @@ contains
 
     tot_exc=0.d0
 !$omp parallel do collapse(2) reduction(+:tot_exc) private(iz,iy,ix)
-    do iz=1,ng%num(3)
-    do iy=1,ng%num(2)
-    do ix=1,ng%num(1)
+    do iz=1,mg%num(3)
+    do iy=1,mg%num(2)
+    do ix=1,mg%num(1)
       tot_exc=tot_exc+eexc_tmp(ix,iy,iz)
     end do
     end do
@@ -254,11 +254,11 @@ contains
       call comm_summation(tau_tmp1,tau_tmp2,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
       
 !$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=1,ng%num(3)
-      do iy=1,ng%num(2)
-      do ix=1,ng%num(1)
-        j(ix,iy,iz,1:3) = j_tmp2(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1,1:3)
-        tau(ix,iy,iz) = tau_tmp2(ng%is(1)+ix-1,ng%is(2)+iy-1,ng%is(3)+iz-1)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+      do ix=1,mg%num(1)
+        j(ix,iy,iz,1:3) = j_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1,1:3)
+        tau(ix,iy,iz) = tau_tmp2(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do

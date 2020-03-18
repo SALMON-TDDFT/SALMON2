@@ -252,7 +252,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   call timer_end(LOG_CALC_HARTREE)
 
   call timer_begin(LOG_CALC_EXC_COR)
-  call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_out,stencil,sVxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_ng,srg,srho_s,ppn,info,spsi_out,stencil,sVxc,energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)

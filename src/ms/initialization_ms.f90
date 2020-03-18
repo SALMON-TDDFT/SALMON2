@@ -287,7 +287,7 @@ use inputoutput
     sVh_stock2%f = sVh_stock1%f
   end if
   call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
-  call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_ng,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
   if(yn_restart=='y')then
     sVh_stock1%f=sVh%f

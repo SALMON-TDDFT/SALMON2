@@ -267,7 +267,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   end do
 
   call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
-  call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_ng,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
 
   select case(iperiodic)
