@@ -16,7 +16,7 @@
 !=======================================================================
 !=======================================================================
 
-SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func,srg,srg_ng, &
+SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,stencil,xc_func,srg,srg_scalar, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
@@ -53,7 +53,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   type(s_process_info),intent(in) :: pinfo
   type(s_stencil),intent(inout) :: stencil
   type(s_xc_functional),intent(in) :: xc_func
-  type(s_sendrecv_grid),intent(inout) :: srg,srg_ng
+  type(s_sendrecv_grid),intent(inout) :: srg,srg_scalar
   type(s_pp_info),intent(inout) :: pp
   type(s_pp_grid) :: ppg
 !  type(s_pp_nlcc),intent(in)    :: ppn
@@ -244,7 +244,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,ng,info,fg,srho,rt%j_e,sVh,poisson,singlescale)
   else
-    call hartree(lg,mg,info,system,fg,poisson,srg_ng,stencil,srho,sVh)
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
   end if
   if(iperiodic==0 .and. itt/=1)then
     sVh_stock1%f = sVh%f
@@ -252,7 +252,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   call timer_end(LOG_CALC_HARTREE)
 
   call timer_begin(LOG_CALC_EXC_COR)
-  call exchange_correlation(system,xc_func,ng,mg,srg_ng,srg,srho_s,ppn,info,spsi_out,stencil,sVxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi_out,stencil,sVxc,energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
@@ -310,7 +310,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
       call timer_begin(LOG_CALC_SINGLESCALE)
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,lg,ng,system,info,srho, &
-      & sVh,rt%j_e,srg_ng,system%Ac_micro,system%div_Ac,singlescale)
+      & sVh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
       call timer_end(LOG_CALC_SINGLESCALE)
     end if
@@ -380,12 +380,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,ng,system,rt,info,pinfo,s
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_ng,spsi_out)
+      call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,spsi_out)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_ng,itt)
+      call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_scalar,itt)
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)
