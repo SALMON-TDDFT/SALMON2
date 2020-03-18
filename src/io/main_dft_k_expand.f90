@@ -18,6 +18,19 @@
 #include "config.h"
 
 subroutine main_dft_k_expand
+  use salmon_global, only: method_wf_distributor
+  implicit none
+
+  if(method_wf_distributor=='single') then
+     call main_dft_k_expand_single
+  else if(method_wf_distributor=='slice') then
+     call main_dft_k_expand_slice
+  else
+     stop "error in method_wf_distributor option"
+  endif
+end subroutine main_dft_k_expand
+
+subroutine main_dft_k_expand_single
   use math_constants, only: pi, zi
   use structures
   use inputoutput
@@ -379,7 +392,6 @@ subroutine get_print_rank_numbers(kex,info,pinfo)
 
   end subroutine write_info_bin
 
-
   subroutine write_atomic_coor(odir,kex,system)
     use salmon_global, only: al,natom,atom_name,kion,unit_length
     use inputoutput, only: au_length_aa
@@ -595,7 +607,6 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
 
 end subroutine write_rho_inout_bin
 
-
 subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
   implicit none
   type(s_k_expand) :: kex
@@ -708,9 +719,7 @@ subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
     ! endif
 
      close(iu)
-
   enddo
-
   if(allocated(zwf_ekr)) deallocate( zwf_ekr )
 
 end subroutine write_wfn_bin
@@ -748,9 +757,7 @@ subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
   end do
   close(fp)
 
-
   return
 end subroutine write_cube
-  
 
-end subroutine main_dft_k_expand
+end subroutine main_dft_k_expand_single

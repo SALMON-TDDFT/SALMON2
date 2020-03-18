@@ -407,10 +407,10 @@ module structures
      integer :: nk, nkx,nky,nkz
      integer,allocatable :: isupercell(:,:)
      real(8),allocatable :: k_vec(:,:)
-     integer :: nk_new, no_new
+     integer :: nk_new, no_new, nmax
      integer :: natom, num_rgrid(3), nelec, nstate
      real(8) :: al(3)
-     integer,allocatable :: myrank(:), iaddress(:,:)
+     integer,allocatable :: myrank(:), iaddress(:,:), iaddress_new(:,:)
   end type s_k_expand
 
 ! +----------------------------------+
