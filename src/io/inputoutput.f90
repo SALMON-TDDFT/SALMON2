@@ -233,6 +233,7 @@ contains
       & method_wf_distributor, &
       & nblock_wf_distribute, &
       & yn_gbp,            &
+      & yn_gbp_stencil,    & ! temporary
       & dump_filename,     &  !remove later
       & modify_gs_wfn_k,   &  !remove later
       & read_gs_wfn_k,     &  !remove later
@@ -593,6 +594,7 @@ contains
     method_wf_distributor = 'single'
     nblock_wf_distribute = 16
     yn_gbp        = 'n'
+    yn_gbp_stencil = 'n'
     !remove later
     dump_filename    = 'default'
     modify_gs_wfn_k  = 'n'
@@ -998,6 +1000,7 @@ contains
     call comm_bcast(method_wf_distributor ,nproc_group_global)
     call comm_bcast(nblock_wf_distribute  ,nproc_group_global)
     call comm_bcast(yn_gbp                ,nproc_group_global)
+    call comm_bcast(yn_gbp_stencil        ,nproc_group_global) ! temporary
     !remove later
     call comm_bcast(dump_filename   ,nproc_group_global)
     call comm_bcast(modify_gs_wfn_k ,nproc_group_global)
@@ -1777,6 +1780,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp_stencil', yn_gbp_stencil
       !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'modify_gs_wfn_k', trim(modify_gs_wfn_k)
@@ -2255,6 +2259,7 @@ contains
     call yn_argument_check(yn_force_stencil_sequential_computation)
     call yn_argument_check(yn_want_communication_overlapping)
     call yn_argument_check(yn_gbp)
+    call yn_argument_check(yn_gbp_stencil)
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
