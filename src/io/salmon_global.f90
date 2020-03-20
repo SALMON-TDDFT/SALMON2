@@ -152,6 +152,7 @@ module salmon_global
 
 !! &scf
   character(8)   :: method_init_wf
+  integer        :: iseed_number_change
   character(8)   :: method_min
   integer        :: ncg,ncg_init
   character(8)   :: method_mixing
@@ -171,7 +172,8 @@ module salmon_global
   character(1)   :: skip_gsortho
   integer        :: iditer_notemperature
   integer        :: step_initial_mix_zero
-  integer        :: iseed_number_change
+  real(8)        :: conv_gap_mix_zero
+
 
 !! &emfield
   character(2)   :: trans_longi
