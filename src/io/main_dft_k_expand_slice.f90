@@ -130,7 +130,6 @@ subroutine main_dft_k_expand_slice
   allocate(wdir(ndir_w))
   call gen_restart_writing_directory_name_k_expand(kex,nblock_orbital,ofl%dir_out_restart,wgdir,wdir)
 
-
   if(comm_is_root(nproc_id_global)) then
      rdir0 = rgdir
      wdir0 = wgdir
@@ -278,6 +277,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   allocate( kex%iaddress(2,kex%nmax), kex%iaddress_new(2,kex%nmax) )
 
   kex%myrank(:) = -1
+  kex%iaddress(:,:) = -1
   kex%iaddress_new(:,:) = -1
 
   !!(for reading)
@@ -309,7 +309,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   end do
   end do
 
-  !write(*,'(a,100i5)') "myrank  =", kex%myrank(:)
+ !write(*,'(a,100i5)') "myrank  =", kex%myrank(:)
 
   end subroutine
 
