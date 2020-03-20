@@ -87,7 +87,7 @@ type(s_mixing) :: mixing
 type(s_band_dft) :: band
 
 logical :: rion_update, flag_conv
-integer :: i,j
+integer :: i,j, icnt_conv_nomix
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: tol_esp_diff, ene_gap
@@ -98,6 +98,7 @@ if(calc_mode=='DFT_BAND') then
 endif
 
 if(step_initial_mix_zero.gt.1)then
+   icnt_conv_nomix = 0
    mixing%flag_mix_zero = .true.
    DFT_NoMix_Iteration : do iter=1,step_initial_mix_zero
 
@@ -125,6 +126,16 @@ if(step_initial_mix_zero.gt.1)then
          end select
 300      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 301      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
+      endif
+      !(convergence: energy gap is over specified energy)
+      if(ene_gap .ge. conv_gap_mix_zero) then
+         icnt_conv_nomix = icnt_conv_nomix + 1
+         if(icnt_conv_nomix==5) then
+            if(comm_is_root(nproc_id_global)) write(*,*) "  converged no-mixing iteration"
+            exit
+         endif
+      else
+         icnt_conv_nomix = 0
       endif
 
    end do DFT_NoMix_Iteration

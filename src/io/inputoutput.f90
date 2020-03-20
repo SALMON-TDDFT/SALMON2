@@ -319,6 +319,7 @@ contains
 
     namelist/scf/ &
       & method_init_wf, &
+      & iseed_number_change, &
       & method_min, &
       & ncg, &
       & ncg_init, &
@@ -339,7 +340,7 @@ contains
       & skip_gsortho, &
       & iditer_notemperature, &
       & step_initial_mix_zero, &
-      & iseed_number_change
+      & conv_gap_mix_zero
 
     namelist/emfield/ &
       & trans_longi, &
@@ -670,6 +671,7 @@ contains
     yn_fix_func = 'n'
 !! == default for &scf
     method_init_wf = 'gauss'
+    iseed_number_change  =  0
     method_min    = 'cg'
     ncg           = 4
     ncg_init      = 4
@@ -690,7 +692,7 @@ contains
     skip_gsortho  = 'n'
     iditer_notemperature = 10
     step_initial_mix_zero= -1
-    iseed_number_change  =  0
+    conv_gap_mix_zero    = 99999d0*uenergy_from_au
 
 !! == default for &emfield
     trans_longi    = 'tr'
@@ -1092,12 +1094,13 @@ contains
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
 !! == bcast for &scf
-    call comm_bcast(method_init_wf        ,nproc_group_global)
-    call comm_bcast(method_min            ,nproc_group_global)
+    call comm_bcast(method_init_wf          ,nproc_group_global)
+    call comm_bcast(iseed_number_change     ,nproc_group_global)
+    call comm_bcast(method_min              ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
     call comm_bcast(ncg_init                ,nproc_group_global)
-    call comm_bcast(method_mixing                 ,nproc_group_global)
-    call comm_bcast(mixrate                ,nproc_group_global)
+    call comm_bcast(method_mixing           ,nproc_group_global)
+    call comm_bcast(mixrate                 ,nproc_group_global)
     call comm_bcast(nmemory_mb              ,nproc_group_global)
     call comm_bcast(alpha_mb                ,nproc_group_global)
     call comm_bcast(nmemory_p               ,nproc_group_global)
@@ -1132,7 +1135,8 @@ contains
     call comm_bcast(skip_gsortho            ,nproc_group_global)
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
     call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
-    call comm_bcast(iseed_number_change     ,nproc_group_global)
+    call comm_bcast(conv_gap_mix_zero       ,nproc_group_global)
+    conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
@@ -1893,6 +1897,7 @@ contains
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_wf', method_init_wf
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iseed_number_change', iseed_number_change
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
@@ -1913,7 +1918,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'skip_gsortho', skip_gsortho
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iseed_number_change', iseed_number_change
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
