@@ -1436,7 +1436,7 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
 
   if (iself) then
     ! read all processes
-    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
+    open(iu1_r,file=dir_file_in,form='unformatted',access='stream',status="old",err=20)
     read(iu1_r) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
     read(iu1_r) Ac%v(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     read(iu1_r) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
@@ -1534,6 +1534,14 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
     deallocate(matbox1,matbox2,matbox3,matbox4)
     if(yn_gbp=='y') deallocate(zbox)
   end if
+
+  return
+
+20 continue  !restart from e.x. theory=tddft_pulse or dft
+  if (comm_is_root(nproc_id_global)) then
+     write(*,*) "no singlescale.bin was found: restart from other theory is assumed"
+  endif
+  return
 end subroutine restart_singlescale
 
 !===================================================================================================================================

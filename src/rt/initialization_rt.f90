@@ -197,6 +197,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
   call restart_rt(lg,mg,mg,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+  if(yn_reset_step_restart=='y' ) Mit=0
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
