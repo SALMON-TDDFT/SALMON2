@@ -1433,7 +1433,7 @@ contains
 
         icount = icount + 1
         if_cartesian = .true.
-        if(yn_datafiles_dump == 'y') then
+        if(yn_datafiles_dump == 'y' .or. yn_self_checkpoint == 'y') then
            filename_tmp = trim(gdir)//"rank_000000/atomic_coor.txt"
         else
            filename_tmp = trim(gdir)//"atomic_coor.txt"
