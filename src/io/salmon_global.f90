@@ -62,6 +62,7 @@ module salmon_global
   character(20)  :: method_wf_distributor
   integer        :: nblock_wf_distribute
   character(1)   :: yn_gbp
+  character(1)   :: yn_gbp_fourier0 ! temporary
   !remove later
   character(256) :: dump_filename
   character(20)  :: modify_gs_wfn_k  !changed from modify_initial_guess

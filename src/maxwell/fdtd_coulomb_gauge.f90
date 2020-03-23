@@ -615,7 +615,7 @@ end subroutine fdtd_singlescale
 subroutine fourier_singlescale(lg,ng,info,fg,rho,j_e,Vh,poisson,singlescale)
   use structures
   use math_constants,only : zi,pi
-  use salmon_global,only: dt
+  use salmon_global,only: dt,yn_gbp_fourier0
   use phys_constants, only: cspeed_au
   use communication, only: comm_summation,comm_bcast
   implicit none
@@ -745,6 +745,10 @@ subroutine fourier_singlescale(lg,ng,info,fg,rho,j_e,Vh,poisson,singlescale)
     singlescale%Ac_fourier(ng%is(1):ng%ie(1),iiy,iiz,1:3) = singlescale%a_ffte(ng%is(1):ng%ie(1),iy,iz,1:3)
   end do
   end do
+  
+  if(yn_gbp_fourier0=='y') then
+    singlescale%Ac_fourier = 0d0
+  end if
 
   return
 end subroutine fourier_singlescale
