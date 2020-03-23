@@ -204,6 +204,7 @@ module salmon_global
   real(8)        :: vec_dipole_source(3,2)
   real(8)        :: cood_dipole_source(3,2)
   real(8)        :: rad_dipole_source
+  real(8)        :: cutoff_G2_emfield
 
 !! &multiscale
   character(16)  :: fdtddim

@@ -370,7 +370,8 @@ contains
       & num_dipole_source , &
       & vec_dipole_source , &
       & cood_dipole_source , &
-      & rad_dipole_source
+      & rad_dipole_source, &
+      & cutoff_G2_emfield
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -728,6 +729,7 @@ contains
     vec_dipole_source  = 0d0
     cood_dipole_source = 0d0
     rad_dipole_source  = 2d0 ! a.u.
+    cutoff_G2_emfield  = -1d0
 
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -1191,6 +1193,8 @@ contains
     cood_dipole_source = cood_dipole_source * ulength_to_au
     call comm_bcast(rad_dipole_source,nproc_group_global)
     rad_dipole_source = rad_dipole_source * ulength_to_au
+    call comm_bcast(cutoff_G2_emfield,nproc_group_global)
+    cutoff_G2_emfield = cutoff_G2_emfield * uenergy_to_au
 
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1975,6 +1979,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,2)', cood_dipole_source(2,2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,2)', cood_dipole_source(3,2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rad_dipole_source', rad_dipole_source
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
