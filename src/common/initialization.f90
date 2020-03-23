@@ -681,7 +681,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   use structures
   use math_constants,  only : pi,zi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,nelem,yn_ffte,aEwald,use_singlescale
+  use salmon_global, only: dt,nelem,yn_ffte,aEwald,use_singlescale,cutoff_G2_emfield
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: ng
@@ -744,6 +744,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
       fg%coef_nabla(ix,iy,iz,2) = -zi*g(2)
       fg%coef_nabla(ix,iy,iz,3) = -zi*g(3)
       if(ix==1.and.iy==1) fg%coef_gxgy0(ix,iy,iz) = 0d0
+      if(cutoff_G2_emfield > 0d0 .and. G2 > cutoff_G2_emfield) fg%coef_gxgy0(ix,iy,iz) = 0d0
       fg%coef_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
     end if
 
