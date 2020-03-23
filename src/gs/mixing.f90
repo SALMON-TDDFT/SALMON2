@@ -524,7 +524,7 @@ end subroutine copy_density
 
 !===================================================================================================================================
 subroutine check_mixing_half(convergence_value,mixing)
-  use salmon_global, only: method_mixing
+  use salmon_global, only: method_mixing,update_mixing_ratio
   use structures, only: s_mixing
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_is_root, comm_bcast
@@ -534,7 +534,7 @@ subroutine check_mixing_half(convergence_value,mixing)
   integer :: icheck
   
   if(comm_is_root(nproc_id_global)) then
-    if(convergence_value>mixing%convergence_value_prev*3.d0)then
+    if(convergence_value > update_mixing_ratio * mixing%convergence_value_prev)then
       icheck=1
     else
       icheck=0
