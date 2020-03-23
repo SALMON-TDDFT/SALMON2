@@ -25,7 +25,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
                miter,   &
                iditer_nosubspace_diag,mixing,iter, &
                poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-  use salmon_global, only: calc_mode,method_mixing,mixrate &
+  use salmon_global, only: calc_mode,method_mixing  &
                         ,yn_subspace_diagonalization,ncg,ncg_init
   use structures
   use timer
@@ -102,7 +102,7 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
   call calc_density(system,srho_s,spsi,info,mg)
 
   select case(method_mixing)
-    case ('simple') ; call simple_mixing(ng,system,1.d0-mixrate,mixrate,srho_s,mixing)
+    case ('simple') ; call simple_mixing(ng,system,1.d0-mixing%mixrate,mixing%mixrate,srho_s,mixing)
     case ('broyden'); call wrapper_broyden(info%icomm_r,ng,system,srho_s,iter,mixing)
     case ('pulay')  ; call pulay(mg,info,system,srho_s,iter,mixing)
   end select

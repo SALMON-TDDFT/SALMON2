@@ -330,6 +330,8 @@ contains
       & alpha_mb, &
       & nmemory_p, &
       & beta_p, &
+      & yn_auto_mixing, &
+      & update_mixing_ratio, &
       & fsset_option, &
       & nfsset_start, &
       & nfsset_every, &
@@ -682,8 +684,10 @@ contains
     mixrate       = 0.5d0
     nmemory_mb    = 8
     alpha_mb      = 0.75d0
-    nmemory_p    = 4
+    nmemory_p     = 4
     beta_p        = 0.75d0
+    yn_auto_mixing = 'n'
+    update_mixing_ratio = 3.d0
     fsset_option  = 'n'
     nfsset_start  = 75
     nfsset_every  = 25
@@ -1110,6 +1114,8 @@ contains
     call comm_bcast(alpha_mb                ,nproc_group_global)
     call comm_bcast(nmemory_p               ,nproc_group_global)
     call comm_bcast(beta_p                  ,nproc_group_global)
+    call comm_bcast(yn_auto_mixing          ,nproc_group_global)
+    call comm_bcast(update_mixing_ratio     ,nproc_group_global)
     call comm_bcast(fsset_option            ,nproc_group_global)
     call comm_bcast(nfsset_start            ,nproc_group_global)
     call comm_bcast(nfsset_every            ,nproc_group_global)
@@ -1915,6 +1921,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mb', alpha_mb
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_p', nmemory_p
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'beta_p', beta_p
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fsset_option', fsset_option
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_start', nfsset_start
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_every', nfsset_every
@@ -2250,6 +2258,7 @@ contains
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)
+    call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_local_field)
     call yn_argument_check(yn_out_psi)

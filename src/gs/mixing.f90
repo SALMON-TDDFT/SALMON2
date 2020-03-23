@@ -125,9 +125,9 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
        end do
     end do
 
-    call broyden(vecr,vecr_in,vecr_out,ng%num(1)*ng%num(2)*ng%num(3),iter,    &
+    call broyden(mixing%alpha_mb,vecr,vecr_in,vecr_out,ng%num(1)*ng%num(2)*ng%num(3),iter,    &
                  mixing%num_rho_stock,mixing%num_rho_stock,comm,&
-                 mixing%flag_mix_zero )
+                 mixing%flag_mix_zero)
 
 !$omp parallel do private(iz,iy,ix) collapse(2)
     do iz=ng%is(3),ng%ie(3)
@@ -174,7 +174,7 @@ subroutine wrapper_broyden(comm,ng,system,srho_s,iter,mixing)
         end do
       end do
 
-      call broyden(vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),iter,  &
+      call broyden(mixing%alpha_mb,vecr,vecr_in, vecr_out, ng%num(1)*ng%num(2)*ng%num(3),iter,  &
                    mixing%num_rho_stock,mixing%num_rho_stock,comm,&
                    mixing%flag_mix_zero )
 
@@ -207,7 +207,7 @@ end subroutine wrapper_broyden
 !===================================================================================================================================
 
 subroutine pulay(mg,info,system,srho_s,iter,mixing)
-  use salmon_global, only: nmemory_p, beta_p
+  use salmon_global, only: nmemory_p
   use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_scalar,s_mixing,allocate_scalar,deallocate_scalar
   use communication, only: comm_summation
   implicit none
@@ -231,7 +231,7 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
 
   if(iter==1.or.nmemory_p==1)then
 
-    call simple_mixing(mg,system,1.d0-beta_p,beta_p,srho_s,mixing)
+    call simple_mixing(mg,system,1.d0-mixing%beta_p,mixing%beta_p,srho_s,mixing)
 
   else
 !pulay mixing
@@ -361,7 +361,7 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
           mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz) = max(1.d-20,  &
-                                                                   x%f(ix,iy,iz) + beta_p*( y%f(ix,iy,iz)-x%f(ix,iy,iz) ))
+                                                                   x%f(ix,iy,iz) + mixing%beta_p*( y%f(ix,iy,iz)-x%f(ix,iy,iz) ))
           srho_s(is)%f(ix,iy,iz) = mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)
         end do
         end do
@@ -372,7 +372,7 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
           mixing%srho_s_in(mixing%num_rho_stock+1,is)%f(ix,iy,iz) = max(1.d-20,  &
-                                                                        x%f(ix,iy,iz) + beta_p*( y%f(ix,iy,iz)-x%f(ix,iy,iz) ))
+                                                                     x%f(ix,iy,iz) + mixing%beta_p*( y%f(ix,iy,iz)-x%f(ix,iy,iz) ))
           srho_s(is)%f(ix,iy,iz) = mixing%srho_s_in(mixing%num_rho_stock+1,is)%f(ix,iy,iz)
         end do
         end do
@@ -392,6 +392,7 @@ end subroutine
 !===================================================================================================================================
 
 subroutine init_mixing(nspin,ng,mixing)
+  use salmon_global, only: yn_restart,mixrate,alpha_mb,beta_p,yn_auto_mixing
   use structures
   implicit none
   integer      ,intent(in) :: nspin
@@ -399,6 +400,15 @@ subroutine init_mixing(nspin,ng,mixing)
   type(s_mixing)           :: mixing
   !
   integer :: i,j
+
+  if(yn_restart=='y'.and.yn_auto_mixing=='y')then
+    ! Conditions are read from "auto_mixing.bin".
+  else
+    mixing%mixrate=mixrate
+    mixing%alpha_mb=alpha_mb
+    mixing%beta_p=beta_p
+    mixing%convergence_value_prev=1.d10
+  end if
 
   allocate(mixing%srho_in(1:mixing%num_rho_stock+1))
   allocate(mixing%srho_out(1:mixing%num_rho_stock+1))
@@ -512,4 +522,50 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
 
 end subroutine copy_density
 
+!===================================================================================================================================
+subroutine check_mixing_half(convergence_value,mixing)
+  use salmon_global, only: method_mixing,update_mixing_ratio
+  use structures, only: s_mixing
+  use parallelization, only: nproc_id_global, nproc_group_global
+  use communication, only: comm_is_root, comm_bcast
+  implicit none
+  real(8), intent(in) :: convergence_value
+  type(s_mixing), intent(inout) :: mixing
+  integer :: icheck
+  
+  if(comm_is_root(nproc_id_global)) then
+    if(convergence_value > update_mixing_ratio * mixing%convergence_value_prev)then
+      icheck=1
+    else
+      icheck=0
+    end if
+  end if
+
+  call comm_bcast(icheck,nproc_group_global)
+
+  if(icheck==1)then
+    select case(method_mixing)
+    case('simple')
+      if(comm_is_root(nproc_id_global)) then
+        write(*,'(" mixrate is decreased from",f12.8," to",f12.8,"." )') mixing%mixrate, mixing%mixrate*0.5d0 
+      end if
+      mixing%mixrate=mixing%mixrate*0.5d0
+    case('broyden')
+      if(comm_is_root(nproc_id_global)) then
+        write(*,'(" alpha_mb is decreased from",f12.8," to",f12.8,"." )') mixing%alpha_mb, mixing%alpha_mb*0.5d0 
+      end if
+      mixing%alpha_mb=mixing%alpha_mb*0.5d0
+    case('pulay')
+      if(comm_is_root(nproc_id_global)) then
+        write(*,'(" beta_p is decreased from",f12.8," to",f12.8,"." )') mixing%beta_p, mixing%beta_p*0.5d0 
+      end if
+      mixing%beta_p=mixing%beta_p*0.5d0
+    end select
+  end if
+
+  mixing%convergence_value_prev=convergence_value
+
+end subroutine check_mixing_half
+
+!===================================================================================================================================
 end module mixing_sub
