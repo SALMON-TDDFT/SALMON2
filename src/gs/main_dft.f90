@@ -147,6 +147,7 @@ else
    iter_band_kpt_stride = 1
 end if
 
+call comm_sync_all
 call timer_enable_sub
 Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 

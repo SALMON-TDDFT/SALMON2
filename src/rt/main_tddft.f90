@@ -76,6 +76,7 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 call fapp_start('time_evol',1,0) ! performance profiling
 #endif
 
+call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,itotNtime
