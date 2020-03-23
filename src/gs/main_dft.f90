@@ -147,6 +147,7 @@ else
    iter_band_kpt_stride = 1
 end if
 
+call timer_enable_sub
 Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 
 if(theory=='dft_band')then
@@ -241,6 +242,7 @@ end if
 call timer_end(LOG_GS_ITERATION)
 
 end do Band_Iteration
+call timer_disable_sub
 
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)

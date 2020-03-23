@@ -76,6 +76,7 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 call fapp_start('time_evol',1,0) ! performance profiling
 #endif
 
+call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,itotNtime
 
@@ -104,6 +105,7 @@ TE : do itt=Mit+1,itotNtime
 
 end do TE
 call timer_end(LOG_RT_ITERATION)
+call timer_disable_sub
 
 #ifdef __FUJITSU
 call fapp_stop('time_evol',1,0) ! performance profiling

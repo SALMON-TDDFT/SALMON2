@@ -143,6 +143,7 @@ rion_update = .true.
 call fipp_start ! performance profiling
 #endif
 
+call timer_enable_sub
 call timer_begin(LOG_GS_ITERATION)
 
 MD_Loop : do it=1,nt
@@ -222,6 +223,7 @@ MD_Loop : do it=1,nt
 end do MD_Loop
 
 call timer_end(LOG_GS_ITERATION)
+call timer_disable_sub
 
 #ifdef __FUJITSU
 call fipp_stop ! performance profiling
