@@ -269,7 +269,7 @@ DFT_Iteration : do iter=Miter+1,nscf
          sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
    end select
-  
+   
    if( ilevel_print.ge.2 ) then
    if(comm_is_root(nproc_id_global)) then
       write(*,*) '-----------------------------------------------'
@@ -313,6 +313,12 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    end if
    end if
+
+! modification of mixing rate for auto_mixing
+   if(yn_auto_mixing=='y')then
+     call check_mixing_half(sum1,mixing)
+   end if
+ 
    rNebox1 = 0d0 
 !$OMP parallel do reduction(+:rNebox1) private(iz,iy,ix)
    do iz=ng%is(3),ng%ie(3)

@@ -162,6 +162,7 @@ module salmon_global
   real(8)        :: alpha_mb
   integer        :: nmemory_p
   real(8)        :: beta_p
+  character(1)   :: yn_auto_mixing
   character(1)   :: fsset_option
   integer        :: nfsset_start
   integer        :: nfsset_every
