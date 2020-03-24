@@ -231,8 +231,9 @@ contains
     allocate(ticked_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
     ticked(:)     = .false.
     ticked_t(:,:) = .false.
-    call timer_disable_sub
+    call timer_enable_sub
     call timer_reset
+    call timer_disable_sub
   end subroutine
 
   subroutine timer_set(e,t)
