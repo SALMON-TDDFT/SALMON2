@@ -633,7 +633,7 @@ subroutine fourier_singlescale(lg,ng,info,fg,rho,j_e,Vh,poisson,singlescale)
   integer :: iiy,iiz,iix
   real(8) :: inv_lgnum3,vec_je(3),rho_t
   integer :: i
-  complex(8) :: f0,f1,j0
+  complex(8) :: j_new,j_old,c_new,c_old
   
   if(info%isize_x < 4) stop "isize(1) must be > 3"
   
@@ -689,27 +689,28 @@ subroutine fourier_singlescale(lg,ng,info,fg,rho,j_e,Vh,poisson,singlescale)
 
 ! Maxwell eq.: singlescale%b_ffte(ix,iy,iz,i)=j(G,t) --> singlescale%b_ffte(ix,iy,iz,i)=Ac(G,t+dt)
   if(i/=0) then
-    !$omp parallel do collapse(2) private(iz,iy,ix,iiz,iiy,f0,f1,j0)
+    !$omp parallel do collapse(2) private(iz,iy,ix,iiz,iiy,j_new,j_old,c_new,c_old)
     do iz=1,ng%num(3)
     do iy=1,ng%num(2)
     do ix=1,lg%num(1)
       iiz=iz+ng%is(3)-1
       iiy=iy+ng%is(2)-1
     ! j(transverse) = j - (1/(4*pi))* d(grad(phi))/dt
-      j0 = singlescale%b_ffte(ix,iy,iz,i) &
+      j_new = singlescale%b_ffte(ix,iy,iz,i) &
       & - (1d0/(4d0*pi))* fg%coef_nabla(ix,iiy,iiz,i) * ( poisson%b_ffte(ix,iy,iz) - singlescale%Vh_ffte_old(ix,iy,iz) )/dt
-    ! f(t) = Ac(t) + (4*pi/(c*G)**2)* j
-      f0 = singlescale%zAc_old(ix,iy,iz,i) + (1/cspeed_au**2)* fg%coef(ix,iiy,iiz) * j0
-    ! f(t+dt) = 2* cos(c*G*dt) * f(t) - f(t-dt)
-      f1 = 2d0* fg%coef_cGdt(ix,iiy,iiz)* f0 - singlescale%f_old(ix,iy,iz,i)
-    ! Ac(t+dt) = f(t+dt) - (4*pi/(c*G)**2)* j
-      singlescale%b_ffte(ix,iy,iz,i) = f1 - (1/cspeed_au**2)* fg%coef(ix,iiy,iiz) * j0
+    ! old variables
+      j_old = singlescale%zj_old(ix,iy,iz,i)
+      c_old = singlescale%zc_old(ix,iy,iz,i)
+    ! c_new = c_old + (4*pi/(c*G)**2)* (j_old-j_new)
+      c_new = c_old + (1/cspeed_au**2)*fg%coef(ix,iiy,iiz) * (j_old-j_new)
+    ! Ac(t+dt) = c_new * cos(c*G*dt) - (4*pi/(c*G)**2)* j_new
+      singlescale%b_ffte(ix,iy,iz,i) = c_new * fg%coef_cGdt(ix,iiy,iiz) - (1/cspeed_au**2)*fg%coef(ix,iiy,iiz) * j_new
     ! Ac(gx=gy=0) --> 0
       singlescale%b_ffte(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i) * fg%coef_gxgy0(ix,iiy,iiz)
-    ! f(t-dt) for next step
-      singlescale%f_old(ix,iy,iz,i) = f0
-    ! Ac(t) for next step
-      singlescale%zAc_old(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i)
+    ! j_old for next step
+      singlescale%zj_old(ix,iy,iz,i) = j_new
+    ! c_old for next step
+      singlescale%zc_old(ix,iy,iz,i) = c_new
     end do
     end do
     end do
@@ -841,7 +842,7 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
     allocate(fw%Ac_fourier(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
     allocate(fw%a_ffte(lg%num(1),ng%num(2),ng%num(3),0:3),fw%b_ffte(lg%num(1),ng%num(2),ng%num(3),0:3))
     allocate(fw%Vh_ffte_old(lg%num(1),ng%num(2),ng%num(3)))
-    allocate(fw%zAc_old(lg%num(1),ng%num(2),ng%num(3),0:3),fw%f_old(lg%num(1),ng%num(2),ng%num(3),0:3))
+    allocate(fw%zj_old(lg%num(1),ng%num(2),ng%num(3),0:3),fw%zc_old(lg%num(1),ng%num(2),ng%num(3),0:3))
     fw%curr4pi_zt = 0d0
     fw%Ac_zt_m = 0d0
     fw%Ac_zt_boundary_bottom = 0d0
@@ -849,8 +850,8 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
     fw%Ac_zt_boundary_bottom_old = 0d0
     fw%Ac_zt_boundary_top_old = 0d0
     fw%Ac_fourier = 0d0
-    fw%zAc_old = 0d0
-    fw%f_old = 0d0
+    fw%zj_old = 0d0
+    fw%zc_old = 0d0
     if(yn_ffte=='y') then
     ! Vh --> fw%Vh_ffte_old
       call calc_Vh_ffte
