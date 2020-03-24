@@ -18,11 +18,12 @@ module broyden_sub
 
 contains
 
-subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_zero)
-  use salmon_global, only: alpha_mb, nmemory_mb
+subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_zero)
+  use salmon_global, only: nmemory_mb
   use communication, only: comm_summation
   use salmon_math
   implicit none
+  real(8), intent(in) :: alpha_mb
   integer, intent(in) :: nl
   integer, intent(in) :: iter
   integer, intent(in) :: iter_mod

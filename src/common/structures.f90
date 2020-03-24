@@ -397,6 +397,8 @@ module structures
     logical :: flag_mix_zero
     integer :: num_rho_stock
     type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
+    real(8) :: mixrate, alpha_mb, beta_p
+    real(8) :: convergence_value_prev
   end type s_mixing
 
   type s_band_dft
