@@ -373,17 +373,6 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
     end if
   end if
 
-  !auto mixing
-  if(yn_auto_mixing=='y')then
-    if(comm_is_root(nproc_id_global))then
-      dir_file_out = trim(odir)//"auto_mixing.bin"
-      open(iu1_w,file=dir_file_out,form='unformatted')
-      write(iu1_w) mixing%mixrate, mixing%alpha_mb, mixing%beta_p
-      write(iu1_w) mixing%convergence_value_prev
-      close(iu1_w)
-    end if
-  end if
-
 end subroutine write_bin
 
 !===================================================================================================================================
@@ -516,21 +505,6 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
     if (present(sVh_stock1) .and. present(sVh_stock2)) then
       call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
     end if
-  end if
-
-  !auto mixing
-  if(yn_auto_mixing=='y')then
-    if(comm_is_root(nproc_id_global))then
-      dir_file_in = trim(idir)//"auto_mixing.bin"
-      open(iu1_r,file=dir_file_in,form='unformatted')
-      read(iu1_r) mixing%mixrate, mixing%alpha_mb, mixing%beta_p
-      read(iu1_r) mixing%convergence_value_prev
-      close(iu1_r)
-    end if
-    call comm_bcast(mixing%mixrate,comm)
-    call comm_bcast(mixing%alpha_mb,comm)
-    call comm_bcast(mixing%beta_p,comm)
-    call comm_bcast(mixing%convergence_value_prev,comm)
   end if
 
 end subroutine read_bin
