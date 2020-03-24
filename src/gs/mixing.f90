@@ -401,14 +401,10 @@ subroutine init_mixing(nspin,ng,mixing)
   !
   integer :: i,j
 
-  if(yn_restart=='y'.and.yn_auto_mixing=='y')then
-    ! Conditions are read from "auto_mixing.bin".
-  else
-    mixing%mixrate=mixrate
-    mixing%alpha_mb=alpha_mb
-    mixing%beta_p=beta_p
-    mixing%convergence_value_prev=1.d10
-  end if
+  mixing%mixrate=mixrate
+  mixing%alpha_mb=alpha_mb
+  mixing%beta_p=beta_p
+  mixing%convergence_value_prev=1.d10
 
   allocate(mixing%srho_in(1:mixing%num_rho_stock+1))
   allocate(mixing%srho_out(1:mixing%num_rho_stock+1))
