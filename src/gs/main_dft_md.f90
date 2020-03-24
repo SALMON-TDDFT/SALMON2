@@ -21,7 +21,7 @@ subroutine main_dft_md
 use structures
 use inputoutput
 use parallelization, only: nproc_id_global,nproc_group_global
-use communication, only: comm_is_root, comm_summation, comm_bcast
+use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
 use scf_iteration_sub
@@ -143,6 +143,8 @@ rion_update = .true.
 call fipp_start ! performance profiling
 #endif
 
+call comm_sync_all
+call timer_enable_sub
 call timer_begin(LOG_GS_ITERATION)
 
 MD_Loop : do it=1,nt
@@ -222,6 +224,7 @@ MD_Loop : do it=1,nt
 end do MD_Loop
 
 call timer_end(LOG_GS_ITERATION)
+call timer_disable_sub
 
 #ifdef __FUJITSU
 call fipp_stop ! performance profiling
