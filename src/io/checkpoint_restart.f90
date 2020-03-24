@@ -913,8 +913,8 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
     write(iu1_w) singlescale%div_Ac_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     if(yn_gbp=='y') then
       write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
-      write(iu1_w) singlescale%zAc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
-      write(iu1_w) singlescale%f_old  (1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      write(iu1_w) singlescale%zj_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      write(iu1_w) singlescale%zc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
       write(iu1_w) singlescale%Ac_zt_boundary_bottom
       write(iu1_w) singlescale%Ac_zt_boundary_top
       write(iu1_w) singlescale%Ac_zt_boundary_bottom_old
@@ -1008,8 +1008,8 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=ng%is(1),ng%ie(1)
-        z0(ix,iy,iz,0:3,1) = singlescale%zAc_old(ix,iy,iz,0:3)
-        z0(ix,iy,iz,0:3,2) = singlescale%f_old  (ix,iy,iz,0:3)
+        z0(ix,iy,iz,0:3,1) = singlescale%zj_old(ix,iy,iz,0:3)
+        z0(ix,iy,iz,0:3,2) = singlescale%zc_old(ix,iy,iz,0:3)
       end do
       end do
       end do
@@ -1449,8 +1449,8 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
     read(iu1_r) singlescale%div_Ac_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
     if(yn_gbp=='y') then
       read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
-      read(iu1_r) singlescale%zAc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
-      read(iu1_r) singlescale%f_old  (1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      read(iu1_r) singlescale%zj_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      read(iu1_r) singlescale%zc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
       read(iu1_r) singlescale%Ac_zt_boundary_bottom
       read(iu1_r) singlescale%Ac_zt_boundary_top
       read(iu1_r) singlescale%Ac_zt_boundary_bottom_old
@@ -1524,8 +1524,8 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
       do iz=ng%is(3),ng%ie(3)
       do iy=ng%is(2),ng%ie(2)
       do ix=1,lg%num(1)
-        singlescale%zAc_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,1)
-        singlescale%f_old  (ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,2)
+        singlescale%zj_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,1)
+        singlescale%zc_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,2)
       end do
       end do
       end do
