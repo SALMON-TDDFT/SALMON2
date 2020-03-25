@@ -212,7 +212,7 @@ module sendrecv_grid
               call comm_start_all(srg%ireq_real8(:, iside, idir))
             end if
           else
-            if (iand(iphase,srg_unpack) > 0) then
+            if (iand(iphase,srg_pack) > 0) then
               ! NOTE: If neightboring nodes are itself (periodic with single proc),
               !       a simple side-to-side copy is used instead of the MPI comm.
               call copy_self(iside, idir)
@@ -364,7 +364,7 @@ module sendrecv_grid
               call comm_start_all(srg%ireq_complex8(:, iside, idir))
             end if
           else
-            if (iand(iphase,srg_unpack) > 0) then
+            if (iand(iphase,srg_pack) > 0) then
               ! NOTE: If neightboring nodes are itself (periodic with single proc),
               !       a simple side-to-side copy is used instead of the MPI comm.
               call copy_self(iside, idir)
