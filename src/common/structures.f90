@@ -312,7 +312,7 @@ module structures
     real(8),allocatable :: coef(:,:,:)      ! 4*pi/|G|^2 (coefficient of the Poisson equation)
     real(8),allocatable :: exp_ewald(:,:,:) ! exp(-|G|^2/(4*a_Ewald))
     complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
-    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),coef_cGdt(:,:,:) ! for single-scale Maxwell-TDDFT
+    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),cos_cGdt(:,:,:),sin_cGdt(:,:,:) ! for single-scale Maxwell-TDDFT
   end type s_reciprocal_grid
 
 ! Poisson equation
@@ -455,7 +455,7 @@ module structures
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
     real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)
     real(8),allocatable :: Ac_fourier(:,:,:,:)
-    complex(8),allocatable :: a_ffte(:,:,:,:),b_ffte(:,:,:,:),Vh_ffte_old(:,:,:),zj_old(:,:,:,:),zc_old(:,:,:,:)
+    complex(8),allocatable :: a_ffte(:,:,:,:),b_ffte(:,:,:,:),Vh_ffte_old(:,:,:),zf_old(:,:,:,:),zc_old(:,:,:,:),zs_old(:,:,:,:)
   end type s_singlescale
 
 !===================================================================================================================================

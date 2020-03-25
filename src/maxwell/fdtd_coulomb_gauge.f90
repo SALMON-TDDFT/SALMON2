@@ -633,7 +633,8 @@ subroutine fourier_singlescale(lg,ng,info,fg,rho,j_e,Vh,poisson,singlescale)
   integer :: iiy,iiz,iix
   real(8) :: inv_lgnum3,vec_je(3),rho_t
   integer :: i
-  complex(8) :: j_new,j_old,c_new,c_old
+  real(8) :: sin,cos
+  complex(8) :: j0,F0,c0,s0,F_old,c_old,s_old,Ac
   
   if(info%isize_x < 4) stop "isize(1) must be > 3"
   
@@ -689,28 +690,36 @@ subroutine fourier_singlescale(lg,ng,info,fg,rho,j_e,Vh,poisson,singlescale)
 
 ! Maxwell eq.: singlescale%b_ffte(ix,iy,iz,i)=j(G,t) --> singlescale%b_ffte(ix,iy,iz,i)=Ac(G,t+dt)
   if(i/=0) then
-    !$omp parallel do collapse(2) private(iz,iy,ix,iiz,iiy,j_new,j_old,c_new,c_old)
+    !$omp parallel do collapse(2) private(iz,iy,ix,iiz,iiy,j0,F0,c0,s0,F_old,c_old,s_old,Ac,sin,cos)
     do iz=1,ng%num(3)
     do iy=1,ng%num(2)
     do ix=1,lg%num(1)
       iiz=iz+ng%is(3)-1
       iiy=iy+ng%is(2)-1
     ! j(transverse) = j - (1/(4*pi))* d(grad(phi))/dt
-      j_new = singlescale%b_ffte(ix,iy,iz,i) &
+      j0 = singlescale%b_ffte(ix,iy,iz,i) &
       & - (1d0/(4d0*pi))* fg%coef_nabla(ix,iiy,iiz,i) * ( poisson%b_ffte(ix,iy,iz) - singlescale%Vh_ffte_old(ix,iy,iz) )/dt
+    ! F_{i} = - (4*pi/(c*G)**2)* j(t)
+      F0 = - (1/cspeed_au**2)*fg%coef(ix,iiy,iiz) * j0
     ! old variables
-      j_old = singlescale%zj_old(ix,iy,iz,i)
+      F_old = singlescale%zf_old(ix,iy,iz,i)
       c_old = singlescale%zc_old(ix,iy,iz,i)
-    ! c_new = c_old + (4*pi/(c*G)**2)* (j_old-j_new)
-      c_new = c_old + (1/cspeed_au**2)*fg%coef(ix,iiy,iiz) * (j_old-j_new)
-    ! Ac(t+dt) = c_new * cos(c*G*dt) - (4*pi/(c*G)**2)* j_new
-      singlescale%b_ffte(ix,iy,iz,i) = c_new * fg%coef_cGdt(ix,iiy,iiz) - (1/cspeed_au**2)*fg%coef(ix,iiy,iiz) * j_new
+      s_old = singlescale%zs_old(ix,iy,iz,i)
+    ! cos(c*G*dt), sin(c*G*dt)
+      cos = fg%cos_cGdt(ix,iiy,iiz)
+      sin = fg%sin_cGdt(ix,iiy,iiz)
+    ! c_{i} = c_{i-1}* cos(c*G*dt) + s_{i-1}* sin(c*G*dt) - (F_{i}-F_{i-1})
+      c0 = c_old* cos + s_old* sin - (F0-F_old)
+    ! s_{i} = - c_{i-1}* sin(c*G*dt) + s_{i-1}* cos(c*G*dt)
+      s0 = - c_old* sin + s_old* cos
+    ! Ac(t+dt) = c_{i}* cos(c*G*dt) + s_{i}* sin(c*G*dt) + F_{i}
+      Ac = c0* cos + s0* sin + F0
     ! Ac(gx=gy=0) --> 0
-      singlescale%b_ffte(ix,iy,iz,i) = singlescale%b_ffte(ix,iy,iz,i) * fg%coef_gxgy0(ix,iiy,iiz)
-    ! j_old for next step
-      singlescale%zj_old(ix,iy,iz,i) = j_new
-    ! c_old for next step
-      singlescale%zc_old(ix,iy,iz,i) = c_new
+      singlescale%b_ffte(ix,iy,iz,i) = Ac * fg%coef_gxgy0(ix,iiy,iiz)
+    ! F_old,c_old,s_old for next step
+      singlescale%zf_old(ix,iy,iz,i) = F0
+      singlescale%zc_old(ix,iy,iz,i) = c0
+      singlescale%zs_old(ix,iy,iz,i) = s0
     end do
     end do
     end do
@@ -842,7 +851,9 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
     allocate(fw%Ac_fourier(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
     allocate(fw%a_ffte(lg%num(1),ng%num(2),ng%num(3),0:3),fw%b_ffte(lg%num(1),ng%num(2),ng%num(3),0:3))
     allocate(fw%Vh_ffte_old(lg%num(1),ng%num(2),ng%num(3)))
-    allocate(fw%zj_old(lg%num(1),ng%num(2),ng%num(3),0:3),fw%zc_old(lg%num(1),ng%num(2),ng%num(3),0:3))
+    allocate(fw%zf_old(lg%num(1),ng%num(2),ng%num(3),0:3), &
+           & fw%zc_old(lg%num(1),ng%num(2),ng%num(3),0:3), &
+           & fw%zs_old(lg%num(1),ng%num(2),ng%num(3),0:3))
     fw%curr4pi_zt = 0d0
     fw%Ac_zt_m = 0d0
     fw%Ac_zt_boundary_bottom = 0d0
@@ -850,8 +861,9 @@ subroutine init_singlescale(ng,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
     fw%Ac_zt_boundary_bottom_old = 0d0
     fw%Ac_zt_boundary_top_old = 0d0
     fw%Ac_fourier = 0d0
-    fw%zj_old = 0d0
+    fw%zf_old = 0d0
     fw%zc_old = 0d0
+    fw%zs_old = 0d0
     if(yn_ffte=='y') then
     ! Vh --> fw%Vh_ffte_old
       call calc_Vh_ffte
