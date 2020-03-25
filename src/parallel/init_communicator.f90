@@ -251,7 +251,9 @@ contains
     iret = -1
 
     if (process_allocation /= 'grid_sequential') then
-      print *, 'tofu_network_oriented_mapping: support grid_sequential only...'
+      if (comm_is_root(info%id_rko)) then
+        print *, 'tofu_network_oriented_mapping: support grid_sequential only...'
+      end if
       return
     end if
 
@@ -282,8 +284,8 @@ contains
     case default
       if (comm_is_root(info%id_rko)) then
         print *, 'tofu_network_oriented_mapping: unsupported Tofu dimension,', tofu_dim
-        return
       end if
+      return
 
     ! 3-dimensional network
     case(3)
