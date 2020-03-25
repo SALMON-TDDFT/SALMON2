@@ -711,10 +711,12 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   ! for single-scale Maxwell-TDDFT
     allocate(fg%coef_nabla(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
     allocate(fg%coef_gxgy0(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-    allocate(fg%coef_cGdt (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(fg%cos_cGdt  (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(fg%sin_cGdt  (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
     fg%coef_nabla = 0d0
     fg%coef_gxgy0 = 1d0
-    fg%coef_cGdt  = 0d0
+    fg%cos_cGdt   = 0d0
+    fg%sin_cGdt   = 0d0
   end if
 
   do iz=ng%is(3),ng%ie(3)
@@ -745,7 +747,8 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
       fg%coef_nabla(ix,iy,iz,3) = -zi*g(3)
       if(ix==1.and.iy==1) fg%coef_gxgy0(ix,iy,iz) = 0d0
       if(cutoff_G2_emfield > 0d0 .and. G2 > cutoff_G2_emfield) fg%coef_gxgy0(ix,iy,iz) = 0d0
-      fg%coef_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
+      fg%cos_cGdt(ix,iy,iz) = cos(cspeed_au*sqrt(G2)*dt)
+      fg%sin_cGdt(ix,iy,iz) = sin(cspeed_au*sqrt(G2)*dt)
     end if
 
   enddo
