@@ -18,7 +18,7 @@
 # define DY(dt) ix,idy(iy+(dt)),iz
 # define DZ(dt) ix,iy,idz(iz+(dt))
 
-subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
+subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
                                        ,tpsi,htpsi,V_local,Ac,div_Ac,lap0,lapt,nabt,k &
                                        )
   use math_constants,only : zi
@@ -26,6 +26,7 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
   integer,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
   integer,intent(in) :: idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  integer,intent(in) :: igs(3),ige(3)
 
   complex(8),intent(in)  :: tpsi   (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
   complex(8),intent(out) :: htpsi  (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
@@ -40,9 +41,9 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
   real(8)    :: kAc(3),div
   complex(8) :: w(3),v,psi0
 
-  do iz=is(3),ie(3)
-  do iy=is(2),ie(2)
-  do ix=is(1),ie(1)
+  do iz=igs(3),ige(3)
+  do iy=igs(2),ige(2)
+  do ix=igs(1),ige(1)
     psi0 = tpsi(ix,iy,iz)
     kAc = k + Ac(:,ix,iy,iz)
     div = div_Ac(ix,iy,iz)

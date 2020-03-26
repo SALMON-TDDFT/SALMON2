@@ -299,7 +299,7 @@ subroutine zstencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
   if (stencil_is_parallelized_by_omp) then
     call zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
   else
-    call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+    call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,is,ie,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
   end if
 end subroutine zstencil_microAc
 

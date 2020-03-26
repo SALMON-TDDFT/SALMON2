@@ -324,11 +324,30 @@ contains
     use sendrecv_grid, only: srg_pack, srg_communication, srg_unpack, &
                              update_overlap_complex8
     use code_optimization, only: modx,mody,modz,optimized_stencil_is_callable
+    use communication, only: comm_proc_null, comm_get_groupinfo
     implicit none
     integer :: igs(3),ige(3)
-    integer,parameter :: nxblk=8, nyblk=8, nzblk=8
+    integer,parameter :: nyblk=8, nzblk=8
     integer :: ibx,iby,ibz
-    integer :: idir,iside,ibs(3),ibe(3)
+    integer :: iplane,ibs(3),ibe(3)
+    integer :: is(3),ie(3)
+    logical :: is_divided(3)
+    integer :: myrank,nprocs
+
+    call comm_get_groupinfo(srg%icomm, myrank, nprocs)
+    do iplane=1,3
+      is_divided(iplane) = srg%neig(1,iplane) /= comm_proc_null .and. &
+                           srg%neig(1,iplane) /= myrank
+    end do
+
+    is(:) = mg%is(:)
+    ie(:) = mg%ie(:)
+    do iplane=1,3
+      if (is_divided(iplane)) then
+        is(iplane) = is(iplane) + 4
+        ie(iplane) = ie(iplane) - 4
+      end if
+    end do
 
 ! phase 1. pack halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE1)
@@ -339,7 +358,7 @@ contains
     call timer_begin(LOG_UHPSI_OVL_PHASE2)
 !$omp parallel default(none) &
 !$omp          private(io,ispin,igs,ige,ibx,iby,ibz) &
-!$omp          shared(ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,srg,modx,mody,modz) &
+!$omp          shared(is,ie,ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,srg,modx,mody,modz) &
 !$omp          shared(optimized_stencil_is_callable)
 
 ! halo communication by master thread (tid = 0)
@@ -351,15 +370,14 @@ contains
 
 ! A computation with multi-thread except master thread,
 ! but master thread can join this loop if the communication completed before computation done.
-!$omp do collapse(5) schedule(dynamic,1)
+!$omp do collapse(4) schedule(dynamic,1)
     do io=io_s,io_e
     do ispin=1,Nspin
-    do ibz=mg%is(3)+4,mg%ie(3)-4,nzblk
-    do iby=mg%is(2)+4,mg%ie(2)-4,nyblk
-    do ibx=mg%is(1)+4,mg%ie(1)-4,nxblk
-      igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, mg%ie(3)-4)
-      igs(2) = iby ; ige(2) = min(iby + nyblk - 1, mg%ie(2)-4)
-      igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, mg%ie(1)-4)
+    do ibz=is(3),ie(3),nzblk
+    do iby=is(2),ie(2),nyblk
+      igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, ie(3))
+      igs(2) = iby ; ige(2) = min(iby + nyblk - 1, ie(2))
+      igs(1) = is(1) ; ige(1) = ie(1)
 #ifdef USE_OPT_EXPLICIT_VECTORIZATION
       if (optimized_stencil_is_callable) then
         call zstencil_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
@@ -377,7 +395,6 @@ contains
     end do
     end do
     end do
-    end do
 !$omp end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE2)
@@ -387,71 +404,59 @@ contains
     call update_overlap_complex8(srg, mg, tpsi%zwf, srg_unpack)
     call timer_end  (LOG_UHPSI_OVL_PHASE3)
 
+    is(:) = mg%is(:)
+    ie(:) = mg%ie(:)
 ! phase 4. computation with halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE4)
 !$omp parallel default(none) &
-!$omp          private(io,ispin,idir,iside,igs,ige,ibx,iby,ibz,ibs,ibe) &
-!$omp          shared(ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,srg,modx,mody,modz) &
+!$omp          firstprivate(is,ie) &
+!$omp          private(io,ispin,iplane,igs,ige,ibx,iby,ibz,ibs,ibe) &
+!$omp          shared(is_divided,ik,im,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,srg,modx,mody,modz) &
 !$omp          shared(optimized_stencil_is_callable)
-    do idir=1,3
-    do iside=1,2
+    do iplane=1,6
 
-      select case((idir-1)*2+iside)
+      if (.not. is_divided((iplane+1)/2)) cycle
+
+      ibs(:) = is(:)
+      ibe(:) = ie(:)
+      select case(iplane)
         case(1) ! update X (up)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
-          ibs(2) = mg%is(2)
-          ibe(2) = mg%ie(2)
           ibs(1) = mg%ie(1) - 4 + 1
           ibe(1) = mg%ie(1)
         case(2) ! update X (down)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
-          ibs(2) = mg%is(2)
-          ibe(2) = mg%ie(2)
           ibs(1) = mg%is(1)
           ibe(1) = mg%is(1) + 4 - 1
         case(3) ! update Y (up)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
           ibs(2) = mg%ie(2) - 4 + 1
           ibe(2) = mg%ie(2)
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
         case(4) ! update Y (down)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
           ibs(2) = mg%is(2)
           ibe(2) = mg%is(2) + 4 - 1
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
         case(5) ! update Z (up)
           ibs(3) = mg%ie(3) - 4 + 1
           ibe(3) = mg%ie(3)
-          ibs(2) = mg%is(2) + 4
-          ibe(2) = mg%ie(2) - 4
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
         case(6) ! update Z (down)
           ibs(3) = mg%is(3)
           ibe(3) = mg%is(3) + 4 - 1
-          ibs(2) = mg%is(2) + 4
-          ibe(2) = mg%ie(2) - 4
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
-        case default
-          stop 'error: compute halo region'
       end select
 
-!$omp do collapse(5)
+      select case(iplane)
+        case(2)
+          is(1) = is(1) + 4
+          ie(1) = ie(1) - 4
+        case(4)
+          is(2) = is(2) + 4
+          ie(2) = ie(2) - 4
+      end select
+
+!$omp do collapse(4) schedule(dynamic,1)
       do io=io_s,io_e
       do ispin=1,Nspin
       do ibz=ibs(3),ibe(3),nzblk
       do iby=ibs(2),ibe(2),nyblk
-      do ibx=ibs(1),ibe(1),nxblk
         igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, ibe(3))
         igs(2) = iby ; ige(2) = min(iby + nyblk - 1, ibe(2))
-        igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, ibe(1))
+        igs(1) = ibs(1) ; ige(1) = ibe(1)
 #ifdef USE_OPT_EXPLICIT_VECTORIZATION
         if (optimized_stencil_is_callable) then
           call zstencil_tuned_seq(mg%is_array,mg%ie_array,mg%is,mg%ie,modx,mody,modz,igs,ige &
@@ -469,9 +474,7 @@ contains
       end do
       end do
       end do
-      end do
-!$omp end do
-    end do
+!$omp end do nowait
     end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
@@ -480,12 +483,30 @@ contains
   subroutine zstencil_microac_overlapped
     use sendrecv_grid, only: srg_pack, srg_communication, srg_unpack, &
                              update_overlap_complex8
-    use code_optimization, only: modx,mody,modz,optimized_stencil_is_callable
+    use communication, only: comm_proc_null, comm_get_groupinfo
     implicit none
     integer :: igs(3),ige(3)
-    integer,parameter :: nxblk=8, nyblk=8, nzblk=8
+    integer,parameter :: nyblk=8, nzblk=8
     integer :: ibx,iby,ibz
-    integer :: idir,iside,ibs(3),ibe(3)
+    integer :: iplane,ibs(3),ibe(3)
+    integer :: is(3),ie(3)
+    logical :: is_divided(3)
+    integer :: myrank,nprocs
+
+    call comm_get_groupinfo(srg%icomm, myrank, nprocs)
+    do iplane=1,3
+      is_divided(iplane) = srg%neig(1,iplane) /= comm_proc_null .and. &
+                           srg%neig(1,iplane) /= myrank
+    end do
+
+    is(:) = mg%is(:)
+    ie(:) = mg%ie(:)
+    do iplane=1,3
+      if (is_divided(iplane)) then
+        is(iplane) = is(iplane) + 4
+        ie(iplane) = ie(iplane) - 4
+      end if
+    end do
 
 ! phase 1. pack halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE1)
@@ -496,8 +517,7 @@ contains
     call timer_begin(LOG_UHPSI_OVL_PHASE2)
 !$omp parallel default(none) &
 !$omp          private(ik,im,io,ispin,igs,ige,ibx,iby,ibz) &
-!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,system,srg,modx,mody,modz) &
-!$omp          shared(optimized_stencil_is_callable)
+!$omp          shared(is,ie,im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,system,srg)
 
 ! halo communication by master thread (tid = 0)
 !$omp master
@@ -508,19 +528,18 @@ contains
 
 ! A computation with multi-thread except master thread,
 ! but master thread can join this loop if the communication completed before computation done.
-!$omp do collapse(7) schedule(dynamic,1)
     do im=im_s,im_e
     do ik=ik_s,ik_e
+!$omp do collapse(4) schedule(dynamic,1)
     do io=io_s,io_e
     do ispin=1,Nspin
-    do ibz=mg%is(3)+4,mg%ie(3)-4,nzblk
-    do iby=mg%is(2)+4,mg%ie(2)-4,nyblk
-    do ibx=mg%is(1)+4,mg%ie(1)-4,nxblk
-      igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, mg%ie(3)-4)
-      igs(2) = iby ; ige(2) = min(iby + nyblk - 1, mg%ie(2)-4)
-      igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, mg%ie(1)-4)
+    do ibz=is(3),ie(3),nzblk
+    do iby=is(2),ie(2),nyblk
+      igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, ie(3))
+      igs(2) = iby ; ige(2) = min(iby + nyblk - 1, ie(2))
+      igs(1) = is(1) ; ige(1) = ie(1)
       call zstencil_microAc_typical_seq( &
-              mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+              mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
              ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
              ,V_local(ispin)%f,system%Ac_micro%v,system%div_Ac%f,stencil%coef_lap0 &
              ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
@@ -528,10 +547,9 @@ contains
     end do
     end do
     end do
+!$omp end do nowait
     end do
     end do
-    end do
-!$omp end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE2)
 
@@ -540,75 +558,62 @@ contains
     call update_overlap_complex8(srg, mg, tpsi%zwf, srg_unpack)
     call timer_end  (LOG_UHPSI_OVL_PHASE3)
 
+    is(:) = mg%is(:)
+    ie(:) = mg%ie(:)
 ! phase 4. computation with halo region
     call timer_begin(LOG_UHPSI_OVL_PHASE4)
 !$omp parallel default(none) &
-!$omp          private(im,ik,io,ispin,idir,iside,igs,ige,ibx,iby,ibz,ibs,ibe) &
-!$omp          shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,k_nabt,system,srg,modx,mody,modz) &
-!$omp          shared(optimized_stencil_is_callable)
-    do idir=1,3
-    do iside=1,2
+!$omp          firstprivate(is,ie) &
+!$omp          private(im,ik,io,ispin,iplane,igs,ige,ibx,iby,ibz,ibs,ibe) &
+!$omp          shared(is_divided,im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,mg,tpsi,htpsi,V_local,k_lap0,stencil,system,srg)
+    do iplane=1,6
 
-      select case((idir-1)*2+iside)
+      if (.not. is_divided((iplane+1)/2)) cycle
+
+      ibs(:) = is(:)
+      ibe(:) = ie(:)
+      select case(iplane)
         case(1) ! update X (up)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
-          ibs(2) = mg%is(2)
-          ibe(2) = mg%ie(2)
           ibs(1) = mg%ie(1) - 4 + 1
           ibe(1) = mg%ie(1)
         case(2) ! update X (down)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
-          ibs(2) = mg%is(2)
-          ibe(2) = mg%ie(2)
           ibs(1) = mg%is(1)
           ibe(1) = mg%is(1) + 4 - 1
         case(3) ! update Y (up)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
           ibs(2) = mg%ie(2) - 4 + 1
           ibe(2) = mg%ie(2)
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
         case(4) ! update Y (down)
-          ibs(3) = mg%is(3)
-          ibe(3) = mg%ie(3)
           ibs(2) = mg%is(2)
           ibe(2) = mg%is(2) + 4 - 1
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
         case(5) ! update Z (up)
           ibs(3) = mg%ie(3) - 4 + 1
           ibe(3) = mg%ie(3)
-          ibs(2) = mg%is(2) + 4
-          ibe(2) = mg%ie(2) - 4
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
         case(6) ! update Z (down)
           ibs(3) = mg%is(3)
           ibe(3) = mg%is(3) + 4 - 1
-          ibs(2) = mg%is(2) + 4
-          ibe(2) = mg%ie(2) - 4
-          ibs(1) = mg%is(1) + 4
-          ibe(1) = mg%ie(1) - 4
-        case default
-          stop 'error: compute halo region'
       end select
 
-!$omp do collapse(7)
+      select case(iplane)
+        case(2)
+          is(1) = is(1) + 4
+          ie(1) = ie(1) - 4
+        case(4)
+          is(2) = is(2) + 4
+          ie(2) = ie(2) - 4
+      end select
+
       do im=im_s,im_e
       do ik=ik_s,ik_e
+!$omp do collapse(4) schedule(dynamic,1)
       do io=io_s,io_e
       do ispin=1,Nspin
       do ibz=ibs(3),ibe(3),nzblk
       do iby=ibs(2),ibe(2),nyblk
-      do ibx=ibs(1),ibe(1),nxblk
         igs(3) = ibz ; ige(3) = min(ibz + nzblk - 1, ibe(3))
         igs(2) = iby ; ige(2) = min(iby + nyblk - 1, ibe(2))
-        igs(1) = ibx ; ige(1) = min(ibx + nxblk - 1, ibe(1))
+        igs(1) = ibs(1) ; ige(1) = ibe(1)
         call zstencil_microAc_typical_seq( &
-                mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,igs,ige &
                ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                ,V_local(ispin)%f,system%Ac_micro%v,system%div_Ac%f,stencil%coef_lap0 &
                ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
@@ -616,11 +621,9 @@ contains
       end do
       end do
       end do
+!$omp end do nowait
       end do
       end do
-      end do
-!$omp end do
-    end do
     end do
 !$omp end parallel
     call timer_end  (LOG_UHPSI_OVL_PHASE4)
