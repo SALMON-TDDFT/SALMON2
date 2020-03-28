@@ -24,7 +24,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic
+  use salmon_global, only: iperiodic,rion,natom
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
@@ -38,7 +38,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: sVpsl
   !
-  integer :: ix,iy,iz,i,nl, ilevel_print
+  integer :: ix,iy,iz,i,nl,ia, ilevel_print
   integer :: mmx(mg%num(1)*mg%num(2)*mg%num(3))
   integer :: mmy(mg%num(1)*mg%num(2)*mg%num(3))
   integer :: mmz(mg%num(1)*mg%num(2)*mg%num(3))
@@ -102,19 +102,32 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   end do
 !$omp end parallel do
 
+  if (.not. allocated(ppg%rion_old)) then
+    call cache_jxyz(ppg,rion)
+
+! For all atom, they should calculate the index and relative coordinate at the first.
+!$omp parallel do private(ia)
+    do ia=1,natom
+      ppg%rion_old(1:3,ia) = ppg%rion_old(1:3,ia) + [hx,hy,hz]*2
+    end do
+!$omp end parallel do
+  end if
+
 call timer_begin(LOG_INIT_PS_CALC_NPS)
-  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
+  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1),lg%num(2),lg%num(3), &
+                                   lg%num(1)*lg%num(2)*lg%num(3),   &
                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
 call timer_end(LOG_INIT_PS_CALC_NPS)
 
 call timer_begin(LOG_INIT_PS_CALC_JXYZ)
   call init_jxyz(ppg)
-
   call calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
                                     hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
 call timer_end(LOG_INIT_PS_CALC_JXYZ)
+
+  call cache_jxyz(ppg,rion)
 
 call timer_begin(LOG_INIT_PS_LMA_UV)
   call set_nlma(pp,ppg)
@@ -570,6 +583,15 @@ subroutine init_mps(ppg)
 
   allocate(ppg%mps(natom))
 
+  if (.not. allocated(ppg%jxyz_max)) then
+    allocate(ppg%jxyz_max(1:3,natom))
+    allocate(ppg%jxyz_min(1:3,natom))
+    allocate(ppg%jxyz_changed(natom))
+    ppg%jxyz_max = 0
+    ppg%jxyz_min = ppg%nps
+    ppg%jxyz_changed = .false.
+  end if
+
 end subroutine init_mps
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_jxyz(ppg)
@@ -598,15 +620,15 @@ subroutine finalize_jxyz(ppg)
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
+subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
   use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
   use structures
-  use communication, only: comm_get_max,comm_get_groupinfo
+  use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
   implicit none
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   real(8),intent(in) :: alx,aly,alz
-  integer,intent(in) :: nl,ml
+  integer,intent(in) :: nl,ml,nlx,nly,nlz
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz
@@ -620,7 +642,7 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3), xyz(3)
   integer :: irank,nproc,na,ia_s,ia_e
   real(8) :: rion_min(3), rion_max(3), rps_max
-  integer :: mg_min(3), mg_max(3)
+  integer :: mg_min(3), mg_max(3), nmin(3), nmax(3)
   logical :: flag_cuboid
 
   if (present(info)) then
@@ -707,12 +729,16 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 
 
   mps_tmp = 0
+  ppg%jxyz_changed(:) = .false.
 !$omp parallel
 !$omp do private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
+!$omp    private(nmin,nmax) &
 !$omp    reduction(max:mps_tmp)
   do ia=ia_s,ia_e
     ik=kion(ia)
     j=0
+    nmin(1:3) = ppg%jxyz_min(1:3,ia)
+    nmax(1:3) = ppg%jxyz_max(1:3,ia)
     do ix=-nc(1),nc(1)
       if( flag_cuboid ) then
         xyz(1) = rion(1,ia) + ix*al(1,1)
@@ -755,22 +781,84 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matr
 !        y=my(i)*Hy+rshift(2)-tmpy
 !        z=mz(i)*Hz+rshift(3)-tmpz
         r=sqrt(x*x+y*y+z*z)
-        if (r<pp%rps(ik)+1.d-12) j=j+1
+        if (r<pp%rps(ik)+1.d-12) then
+          nmin(1) = min(nmin(1), mx(i)+ix*nlx)
+          nmin(2) = min(nmin(2), my(i)+iy*nly)
+          nmin(3) = min(nmin(3), mz(i)+iz*nlz)
+          nmax(1) = max(nmax(1), mx(i)+ix*nlx)
+          nmax(2) = max(nmax(2), my(i)+iy*nly)
+          nmax(3) = max(nmax(3), mz(i)+iz*nlz)
+          ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
+                                 nmin(1) /= ppg%jxyz_min(1,ia) .or. &
+                                 nmin(2) /= ppg%jxyz_min(2,ia) .or. &
+                                 nmin(3) /= ppg%jxyz_min(3,ia) .or. &
+                                 nmax(1) /= ppg%jxyz_max(1,ia) .or. &
+                                 nmax(2) /= ppg%jxyz_max(2,ia) .or. &
+                                 nmax(3) /= ppg%jxyz_max(3,ia)
+          j=j+1
+        end if
       enddo
     enddo
     enddo
     enddo
+    ppg%jxyz_min(1:3,ia) = nmin(1:3)
+    ppg%jxyz_max(1:3,ia) = nmax(1:3)
+    ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia) .or. (ppg%mps_old(ia) /= j)
     mps_tmp = max(mps_tmp,j)
   end do
 !$omp end do
 !$omp end parallel
 
   ppg%nps=mps_tmp
+  if (allocated(ppg%jxyz_old)) then
+    ppg%nps = max(ppg%nps, size(ppg%jxyz_old,2))
+  end if
   if (present(info)) then
     call comm_get_max(ppg%nps,info%icomm_ko)
+    call comm_logical_or(ppg%jxyz_changed,info%icomm_ko)
   end if
 
 end subroutine calc_nps
+
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+subroutine cache_jxyz(ppg,rion)
+  use structures
+  implicit none
+  type(s_pp_grid)    :: ppg
+  real(8),intent(in) :: rion(:,:)
+
+  if (allocated(ppg%rion_old)) then
+    deallocate(ppg%rion_old)
+    deallocate(ppg%jxyz_old,ppg%jxx_old,ppg%jyy_old,ppg%jzz_old)
+    deallocate(ppg%mps_old,ppg%rxyz_old)
+  end if
+
+  allocate(ppg%rion_old(size(rion,1),size(rion,2)))
+  allocate(ppg%jxyz_old(size(ppg%jxyz,1),size(ppg%jxyz,2),size(ppg%jxyz,3)))
+  allocate(ppg%jxx_old(size(ppg%jxx,1),size(ppg%jxx,2)))
+  allocate(ppg%jyy_old(size(ppg%jyy,1),size(ppg%jyy,2)))
+  allocate(ppg%jzz_old(size(ppg%jzz,1),size(ppg%jzz,2)))
+  allocate(ppg%mps_old(size(ppg%mps,1)))
+  allocate(ppg%rxyz_old(size(ppg%rxyz,1),size(ppg%rxyz,2),size(ppg%rxyz,3)))
+
+  if (allocated(ppg%jxyz)) then
+    ppg%rion_old = rion
+    ppg%jxyz_old = ppg%jxyz
+    ppg%jxx_old  = ppg%jxx
+    ppg%jyy_old  = ppg%jyy
+    ppg%jzz_old  = ppg%jzz
+    ppg%mps_old  = ppg%mps
+    ppg%rxyz_old = ppg%rxyz
+  else
+    ppg%rion_old = rion
+    ppg%jxyz_old = 0
+    ppg%jxx_old  = 0
+    ppg%jyy_old  = 0
+    ppg%jzz_old  = 0
+    ppg%mps_old  = 0
+    ppg%rxyz_old = 0d0
+  end if
+end subroutine
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
@@ -797,8 +885,20 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   real(8) :: rion_min(3), rion_max(3), rps_max
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
+  !
+  real(8) :: min_distance(3),min2norm
+  logical :: is_proc_distributed
 
-  if (present(info)) then
+  min_distance(:) = [hx, hy, hz]
+  min2norm = sqrt(dot_product(min_distance,min_distance))
+
+  if (allocated(ppg%rion_old)) then
+    is_proc_distributed = .false.
+  else
+    is_proc_distributed = present(info)
+  end if
+
+  if (is_proc_distributed) then
     ia_s = info%ia_s
     ia_e = info%ia_e
   else
@@ -891,8 +991,20 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
 !$omp parallel do default(none) &
 !$omp    private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
 !$omp    shared(ia_s,ia_e,natom,kion,nc,al,rion,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg) &
-!$omp    shared(mg_min,mg_max,flag_cuboid,rps_max)
+!$omp    shared(mg_min,mg_max,flag_cuboid,rps_max) &
+!$omp    firstprivate(min2norm)
   do ia=ia_s,ia_e
+  if (.not. ppg%jxyz_changed(ia)) then
+    j = ppg%mps_old(ia)
+    ppg%mps(ia) = j
+    ppg%jxyz(1:3,1:j,ia) = ppg%jxyz_old(1:3,1:j,ia)
+    ppg%jxx(1:j,ia)      = ppg%jxx_old(1:j,ia)
+    ppg%jyy(1:j,ia)      = ppg%jyy_old(1:j,ia)
+    ppg%jzz(1:j,ia)      = ppg%jzz_old(1:j,ia)
+    do i=1,ppg%mps(ia)
+      ppg%rxyz(:,i,ia) = ppg%rxyz_old(:,i,ia) - (rion(:,ia) - ppg%rion_old(:,ia))
+    end do
+  else
     ik=kion(ia)
     j=0
     do ix=-nc(1),nc(1)
@@ -950,10 +1062,11 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
     end do
     end do
     ppg%mps(ia)=j
+  end if
   end do
 !$omp end parallel do
 
-  if (present(info)) then
+  if (is_proc_distributed) then
     call comm_summation(ppg%jxyz,info%icomm_ko)
     call comm_summation(ppg%jxx, info%icomm_ko)
     call comm_summation(ppg%jyy, info%icomm_ko)
