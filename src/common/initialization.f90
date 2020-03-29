@@ -348,7 +348,7 @@ subroutine init_parallel_dft(system,info,pinfo)
 ! #ia: atom index (communicator=info%icomm_ko)
   info%ia_s = int((system%nion * info%id_ko) / info%isize_ko) + 1
   info%ia_e = int((system%nion * (info%id_ko + 1)) / info%isize_ko)
-  na = info%ia_e - info%ia_s
+  na = info%ia_e - info%ia_s + 1
   if (info%id_ko == info%isize_ko-1) info%ia_e = system%nion
 
 end subroutine init_parallel_dft
