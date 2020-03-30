@@ -104,13 +104,6 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
 
   if (.not. allocated(ppg%rion_old)) then
     call cache_jxyz(ppg,rion)
-
-! For all atom, they should calculate the index and relative coordinate at the first.
-!$omp parallel do private(ia)
-    do ia=1,natom
-      ppg%rion_old(1:3,ia) = ppg%rion_old(1:3,ia) + [hx,hy,hz]*2
-    end do
-!$omp end parallel do
   end if
 
 call timer_begin(LOG_INIT_PS_CALC_NPS)
@@ -982,7 +975,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   ppg%jxx  = 0
   ppg%jyy  = 0
   ppg%jzz  = 0
-  ppg%rxyz = 0
+  ppg%rxyz = 0d0
   ppg%mps  = 0
 
 !$omp parallel do default(none) &
@@ -1049,14 +1042,14 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
       end do
       ppg%mps(ia)=j
     else
-      j = ppg%mps_old(ia)
-      ppg%mps(ia) = j
-      ppg%jxyz(1:3,1:j,ia) = ppg%jxyz_old(1:3,1:j,ia)
-      ppg%jxx(1:j,ia)      = ppg%jxx_old(1:j,ia)
-      ppg%jyy(1:j,ia)      = ppg%jyy_old(1:j,ia)
-      ppg%jzz(1:j,ia)      = ppg%jzz_old(1:j,ia)
-      do i=1,ppg%mps(ia)
-        ppg%rxyz(:,i,ia) = ppg%rxyz_old(:,i,ia) - (rion(:,ia) - ppg%rion_old(:,ia))
+      i = ppg%mps_old(ia)
+      ppg%mps(ia) = i
+      ppg%jxyz(1:3,1:i,ia) = ppg%jxyz_old(1:3,1:i,ia)
+      ppg%jxx(1:i,ia)      = ppg%jxx_old(1:i,ia)
+      ppg%jyy(1:i,ia)      = ppg%jyy_old(1:i,ia)
+      ppg%jzz(1:i,ia)      = ppg%jzz_old(1:i,ia)
+      do j=1,i
+        ppg%rxyz(1:3,j,ia) = ppg%rxyz_old(1:3,j,ia) - (rion(1:3,ia) - ppg%rion_old(1:3,ia))
       end do
     end if
   end do
