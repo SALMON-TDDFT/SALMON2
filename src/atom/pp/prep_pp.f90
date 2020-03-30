@@ -851,11 +851,11 @@ subroutine cache_jxyz(ppg,rion)
     ppg%rxyz_old = ppg%rxyz
   else
     ppg%rion_old = rion
-    ppg%jxyz_old = 0
-    ppg%jxx_old  = 0
-    ppg%jyy_old  = 0
-    ppg%jzz_old  = 0
-    ppg%mps_old  = 0
+    ppg%jxyz_old = -1
+    ppg%jxx_old  = -1
+    ppg%jyy_old  = -1
+    ppg%jzz_old  = -1
+    ppg%mps_old  = -1
     ppg%rxyz_old = 0d0
   end if
 end subroutine
