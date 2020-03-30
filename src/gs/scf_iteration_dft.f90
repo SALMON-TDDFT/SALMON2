@@ -316,7 +316,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 
 ! modification of mixing rate for auto_mixing
    if(yn_auto_mixing=='y')then
-     call check_mixing_half(sum1,mixing)
+     call check_mixing_half(Miter,sum1,mixing)
    end if
  
    rNebox1 = 0d0 
