@@ -153,6 +153,18 @@ subroutine set_initial_velocity(system,md)
   call comm_bcast(system%Velocity ,nproc_group_global)
  
 end subroutine set_initial_velocity
+
+Subroutine quickrnd(iseed,rnd)
+  implicit none
+  integer,parameter :: im=6075,ia=106,ic=1283
+  integer :: iseed
+  real(8) :: rnd
+
+  iseed=mod(iseed*ia+ic,im)
+  rnd=dble(iseed)/dble(im)
+
+  return
+End Subroutine quickrnd
    
 subroutine read_initial_velocity(system,md)
   ! initial velocity for md option can be given by external file 

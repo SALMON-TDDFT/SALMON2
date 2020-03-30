@@ -22,18 +22,6 @@ program main
 
   call timer_initialize
 
-  !ARTED: (legacy: only in the case of iperiodic=3 + domain parallel=y)
-  select case(yn_domain_parallel)  
-  case('n')
-     select case(iperiodic)
-     case(3) 
-        if( theory/='maxwell' ) then
-          call arted
-          stop
-        end if
-     end select
-  end select
-
   !GCEED: (main)
   if(nproc_id_global==0) write(*,*)"  theory= ", trim(theory)
   select case(theory)
@@ -43,7 +31,7 @@ program main
   case('dft2tddft')                   ; call main_dft2tddft ! DFT data redistributor to use TDDFT
   case('dft_k_expand')                ; call main_dft_k_expand !convert DFT/k-points data to supercell/gammma DFT
   case('single_scale_maxwell_tddft'  ); call main_tddft
-  case('multi_scale_maxwell_tddft'   ); call arted      !temporally
+  case('multi_scale_maxwell_tddft'   ); stop("Multi-scale Maxwell-TDDFT is not implemented") !temporally
   case('multiscale_experiment' )      ; call main_ms    ! experimental
   case('maxwell')                     ; call main_maxwell
  !case('sbe')                         ; call main_sbe

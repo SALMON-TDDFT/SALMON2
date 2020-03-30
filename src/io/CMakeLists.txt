@@ -2,7 +2,6 @@ set(SOURCES
     checkpoint_restart.f90
     inputoutput.f90
     salmon_global.f90
-    flops.f90
     perflog.f90
     posix.c
     filesystem.f90

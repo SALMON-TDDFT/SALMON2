@@ -85,8 +85,8 @@ contains
   subroutine write_flops(fd,write_mode)
     use parallelization
     use communication
-    use flops
     use math_constants
+!    use flops
     use salmon_global, only: theory, iperiodic, yn_domain_parallel
     implicit none
     integer, intent(in) :: fd, write_mode
@@ -101,7 +101,7 @@ contains
           ! 3: ARTED
           case(3)
             if (yn_domain_parallel == 'y') then
-              call get_hamiltonian_flops(lg,pg,mg,sg)
+            !  call get_hamiltonian_flops(lg,pg,mg,sg)
               if (comm_is_root(nproc_id_global)) then
                 if (write_mode == write_mode_readable) then
                   write (fd,'(a30,4(a12))') 'hamiltonian','all','stencil','pseudo-pt','update'
