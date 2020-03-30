@@ -886,11 +886,8 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
   !
-  real(8) :: min_distance(3),min2norm
   logical :: is_proc_distributed
 
-  min_distance(:) = [hx, hy, hz]
-  min2norm = sqrt(dot_product(min_distance,min_distance))
 
   if (allocated(ppg%rion_old)) then
     is_proc_distributed = .false.
@@ -991,78 +988,77 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
 !$omp parallel do default(none) &
 !$omp    private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
 !$omp    shared(ia_s,ia_e,natom,kion,nc,al,rion,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg) &
-!$omp    shared(mg_min,mg_max,flag_cuboid,rps_max) &
-!$omp    firstprivate(min2norm)
+!$omp    shared(mg_min,mg_max,flag_cuboid,rps_max)
   do ia=ia_s,ia_e
-  if (.not. ppg%jxyz_changed(ia)) then
-    j = ppg%mps_old(ia)
-    ppg%mps(ia) = j
-    ppg%jxyz(1:3,1:j,ia) = ppg%jxyz_old(1:3,1:j,ia)
-    ppg%jxx(1:j,ia)      = ppg%jxx_old(1:j,ia)
-    ppg%jyy(1:j,ia)      = ppg%jyy_old(1:j,ia)
-    ppg%jzz(1:j,ia)      = ppg%jzz_old(1:j,ia)
-    do i=1,ppg%mps(ia)
-      ppg%rxyz(:,i,ia) = ppg%rxyz_old(:,i,ia) - (rion(:,ia) - ppg%rion_old(:,ia))
-    end do
-  else
-    ik=kion(ia)
-    j=0
-    do ix=-nc(1),nc(1)
-      if( flag_cuboid ) then
-        xyz(1) = rion(1,ia) + ix*al(1,1)
-        if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
-            xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
-      endif
-    do iy=-nc(2),nc(2)
-      if( flag_cuboid ) then
-        xyz(2) = rion(2,ia) + iy*al(2,2)
-        if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
-            xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
-      endif
-    do iz=-nc(3),nc(3)
-      if( flag_cuboid ) then
-        xyz(3) = rion(3,ia) + iz*al(3,3)
-        if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
-            xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
-      endif
+    if (ppg%jxyz_changed(ia)) then
+      ik=kion(ia)
+      j=0
+      do ix=-nc(1),nc(1)
+        if( flag_cuboid ) then
+          xyz(1) = rion(1,ia) + ix*al(1,1)
+          if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
+              xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
+        endif
+      do iy=-nc(2),nc(2)
+        if( flag_cuboid ) then
+          xyz(2) = rion(2,ia) + iy*al(2,2)
+          if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
+              xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
+        endif
+      do iz=-nc(3),nc(3)
+        if( flag_cuboid ) then
+          xyz(3) = rion(3,ia) + iz*al(3,3)
+          if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
+              xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
+        endif
 
-      rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
-      rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
-      rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
-      tmpx = rion(1,ia) + rr(1)
-      tmpy = rion(2,ia) + rr(2)
-      tmpz = rion(3,ia) + rr(3)
-      do i=1,ml
-        u = mx(i)*hx + rshift(1)
-        v = my(i)*hy + rshift(2)
-        w = mz(i)*hz + rshift(3)
-        rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
-        rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
-        rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
-        x = rr(1) - tmpx
-        y = rr(2) - tmpy
-        z = rr(3) - tmpz
-        r=sqrt(x*x+y*y+z*z)
-        if (r<pp%rps(ik)) then
-          j=j+1
-          if (j<=ppg%nps) then
-            ppg%jxyz(1,j,ia)=mx(i)
-            ppg%jxyz(2,j,ia)=my(i)
-            ppg%jxyz(3,j,ia)=mz(i)
-            ppg%jxx(j,ia)=ix
-            ppg%jyy(j,ia)=iy
-            ppg%jzz(j,ia)=iz
-            ppg%rxyz(1,j,ia)=x
-            ppg%rxyz(2,j,ia)=y
-            ppg%rxyz(3,j,ia)=z
+        rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
+        rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
+        rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
+        tmpx = rion(1,ia) + rr(1)
+        tmpy = rion(2,ia) + rr(2)
+        tmpz = rion(3,ia) + rr(3)
+        do i=1,ml
+          u = mx(i)*hx + rshift(1)
+          v = my(i)*hy + rshift(2)
+          w = mz(i)*hz + rshift(3)
+          rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
+          rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
+          rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
+          x = rr(1) - tmpx
+          y = rr(2) - tmpy
+          z = rr(3) - tmpz
+          r=sqrt(x*x+y*y+z*z)
+          if (r<pp%rps(ik)) then
+            j=j+1
+            if (j<=ppg%nps) then
+              ppg%jxyz(1,j,ia)=mx(i)
+              ppg%jxyz(2,j,ia)=my(i)
+              ppg%jxyz(3,j,ia)=mz(i)
+              ppg%jxx(j,ia)=ix
+              ppg%jyy(j,ia)=iy
+              ppg%jzz(j,ia)=iz
+              ppg%rxyz(1,j,ia)=x
+              ppg%rxyz(2,j,ia)=y
+              ppg%rxyz(3,j,ia)=z
+            end if
           end if
-        end if
+        end do
       end do
-    end do
-    end do
-    end do
-    ppg%mps(ia)=j
-  end if
+      end do
+      end do
+      ppg%mps(ia)=j
+    else
+      j = ppg%mps_old(ia)
+      ppg%mps(ia) = j
+      ppg%jxyz(1:3,1:j,ia) = ppg%jxyz_old(1:3,1:j,ia)
+      ppg%jxx(1:j,ia)      = ppg%jxx_old(1:j,ia)
+      ppg%jyy(1:j,ia)      = ppg%jyy_old(1:j,ia)
+      ppg%jzz(1:j,ia)      = ppg%jzz_old(1:j,ia)
+      do i=1,ppg%mps(ia)
+        ppg%rxyz(:,i,ia) = ppg%rxyz_old(:,i,ia) - (rion(:,ia) - ppg%rion_old(:,ia))
+      end do
+    end if
   end do
 !$omp end parallel do
 
