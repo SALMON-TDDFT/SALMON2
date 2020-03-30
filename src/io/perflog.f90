@@ -86,6 +86,7 @@ contains
     use parallelization
     use communication
     use math_constants
+!    use flops
     use salmon_global, only: theory, iperiodic, yn_domain_parallel
     implicit none
     integer, intent(in) :: fd, write_mode
