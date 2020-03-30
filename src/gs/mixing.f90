@@ -519,12 +519,13 @@ subroutine copy_density(Miter,nspin,ng,srho_s,mixing)
 end subroutine copy_density
 
 !===================================================================================================================================
-subroutine check_mixing_half(convergence_value,mixing)
+subroutine check_mixing_half(Miter,convergence_value,mixing)
   use salmon_global, only: method_mixing,update_mixing_ratio
   use structures, only: s_mixing
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_is_root, comm_bcast
   implicit none
+  integer, intent(in) :: Miter
   real(8), intent(in) :: convergence_value
   type(s_mixing), intent(inout) :: mixing
   integer :: icheck
@@ -543,17 +544,20 @@ subroutine check_mixing_half(convergence_value,mixing)
     select case(method_mixing)
     case('simple')
       if(comm_is_root(nproc_id_global)) then
-        write(*,'(" mixrate is decreased from",f12.8," to",f12.8,"." )') mixing%mixrate, mixing%mixrate*0.5d0 
+        write(*,'(" mixrate decreased from",e16.8," to",e16.8," at iter = ", i6,"." )')  &
+          mixing%mixrate, mixing%mixrate*0.5d0, Miter
       end if
       mixing%mixrate=mixing%mixrate*0.5d0
     case('broyden')
       if(comm_is_root(nproc_id_global)) then
-        write(*,'(" alpha_mb is decreased from",f12.8," to",f12.8,"." )') mixing%alpha_mb, mixing%alpha_mb*0.5d0 
+        write(*,'(" alpha_mb decreased from",e16.8," to",e16.8," at iter = ", i6,"." )')  &
+          mixing%alpha_mb, mixing%alpha_mb*0.5d0, Miter 
       end if
       mixing%alpha_mb=mixing%alpha_mb*0.5d0
     case('pulay')
       if(comm_is_root(nproc_id_global)) then
-        write(*,'(" beta_p is decreased from",f12.8," to",f12.8,"." )') mixing%beta_p, mixing%beta_p*0.5d0 
+        write(*,'(" beta_p decreased from",e16.8," to",e16.8," at iter = ", i6,"." )')  &
+          mixing%beta_p, mixing%beta_p*0.5d0, Miter 
       end if
       mixing%beta_p=mixing%beta_p*0.5d0
     end select
