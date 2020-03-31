@@ -256,6 +256,11 @@ module communication
     module procedure comm_logical_and_scalar
   end interface
 
+  interface comm_logical_or
+    ! 1-D array (in-place)
+    module procedure comm_ip_logical_or_array1d
+  end interface
+
   private :: get_rank, error_check, abort_show_message
 
 #define MPI_ERROR_CHECK(x) x; call error_check(ierr)
@@ -1360,6 +1365,15 @@ contains
     integer, intent(in)  :: ngroup
     integer :: ierr
     MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_LOGICAL, MPI_LAND, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_ip_logical_or_array1d(values, ngroup)
+    use mpi, only: MPI_LOGICAL, MPI_IN_PLACE, MPI_LOR
+    implicit none
+    logical, intent(inout) :: values(:)
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_LOGICAL, MPI_LOR, ngroup, ierr))
   end subroutine
 
 
