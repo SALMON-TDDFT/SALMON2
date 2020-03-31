@@ -1022,7 +1022,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
           y = rr(2) - tmpy
           z = rr(3) - tmpz
           r=sqrt(x*x+y*y+z*z)
-          if (r<pp%rps(ik)) then
+          if (r<pp%rps(ik)+1.d-12) then
             j=j+1
             if (j<=ppg%nps) then
               ppg%jxyz(1,j,ia)=mx(i)
