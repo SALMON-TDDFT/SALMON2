@@ -635,7 +635,7 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3), xyz(3)
   integer :: irank,nproc,na,ia_s,ia_e
   real(8) :: rion_min(3), rion_max(3), rps_max
-  integer :: mg_min(3), mg_max(3), nmin(3), nmax(3)
+  integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
 
   if (present(info)) then
@@ -725,13 +725,10 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy
   ppg%jxyz_changed(:) = .false.
 !$omp parallel
 !$omp do private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
-!$omp    private(nmin,nmax) &
 !$omp    reduction(max:mps_tmp)
   do ia=ia_s,ia_e
     ik=kion(ia)
     j=0
-    nmin(1:3) = ppg%jxyz_min(1:3,ia)
-    nmax(1:3) = ppg%jxyz_max(1:3,ia)
     do ix=-nc(1),nc(1)
       if( flag_cuboid ) then
         xyz(1) = rion(1,ia) + ix*al(1,1)
@@ -775,27 +772,16 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy
 !        z=mz(i)*Hz+rshift(3)-tmpz
         r=sqrt(x*x+y*y+z*z)
         if (r<pp%rps(ik)+1.d-12) then
-          nmin(1) = min(nmin(1), mx(i)+ix*nlx)
-          nmin(2) = min(nmin(2), my(i)+iy*nly)
-          nmin(3) = min(nmin(3), mz(i)+iz*nlz)
-          nmax(1) = max(nmax(1), mx(i)+ix*nlx)
-          nmax(2) = max(nmax(2), my(i)+iy*nly)
-          nmax(3) = max(nmax(3), mz(i)+iz*nlz)
-          ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
-                                 nmin(1) /= ppg%jxyz_min(1,ia) .or. &
-                                 nmin(2) /= ppg%jxyz_min(2,ia) .or. &
-                                 nmin(3) /= ppg%jxyz_min(3,ia) .or. &
-                                 nmax(1) /= ppg%jxyz_max(1,ia) .or. &
-                                 nmax(2) /= ppg%jxyz_max(2,ia) .or. &
-                                 nmax(3) /= ppg%jxyz_max(3,ia)
           j=j+1
+          ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
+                                 mx(i) /= ppg%jxyz_old(1,j,ia) .or. &
+                                 my(i) /= ppg%jxyz_old(2,j,ia) .or. &
+                                 mz(i) /= ppg%jxyz_old(3,j,ia)
         end if
       enddo
     enddo
     enddo
     enddo
-    ppg%jxyz_min(1:3,ia) = nmin(1:3)
-    ppg%jxyz_max(1:3,ia) = nmax(1:3)
     ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia) .or. (ppg%mps_old(ia) /= j)
     mps_tmp = max(mps_tmp,j)
   end do
