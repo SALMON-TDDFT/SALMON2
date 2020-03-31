@@ -377,10 +377,4 @@ character(256),allocatable :: atom_name(:)
   character(1) :: yn_force_stencil_sequential_computation
   character(1) :: yn_want_communication_overlapping
 
-!! &dft2tddft
-  character(1) :: yn_datafiles_dump
-  integer      :: target_nproc_k
-  integer      :: target_nproc_ob
-  integer      :: target_nproc_rgrid(3)
-
 end module salmon_global
