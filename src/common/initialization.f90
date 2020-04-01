@@ -249,7 +249,7 @@ end subroutine init_dft_system
 subroutine init_process_distribution(system,icomm1,pinfo)
   use structures, only: s_process_info,s_dft_system
   use parallelization, only: nproc_id_global, nproc_group_global
-  use salmon_global, only: theory,ispin
+  use salmon_global, only: theory
   use communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
@@ -681,7 +681,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   use structures
   use math_constants,  only : pi,zi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,nelem,yn_ffte,aEwald,use_singlescale,cutoff_G2_emfield
+  use salmon_global, only: dt,yn_ffte,aEwald,use_singlescale,cutoff_G2_emfield
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: ng
@@ -888,7 +888,6 @@ end subroutine set_gridcoordinate
 
 subroutine init_nion_div(system,lg,mg,info)
   use structures, only: s_dft_system, s_reciprocal_grid, s_rgrid, s_parallel_info
-  use inputoutput, only: num_kgrid
   use communication, only: comm_summation, comm_get_groupinfo, comm_is_root
  !use parallelization, only: nproc_id_global
   implicit none

@@ -115,7 +115,8 @@ subroutine main_dft_k_expand_single
 
   if(system%nspin /= 1) stop "error: nspin must be 1"
   if(nproc_k /= system%nk) stop "error: nproc_k must be # of k-points"
-  if(mod(nstate,nproc_ob)/=0.or.mod(nelec/2,(nstate/nproc_ob))/=0) stop "error: must be mod(nstate,nproc_ob)==0.and.mod(nelec/2,(nstate/nproc_ob))==0"
+  if(mod(nstate,nproc_ob)/=0.or.mod(nelec/2,(nstate/nproc_ob))/=0) &
+    stop "error: must be mod(nstate,nproc_ob)==0.and.mod(nelec/2,(nstate/nproc_ob))==0"
 
   ! read restart data
   call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)

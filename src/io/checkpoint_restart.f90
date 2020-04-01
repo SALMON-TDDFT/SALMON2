@@ -290,7 +290,7 @@ end subroutine restart_rt
 !===================================================================================================================================
 
 subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
-  use salmon_global, only: theory,calc_mode,write_gs_restart_data,yn_auto_mixing
+  use salmon_global, only: theory,calc_mode,write_gs_restart_data
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global, nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -381,7 +381,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data,yn_auto_mixing
+  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data
   implicit none
   character(*)              ,intent(in) :: idir
   type(s_rgrid)             ,intent(in) :: lg, mg, ng

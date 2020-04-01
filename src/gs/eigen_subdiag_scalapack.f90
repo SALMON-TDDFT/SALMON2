@@ -20,12 +20,11 @@ module eigen_scalapack
 
 contains
 
-  subroutine eigen_pdsyevd(pinfo,info,h,e,v)
-    use structures, only: s_process_info, s_parallel_info
+  subroutine eigen_pdsyevd(pinfo,h,e,v)
+    use structures, only: s_process_info
     use communication, only: comm_summation, comm_is_root
     implicit none
-    type(s_process_info),intent(in)     :: pinfo
-    type(s_parallel_info),intent(in) :: info
+    type(s_process_info),intent(in)  :: pinfo
     real(8), intent(in)  :: h(:,:)
     real(8), intent(out) :: e(:)
     real(8), intent(out) :: v(:,:)
@@ -149,12 +148,11 @@ contains
   end subroutine eigen_pdsyevd_red_mem
 
 
-  subroutine eigen_pzheevd(pinfo,info,h,e,v)
-    use structures, only: s_process_info, s_parallel_info
+  subroutine eigen_pzheevd(pinfo,h,e,v)
+    use structures, only: s_process_info
     use communication, only: comm_summation, comm_is_root
     implicit none
-    type(s_process_info),intent(in)     :: pinfo
-    type(s_parallel_info),intent(in) :: info
+    type(s_process_info),intent(in) :: pinfo
     complex(8), intent(in)  :: h(:,:)
     real(8), intent(out)    :: e(:)
     complex(8), intent(out) :: v(:,:)

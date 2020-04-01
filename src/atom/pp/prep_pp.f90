@@ -24,7 +24,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic,rion,natom
+  use salmon_global, only: iperiodic,rion
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
@@ -38,7 +38,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: sVpsl
   !
-  integer :: ix,iy,iz,i,nl,ia, ilevel_print
+  integer :: ix,iy,iz,i,nl, ilevel_print
   integer :: mmx(mg%num(1)*mg%num(2)*mg%num(3))
   integer :: mmy(mg%num(1)*mg%num(2)*mg%num(3))
   integer :: mmz(mg%num(1)*mg%num(2)*mg%num(3))
@@ -389,7 +389,7 @@ END SUBROUTINE calc_Vpsl_isolated
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,vpsl,ppg,property)
-  use salmon_global,only : natom, nelem, kion, yn_ffte
+  use salmon_global,only : nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
@@ -629,7 +629,7 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: x,y,z,r,u,v,w
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3), xyz(3)
-  integer :: irank,nproc,na,ia_s,ia_e
+  integer :: ia_s,ia_e
   real(8) :: rion_min(3), rion_max(3), rps_max
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid
@@ -847,7 +847,7 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   real(8) :: tmpx,tmpy,tmpz
   real(8) :: r,x,y,z,u,v,w
   real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3),xyz(3)
-  integer :: irank,nproc,na,ia_s,ia_e
+  integer :: ia_s,ia_e
   real(8) :: rion_min(3), rion_max(3), rps_max
   integer :: mg_min(3), mg_max(3)
   logical :: flag_cuboid

@@ -91,7 +91,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_ofile) :: ofile
   
   integer :: itotNtime
-  integer :: iob, i,i1,iik,jspin, Mit, m, n
+  integer :: iob, i1,iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
   real(8) :: rbox_array2(4),tt

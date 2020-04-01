@@ -392,7 +392,7 @@ end subroutine
 !===================================================================================================================================
 
 subroutine init_mixing(nspin,ng,mixing)
-  use salmon_global, only: yn_restart,mixrate,alpha_mb,beta_p,yn_auto_mixing
+  use salmon_global, only: mixrate,alpha_mb,beta_p
   use structures
   implicit none
   integer      ,intent(in) :: nspin
