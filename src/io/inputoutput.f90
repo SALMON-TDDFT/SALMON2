@@ -59,7 +59,6 @@ module inputoutput
   integer :: inml_group_hartree
   integer :: inml_group_others
   integer :: inml_code
-  integer :: inml_dft2tddft
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -532,12 +531,6 @@ contains
       & yn_force_stencil_sequential_computation, &
       & yn_want_communication_overlapping
 
-    namelist/dft2tddft/ &
-      & yn_datafiles_dump, &
-      & target_nproc_k, &
-      & target_nproc_ob, &
-      & target_nproc_rgrid
-
 !! == default for &unit ==
     unit_system='au'
 !! =======================
@@ -886,11 +879,6 @@ contains
     yn_force_stencil_openmp_parallelization = 'n'
     yn_force_stencil_sequential_computation = 'n'
     yn_want_communication_overlapping = 'n'
-!! == default for dft2tddft
-    yn_datafiles_dump = 'n'
-    target_nproc_k  = 0
-    target_nproc_ob = 0
-    target_nproc_rgrid = 0
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -963,9 +951,6 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=code, iostat=inml_code)
-      rewind(fh_namelist)
-
-      read(fh_namelist, nml=dft2tddft, iostat=inml_dft2tddft)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -1375,11 +1360,6 @@ contains
     call comm_bcast(yn_force_stencil_openmp_parallelization,nproc_group_global)
     call comm_bcast(yn_force_stencil_sequential_computation,nproc_group_global)
     call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
-!! == bcast for dft2tddft
-    call comm_bcast(yn_datafiles_dump     ,nproc_group_global)
-    call comm_bcast(target_nproc_k        ,nproc_group_global)
-    call comm_bcast(target_nproc_ob       ,nproc_group_global)
-    call comm_bcast(target_nproc_rgrid    ,nproc_group_global)
 
     if (yn_force_stencil_openmp_parallelization == 'y' .and. yn_force_stencil_sequential_computation == 'y') then
       if (comm_is_root(nproc_id_global)) then
@@ -1395,7 +1375,7 @@ contains
     use parallelization
     use communication
     use filesystem, only: get_filehandle
-    use salmon_global, only: directory_read_data,yn_restart !,yn_self_checkpoint,yn_datafiles_dump
+    use salmon_global, only: directory_read_data,yn_restart
     use checkpoint_restart_sub, only: generate_restart_directory_name
     character(256) :: filename_tmp,char_atom, gdir,wdir
     integer :: icount,i
@@ -1446,7 +1426,7 @@ contains
 
         icount = icount + 1
         if_cartesian = .true.
-        if(yn_datafiles_dump == 'y' .or. yn_self_checkpoint == 'y') then
+        if(yn_self_checkpoint == 'y') then
            filename_tmp = trim(gdir)//"rank_000000/atomic_coor.txt"
         else
            filename_tmp = trim(gdir)//"atomic_coor.txt"
@@ -2205,15 +2185,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_openmp_parallelization', yn_force_stencil_openmp_parallelization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_sequential_computation', yn_force_stencil_sequential_computation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
-
-      if(inml_dft2tddft >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dft2tddft', inml_dft2tddft
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_datafiles_dump', yn_datafiles_dump
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_k', target_nproc_k
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_ob', target_nproc_ob
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(1)', target_nproc_rgrid(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(2)', target_nproc_rgrid(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(3)', target_nproc_rgrid(3)
 
       close(fh_variables_log)
 

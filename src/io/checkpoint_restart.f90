@@ -83,7 +83,7 @@ end subroutine generate_restart_directory_name
 subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: yn_self_checkpoint
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
@@ -107,7 +107,7 @@ subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
     iself = (yn_self_checkpoint == 'y')
   end if
 
-  if (iself .or. yn_datafiles_dump == 'y') then
+  if (iself) then
     call create_directory(wdir)
   else
     wdir = gdir
@@ -120,7 +120,7 @@ end subroutine checkpoint_gs
 subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_mixing
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,&
-                           yn_datafiles_dump,read_gs_restart_data
+                           read_gs_restart_data
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
@@ -135,7 +135,7 @@ subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
   if (read_gs_restart_data=='rho') then
@@ -223,7 +223,7 @@ end subroutine restart_opt
 subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,singlescale,idir)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump,use_singlescale
+  use salmon_global, only: yn_self_checkpoint,use_singlescale
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg, ng
@@ -248,7 +248,7 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,si
     iself = (yn_self_checkpoint == 'y')
   end if
 
-  if (iself .or. yn_datafiles_dump == 'y') then
+  if (iself) then
     call create_directory(wdir)
   else
     wdir = gdir
@@ -264,7 +264,7 @@ end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
   type(s_dft_system)     ,intent(inout) :: system
@@ -279,7 +279,7 @@ subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
@@ -381,7 +381,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_restart, theory,calc_mode,yn_datafiles_dump,read_gs_restart_data,yn_auto_mixing
+  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data,yn_auto_mixing
   implicit none
   character(*)              ,intent(in) :: idir
   type(s_rgrid)             ,intent(in) :: lg, mg, ng
@@ -453,7 +453,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
      end if
 
      !debug check
-     if (yn_restart == 'y' .and. yn_datafiles_dump == 'y') then
+     if (yn_restart == 'y') then
         if (nprocs /= nproc_size_global) then
            stop 'number of processes do not match!'
         end if
@@ -513,7 +513,6 @@ end subroutine read_bin
 !===================================================================================================================================
 
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
-  use salmon_global, only: yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
@@ -535,7 +534,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 
   iu2_w = 87
 
-  if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
+  if(is_self_checkpoint) then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
@@ -1049,7 +1048,6 @@ end subroutine write_singlescale
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
-  use salmon_global, only: yn_datafiles_dump
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*),            intent(in) :: idir
@@ -1073,7 +1071,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
 
   iu2_r = 86
 
-  if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
+  if(is_self_checkpoint) then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
@@ -1408,7 +1406,7 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: directory_read_data,yn_self_checkpoint,yn_datafiles_dump,yn_gbp
+  use salmon_global, only: directory_read_data,yn_self_checkpoint,yn_gbp
   implicit none
   integer      ,intent(in) :: comm
   type(s_rgrid),intent(in) :: lg,ng
@@ -1427,7 +1425,7 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
@@ -1553,7 +1551,7 @@ end subroutine restart_singlescale
 !(currently not used: see subroutine "read_atomic_coordinates")
 subroutine restart_Rion(system)
   use structures, only: s_dft_system
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
   type(s_dft_system)     ,intent(inout) :: system
   character(256) :: gdir,wdir
@@ -1562,7 +1560,7 @@ subroutine restart_Rion(system)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
@@ -1573,7 +1571,7 @@ subroutine restart_Velocity(system)
   use structures, only: s_dft_system
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
   type(s_dft_system), intent(inout) :: system
   character(256) :: gdir,wdir
@@ -1582,7 +1580,7 @@ subroutine restart_Velocity(system)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
