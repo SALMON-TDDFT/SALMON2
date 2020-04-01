@@ -9,16 +9,16 @@ import sys
 import os 
 import re 
 
-print("#" * 60)
-print("# Verification start")
+print("#" * 60) 
+print("# Verification start") 
 
 restart_iteration = 60
 
-filelist = [
-    "Si_rt.data",
+filelist = [ 
+    "Si_rt.data", 
 ]
 
-origin_dir = "../203_checkpoint_self"
+origin_dir = "../202_rt_checkpoint_single"
 target_dir = "./"
 
 permissible_error =  1e-15
@@ -55,9 +55,9 @@ for f in filelist:
         d = float(rt[i][15])
         if abs(d - s) > permissible_error:
             print("Mismatch |%e - %e| > %e)" % (d, s, permissible_error))
-            sys.exit(-1)  # Failure
+            sys.exit(-1)  # Failure 
 
-print("# Verification end")
-print("#" * 60)
+print("# Verification end") 
+print("#" * 60) 
 
-sys.exit(0)  # Success
+sys.exit(0)  # Success 

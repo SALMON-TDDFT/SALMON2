@@ -6,5 +6,6 @@
 # if required, this script file can utilized for the preparation of 
 # the input data for the following calculations.
 
-cp ../pseudo/Si_rps.dat ./
-ln -s ../201_checkpoint/checkpoint_rt_000060 ./checkpoint_rt_000060
+cp ../pseudo/H_rps.dat ./
+cp ../pseudo/O_rps.dat ./
+
