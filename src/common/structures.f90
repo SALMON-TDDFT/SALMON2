@@ -238,9 +238,6 @@ module structures
     integer :: nps
     integer,allocatable :: mps(:)
     integer,allocatable :: jxyz(:,:,:)
-    integer,allocatable :: jxx(:,:)
-    integer,allocatable :: jyy(:,:)
-    integer,allocatable :: jzz(:,:)
     real(8),allocatable :: rxyz(:,:,:)
     real(8),allocatable :: uv(:,:)
     real(8),allocatable :: duv(:,:,:)
@@ -687,9 +684,6 @@ contains
     type(s_pp_grid) :: ppg
     DEAL(ppg%mps)
     DEAL(ppg%jxyz)
-    DEAL(ppg%jxx)
-    DEAL(ppg%jyy)
-    DEAL(ppg%jzz)
     DEAL(ppg%uv)
     DEAL(ppg%duv)
     DEAL(ppg%lma_tbl)

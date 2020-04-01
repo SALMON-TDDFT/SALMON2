@@ -170,7 +170,7 @@ SUBROUTINE dealloc_init_ps(ppg)
   implicit none
   type(s_pp_grid) :: ppg
 
-  deallocate(ppg%jxyz, ppg%jxx, ppg%jyy, ppg%jzz, ppg%rxyz)
+  deallocate(ppg%jxyz, ppg%rxyz)
   deallocate(ppg%lma_tbl, ppg%ia_tbl)
   deallocate(ppg%rinv_uvu,ppg%uv,ppg%duv)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
@@ -594,9 +594,6 @@ subroutine init_jxyz(ppg)
   type(s_pp_grid) :: ppg
 
   allocate(ppg%jxyz(3,ppg%nps,natom))
-  allocate(ppg%jxx( ppg%nps,natom))
-  allocate(ppg%jyy( ppg%nps,natom))
-  allocate(ppg%jzz( ppg%nps,natom))
   allocate(ppg%rxyz(3,ppg%nps,natom))
 
 end subroutine init_jxyz
@@ -607,7 +604,6 @@ subroutine finalize_jxyz(ppg)
   type(s_pp_grid) :: ppg
 
   deallocate(ppg%jxyz)
-  deallocate(ppg%jxx,ppg%jyy,ppg%jzz)
   deallocate(ppg%rxyz)
 
 end subroutine finalize_jxyz
@@ -808,32 +804,23 @@ subroutine cache_jxyz(ppg,rion)
 
   if (allocated(ppg%rion_old)) then
     deallocate(ppg%rion_old)
-    deallocate(ppg%jxyz_old,ppg%jxx_old,ppg%jyy_old,ppg%jzz_old)
+    deallocate(ppg%jxyz_old)
     deallocate(ppg%mps_old,ppg%rxyz_old)
   end if
 
   allocate(ppg%rion_old(size(rion,1),size(rion,2)))
   allocate(ppg%jxyz_old(size(ppg%jxyz,1),size(ppg%jxyz,2),size(ppg%jxyz,3)))
-  allocate(ppg%jxx_old(size(ppg%jxx,1),size(ppg%jxx,2)))
-  allocate(ppg%jyy_old(size(ppg%jyy,1),size(ppg%jyy,2)))
-  allocate(ppg%jzz_old(size(ppg%jzz,1),size(ppg%jzz,2)))
   allocate(ppg%mps_old(size(ppg%mps,1)))
   allocate(ppg%rxyz_old(size(ppg%rxyz,1),size(ppg%rxyz,2),size(ppg%rxyz,3)))
 
   if (allocated(ppg%jxyz)) then
     ppg%rion_old = rion
     ppg%jxyz_old = ppg%jxyz
-    ppg%jxx_old  = ppg%jxx
-    ppg%jyy_old  = ppg%jyy
-    ppg%jzz_old  = ppg%jzz
     ppg%mps_old  = ppg%mps
     ppg%rxyz_old = ppg%rxyz
   else
     ppg%rion_old = rion
     ppg%jxyz_old = -1
-    ppg%jxx_old  = -1
-    ppg%jyy_old  = -1
-    ppg%jzz_old  = -1
     ppg%mps_old  = -1
     ppg%rxyz_old = 0d0
   end if
@@ -958,9 +945,6 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
   end if
 
   ppg%jxyz = 0
-  ppg%jxx  = 0
-  ppg%jyy  = 0
-  ppg%jzz  = 0
   ppg%rxyz = 0d0
   ppg%mps  = 0
 
@@ -1014,9 +998,6 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
               ppg%jxyz(1,j,ia)=mx(i)
               ppg%jxyz(2,j,ia)=my(i)
               ppg%jxyz(3,j,ia)=mz(i)
-              ppg%jxx(j,ia)=ix
-              ppg%jyy(j,ia)=iy
-              ppg%jzz(j,ia)=iz
               ppg%rxyz(1,j,ia)=x
               ppg%rxyz(2,j,ia)=y
               ppg%rxyz(3,j,ia)=z
@@ -1031,9 +1012,6 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
       i = ppg%mps_old(ia)
       ppg%mps(ia) = i
       ppg%jxyz(1:3,1:i,ia) = ppg%jxyz_old(1:3,1:i,ia)
-      ppg%jxx(1:i,ia)      = ppg%jxx_old(1:i,ia)
-      ppg%jyy(1:i,ia)      = ppg%jyy_old(1:i,ia)
-      ppg%jzz(1:i,ia)      = ppg%jzz_old(1:i,ia)
       do j=1,i
         ppg%rxyz(1:3,j,ia) = ppg%rxyz_old(1:3,j,ia) - (rion(1:3,ia) - ppg%rion_old(1:3,ia))
       end do
@@ -1043,9 +1021,6 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
 
   if (is_proc_distributed) then
     call comm_summation(ppg%jxyz,info%icomm_ko)
-    call comm_summation(ppg%jxx, info%icomm_ko)
-    call comm_summation(ppg%jyy, info%icomm_ko)
-    call comm_summation(ppg%jzz, info%icomm_ko)
     call comm_summation(ppg%rxyz,info%icomm_ko)
     call comm_summation(ppg%mps, info%icomm_ko)
   end if
