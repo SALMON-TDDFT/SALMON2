@@ -20,7 +20,7 @@ module dip
 contains
 
 !===================================================================================================================================
-subroutine subdip(comm,itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
+subroutine subdip(comm,itt,rt,lg,mg,srho,rNe,poisson,Etot,system,pp)
   use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation
@@ -31,7 +31,7 @@ subroutine subdip(comm,itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
   integer,intent(in) :: comm
   integer,intent(in) :: itt
   type(s_rgrid) ,intent(in) :: lg
-  type(s_rgrid) ,intent(in) :: ng
+  type(s_rgrid) ,intent(in) :: mg
   type(s_scalar),intent(in) :: srho
   type(s_rt),intent(inout) :: rt
   real(8),intent(in)        :: Etot
@@ -49,7 +49,7 @@ subroutine subdip(comm,itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
   Hvol   = system%Hvol
   Hgs(:) = system%Hgs(:)
 
-  call calc_dip(comm,lg,ng,srho,rbox_array2)
+  call calc_dip(comm,lg,mg,srho,rbox_array2)
 
   !(ionic dipole) -- defined as plus charge (ordinary definition))
   rt%Dp_i(:,itt) = 0d0
@@ -104,13 +104,13 @@ subroutine subdip(comm,itt,rt,lg,ng,srho,rNe,poisson,Etot,system,pp)
 
 end subroutine subdip
 
-subroutine calc_dip(comm,lg,ng,srho,rbox_array2)
+subroutine calc_dip(comm,lg,mg,srho,rbox_array2)
   use structures, only: s_rgrid,s_scalar
   use communication, only: comm_summation
   implicit none
   integer,       intent(in) :: comm
   type(s_rgrid) ,intent(in) :: lg
-  type(s_rgrid) ,intent(in) :: ng
+  type(s_rgrid) ,intent(in) :: mg
   type(s_scalar),intent(in) :: srho
   integer :: ix,iy,iz
   real(8) :: rbox_array(4),rbox_array2(4)
@@ -122,18 +122,18 @@ subroutine calc_dip(comm,lg,ng,srho,rbox_array2)
   select case(mod(lg%num(1),2))
   case(1)
 !$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
        rbox = rbox + dble(ix) * srho%f(ix,iy,iz)
     end do
     end do
     end do
   case(0)
 !$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rbox = rbox + (dble(ix)-0.5d0) * srho%f(ix,iy,iz)
     end do
     end do
@@ -145,18 +145,18 @@ subroutine calc_dip(comm,lg,ng,srho,rbox_array2)
   select case(mod(lg%num(2),2))
   case(1)
 !$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rbox = rbox + dble(iy) * srho%f(ix,iy,iz)
     end do
     end do
     end do
   case(0)
 !$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rbox = rbox + (dble(iy)-0.5d0) * srho%f(ix,iy,iz)
     end do
     end do
@@ -168,18 +168,18 @@ subroutine calc_dip(comm,lg,ng,srho,rbox_array2)
   select case(mod(lg%num(3),2))
   case(1)
 !$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
        rbox = rbox + dble(iz) * srho%f(ix,iy,iz)
     end do
     end do
     end do
   case(0)
 !$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
        rbox = rbox + (dble(iz)-0.5d0) * srho%f(ix,iy,iz)
     end do
     end do
@@ -189,9 +189,9 @@ subroutine calc_dip(comm,lg,ng,srho,rbox_array2)
 
   rbox=0.d0
 !$OMP parallel do reduction( + : rbox ) private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
      rbox = rbox + srho%f(ix,iy,iz)
   end do
   end do

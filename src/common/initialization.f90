@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,pinfo,info,lg,mg,ng_tmp,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+subroutine init_dft(comm,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
                            nproc_k,nproc_ob,nproc_rgrid
@@ -37,7 +37,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng_tmp,system,stencil,fg,poisson,srg,s
   integer      ,intent(in) :: comm
   type(s_process_info)     :: pinfo
   type(s_parallel_info)    :: info
-  type(s_rgrid)            :: lg,mg,ng_tmp
+  type(s_rgrid)            :: lg,mg
   type(s_dft_system)       :: system
   type(s_stencil)          :: stencil
   type(s_reciprocal_grid)  :: fg
@@ -59,7 +59,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,ng_tmp,system,stencil,fg,poisson,srg,s
 
 ! parallelization
   call check_ffte_condition(pinfo,lg)
-  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg,ng_tmp) ! lg --> mg & ng
+  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg) ! lg --> mg
   call init_parallel_dft(system,info,pinfo)
   call init_scalapack(pinfo,info,system)
   call init_eigenexa(pinfo,info,system)
@@ -522,7 +522,7 @@ end subroutine check_ffte_condition
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg,ng)
+subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg)
   use communication, only: comm_is_root
   use salmon_global, only: yn_periodic
   use structures, only: s_process_info,s_rgrid,s_parallel_info
@@ -531,7 +531,7 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg,ng)
   type(s_process_info),intent(in)    :: pinfo
   type(s_parallel_info),intent(in)   :: info
   type(s_rgrid),       intent(inout) :: lg
-  type(s_rgrid),       intent(inout) :: mg,ng
+  type(s_rgrid),       intent(inout) :: mg
   !
   integer :: nproc_domain_orbital(3),nproc_k,nproc_ob
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
@@ -542,10 +542,7 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg,ng)
 
   if ( allocated(mg%is_all) ) deallocate(mg%is_all)
   if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)
-  if ( allocated(ng%is_all) ) deallocate(ng%is_all)
-  if ( allocated(ng%ie_all) ) deallocate(ng%ie_all)
   allocate(mg%is_all(3,0:nproc-1),mg%ie_all(3,0:nproc-1))
-  allocate(ng%is_all(3,0:nproc-1),ng%ie_all(3,0:nproc-1))
 
 ! +-------------------------------+
 ! | mg: r-space grid for orbitals |
@@ -621,70 +618,23 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg,ng)
     stop "The system is small. Please use less number of processors."
   end if
 
-! +-----------------------------+
-! | ng: r-space grid for fields |
-! +-----------------------------+
-
-  ng%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
-  ng%nd = Nd
-
-  ng%is_all = mg%is_all
-  ng%ie_all = mg%ie_all
-
-  ng%is(1:3)  = ng%is_all(:,myrank)
-  ng%ie(1:3)  = ng%ie_all(:,myrank)
-  ng%num(1:3) = ng%ie(1:3)-ng%is(1:3)+1
-
-  ng%is_overlap(1:3) = ng%is(1:3)-nd
-  ng%ie_overlap(1:3) = ng%ie(1:3)+nd
-  ng%is_array(1:3) = ng%is(1:3)-nd
-  ng%ie_array(1:3) = ng%ie(1:3)+nd
-
-  if ( allocated(ng%idx) ) deallocate(ng%idx)
-  if ( allocated(ng%idy) ) deallocate(ng%idy)
-  if ( allocated(ng%idz) ) deallocate(ng%idz)
-  allocate(ng%idx(ng%is_overlap(1):ng%ie_overlap(1)) &
-          ,ng%idy(ng%is_overlap(2):ng%ie_overlap(2)) &
-          ,ng%idz(ng%is_overlap(3):ng%ie_overlap(3)))
-  do j=ng%is_overlap(1),ng%ie_overlap(1)
-    ng%idx(j) = j
-  end do
-  do j=ng%is_overlap(2),ng%ie_overlap(2)
-    ng%idy(j) = j
-  end do
-  do j=ng%is_overlap(3),ng%ie_overlap(3)
-    ng%idz(j) = j
-  end do
-
-  if(yn_periodic=='n'.and.(ng%num(1)<nd.or.ng%num(2)<nd.or.ng%num(3)<nd))then
-    stop "The system is small. Please use less number of processors."
-  end if
-
 #ifdef USE_OPT_ARRAY_PADDING
   lg%ie_array(2)=lg%ie_array(2) + 1
   mg%ie_array(2)=mg%ie_array(2) + 1
-  ng%ie_array(2)=ng%ie_array(2) + 1
 #endif
-
-! final check...
-  do j=1,3
-    if (mg%is(j) /= ng%is(j) .or. mg%ie(j) /= ng%ie(j)) then
-      stop 'invalid range: mg and ng, please check init_grid_parallel subroutine'
-    end if
-  end do
 
 end subroutine init_grid_parallel
 
 !===================================================================================================================================
 
-subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
+subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   use structures
   use math_constants,  only : pi,zi
   use phys_constants, only: cspeed_au
   use salmon_global, only: dt,yn_ffte,aEwald,use_singlescale,cutoff_G2_emfield
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
-  type(s_rgrid)          ,intent(in)    :: ng
+  type(s_rgrid)          ,intent(in)    :: mg
   type(s_reciprocal_grid),intent(inout) :: fg
   type(s_dft_system)     ,intent(in)    :: system
   type(s_parallel_info)  ,intent(in)    :: info
@@ -698,10 +648,10 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
 
   brl(:,:)=system%primitive_b(:,:)
 
-  allocate(fg%if_Gzero (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-  allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-  allocate(fg%coef     (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-  allocate(fg%exp_ewald(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+  allocate(fg%if_Gzero (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(fg%coef     (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(fg%exp_ewald(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
   fg%if_Gzero = .false.
   fg%vec_G = 0d0
   fg%coef = 0d0
@@ -709,18 +659,18 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
 
   if(yn_ffte=='y' .and. use_singlescale=='y') then
   ! for single-scale Maxwell-TDDFT
-    allocate(fg%coef_nabla(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),3))
-    allocate(fg%coef_gxgy0(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-    allocate(fg%cos_cGdt  (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-    allocate(fg%sin_cGdt  (lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(fg%coef_nabla(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
+    allocate(fg%coef_gxgy0(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(fg%cos_cGdt  (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(fg%sin_cGdt  (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     fg%coef_nabla = 0d0
     fg%coef_gxgy0 = 1d0
     fg%cos_cGdt   = 0d0
     fg%sin_cGdt   = 0d0
   end if
 
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
   do ix=lg%is(1),lg%ie(1)
 
     if((ix-1)**2+(iy-1)**2+(iz-1)**2 == 0) fg%if_Gzero(ix,iy,iz) = .true.
@@ -765,12 +715,12 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
     allocate(fg%egz(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
     allocate(fg%egzc(lg%is(3):lg%ie(3),lg%is(3):lg%ie(3)))
 
-    allocate(poisson%ff1x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff1y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff1z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
-    allocate(poisson%ff2x(lg%is(1):lg%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff2y(ng%is(1):ng%ie(1),lg%is(2):lg%ie(2),ng%is(3):ng%ie(3)))
-    allocate(poisson%ff2z(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff1x(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff1y(mg%is(1):mg%ie(1),lg%is(2):lg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff1z(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(poisson%ff2x(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff2y(mg%is(1):mg%ie(1),lg%is(2):lg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(poisson%ff2z(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),lg%is(3):lg%ie(3)))
 
   !$OMP parallel do private(ix,kx,tmp)
     do ix=lg%is(1),lg%ie(1)
@@ -800,8 +750,8 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
   else
   ! FFTE
 
-    allocate(poisson%a_ffte(lg%num(1),ng%num(2),ng%num(3)))
-    allocate(poisson%b_ffte(lg%num(1),ng%num(2),ng%num(3)))
+    allocate(poisson%a_ffte(lg%num(1),mg%num(2),mg%num(3)))
+    allocate(poisson%b_ffte(lg%num(1),mg%num(2),mg%num(3)))
 
   ! FFTE initialization step
     call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
@@ -810,7 +760,7 @@ subroutine init_reciprocal_grid(lg,ng,fg,system,info,poisson)
 
   end if
 
-  allocate(poisson%zrhoG_ele(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+  allocate(poisson%zrhoG_ele(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
 
   return
 end subroutine init_reciprocal_grid

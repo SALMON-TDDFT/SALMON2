@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
+subroutine scf_iteration_step(lg,mg,system,info,pinfo,stencil, &
                srg,srg_scalar,spsi,shpsi,srho,srho_s, &
                cg,ppg,vlocal,  &
                miter,   &
@@ -40,7 +40,6 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
 
   type(s_rgrid),         intent(in)    :: lg
   type(s_rgrid),         intent(in)    :: mg
-  type(s_rgrid),         intent(in)    :: ng
   type(s_dft_system),    intent(in)    :: system
   type(s_parallel_info), intent(in)    :: info
   type(s_process_info),  intent(in)    :: pinfo
@@ -102,8 +101,8 @@ subroutine scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil, &
   call calc_density(system,srho_s,spsi,info,mg)
 
   select case(method_mixing)
-    case ('simple') ; call simple_mixing(ng,system,1.d0-mixing%mixrate,mixing%mixrate,srho_s,mixing)
-    case ('broyden'); call wrapper_broyden(info%icomm_r,ng,system,srho_s,iter,mixing)
+    case ('simple') ; call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,srho_s,mixing)
+    case ('broyden'); call wrapper_broyden(info%icomm_r,mg,system,srho_s,iter,mixing)
     case ('pulay')  ; call pulay(mg,info,system,srho_s,iter,mixing)
   end select
   call timer_end(LOG_CALC_RHO)

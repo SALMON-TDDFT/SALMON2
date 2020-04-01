@@ -95,9 +95,9 @@ TE : do itt=Mit+1,itotNtime
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
     if (mod(itt,2)==1) then
-      call checkpoint_rt(lg,mg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale)
     else
-      call checkpoint_rt(lg,mg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale)
     endif
     call timer_end(LOG_CHECKPOINT_SELF)
     call comm_sync_all
@@ -143,7 +143,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call checkpoint_rt(lg,mg,mg,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,singlescale,ofl%dir_out_restart)
+  call checkpoint_rt(lg,mg,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,singlescale,ofl%dir_out_restart)
 end if
 
 call finalize_xc(xc_func)

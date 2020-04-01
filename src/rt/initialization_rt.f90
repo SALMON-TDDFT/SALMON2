@@ -64,7 +64,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_rgrid) :: ng_tmp
   type(s_dft_system)  :: system
   type(s_rt) :: rt
   type(s_process_info) :: pinfo
@@ -160,7 +159,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   
   
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng_tmp,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+  call init_dft(nproc_group_global,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   
   call init_code_optimization
   
@@ -196,7 +195,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  call restart_rt(lg,mg,mg,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+  call restart_rt(lg,mg,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
   if(yn_reset_step_restart=='y' ) Mit=0
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
@@ -403,10 +402,10 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     do itt=0,0
       if(yn_out_dns_rt=='y')then
          !!XXX bug XXX dnsdiff data is wrong as reference dns is srho%f now !AY
-        call write_dns(lg,mg,mg,srho%f,system%hgs,srho%f,itt)
+        call write_dns(lg,mg,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        call write_elf(itt,lg,mg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
+        call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
         call write_estatic(lg,mg,system%hgs,stencil,info,sVh,srg_scalar,itt)

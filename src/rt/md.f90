@@ -334,7 +334,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   call timer_end(LOG_MD_TEVOL_PART1)
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
   use structures, only: s_dft_system,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
     s_parallel_info, s_scalar, s_pp_info
   use salmon_global, only: step_update_ps !,step_update_ps2
@@ -345,7 +345,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl
   implicit none
   type(s_parallel_info) :: info
   type(s_dft_system) :: system
-  type(s_rgrid),intent(in) :: lg,mg,ng
+  type(s_rgrid),intent(in) :: lg,mg
   type(s_poisson),intent(inout) :: poisson
   type(s_reciprocal_grid) :: fg
   type(s_pp_info),intent(inout) :: pp

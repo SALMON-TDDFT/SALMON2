@@ -131,7 +131,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,pinfo,sten
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
-     call update_pseudo_rt(itt,info,system,lg,mg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
+     call update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
   endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
@@ -369,7 +369,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,pinfo,sten
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,mg,srho%f,system%hgs,srho%f,itt)
+      call write_dns(lg,mg,srho%f,system%hgs,srho%f,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. use_singlescale=='y')then
@@ -379,7 +379,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,pinfo,sten
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call write_elf(itt,lg,mg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_out)
+      call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_out)
     end if
   end if
   if(yn_out_estatic_rt=='y')then

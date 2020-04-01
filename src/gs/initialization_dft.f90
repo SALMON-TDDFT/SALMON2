@@ -18,7 +18,7 @@
 #include "config.h"
 
 subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
-                                lg, mg, ng,  &
+                                lg, mg,  &
                                 pinfo, info,  &
                                 srg, srg_scalar,  &
                                 srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
@@ -48,7 +48,6 @@ use salmon_total_energy
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
-type(s_rgrid) :: ng
 type(s_process_info) :: pinfo
 type(s_parallel_info) :: info
 type(s_sendrecv_grid) :: srg, srg_scalar
@@ -71,7 +70,7 @@ integer,parameter :: Nd = 4
 
 integer :: jspin
 
-!call init_dft(nproc_group_global,pinfo,info,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+!call init_dft(nproc_group_global,pinfo,info,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 
 call init_code_optimization
 
@@ -137,7 +136,7 @@ end subroutine initialization1_dft
 
 subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 system,energy,ewald,stencil,fg,poisson,&
-                                lg,mg,ng,info,  &
+                                lg,mg,info,  &
                                 srg,srg_scalar,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
@@ -171,7 +170,6 @@ use init_gs, only: init_wf
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
-type(s_rgrid) :: ng
 type(s_parallel_info) :: info
 type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
@@ -209,30 +207,30 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   spsi%update_zwf_overlap = .false.
 
   mixing%num_rho_stock = 21
-  call init_mixing(nspin,ng,mixing)
+  call init_mixing(nspin,mg,mixing)
 
   ! restart from binary
   if (yn_restart == 'y') then
-     call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
+     call restart_gs(lg,mg,system,info,spsi,Miter,mixing=mixing)
      if(read_gs_restart_data=='wfn') then
         call calc_density(system,srho_s,spsi,info,mg)
      else 
         i = mixing%num_rho_stock+1
         !srho%f      => mg (orbital domain allocation)
         !srho_s(j)%f => mg (orbital domain allocation)
-        !mixing%srho_in(i)%f => ng (density domain allocation)
-        do iz=ng%is(3),ng%ie(3)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
+        !mixing%srho_in(i)%f => mg (density domain allocation)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
            srho_s(1)%f(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
         end do
         end do
         end do
         if(system%nspin==2) then
            do jspin=1,system%nspin
-              do iz=ng%is(3),ng%ie(3)
-              do iy=ng%is(2),ng%ie(2)
-              do ix=ng%is(1),ng%ie(1)
+              do iz=mg%is(3),mg%ie(3)
+              do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
                  srho_s(jspin)%f(ix,iy,iz) = mixing%srho_s_in(i,jspin)%f(ix,iy,iz)
               end do
               end do
@@ -283,9 +281,9 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
+     call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
   case(3)
-     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
 
 
@@ -294,7 +292,7 @@ end subroutine initialization2_dft
 !====================================
 subroutine initialization_dft_md( Miter, rion_update,  &
                                 system,md,energy,ewald,stencil,fg,poisson,&
-                                lg,mg,ng,  &
+                                lg,mg,  &
                                 info,pinfo,  &
                                 srg,srg_scalar,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
@@ -330,7 +328,6 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_rgrid) :: ng
   type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_scalar
@@ -358,13 +355,13 @@ subroutine initialization_dft_md( Miter, rion_update,  &
 
   if(allocated(rho_old%f))    deallocate(rho_old%f)
   if(allocated(Vlocal_old%f)) deallocate(Vlocal_old%f)
-  call allocate_scalar(ng,rho_old)
-  call allocate_scalar(ng,Vlocal_old)
+  call allocate_scalar(mg,rho_old)
+  call allocate_scalar(mg,Vlocal_old)
 
 !$OMP parallel do private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
      rho_old%f(ix,iy,iz)   = srho%f(ix,iy,iz)
      Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
   end do
@@ -376,7 +373,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   Miter=0
   call scf_iteration_dft( Miter,rion_update,sum1,  &
                           system,energy,ewald,  &
-                          lg,mg,ng,  &
+                          lg,mg,  &
                           info,pinfo,  &
                           poisson,fg,  &
                           cg,mixing,  &
