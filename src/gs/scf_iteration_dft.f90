@@ -367,7 +367,6 @@ subroutine  get_band_gap(system,energy,gap)
     use structures
     use salmon_global, only: nelec
     use inputoutput, only: au_energy_ev
-    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
     type(s_dft_system),intent(in) :: system
