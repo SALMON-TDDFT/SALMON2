@@ -7,4 +7,4 @@
 # the input data for the following calculations.
 
 cp ../pseudo/Si_rps.dat ./
-ln -s ../201_checkpoint/checkpoint_rt_000060 ./checkpoint_rt_000060
+ln -s ../202_rt_checkpoint_single/checkpoint_rt_000060 ./checkpoint_rt_000060
