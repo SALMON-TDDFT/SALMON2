@@ -250,13 +250,6 @@ contains
 
     iret = -1
 
-    if (process_allocation /= 'grid_sequential') then
-      if (comm_is_root(info%id_rko)) then
-        print *, 'tofu_network_oriented_mapping: support grid_sequential only...'
-      end if
-      return
-    end if
-
     call FJMPI_Topology_get_dimension(tofu_dim, ierr)
     if (ierr /= MPI_SUCCESS) &
       stop 'FJMPI_Topology_get_dimension: error'
@@ -300,37 +293,72 @@ contains
         print *, '[PROCESS MAPPING RULE]'
         print *, '  Requested network shape = (PX, PY, PZ, PW)'
         print *, '  Tofu-network shape      = (TX, TY, TZ)'
-        print *, '  Process shape           = (TX*NPN, TY, TZ)'
+        print *, '  Process shape           = (TX*PPN, TY, TZ)'
         print *, ''
-        print *, '  (PX, PY, PZ)      = nproc_rgrid'
-        print *, '  PW  = PW1*PW2*PW3 = nproc_ob*nproc_k'
-        print *, '  PW1 = TX*NPN / PX'
-        print *, '  PW2 = TY     / PY'
-        print *, '  PW3 = TZ     / PZ'
-        print *, '  TX  = PX*PW1 / NPN'
-        print *, '  TY  = PY*PW2'
-        print *, '  TZ  = PZ*PW3'
-        print *, '  NPN = # of process/node'
+        print *, '  (PX, PY, PZ) = nproc_rgrid'
+        print *, '  PW           = nproc_ob*nproc_k'
+        print *, '  PPN          = # of process/node'
+        if (process_allocation == 'grid_sequential')
+          print *, '  PW  = PW1*PW2*PW3'
+          print *, '  PW1 = TX*PPN / PX'
+          print *, '  PW2 = TY     / PY'
+          print *, '  PW3 = TZ     / PZ'
+          print *, '  TX  = PX*PW1 / PPN'
+          print *, '  TY  = PY*PW2'
+          print *, '  TZ  = PZ*PW3'
+        else if (process_allocation = 'orbital_sequential')
+          print *, '  PX  = PX1*PX2*PX3'
+          print *, '  PX1 = TX*PPN / PW'
+          print *, '  PX2 = TY     / PY'
+          print *, '  PX3 = TZ     / PZ'
+          print *, '  TX  = PW*PX1 / PPN'
+          print *, '  TY  = PY*PX2'
+          print *, '  TZ  = PZ*PX3'
+        end if
       end if
 
-      pw(1) = tofu_shape(1) * nprocs_per_node / nproc_d_o(1)
-      pw(2) = tofu_shape(2)                   / nproc_d_o(2)
-      pw(3) = tofu_shape(3)                   / nproc_d_o(3)
+      if (process_allocation == 'grid_sequential') then
+        pw(1) = tofu_shape(1) * nprocs_per_node / nproc_d_o(1)
+      else if (process_allocation == 'orbital_sequential') then
+        pw(1) = tofu_shape(1) * nprocs_per_node / (nproc_ob*nproc_k)
+      end if
+      pw(2) = tofu_shape(2) / nproc_d_o(2)
+      pw(3) = tofu_shape(3) / nproc_d_o(3)
 
-      pshape(1:3) = nproc_d_o(1:3) * pw(1:3)
+      if (process_allocation == 'grid_sequential') then
+        pshape(1:3) = nproc_d_o(1:3) * pw(1:3)
+      else if (process_allocation == 'orbital_sequential') then
+        pshape(1)   = nproc_ob*nproc_k * pw(1)
+        pshape(2:3) = nproc_d_o(2:3) * pw(2:3)
+      end if
 
       if (comm_is_root(info%id_rko)) then
-        print *, '  (PW1, PW2, PW3) =', pw(1:3)
-        print *, '  (PX*PW1, PY*PW2, PZ*PW3) =', pshape(1:3)
+        if (process_allocation == 'grid_sequential') then
+          print *, '  (PW1, PW2, PW3) =', pw(1:3)
+          print *, '  (PX*PW1, PY*PW2, PZ*PW3) =', pshape(1:3)
+        else if (process_allocation == 'orbital_sequential') then
+          print *, '  (PX1, PX2, PX3) =', pw(1:3)
+          print *, '  (PW*PX1, PY*PX2, PZ*PX3) =', pshape(1:3)
+        end if
         print *, '======================================================='
       end if
 
-      if (product(pw) /= nproc_ob*nproc_k) then
-        if (comm_is_root(info%id_rko)) then
-          print *, 'product(pw) /= nproc_ob*nproc_k'
-          print *, '(PW1, PW2, PW3) =', pw
+      if (process_allocation == 'grid_sequential') then
+        if (product(pw) /= nproc_ob*nproc_k) then
+          if (comm_is_root(info%id_rko)) then
+            print *, 'product(PW[1-3]) /= PW'
+            print *, '(PW1, PW2, PW3) =', pw
+          end if
+          return
         end if
-        return
+      else if (process_allocation == 'orbital_sequential') then
+        if (product(pw) /= nproc_d_o(1)) then
+          if (comm_is_root(info%id_rko)) then
+            print *, 'product(PX[1-3]) /= PX'
+            print *, '(PX1, PX2, PX3) =', pw
+          end if
+          return
+        end if
       end if
 
       info%imap = -1
@@ -340,15 +368,28 @@ contains
       do ix=0,pshape(1)-1
         nl = nl + 1
 
-        iaddress(1) = mod(ix, nproc_d_o(1))
         iaddress(2) = mod(iy, nproc_d_o(2))
         iaddress(3) = mod(iz, nproc_d_o(3))
 
-        n = ((ix + nproc_d_o(1)) / nproc_d_o(1) - 1) &
-          + ((iy + nproc_d_o(2)) / nproc_d_o(2) - 1) * pw(1) &
-          + ((iz + nproc_d_o(3)) / nproc_d_o(3) - 1) * pw(1) * pw(2)
-        iaddress(4) = mod(n, nproc_ob)
-        iaddress(5) = n / nproc_ob
+        if (process_allocation == 'grid_sequential') then
+          iaddress(1) = mod(ix, nproc_d_o(1))
+
+          n = ((ix + nproc_d_o(1)) / nproc_d_o(1) - 1) &
+            + ((iy + nproc_d_o(2)) / nproc_d_o(2) - 1) * pw(1) &
+            + ((iz + nproc_d_o(3)) / nproc_d_o(3) - 1) * pw(1) * pw(2)
+
+          iaddress(4) = mod(n, nproc_ob)
+          iaddress(5) = n / nproc_ob
+        else if (process_allocation == 'orbital_sequential') then
+          n = ((ix + nproc_ob*nproc_k) / nproc_ob*nproc_k - 1) &
+            + ((iy + nproc_d_o(2))     / nproc_d_o(2)     - 1) * pw(1) &
+            + ((iz + nproc_d_o(3))     / nproc_d_o(3)     - 1) * pw(1) * pw(2)
+          iaddress(1) = mod(n, nproc_d_o(1))
+
+          n = mod(ix, nproc_ob*nproc_k)
+          iaddress(4) = mod(n, nproc_ob)
+          iaddress(5) = n / nproc_ob
+        end if
 
         if (info%imap(iaddress(1),iaddress(2),iaddress(3),iaddress(4),iaddress(5)) /= -1) then
           if (comm_is_root(info%id_rko)) then
