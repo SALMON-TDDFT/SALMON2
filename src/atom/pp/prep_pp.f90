@@ -181,156 +181,6 @@ END SUBROUTINE dealloc_init_ps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-! for ARTED
-! future work: remove this subroutine
-subroutine calc_vloc(pp,dvloc_g,gx,gy,gz,ng,ng_s,ng_e,ngzero)
-  use salmon_global,only : nelem
-  use math_constants,only : pi
-  use structures,only : s_pp_info
-  implicit none
-  type(s_pp_info) :: pp
-  integer,intent(in) :: ng,ng_s,ng_e
-  integer,intent(in) :: ngzero
-  real(8),intent(in) :: gx(ng),gy(ng),gz(ng)
-  complex(8),intent(out) :: dvloc_g(ng_s:ng_e,nelem)
-  integer :: i,ik,n
-  real(8) :: dr
-  real(8) :: g2sq
-  real(8) :: vloc_av
-  real(8) :: s,r
-
-!$omp parallel
-!$omp do private(ik,n,g2sq,s,r,dr,i,vloc_av) collapse(2)
-  do ik=1,nelem
-    do n=ng_s,ng_e
-      g2sq=sqrt(gx(n)**2+gy(n)**2+gz(n)**2)
-      s=0.d0
-      if (n == ngzero) then
-        do i=2,pp%nrloc(ik)
-          r=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-          dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-          vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-          s=s+4d0*pi*(r**2*vloc_av+r*pp%zps(ik))*dr
-        enddo
-      else
-        do i=2,pp%nrloc(ik)
-          r=0.5d0*(pp%rad(i,ik)+pp%rad(i-1,ik))
-          dr=pp%rad(i,ik)-pp%rad(i-1,ik)
-          vloc_av = 0.5d0*(pp%vloctbl(i,ik)+pp%vloctbl(i-1,ik))
-          s=s+4d0*pi*sin(g2sq*r)/g2sq*(r*vloc_av+pp%zps(ik))*dr !Vloc - coulomb
-        enddo
-      endif
-      dvloc_g(n,ik)=s
-    enddo
-  enddo
-!$omp end do
-!$omp end parallel
-
-end subroutine calc_vloc
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-
-! for ARTED
-! future work: remove this subroutine
-subroutine calc_vpsl(pp,rhoion_g,vpsl_ia,vpsl,dvloc_g,  &
-                     ngzero,gx,gy,gz,ng,ng_s,ng_e,nl,alxyz,lx,ly,lz,hx,hy,hz,matrix_A0)
-  use salmon_global,only : natom, nelem, kion, rion
-  use parallelization,only : nproc_group_tdks
-  use communication, only: comm_summation
-  use math_constants,only : pi
-  use structures,only : s_pp_info
-  implicit none
-  type(s_pp_info) :: pp
-  integer,intent(in) :: ngzero
-  integer,intent(in) :: ng,ng_s,ng_e
-  complex(8),intent(in) :: dvloc_g(ng_s:ng_e,nelem)
-  real(8),intent(in) :: gx(ng),gy(ng),gz(ng)
-  integer,intent(in) :: nl
-  real(8),intent(in) :: alxyz
-  integer,intent(in) :: lx(nl),ly(nl),lz(nl)
-  real(8),intent(in) :: hx,hy,hz
-  complex(8),intent(out) :: rhoion_g(ng_s:ng_e)
-  real(8),intent(out) :: vpsl_ia(nl,natom)
-  real(8),intent(out) :: vpsl(nl)
-  real(8),intent(in),optional :: matrix_A0(3,3)
-  integer :: a,i,n,ik
-  real(8) :: gd,r(3),matrix_A(3,3),u,v,w
-  real(8) :: g2
-  complex(8) :: vion_g_ia(ng_s:ng_e,natom),tmp_exp !, Vion_G(NG_s:NG_e)
-  real(8) :: vpsl_ia_l(nl,natom)
-  real(8) :: gr
-  complex(8),parameter :: zi=(0.d0,1.d0)
-
-  matrix_A = 0d0
-  matrix_A(1,1) = 1d0
-  matrix_A(2,2) = 1d0
-  matrix_A(3,3) = 1d0
-  if(present(matrix_A0)) matrix_A = matrix_A0
-
-  !(Local pseudopotential: Vlocal in G-space(=Vion_G))
-  vion_g_ia=0.d0
- !Vion_G   =0.d0
-  rhoion_g =0.d0
-!$omp parallel private(a,ik)
-  do a=1,natom
-    ik=kion(a)
-!$omp do private(n,g2,gd,tmp_exp)
-    do n=ng_s,ng_e
-      gd=gx(n)*rion(1,a)+gy(n)*rion(2,a)+gz(n)*rion(3,a)
-      tmp_exp = exp(-zi*gd)/alxyz
-     !Vion_G(n)     = Vion_G(n)      + dvloc_g(n,ik)*tmp_exp
-      vion_g_ia(n,a)= vion_g_ia(n,a) + dvloc_g(n,ik)*tmp_exp
-      rhoion_g(n)   = rhoion_g(n) + pp%zps(ik)*tmp_exp
-      if(n == ngzero) cycle
-      !(add coulomb as dvloc_g is given by Vloc - coulomb)
-      g2=gx(n)**2+gy(n)**2+gz(n)**2
-     !Vion_G(n)     = Vion_G(n)      -4d0*pi/g2*pp%zps(ik)*tmp_exp
-      vion_g_ia(n,a)= vion_g_ia(n,a) -4d0*pi/g2*pp%zps(ik)*tmp_exp
-    enddo
-!$omp end do
-  enddo
-!$omp end parallel
-
-  !(Local pseudopotential: Vlocal(=Vpsl) in real-space)
-  vpsl_ia_l=0.d0
- !Vpsl_l   =0.d0
-!$omp parallel private(n)
-  do n=ng_s,ng_e
-!$omp do private(i,gr,a,tmp_exp,u,v,w,r)
-    do i=1,NL
-      u = lx(i)*hx
-      v = ly(i)*hy
-      w = lz(i)*hz
-      r(1) = u*matrix_A(1,1) + v*matrix_A(1,2) + w*matrix_A(1,3)
-      r(2) = u*matrix_A(2,1) + v*matrix_A(2,2) + w*matrix_A(2,3)
-      r(3) = u*matrix_A(3,1) + v*matrix_A(3,2) + w*matrix_A(3,3)
-      gr = gx(n)*r(1) + gy(n)*r(2) + gz(n)*r(3)
-!      gr = gx(n)*lx(i)*hx+gy(n)*ly(i)*hy+gz(n)*lz(i)*hz
-      tmp_exp = exp(zi*gr)
-      !vpsl_l(i) = vpsl_l(i) + vion_G(n)*tmp_exp
-      do a=1,natom
-        vpsl_ia_l(i,a)= vpsl_ia_l(i,a)+ vion_g_ia(n,a)*tmp_exp
-      enddo
-    enddo
-!$omp end do
-  enddo
-!$omp end parallel
-
- !call comm_summation(vpsl_l,vpsl,nl,nproc_group_tdks)
-  call comm_summation(vpsl_ia_l,vpsl_ia,nl*natom,nproc_group_tdks)
-
-!$omp parallel
-!$omp do private(i)
-  do i=1,nl
-    vpsl(i) = sum(vpsl_ia(i,:))
-  enddo
-!$omp end do
-!$omp end parallel
-
-end subroutine calc_vpsl
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-
 SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
   use structures
   use salmon_global,only : natom, kion
@@ -610,7 +460,7 @@ end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
-  use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
+  use salmon_global,only : natom,kion,rion,iperiodic
   use structures
   use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
   implicit none
@@ -707,13 +557,9 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy
       rshift(3)=-0.5d0*Hz
     end if
   else if(iperiodic==3)then
-    if(yn_domain_parallel=='y')then
-      rshift(1)=-Hx
-      rshift(2)=-Hy
-      rshift(3)=-Hz
-    else
-      rshift(:)=0.d0
-    end if
+    rshift(1)=-Hx
+    rshift(2)=-Hy
+    rshift(3)=-Hz
   end if
 
 
@@ -828,7 +674,7 @@ end subroutine
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
-  use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
+  use salmon_global,only : natom,kion,rion,iperiodic
   use structures
   use communication,only: comm_get_groupinfo,comm_summation
   implicit none
@@ -934,14 +780,10 @@ subroutine calc_jxyz(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,mat
     else
       rshift(3)=-0.5d0*Hz
     end if
-  else if(iperiodic==3)then 
-    if(yn_domain_parallel=='y')then
-      rshift(1)=-Hx
-      rshift(2)=-Hy
-      rshift(3)=-Hz
-    else
-      rshift(:)=0.d0
-    end if
+  else if(iperiodic==3)then
+    rshift(1)=-Hx
+    rshift(2)=-Hy
+    rshift(3)=-Hz
   end if
 
   ppg%jxyz = 0
@@ -1132,7 +974,7 @@ subroutine set_lma_tbl(pp,ppg)
 end subroutine set_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
-  use salmon_global,only : natom,kion,iperiodic,yn_domain_parallel,nelem
+  use salmon_global,only : natom,kion,iperiodic,nelem
   use math_constants,only : pi
   use salmon_math,only : ylm,dylm
   use structures,only : s_pp_info,s_pp_grid
@@ -1168,14 +1010,10 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
     else
       rshift(3)=-0.5d0*Hz
     end if
-  else if(iperiodic==3)then 
-    if(yn_domain_parallel=='y')then
-      rshift(1)=-Hx
-      rshift(2)=-Hy
-      rshift(3)=-Hz
-    else
-      rshift(:)=0.d0
-    end if
+  else if(iperiodic==3)then
+    rshift(1)=-Hx
+    rshift(2)=-Hy
+    rshift(3)=-Hz
   end if
 
   if( property == 'initial' ) then

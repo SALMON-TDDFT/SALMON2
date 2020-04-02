@@ -12,10 +12,6 @@
   unit_system = 'a.u.'
 /
 
-&parallel
-  yn_domain_parallel = 'y'
-/
-
 &system
   yn_periodic = 'y'
   al = 10.26d0, 10.26d0, 10.26d0

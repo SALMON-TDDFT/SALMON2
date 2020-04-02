@@ -249,7 +249,6 @@ contains
       & unit_system
 
     namelist/parallel/ &
-      & yn_domain_parallel, &
       & nproc_k, &
       & nproc_ob, &
       & nproc_rgrid, &
@@ -606,7 +605,6 @@ contains
     write_gs_wfn_k_ms= 'n'
     write_rt_wfn_k_ms= 'n'
 !! == default for &parallel
-    yn_domain_parallel   = 'n'
     nproc_k              = 0
     nproc_ob             = 0
     nproc_rgrid          = 0
@@ -1010,7 +1008,6 @@ contains
     call comm_bcast(write_rt_wfn_k_ms,nproc_group_global)
 
 !! == bcast for &parallel
-    call comm_bcast(yn_domain_parallel  ,nproc_group_global)
     call comm_bcast(nproc_k             ,nproc_group_global)
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
@@ -1798,7 +1795,6 @@ contains
 
       if(inml_parallel >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'parallel', inml_parallel
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_domain_parallel', yn_domain_parallel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(1)', nproc_rgrid(1)
@@ -2221,7 +2217,6 @@ contains
     call yn_argument_check(yn_restart)
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
-    call yn_argument_check(yn_domain_parallel)
     call yn_argument_check(yn_ffte)
     call yn_argument_check(yn_scalapack)
     call yn_argument_check(yn_scalapack_red_mem)
@@ -2266,37 +2261,29 @@ contains
     case default            ; stop 'method_init_wf must be gauss or random'
     end select
 
-    if(iperiodic==0.or.(iperiodic==3.and.yn_domain_parallel=='y')) then
-      select case(convergence)
-      case('rho_dne')
-        continue
-      case('norm_rho','norm_rho_dng')
-        if(threshold<-1.d-12)then
-          if (comm_is_root(nproc_id_global)) then
-            write(*,*) 'set threshold when convergence is norm_rho or norm_rho_dng.'
-          endif
-          call end_parallel
-        end if
-      case('norm_pot','norm_pot_dng')
-        if(threshold<-1.d-12)then
-          if (comm_is_root(nproc_id_global)) then
-            write(*,*) 'set threshold when convergence is norm_pot or norm_rho_pot.'
-          endif
-          call end_parallel
-        end if
-      case default
+    select case(convergence)
+    case('rho_dne')
+      continue
+    case('norm_rho','norm_rho_dng')
+      if(threshold<-1.d-12)then
         if (comm_is_root(nproc_id_global)) then
-          write(*,*) 'check a keyword of convergence.'
+          write(*,*) 'set threshold when convergence is norm_rho or norm_rho_dng.'
         endif
         call end_parallel
-      end select
-
-    else if(iperiodic==3.and.yn_domain_parallel=='n') then
-      if(convergence.ne.'rho_dne') call stop_by_bad_input2('iperiodic','convergence')
-      if(abs(t1_start).ge.1d-10)then
-         if(index(ae_shape1,'Acos')==0) call stop_by_bad_input2('t1_start','ae_shape1')
+      end if
+    case('norm_pot','norm_pot_dng')
+      if(threshold<-1.d-12)then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) 'set threshold when convergence is norm_pot or norm_rho_pot.'
+        endif
+        call end_parallel
+      end if
+    case default
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'check a keyword of convergence.'
       endif
-    endif
+      call end_parallel
+    end select
 
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
       select case(out_dos_function)
@@ -2306,16 +2293,6 @@ contains
         stop 'set out_dos_meshotd to "gaussian" or "lorentzian"'
       end select
     end if
-
-    select case(yn_domain_parallel)
-    case('n')
-       select case(iperiodic)
-       case(3)
-          if( theory/='maxwell' ) then
-            return ! ARTED
-          end if
-       end select
-    end select
 
     if (yn_eigenexa == 'y') then
 #ifdef USE_EIGENEXA
