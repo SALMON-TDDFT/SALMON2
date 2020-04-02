@@ -25,7 +25,7 @@ subroutine initialization_ms( &
                      nmacro, &
                      Mit, itotNtime, system, energy, ewald, rt, md,&
                      stencil, fg, poisson,  &
-                     lg, mg, ng, info,  &
+                     lg, mg, info,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
@@ -79,7 +79,6 @@ use inputoutput
   integer :: mit
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_rgrid) :: ng
   type(s_dft_system)  :: system
   type(s_rt) :: rt
   type(s_process_info) :: pinfo
@@ -229,7 +228,7 @@ use inputoutput
   ! | initialization |
   ! +----------------+
   
-  call init_dft(nproc_group_macropoint,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+  call init_dft(nproc_group_macropoint,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   
   call init_code_optimization
   
@@ -265,7 +264,7 @@ use inputoutput
  
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  call restart_rt(lg,mg,ng,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+  call restart_rt(lg,mg,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
@@ -304,9 +303,9 @@ use inputoutput
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,.true.,energy)
+     call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,.true.,energy)
   case(3)
-     call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,.true.,energy)
+     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,.true.,energy)
   end select
   energy%E_tot0 = energy%E_tot
   
@@ -441,7 +440,7 @@ use inputoutput
   end if
   
   if(yn_restart /= 'y')then
-    call calc_dip(info%icomm_r,lg,ng,srho,rbox_array2)
+    call calc_dip(info%icomm_r,lg,mg,srho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   
   end if
@@ -473,13 +472,13 @@ use inputoutput
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-        call write_dns(lg,mg,ng,srho%f,system%hgs,srho%f,itt)
+        call write_dns(lg,mg,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        call write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,spsi_in)
+        call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,ng,system%hgs,stencil,info,sVh,srg_scalar,itt)
+        call write_estatic(lg,mg,system%hgs,stencil,info,sVh,srg_scalar,itt)
       end if
     end do
   

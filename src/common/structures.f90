@@ -344,7 +344,7 @@ module structures
   end type s_poisson
 
   type s_fdtd_system
-    type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
+    type(s_rgrid)         :: lg, mg       ! Structure for send and receive in fdtd
     type(s_sendrecv_grid) :: srg_ng       ! Structure for send and receive in fdtd
     real(8) :: rlsize(3)                  ! Size of Cell
     real(8) :: hgs(3)                     ! Grid Spacing

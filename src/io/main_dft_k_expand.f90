@@ -59,7 +59,6 @@ subroutine main_dft_k_expand_single
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_rgrid) :: ng
   type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_scalar
@@ -94,12 +93,12 @@ subroutine main_dft_k_expand_single
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(process_allocation /= 'orbital_sequential') stop "error: process_allocation must be orbital_sequential"
 
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+  call init_dft(nproc_group_global,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
   allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
   call initialization1_dft( system, energy, stencil, fg, poisson,  &
-                            lg, mg, ng,  &
+                            lg, mg,  &
                             pinfo, info,  &
                             srg, srg_scalar,  &
                             srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
@@ -110,7 +109,7 @@ subroutine main_dft_k_expand_single
   nspin = system%nspin
   spsi%update_zwf_overlap = .false.
   mixing%num_rho_stock = 21
-  call init_mixing(nspin,ng,mixing)  !maybe not necessary
+  call init_mixing(nspin,mg,mixing)  !maybe not necessary
 
 
   if(system%nspin /= 1) stop "error: nspin must be 1"
@@ -119,7 +118,7 @@ subroutine main_dft_k_expand_single
     stop "error: must be mod(nstate,nproc_ob)==0.and.mod(nelec/2,(nstate/nproc_ob))==0"
 
   ! read restart data
-  call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
+  call restart_gs(lg,mg,system,info,spsi,Miter,mixing=mixing)
 
   ! initialization for k-expand
   call init_k_expand(system%nk,kex)
@@ -537,9 +536,9 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
         iz_add = lg%ie(3) * (kex%isupercell(3,ixyz)-1)
 
         !$omp parallel do collapse(2) private(ix,iy,iz,iix,iiy,iiz)
-        do iz= ng%is(3),ng%ie(3)
-        do iy= ng%is(2),ng%ie(2)
-        do ix= ng%is(1),ng%ie(1)
+        do iz= mg%is(3),mg%ie(3)
+        do iy= mg%is(2),mg%ie(2)
+        do ix= mg%is(1),mg%ie(1)
 
            iix = ix + ix_add
            iiy = iy + iy_add

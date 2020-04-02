@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
+subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa,theory
   use structures, only: s_rgrid,s_scalar,allocate_scalar,deallocate_scalar
   use parallelization, only: nproc_group_global
@@ -30,7 +30,6 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
   real(8),intent(in) :: rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   real(8),intent(in) :: hgs(3)
   real(8),intent(in),optional :: rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
@@ -55,9 +54,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   end do
 
   !$OMP parallel do collapse(2) private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     work_l1%f(ix,iy,iz)=rho(ix,iy,iz)
   end do
   end do
@@ -65,9 +64,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
 
   if(format_voxel_data=='avs')then
     !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       work_l1%f(ix,iy,iz)=work_l1%f(ix,iy,iz)/(au_length_aa**3)
     end do
     end do
@@ -108,9 +107,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
     end do
 
     !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       work_l1%f(ix,iy,iz)=rho(ix,iy,iz)-rho0(ix,iy,iz)
     end do
     end do
@@ -118,9 +117,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   
     if(format_voxel_data=='avs')then
       !$OMP parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         work_l1%f(ix,iy,iz)=work_l1%f(ix,iy,iz)/(au_length_aa**3)
       end do
       end do
@@ -234,7 +233,7 @@ end subroutine write_dns_ac_je
 
 !===================================================================================================================================
 
-subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
+subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   use salmon_global, only: format_voxel_data,theory
   use structures
   use math_constants, only: pi
@@ -245,7 +244,7 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
   use write_file3d
   implicit none
   integer                 ,intent(in) :: itt
-  type(s_rgrid)           ,intent(in) :: lg,mg,ng
+  type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_stencil)         ,intent(in) :: stencil
@@ -278,9 +277,9 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
   complex(8) :: gradzpsi(3,mg%is_array(1):mg%ie_array(1),   &
                        mg%is_array(2):mg%ie_array(2),   &
                        mg%is_array(3):mg%ie_array(3))
-  real(8) :: gradrho(3,ng%is(1):ng%ie(1),   &
-                       ng%is(2):ng%ie(2),   &
-                       ng%is(3):ng%ie(3))
+  real(8) :: gradrho(3,mg%is(1):mg%ie(1),   &
+                       mg%is(2):mg%ie(2),   &
+                       mg%is(3):mg%ie(3))
   real(8) :: gradrho2(mg%is(1):mg%ie(1),   &
                       mg%is(2):mg%ie(2),   &
                       mg%is(3):mg%ie(3))
@@ -293,9 +292,9 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
   real(8) :: rho_half(mg%is(1):mg%ie(1),   &
                       mg%is(2):mg%ie(2),   &
                       mg%is(3):mg%ie(3))
-  real(8) :: box(ng%is_array(1):ng%ie_array(1), &
-  & ng%is_array(2):ng%ie_array(2), &
-  & ng%is_array(3):ng%ie_array(3))
+  real(8) :: box(mg%is_array(1):mg%ie_array(1), &
+  & mg%is_array(2):mg%ie_array(2), &
+  & mg%is_array(3):mg%ie_array(3))
   real(8) :: matbox_l(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ calc_elf"
@@ -360,20 +359,20 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
     call comm_summation(mrelftau,elftau,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
     call comm_summation(mrcurden,curden,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
     
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       box(ix,iy,iz) = srho%f(ix,iy,iz)
     end do
     end do
     end do
     
-    call update_overlap_real8(srg_scalar, ng, box)
-    call calc_gradient_field(ng,stencil%coef_nab,box,gradrho)
+    call update_overlap_real8(srg_scalar, mg, box)
+    call calc_gradient_field(mg,stencil%coef_nab,box,gradrho)
 
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2      &
             +gradrho(2,ix,iy,iz)**2      &
             +gradrho(3,ix,iy,iz)**2
@@ -385,9 +384,9 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
 
   ! matbox_l stores ELF
   matbox_l=0.d0
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     elfcuni(ix,iy,iz)=3.d0/5.d0*(6.d0*Pi**2)**(2.d0/3.d0)      &
               *rho_half(ix,iy,iz)**(5.d0/3.d0)
     matbox_l(ix,iy,iz)=1.d0/(1.d0+elfc(ix,iy,iz)**2/elfcuni(ix,iy,iz)**2)
@@ -421,7 +420,7 @@ end subroutine write_elf
 
 !===================================================================================================================================
 
-subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_scalar,itt)
+subroutine write_estatic(lg,mg,hgs,stencil,info,sVh,srg_scalar,itt)
   use salmon_global, only: format_voxel_data
   use structures
   use sendrecv_grid, only: update_overlap_real8
@@ -429,7 +428,7 @@ subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_scalar,itt)
   use communication, only: comm_summation
   use write_file3d
   implicit none
-  type(s_rgrid)   ,intent(in) :: lg,ng
+  type(s_rgrid)   ,intent(in) :: lg,mg
   real(8)         ,intent(in) :: hgs(3)
   type(s_stencil) ,intent(in) :: stencil
   type(s_parallel_info),intent(in) :: info
@@ -443,31 +442,31 @@ subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_scalar,itt)
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
-  real(8) :: grad_Vh(3,ng%is(1):ng%ie(1),   &
-                       ng%is(2):ng%ie(2),   &
-                       ng%is(3):ng%ie(3))
-  real(8) :: box(ng%is_array(1):ng%ie_array(1), &
-  & ng%is_array(2):ng%ie_array(2), &
-  & ng%is_array(3):ng%ie_array(3))
+  real(8) :: grad_Vh(3,mg%is(1):mg%ie(1),   &
+                       mg%is(2):mg%ie(2),   &
+                       mg%is(3):mg%ie(3))
+  real(8) :: box(mg%is_array(1):mg%ie_array(1), &
+  & mg%is_array(2):mg%ie_array(2), &
+  & mg%is_array(3):mg%ie_array(3))
   real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: rmat,rmat2
   
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     box(ix,iy,iz) = sVh%f(ix,iy,iz)
   end do
   end do
   end do
 
-  call update_overlap_real8(srg_scalar, ng, box)
-  call calc_gradient_field(ng,stencil%coef_nab,box,grad_Vh)
+  call update_overlap_real8(srg_scalar, mg, box)
+  call calc_gradient_field(mg,stencil%coef_nab,box,grad_Vh)
 
   do jj=1,3
     
     rmat = 0d0
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rmat(ix,iy,iz) = grad_Vh(jj,ix,iy,iz)
     end do
     end do

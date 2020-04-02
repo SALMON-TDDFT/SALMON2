@@ -21,7 +21,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_isolated(system,info,ng,pp,rho,Vh,Vxc,rion_update,energy)
+  SUBROUTINE calc_Total_Energy_isolated(system,info,mg,pp,rho,Vh,Vxc,rion_update,energy)
     use structures
     use salmon_global, only: kion
     use communication, only: comm_summation
@@ -29,7 +29,7 @@ CONTAINS
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
-    type(s_rgrid)           ,intent(in) :: ng
+    type(s_rgrid)           ,intent(in) :: mg
     type(s_pp_info)         ,intent(in) :: pp
     type(s_scalar)          ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
     logical                 ,intent(in) :: rion_update
@@ -79,11 +79,11 @@ CONTAINS
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:sum1) &
 !$omp          private(ispin,ix,iy,iz) &
-!$omp          shared(Nspin,ng,Vh,rho,Vxc)
+!$omp          shared(Nspin,mg,Vh,rho,Vxc)
     do ispin=1,Nspin
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         sum1 = sum1 - 0.5d0* Vh%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz)    &
                     - ( Vxc(ispin)%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz) )
       end do
@@ -108,7 +108,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+  SUBROUTINE calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     use structures
     use salmon_math
     use math_constants,only : pi,zi
@@ -116,7 +116,7 @@ CONTAINS
     use communication, only: comm_summation,comm_is_root
     use timer
     implicit none
-    type(s_rgrid)           ,intent(in) :: ng
+    type(s_rgrid)           ,intent(in) :: mg
     type(s_ewald_ion_ion)   ,intent(in) :: ewald
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
@@ -181,10 +181,10 @@ CONTAINS
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_tmp_l) &
 !$omp          private(ix,iy,iz,rho_i) &
-!$omp          shared(fg,aEwald,sysvol,ng,ppg)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+!$omp          shared(fg,aEwald,sysvol,mg,ppg)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         rho_i = ppg%zrhoG_ion(ix,iy,iz)
         E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2 * fg%exp_ewald(ix,iy,iz) *0.5d0) ! ewald (--> Rion_update)
       end do
@@ -198,10 +198,10 @@ CONTAINS
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
-!$omp          shared(ng,fg,aEwald,system,sysvol,kion,poisson,ppg,info)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+!$omp          shared(mg,fg,aEwald,system,sysvol,kion,poisson,ppg,info)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       g(1) = fg%vec_G(1,ix,iy,iz)
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)

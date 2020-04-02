@@ -219,49 +219,49 @@ contains
     call comm_bcast(dt_em,nproc_group_global)
     
     !*** basic allocation in eh-FDTD **************************************************************************!
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ex_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ex_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ex_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ex_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ex_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ex_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ey_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ey_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ey_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ey_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ey_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ey_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ez_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ez_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ez_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ez_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_ez_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_ez_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hx_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hx_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hx_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hx_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hx_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hx_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hy_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hy_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hy_z)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hy_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hy_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hy_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hz_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hz_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hz_x)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hz_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c1_hz_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_hz_y)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_jx)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_jy)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%c2_jz)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_ex_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_ex_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_ex_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_ex_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_ey_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_ey_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_ey_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_ey_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_ez_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_ez_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_ez_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_ez_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_hx_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_hx_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_hx_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_hx_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_hy_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_hy_z)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_hy_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_hy_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_hz_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_hz_x)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c1_hz_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_hz_y)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jx)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jy)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%c2_jz)
     
     !*** input fdtd shape *************************************************************************************!
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i3d',i3d=fs%imedia)
-    call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rmedia)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i3d',i3d=fs%imedia)
+    call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rmedia)
     if(media_num>0) then
       !check file format and input shape file
       if(comm_is_root(nproc_id_global)) write(*,*)
@@ -270,7 +270,7 @@ contains
         if(comm_is_root(nproc_id_global)) then
           write(*,*) "shape file is inputed by .cube format."
         end if
-        call eh_input_shape(fe%ifn,fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
+        call eh_input_shape(fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
         fe%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
         call eh_sendrecv(fs,fe,'r')
         fs%imedia(:,:,:)=int(fe%rmedia(:,:,:)+1d-3)
@@ -320,21 +320,21 @@ contains
       icount_ld=1
       
       !allocate Lorentz-Drude variables
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idx_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idy_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idz_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjx_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjy_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjz_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjx_sum_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjy_sum_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjz_sum_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%px_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%py_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%pz_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%px_sum_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%py_sum_ld)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%pz_sum_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idx_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idy_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'i4d',num4d=fe%num_ld,i4d=fe%idz_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjx_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjy_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%rjz_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rjx_sum_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rjy_sum_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rjz_sum_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%px_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%py_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r5d',num4d=fe%max_pole_num_ld,num5d=fe%num_ld,r5d=fe%pz_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%px_sum_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%py_sum_ld)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%pz_sum_ld)
       allocate(fe%c1_j_ld(fe%max_pole_num_ld,fe%num_ld),&
                fe%c2_j_ld(fe%max_pole_num_ld,fe%num_ld),&
                fe%c3_j_ld(fe%max_pole_num_ld,fe%num_ld))
@@ -354,8 +354,8 @@ contains
     !*** Check TTM On/Off, and initialization
     call init_ttm_parameters( dt_em )
     if( use_ttm )then
-       call init_ttm_grid( fs%hgs, fs%ng%is_array, fs%ng%is, fs%ng%ie, fs%imedia )
-       call init_ttm_alloc( fs%srg_ng, fs%ng )
+       call init_ttm_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
+       call init_ttm_alloc( fs%srg_ng, fs%mg )
        if( comm_is_root(nproc_id_global) )then
           open(unit2,file=file_unit2)
           write(unit2,'("#",99(1X,I0,":",A))') &
@@ -419,44 +419,44 @@ contains
     end if
     
     !*** set calculation area *********************************************************************************!
-    fe%iex_y_is(:)=fs%ng%is(:); fe%iex_y_ie(:)=fs%ng%ie(:);
-    fe%iex_z_is(:)=fs%ng%is(:); fe%iex_z_ie(:)=fs%ng%ie(:);
-    fe%iey_z_is(:)=fs%ng%is(:); fe%iey_z_ie(:)=fs%ng%ie(:);
-    fe%iey_x_is(:)=fs%ng%is(:); fe%iey_x_ie(:)=fs%ng%ie(:);
-    fe%iez_x_is(:)=fs%ng%is(:); fe%iez_x_ie(:)=fs%ng%ie(:);
-    fe%iez_y_is(:)=fs%ng%is(:); fe%iez_y_ie(:)=fs%ng%ie(:);
-    fe%ihx_y_is(:)=fs%ng%is(:); fe%ihx_y_ie(:)=fs%ng%ie(:);
-    fe%ihx_z_is(:)=fs%ng%is(:); fe%ihx_z_ie(:)=fs%ng%ie(:);
-    fe%ihy_z_is(:)=fs%ng%is(:); fe%ihy_z_ie(:)=fs%ng%ie(:);
-    fe%ihy_x_is(:)=fs%ng%is(:); fe%ihy_x_ie(:)=fs%ng%ie(:);
-    fe%ihz_x_is(:)=fs%ng%is(:); fe%ihz_x_ie(:)=fs%ng%ie(:);
-    fe%ihz_y_is(:)=fs%ng%is(:); fe%ihz_y_ie(:)=fs%ng%ie(:);
-    if((fs%a_bc(1,1)=='pml').and.(fs%ng%is(1)==fs%lg%is(1))) then !x, bottom
-      fe%iey_x_is(1)=fs%ng%is(1)+1; fe%iez_x_is(1)=fs%ng%is(1)+1;
+    fe%iex_y_is(:)=fs%mg%is(:); fe%iex_y_ie(:)=fs%mg%ie(:);
+    fe%iex_z_is(:)=fs%mg%is(:); fe%iex_z_ie(:)=fs%mg%ie(:);
+    fe%iey_z_is(:)=fs%mg%is(:); fe%iey_z_ie(:)=fs%mg%ie(:);
+    fe%iey_x_is(:)=fs%mg%is(:); fe%iey_x_ie(:)=fs%mg%ie(:);
+    fe%iez_x_is(:)=fs%mg%is(:); fe%iez_x_ie(:)=fs%mg%ie(:);
+    fe%iez_y_is(:)=fs%mg%is(:); fe%iez_y_ie(:)=fs%mg%ie(:);
+    fe%ihx_y_is(:)=fs%mg%is(:); fe%ihx_y_ie(:)=fs%mg%ie(:);
+    fe%ihx_z_is(:)=fs%mg%is(:); fe%ihx_z_ie(:)=fs%mg%ie(:);
+    fe%ihy_z_is(:)=fs%mg%is(:); fe%ihy_z_ie(:)=fs%mg%ie(:);
+    fe%ihy_x_is(:)=fs%mg%is(:); fe%ihy_x_ie(:)=fs%mg%ie(:);
+    fe%ihz_x_is(:)=fs%mg%is(:); fe%ihz_x_ie(:)=fs%mg%ie(:);
+    fe%ihz_y_is(:)=fs%mg%is(:); fe%ihz_y_ie(:)=fs%mg%ie(:);
+    if((fs%a_bc(1,1)=='pml').and.(fs%mg%is(1)==fs%lg%is(1))) then !x, bottom
+      fe%iey_x_is(1)=fs%mg%is(1)+1; fe%iez_x_is(1)=fs%mg%is(1)+1;
     end if
-    if((fs%a_bc(1,2)=='pml').and.(fs%ng%ie(1)==fs%lg%ie(1))) then !x, top
-      fe%iex_y_ie(1)=fs%ng%ie(1)-1; fe%iex_z_ie(1)=fs%ng%ie(1)-1;
-      fe%iey_x_ie(1)=fs%ng%ie(1)-1; fe%iez_x_ie(1)=fs%ng%ie(1)-1;
-      fe%ihy_z_ie(1)=fs%ng%ie(1)-1; fe%ihy_x_ie(1)=fs%ng%ie(1)-1;
-      fe%ihz_x_ie(1)=fs%ng%ie(1)-1; fe%ihz_y_ie(1)=fs%ng%ie(1)-1;
+    if((fs%a_bc(1,2)=='pml').and.(fs%mg%ie(1)==fs%lg%ie(1))) then !x, top
+      fe%iex_y_ie(1)=fs%mg%ie(1)-1; fe%iex_z_ie(1)=fs%mg%ie(1)-1;
+      fe%iey_x_ie(1)=fs%mg%ie(1)-1; fe%iez_x_ie(1)=fs%mg%ie(1)-1;
+      fe%ihy_z_ie(1)=fs%mg%ie(1)-1; fe%ihy_x_ie(1)=fs%mg%ie(1)-1;
+      fe%ihz_x_ie(1)=fs%mg%ie(1)-1; fe%ihz_y_ie(1)=fs%mg%ie(1)-1;
     end if
-    if((fs%a_bc(2,1)=='pml').and.(fs%ng%is(2)==fs%lg%is(2))) then !y, bottom
-      fe%iex_y_is(2)=fs%ng%is(2)+1; fe%iez_y_is(2)=fs%ng%is(2)+1;
+    if((fs%a_bc(2,1)=='pml').and.(fs%mg%is(2)==fs%lg%is(2))) then !y, bottom
+      fe%iex_y_is(2)=fs%mg%is(2)+1; fe%iez_y_is(2)=fs%mg%is(2)+1;
     end if
-    if((fs%a_bc(2,2)=='pml').and.(fs%ng%ie(2)==fs%lg%ie(2))) then !y, top
-      fe%iex_y_ie(2)=fs%ng%ie(2)-1; fe%iey_z_ie(2)=fs%ng%ie(2)-1;
-      fe%iey_x_ie(2)=fs%ng%ie(2)-1; fe%iez_y_ie(2)=fs%ng%ie(2)-1;
-      fe%ihx_y_ie(2)=fs%ng%ie(2)-1; fe%ihx_z_ie(2)=fs%ng%ie(2)-1;
-      fe%ihz_x_ie(2)=fs%ng%ie(2)-1; fe%ihz_y_ie(2)=fs%ng%ie(2)-1;
+    if((fs%a_bc(2,2)=='pml').and.(fs%mg%ie(2)==fs%lg%ie(2))) then !y, top
+      fe%iex_y_ie(2)=fs%mg%ie(2)-1; fe%iey_z_ie(2)=fs%mg%ie(2)-1;
+      fe%iey_x_ie(2)=fs%mg%ie(2)-1; fe%iez_y_ie(2)=fs%mg%ie(2)-1;
+      fe%ihx_y_ie(2)=fs%mg%ie(2)-1; fe%ihx_z_ie(2)=fs%mg%ie(2)-1;
+      fe%ihz_x_ie(2)=fs%mg%ie(2)-1; fe%ihz_y_ie(2)=fs%mg%ie(2)-1;
     end if
-    if((fs%a_bc(3,1)=='pml').and.(fs%ng%is(3)==fs%lg%is(3))) then !z, bottom
-      fe%iex_z_is(3)=fs%ng%is(3)+1; fe%iey_z_is(3)=fs%ng%is(3)+1;
+    if((fs%a_bc(3,1)=='pml').and.(fs%mg%is(3)==fs%lg%is(3))) then !z, bottom
+      fe%iex_z_is(3)=fs%mg%is(3)+1; fe%iey_z_is(3)=fs%mg%is(3)+1;
     end if
-    if((fs%a_bc(3,2)=='pml').and.(fs%ng%ie(3)==fs%lg%ie(3))) then !z, top
-      fe%iex_z_ie(3)=fs%ng%ie(3)-1; fe%iey_z_ie(3)=fs%ng%ie(3)-1;
-      fe%iez_x_ie(3)=fs%ng%ie(3)-1; fe%iez_y_ie(3)=fs%ng%ie(3)-1;
-      fe%ihx_y_ie(3)=fs%ng%ie(3)-1; fe%ihx_z_ie(3)=fs%ng%ie(3)-1;
-      fe%ihy_z_ie(3)=fs%ng%ie(3)-1; fe%ihy_x_ie(3)=fs%ng%ie(3)-1;
+    if((fs%a_bc(3,2)=='pml').and.(fs%mg%ie(3)==fs%lg%ie(3))) then !z, top
+      fe%iex_z_ie(3)=fs%mg%ie(3)-1; fe%iey_z_ie(3)=fs%mg%ie(3)-1;
+      fe%iez_x_ie(3)=fs%mg%ie(3)-1; fe%iez_y_ie(3)=fs%mg%ie(3)-1;
+      fe%ihx_y_ie(3)=fs%mg%ie(3)-1; fe%ihx_z_ie(3)=fs%mg%ie(3)-1;
+      fe%ihy_z_ie(3)=fs%mg%ie(3)-1; fe%ihy_x_ie(3)=fs%mg%ie(3)-1;
     end if
     
     !*** set pml **********************************************************************************************!
@@ -494,12 +494,12 @@ contains
     !*** prepare observation **********************************************************************************!
     if(obs_num_em>0) then
       !set initial
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ex_s)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ey_s)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%ez_s)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hx_s)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hy_s)
-      call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%hz_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ex_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ey_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%ez_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hx_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hy_s)
+      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%hz_s)
       allocate(fe%iobs_po_id(obs_num_em,3)) !1:x,        2:y,        3:z
       allocate(fe%iobs_po_pe(obs_num_em))
       allocate(fe%iobs_li_pe(obs_num_em,3)) !1:x-line,   2:y-line,   3:z-line
@@ -510,7 +510,7 @@ contains
       !search observation point
       do ii=1,obs_num_em
         call find_point_em(obs_loc_em(ii,:),fe%iobs_po_id(ii,:),&
-                           fe%iobs_po_pe(ii),fe%iobs_li_pe(ii,:),fe%iobs_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
+                           fe%iobs_po_pe(ii),fe%iobs_li_pe(ii,:),fe%iobs_pl_pe(ii,:),fs%mg%is(:),fs%mg%ie(:),&
                            minval(fs%lg%is)-fe%Nd,maxval(fs%lg%ie)+fe%Nd,fe%coo(:,:))
       end do
       
@@ -613,14 +613,14 @@ contains
       if(fe%inc_dist1/='none') then
         ii=1
         call find_point_em(source_loc1(:),fe%inc_po_id(ii,:),&
-                           fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
+                           fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%mg%is(:),fs%mg%ie(:),&
                            minval(fs%lg%is(:))-fe%Nd,maxval(fs%lg%ie(:))+fe%Nd,fe%coo(:,:))
         call eh_check_iw_parameter(ii,phi_cep1,I_wcm2_1,E_amplitude1,ae_shape1)
       end if
       if(fe%inc_dist2/='none') then
         ii=2
         call find_point_em(source_loc2(:),fe%inc_po_id(ii,:),&
-                           fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%ng%is(:),fs%ng%ie(:),&
+                           fe%inc_po_pe(ii),fe%inc_li_pe(ii,:),fe%inc_pl_pe(ii,:),fs%mg%is(:),fs%mg%ie(:),&
                            minval(fs%lg%is(:))-fe%Nd,maxval(fs%lg%ie(:))+fe%Nd,fe%coo(:,:))
         call eh_check_iw_parameter(ii,phi_cep2,I_wcm2_2,E_amplitude2,ae_shape2)
       end if
@@ -687,9 +687,9 @@ contains
       if(fe%num_ld>0) then
         do ii=1,fe%num_ld
         do ij=1,pole_num_ld(fe%media_ld(ii))
-          do iz=fs%ng%is(3),fs%ng%ie(3)
-          do iy=fs%ng%is(2),fs%ng%ie(2)
-          do ix=fs%ng%is(1),fs%ng%ie(1)
+          do iz=fs%mg%is(3),fs%mg%ie(3)
+          do iy=fs%mg%is(2),fs%mg%ie(2)
+          do ix=fs%mg%is(1),fs%mg%ie(1)
             if(fe%idx_ld(ix,iy,iz,ii)==1) then
               if(ae_shape1=='impulse') then
                 fe%rjx_ld(ix,iy,iz,ij,ii)=fe%rjx_ld(ix,iy,iz,ij,ii) &
@@ -740,15 +740,15 @@ contains
       allocate(fe%fr_lr(nenergy,3),fe%fi_lr(nenergy,3))
       fe%fr_lr(:,:)=0.0d0; fe%fi_lr(:,:)=0.0d0;
       if(yn_periodic=='n') then
-        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%px_lr)
-        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%py_lr)
-        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%pz_lr)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%px_lr)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%py_lr)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%pz_lr)
         allocate(fe%dip_lr(nt_em,3))
         fe%dip_lr(:,:)=0.0d0
       elseif(yn_periodic=='y') then
-        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjx_lr)
-        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjy_lr)
-        call eh_allocate(fs%ng%is_array,fs%ng%ie_array,'r3d',r3d=fe%rjz_lr)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rjx_lr)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rjy_lr)
+        call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',r3d=fe%rjz_lr)
         allocate(fe%curr_lr(nt_em,3),fe%e_lr(nt_em,3))
         fe%curr_lr(:,:)=0.0d0; fe%e_lr(:,:)=0.0d0;
         allocate(fe%er_lr(0:nenergy,3),fe%ei_lr(0:nenergy,3))
@@ -836,9 +836,9 @@ contains
       case('pec')
         c1_e=0.0d0; c2_e_x=0.0d0; c2_e_y=0.0d0; c2_e_z=0.0d0;
       case('lorentz-drude')
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           if(fs%imedia(ix,iy,iz)==ii) then
             if(fs%imedia(ix+1,iy,iz)==ii) then !x
               fe%idx_ld(ix,iy,iz,icount_ld)=1;
@@ -890,43 +890,43 @@ contains
       
       !set coefficient
       if(ii==0) then
-        fe%c1_ex_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_e
-        fe%c2_ex_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c2_e_y
-        fe%c1_ex_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_e
-        fe%c2_ex_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_e_z
+        fe%c1_ex_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_e
+        fe%c2_ex_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c2_e_y
+        fe%c1_ex_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_e
+        fe%c2_ex_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_e_z
             
-        fe%c1_ey_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_e
-        fe%c2_ey_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c2_e_z
-        fe%c1_ey_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_e
-        fe%c2_ey_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_e_x
+        fe%c1_ey_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_e
+        fe%c2_ey_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c2_e_z
+        fe%c1_ey_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_e
+        fe%c2_ey_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_e_x
           
-        fe%c1_ez_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_e
-        fe%c2_ez_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c2_e_x
-        fe%c1_ez_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_e
-        fe%c2_ez_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_e_y
+        fe%c1_ez_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_e
+        fe%c2_ez_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c2_e_x
+        fe%c1_ez_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_e
+        fe%c2_ez_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_e_y
           
-        fe%c1_hx_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_h
-        fe%c2_hx_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_h_y
-        fe%c1_hx_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_h
-        fe%c2_hx_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c2_h_z
+        fe%c1_hx_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_h
+        fe%c2_hx_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_h_y
+        fe%c1_hx_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_h
+        fe%c2_hx_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c2_h_z
           
-        fe%c1_hy_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_h
-        fe%c2_hy_z(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_h_z
-        fe%c1_hy_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_h
-        fe%c2_hy_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c2_h_x
+        fe%c1_hy_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_h
+        fe%c2_hy_z(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_h_z
+        fe%c1_hy_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_h
+        fe%c2_hy_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c2_h_x
         
-        fe%c1_hz_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_h
-        fe%c2_hz_x(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_h_x
-        fe%c1_hz_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c1_h
-        fe%c2_hz_y(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=c2_h_y
+        fe%c1_hz_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_h
+        fe%c2_hz_x(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_h_x
+        fe%c1_hz_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c1_h
+        fe%c2_hz_y(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=c2_h_y
                     
-        fe%c2_jx(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_j
-        fe%c2_jy(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_j
-        fe%c2_jz(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))=-c2_j
+        fe%c2_jx(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_j
+        fe%c2_jy(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_j
+        fe%c2_jz(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))=-c2_j
       else
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           if(fs%imedia(ix,iy,iz)==ii) then
             !ex and jx
             if(fs%imedia(ix+1,iy,iz)==ii) then
@@ -1028,30 +1028,30 @@ contains
     subroutine eh_set_pml(idir,c1_e1,c2_e1,c1_e2,c2_e2,c1_h1,c2_h1,c1_h2,c2_h2)
       implicit none
       integer,intent(in)  :: idir
-      real(8),intent(out) :: c1_e1(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                             c2_e1(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                             c1_e2(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                             c2_e2(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                             c1_h1(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                             c2_h1(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                             c1_h2(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                             c2_h2(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                   fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                   fs%ng%is_array(3):fs%ng%ie_array(3))
+      real(8),intent(out) :: c1_e1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                             c2_e1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                             c1_e2(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                             c2_e2(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                             c1_h1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                             c2_h1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                             c1_h2(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                             c2_h2(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                   fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                   fs%mg%is_array(3):fs%mg%ie_array(3))
       integer :: ista,iend
       real(8) :: pml_del,s_max
       real(8) :: s_l(fe%ipml_l+1),sh_l(fe%ipml_l), &
@@ -1092,29 +1092,29 @@ contains
       call comm_bcast(c2_pml_h,nproc_group_global)
       
       !set pml(bottom)
-      if((fs%a_bc(idir,1)=='pml').and.(fs%ng%is(idir)<=(fs%lg%is(idir)+fe%ipml_l))) then
+      if((fs%a_bc(idir,1)=='pml').and.(fs%mg%is(idir)<=(fs%lg%is(idir)+fe%ipml_l))) then
         !e
         iend=fs%lg%is(idir)+fe%ipml_l
-        if(fs%ng%ie(idir)<iend) then
-          iend=fs%ng%ie(idir)
+        if(fs%mg%ie(idir)<iend) then
+          iend=fs%mg%ie(idir)
         end if
         icount=1
-        do ii=fs%ng%is(idir),iend
+        do ii=fs%mg%is(idir),iend
           if(idir==1) then
-            c1_e1(ii,:,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(ii,:,:)=-c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(ii,:,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(ii,:,:)= c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(ii,:,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(ii,:,:)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(ii,:,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(ii,:,:)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==2) then
-            c1_e1(:,ii,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(:,ii,:)=-c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(:,ii,:)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(:,ii,:)= c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(:,ii,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(:,ii,:)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(:,ii,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(:,ii,:)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==3) then
-            c1_e1(:,:,ii)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(:,:,ii)=-c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(:,:,ii)= c1_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(:,:,ii)= c2_pml(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(:,:,ii)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(:,:,ii)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(:,:,ii)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(:,:,ii)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           end if
           icount=icount+1
         end do
@@ -1124,36 +1124,36 @@ contains
           iend=iend-1
         end if
         icount=1
-        do ii=fs%ng%is(idir),iend
+        do ii=fs%mg%is(idir),iend
           if(idir==1) then
-            c1_h1(ii,:,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(ii,:,:)= c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(ii,:,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(ii,:,:)=-c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(ii,:,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(ii,:,:)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(ii,:,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(ii,:,:)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==2) then
-            c1_h1(:,ii,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(:,ii,:)= c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(:,ii,:)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(:,ii,:)=-c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(:,ii,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(:,ii,:)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(:,ii,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(:,ii,:)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==3) then
-            c1_h1(:,:,ii)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(:,:,ii)= c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(:,:,ii)= c1_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(:,:,ii)=-c2_pml_h(fs%ng%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(:,:,ii)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(:,:,ii)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(:,:,ii)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(:,:,ii)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           end if
           icount=icount+1
         end do
       end if
       
       !set pml(top)
-      if((fs%a_bc(idir,2)=='pml').and.(fs%ng%ie(idir)>=(fs%lg%ie(idir)-fe%ipml_l))) then
+      if((fs%a_bc(idir,2)=='pml').and.(fs%mg%ie(idir)>=(fs%lg%ie(idir)-fe%ipml_l))) then
         !e
         ista=fs%lg%ie(idir)-fe%ipml_l
-        if(fs%ng%is(idir)>ista) then
-          ista=fs%ng%is(idir)
+        if(fs%mg%is(idir)>ista) then
+          ista=fs%mg%is(idir)
         end if
         icount=1
-        do ii=ista,fs%ng%ie(idir)
+        do ii=ista,fs%mg%ie(idir)
           if(idir==1) then
             c1_e1(ii,:,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
             c2_e1(ii,:,:)=-c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
@@ -1174,10 +1174,10 @@ contains
         end do
         
         !h
-        if(fs%ng%ie(idir)==fs%lg%ie(idir)) then
-          iend=fs%ng%ie(idir)-1
+        if(fs%mg%ie(idir)==fs%lg%ie(idir)) then
+          iend=fs%mg%ie(idir)-1
         else
-          iend=fs%ng%ie(idir)
+          iend=fs%mg%ie(idir)
         end if
         icount=1
         do ii=ista,iend
@@ -1365,17 +1365,17 @@ contains
       end if
       
       !update e
-      call eh_fd(fe%iex_y_is,fe%iex_y_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%iex_y_is,fe%iex_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_ex_y,fe%c2_ex_y,fe%ex_y,fe%hz_x,fe%hz_y,      'e','y') !ex_y
-      call eh_fd(fe%iex_z_is,fe%iex_z_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%iex_z_is,fe%iex_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_ex_z,fe%c2_ex_z,fe%ex_z,fe%hy_z,fe%hy_x,      'e','z') !ex_z
-      call eh_fd(fe%iey_z_is,fe%iey_z_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%iey_z_is,fe%iey_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_ey_z,fe%c2_ey_z,fe%ey_z,fe%hx_y,fe%hx_z,      'e','z') !ey_z
-      call eh_fd(fe%iey_x_is,fe%iey_x_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%iey_x_is,fe%iey_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_ey_x,fe%c2_ey_x,fe%ey_x,fe%hz_x,fe%hz_y,      'e','x') !ey_x
-      call eh_fd(fe%iez_x_is,fe%iez_x_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%iez_x_is,fe%iez_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_ez_x,fe%c2_ez_x,fe%ez_x,fe%hy_z,fe%hy_x,      'e','x') !ez_x
-      call eh_fd(fe%iez_y_is,fe%iez_y_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%iez_y_is,fe%iez_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_ez_y,fe%c2_ez_y,fe%ez_y,fe%hx_y,fe%hx_z,      'e','y') !ez_y
       if(fe%inc_num>0) then !add incident current source
         if(fe%inc_dist1/='none') call eh_add_inc(1,E_amplitude1,tw1,omega1,phi_cep1,&
@@ -1397,9 +1397,9 @@ contains
       if( (obs_num_em>0).and.(mod(iter,obs_samp_em)==0) )then
 !$omp parallel
 !$omp do private(ix,iy,iz)
-        do iz=(fs%ng%is_array(3)),(fs%ng%ie_array(3))
-        do iy=(fs%ng%is_array(2)),(fs%ng%ie_array(2))
-        do ix=(fs%ng%is_array(1)),(fs%ng%ie_array(1))
+        do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
+        do iy=(fs%mg%is_array(2)),(fs%mg%ie_array(2))
+        do ix=(fs%mg%is_array(1)),(fs%mg%ie_array(1))
           fe%hx_s(ix,iy,iz)=fe%hx_y(ix,iy,iz)+fe%hx_z(ix,iy,iz)
           fe%hy_s(ix,iy,iz)=fe%hy_z(ix,iy,iz)+fe%hy_x(ix,iy,iz)
           fe%hz_s(ix,iy,iz)=fe%hz_x(ix,iy,iz)+fe%hz_y(ix,iy,iz)
@@ -1411,17 +1411,17 @@ contains
       end if
       
       !update h
-      call eh_fd(fe%ihx_y_is,fe%ihx_y_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%ihx_y_is,fe%ihx_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hx_y,fe%c2_hx_y,fe%hx_y,fe%ez_x,fe%ez_y,      'h','y') !hx_y
-      call eh_fd(fe%ihx_z_is,fe%ihx_z_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%ihx_z_is,fe%ihx_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hx_z,fe%c2_hx_z,fe%hx_z,fe%ey_z,fe%ey_x,      'h','z') !hx_z
-      call eh_fd(fe%ihy_z_is,fe%ihy_z_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%ihy_z_is,fe%ihy_z_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hy_z,fe%c2_hy_z,fe%hy_z,fe%ex_y,fe%ex_z,      'h','z') !hy_z
-      call eh_fd(fe%ihy_x_is,fe%ihy_x_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%ihy_x_is,fe%ihy_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hy_x,fe%c2_hy_x,fe%hy_x,fe%ez_x,fe%ez_y,      'h','x') !hy_x
-      call eh_fd(fe%ihz_x_is,fe%ihz_x_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%ihz_x_is,fe%ihz_x_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hz_x,fe%c2_hz_x,fe%hz_x,fe%ey_z,fe%ey_x,      'h','x') !hz_x
-      call eh_fd(fe%ihz_y_is,fe%ihz_y_ie,      fs%ng%is,fs%ng%ie,fe%Nd,&
+      call eh_fd(fe%ihz_y_is,fe%ihz_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,      'h','y') !hz_y
       call eh_sendrecv(fs,fe,'h')
       
@@ -1438,9 +1438,9 @@ contains
          u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
 
          u_energy_p = u_energy
-         call ttm_penetration( fs%ng%is, u_energy_p )
+         call ttm_penetration( fs%mg%is, u_energy_p )
 
-         call ttm_main( fs%srg_ng, fs%ng, u_energy_p )
+         call ttm_main( fs%srg_ng, fs%mg, u_energy_p )
 
          if( mod(iter,obs_samp_em) == 0 )then
             ix=fs%lg%is(1)-fe%Nd; jx=fs%lg%ie(1)+fe%Nd
@@ -1486,9 +1486,9 @@ contains
         !prepare e and h for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
-        do iz=(fs%ng%is_array(3)),(fs%ng%ie_array(3))
-        do iy=(fs%ng%is_array(2)),(fs%ng%ie_array(2))
-        do ix=(fs%ng%is_array(1)),(fs%ng%ie_array(1))
+        do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
+        do iy=(fs%mg%is_array(2)),(fs%mg%ie_array(2))
+        do ix=(fs%mg%is_array(1)),(fs%mg%ie_array(1))
           fe%ex_s(ix,iy,iz)=fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz)
           fe%ey_s(ix,iy,iz)=fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz)
           fe%ez_s(ix,iy,iz)=fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz)
@@ -1523,17 +1523,17 @@ contains
           !plane
           if(yn_obs_plane_em(ii)=='y') then
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
-                               fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ex_s,'ex')
+                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ex_s,'ex')
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
-                               fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ey_s,'ey')
+                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ey_s,'ey')
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,&
-                               fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ez_s,'ez')
+                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%ez_s,'ez')
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
-                               fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hx_s,'hx')
+                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hx_s,'hx')
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
-                               fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hy_s,'hy')
+                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hy_s,'hy')
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
-                               fs%ng%is,fs%ng%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hz_s,'hz')
+                               fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hz_s,'hz')
           end if
         end do
         
@@ -1553,9 +1553,9 @@ contains
       !initialize
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=fs%ng%is(3),fs%ng%ie(3)
-      do iy=fs%ng%is(2),fs%ng%ie(2)
-      do ix=fs%ng%is(1),fs%ng%ie(1)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
         fe%rjx_sum_ld(ix,iy,iz)=0.0d0; fe%rjy_sum_ld(ix,iy,iz)=0.0d0; fe%rjz_sum_ld(ix,iy,iz)=0.0d0;
         fe%px_sum_ld(ix,iy,iz) =0.0d0; fe%py_sum_ld(ix,iy,iz) =0.0d0; fe%pz_sum_ld(ix,iy,iz) =0.0d0;
       end do
@@ -1569,9 +1569,9 @@ contains
       do ij=1,pole_num_ld(fe%media_ld(ii))
 !$omp parallel
 !$omp do private(ix,iy,iz)
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           fe%px_ld(ix,iy,iz,ij,ii)=fe%px_ld(ix,iy,iz,ij,ii)+dt_em*fe%rjx_ld(ix,iy,iz,ij,ii)
           fe%py_ld(ix,iy,iz,ij,ii)=fe%py_ld(ix,iy,iz,ij,ii)+dt_em*fe%rjy_ld(ix,iy,iz,ij,ii)
           fe%pz_ld(ix,iy,iz,ij,ii)=fe%pz_ld(ix,iy,iz,ij,ii)+dt_em*fe%rjz_ld(ix,iy,iz,ij,ii)
@@ -1591,9 +1591,9 @@ contains
       do ij=1,pole_num_ld(fe%media_ld(ii))
 !$omp parallel
 !$omp do private(ix,iy,iz)
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           fe%rjx_ld(ix,iy,iz,ij,ii)= fe%c1_j_ld(ij,ii)*fe%rjx_ld(ix,iy,iz,ij,ii) &
                                     +fe%c2_j_ld(ij,ii)*( fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz) ) &
                                     *dble(fe%idx_ld(ix,iy,iz,ii)) &
@@ -1635,9 +1635,9 @@ contains
         !initialize polarization vector
 !$omp parallel
 !$omp do private(ix,iy,iz)
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           fe%px_lr(ix,iy,iz)=0.0d0; fe%py_lr(ix,iy,iz)=0.0d0; fe%pz_lr(ix,iy,iz)=0.0d0;
         end do
         end do
@@ -1649,9 +1649,9 @@ contains
         if(fe%num_ld>0) then
 !$omp parallel
 !$omp do private(ix,iy,iz)
-          do iz=fs%ng%is(3),fs%ng%ie(3)
-          do iy=fs%ng%is(2),fs%ng%ie(2)
-          do ix=fs%ng%is(1),fs%ng%ie(1)
+          do iz=fs%mg%is(3),fs%mg%ie(3)
+          do iy=fs%mg%is(2),fs%mg%ie(2)
+          do ix=fs%mg%is(1),fs%mg%ie(1)
             fe%px_lr(ix,iy,iz)=fe%px_lr(ix,iy,iz)+fe%px_sum_ld(ix,iy,iz);
             fe%py_lr(ix,iy,iz)=fe%py_lr(ix,iy,iz)+fe%py_sum_ld(ix,iy,iz);
             fe%pz_lr(ix,iy,iz)=fe%pz_lr(ix,iy,iz)+fe%pz_sum_ld(ix,iy,iz);
@@ -1667,9 +1667,9 @@ contains
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           sum_lr_x=sum_lr_x+fe%px_lr(ix,iy,iz)
           sum_lr_y=sum_lr_y+fe%py_lr(ix,iy,iz)
           sum_lr_z=sum_lr_z+fe%pz_lr(ix,iy,iz)
@@ -1685,9 +1685,9 @@ contains
         !initialize current density
 !$omp parallel
 !$omp do private(ix,iy,iz)
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           fe%rjx_lr(ix,iy,iz)=0.0d0; fe%rjy_lr(ix,iy,iz)=0.0d0; fe%rjz_lr(ix,iy,iz)=0.0d0;
         end do
         end do
@@ -1699,9 +1699,9 @@ contains
         if(fe%num_ld>0) then
 !$omp parallel
 !$omp do private(ix,iy,iz)
-          do iz=fs%ng%is(3),fs%ng%ie(3)
-          do iy=fs%ng%is(2),fs%ng%ie(2)
-          do ix=fs%ng%is(1),fs%ng%ie(1)
+          do iz=fs%mg%is(3),fs%mg%ie(3)
+          do iy=fs%mg%is(2),fs%mg%ie(2)
+          do ix=fs%mg%is(1),fs%mg%ie(1)
             fe%rjx_lr(ix,iy,iz)=fe%rjx_lr(ix,iy,iz)+fe%rjx_sum_ld(ix,iy,iz)
             fe%rjy_lr(ix,iy,iz)=fe%rjy_lr(ix,iy,iz)+fe%rjy_sum_ld(ix,iy,iz)
             fe%rjz_lr(ix,iy,iz)=fe%rjz_lr(ix,iy,iz)+fe%rjz_sum_ld(ix,iy,iz)
@@ -1717,9 +1717,9 @@ contains
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           sum_lr_x=sum_lr_x+fe%rjx_lr(ix,iy,iz)
           sum_lr_y=sum_lr_y+fe%rjy_lr(ix,iy,iz)
           sum_lr_z=sum_lr_z+fe%rjz_lr(ix,iy,iz)
@@ -1738,9 +1738,9 @@ contains
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
 !$omp parallel
 !$omp do private(ix,iy,iz) reduction( + : sum_lr_x,sum_lr_y,sum_lr_z )
-        do iz=fs%ng%is(3),fs%ng%ie(3)
-        do iy=fs%ng%is(2),fs%ng%ie(2)
-        do ix=fs%ng%is(1),fs%ng%ie(1)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
           sum_lr_x=sum_lr_x+( fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz) )
           sum_lr_y=sum_lr_y+( fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz) )
           sum_lr_z=sum_lr_z+( fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz) )
@@ -1918,15 +1918,15 @@ contains
     !+ add current +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     subroutine eh_add_curr(rjx,rjy,rjz)
       implicit none
-      real(8),intent(in) :: rjx(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                            rjy(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                fs%ng%is_array(3):fs%ng%ie_array(3)),&
-                            rjz(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                                fs%ng%is_array(2):fs%ng%ie_array(2),&
-                                fs%ng%is_array(3):fs%ng%ie_array(3))
+      real(8),intent(in) :: rjx(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                            rjy(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                fs%mg%is_array(3):fs%mg%ie_array(3)),&
+                            rjz(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                                fs%mg%is_array(2):fs%mg%ie_array(2),&
+                                fs%mg%is_array(3):fs%mg%ie_array(3))
       
       !ex
 !$omp parallel
@@ -2007,15 +2007,15 @@ contains
     !+ check and update maximum of e and h +++++++++++++++++++++++++++++++++++++++++++++++++++
     subroutine eh_update_max
       implicit none
-      real(8) :: e_abs(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3)),&
-                 h_abs(fs%ng%is(1):fs%ng%ie(1),fs%ng%is(2):fs%ng%ie(2),fs%ng%is(3):fs%ng%ie(3))
+      real(8) :: e_abs(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3)),&
+                 h_abs(fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3))
       real(8) :: e_max_tmp(0:nproc_size_global-1), h_max_tmp(0:nproc_size_global-1),&
                  e_max_tmp2(0:nproc_size_global-1),h_max_tmp2(0:nproc_size_global-1)
       
       e_max_tmp(:)=0.0d0; h_max_tmp(:)=0.0d0;
-      do iz=fs%ng%is(3),fs%ng%ie(3)
-      do iy=fs%ng%is(2),fs%ng%ie(2)
-      do ix=fs%ng%is(1),fs%ng%ie(1)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
         e_abs(ix,iy,iz)=sqrt( fe%ex_s(ix,iy,iz)**2.0d0 + fe%ey_s(ix,iy,iz)**2.0d0 + fe%ez_s(ix,iy,iz)**2.0d0 )
         h_abs(ix,iy,iz)=sqrt( fe%hx_s(ix,iy,iz)**2.0d0 + fe%hy_s(ix,iy,iz)**2.0d0 + fe%hz_s(ix,iy,iz)**2.0d0 )
         if(e_max_tmp(nproc_id_global)<e_abs(ix,iy,iz)) e_max_tmp(nproc_id_global)=e_abs(ix,iy,iz)
@@ -2336,33 +2336,33 @@ contains
     
     !initialize r-grid
     call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
-    call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,fs%lg,fs%mg,fs%ng) ! lg --> mg & ng
+    call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,fs%lg,fs%mg) ! lg --> mg
     !### This process about ng is temporal. #####################!
     !### With modifying set_ng to be applied to arbitrary Nd, ###!
     !### this process will be removed.###########################!
-    fs%ng%is_overlap(1:3)=fs%ng%is(1:3)-fe%Nd
-    fs%ng%ie_overlap(1:3)=fs%ng%ie(1:3)+fe%Nd
-    fs%ng%is_array(1:3)  =fs%ng%is(1:3)-fe%Nd
-    fs%ng%ie_array(1:3)  =fs%ng%ie(1:3)+fe%Nd
+    fs%mg%is_overlap(1:3)=fs%mg%is(1:3)-fe%Nd
+    fs%mg%ie_overlap(1:3)=fs%mg%ie(1:3)+fe%Nd
+    fs%mg%is_array(1:3)  =fs%mg%is(1:3)-fe%Nd
+    fs%mg%ie_array(1:3)  =fs%mg%ie(1:3)+fe%Nd
     !############################################################!
     
     !prepare for setting sendrecv environment
-    if(allocated(fs%ng%idx)) deallocate(fs%ng%idx)
-    if(allocated(fs%ng%idy)) deallocate(fs%ng%idy)
-    if(allocated(fs%ng%idz)) deallocate(fs%ng%idz)
-    allocate(fs%ng%idx(fs%ng%is_overlap(1):fs%ng%ie_overlap(1)), &
-             fs%ng%idy(fs%ng%is_overlap(2):fs%ng%ie_overlap(2)), &
-             fs%ng%idz(fs%ng%is_overlap(3):fs%ng%ie_overlap(3)))
-    do ii=fs%ng%is_overlap(1),fs%ng%ie_overlap(1)
-      fs%ng%idx(ii)=ii
+    if(allocated(fs%mg%idx)) deallocate(fs%mg%idx)
+    if(allocated(fs%mg%idy)) deallocate(fs%mg%idy)
+    if(allocated(fs%mg%idz)) deallocate(fs%mg%idz)
+    allocate(fs%mg%idx(fs%mg%is_overlap(1):fs%mg%ie_overlap(1)), &
+             fs%mg%idy(fs%mg%is_overlap(2):fs%mg%ie_overlap(2)), &
+             fs%mg%idz(fs%mg%is_overlap(3):fs%mg%ie_overlap(3)))
+    do ii=fs%mg%is_overlap(1),fs%mg%ie_overlap(1)
+      fs%mg%idx(ii)=ii
     end do
-    do ii=fs%ng%is_overlap(2),fs%ng%ie_overlap(2)
-      fs%ng%idy(ii)=ii
+    do ii=fs%mg%is_overlap(2),fs%mg%ie_overlap(2)
+      fs%mg%idy(ii)=ii
     end do
-    do ii=fs%ng%is_overlap(3),fs%ng%ie_overlap(3)
-      fs%ng%idz(ii)=ii
+    do ii=fs%mg%is_overlap(3),fs%mg%ie_overlap(3)
+      fs%mg%idz(ii)=ii
     end do
-    fs%ng%Nd=fe%Nd
+    fs%mg%Nd=fe%Nd
     
     !set sendrecv environment
     if    (yn_periodic=='n') then
@@ -2371,7 +2371,7 @@ contains
       iperi=3
     end if
     call create_sendrecv_neig_scalar(neig_ng_eh,info,pinfo,iperi) ! neighboring node array
-    call init_sendrecv_grid(fs%srg_ng,fs%ng,1,info%icomm_r,neig_ng_eh)
+    call init_sendrecv_grid(fs%srg_ng,fs%mg,1,info%icomm_r,neig_ng_eh)
     
     return
   end subroutine eh_mpi_grid_sr
@@ -2483,40 +2483,40 @@ contains
     real(8),allocatable               :: f1(:,:,:),f2(:,:,:),f3(:,:,:)
     
     if(var=='e') then
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%ex_y)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%ex_z)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%ey_z)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%ey_x)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%ez_x)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%ez_y)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ex_y)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ex_z)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ey_z)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ey_x)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ez_x)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%ez_y)
     elseif(var=='h') then
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hx_y)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hx_z)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hy_z)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hy_x)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hz_x)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hz_y)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_y)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_z)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_z)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_x)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_x)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_y)
     elseif(var=='r') then
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%rmedia)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%rmedia)
     elseif(var=='s') then
       !allocate temporary variable
-      allocate(f1(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                  fs%ng%is_array(2):fs%ng%ie_array(2),&
-                  fs%ng%is_array(3):fs%ng%ie_array(3)),&
-               f2(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                  fs%ng%is_array(2):fs%ng%ie_array(2),&
-                  fs%ng%is_array(3):fs%ng%ie_array(3)),&
-               f3(fs%ng%is_array(1):fs%ng%ie_array(1),&
-                  fs%ng%is_array(2):fs%ng%ie_array(2),&
-                  fs%ng%is_array(3):fs%ng%ie_array(3)))
+      allocate(f1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)),&
+               f2(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)),&
+               f3(fs%mg%is_array(1):fs%mg%ie_array(1),&
+                  fs%mg%is_array(2):fs%mg%ie_array(2),&
+                  fs%mg%is_array(3):fs%mg%ie_array(3)))
       f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
       
       !spatially adjust e for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=fs%ng%is(3),fs%ng%ie(3)
-      do iy=fs%ng%is(2),fs%ng%ie(2)
-      do ix=fs%ng%is(1),fs%ng%ie(1)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
         f1(ix,iy,iz)=( fe%ex_s(ix,iy,iz)+fe%ex_s(ix-1,iy,iz) )/2.0d0
         f2(ix,iy,iz)=( fe%ey_s(ix,iy,iz)+fe%ey_s(ix,iy-1,iz) )/2.0d0
         f3(ix,iy,iz)=( fe%ez_s(ix,iy,iz)+fe%ez_s(ix,iy,iz-1) )/2.0d0
@@ -2531,9 +2531,9 @@ contains
       !spatially adjust h for save
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=fs%ng%is(3),fs%ng%ie(3)
-      do iy=fs%ng%is(2),fs%ng%ie(2)
-      do ix=fs%ng%is(1),fs%ng%ie(1)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
         f1(ix,iy,iz)=( fe%hx_s(ix,iy,iz)+fe%hx_s(ix,iy-1,iz) )/2.0d0
         f2(ix,iy,iz)=( fe%hy_s(ix,iy,iz)+fe%hy_s(ix,iy,iz-1) )/2.0d0
         f3(ix,iy,iz)=( fe%hz_s(ix,iy,iz)+fe%hz_s(ix-1,iy,iz) )/2.0d0
@@ -2544,14 +2544,14 @@ contains
 !$omp end parallel
       fe%hx_s(:,:,:)=f1(:,:,:); fe%hy_s(:,:,:)=f2(:,:,:); fe%hz_s(:,:,:)=f3(:,:,:);
       f1(:,:,:)=0.0d0; f2(:,:,:)=0.0d0; f3(:,:,:)=0.0d0;
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hx_s)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hy_s)
-      call update_overlap_real8(fs%srg_ng,fs%ng,fe%hz_s)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hx_s)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hy_s)
+      call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_s)
 !$omp parallel
 !$omp do private(ix,iy,iz)
-      do iz=fs%ng%is(3),fs%ng%ie(3)
-      do iy=fs%ng%is(2),fs%ng%ie(2)
-      do ix=fs%ng%is(1),fs%ng%ie(1)
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
         f1(ix,iy,iz)=( fe%hx_s(ix,iy,iz)+fe%hx_s(ix,iy,iz-1) )/2.0d0
         f2(ix,iy,iz)=( fe%hy_s(ix,iy,iz)+fe%hy_s(ix-1,iy,iz) )/2.0d0
         f3(ix,iy,iz)=( fe%hz_s(ix,iy,iz)+fe%hz_s(ix,iy-1,iz) )/2.0d0
@@ -2827,9 +2827,9 @@ contains
     integer :: ix,iy,iz
 !$omp parallel
 !$omp do private(ix,iy,iz)
-    do iz=(fs%ng%is_array(3)),(fs%ng%ie_array(3))
-    do iy=(fs%ng%is_array(2)),(fs%ng%ie_array(2))
-    do ix=(fs%ng%is_array(1)),(fs%ng%ie_array(1))
+    do iz=(fs%mg%is_array(3)),(fs%mg%ie_array(3))
+    do iy=(fs%mg%is_array(2)),(fs%mg%ie_array(2))
+    do ix=(fs%mg%is_array(1)),(fs%mg%ie_array(1))
        fe%ex_s(ix,iy,iz)=fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz)
        fe%ey_s(ix,iy,iz)=fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz)
        fe%ez_s(ix,iy,iz)=fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz)
@@ -2842,12 +2842,12 @@ contains
 !$omp end do
 !$omp end parallel
     call eh_sendrecv(fs,fe,'s')
-    call update_overlap_real8( fs%srg_ng, fs%ng, fe%ex_s )
-    call update_overlap_real8( fs%srg_ng, fs%ng, fe%ey_s )
-    call update_overlap_real8( fs%srg_ng, fs%ng, fe%ez_s )
-    call update_overlap_real8( fs%srg_ng, fs%ng, fe%hx_s )
-    call update_overlap_real8( fs%srg_ng, fs%ng, fe%hy_s )
-    call update_overlap_real8( fs%srg_ng, fs%ng, fe%hz_s )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ex_s )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ey_s )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%ez_s )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hx_s )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hy_s )
+    call update_overlap_real8( fs%srg_ng, fs%mg, fe%hz_s )
   end subroutine calc_es_and_hs
 
   subroutine allocate_poynting(fs, S, divS, u)
@@ -2858,16 +2858,16 @@ contains
     real(8),allocatable,optional,intent(inout) :: divS(:,:,:)
     real(8),allocatable,optional,intent(inout) :: u(:,:,:)
     integer :: is1,is2,is3,ie1,ie2,ie3
-    is1=fs%ng%is_array(1); ie1=fs%ng%ie_array(1)
-    is2=fs%ng%is_array(2); ie2=fs%ng%ie_array(2)
-    is3=fs%ng%is_array(3); ie3=fs%ng%ie_array(3)
+    is1=fs%mg%is_array(1); ie1=fs%mg%ie_array(1)
+    is2=fs%mg%is_array(2); ie2=fs%mg%ie_array(2)
+    is3=fs%mg%is_array(3); ie3=fs%mg%ie_array(3)
     if ( present(S) ) then
        if ( allocated(S) ) deallocate(S)
        allocate( S(is1:ie1,is2:ie2,is3:ie3,3) ); S=0.0d0
     end if
-    is1=fs%ng%is(1); ie1=fs%ng%ie(1)
-    is2=fs%ng%is(2); ie2=fs%ng%ie(2)
-    is3=fs%ng%is(3); ie3=fs%ng%ie(3)
+    is1=fs%mg%is(1); ie1=fs%mg%ie(1)
+    is2=fs%mg%is(2); ie2=fs%mg%ie(2)
+    is3=fs%mg%is(3); ie3=fs%mg%ie(3)
     if ( present(divS) ) then
        if ( allocated(divS) ) deallocate(divS)
        allocate( divS(is1:ie1,is2:ie2,is3:ie3) ); divS=0.0d0
@@ -2886,12 +2886,12 @@ contains
     type(ls_fdtd_eh), intent(inout)   :: fe
     real(8), intent(inout) :: Spoynting(:,:,:,:)
     integer :: ix,iy,iz,jx,jy,jz,ix0,iy0,iz0,ix1,iy1,iz1
-    ix0=fs%ng%is_array(1)
-    iy0=fs%ng%is_array(2)
-    iz0=fs%ng%is_array(3)
-    ix1=fs%ng%ie_array(1)
-    iy1=fs%ng%ie_array(2)
-    iz1=fs%ng%ie_array(3)
+    ix0=fs%mg%is_array(1)
+    iy0=fs%mg%is_array(2)
+    iz0=fs%mg%is_array(3)
+    ix1=fs%mg%ie_array(1)
+    iy1=fs%mg%ie_array(2)
+    iz1=fs%mg%ie_array(3)
 !$omp parallel
 !$omp do private(ix,iy,iz,jx,jy,jz)
     do iz = iz0, iz1
@@ -2921,19 +2921,19 @@ contains
     cx = 0.5d0/fs%hgs(1)
     cy = 0.5d0/fs%hgs(2)
     cz = 0.5d0/fs%hgs(3)
-    ix0=fs%ng%is(1)-1
-    iy0=fs%ng%is(2)-1
-    iz0=fs%ng%is(3)-1
-    jx0=fs%ng%is_array(1)-1
-    jy0=fs%ng%is_array(2)-1
-    jz0=fs%ng%is_array(3)-1
+    ix0=fs%mg%is(1)-1
+    iy0=fs%mg%is(2)-1
+    iz0=fs%mg%is(3)-1
+    jx0=fs%mg%is_array(1)-1
+    jy0=fs%mg%is_array(2)-1
+    jz0=fs%mg%is_array(3)-1
 !$omp parallel
 !$omp do private(jx,jy,jz)
-    do iz=fs%ng%is(3),fs%ng%ie(3)
+    do iz=fs%mg%is(3),fs%mg%ie(3)
        jz=iz-jz0
-    do iy=fs%ng%is(2),fs%ng%ie(2)
+    do iy=fs%mg%is(2),fs%mg%ie(2)
        jy=iy-jy0
-    do ix=fs%ng%is(1),fs%ng%ie(1)
+    do ix=fs%mg%is(1),fs%mg%ie(1)
        jx=ix-jx0
        divS(ix-ix0,iy-iy0,iz-iz0) &
             = ( Spoynting(jx+1,jy,jz,1) - Spoynting(jx-1,jy,jz,1) )*cx &
