@@ -21,7 +21,6 @@
 /
 
 &parallel
-  yn_domain_parallel = 'y'
 !  yn_ffte = "y"
 /
 

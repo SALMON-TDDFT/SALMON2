@@ -11,7 +11,6 @@
 /
 
 &parallel
-  yn_domain_parallel='y'
   nproc_k=1
   nproc_ob=4
   nproc_rgrid=1,1,1

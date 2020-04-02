@@ -325,7 +325,7 @@ contains
 
 
     subroutine setup_xcfunc(name)
-      use salmon_global, only: iperiodic, yn_domain_parallel
+      use salmon_global, only: iperiodic
       use inputoutput, only: stop_by_bad_input2
       implicit none
       character(*), intent(in) :: name

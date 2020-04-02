@@ -10,11 +10,6 @@
 !   (see chapter: 'List of all input keywords' in the manual)                            !
 !########################################################################################!
 
-&parallel
-  !This will be removed when ARTED is deleted.
-  yn_domain_parallel = 'y'
-/
-
 &calculation
   !type of theory
   theory = 'dft'

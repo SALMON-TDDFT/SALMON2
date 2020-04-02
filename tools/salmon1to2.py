@@ -60,7 +60,6 @@ keyword_table = [
         ['unit_system',          ('units', 'unit_system')],
     ]],
     ['parallel', [
-        ['yn_domain_parallel',   ('units', 'domain_parallel')],
         ['nproc_k',              ('parallel', 'nproc_k')],
         ['nproc_ob',             ('parallel', 'nproc_ob')],
         ['nproc_domain_orbital', ('parallel', 'nproc_domain')],

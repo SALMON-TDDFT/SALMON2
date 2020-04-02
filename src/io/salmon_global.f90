@@ -39,12 +39,7 @@ module salmon_global
 !! &calculation
   character(32)  :: theory
   character(16)  :: calc_mode          !remove later
-  character(1)   :: use_ehrenfest_md   !remove later
-  character(1)   :: use_adiabatic_md   !remove later
-  character(1)   :: use_ms_maxwell     !remove later
-  character(1)   :: use_geometry_opt   !remove later
   character(1)   :: use_singlescale    !remove later
-  character(16)  :: use_potential_model
   character(1)   :: yn_md
   character(1)   :: yn_opt
 !! &control
@@ -64,17 +59,9 @@ module salmon_global
   character(1)   :: yn_gbp
   character(1)   :: yn_gbp_fourier0 ! temporary
   !remove later
-  character(256) :: dump_filename
-  character(20)  :: modify_gs_wfn_k  !changed from modify_initial_guess
-  character(1)   :: read_gs_wfn_k
-  character(1)   :: read_rt_wfn_k
-  character(1)   :: read_gs_wfn_k_ms
-  character(1)   :: read_rt_wfn_k_ms
   character(1)   :: read_gs_dns_cube
   character(1)   :: write_gs_wfn_k
   character(1)   :: write_rt_wfn_k
-  character(1)   :: write_gs_wfn_k_ms
-  character(1)   :: write_rt_wfn_k_ms
 
 !! &units
   character(16)  :: unit_system
@@ -84,7 +71,6 @@ module salmon_global
   character(16)  :: unit_charge
 
 !! &parallel
-  character(1)   :: yn_domain_parallel
   integer        :: nproc_k
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
