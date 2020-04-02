@@ -12,12 +12,27 @@ import re
 print("#" * 60) 
 print("# Verification start") 
 
+dirlist = [
+    "data_for_restart/k_001_ob_000001",
+    "data_for_restart/k_001_ob_000017",
+    "data_for_restart/k_002_ob_000001",
+    "data_for_restart/k_002_ob_000017",
+    "data_for_restart/k_003_ob_000001",
+    "data_for_restart/k_003_ob_000017",
+    "data_for_restart/k_004_ob_000001",
+    "data_for_restart/k_004_ob_000017",
+    "data_for_restart/k_005_ob_000001",
+    "data_for_restart/k_005_ob_000017",
+    "data_for_restart/k_006_ob_000001",
+    "data_for_restart/k_006_ob_000017",
+    "data_for_restart/k_007_ob_000001",
+    "data_for_restart/k_007_ob_000017",
+    "data_for_restart/k_008_ob_000001",
+    "data_for_restart/k_008_ob_000017",
+]
+
 filelist = [ 
     "Si_eigen.data",
-    "data_for_restart/rank_000000/wfn.bin",
-    "data_for_restart/rank_000001/wfn.bin",
-    "data_for_restart/rank_000002/wfn.bin",
-    "data_for_restart/rank_000003/wfn.bin",
 ]
 
 # difference of eigen energies for io=1 and io=2 with ik=2"
@@ -27,6 +42,12 @@ permissible_error_1 = 0.00004 # (~0.001eV)
 # difference of eigen energies for io=15 and io=16 with ik=2"
 reference_value_2 = 0.078642
 permissible_error_2 = 0.00004 # (~0.001eV)
+
+print("# Checking exists a directory")
+for item in dirlist:
+    if not os.path.isdir(item):
+        print("Directory not found: %s" % item)
+        sys.exit(-1)  # Failure
 
 print("# Checking the existance of outputfile")
 for item in filelist:

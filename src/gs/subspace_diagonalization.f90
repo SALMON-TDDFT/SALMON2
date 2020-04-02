@@ -350,7 +350,7 @@ end subroutine ssdg_rwf
 
     if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
-     call eigen_pzheevd(pinfo, info, hmat, eval, evec)
+     call eigen_pzheevd(pinfo, hmat, eval, evec)
 #else
      stop "ScaLAPACK does not enabled, please check your build configuration."
 #endif
@@ -521,13 +521,13 @@ do ispin = 1, system%nspin
 
   if(yn_eigenexa=='y') then
 #ifdef USE_EIGENEXA
-     call eigen_pdsyevd_ex(pinfo, info, hmat, eval, evec)
+     call eigen_pdsyevd_ex(pinfo, hmat, eval, evec)
 #else
      stop "EigenExa does not enabled, please check your build configuration."
 #endif
   else if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
-     call eigen_pdsyevd(pinfo, info, hmat, eval, evec)
+     call eigen_pdsyevd(pinfo, hmat, eval, evec)
 #else
      stop "ScaLAPACK does not enabled, please check your build configuration."
 #endif

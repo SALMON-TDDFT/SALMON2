@@ -8,7 +8,6 @@ set(SOURCES
     write_field.f90
     write_file3d.f90
     write.f90
-    main_dft2tddft.f90
     main_dft_k_expand.f90
     main_dft_k_expand_slice.f90
    )

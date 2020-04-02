@@ -128,7 +128,7 @@ CONTAINS
     type(s_dft_energy)                  :: energy
     !
     integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair
-    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(5),E_sum(5)
+    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),Gd,sysvol,E_wrk(5),E_sum(5)
     real(8) :: etmp
     complex(8) :: rho_e,rho_i
 

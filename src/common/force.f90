@@ -30,7 +30,7 @@ contains
     use sym_vector_sub, only: sym_vector_xyz
     use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
-    use salmon_global, only: kion,cutoff_g,aEwald,iperiodic,yn_collective_opt,process_allocation
+    use salmon_global, only: kion,cutoff_g,iperiodic,yn_collective_opt,process_allocation
     use code_optimization, only: stencil_is_parallelized_by_omp
     use timer
     implicit none

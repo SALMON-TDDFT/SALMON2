@@ -238,9 +238,6 @@ module structures
     integer :: nps
     integer,allocatable :: mps(:)
     integer,allocatable :: jxyz(:,:,:)
-    integer,allocatable :: jxx(:,:)
-    integer,allocatable :: jyy(:,:)
-    integer,allocatable :: jzz(:,:)
     real(8),allocatable :: rxyz(:,:,:)
     real(8),allocatable :: uv(:,:)
     real(8),allocatable :: duv(:,:,:)
@@ -255,6 +252,17 @@ module structures
     complex(8),allocatable :: uv_so(:,:,:,:)
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
+    !
+    real(8),allocatable :: rion_old(:,:) ! old position
+    integer,allocatable :: jxyz_old(:,:,:)
+    integer,allocatable :: jxx_old(:,:)
+    integer,allocatable :: jyy_old(:,:)
+    integer,allocatable :: jzz_old(:,:)
+    integer,allocatable :: mps_old(:)
+    real(8),allocatable :: rxyz_old(:,:,:)
+    integer,allocatable :: jxyz_min(:,:)
+    integer,allocatable :: jxyz_max(:,:)
+    logical,allocatable :: jxyz_changed(:)
     !
     integer,allocatable :: proj_pairs_ao(:,:)
     integer,allocatable :: proj_pairs_info_ao(:,:)
@@ -676,9 +684,6 @@ contains
     type(s_pp_grid) :: ppg
     DEAL(ppg%mps)
     DEAL(ppg%jxyz)
-    DEAL(ppg%jxx)
-    DEAL(ppg%jyy)
-    DEAL(ppg%jzz)
     DEAL(ppg%uv)
     DEAL(ppg%duv)
     DEAL(ppg%lma_tbl)

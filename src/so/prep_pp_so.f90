@@ -111,7 +111,7 @@ write(*,*) "----------- set_lma_tbl"
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
   subroutine calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,property,hvol0)
-  use salmon_global,  only : natom, kion, iperiodic, yn_domain_parallel
+  use salmon_global,  only : natom, kion, iperiodic
   use math_constants, only : pi
   use structures,     only : s_pp_info, s_pp_grid
   implicit none
@@ -152,14 +152,10 @@ write(*,*) "----------- set_lma_tbl"
     else
       rshift(3)=-0.5d0*Hz
     end if
-  else if ( iperiodic == 3 ) then 
-    if ( yn_domain_parallel == 'y' ) then
-      rshift(1)=-Hx
-      rshift(2)=-Hy
-      rshift(3)=-Hz
-    else
-      rshift(:)=0.0d0
-    end if
+  else if ( iperiodic == 3 ) then
+    rshift(1)=-Hx
+    rshift(2)=-Hy
+    rshift(3)=-Hz
   end if
 
   call set_nlma_so( pp, ppg )

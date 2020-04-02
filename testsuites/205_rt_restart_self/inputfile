@@ -4,18 +4,14 @@
 
 &control
   sysname = 'Si'
-  checkpoint_interval = 60
+  !checkpoint_interval = 60
   yn_self_checkpoint = 'y'
-  !directory_read_data = 'checkpoint_rt_000060/'
-  !yn_restart = 'y'
+  directory_read_data = 'checkpoint_rt_000060/'
+  yn_restart = 'y'
 /
 
 &units
   unit_system = 'a.u.'
-/
-
-&parallel
-  yn_domain_parallel='y'
 /
 
 &system

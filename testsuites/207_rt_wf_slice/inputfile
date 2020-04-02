@@ -1,27 +1,15 @@
 &calculation
-  theory='dft2tddft'
+  theory='tddft_pulse'
 /
 
 &control
   sysname = 'Si'
-/
-
-&dft2tddft
-  yn_datafiles_dump = 'y'
-  target_nproc_k = 1
-  target_nproc_ob = 2
-  target_nproc_rgrid = 1,1,2
+  method_wf_distributor = 'slice'
+  nblock_wf_distribute  = 16
 /
 
 &units
   unit_system = 'a.u.'
-/
-
-&parallel
-  yn_domain_parallel='y'
-  nproc_k = 4
-  nproc_ob = 1
-  nproc_rgrid = 1,1,1
 /
 
 &system
@@ -40,10 +28,6 @@
   lloc_ps(1) = 2
 /
 
-&functional
-  xc = 'PZ'
-/
-
 &rgrid
   dl = 0.855d0, 0.855d0, 0.855d0
 /
@@ -53,7 +37,7 @@
 /
 
 &tgrid
-  nt = 180
+  nt = 250
   dt = 0.16
 /
 
@@ -63,14 +47,16 @@
   threshold = 1.d-9
 /
 
-&emfield
-  ae_shape1 = 'impulse'
-  epdir_re1 = 0., 0., 1.
+&functional
+  xc = 'PZ'
 /
 
-&analysis
-  nenergy = 1000
-  de = 0.001
+&emfield
+  ae_shape1 = 'Acos2'
+  I_wcm2_1 = 1d14
+  omega1 = 0.05696145187d0
+  tw1 = 441.195136248d0
+  epdir_re1 = 0., 0., 1.
 /
 
 &atomic_coor

@@ -115,9 +115,8 @@ subroutine main_dft_k_expand_single
 
   if(system%nspin /= 1) stop "error: nspin must be 1"
   if(nproc_k /= system%nk) stop "error: nproc_k must be # of k-points"
-  if(mod(nstate,nproc_ob)/=0.or.mod(nelec/2,(nstate/nproc_ob))/=0) stop "error: must be mod(nstate,nproc_ob)==0.and.mod(nelec/2,(nstate/nproc_ob))==0"
-
-  yn_datafiles_dump = 'n'
+  if(mod(nstate,nproc_ob)/=0.or.mod(nelec/2,(nstate/nproc_ob))/=0) &
+    stop "error: must be mod(nstate,nproc_ob)==0.and.mod(nelec/2,(nstate/nproc_ob))==0"
 
   ! read restart data
   call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
@@ -126,7 +125,6 @@ subroutine main_dft_k_expand_single
   call init_k_expand(system%nk,kex)
   call get_print_rank_numbers(kex,info,pinfo)
 
-  yn_datafiles_dump = 'y'
   !(prepare directory)
   call init_dir_out_restart(ofl)
   allocate(wdir(kex%nk))

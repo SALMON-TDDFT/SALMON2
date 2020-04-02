@@ -14,11 +14,6 @@
 !   in the current directory.                                                            !
 !########################################################################################!
 
-&parallel
-  !This will be removed when ARTED is deleted.
-  yn_domain_parallel = 'y'
-/
-
 &calculation
   !type of theory
   theory = 'tddft_response'

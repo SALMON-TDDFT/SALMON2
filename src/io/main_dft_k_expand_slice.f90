@@ -104,8 +104,6 @@ subroutine main_dft_k_expand_slice
   if(nproc_k /= system%nk) stop "error: nproc_k must be # of k-points"
 
 
-  yn_datafiles_dump = 'n'
-
   ! initialization for k-expand
   call init_k_expand(system%nk,kex)
   call assign_rank_mumber_to_read_write_files(kex,system,info)

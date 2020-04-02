@@ -1,10 +1,16 @@
 &calculation
-  theory="dft"
-  yn_opt='y'
+  theory='dft'
 /
 
 &control
   sysname = 'H2O'
+/
+
+&parallel
+  nproc_k = 1
+  nproc_ob = 2
+  nproc_rgrid = 1,2,1
+  yn_eigenexa = 'y'
 /
 
 &units
@@ -14,15 +20,13 @@
 &system
   yn_periodic = 'y'
   al = 5.0d0, 5.0d0, 5.0d0
+  isym = 1
   nstate = 8
   nelec  = 8
   nelem  = 2
   natom  = 3
 /
 
-&parallel
-!  yn_ffte = "y"
-/
 
 &pseudo
   iZatom(1)=1
@@ -38,25 +42,22 @@
 /
 
 &rgrid
-  num_rgrid = 24,24,24
+  dl = 0.2d0, 0.2d0, 0.2d0
 /
 
 &kgrid
-  num_kgrid = 1,1,1
+  num_kgrid=1,1,1
 /
+
 
 &scf
-  nscf = 200
-  threshold=1d-8
-/
-
-&opt
-  convrg_opt_fmax  = 1d-2
+  nscf = 250
+  threshold=1d-12
 /
 
 &atomic_coor
-'H'     3.5     2.5     2.5     1  y
-'H'     2.5     3.5     2.5     1  y
-'O'     2.5     2.5     2.5     2  y
+  'H'      3.55908403      2.48190608      2.50003451  1
+  'H'      2.48189998      3.55908246      2.50002600  1
+  'O'      2.61768087      2.61768023      2.49992927  2
 /
 

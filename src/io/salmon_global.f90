@@ -71,7 +71,6 @@ module salmon_global
   character(16)  :: unit_charge
 
 !! &parallel
-  character(1)   :: yn_domain_parallel
   integer        :: nproc_k
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
@@ -363,11 +362,5 @@ character(256),allocatable :: atom_name(:)
   character(1) :: yn_force_stencil_openmp_parallelization
   character(1) :: yn_force_stencil_sequential_computation
   character(1) :: yn_want_communication_overlapping
-
-!! &dft2tddft
-  character(1) :: yn_datafiles_dump
-  integer      :: target_nproc_k
-  integer      :: target_nproc_ob
-  integer      :: target_nproc_rgrid(3)
 
 end module salmon_global

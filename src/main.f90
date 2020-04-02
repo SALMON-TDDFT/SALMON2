@@ -28,10 +28,9 @@ program main
   case('dft','dft_band')              ; call main_dft
   case('dft_md')                      ; call main_dft_md
   case('tddft_response','tddft_pulse'); call main_tddft
-  case('dft2tddft')                   ; call main_dft2tddft ! DFT data redistributor to use TDDFT
   case('dft_k_expand')                ; call main_dft_k_expand !convert DFT/k-points data to supercell/gammma DFT
   case('single_scale_maxwell_tddft'  ); call main_tddft
-  case('multi_scale_maxwell_tddft'   ); stop("Multi-scale Maxwell-TDDFT is not implemented") !temporally
+  case('multi_scale_maxwell_tddft'   ); stop 'Multi-scale Maxwell-TDDFT is not implemented' !temporally
   case('multiscale_experiment' )      ; call main_ms    ! experimental
   case('maxwell')                     ; call main_maxwell
  !case('sbe')                         ; call main_sbe
