@@ -61,26 +61,16 @@ contains
     case('dft_md')
        yn_md='y'
        calc_mode='GS'
-       use_adiabatic_md='y'
     case('tddft_response','tddft_pulse')
        calc_mode='RT'
     case('multi_scale_maxwell_tddft')
        calc_mode='RT'
-       use_ms_maxwell='y'
     case('single_scale_maxwell_tddft')
        calc_mode='RT'
        use_singlescale='y'
     case('dft_tddft')
        calc_mode='GS_RT'  !legacy-- this is not supported officially now
        write(*,*) "theory=dft_tddft is not supported officially !!"
-    end select
-
-    select case(yn_md)
-    case('y') ; use_ehrenfest_md='y'
-    end select
-
-    select case(yn_opt)
-    case('y') ; use_geometry_opt='y'
     end select
 
   end subroutine set_basic_flag
