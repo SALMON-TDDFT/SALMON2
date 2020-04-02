@@ -298,7 +298,7 @@ contains
         print *, '  (PX, PY, PZ) = nproc_rgrid'
         print *, '  PW           = nproc_ob*nproc_k'
         print *, '  PPN          = # of process/node'
-        if (process_allocation == 'grid_sequential')
+        if (process_allocation == 'grid_sequential') then
           print *, '  PW  = PW1*PW2*PW3'
           print *, '  PW1 = TX*PPN / PX'
           print *, '  PW2 = TY     / PY'
@@ -306,7 +306,7 @@ contains
           print *, '  TX  = PX*PW1 / PPN'
           print *, '  TY  = PY*PW2'
           print *, '  TZ  = PZ*PW3'
-        else if (process_allocation = 'orbital_sequential')
+        else if (process_allocation == 'orbital_sequential') then
           print *, '  PX  = PX1*PX2*PX3'
           print *, '  PX1 = TX*PPN / PW'
           print *, '  PX2 = TY     / PY'
