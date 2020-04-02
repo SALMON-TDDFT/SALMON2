@@ -84,7 +84,6 @@ module salmon_global
   character(16)  :: unit_charge
 
 !! &parallel
-  character(1)   :: yn_domain_parallel
   integer        :: nproc_k
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)

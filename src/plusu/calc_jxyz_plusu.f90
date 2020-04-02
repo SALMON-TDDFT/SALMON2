@@ -24,7 +24,7 @@ module calc_jxyz_plusu_sub
 contains
 
   subroutine calc_jxyz_plusu(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
-    use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
+    use salmon_global,only : natom,kion,rion,iperiodic
     use structures,only : s_pp_info,s_pp_grid
     implicit none
     type(s_pp_info) :: pp
@@ -80,14 +80,10 @@ contains
       else
         rshift(3)=-0.5d0*Hz
       end if
-    else if( iperiodic == 3 )then 
-      if( yn_domain_parallel == 'y' )then
-        rshift(1)=-Hx
-        rshift(2)=-Hy
-        rshift(3)=-Hz
-      else
-        rshift(:)=0.0d0
-      end if
+    else if( iperiodic == 3 )then
+      rshift(1)=-Hx
+      rshift(2)=-Hy
+      rshift(3)=-Hz
     end if
 
     do a=1,natom

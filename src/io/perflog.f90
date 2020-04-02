@@ -87,7 +87,7 @@ contains
     use communication
     use math_constants
 !    use flops
-    use salmon_global, only: theory, iperiodic, yn_domain_parallel
+    use salmon_global, only: theory, iperiodic
     implicit none
     integer, intent(in) :: fd, write_mode
 
@@ -100,7 +100,7 @@ contains
           ! 0: GCEED
           ! 3: ARTED
           case(3)
-            if (yn_domain_parallel == 'y') then
+            !  if (yn_domain_parallel == 'y') then
             !  call get_hamiltonian_flops(lg,pg,mg,sg)
               if (comm_is_root(nproc_id_global)) then
                 if (write_mode == write_mode_readable) then
@@ -117,7 +117,7 @@ contains
                   write (fd,'(a,",",3(f0.6,","),f0.6)') 'system'          ,sg(4),sg(1),sg(2),sg(3)
                 end if
               end if
-            end if
+            !end if
         end select
     end select
   end subroutine
