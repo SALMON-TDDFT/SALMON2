@@ -207,13 +207,8 @@ contains
 
     namelist/calculation/ &
       & theory, &
-      & calc_mode,        &  !remove later
-      & use_ehrenfest_md, &  !remove later
-      & use_adiabatic_md, &  !remove later
-      & use_ms_maxwell,   &  !remove later
-      & use_geometry_opt, &  !remove later
-      & use_singlescale,  &  !remove later
-      & use_potential_model,&  !AY trial
+      & calc_mode,        &  !remove later (but this is used currently)
+      & use_singlescale,  &  !remove later (but this is used currently)
       & yn_md,  &
       & yn_opt
 
@@ -226,24 +221,16 @@ contains
       & yn_self_checkpoint,  &
       & checkpoint_interval, &
       & yn_reset_step_restart, &
-      & read_gs_restart_data,&
-      & write_gs_restart_data,&
-      & time_shutdown,       &
+      & read_gs_restart_data,  &
+      & write_gs_restart_data, &
+      & time_shutdown,         &
       & method_wf_distributor, &
-      & nblock_wf_distribute, &
-      & yn_gbp,            &
-      & yn_gbp_fourier0,   & ! temporary
-      & dump_filename,     &  !remove later
-      & modify_gs_wfn_k,   &  !remove later
-      & read_gs_wfn_k,     &  !remove later
-      & read_rt_wfn_k,     &  !remove later
-      & read_gs_wfn_k_ms,  &  !remove later
-      & read_rt_wfn_k_ms,  &  !remove later
-      & read_gs_dns_cube,  &  !remove later
-      & write_gs_wfn_k,    &  !remove later
-      & write_rt_wfn_k,    &  !remove later
-      & write_gs_wfn_k_ms, &  !remove later
-      & write_rt_wfn_k_ms     !remove later
+      & nblock_wf_distribute,  &
+      & yn_gbp,            &  !should change name or temporary
+      & yn_gbp_fourier0,   &  !should change name or temporary
+      & read_gs_dns_cube,  &  !remove later (but this is used currently)
+      & write_gs_wfn_k,    &  !remove later (but this is used currently)
+      & write_rt_wfn_k        !remove later (but this is used currently)
 
     namelist/units/ &
       & unit_system
@@ -568,12 +555,7 @@ contains
 !! == default for &calculation
     theory              = 'tddft'
     calc_mode           = 'none'   !remove later
-    use_ehrenfest_md    = 'n'  !remove later
-    use_adiabatic_md    = 'n'  !remove later
-    use_ms_maxwell      = 'n'  !remove later
-    use_geometry_opt    = 'n'  !remove later
     use_singlescale     = 'n'  !remove later
-    use_potential_model = 'n'
     yn_md               = 'n'
     yn_opt              = 'n'
 !! == default for &control
@@ -593,17 +575,9 @@ contains
     yn_gbp        = 'n'
     yn_gbp_fourier0 = 'n' ! temporary
     !remove later
-    dump_filename    = 'default'
-    modify_gs_wfn_k  = 'n'
-    read_gs_wfn_k    = 'n'
-    read_rt_wfn_k    = 'n'
-    read_gs_wfn_k_ms = 'n'
-    read_rt_wfn_k_ms = 'n'
     read_gs_dns_cube = 'n'
     write_gs_wfn_k   = 'n'
     write_rt_wfn_k   = 'n'
-    write_gs_wfn_k_ms= 'n'
-    write_rt_wfn_k_ms= 'n'
 !! == default for &parallel
     nproc_k              = 0
     nproc_ob             = 0
@@ -963,12 +937,7 @@ contains
 !! == bcast for &calculation
     call comm_bcast(theory             ,nproc_group_global)
     call comm_bcast(calc_mode          ,nproc_group_global)  !remove later
-    call comm_bcast(use_ehrenfest_md   ,nproc_group_global)  !remove later
-    call comm_bcast(use_adiabatic_md   ,nproc_group_global)  !remove later
-    call comm_bcast(use_ms_maxwell     ,nproc_group_global)  !remove later
-    call comm_bcast(use_geometry_opt   ,nproc_group_global)  !remove later
     call comm_bcast(use_singlescale    ,nproc_group_global)  !remove later
-    call comm_bcast(use_potential_model,nproc_group_global)
     call comm_bcast(yn_md              ,nproc_group_global)
     call comm_bcast(yn_opt             ,nproc_group_global)
 
@@ -995,17 +964,9 @@ contains
     call comm_bcast(yn_gbp                ,nproc_group_global)
     call comm_bcast(yn_gbp_fourier0       ,nproc_group_global) ! temporary
     !remove later
-    call comm_bcast(dump_filename   ,nproc_group_global)
-    call comm_bcast(modify_gs_wfn_k ,nproc_group_global)
-    call comm_bcast(read_gs_wfn_k   ,nproc_group_global)
-    call comm_bcast(read_rt_wfn_k   ,nproc_group_global)
     call comm_bcast(read_gs_dns_cube,nproc_group_global)
-    call comm_bcast(read_gs_wfn_k_ms ,nproc_group_global)
-    call comm_bcast(read_rt_wfn_k_ms ,nproc_group_global)
     call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
     call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
-    call comm_bcast(write_gs_wfn_k_ms,nproc_group_global)
-    call comm_bcast(write_rt_wfn_k_ms,nproc_group_global)
 
 !! == bcast for &parallel
     call comm_bcast(nproc_k             ,nproc_group_global)
@@ -1749,14 +1710,9 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'calculation', inml_calculation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
 !      write(fh_variables_log, '("#",4X,A,"=",A)') 'calc_mode', calc_mode                 !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_ehrenfest_md', use_ehrenfest_md   !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_adiabatic_md', use_adiabatic_md   !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_ms_maxwell', use_ms_maxwell       !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_geometry_opt', use_geometry_opt   !remove later
 !      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_singlescale', use_singlescale     !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
-     !write(fh_variables_log, '("#",4X,A,"=",A)') 'use_potential_model', use_potential_model !AY not open now
 
       if(inml_control >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', inml_control
@@ -1775,18 +1731,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp_fourier0', yn_gbp_fourier0 ! temporary
-      !remove later
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'modify_gs_wfn_k', trim(modify_gs_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_wfn_k', trim(read_gs_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_rt_wfn_k', trim(read_rt_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_wfn_k_ms', trim(read_gs_wfn_k_ms)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_rt_wfn_k_ms', trim(read_rt_wfn_k_ms)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k_ms', trim(write_gs_wfn_k_ms)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k_ms', trim(write_rt_wfn_k_ms)
 
 
       if(inml_units >0)ierr_nml = ierr_nml +1
