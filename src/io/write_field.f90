@@ -367,7 +367,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
     end do
     end do
     
-    call update_overlap_real8(srg_scalar, mg, box)
+    if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
     call calc_gradient_field(mg,stencil%coef_nab,box,gradrho)
 
     do iz=mg%is(3),mg%ie(3)
@@ -458,7 +458,7 @@ subroutine write_estatic(lg,mg,hgs,stencil,info,sVh,srg_scalar,itt)
   end do
   end do
 
-  call update_overlap_real8(srg_scalar, mg, box)
+  if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
   call calc_gradient_field(mg,stencil%coef_nab,box,grad_Vh)
 
   do jj=1,3

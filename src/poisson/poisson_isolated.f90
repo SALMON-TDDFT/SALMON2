@@ -79,7 +79,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   end do
   end do
   end do
-  call update_overlap_real8(srg_scalar, mg, pk)
+  if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, pk)
   call laplacian_poisson(mg,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
 !$omp parallel do private(iz,iy,ix) collapse(2)
@@ -119,7 +119,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   
   iteration : do iter=1,maxiter
   
-    call update_overlap_real8(srg_scalar, mg, pk)
+    if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, pk)
     call laplacian_poisson(mg,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
     totbox=0d0
