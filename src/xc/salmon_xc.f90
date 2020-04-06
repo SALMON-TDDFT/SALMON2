@@ -123,7 +123,7 @@ contains
       enddo
 !$omp end parallel do
 
-      call update_overlap_real8(srg_scalar, mg, rhd)
+      if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,rhd,grho)
       call calc_laplacian_field(mg,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
       & ,lrho( 1:mg%num(1), 1:mg%num(2), 1:mg%num(3) ) )
