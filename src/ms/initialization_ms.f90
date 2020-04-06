@@ -37,7 +37,7 @@ subroutine initialization_ms( &
                      nmacro_mygrp, &
                      imacro_mygrp_s, &
                      imacro_mygrp_e, &
-                     fs, ff)
+                     fs, fw)
 use inputoutput
 
   use math_constants, only: pi, zi
@@ -63,6 +63,7 @@ use inputoutput
   use salmon_Total_Energy
   use em_field, only: set_vonf,calc_Ac_ext
   use dip, only: calc_dip
+  use fdtd_weyl, only: ls_fdtd_weyl
   implicit none
   integer,parameter :: Nd = 4
 
@@ -103,7 +104,7 @@ use inputoutput
   type(s_ofile) :: ofile
 
   type(s_fdtd_system) :: fs
-  type(s_fdtd_field)  :: ff
+  type(ls_fdtd_weyl)  :: fw
 
 
   

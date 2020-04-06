@@ -17,7 +17,8 @@
 
 
 module fdtd_weyl
-    use structures, only: s_fdtd_system, s_scalar, s_vector
+    use structures, only: s_fdtd_system, s_scalar, s_vector, &
+        & allocate_vector, allocate_vector_with_ovlp, allocate_scalar
     implicit none
 
     type ls_fdtd_weyl

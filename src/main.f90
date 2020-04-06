@@ -1,4 +1,4 @@
-program main
+  program main
   use salmon_global
   use parallelization
   use communication, only: comm_is_root

@@ -458,6 +458,17 @@ module structures
     complex(8),allocatable :: a_ffte(:,:,:,:),b_ffte(:,:,:,:),Vh_ffte_old(:,:,:),zf_old(:,:,:,:),zc_old(:,:,:,:),zs_old(:,:,:,:)
   end type s_singlescale
 
+  type s_multiscale
+    ! Parallelization options
+    integer :: nmacro
+    integer :: icomm_multiscale, isize_multiscale, id_multiscale ! Top level communicator
+    integer :: icomm_macropoint, isize_macropoint, id_macropoint ! Macropoint communicator
+    integer :: imacro_mygroup_s, imacro_mygroup_e
+    integer :: id_mygroup_s, id_mygroup_e
+    integer, allocatable :: ixyz_tbl(:, :)
+    integer, allocatable :: imacro_tbl(:, :, :)
+  end type s_multiscale
+
 !===================================================================================================================================
 
 contains
