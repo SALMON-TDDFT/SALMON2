@@ -615,10 +615,14 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy
         r=sqrt(x*x+y*y+z*z)
         if (r<pp%rps(ik)+1.d-12) then
           j=j+1
-          ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
-                                 mx(i) /= ppg%jxyz_old(1,j,ia) .or. &
-                                 my(i) /= ppg%jxyz_old(2,j,ia) .or. &
-                                 mz(i) /= ppg%jxyz_old(3,j,ia)
+          if (ppg%mps_old(ia) < j) then
+            ppg%jxyz_changed(ia) = .true.
+          else
+            ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
+                                   mx(i) /= ppg%jxyz_old(1,j,ia) .or. &
+                                   my(i) /= ppg%jxyz_old(2,j,ia) .or. &
+                                   mz(i) /= ppg%jxyz_old(3,j,ia)
+          end if
         end if
       enddo
     enddo
