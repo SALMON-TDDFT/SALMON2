@@ -647,31 +647,34 @@ end subroutine calc_nps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine cache_jxyz(ppg,rion)
+  use salmon_global, only: natom
   use structures
   implicit none
   type(s_pp_grid)    :: ppg
   real(8),intent(in) :: rion(:,:)
 
-  if (allocated(ppg%rion_old)) then
-    deallocate(ppg%rion_old)
-    deallocate(ppg%jxyz_old)
-    deallocate(ppg%mps_old,ppg%rxyz_old)
-  end if
+  if (allocated(ppg%mps_old))  deallocate(ppg%mps_old)
+  if (allocated(ppg%rion_old)) deallocate(ppg%rion_old)
+  if (allocated(ppg%jxyz_old)) deallocate(ppg%jxyz_old)
+  if (allocated(ppg%rxyz_old)) deallocate(ppg%rxyz_old)
 
+  allocate(ppg%mps_old(natom))
   allocate(ppg%rion_old(size(rion,1),size(rion,2)))
-  allocate(ppg%jxyz_old(size(ppg%jxyz,1),size(ppg%jxyz,2),size(ppg%jxyz,3)))
-  allocate(ppg%mps_old(size(ppg%mps,1)))
-  allocate(ppg%rxyz_old(size(ppg%rxyz,1),size(ppg%rxyz,2),size(ppg%rxyz,3)))
+  ppg%rion_old = rion
 
   if (allocated(ppg%jxyz)) then
-    ppg%rion_old = rion
-    ppg%jxyz_old = ppg%jxyz
     ppg%mps_old  = ppg%mps
+
+    allocate(ppg%jxyz_old(size(ppg%jxyz,1),size(ppg%jxyz,2),size(ppg%jxyz,3)))
+    allocate(ppg%rxyz_old(size(ppg%rxyz,1),size(ppg%rxyz,2),size(ppg%rxyz,3)))
+    ppg%jxyz_old = ppg%jxyz
     ppg%rxyz_old = ppg%rxyz
   else
-    ppg%rion_old = rion
-    ppg%jxyz_old = -1
     ppg%mps_old  = -1
+
+    allocate(ppg%jxyz_old(3,1,natom))
+    allocate(ppg%rxyz_old(3,1,natom))
+    ppg%jxyz_old = -1
     ppg%rxyz_old = 0d0
   end if
 end subroutine
