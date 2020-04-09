@@ -171,7 +171,7 @@ subroutine poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
   case ('xy')
 
   poisson%b_ffte=0.d0
-!$OMP parallel do private(iiz,iiy,ix) collapse(2)
+!$OMP parallel do private(iix,iiy,ix) collapse(2)
   do ix=1,mg%num(1)
   do iy=1,mg%num(2)
     iix=ix+mg%is(1)-1
