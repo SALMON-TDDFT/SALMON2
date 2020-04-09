@@ -58,7 +58,7 @@ subroutine init_dft(comm,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scal
   call init_communicator_dft(comm,pinfo,info)
 
 ! parallelization
-  call check_ffte_condition(pinfo,lg)
+  call check_ffte_condition(info,pinfo,lg)
   call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg) ! lg --> mg
   call init_parallel_dft(system,info,pinfo)
   call init_scalapack(pinfo,info,system)
@@ -476,23 +476,46 @@ end subroutine
 
 !===================================================================================================================================
 
-subroutine check_ffte_condition(pinfo,lg)
+subroutine check_ffte_condition(info,pinfo,lg)
   use structures
-  use salmon_global, only: yn_ffte
+  use salmon_global, only: yn_ffte,ffte_parallel
+  use communication, only: comm_is_root
   implicit none
-  type(s_process_info),intent(in) :: pinfo
-  type(s_rgrid),       intent(in) :: lg
+  type(s_parallel_info),intent(in) :: info
+  type(s_process_info),intent(in)  :: pinfo
+  type(s_rgrid),       intent(in)  :: lg
   integer :: mx,my,mz
   integer :: j,lg_num_tmp,ii
 
   if (yn_ffte == 'y') then
-    mx = mod(lg%num(1), pinfo%nprgrid(2))
-    my = mod(lg%num(2), pinfo%nprgrid(2))
-    if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_domain_orbital(2)'
+    select case(ffte_parallel)
+    case ('xy', 'yz')
+      continue
+    case default
+      if (comm_is_root(info%id_rko)) then
+        print *, '[WARNING] ffte_parallel must be "xy" or "yz", we will set "yz".'
+      end if
+      ffte_parallel = 'yz'
+    end select
 
-    my = mod(lg%num(2), pinfo%nprgrid(3))
-    mz = mod(lg%num(3), pinfo%nprgrid(3))
-    if (my /= 0 .or. mz /= 0) stop 'Both lg%num(2) and lg%num(3) must be divisible by nproc_domain_orbital(3)'
+    select case(ffte_parallel)
+    case ('xy')
+      mz = mod(lg%num(3), pinfo%nprgrid(2))
+      my = mod(lg%num(2), pinfo%nprgrid(2))
+      if (mz /= 0 .or. my /= 0) stop 'Both lg%num(3) and lg%num(2) must be divisible by nproc_rgrid(2)'
+
+      my = mod(lg%num(2), pinfo%nprgrid(1))
+      mx = mod(lg%num(1), pinfo%nprgrid(1))
+      if (my /= 0 .or. mx /= 0) stop 'Both lg%num(2) and lg%num(1) must be divisible by nproc_rgrid(1)'
+    case ('yz')
+      mx = mod(lg%num(1), pinfo%nprgrid(2))
+      my = mod(lg%num(2), pinfo%nprgrid(2))
+      if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_rgrid(2)'
+
+      my = mod(lg%num(2), pinfo%nprgrid(3))
+      mz = mod(lg%num(3), pinfo%nprgrid(3))
+      if (my /= 0 .or. mz /= 0) stop 'Both lg%num(2) and lg%num(3) must be divisible by nproc_rgrid(3)'
+    end select
 
     ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
     do j=1,3
@@ -631,7 +654,7 @@ subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   use structures
   use math_constants,  only : pi,zi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,yn_ffte,aEwald,use_singlescale,cutoff_G2_emfield
+  use salmon_global, only: dt,yn_ffte,aEwald,use_singlescale,cutoff_G2_emfield,ffte_parallel
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: mg
@@ -648,10 +671,10 @@ subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
 
   brl(:,:)=system%primitive_b(:,:)
 
-  allocate(fg%if_Gzero (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  allocate(fg%coef     (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-  allocate(fg%exp_ewald(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+  allocate(fg%if_Gzero (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(fg%vec_G(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(fg%coef     (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+  allocate(fg%exp_ewald(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   fg%if_Gzero = .false.
   fg%vec_G = 0d0
   fg%coef = 0d0
@@ -659,18 +682,18 @@ subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
 
   if(yn_ffte=='y' .and. use_singlescale=='y') then
   ! for single-scale Maxwell-TDDFT
-    allocate(fg%coef_nabla(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))
-    allocate(fg%coef_gxgy0(lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(fg%cos_cGdt  (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(fg%sin_cGdt  (lg%is(1):lg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(fg%coef_nabla(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),3))
+    allocate(fg%coef_gxgy0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(fg%cos_cGdt  (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    allocate(fg%sin_cGdt  (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
     fg%coef_nabla = 0d0
     fg%coef_gxgy0 = 1d0
     fg%cos_cGdt   = 0d0
     fg%sin_cGdt   = 0d0
   end if
 
-  do iz=mg%is(3),mg%ie(3)
-  do iy=mg%is(2),mg%ie(2)
+  do iz=lg%is(3),lg%ie(3)
+  do iy=lg%is(2),lg%ie(2)
   do ix=lg%is(1),lg%ie(1)
 
     if((ix-1)**2+(iy-1)**2+(iz-1)**2 == 0) fg%if_Gzero(ix,iy,iz) = .true.
@@ -749,14 +772,26 @@ subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
 
   else
   ! FFTE
-
+  select case(ffte_parallel)
+  case ('xy')
+    allocate(poisson%a_ffte(lg%num(3),mg%num(2),mg%num(1)))
+    allocate(poisson%b_ffte(lg%num(3),mg%num(2),mg%num(1)))
+  case ('yz')
     allocate(poisson%a_ffte(lg%num(1),mg%num(2),mg%num(3)))
     allocate(poisson%b_ffte(lg%num(1),mg%num(2),mg%num(3)))
+  end select
 
   ! FFTE initialization step
+  select case(ffte_parallel)
+  case ('xy')
+    call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(3),lg%num(2),lg%num(1), &
+                      info%isize_y,info%isize_x,0, &
+                      info%icomm_y,info%icomm_x)
+  case ('yz')
     call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
                       info%isize_y,info%isize_z,0, &
                       info%icomm_y,info%icomm_z)
+  end select
 
   end if
 

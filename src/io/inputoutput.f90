@@ -240,6 +240,7 @@ contains
       & nproc_ob, &
       & nproc_rgrid, &
       & yn_ffte, &
+      & ffte_parallel, &
       & yn_scalapack, &
       & yn_scalapack_red_mem, &
       & yn_eigenexa, &
@@ -583,6 +584,7 @@ contains
     nproc_ob             = 0
     nproc_rgrid          = 0
     yn_ffte              = 'n'
+    ffte_parallel        = 'yz'
     yn_scalapack         = 'n'
     yn_scalapack_red_mem = 'n'
     yn_eigenexa          = 'n'
@@ -973,6 +975,7 @@ contains
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
+    call comm_bcast(ffte_parallel       ,nproc_group_global)
     call comm_bcast(yn_scalapack        ,nproc_group_global)
     call comm_bcast(yn_scalapack_red_mem ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
@@ -1748,6 +1751,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'ffte_parallel', ffte_parallel
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack_red_mem', yn_scalapack_red_mem
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa

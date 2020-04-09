@@ -239,7 +239,7 @@ END SUBROUTINE calc_Vpsl_isolated
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,vpsl,ppg,property)
-  use salmon_global,only : nelem, kion, yn_ffte
+  use salmon_global,only : nelem, kion, yn_ffte, ffte_parallel
   use communication, only: comm_summation
   use math_constants,only : pi,zi
   use structures
@@ -254,7 +254,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,vpsl,ppg,property)
   type(s_pp_grid)                    :: ppg
   character(17)                      :: property
   !
-  integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
+  integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iix,iiy,iiz
   real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
   complex(8) :: tmp_exp
   complex(8) :: vtmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:2)
@@ -384,33 +384,64 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,vpsl,ppg,property)
   
   else
   ! cf. poisson_ffte.f90
-  
+
     poisson%b_ffte=0.d0
-  !$OMP parallel do private(iz,iy,ix,iiz,iiy) collapse(2)
-    do iz = 1,mg%num(3)
-    do iy = 1,mg%num(2)
-    do ix = mg%is(1),mg%ie(1)
-      iiz=iz+mg%is(3)-1
-      iiy=iy+mg%is(2)-1
-      poisson%b_ffte(ix,iy,iz) = vtmp2(ix,iiy,iiz,1) ! V_ion(G)
-    end do
-    end do
-    end do
-    call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_x)
 
-    CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
-                      info%isize_y,info%isize_z,1, &
-                      info%icomm_y,info%icomm_z)
+    select case (ffte_parallel)
+    case ('xy')
+      !$OMP parallel do private(iz,iy,ix,iix,iiy) collapse(2)
+      do ix = 1,mg%num(1)
+      do iy = 1,mg%num(2)
+      do iz = mg%is(3),mg%ie(3)
+        iix=ix+mg%is(1)-1
+        iiy=iy+mg%is(2)-1
+        poisson%b_ffte(iz,iy,ix) = vtmp2(iix,iiy,iz,1) ! V_ion(G)
+      end do
+      end do
+      end do
+      call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_z)
 
-  !$OMP parallel do private(iz,iy,iiz,iiy) collapse(2)
-    do iz=1,mg%num(3)
-    do iy=1,mg%num(2)
-      iiz=iz+mg%is(3)-1
-      iiy=iy+mg%is(2)-1
-      Vpsl%f(mg%is(1):mg%ie(1),iiy,iiz) = poisson%b_ffte(mg%is(1):mg%ie(1),iy,iz)*system%ngrid
-    end do
-    end do
-    
+      CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(3),lg%num(2),lg%num(1),   &
+                        info%isize_y,info%isize_x,1, &
+                        info%icomm_y,info%icomm_x)
+
+      !$OMP parallel do private(iz,iy,iix,iiy) collapse(2)
+      do ix = 1,mg%num(1)
+      do iy = 1,mg%num(2)
+        iix=ix+mg%is(1)-1
+        iiy=iy+mg%is(2)-1
+        Vpsl%f(iix,iiy,mg%is(3):mg%ie(3)) = poisson%b_ffte(mg%is(3):mg%ie(3),iy,ix)*system%ngrid
+      end do
+      end do
+
+    case ('yz')
+      !$OMP parallel do private(iz,iy,ix,iiz,iiy) collapse(2)
+      do iz = 1,mg%num(3)
+      do iy = 1,mg%num(2)
+      do ix = mg%is(1),mg%ie(1)
+        iiz=iz+mg%is(3)-1
+        iiy=iy+mg%is(2)-1
+        poisson%b_ffte(ix,iy,iz) = vtmp2(ix,iiy,iiz,1) ! V_ion(G)
+      end do
+      end do
+      end do
+      call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_x)
+
+      CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3),   &
+                        info%isize_y,info%isize_z,1, &
+                        info%icomm_y,info%icomm_z)
+
+      !$OMP parallel do private(iz,iy,iiz,iiy) collapse(2)
+      do iz=1,mg%num(3)
+      do iy=1,mg%num(2)
+        iiz=iz+mg%is(3)-1
+        iiy=iy+mg%is(2)-1
+        Vpsl%f(mg%is(1):mg%ie(1),iiy,iiz) = poisson%b_ffte(mg%is(1):mg%ie(1),iy,iz)*system%ngrid
+      end do
+      end do
+
+    end select ! ffte_parallel
+
   end if
 
   return
