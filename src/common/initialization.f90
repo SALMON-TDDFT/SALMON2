@@ -500,13 +500,13 @@ subroutine check_ffte_condition(info,pinfo,lg)
 
     select case(ffte_parallel)
     case ('xy')
-      mz = mod(lg%num(3), pinfo%nprgrid(2))
-      my = mod(lg%num(2), pinfo%nprgrid(2))
-      if (mz /= 0 .or. my /= 0) stop 'Both lg%num(3) and lg%num(2) must be divisible by nproc_rgrid(2)'
-
-      my = mod(lg%num(2), pinfo%nprgrid(1))
+      mz = mod(lg%num(3), pinfo%nprgrid(1))
       mx = mod(lg%num(1), pinfo%nprgrid(1))
-      if (my /= 0 .or. mx /= 0) stop 'Both lg%num(2) and lg%num(1) must be divisible by nproc_rgrid(1)'
+      if (mz /= 0 .or. mx /= 0) stop 'Both lg%num(3) and lg%num(1) must be divisible by nproc_rgrid(1)'
+
+      mx = mod(lg%num(1), pinfo%nprgrid(2))
+      my = mod(lg%num(2), pinfo%nprgrid(2))
+      if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_rgrid(2)'
     case ('yz')
       mx = mod(lg%num(1), pinfo%nprgrid(2))
       my = mod(lg%num(2), pinfo%nprgrid(2))
@@ -774,8 +774,8 @@ subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   ! FFTE
   select case(ffte_parallel)
   case ('xy')
-    allocate(poisson%a_ffte(lg%num(3),mg%num(2),mg%num(1)))
-    allocate(poisson%b_ffte(lg%num(3),mg%num(2),mg%num(1)))
+    allocate(poisson%a_ffte(lg%num(3),mg%num(1),mg%num(2)))
+    allocate(poisson%b_ffte(lg%num(3),mg%num(1),mg%num(2)))
   case ('yz')
     allocate(poisson%a_ffte(lg%num(1),mg%num(2),mg%num(3)))
     allocate(poisson%b_ffte(lg%num(1),mg%num(2),mg%num(3)))
@@ -784,9 +784,9 @@ subroutine init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   ! FFTE initialization step
   select case(ffte_parallel)
   case ('xy')
-    call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(3),lg%num(2),lg%num(1), &
-                      info%isize_y,info%isize_x,0, &
-                      info%icomm_y,info%icomm_x)
+    call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(3),lg%num(1),lg%num(2), &
+                      info%isize_x,info%isize_y,0, &
+                      info%icomm_x,info%icomm_y)
   case ('yz')
     call PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(1),lg%num(2),lg%num(3), &
                       info%isize_y,info%isize_z,0, &

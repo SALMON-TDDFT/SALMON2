@@ -172,48 +172,48 @@ subroutine poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
 
   poisson%b_ffte=0.d0
 !$OMP parallel do private(iix,iiy,ix) collapse(2)
-  do ix=1,mg%num(1)
   do iy=1,mg%num(2)
-    iix=ix+mg%is(1)-1
+  do ix=1,mg%num(1)
     iiy=iy+mg%is(2)-1
-    poisson%b_ffte(mg%is(3):mg%ie(3),iy,ix) = cmplx(rho%f(iix,iiy,mg%is(3):mg%ie(3)))
+    iix=ix+mg%is(1)-1
+    poisson%b_ffte(mg%is(3):mg%ie(3),ix,iy) = cmplx(rho%f(iix,iiy,mg%is(3):mg%ie(3)))
   end do
   end do
   call comm_summation(poisson%b_ffte,poisson%a_ffte,size(poisson%a_ffte),info%icomm_z)
 
-  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(3),lg%num(2),lg%num(1),   &
-                    info%isize_y,info%isize_x,-1, &
-                    info%icomm_y,info%icomm_x)
+  CALL PZFFT3DV_MOD(poisson%a_ffte,poisson%b_ffte,lg%num(3),lg%num(1),lg%num(2),   &
+                    info%isize_x,info%isize_y,-1, &
+                    info%icomm_x,info%icomm_y)
 
   poisson%zrhoG_ele=0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(iz,iy,ix,iiy,iiz,iix) &
 !$omp             shared(mg,lg,poisson,inv_lgnum3,fg)
-  do ix=1,mg%num(1)
   do iy=1,mg%num(2)
-    iix=ix+mg%is(1)-1
+  do ix=1,mg%num(1)
     iiy=iy+mg%is(2)-1
+    iix=ix+mg%is(1)-1
     do iz=1,mg%num(3)
       iiz=iz+mg%is(3)-1
-      poisson%zrhoG_ele(iix,iiy,iiz) = poisson%b_ffte(iiz,iy,ix)*inv_lgnum3
+      poisson%zrhoG_ele(iix,iiy,iiz) = poisson%b_ffte(iiz,ix,iy)*inv_lgnum3
     end do
     do iz=1,lg%num(3)
-      poisson%b_ffte(iz,iy,ix) = poisson%b_ffte(iz,iy,ix) * fg%coef(iix,iiy,iz)
+      poisson%b_ffte(iz,ix,iy) = poisson%b_ffte(iz,ix,iy) * fg%coef(iix,iiy,iz)
     end do
   end do
   end do
 !$omp end parallel do
 
-  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(3),lg%num(2),lg%num(1), &
-                    info%isize_y,info%isize_x,1, &
-                    info%icomm_y,info%icomm_x)
+  CALL PZFFT3DV_MOD(poisson%b_ffte,poisson%a_ffte,lg%num(3),lg%num(1),lg%num(2), &
+                    info%isize_x,info%isize_y,1, &
+                    info%icomm_x,info%icomm_y)
 
 !$OMP parallel do private(iix,iiy) collapse(2)
-  do ix=1,mg%num(1)
   do iy=1,mg%num(2)
-    iix=ix+mg%is(1)-1
+  do ix=1,mg%num(1)
     iiy=iy+mg%is(2)-1
-    Vh%f(iix,iiy,mg%is(3):mg%ie(3)) = poisson%a_ffte(mg%is(3):mg%ie(3),iy,ix)
+    iix=ix+mg%is(1)-1
+    Vh%f(iix,iiy,mg%is(3):mg%ie(3)) = poisson%a_ffte(mg%is(3):mg%ie(3),ix,iy)
   end do
   end do
 
