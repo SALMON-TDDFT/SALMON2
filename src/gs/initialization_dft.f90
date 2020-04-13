@@ -16,6 +16,10 @@
 !=======================================================================
 
 #include "config.h"
+module initialization_dft
+  implicit none
+  
+contains
 
 subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg,  &
@@ -403,3 +407,4 @@ subroutine initialization_dft_md( Miter, rion_update,  &
 
 end subroutine initialization_dft_md
 
+end module initialization_dft
