@@ -43,6 +43,7 @@ subroutine main_dft_k_expand_slice
   use filesystem
   use hamiltonian
   use salmon_total_energy
+  use initialization_dft
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg

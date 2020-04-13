@@ -44,7 +44,8 @@ use salmon_total_energy
 use init_gs, only: init_wf
 use md_sub, only: init_md, update_pseudo_rt, &
                   time_evolution_step_md_part1,time_evolution_step_md_part2
-                  
+use initialization_dft
+
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg

@@ -2335,7 +2335,7 @@ contains
     
     !initialize r-grid
     call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
-    call init_grid_parallel(info%id_rko,info%isize_rko,info,fs%lg,fs%mg) ! lg --> mg
+    call init_grid_parallel(info,fs%lg,fs%mg) ! lg --> mg
     !### This process about ng is temporal. #####################!
     !### With modifying set_ng to be applied to arbitrary Nd, ###!
     !### this process will be removed.###########################!

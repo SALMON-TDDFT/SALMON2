@@ -58,10 +58,8 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
 
 ! parallelization
   call check_ffte_condition(info,lg)
-  call init_grid_parallel(info%id_rko,info%isize_rko,info,lg,mg) ! lg --> mg
+  call init_grid_parallel(info,lg,mg) ! lg --> mg
   call init_parallel_dft(system,info)
-  call init_scalapack(info,system)
-  call init_eigenexa(info,system)
   ! sendrecv_grid object for wavefunction updates
   call create_sendrecv_neig_orbital(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
@@ -420,58 +418,6 @@ end subroutine init_grid_whole
 
 !===================================================================================================================================
 
-subroutine init_scalapack(info,system)
-  use salmon_global, only: yn_scalapack
-#ifdef USE_SCALAPACK
-  use scalapack_module
-  use communication, only: comm_is_root,comm_sync_all
-#endif
-  use structures
-  implicit none
-  type(s_parallel_info)         :: info
-  type(s_dft_system),intent(in) :: system
-#ifdef USE_SCALAPACK
-  integer :: n
-#endif
-
-  if (yn_scalapack == 'y') then
-#ifdef USE_SCALAPACK
-    call create_gridmap(info)
-    n = system%no
-    call init_blacs(info,n)
-    if (n /= system%no) then
-      if (comm_is_root(info%id_rko)) then
-        print '(A,I6)', '[FATAL ERROR] nstate must be ',n
-      end if
-      call comm_sync_all
-      stop
-    end if
-#endif
-  end if
-end subroutine
-
-!===================================================================================================================================
-
-subroutine init_eigenexa(info,system)
-  use salmon_global, only: yn_eigenexa
-#ifdef USE_EIGENEXA
-  use eigenexa_module, only: init_eigenexa_mod => init_eigenexa
-  use communication, only: comm_is_root,comm_sync_all
-#endif
-  use structures
-  implicit none
-  type(s_parallel_info)         :: info
-  type(s_dft_system),intent(in) :: system
-
-  if (yn_eigenexa == 'y') then
-#ifdef USE_EIGENEXA
-    call init_eigenexa_mod(info,system%no)
-#endif
-  end if
-end subroutine
-
-!===================================================================================================================================
-
 subroutine check_ffte_condition(info,lg)
   use structures
   use salmon_global, only: yn_ffte
@@ -518,18 +464,20 @@ end subroutine check_ffte_condition
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(myrank,nproc,info,lg,mg)
+subroutine init_grid_parallel(info,lg,mg)
   use communication, only: comm_is_root
   use salmon_global, only: yn_periodic
   use structures, only: s_rgrid,s_parallel_info
   implicit none
-  integer,             intent(in)    :: myrank,nproc
-  type(s_parallel_info),intent(in)   :: info
-  type(s_rgrid),       intent(inout) :: lg
-  type(s_rgrid),       intent(inout) :: mg
+  type(s_parallel_info),intent(in)    :: info
+  type(s_rgrid),        intent(inout) :: lg
+  type(s_rgrid),        intent(inout) :: mg
   !
-  integer :: nproc_domain_orbital(3),nproc_k,nproc_ob
+  integer :: myrank,nproc,nproc_domain_orbital(3),nproc_k,nproc_ob
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
+  
+  myrank = info%id_rko
+  nproc  = info%isize_rko
 
   nproc_k              = info%npk
   nproc_ob             = info%nporbital

@@ -45,6 +45,7 @@ use structure_opt_sub
 use salmon_total_energy
 use band_dft_sub
 use init_gs, only: init_wf
+use initialization_dft
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
