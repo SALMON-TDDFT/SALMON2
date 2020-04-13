@@ -75,6 +75,9 @@ integer :: jspin
 
 !call init_dft(nproc_group_global,info,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 
+call init_scalapack(info,system)
+call init_eigenexa(info,system)
+
 call init_code_optimization
 
 allocate( energy%esp(system%no,system%nk,system%nspin) ); energy%esp=0.0d0
@@ -406,5 +409,57 @@ subroutine initialization_dft_md( Miter, rion_update,  &
 
 
 end subroutine initialization_dft_md
+
+!===================================================================================================================================
+
+subroutine init_scalapack(info,system)
+  use salmon_global, only: yn_scalapack
+#ifdef USE_SCALAPACK
+  use scalapack_module
+  use communication, only: comm_is_root,comm_sync_all
+#endif
+  use structures
+  implicit none
+  type(s_parallel_info)         :: info
+  type(s_dft_system),intent(in) :: system
+#ifdef USE_SCALAPACK
+  integer :: n
+#endif
+
+  if (yn_scalapack == 'y') then
+#ifdef USE_SCALAPACK
+    call create_gridmap(info)
+    n = system%no
+    call init_blacs(info,n)
+    if (n /= system%no) then
+      if (comm_is_root(info%id_rko)) then
+        print '(A,I6)', '[FATAL ERROR] nstate must be ',n
+      end if
+      call comm_sync_all
+      stop
+    end if
+#endif
+  end if
+end subroutine
+
+!===================================================================================================================================
+
+subroutine init_eigenexa(info,system)
+  use salmon_global, only: yn_eigenexa
+#ifdef USE_EIGENEXA
+  use eigenexa_module, only: init_eigenexa_mod => init_eigenexa
+  use communication, only: comm_is_root,comm_sync_all
+#endif
+  use structures
+  implicit none
+  type(s_parallel_info)         :: info
+  type(s_dft_system),intent(in) :: system
+
+  if (yn_eigenexa == 'y') then
+#ifdef USE_EIGENEXA
+    call init_eigenexa_mod(info,system%no)
+#endif
+  end if
+end subroutine
 
 end module initialization_dft
