@@ -22,12 +22,12 @@ module set_numcpu
 
 contains
 
-  function check_numcpu(icomm1, pinfo) result(iok)
-  use structures, only: s_process_info
+  function check_numcpu(icomm1, info) result(iok)
+  use structures, only: s_parallel_info
   use communication, only: comm_get_groupinfo
   implicit none
   integer, intent(in) :: icomm1 ! Communicator for a single grid system
-  type(s_process_info),intent(inout) :: pinfo
+  type(s_parallel_info),intent(inout) :: info
   logical :: iok
 
   integer :: nproc_k, nproc_ob
@@ -37,9 +37,9 @@ contains
 
   call comm_get_groupinfo(icomm1, nproc_id_comm1, nproc_size_comm1)
 
-  nproc_k   = pinfo%npk
-  nproc_ob  = pinfo%nporbital
-  nproc_d_o = pinfo%nprgrid
+  nproc_k   = info%npk
+  nproc_ob  = info%nporbital
+  nproc_d_o = info%nprgrid
 
   nproc_total_wf = nproc_k * nproc_ob * product(nproc_d_o(:))
 
@@ -53,12 +53,12 @@ contains
   end if
 end function check_numcpu
 
-subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
-  use structures, only: s_process_info
+subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info)
+  use structures, only: s_parallel_info
   use communication, only: comm_get_groupinfo
   implicit none
-  integer,intent(in)               :: iprefer_dist,numk,numo,icomm1
-  type(s_process_info),intent(out) :: pinfo
+  integer,intent(in)                :: iprefer_dist,numk,numo,icomm1
+  type(s_parallel_info),intent(out) :: info
   integer :: nproc_size_comm1, nproc_id_comm1
 
   integer :: ip
@@ -180,9 +180,9 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,pinfo)
     end select
   end do
 
-  pinfo%npk         = nproc_k
-  pinfo%nporbital   = nproc_ob
-  pinfo%nprgrid(1:3) = nproc_d_o(1:3)
+  info%npk         = nproc_k
+  info%nporbital   = nproc_ob
+  info%nprgrid(1:3) = nproc_d_o(1:3)
 
 end subroutine set_numcpu_general
 

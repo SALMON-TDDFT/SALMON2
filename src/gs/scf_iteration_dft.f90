@@ -18,7 +18,7 @@
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,ewald,  &
                               lg,mg,  &
-                              info,pinfo,  &
+                              info,  &
                               poisson,fg,  &
                               cg,mixing,  &
                               stencil,  &
@@ -65,7 +65,6 @@ real(8) :: rNebox1,rNebox2
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_parallel_info) :: info
-type(s_process_info),intent(in) :: pinfo
 type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
@@ -103,7 +102,7 @@ if(step_initial_mix_zero.gt.1)then
 
       rion_update = check_rion_update() .or. (iter == 1)
       call copy_density(iter,system%nspin,mg,srho_s,mixing)
-      call scf_iteration_step(lg,mg,system,info,pinfo,stencil,  &
+      call scf_iteration_step(lg,mg,system,info,stencil,  &
                      srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      iter,  &
@@ -169,7 +168,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       end if
    end if
    call copy_density(Miter,system%nspin,mg,srho_s,mixing)
-   call scf_iteration_step(lg,mg,system,info,pinfo,stencil,  &
+   call scf_iteration_step(lg,mg,system,info,stencil,  &
                      srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &

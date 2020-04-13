@@ -19,7 +19,7 @@
 
 subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg,  &
-                                pinfo, info,  &
+                                info,  &
                                 srg, srg_scalar,  &
                                 srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                                 spsi, shpsi, sttpsi,  &
@@ -48,7 +48,6 @@ use salmon_total_energy
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
-type(s_process_info) :: pinfo
 type(s_parallel_info) :: info
 type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
@@ -70,7 +69,7 @@ integer,parameter :: Nd = 4
 
 integer :: jspin
 
-!call init_dft(nproc_group_global,pinfo,info,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+!call init_dft(nproc_group_global,info,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 
 call init_code_optimization
 
@@ -119,7 +118,7 @@ subroutine init_code_optimization
   call switch_stencil_optimization(mg%num)
   call switch_openmp_parallelization(mg%num)
 
-  if(iperiodic==3 .and. product(pinfo%nprgrid)==1) then
+  if(iperiodic==3 .and. product(info%nprgrid)==1) then
     ignum = mg%num
   else
     ignum = mg%num + (nd*2)
@@ -127,7 +126,7 @@ subroutine init_code_optimization
   call set_modulo_tables(ignum)
 
   if (comm_is_root(nproc_id_global)) then
-    call optimization_log(pinfo)
+    call optimization_log(info)
   end if
 end subroutine
 
@@ -141,7 +140,7 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
-                                xc_func,mixing,pinfo )
+                                xc_func,mixing )
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -187,7 +186,6 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_ewald_ion_ion) :: ewald
 type(s_mixing) :: mixing
-type(s_process_info) :: pinfo
 
 logical :: rion_update
 integer :: Miter,jspin, nspin,i,ix,iy,iz
@@ -240,7 +238,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
 
         if( read_gs_restart_data=='rho_inout'.or. &
             read_gs_restart_data=='rho'         )then
-           call init_wf(lg,mg,system,info,spsi,pinfo)
+           call init_wf(lg,mg,system,info,spsi)
         endif
      endif
 
@@ -250,7 +248,7 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
   else
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
-    call init_wf(lg,mg,system,info,spsi,pinfo)
+    call init_wf(lg,mg,system,info,spsi)
     call calc_density(system,srho_s,spsi,info,mg)
   end if
 
@@ -293,7 +291,7 @@ end subroutine initialization2_dft
 subroutine initialization_dft_md( Miter, rion_update,  &
                                 system,md,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,  &
-                                info,pinfo,  &
+                                info,  &
                                 srg,srg_scalar,  &
                                 srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
                                 spsi,shpsi,sttpsi,  &
@@ -328,7 +326,6 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_scalar
   type(s_orbital) :: spsi,shpsi,sttpsi
@@ -374,7 +371,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   call scf_iteration_dft( Miter,rion_update,sum1,  &
                           system,energy,ewald,  &
                           lg,mg,  &
-                          info,pinfo,  &
+                          info,  &
                           poisson,fg,  &
                           cg,mixing,  &
                           stencil,  &

@@ -82,17 +82,17 @@ contains
     end do
   end subroutine
 
-  subroutine optimization_log(pinfo)
-    use structures, only: s_process_info
+  subroutine optimization_log(info)
+    use structures, only: s_parallel_info
     use parallelization, only: is_distributed_parallel, get_nthreads
     implicit none
-    type(s_process_info), intent(in) :: pinfo
+    type(s_parallel_info), intent(in) :: info
     print *, '========== code optimization log =========='
     if (is_distributed_parallel()) then
       print *, 'MPI distribution:'
-      print *, '  nproc_k    :', pinfo%npk
-      print *, '  nproc_ob   :', pinfo%nporbital
-      print *, '  nproc_rgrid :', pinfo%nprgrid
+      print *, '  nproc_k    :', info%npk
+      print *, '  nproc_ob   :', info%nporbital
+      print *, '  nproc_rgrid :', info%nprgrid
     end if
     print *, 'OpenMP parallelization:'
     print *, '  number of threads :', get_nthreads()

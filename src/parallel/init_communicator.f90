@@ -20,14 +20,13 @@ CONTAINS
 
 !===================================================================================================================================
 
-subroutine init_communicator_dft(comm,pinfo,info)
+subroutine init_communicator_dft(comm,info)
   use salmon_global, only: process_allocation
-  use structures, only: s_process_info, s_parallel_info
+  use structures, only: s_parallel_info
   use communication, only: comm_create_group, comm_get_groupinfo, &
                            comm_is_root, comm_summation, comm_create_group_byid
   implicit none
   integer             ,intent(in) :: comm
-  type(s_process_info),intent(in) :: pinfo
   type(s_parallel_info)           :: info
   !
   integer :: myrank,nproc
@@ -42,9 +41,9 @@ subroutine init_communicator_dft(comm,pinfo,info)
 
   call comm_get_groupinfo(comm, myrank, nproc)
 
-  nproc_k   = pinfo%npk
-  nproc_ob  = pinfo%nporbital
-  nproc_d_o = pinfo%nprgrid
+  nproc_k   = info%npk
+  nproc_ob  = info%nporbital
+  nproc_d_o = info%nprgrid
 
   allocate(iranklists(nproc))
 

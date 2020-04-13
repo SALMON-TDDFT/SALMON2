@@ -24,7 +24,7 @@ contains
 
 !===================================================================================================================================
 
-subroutine init_dft(comm,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
                            nproc_k,nproc_ob,nproc_rgrid
@@ -35,7 +35,6 @@ subroutine init_dft(comm,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scal
   use sym_rho_sub, only: init_sym_rho
   implicit none
   integer      ,intent(in) :: comm
-  type(s_process_info)     :: pinfo
   type(s_parallel_info)    :: info
   type(s_rgrid)            :: lg,mg
   type(s_dft_system)       :: system
@@ -51,23 +50,23 @@ subroutine init_dft(comm,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scal
   call init_dft_system(lg,system,stencil)
 
 ! process distribution
-  pinfo%npk       = nproc_k
-  pinfo%nporbital = nproc_ob
-  pinfo%nprgrid    = nproc_rgrid
-  call init_process_distribution(system,comm,pinfo)
-  call init_communicator_dft(comm,pinfo,info)
+  info%npk       = nproc_k
+  info%nporbital = nproc_ob
+  info%nprgrid   = nproc_rgrid
+  call init_process_distribution(system,comm,info)
+  call init_communicator_dft(comm,info)
 
 ! parallelization
-  call check_ffte_condition(pinfo,lg)
-  call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,lg,mg) ! lg --> mg
-  call init_parallel_dft(system,info,pinfo)
-  call init_scalapack(pinfo,info,system)
-  call init_eigenexa(pinfo,info,system)
+  call check_ffte_condition(info,lg)
+  call init_grid_parallel(info%id_rko,info%isize_rko,info,lg,mg) ! lg --> mg
+  call init_parallel_dft(system,info)
+  call init_scalapack(info,system)
+  call init_eigenexa(info,system)
   ! sendrecv_grid object for wavefunction updates
-  call create_sendrecv_neig_orbital(neig, info, pinfo, iperiodic) ! neighboring node array
+  call create_sendrecv_neig_orbital(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
   ! sendrecv_grid object for scalar field updates
-  call create_sendrecv_neig_scalar(neig_ng, info, pinfo, iperiodic) ! neighboring node array
+  call create_sendrecv_neig_scalar(neig_ng, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg_scalar, mg, 1, info%icomm_rko, neig_ng)
 
 ! symmetry
@@ -246,28 +245,28 @@ end subroutine init_dft_system
 
 !===================================================================================================================================
 
-subroutine init_process_distribution(system,icomm1,pinfo)
-  use structures, only: s_process_info,s_dft_system
+subroutine init_process_distribution(system,icomm1,info)
+  use structures, only: s_parallel_info,s_dft_system
   use parallelization, only: nproc_id_global, nproc_group_global
   use salmon_global, only: theory
   use communication, only: comm_is_root,comm_bcast
   use set_numcpu
   implicit none
-  type(s_dft_system),intent(in)      :: system
-  integer, intent(in)                :: icomm1 ! Communicator for single DFT system.
-  type(s_process_info),intent(inout) :: pinfo
+  type(s_dft_system),intent(in)       :: system
+  integer, intent(in)                 :: icomm1 ! Communicator for single DFT system.
+  type(s_parallel_info),intent(inout) :: info
   logical :: if_stop
 
-  if((pinfo%nporbital + sum(pinfo%nprgrid)) == 0) then
+  if((info%nporbital + sum(info%nprgrid)) == 0) then
     ! Process distribution is automatically decided by SALMON.
     if (system%ngrid > 16**3) then
-      call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,pinfo)
+      call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,info)
     else
       select case(theory)
       case('dft','dft_band','dft_md','dft2tddft')
-        call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,icomm1,pinfo)
+        call set_numcpu_general(iprefer_k_distribution,system%nk,system%no,icomm1,info)
       case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
-        call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,pinfo)
+        call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,info)
       case default
         stop 'invalid theory'
       end select
@@ -277,33 +276,32 @@ subroutine init_process_distribution(system,icomm1,pinfo)
   end if
 
   if (comm_is_root(nproc_id_global)) then
-    if_stop = .not. check_numcpu(icomm1, pinfo)
+    if_stop = .not. check_numcpu(icomm1, info)
   end if
   call comm_bcast(if_stop, nproc_group_global)
   if (if_stop) stop 'fail: check_numcpu'
 
 #ifdef USE_SCALAPACK
-  pinfo%flag_blacs_gridinit = .false.
+  info%flag_blacs_gridinit = .false.
 #endif
 #ifdef USE_EIGENEXA
-  pinfo%flag_eigenexa_init = .false.
+  info%flag_eigenexa_init = .false.
 #endif
 end subroutine init_process_distribution
 
 !===================================================================================================================================
 
-subroutine init_parallel_dft(system,info,pinfo)
+subroutine init_parallel_dft(system,info)
   use structures
   implicit none
   type(s_dft_system),intent(in) :: system
-  type(s_parallel_info)      :: info
-  type(s_process_info)          :: pinfo
+  type(s_parallel_info)         :: info
   !
   integer :: io,nproc_k,nproc_ob,nproc_domain_orbital(3),m,na
 
-  nproc_k              = pinfo%npk
-  nproc_ob             = pinfo%nporbital
-  nproc_domain_orbital = pinfo%nprgrid
+  nproc_k              = info%npk
+  nproc_ob             = info%nporbital
+  nproc_domain_orbital = info%nprgrid
 
 ! for single-cell calculations
   info%im_s = 1
@@ -422,7 +420,7 @@ end subroutine init_grid_whole
 
 !===================================================================================================================================
 
-subroutine init_scalapack(pinfo,info,system)
+subroutine init_scalapack(info,system)
   use salmon_global, only: yn_scalapack
 #ifdef USE_SCALAPACK
   use scalapack_module
@@ -430,18 +428,17 @@ subroutine init_scalapack(pinfo,info,system)
 #endif
   use structures
   implicit none
-  type(s_process_info)                :: pinfo
-  type(s_parallel_info),intent(in) :: info
-  type(s_dft_system),intent(in)       :: system
+  type(s_parallel_info)         :: info
+  type(s_dft_system),intent(in) :: system
 #ifdef USE_SCALAPACK
   integer :: n
 #endif
 
   if (yn_scalapack == 'y') then
 #ifdef USE_SCALAPACK
-    call create_gridmap(pinfo,info)
+    call create_gridmap(info)
     n = system%no
-    call init_blacs(pinfo,info,n)
+    call init_blacs(info,n)
     if (n /= system%no) then
       if (comm_is_root(info%id_rko)) then
         print '(A,I6)', '[FATAL ERROR] nstate must be ',n
@@ -455,7 +452,7 @@ end subroutine
 
 !===================================================================================================================================
 
-subroutine init_eigenexa(pinfo,info,system)
+subroutine init_eigenexa(info,system)
   use salmon_global, only: yn_eigenexa
 #ifdef USE_EIGENEXA
   use eigenexa_module, only: init_eigenexa_mod => init_eigenexa
@@ -463,35 +460,34 @@ subroutine init_eigenexa(pinfo,info,system)
 #endif
   use structures
   implicit none
-  type(s_process_info)             :: pinfo
-  type(s_parallel_info),intent(in) :: info
-  type(s_dft_system),intent(in)    :: system
+  type(s_parallel_info)         :: info
+  type(s_dft_system),intent(in) :: system
 
   if (yn_eigenexa == 'y') then
 #ifdef USE_EIGENEXA
-    call init_eigenexa_mod(pinfo,info,system%no)
+    call init_eigenexa_mod(info,system%no)
 #endif
   end if
 end subroutine
 
 !===================================================================================================================================
 
-subroutine check_ffte_condition(pinfo,lg)
+subroutine check_ffte_condition(info,lg)
   use structures
   use salmon_global, only: yn_ffte
   implicit none
-  type(s_process_info),intent(in) :: pinfo
-  type(s_rgrid),       intent(in) :: lg
+  type(s_parallel_info),intent(in) :: info
+  type(s_rgrid),        intent(in) :: lg
   integer :: mx,my,mz
   integer :: j,lg_num_tmp,ii
 
   if (yn_ffte == 'y') then
-    mx = mod(lg%num(1), pinfo%nprgrid(2))
-    my = mod(lg%num(2), pinfo%nprgrid(2))
+    mx = mod(lg%num(1), info%nprgrid(2))
+    my = mod(lg%num(2), info%nprgrid(2))
     if (mx /= 0 .or. my /= 0) stop 'Both lg%num(1) and lg%num(2) must be divisible by nproc_domain_orbital(2)'
 
-    my = mod(lg%num(2), pinfo%nprgrid(3))
-    mz = mod(lg%num(3), pinfo%nprgrid(3))
+    my = mod(lg%num(2), info%nprgrid(3))
+    mz = mod(lg%num(3), info%nprgrid(3))
     if (my /= 0 .or. mz /= 0) stop 'Both lg%num(2) and lg%num(3) must be divisible by nproc_domain_orbital(3)'
 
     ! this code treats the situation that lg%num(1:3) is less than or equal to 48,828,125
@@ -522,13 +518,12 @@ end subroutine check_ffte_condition
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg)
+subroutine init_grid_parallel(myrank,nproc,info,lg,mg)
   use communication, only: comm_is_root
   use salmon_global, only: yn_periodic
-  use structures, only: s_process_info,s_rgrid,s_parallel_info
+  use structures, only: s_rgrid,s_parallel_info
   implicit none
   integer,             intent(in)    :: myrank,nproc
-  type(s_process_info),intent(in)    :: pinfo
   type(s_parallel_info),intent(in)   :: info
   type(s_rgrid),       intent(inout) :: lg
   type(s_rgrid),       intent(inout) :: mg
@@ -536,9 +531,9 @@ subroutine init_grid_parallel(myrank,nproc,pinfo,info,lg,mg)
   integer :: nproc_domain_orbital(3),nproc_k,nproc_ob
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
 
-  nproc_k              = pinfo%npk
-  nproc_ob             = pinfo%nporbital
-  nproc_domain_orbital = pinfo%nprgrid
+  nproc_k              = info%npk
+  nproc_ob             = info%nporbital
+  nproc_domain_orbital = info%nprgrid
 
   if ( allocated(mg%is_all) ) deallocate(mg%is_all)
   if ( allocated(mg%ie_all) ) deallocate(mg%ie_all)
@@ -844,7 +839,7 @@ subroutine init_nion_div(system,lg,mg,info)
   type(s_dft_system),intent(in) :: system
   type(s_rgrid)     ,intent(in) :: lg
   type(s_rgrid)     ,intent(in) :: mg
-  type(s_parallel_info)      :: info
+  type(s_parallel_info)         :: info
   !
   logical :: flag_cuboid
  !integer :: k,irank,nproc

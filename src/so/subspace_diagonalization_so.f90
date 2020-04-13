@@ -25,7 +25,7 @@ module subspace_diagonalization_so
 
 contains
 
-  subroutine ssdg_isolated(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+  subroutine ssdg_isolated(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use structures
     use communication, only: comm_summation,comm_bcast
     use timer
@@ -37,7 +37,6 @@ contains
     type(s_rgrid)           ,intent(in) :: mg
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
-    type(s_process_info),intent(in) :: pinfo
     type(s_stencil),intent(in) :: stencil
     type(s_pp_grid),intent(in) :: ppg
     type(s_scalar) ,intent(in) :: vlocal(system%nspin)

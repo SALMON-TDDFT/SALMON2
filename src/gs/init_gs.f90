@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
+SUBROUTINE init_wf(lg,mg,system,info,spsi)
   use structures
   use inputoutput, only: au_length_aa, method_init_wf
   use salmon_global, only: yn_periodic,natom,rion
@@ -32,7 +32,6 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info)   ,intent(in) :: info
   type(s_orbital)                     :: spsi
-  type(s_process_info)    ,intent(in) :: pinfo
   !
   integer :: ik,io,is,a,ix,iy,iz,ip, ig,ngauss
   real(8) :: xx,yy,zz,x1,y1,z1,rr,Xmax,Ymax,Zmax,q(3)
@@ -161,7 +160,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
 
   end if
 
-  call gram_schmidt(system, mg, info, spsi, pinfo)
+  call gram_schmidt(system, mg, info, spsi)
 
   return
 
