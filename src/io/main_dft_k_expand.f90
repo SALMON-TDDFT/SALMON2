@@ -59,7 +59,6 @@ subroutine main_dft_k_expand_single
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_scalar
   type(s_orbital) :: spsi,shpsi,sttpsi
@@ -93,13 +92,13 @@ subroutine main_dft_k_expand_single
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(process_allocation /= 'orbital_sequential') stop "error: process_allocation must be orbital_sequential"
 
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
   allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
   call initialization1_dft( system, energy, stencil, fg, poisson,  &
                             lg, mg,  &
-                            pinfo, info,  &
+                            info,  &
                             srg, srg_scalar,  &
                             srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                             spsi, shpsi, sttpsi,  &
@@ -122,7 +121,7 @@ subroutine main_dft_k_expand_single
 
   ! initialization for k-expand
   call init_k_expand(system%nk,kex)
-  call get_print_rank_numbers(kex,info,pinfo)
+  call get_print_rank_numbers(kex,info)
 
   !(prepare directory)
   call init_dir_out_restart(ofl)
@@ -256,12 +255,11 @@ subroutine init_k_expand(mk,kex)
 
 end subroutine init_k_expand
 
-subroutine get_print_rank_numbers(kex,info,pinfo)
+subroutine get_print_rank_numbers(kex,info)
   use communication, only: comm_is_root, comm_bcast
   implicit none
   type(s_k_expand) :: kex
   type(s_parallel_info),intent(in) :: info
-  type(s_process_info),intent(in)  :: pinfo
   integer :: icnt,nl,i1,i2,i3,i4,i5,k1,k2,k3,nkx,nky,nkz
   integer :: nproc_k, nproc_o, nproc_r(3)
 
@@ -288,9 +286,9 @@ subroutine get_print_rank_numbers(kex,info,pinfo)
     nky = kex%nky
     nkz = kex%nkz
 
-    nproc_k  = pinfo%npk
-    nproc_o  = pinfo%nporbital
-    nproc_r  = pinfo%nprgrid
+    nproc_k  = info%npk
+    nproc_o  = info%nporbital
+    nproc_r  = info%nprgrid
 
     !(after)
     allocate( kex%myrank(kex%nk) )

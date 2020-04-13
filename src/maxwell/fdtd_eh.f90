@@ -2317,26 +2317,25 @@ contains
     use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
     use init_communicator, only: init_communicator_dft
     use sendrecv_grid,     only: create_sendrecv_neig_scalar,init_sendrecv_grid
-    use structures,        only: s_fdtd_system, s_parallel_info, s_process_info
+    use structures,        only: s_fdtd_system, s_parallel_info
     use initialization_sub
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
-    type(s_process_info)              :: pinfo
     type(s_parallel_info)             :: info
     integer                           :: neig_ng_eh(1:2,1:3)
     integer                           :: ii,iperi
     
     !set mpi condition
-    pinfo%npk       = nproc_k
-    pinfo%nporbital = nproc_ob
-    pinfo%nprgrid    = nproc_rgrid
-    call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,pinfo)
-    call init_communicator_dft(nproc_group_global,pinfo,info)
+    info%npk       = nproc_k
+    info%nporbital = nproc_ob
+    info%nprgrid    = nproc_rgrid
+    call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info)
+    call init_communicator_dft(nproc_group_global,info)
     
     !initialize r-grid
     call init_grid_whole(fs%rlsize,fs%hgs,fs%lg)
-    call init_grid_parallel(info%id_rko,info%isize_rko,pinfo,info,fs%lg,fs%mg) ! lg --> mg
+    call init_grid_parallel(info%id_rko,info%isize_rko,info,fs%lg,fs%mg) ! lg --> mg
     !### This process about ng is temporal. #####################!
     !### With modifying set_ng to be applied to arbitrary Nd, ###!
     !### this process will be removed.###########################!
@@ -2370,7 +2369,7 @@ contains
     elseif(yn_periodic=='y') then
       iperi=3
     end if
-    call create_sendrecv_neig_scalar(neig_ng_eh,info,pinfo,iperi) ! neighboring node array
+    call create_sendrecv_neig_scalar(neig_ng_eh,info,iperi) ! neighboring node array
     call init_sendrecv_grid(fs%srg_ng,fs%mg,1,info%icomm_r,neig_ng_eh)
     
     return

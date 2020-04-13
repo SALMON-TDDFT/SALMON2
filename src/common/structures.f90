@@ -89,27 +89,6 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids
   end type s_rgrid
 
-  type s_process_info
-    integer :: npk
-    integer :: nporbital
-    integer :: nprgrid(3)    ! x,y,z
-#ifdef USE_SCALAPACK
-    logical :: flag_blacs_gridinit
-    integer :: icomm_sl ! for summation
-    integer :: iam,nprocs
-    integer,allocatable :: gridmap(:,:)
-    integer :: nprow,npcol,myrow,mycol
-    integer :: nrow_local,ncol_local,lda
-    integer :: desca(9), descz(9)
-    integer :: len_work  ! for PDSYEVD, PZHEEVD
-    integer :: len_rwork ! for PZHEEVD
-    integer,allocatable :: ndiv(:), i_tbl(:,:), j_tbl(:,:), iloc_tbl(:,:), jloc_tbl(:,:)
-#endif
-#ifdef USE_EIGENEXA
-    logical :: flag_eigenexa_init
-#endif
-  end type
-
 ! for persistent communication
   type s_pcomm_cache
     real(8), allocatable :: dbuf(:, :, :, :)
@@ -141,6 +120,11 @@ module structures
   end type s_sendrecv_grid
 
   type s_parallel_info
+  ! division of MPI processes (for orbital wavefunction)
+    integer :: npk        ! k-points
+    integer :: nporbital  ! orbital index
+    integer :: nprgrid(3) ! r-space (x,y,z)
+  ! parallelization of orbital wavefunction
     integer :: iaddress(5) ! address of MPI under orbital wavefunction (ix,iy,iz,io,ik)
     integer,allocatable :: imap(:,:,:,:,:) ! address map
     logical :: if_divide_rspace
@@ -161,16 +145,31 @@ module structures
     integer :: icomm_y,id_y,isize_y ! y-axis
     integer :: icomm_z,id_z,isize_z ! z-axis
     integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
+  ! for atom index #ia
+    integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
+    integer :: nion_mg
+    integer,allocatable :: ia_mg(:)
   ! for orbital index #io
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
     integer,allocatable :: io_s_all(:) ! io_s for all orbital ranks
     integer,allocatable :: io_e_all(:) ! io_e for all orbital ranks
     integer,allocatable :: numo_all(:) ! numo for all orbital ranks
     integer :: numo_max ! max value of numo_all
-  ! for atom index #ia
-    integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
-    integer :: nion_mg
-    integer,allocatable :: ia_mg(:)
+#ifdef USE_SCALAPACK
+    logical :: flag_blacs_gridinit
+    integer :: icomm_sl ! for summation
+    integer :: iam,nprocs
+    integer,allocatable :: gridmap(:,:)
+    integer :: nprow,npcol,myrow,mycol
+    integer :: nrow_local,ncol_local,lda
+    integer :: desca(9), descz(9)
+    integer :: len_work  ! for PDSYEVD, PZHEEVD
+    integer :: len_rwork ! for PZHEEVD
+    integer,allocatable :: ndiv(:), i_tbl(:,:), j_tbl(:,:), iloc_tbl(:,:), jloc_tbl(:,:)
+#endif
+#ifdef USE_EIGENEXA
+    logical :: flag_eigenexa_init
+#endif
   end type s_parallel_info
 
   type s_orbital

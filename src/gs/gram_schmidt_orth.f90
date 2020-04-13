@@ -15,21 +15,20 @@
 !
 !=======================================================================
 module gram_schmidt_orth
-  use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital, s_process_info
+  use structures, only: s_dft_system, s_rgrid, s_parallel_info, s_orbital
   use pack_unpack, only: copy_data
   use gram_schmidt_so_sub, only: gram_schmidt_so, SPIN_ORBIT_ON
   implicit none
 
 contains
 
-  subroutine gram_schmidt(sys, rg, wfi, wf, pinfo)
+  subroutine gram_schmidt(sys, rg, wfi, wf)
     use timer
     implicit none
-    type(s_dft_system),       intent(in)    :: sys
+    type(s_dft_system),   intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_parallel_info),      intent(in)    :: wfi
-    type(s_orbital), intent(inout) :: wf
-    type(s_process_info) :: pinfo
+    type(s_parallel_info),intent(in)    :: wfi
+    type(s_orbital),      intent(inout) :: wf
 
     if ( SPIN_ORBIT_ON ) then
       call gram_schmidt_so(sys, rg, wfi, wf)
@@ -39,10 +38,10 @@ contains
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
 
     if (sys%if_real_orbital) then
-      call gram_schmidt_col_rblas(sys, rg, wfi, wf, pinfo)
+      call gram_schmidt_col_rblas(sys, rg, wfi, wf)
       !call gram_schmidt_col_real8(sys, rg, wfi, wf) !old fashion
     else
-      call gram_schmidt_col_cblas(sys, rg, wfi, wf, pinfo)
+      call gram_schmidt_col_cblas(sys, rg, wfi, wf)
       !call gram_schmidt_col_complex8(sys, rg, wfi, wf) !old fashion
     end if
 
@@ -56,10 +55,10 @@ contains
     use timer
     use communication, only: comm_bcast, comm_summation
     implicit none
-    type(s_dft_system),       intent(in)    :: sys
+    type(s_dft_system),   intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_parallel_info),      intent(in)    :: wfi
-    type(s_orbital), intent(inout) :: wf
+    type(s_parallel_info),intent(in)    :: wfi
+    type(s_orbital),      intent(inout) :: wf
 
     integer :: nsize_rg
     integer :: ik, im, ispin
@@ -225,16 +224,15 @@ contains
 
 !=======================================================================
 
-  subroutine gram_schmidt_col_cblas(sys, rg, wfi, wf, pinfo)
+  subroutine gram_schmidt_col_cblas(sys, rg, wfi, wf)
     ! Only for the colinear L(S)DA:
     use timer
     use communication, only: comm_bcast, comm_summation
     implicit none
-    type(s_dft_system),       intent(in)    :: sys
+    type(s_dft_system),   intent(in)    :: sys
     type(s_rgrid),        intent(in)    :: rg
-    type(s_parallel_info),      intent(in)    :: wfi
-    type(s_orbital), intent(inout) :: wf
-    type(s_process_info) :: pinfo
+    type(s_parallel_info),intent(in)    :: wfi
+    type(s_orbital),      intent(inout) :: wf
 
     complex(8), parameter :: zero = 0d0
     complex(8), parameter :: one = 1d0
@@ -269,7 +267,7 @@ contains
       end do
 
       ! Loop for all:
-      do m = 0, pinfo%nporbital-1
+      do m = 0, wfi%nporbital-1
         if(wfi%id_o==m)then
 
           if(wfi%numo < 32) then
@@ -515,16 +513,15 @@ contains
 
   !=======================================================================
 
-    subroutine gram_schmidt_col_cblas_old(sys, rg, wfi, wf, pinfo)
+    subroutine gram_schmidt_col_cblas_old(sys, rg, wfi, wf)
       ! Only for the colinear L(S)DA:
       use timer
       use communication, only: comm_bcast, comm_summation
       implicit none
-      type(s_dft_system),       intent(in)    :: sys
+      type(s_dft_system),   intent(in)    :: sys
       type(s_rgrid),        intent(in)    :: rg
-      type(s_parallel_info),      intent(in)    :: wfi
-      type(s_orbital), intent(inout) :: wf
-      type(s_process_info) :: pinfo
+      type(s_parallel_info),intent(in)    :: wfi
+      type(s_orbital),      intent(inout) :: wf
 
       complex(8), parameter :: zero = 0d0
       complex(8), parameter :: one = 1d0
@@ -556,7 +553,7 @@ contains
         end do
 
         ! Loop for all:
-        do m = 0, pinfo%nporbital-1
+        do m = 0, wfi%nporbital-1
           if(wfi%id_o==m)then
           ! Loop for orbit #io1 in my rank:
             do jo1 = 1, wfi%numo
@@ -643,16 +640,15 @@ contains
   !=======================================================================
 
 
-    subroutine gram_schmidt_col_rblas(sys, rg, wfi, wf, pinfo)
+    subroutine gram_schmidt_col_rblas(sys, rg, wfi, wf)
       ! Only for the colinear L(S)DA:
       use timer
       use communication, only: comm_bcast, comm_summation
       implicit none
-      type(s_dft_system),       intent(in)    :: sys
+      type(s_dft_system),   intent(in)    :: sys
       type(s_rgrid),        intent(in)    :: rg
-      type(s_parallel_info),      intent(in)    :: wfi
-      type(s_orbital), intent(inout) :: wf
-      type(s_process_info) :: pinfo
+      type(s_parallel_info),intent(in)    :: wfi
+      type(s_orbital),      intent(inout) :: wf
 
       real(8), parameter :: zero = 0d0
       real(8), parameter :: one = 1d0
@@ -687,7 +683,7 @@ contains
         end do
 
         ! Loop for all:
-        do m = 0, pinfo%nporbital-1
+        do m = 0, wfi%nporbital-1
           if(wfi%id_o==m)then
 
           if(wfi%numo < 32) then
@@ -928,16 +924,15 @@ contains
 
     !=======================================================================
 
-      subroutine gram_schmidt_col_rblas_old(sys, rg, wfi, wf, pinfo)
+      subroutine gram_schmidt_col_rblas_old(sys, rg, wfi, wf)
         ! Only for the colinear L(S)DA:
         use timer
         use communication, only: comm_bcast, comm_summation
         implicit none
-        type(s_dft_system),       intent(in)    :: sys
+        type(s_dft_system),   intent(in)    :: sys
         type(s_rgrid),        intent(in)    :: rg
-        type(s_parallel_info),      intent(in)    :: wfi
-        type(s_orbital), intent(inout) :: wf
-        type(s_process_info) :: pinfo
+        type(s_parallel_info),intent(in)    :: wfi
+        type(s_orbital),      intent(inout) :: wf
 
         real(8), parameter :: zero = 0d0
         real(8), parameter :: one = 1d0
@@ -969,7 +964,7 @@ contains
           end do
 
           ! Loop for all:
-          do m = 0, pinfo%nporbital-1
+          do m = 0, wfi%nporbital-1
             if(wfi%id_o==m)then
             ! Loop for orbit #jo1 in my rank:
               do jo1 = 1, wfi%numo
@@ -1060,10 +1055,10 @@ contains
       use timer
       use communication, only: comm_bcast, comm_summation
       implicit none
-      type(s_dft_system),       intent(in)    :: sys
+      type(s_dft_system),   intent(in)    :: sys
       type(s_rgrid),        intent(in)    :: rg
-      type(s_parallel_info),      intent(in)    :: wfi
-      type(s_orbital), intent(inout) :: wf
+      type(s_parallel_info),intent(in)    :: wfi
+      type(s_orbital),      intent(inout) :: wf
 
       integer :: nsize_rg
       integer :: ik, im, ispin

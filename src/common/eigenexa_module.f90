@@ -21,12 +21,11 @@ module eigenexa_module
 private
 
 contains
-  subroutine init_eigenexa(pinfo,info,n)
-    use structures, only: s_process_info, s_parallel_info
+  subroutine init_eigenexa(info,n)
+    use structures, only: s_parallel_info
     use communication, only: comm_summation
     use eigen_libs_mod
     implicit none
-    type(s_process_info),intent(inout)  :: pinfo
     type(s_parallel_info),intent(in) :: info
     integer,intent(in) :: n
 

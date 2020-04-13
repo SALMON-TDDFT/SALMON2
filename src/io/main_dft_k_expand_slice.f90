@@ -46,7 +46,6 @@ subroutine main_dft_k_expand_slice
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_ng
   type(s_orbital) :: spsi,shpsi,sttpsi
@@ -80,13 +79,13 @@ subroutine main_dft_k_expand_slice
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(method_wf_distributor /= 'slice') stop "error: method_wf_distributor must be slice"
 
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_ng,ofl)
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_ng,ofl)
   allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
 
 
   call initialization1_dft( system, energy, stencil, fg, poisson,  &
                             lg, mg,  &
-                            pinfo, info,  &
+                            info,  &
                             srg, srg_ng,  &
                             srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
                             spsi, shpsi, sttpsi,  &

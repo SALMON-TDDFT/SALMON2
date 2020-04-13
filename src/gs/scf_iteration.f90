@@ -19,7 +19,7 @@ module scf_iteration_sub
 
 contains
 
-subroutine scf_iteration_step(lg,mg,system,info,pinfo,stencil, &
+subroutine scf_iteration_step(lg,mg,system,info,stencil, &
                srg,srg_scalar,spsi,shpsi,srho,srho_s, &
                cg,ppg,vlocal,  &
                miter,   &
@@ -42,7 +42,6 @@ subroutine scf_iteration_step(lg,mg,system,info,pinfo,stencil, &
   type(s_rgrid),         intent(in)    :: mg
   type(s_dft_system),    intent(in)    :: system
   type(s_parallel_info), intent(in)    :: info
-  type(s_process_info),  intent(in)    :: pinfo
   type(s_orbital),       intent(inout) :: spsi,shpsi
   type(s_scalar),        intent(inout) :: srho
   type(s_scalar),        intent(inout) :: srho_s(system%nspin)
@@ -82,13 +81,13 @@ subroutine scf_iteration_step(lg,mg,system,info,pinfo,stencil, &
   call timer_end(LOG_CALC_MINIMIZATION)
 
 ! Gram Schmidt orghonormalization
-  call gram_schmidt(system, mg, info, spsi, pinfo)
+  call gram_schmidt(system, mg, info, spsi)
 
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
     if(miter>iditer_nosubspace_diag)then
-      call ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+      call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
   end if
   call timer_end(LOG_CALC_SUBSPACE_DIAG)

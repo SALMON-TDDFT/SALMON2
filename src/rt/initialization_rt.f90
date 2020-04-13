@@ -24,7 +24,7 @@ contains
 subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
-                     lg, mg, info,pinfo,  &
+                     lg, mg, info,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, srho, srho_s,  &
@@ -66,7 +66,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_rgrid) :: mg
   type(s_dft_system)  :: system
   type(s_rt) :: rt
-  type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
@@ -159,7 +158,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   
   
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile)
   
   call init_code_optimization
   
@@ -508,7 +507,7 @@ subroutine init_code_optimization
   call switch_stencil_optimization(mg%num)
   call switch_openmp_parallelization(mg%num)
 
-  if(iperiodic==3 .and. product(pinfo%nprgrid)==1) then
+  if(iperiodic==3 .and. product(info%nprgrid)==1) then
      ignum = mg%num
   else
      ignum = mg%num + (nd*2)
@@ -516,7 +515,7 @@ subroutine init_code_optimization
   call set_modulo_tables(ignum)
 
   if (comm_is_root(nproc_id_global)) then
-     call optimization_log(pinfo)
+     call optimization_log(info)
   end if
 end subroutine init_code_optimization
 
