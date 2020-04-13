@@ -58,7 +58,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
 
 ! parallelization
   call check_ffte_condition(info,lg)
-  call init_grid_parallel(info%id_rko,info%isize_rko,info,lg,mg) ! lg --> mg
+  call init_grid_parallel(info,lg,mg) ! lg --> mg
   call init_parallel_dft(system,info)
   call init_scalapack(info,system)
   call init_eigenexa(info,system)
@@ -518,18 +518,20 @@ end subroutine check_ffte_condition
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(myrank,nproc,info,lg,mg)
+subroutine init_grid_parallel(info,lg,mg)
   use communication, only: comm_is_root
   use salmon_global, only: yn_periodic
   use structures, only: s_rgrid,s_parallel_info
   implicit none
-  integer,             intent(in)    :: myrank,nproc
-  type(s_parallel_info),intent(in)   :: info
-  type(s_rgrid),       intent(inout) :: lg
-  type(s_rgrid),       intent(inout) :: mg
+  type(s_parallel_info),intent(in)    :: info
+  type(s_rgrid),        intent(inout) :: lg
+  type(s_rgrid),        intent(inout) :: mg
   !
-  integer :: nproc_domain_orbital(3),nproc_k,nproc_ob
+  integer :: myrank,nproc,nproc_domain_orbital(3),nproc_k,nproc_ob
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
+  
+  myrank = info%id_rko
+  nproc  = info%isize_rko
 
   nproc_k              = info%npk
   nproc_ob             = info%nporbital
