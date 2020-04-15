@@ -20,6 +20,12 @@
 module code_optimization
   implicit none
 
+  ! current/force OpenMP parallelization mode
+  !   .TRUE.  : k,orbital parallel
+  !   .FALSE. : rgrid parallel
+  logical :: current_omp_mode
+  logical :: force_omp_mode
+
   ! can we call optimized stencil code in hamiltonian?
   logical :: optimized_stencil_is_callable
 
@@ -44,18 +50,36 @@ contains
   end subroutine
 
   subroutine switch_openmp_parallelization(nlens)
-    use salmon_global, only: yn_want_stencil_openmp_parallelization, &
-                             yn_force_stencil_openmp_parallelization, &
-                             yn_force_stencil_sequential_computation
+    use salmon_global, only: stencil_openmp_mode,current_openmp_mode,force_openmp_mode
     implicit none
     integer,intent(in) :: nlens(3) ! a length of x,y,z directions
-    logical :: ret
-    ret = (yn_want_stencil_openmp_parallelization  == 'y') .and. (nlens(1)*nlens(2)*nlens(3) >= 32*32*32)
 
-    if (yn_force_stencil_openmp_parallelization == 'y') ret = .true.  ! forcible option: use OpenMP parallelized code
-    if (yn_force_stencil_sequential_computation == 'y') ret = .false. ! forcible option: use sequential code
+    select case(stencil_openmp_mode)
+    case('orbital')
+      stencil_is_parallelized_by_omp = .false.
+    case('rgrid')
+      stencil_is_parallelized_by_omp = .true.
+    case default
+      stencil_is_parallelized_by_omp = (nlens(1)*nlens(2)*nlens(3) >= 32*32*32)
+    end select
 
-    stencil_is_parallelized_by_omp = ret
+    select case(current_openmp_mode)
+    case('orbital')
+      current_omp_mode = .true.
+    case('rgrid')
+      current_omp_mode = .false.
+    case default
+      current_omp_mode = .not. stencil_is_parallelized_by_omp
+    end select
+
+    select case(force_openmp_mode)
+    case('orbital')
+      force_omp_mode = .true.
+    case('rgrid')
+      force_omp_mode = .false.
+    case default
+      force_omp_mode = .not. stencil_is_parallelized_by_omp
+    end select
   end subroutine
 
   subroutine set_modulo_tables(nlens)
@@ -90,8 +114,8 @@ contains
     print *, '========== code optimization log =========='
     if (is_distributed_parallel()) then
       print *, 'MPI distribution:'
-      print *, '  nproc_k    :', info%npk
-      print *, '  nproc_ob   :', info%nporbital
+      print *, '  nproc_k     :', info%npk
+      print *, '  nproc_ob    :', info%nporbital
       print *, '  nproc_rgrid :', info%nprgrid
     end if
     print *, 'OpenMP parallelization:'
@@ -99,5 +123,9 @@ contains
     print *, 'hpsi stencil:'
     print *, '  enables hand-coding vectorization :', optimized_stencil_is_callable
     print *, '  enables openmp parallelization    :', stencil_is_parallelized_by_omp
+    print *, 'current:'
+    print *, '  k,orbital parallelized of openmp  :', current_omp_mode
+    print *, 'force:'
+    print *, '  k,orbital parallelized of openmp  :', force_omp_mode
   end subroutine
 end module

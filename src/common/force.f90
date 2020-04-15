@@ -31,7 +31,7 @@ contains
     use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
     use salmon_global, only: kion,cutoff_g,iperiodic,yn_collective_opt,process_allocation
-    use code_optimization, only: stencil_is_parallelized_by_omp
+    use code_optimization, only: force_omp_mode
     use timer
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
@@ -59,11 +59,8 @@ contains
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
     integer :: Norb,iorb,ilocal
-    logical :: is_parallel_info
 
     call timer_begin(LOG_CALC_ION_FORCE)
-
-    is_parallel_info = .not. stencil_is_parallelized_by_omp
 
     nion = system%nion
     if(.not.allocated(system%Force)) allocate(system%Force(3,nion))
@@ -186,7 +183,7 @@ contains
 !$omp   shared(im,ik_s,ik_e,io_s,io_e,nspin,tpsi,mg,stencil,system,ppg,uVpsibox2,iperiodic) &
 !$omp   shared(PLUS_U_ON,Nlma_ao,phipsibox2,iorb,zF_tmp,U_eff,dm_mms_nla) &
 !$omp   reduction(+:F_tmp) &
-!$omp   if(is_parallel_info)
+!$omp   if(force_omp_mode)
 
     if (.not. allocated(gtpsi)) then
       allocate(gtpsi(3,mg%is_array(1):mg%ie_array(1) &

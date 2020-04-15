@@ -357,10 +357,10 @@ character(1),allocatable :: flag_opt_atom(:)
 character(256),allocatable :: atom_name(:)
 
 !! &code
-  character(1) :: yn_want_stencil_openmp_parallelization
   character(1) :: yn_want_stencil_hand_vectorization
-  character(1) :: yn_force_stencil_openmp_parallelization
-  character(1) :: yn_force_stencil_sequential_computation
   character(1) :: yn_want_communication_overlapping
+  character(10) :: stencil_openmp_mode  ! 'auto', 'orbital', 'rgrid'
+  character(10) :: current_openmp_mode  ! 'auto', 'orbital', 'rgrid'
+  character(10) :: force_openmp_mode    ! 'auto', 'orbital', 'rgrid'
 
 end module salmon_global
