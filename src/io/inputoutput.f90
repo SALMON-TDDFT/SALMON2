@@ -511,11 +511,11 @@ contains
       & iflag_estatic
 
     namelist/code/ &
-      & yn_want_stencil_openmp_parallelization, &
       & yn_want_stencil_hand_vectorization, &
-      & yn_force_stencil_openmp_parallelization, &
-      & yn_force_stencil_sequential_computation, &
-      & yn_want_communication_overlapping
+      & yn_want_communication_overlapping, &
+      & stencil_openmp_mode, &
+      & current_openmp_mode, &
+      & force_openmp_mode
 
 !! == default for &unit ==
     unit_system='au'
@@ -846,11 +846,11 @@ contains
     iwdenstep                  = 0
     iflag_estatic              = 0
 !! == default for code
-    yn_want_stencil_openmp_parallelization = 'y'
-    yn_want_stencil_hand_vectorization     = 'y'
-    yn_force_stencil_openmp_parallelization = 'n'
-    yn_force_stencil_sequential_computation = 'n'
-    yn_want_communication_overlapping = 'n'
+    yn_want_stencil_hand_vectorization = 'y'
+    yn_want_communication_overlapping  = 'n'
+    stencil_openmp_mode = 'auto'
+    current_openmp_mode = 'auto'
+    force_openmp_mode   = 'auto'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -1313,20 +1313,11 @@ contains
     call comm_bcast(iwdenstep           ,nproc_group_global)
     call comm_bcast(iflag_estatic       ,nproc_group_global)
 !! == bcast for code
-    call comm_bcast(yn_want_stencil_openmp_parallelization ,nproc_group_global)
     call comm_bcast(yn_want_stencil_hand_vectorization     ,nproc_group_global)
-    call comm_bcast(yn_force_stencil_openmp_parallelization,nproc_group_global)
-    call comm_bcast(yn_force_stencil_sequential_computation,nproc_group_global)
     call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
-
-    if (yn_force_stencil_openmp_parallelization == 'y' .and. yn_force_stencil_sequential_computation == 'y') then
-      if (comm_is_root(nproc_id_global)) then
-        print *, 'WARNING: exclusive options are both specified, could you please check your input file.'
-        print *, "         `yn_force_stencil_openmp_parallelization = 'y'`, and"
-        print *, "         `yn_force_stencil_sequential_computation = 'y'`"
-      end if
-    end if
-
+    call comm_bcast(stencil_openmp_mode                    ,nproc_group_global)
+    call comm_bcast(current_openmp_mode                    ,nproc_group_global)
+    call comm_bcast(force_openmp_mode                      ,nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2123,11 +2114,11 @@ contains
 
       if(inml_code >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'code', inml_code
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_openmp_parallelization', yn_want_stencil_openmp_parallelization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_hand_vectorization', yn_want_stencil_hand_vectorization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_openmp_parallelization', yn_force_stencil_openmp_parallelization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_sequential_computation', yn_force_stencil_sequential_computation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'stencil_openmp_mode', stencil_openmp_mode
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'current_openmp_mode', current_openmp_mode
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'force_openmp_mode',   force_openmp_mode
 
       close(fh_variables_log)
 
@@ -2189,10 +2180,7 @@ contains
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_set_ini_velocity)
     call yn_argument_check(yn_stop_system_momt)
-    call yn_argument_check(yn_want_stencil_openmp_parallelization)
     call yn_argument_check(yn_want_stencil_hand_vectorization)
-    call yn_argument_check(yn_force_stencil_openmp_parallelization)
-    call yn_argument_check(yn_force_stencil_sequential_computation)
     call yn_argument_check(yn_want_communication_overlapping)
     call yn_argument_check(yn_gbp)
     call yn_argument_check(yn_gbp_fourier0) ! temporary
