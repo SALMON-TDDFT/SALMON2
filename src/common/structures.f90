@@ -461,7 +461,7 @@ module structures
   type s_multiscale
     ! Parallelization options
     integer :: nmacro
-    integer :: icomm_multiscale, isize_multiscale, id_multiscale ! Top level communicator
+    integer :: icomm_ms_world, isize_ms_world, id_ms_world ! Top level communicator
     integer :: icomm_macropoint, isize_macropoint, id_macropoint ! Macropoint communicator
     integer :: imacro_mygroup_s, imacro_mygroup_e
     integer :: id_mygroup_s, id_mygroup_e

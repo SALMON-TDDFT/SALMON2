@@ -266,7 +266,7 @@ subroutine init_process_distribution(system,icomm1,info)
       case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
         call set_numcpu_general(iprefer_orbital_distribution,system%nk,system%no,icomm1,info)
       case default
-        stop 'invalid theory'
+        stop 'invalid theory @ initialization'
       end select
     end if
   else

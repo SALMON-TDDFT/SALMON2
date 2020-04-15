@@ -228,7 +228,7 @@ contains
       call set_sub(24, LOG_RT_MISC              , 'misc.')
       call write_loadbalance(fd, 24, tsrc, headers, mode)
     case default
-      stop 'invalid theory'
+      stop 'invalid theory @ perflog'
     end select
 
     if (theory == 'single_scale_maxwell_tddft') then

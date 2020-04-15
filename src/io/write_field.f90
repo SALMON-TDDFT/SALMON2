@@ -82,7 +82,7 @@ subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
   case default
-    stop 'invalid theory'
+    stop 'invalid theory @ writefield'
   end select
 
   phys_quantity = "dns"
@@ -403,7 +403,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
     write(filenum, '(i6.6)') itt
     suffix = "elf_"//adjustl(filenum)
   case default
-    stop 'invalid theory'
+    stop 'invalid theory @ writefield'
   end select
 
   phys_quantity = "elf"
