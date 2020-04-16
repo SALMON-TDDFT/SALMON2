@@ -159,7 +159,14 @@ close(9999)
 contains
 
 
-
+function macropoint_in_mygroup(imacro) result(r)
+    implicit none
+    integer, intent(in) :: imacro
+    logical :: r
+    r = (ms%imacro_mygroup_s <= imacro) &
+        & .and. (imacro <= ms%imacro_mygroup_e)
+    return
+end function macropoint_in_mygroup
 
 
 
@@ -281,7 +288,7 @@ subroutine initialization_ms()
             write(*, '(a)') "################################"
             write(*, '(a, i6)') "# Initialization of macropoint #", i
         end if
-        if (ms%imacro_mygroup_s == i) then
+        if (macropoint_in_mygroup(i)) then
             call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                                     singlescale,  &
                                     stencil, fg, poisson,  &

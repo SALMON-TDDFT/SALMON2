@@ -1,6 +1,5 @@
 set(SOURCES
     main_ms.f90
-    initialization_ms.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
