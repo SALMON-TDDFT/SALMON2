@@ -23,11 +23,11 @@ module fdtd_weyl
 
     type ls_fdtd_weyl
         type(s_scalar) :: phi, rho_em
-        type(s_vector) :: vec_e, vec_h, vec_a, vec_j_em
-        type(s_vector) :: vec_Ac, vec_Ac_old, vec_Ac_tmp
+        type(s_vector) :: vec_e, vec_h, vec_j_em
+        type(s_vector) :: vec_Ac, vec_Ac_old
         type(s_scalar) :: edensity_emfield
         type(s_scalar) :: edensity_absorb
-
+        character(16) :: fdtddim
     end type ls_fdtd_weyl
 
 
@@ -39,15 +39,56 @@ contains
         type(s_fdtd_system), intent(inout) :: fs
         type(ls_fdtd_weyl), intent(inout) :: fw
 
+        call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac)
+        call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_old)
         call allocate_vector(fs%mg, fw%vec_e)
         call allocate_vector(fs%mg, fw%vec_h)
         call allocate_vector(fs%mg, fw%vec_j_em)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_old)
-        call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_tmp)
         call allocate_scalar(fs%mg, fw%edensity_emfield)
         call allocate_scalar(fs%mg, fw%edensity_absorb)
 
+        fw%vec_Ac%v = 0d0
+        fw%vec_Ac_old%v = 0d0
+        fw%vec_e%v = 0d0
+        fw%vec_h%v = 0d0
+        fw%vec_j_em%v = 0d0
+        fw%edensity_emfield%f = 0d0
+        fw%edensity_absorb%f = 0d0
+
+        write(9999, *) "(fw%vec_Ac%v, 1)", lbound(fw%vec_Ac%v, 1), ubound(fw%vec_Ac%v, 1)
+        write(9999, *) "(fw%vec_Ac%v, 2)", lbound(fw%vec_Ac%v, 2), ubound(fw%vec_Ac%v, 2)
+        write(9999, *) "(fw%vec_Ac%v, 3)", lbound(fw%vec_Ac%v, 3), ubound(fw%vec_Ac%v, 3)
+        write(9999, *) "(fw%vec_Ac%v, 4)", lbound(fw%vec_Ac%v, 4), ubound(fw%vec_Ac%v, 4)
+
+        write(9999, *) "(fw%vec_Ac_old%v, 1)", lbound(fw%vec_Ac_old%v, 1), ubound(fw%vec_Ac_old%v, 1)
+        write(9999, *) "(fw%vec_Ac_old%v, 2)", lbound(fw%vec_Ac_old%v, 2), ubound(fw%vec_Ac_old%v, 2)
+        write(9999, *) "(fw%vec_Ac_old%v, 3)", lbound(fw%vec_Ac_old%v, 3), ubound(fw%vec_Ac_old%v, 3)
+        write(9999, *) "(fw%vec_Ac_old%v, 4)", lbound(fw%vec_Ac_old%v, 4), ubound(fw%vec_Ac_old%v, 4)
+        
+        write(9999, *) "(fw%vec_e%v, 1)", lbound(fw%vec_e%v, 1), ubound(fw%vec_e%v, 1)
+        write(9999, *) "(fw%vec_e%v, 2)", lbound(fw%vec_e%v, 2), ubound(fw%vec_e%v, 2)
+        write(9999, *) "(fw%vec_e%v, 3)", lbound(fw%vec_e%v, 3), ubound(fw%vec_e%v, 3)
+        write(9999, *) "(fw%vec_e%v, 4)", lbound(fw%vec_e%v, 4), ubound(fw%vec_e%v, 4)
+
+        write(9999, *) "(fw%vec_h%v, 1)", lbound(fw%vec_h%v, 1), ubound(fw%vec_h%v, 1)
+        write(9999, *) "(fw%vec_h%v, 2)", lbound(fw%vec_h%v, 2), ubound(fw%vec_h%v, 2)
+        write(9999, *) "(fw%vec_h%v, 3)", lbound(fw%vec_h%v, 3), ubound(fw%vec_h%v, 3)
+        write(9999, *) "(fw%vec_h%v, 4)", lbound(fw%vec_h%v, 4), ubound(fw%vec_h%v, 4)
+        
+        write(9999, *) "(fw%vec_j_em%v, 1)", lbound(fw%vec_j_em%v, 1), ubound(fw%vec_j_em%v, 1)
+        write(9999, *) "(fw%vec_j_em%v, 2)", lbound(fw%vec_j_em%v, 2), ubound(fw%vec_j_em%v, 2)
+        write(9999, *) "(fw%vec_j_em%v, 3)", lbound(fw%vec_j_em%v, 3), ubound(fw%vec_j_em%v, 3)
+        write(9999, *) "(fw%vec_j_em%v, 4)", lbound(fw%vec_j_em%v, 4), ubound(fw%vec_j_em%v, 4)
+
+        write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
+        write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
+        write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
+
+        write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
+        write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
+        write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
+
+        flush(9999)
 
         contains
 
@@ -63,7 +104,7 @@ contains
 
 
     subroutine weyl_calc(fs, fw)
-        use inputoutput, only: fdtddim, dt_em
+        use inputoutput, only: dt_em
         use structures,     only: s_fdtd_system
         use phys_constants,    only: cspeed_au
         use math_constants,    only: pi
@@ -78,7 +119,7 @@ contains
         nd = fs%mg%nd
     
         ! Update electromagnetic field
-        select case(trim(fdtddim))
+        select case(trim(fw%fdtddim))
         case('1d', '1D')
         call dt_evolve_Ac_1d()
         call calc_vec_h_1d()
@@ -111,6 +152,7 @@ contains
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
         
+        write(9999, *) "dt_evolve_Ac_1d"
         i2 = fs%mg%is(2)
         i3 = fs%mg%is(3)
         r_inv_h(1) = 1d0 / fs%hgs(1)

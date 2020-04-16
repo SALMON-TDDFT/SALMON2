@@ -712,7 +712,7 @@ contains
     nksplit    = 0
     nxysplit   = 0
     nxvacl_m   = 1
-    nxvacr_m   = 0
+    nxvacr_m   = 1
     nx_origin_m = 1
     ny_origin_m = 1
     nz_origin_m = 1

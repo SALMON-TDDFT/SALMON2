@@ -78,7 +78,7 @@ integer :: nmacro_mygroup, isize_mygroup
 call timer_begin(LOG_TOTAL)
 
 ! Open logfile for debugging
-write(file_debug_log, "('debug_log_', i3.3, '.txt')") nproc_id_global
+write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
 open(unit=9999, file=file_debug_log)
 write(9999, *) 'logging start'; flush(9999)
 
@@ -228,46 +228,42 @@ subroutine initialization_ms()
     flush(9999)
     
     
-    fs%lg%ndir = 3
-    fs%lg%nd = 1
+    fs%mg%ndir = 3
+    fs%mg%nd = 1
     
     fs%hgs(1:3) = dl_em(1:3)
     if (0 < hx_m) fs%hgs(1) = hx_m
     if (0 < hy_m) fs%hgs(2) = hy_m
     if (0 < hz_m) fs%hgs(3) = hz_m
     
-    fs%lg%is(1) = -nxvacl_m
+    fs%mg%is(1) = -nxvacl_m
     
     
-    write(9999, *) 'fs%lg%ndir:', fs%lg%ndir
-    write(9999, *) 'fs%lg%nd:', fs%lg%nd
+    write(9999, *) 'fs%mg%ndir:', fs%mg%ndir
+    write(9999, *) 'fs%mg%nd:', fs%mg%nd
     write(9999, *) 'fs%hgs(1:3):', fs%hgs(1:3)
     flush(9999)
     
-    
-    fs%lg%is(1) = -nxvacl_m
-    fs%lg%ie(1) = nx_m+nxvacr_m
-    fs%lg%is(2) = 1
-    
-    fs%lg%ie(2) = ny_m
-    fs%lg%is(3) = 1
-    fs%lg%ie(3) = nz_m
-    fs%lg%is_overlap(1) = 0
-    fs%lg%ie_overlap(1) = nx_m + 1
-    fs%lg%is_overlap(2) = 0
-    fs%lg%ie_overlap(2) = ny_m + 1
-    fs%lg%is_overlap(3) = 0
-    fs%lg%ie_overlap(3) = nz_m + 1
-    fs%lg%is_array(1) = 0
-    fs%lg%ie_array(1) = nx_m + 1
-    fs%lg%is_array(2) = 0
-    fs%lg%ie_array(2) = ny_m + 1
-    fs%lg%is_array(3) = 0
-    fs%lg%ie_array(3) = nz_m + 1
-    ! allocate(fs%lg%idx(fs%lg%is_array(1):fs%lg%ie_array(1)))
-    ! allocate(fs%lg%idy(fs%lg%is_array(2):fs%lg%ie_array(2)))
-    ! allocate(fs%lg%idy(fs%lg%is_array(3):fs%lg%ie_array(3)))
-    allocate(fs%lg%coordinate(minval(fs%lg%is_overlap):maxval(fs%lg%ie_overlap),1:3))
+    fw%fdtddim = '1d'
+    fs%mg%is(1) = -nxvacl_m
+    fs%mg%ie(1) = nx_m+nxvacr_m
+    fs%mg%is(2) = 1
+    fs%mg%ie(2) = ny_m
+    fs%mg%is(3) = 1
+    fs%mg%ie(3) = nz_m
+    fs%mg%is_overlap(1) = 0
+    fs%mg%ie_overlap(1) = nx_m + 1
+    fs%mg%is_overlap(2) = 0
+    fs%mg%ie_overlap(2) = ny_m + 1
+    fs%mg%is_overlap(3) = 0
+    fs%mg%ie_overlap(3) = nz_m + 1
+    fs%mg%is_array(1) = 0
+    fs%mg%ie_array(1) = nx_m + 1
+    fs%mg%is_array(2) = 0
+    fs%mg%ie_array(2) = ny_m + 1
+    fs%mg%is_array(3) = 0
+    fs%mg%ie_array(3) = nz_m + 1
+    allocate(fs%mg%coordinate(minval(fs%mg%is_overlap):maxval(fs%mg%ie_overlap),1:3))
     fs%rlsize(1) = 1d0
     fs%rlsize(2) = 1d0
     fs%rlsize(3) = 1d0
@@ -278,16 +274,32 @@ subroutine initialization_ms()
     fs%a_bc(2,1:2) = 'pbc'
     fs%a_bc(3,1:2) = 'pbc'
     fs%imedia(:,:,:) = 0
+
+    write(9999, *) 'Initialization FDTD WEYL START';flush(9999)
+    call weyl_init(fs, fw)
+    write(9999, *) 'Initialization FDTD WEYL END';flush(9999)
     
-    write(9999, *) 'Initialization Start'
+    write(9999, *) 'Initialization MP Start';flush(9999)
+
+    
+    
+    write(9999, *) 'Directory name generate start'
+    ms%base_directory = trim(base_directory)
+    write(9999, *) trim(ms%base_directory)
+    write(9999, *) trim(sysname)
+    write(9999, *) "_m/"
+    write(9999, *) ms%imacro_mygroup_s
+    write(9999, *)  "/"
     flush(9999)
 
-    ms%base_directory = trim(base_directory)
     write(ms%base_directory_macro, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), "_m/", ms%imacro_mygroup_s, "/"
-    write(9999, *) "ms%base_directory_macro:", trim(ms%base_directory_macro); flush(9999)
+    write(9999, *) "ms%base_directory_macro:", trim(ms%base_directory_macro)
+    flush(9999)
+
+    write(9999, *) 'Directory name generate end';flush(9999)
 
     if (comm_is_root(ms%id_macropoint)) &
-        &    call create_directory(ms%base_directory_macro)
+        &    call create_directory(trim(ms%base_directory_macro))
     
     ! Override Global Variables
     nproc_group_global = ms%icomm_macropoint
@@ -336,7 +348,7 @@ subroutine time_evolution_step_ms_macro
     nproc_id_global = ms%id_macropoint
     nproc_size_global = ms%isize_macropoint
 
-
+    call weyl_calc(fs, fw)
 
     if(mod(itt,2)==1)then
         call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
