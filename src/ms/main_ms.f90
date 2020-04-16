@@ -31,6 +31,8 @@ use initialization_rt_sub
 use checkpoint_restart_sub
 use fdtd_weyl, only: ls_fdtd_weyl, weyl_init, weyl_calc, weyl_finalize
 use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global
+
+use filesystem, only: create_directory
 implicit none
 
 type(s_rgrid) :: lg
@@ -192,7 +194,9 @@ subroutine initialization_ms()
     else
         stop "number of procs must be larger than number of points!"
     end if
-        
+    
+
+
     ! allocate(iranklists())
     write(9999, *) 'nmacro_mygroup:', nmacro_mygroup
     write(9999, *) 'isize_mygroup:', isize_mygroup
@@ -277,11 +281,21 @@ subroutine initialization_ms()
     
     write(9999, *) 'Initialization Start'
     flush(9999)
+
+    ms%base_directory = trim(base_directory)
+    write(ms%base_directory_macro, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), "_m/", ms%imacro_mygroup_s, "/"
+    write(9999, *) "ms%base_directory_macro:", trim(ms%base_directory_macro); flush(9999)
+
+    if (comm_is_root(ms%id_macropoint)) &
+        &    call create_directory(ms%base_directory_macro)
     
     ! Override Global Variables
     nproc_group_global = ms%icomm_macropoint
     nproc_id_global = ms%id_macropoint
     nproc_size_global = ms%isize_macropoint
+    base_directory = ms%base_directory_macro
+
+    
     
     do i = 1, ms%nmacro
         if (comm_is_root(ms%id_ms_world)) then
