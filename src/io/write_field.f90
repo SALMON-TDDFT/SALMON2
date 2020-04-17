@@ -35,7 +35,7 @@ subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
   real(8),intent(in),optional :: rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer,intent(in),optional :: itt
   integer :: ix,iy,iz
-  character(30) :: suffix
+  character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
@@ -253,7 +253,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   type(s_orbital)                     :: tpsi
   !
   real(8):: elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-  character(30) :: suffix
+  character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
@@ -438,7 +438,7 @@ subroutine write_estatic(lg,mg,hgs,stencil,info,sVh,srg_scalar,itt)
   !
   integer :: ix,iy,iz,jj
   integer,parameter :: Nd=4
-  character(30) :: suffix
+  character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
@@ -515,13 +515,13 @@ subroutine write_psi(lg,mg,system,info,spsi)
   !
   integer :: io,ik,ispin,ix,iy,iz
   complex(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: cmatbox,cmatbox2
-  character(30) :: suffix
+  character(60) :: suffix_re, suffix_im
   character(30) :: phys_quantity
-  character(10) :: filenum
+  character(10) :: fileid_k, fileid_ob, fileid_spin
   character(20) :: header_unit
   
   cmatbox = 0d0
- 
+  
   do ik=1,system%nk
   do io=1,system%no
   do ispin=1,system%nspin
@@ -536,31 +536,59 @@ subroutine write_psi(lg,mg,system,info,spsi)
       end do
       if(info%ik_s <= ik .and. ik <= info%ik_e .and.   &
          info%io_s <= io .and. io <= info%io_e) then
-        
+        if(allocated(spsi%rwf)) then
 !$omp parallel do collapse(2)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          cmatbox(ix,iy,iz) = spsi%zwf(ix,iy,iz,ispin,io,ik,1) ! future work: rwf
-        end do
-        end do
-        end do
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            cmatbox(ix,iy,iz) = spsi%rwf(ix,iy,iz,ispin,io,ik,1)
+          end do
+          end do
+          end do
+        else
+!$omp parallel do collapse(2)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            cmatbox(ix,iy,iz) = spsi%zwf(ix,iy,iz,ispin,io,ik,1)
+          end do
+          end do
+          end do
+        end if
       end if
       call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-
-      write(filenum, '(i5)') io ! future work: ik,ispin
-      suffix = "psi"//trim(adjustl(filenum))
+      
       phys_quantity = "psi"
-      if(format_voxel_data=='avs')then
-        header_unit = "A**(-3/2)"
-      ! future work: real & imaginary part
-        call write_avs(lg,103,suffix,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
-        call write_avs(lg,103,suffix,header_unit,aimag(cmatbox2)/sqrt(au_length_aa)**3)
-      else if(format_voxel_data=='cube')then
-      ! future work: real & imaginary part
-        call write_cube(lg,103,suffix,phys_quantity,dble(cmatbox2),system%hgs)
-        call write_cube(lg,103,suffix,phys_quantity,aimag(cmatbox2),system%hgs)
-      end if
+      if(allocated(spsi%rwf)) then
+        write(fileid_ob, '(i8)') io
+        suffix_re = "psi_ob"//trim(adjustl(fileid_ob))
+        if(format_voxel_data=='avs')then
+          header_unit = "A**(-3/2)"
+          call write_avs(lg,103,suffix_re,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
+        else if(format_voxel_data=='cube')then
+          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system%hgs)
+        end if
+      else
+        write(fileid_k,    '(i8)') ik
+        write(fileid_ob,   '(i8)') io
+        write(fileid_spin, '(i8)') ispin
+        suffix_re = "psi_k"//trim(adjustl(fileid_k))   // &
+                    "_ob"  //trim(adjustl(fileid_ob))  // &
+                    "_spin"//trim(adjustl(fileid_spin))// &
+                    "_real" 
+        suffix_im = "psi_k"//trim(adjustl(fileid_k))   // &
+                    "_ob"  //trim(adjustl(fileid_ob))  // &
+                    "_spin"//trim(adjustl(fileid_spin))// &
+                    "_imag" 
+        if(format_voxel_data=='avs')then
+          header_unit = "A**(-3/2)"
+          call write_avs(lg,103,suffix_re,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
+          call write_avs(lg,103,suffix_im,header_unit,aimag(cmatbox2)/sqrt(au_length_aa)**3)
+        else if(format_voxel_data=='cube')then
+          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system%hgs)
+          call write_cube(lg,103,suffix_im,phys_quantity,aimag(cmatbox2),system%hgs)
+        end if
+      endif
       
   end do
   end do

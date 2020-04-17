@@ -31,9 +31,9 @@ subroutine write_avs(lg,fp,suffix,header_unit,rmat)
   character(20),intent(in) :: header_unit
   real(8),intent(in) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                              lg%is(3):lg%ie(3))
-  character(30),intent(in):: suffix
+  character(60),intent(in):: suffix
   !
-  character(30):: filename
+  character(60):: filename
   integer::ix,iy,iz
   integer::jj,icount
   integer::jsta,jend
@@ -102,12 +102,12 @@ subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,hgs)
   implicit none
   type(s_rgrid),intent(in) :: lg
   integer, intent(IN) :: fp
-  character(30),intent(in):: suffix
+  character(60),intent(in):: suffix
   character(30),intent(in):: phys_quantity
   real(8),intent(IN) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                               lg%is(3):lg%ie(3))
   real(8),intent(in) :: hgs(3)
-  character(30):: filename
+  character(60):: filename
   integer :: j,iatom
   integer :: ix,iy,iz
   integer :: ik
@@ -168,11 +168,11 @@ subroutine write_vtk(lg,fp,suffix,rmat,hgs)
   implicit none
   type(s_rgrid),intent(in) :: lg
   integer,intent(in) :: fp
-  character(30),intent(in):: suffix
+  character(60),intent(in):: suffix
   real(8),intent(in) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                              lg%is(3):lg%ie(3))
   real(8),intent(in) :: hgs(3)
-  character(30):: filename
+  character(60):: filename
   integer :: ix,iy,iz
 
   if(comm_is_root(nproc_id_global))then
