@@ -22,6 +22,7 @@ module fdtd_weyl
     implicit none
 
     type ls_fdtd_weyl
+        real(8) :: dt
         type(s_scalar) :: phi, rho_em
         type(s_vector) :: vec_e, vec_h, vec_j_em
         type(s_vector) :: vec_Ac, vec_Ac_old
@@ -104,7 +105,6 @@ contains
 
 
     subroutine weyl_calc(fs, fw)
-        use inputoutput, only: dt_em
         use structures,     only: s_fdtd_system
         use phys_constants,    only: cspeed_au
         use math_constants,    only: pi
@@ -152,7 +152,6 @@ contains
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
         
-        write(9999, *) "dt_evolve_Ac_1d"
         i2 = fs%mg%is(2)
         i3 = fs%mg%is(3)
         r_inv_h(1) = 1d0 / fs%hgs(1)
@@ -165,7 +164,7 @@ contains
             &      + fw%vec_Ac%v(2:3, i1-1, i2, i3) &
             & ) * r_inv_h(1) ** 2
             Ac_tmp(:, i1, i2, i3) = (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
-            & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (dt_em**2) - rot2_Ac(:) * (cspeed_au * dt_em)**2 )
+            & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi * (fw%dt**2) - rot2_Ac(:) * (cspeed_au * fw%dt)**2 )
         end do
         !$omp end parallel do
     
@@ -232,7 +231,7 @@ contains
                 & +(-1.00d0 * r_inv_h(2)**2) * fw%vec_Ac%v(3, i1, i2+1, i3) &
                 & +(-1.00d0 * r_inv_h(1)**2) * fw%vec_Ac%v(3, i1+1, i2, i3)
             Ac_tmp(:, i1, i2, i3) = (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
-                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (dt_em**2) - rot2_Ac(:)* (cspeed_au * dt_em)**2 )
+                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (fw%dt**2) - rot2_Ac(:)* (cspeed_au * fw%dt)**2 )
             end do
         end do
         !$omp end parallel do
@@ -343,7 +342,7 @@ contains
                 & - (r_inv_h(1)**2) * fw%vec_Ac%v(3, i1+1, i2+0, i3+0)
                 Ac_tmp(:,i1, i2, i3) = &
                 & + (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
-                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (dt_em**2) - rot2_Ac(:) * (cspeed_au * dt_em)**2)
+                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (fw%dt**2) - rot2_Ac(:) * (cspeed_au * fw%dt)**2)
             end do
             end do
         end do
@@ -468,7 +467,7 @@ contains
                 & +(-0.50d0* (1.00d0 * r_inv_h(2))* (1.00d0/Y)-(1.00d0 * r_inv_h(2)**2))*fw%vec_Ac%v(3,i1+0,i2+1,i3) &
                 & -(1.00d0 * r_inv_h(1)**2)*fw%vec_Ac%v(3,i1+1,i2+0,i3)
             Ac_tmp(:,i1, i2, i3) = (2 * fw%vec_Ac%v(:,i1, i2, i3) - fw%vec_Ac_old%v(:,i1, i2, i3) &
-                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (dt_em**2) - rot2_Ac(:)* (cspeed_au * dt_em)**2)
+                & + fw%vec_j_em%v(:,i1, i2, i3) * 4.0 * pi* (fw%dt**2) - rot2_Ac(:)* (cspeed_au * fw%dt)**2)
             end do
         end do
         !$omp end parallel do
@@ -483,7 +482,7 @@ contains
         implicit none
         integer ::  i1, i2, i3
         real(8) :: r_inv_dt
-        r_inv_dt = 1d0 / dt_em
+        r_inv_dt = 1d0 / fw%dt
         !$omp parallel do collapse(3) default(shared) private(i1, i2, i3)
         do i3 = fs%mg%is(3), fs%mg%ie(3)
             do i2 = fs%mg%is(2), fs%mg%ie(2)
@@ -606,7 +605,7 @@ contains
                 & )
                 fw%edensity_absorb%f(i1, i2, i3) = fw%edensity_absorb%f(i1, i2, i3) + ( &
                 & dot_product(fw%vec_e%v(:, i1, i2, i3), fw%vec_j_em%v(:, i1, i2, i3)) &
-                & ) * dt_em
+                & ) * fw%dt
             end do
             end do
         end do

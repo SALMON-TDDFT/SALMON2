@@ -22,7 +22,7 @@ subroutine main_ms
 use math_constants, only: pi
 use salmon_global
 use structures
-use inputoutput, only: nx_m, ny_m, nz_m
+use inputoutput, only: nx_m, ny_m, nz_m, dt
 use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, comm_get_groupinfo, comm_sync_all
 use salmon_xc, only: finalize_xc
 use timer
@@ -31,8 +31,9 @@ use initialization_rt_sub
 use checkpoint_restart_sub
 use fdtd_weyl, only: ls_fdtd_weyl, weyl_init, weyl_calc, weyl_finalize
 use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global
-
 use filesystem, only: create_directory
+use phys_constants, only: cspeed_au
+use em_field, only: calc_Ac_ext
 implicit none
 
 type(s_rgrid) :: lg
@@ -68,7 +69,7 @@ type(s_multiscale) :: ms
 integer :: Mit, itt, itotNtime
 integer :: nntime
 
-integer :: i
+integer :: i, ix, iy, iz
 
 integer, allocatable :: iranklists(:)
 
@@ -85,6 +86,7 @@ write(9999, *) 'logging start'; flush(9999)
 ! Initialization
 call initialization_ms()
 
+
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
@@ -92,7 +94,11 @@ TE : do itt=Mit+1,itotNtime
 
     write(9999, *) 'Step', itt; flush(9999)
 
+    write(9999, *) "StartTime evolution"; flush(9999)
     call time_evolution_step_ms_macro()
+    write(9999, *) "EndTime evolution"; flush(9999)
+    call test_ms1()
+
 
 !   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
 !     call timer_begin(LOG_CHECKPOINT_SYNC)
@@ -162,6 +168,8 @@ contains
 
 
 
+
+
 function macropoint_in_mygroup(imacro) result(r)
     implicit none
     integer, intent(in) :: imacro
@@ -170,6 +178,9 @@ function macropoint_in_mygroup(imacro) result(r)
         & .and. (imacro <= ms%imacro_mygroup_e)
     return
 end function macropoint_in_mygroup
+
+
+
 
 
 ! Create the base_directory name for each macropoints:
@@ -189,6 +200,9 @@ function base_directory_macro(imacro) result(r)
     ! flush(9999)
     return
 end function base_directory_macro
+
+
+
 
 
 subroutine initialization_ms()
@@ -250,9 +264,9 @@ subroutine initialization_ms()
     fs%mg%nd = 1
     
     fs%hgs(1:3) = dl_em(1:3)
-    if (0 < hx_m) fs%hgs(1) = hx_m
-    if (0 < hy_m) fs%hgs(2) = hy_m
-    if (0 < hz_m) fs%hgs(3) = hz_m
+    if (0d0 < hx_m) fs%hgs(1) = hx_m
+    if (0d0 < hy_m) fs%hgs(2) = hy_m
+    if (0d0 < hz_m) fs%hgs(3) = hz_m
     
     fs%mg%is(1) = -nxvacl_m
     
@@ -260,7 +274,8 @@ subroutine initialization_ms()
     write(9999, *) 'fs%mg%nd:', fs%mg%nd
     write(9999, *) 'fs%hgs(1:3):', fs%hgs(1:3)
     flush(9999)
-    
+
+    fw%dt = dt
     fw%fdtddim = '1d'
     fs%mg%is(1) = -nxvacl_m
     fs%mg%ie(1) = nx_m+nxvacr_m
@@ -268,19 +283,10 @@ subroutine initialization_ms()
     fs%mg%ie(2) = ny_m
     fs%mg%is(3) = 1
     fs%mg%ie(3) = nz_m
-    fs%mg%is_overlap(1) = 0
-    fs%mg%ie_overlap(1) = nx_m + 1
-    fs%mg%is_overlap(2) = 0
-    fs%mg%ie_overlap(2) = ny_m + 1
-    fs%mg%is_overlap(3) = 0
-    fs%mg%ie_overlap(3) = nz_m + 1
-    fs%mg%is_array(1) = 0
-    fs%mg%ie_array(1) = nx_m + 1
-    fs%mg%is_array(2) = 0
-    fs%mg%ie_array(2) = ny_m + 1
-    fs%mg%is_array(3) = 0
-    fs%mg%ie_array(3) = nz_m + 1
-    allocate(fs%mg%coordinate(minval(fs%mg%is_overlap):maxval(fs%mg%ie_overlap),1:3))
+    fs%mg%is_overlap(1:3) = fs%mg%is(1:3) - fs%mg%nd
+    fs%mg%ie_overlap(1:3) = fs%mg%ie(1:3) + fs%mg%nd
+    fs%mg%is_array(1:3) = fs%mg%is_overlap(1:3)
+    fs%mg%ie_array(1:3) = fs%mg%ie_overlap(1:3)
     fs%rlsize(1) = 1d0
     fs%rlsize(2) = 1d0
     fs%rlsize(3) = 1d0
@@ -295,7 +301,29 @@ subroutine initialization_ms()
     write(9999, *) 'Initialization FDTD Weyl start';flush(9999)
     call Weyl_init(fs, fw)
     write(9999, *) 'Initialization FDTD Weyl end';flush(9999)
-    
+
+    allocate(ms%ixyz_tbl(1:3, 1:ms%nmacro))
+    allocate(ms%imacro_tbl( &
+        & fs%mg%is(1):fs%mg%ie(1), &
+        & fs%mg%is(2):fs%mg%ie(2), &
+        & fs%mg%is(3):fs%mg%ie(3)))
+
+    i = 1
+    do iz = 1, nz_m
+        do iy = 1, ny_m
+            do ix = 1, nx_m
+                ms%imacro_tbl(ix, iy, iz) = i
+                ms%ixyz_tbl(1, i) = ix
+                ms%ixyz_tbl(2, i) = iy
+                ms%ixyz_tbl(3, i) = iz
+                i = i + 1
+            end do
+        end do
+    end do
+
+    if (comm_is_root(ms%id_ms_world)) &
+        & call create_directory(trim(ms%base_directory) // trim(sysname) // '_f')
+
     write(9999, *) 'Macrpoint initialization start';flush(9999)
     do i = 1, ms%nmacro
         if (comm_is_root(ms%id_ms_world)) then
@@ -335,15 +363,23 @@ subroutine initialization_ms()
     end do
     write(9999, *) 'Macrpoint initialization end';flush(9999)
 
-        
+    write(9999, *) 'Incident field setup start';flush(9999)
+    call incident()
+    write(9999, *) 'Incident field setup end';flush(9999)
+    call test_ms1()
+
     write(9999, *) 'Initialization Complete'
     flush(9999)
     return    
 end subroutine initialization_ms
 
 
+
+
 subroutine time_evolution_step_ms_macro
     implicit none
+    integer :: ii, iix, iiy, iiz
+
     ! Override Global Variables
     nproc_group_global = ms%icomm_macropoint
     nproc_id_global = ms%id_macropoint
@@ -351,14 +387,31 @@ subroutine time_evolution_step_ms_macro
 
     call weyl_calc(fs, fw)
 
-    if(mod(itt,2)==1)then
-        call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-         & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-         & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
-      else
-        call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-         & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-         & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+    if (ms%imacro_mygroup_e == ms%imacro_mygroup_s) then
+        ii = ms%imacro_mygroup_s
+        iix = ms%ixyz_tbl(1, ii)
+        iiy = ms%ixyz_tbl(2, ii)
+        iiz = ms%ixyz_tbl(3, ii)
+
+        write(9999, *) ii, iix, iiy, iiz
+
+        ! rt%Ac_ext(:, itt) = fw%vec_Ac(1:3, iix, iiy, iiz)
+        ! rt%Ac_ext(:, itt+1) = fw%vec_Ac(1:3, iix, iiy, iiz) &
+        ! & + (fw%vec_Ac(1:3, iix, iiy, iiz) -  fw%vec_Ac_old(1:3, iix, iiy, iiz))
+
+        ! if(mod(itt,2)==1)then
+        !     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+        !     & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+        !     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+        ! else
+        !     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+        !     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+        !     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+        ! end if
+
+        ! fw%vec_Ac(1:3, iix, iiy, iiz) = rt%curr(1:3)
+    else
+        stop "Unsupported paralization scheme"
     end if
 
     ! Override Global Variables (Repair)
@@ -369,6 +422,59 @@ subroutine time_evolution_step_ms_macro
     return
 end subroutine time_evolution_step_ms_macro
 
+
+
+
+
+subroutine test_ms1()
+    implicit none
+    integer ::  iix, iiy, iiz
+    character(256) :: filename
+
+    write(9999, *) "Start test_ms1"; flush(9999)
+
+    iiy = fs%mg%is(2)
+    iiz = fs%mg%is(3)
+    if (ms%id_ms_world == 0) then
+        if (mod(itt, 100) == 0) then
+            write(filename, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_f/', itt, '.data'
+            write(9999, *) trim(filename); flush(9999)
+            write(9999, *) "iiy", iiy, "iiz", iiz; flush(9999)
+            open(8888, file=trim(filename))
+            do iix = fs%mg%is(1), fs%mg%ie(1)
+                write(8888, '(i6, 4(1x, e23.15e3))') iix, iix * fs%hgs(1), &
+                    & fw%vec_Ac%v(1, iix, iiy, iiz), &
+                    & fw%vec_Ac%v(2, iix, iiy, iiz), &
+                    & fw%vec_Ac%v(3, iix, iiy, iiz)
+            end do
+            close(8888)
+        end if
+    end if
+
+    write(9999, *) "End test_ms1"; flush(9999)
+
+end subroutine test_ms1
+
+
+subroutine incident()
+    implicit none
+    integer :: iix, iiy, iiz
+
+    fw%vec_Ac%v(:, :, :, :) = 0d0
+    fw%vec_Ac_old%v(:, :, :, :) = 0d0
+
+    do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
+        do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
+            do iix = fs%mg%is_overlap(1), fs%mg%ie_overlap(1)
+                call calc_Ac_ext(- iix * fs%hgs(1) / cspeed_au , &
+                    & fw%vec_Ac%v(1:3, iix, iiy, iiz))
+                call calc_Ac_ext(- iix * fs%hgs(1) / cspeed_au - fw%dt , & 
+                    & fw%vec_Ac_old%v(1:3, iix, iiy, iiz))
+            end do
+        end do
+    end do
+    return
+ end subroutine incident
 
 end subroutine main_ms
 
