@@ -196,6 +196,7 @@ type(s_mixing) :: mixing
 
 logical :: rion_update
 integer :: Miter,jspin, nspin,i,ix,iy,iz
+real(8) :: rNe0,rNe
 
   select case(method_min)
   case('cg')   ; continue
@@ -259,15 +260,30 @@ integer :: Miter,jspin, nspin,i,ix,iy,iz
     call calc_density(system,srho_s,spsi,info,mg)
   end if
 
-  if(read_gs_dns_cube == 'y') then
-     if(ispin/=0) stop "read_gs_dns_cube=='n' & ispin/=0"
-     call read_dns(lg,mg,srho_s(1)%f) ! cube file only
-  end if
-
   srho%f = 0d0
   do jspin=1,nspin
      srho%f = srho%f + srho_s(jspin)%f
   end do
+  
+  if(read_gs_dns_cube == 'y') then
+    call read_dns(lg,mg,srho%f) ! cube file only
+    rNe0 = 0d0
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rNe0 = rNe0 + srho%f(ix,iy,iz) *system%Hvol
+    end do
+    end do
+    end do
+    call comm_summation(rNe0,rNe,info%icomm_r)
+    srho%f = srho%f *(dble(nelec)/rNe)
+    if(system%nspin==1) then
+      srho_s(1)%f = srho%f
+    else if(system%nspin==2) then
+      srho_s(1)%f = srho%f/2d0
+      srho_s(2)%f = srho%f/2d0
+    end if
+  end if
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
