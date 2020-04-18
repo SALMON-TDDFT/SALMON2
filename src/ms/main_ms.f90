@@ -161,6 +161,7 @@ close(9999)
 contains
 
 
+
 function macropoint_in_mygroup(imacro) result(r)
     implicit none
     integer, intent(in) :: imacro
@@ -171,10 +172,29 @@ function macropoint_in_mygroup(imacro) result(r)
 end function macropoint_in_mygroup
 
 
+! Create the base_directory name for each macropoints:
+function base_directory_macro(imacro) result(r)
+    implicit none
+    integer, intent(in) :: imacro
+    ! character(256) :: tmp
+    character(256) :: r
+    ! write(9999, *) trim(ms%base_directory)
+    ! write(9999, *) trim(sysname)
+    ! write(9999, *) imacro
+    ! FLUSH(9999)
+    ! write(9999, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/', imacro, '/'
+    ! flush(9999)
+    write(r, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/', imacro, '/'
+    ! write(9999, *) trim(tmp)
+    ! flush(9999)
+    return
+end function base_directory_macro
 
 
 subroutine initialization_ms()
     implicit none
+
+    ms%base_directory = trim(base_directory)
     ms%nmacro = nx_m * ny_m * nz_m
     ms%icomm_ms_world = nproc_group_global
     ms%isize_ms_world = nproc_size_global
@@ -194,8 +214,6 @@ subroutine initialization_ms()
     else
         stop "number of procs must be larger than number of points!"
     end if
-    
-
 
     ! allocate(iranklists())
     write(9999, *) 'nmacro_mygroup:', nmacro_mygroup
@@ -204,6 +222,7 @@ subroutine initialization_ms()
     write(9999, *) 'ms%imacro_mygroup_e:', ms%imacro_mygroup_e
     write(9999, *) 'ms%id_mygroup_s:', ms%id_mygroup_s
     write(9999, *) 'ms%id_mygroup_e:', ms%id_mygroup_e
+    write(9999, *) 'ms%base_directory:', trim(ms%base_directory)
     flush(9999)
     
     if (ms%nmacro < 1) stop "Invalid macropoint number"
@@ -227,7 +246,6 @@ subroutine initialization_ms()
     write(9999, *) 'ms%isize_macropoint:', ms%isize_macropoint
     flush(9999)
     
-    
     fs%mg%ndir = 3
     fs%mg%nd = 1
     
@@ -237,7 +255,6 @@ subroutine initialization_ms()
     if (0 < hz_m) fs%hgs(3) = hz_m
     
     fs%mg%is(1) = -nxvacl_m
-    
     
     write(9999, *) 'fs%mg%ndir:', fs%mg%ndir
     write(9999, *) 'fs%mg%nd:', fs%mg%nd
@@ -275,46 +292,29 @@ subroutine initialization_ms()
     fs%a_bc(3,1:2) = 'pbc'
     fs%imedia(:,:,:) = 0
 
-    write(9999, *) 'Initialization FDTD WEYL START';flush(9999)
-    call weyl_init(fs, fw)
-    write(9999, *) 'Initialization FDTD WEYL END';flush(9999)
+    write(9999, *) 'Initialization FDTD Weyl start';flush(9999)
+    call Weyl_init(fs, fw)
+    write(9999, *) 'Initialization FDTD Weyl end';flush(9999)
     
-    write(9999, *) 'Initialization MP Start';flush(9999)
-
-    
-    
-    write(9999, *) 'Directory name generate start'
-    ms%base_directory = trim(base_directory)
-    write(9999, *) trim(ms%base_directory)
-    write(9999, *) trim(sysname)
-    write(9999, *) "_m/"
-    write(9999, *) ms%imacro_mygroup_s
-    write(9999, *)  "/"
-    flush(9999)
-
-    write(ms%base_directory_macro, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), "_m/", ms%imacro_mygroup_s, "/"
-    write(9999, *) "ms%base_directory_macro:", trim(ms%base_directory_macro)
-    flush(9999)
-
-    write(9999, *) 'Directory name generate end';flush(9999)
-
-    if (comm_is_root(ms%id_macropoint)) &
-        &    call create_directory(trim(ms%base_directory_macro))
-    
-    ! Override Global Variables
-    nproc_group_global = ms%icomm_macropoint
-    nproc_id_global = ms%id_macropoint
-    nproc_size_global = ms%isize_macropoint
-    base_directory = ms%base_directory_macro
-
-    
-    
+    write(9999, *) 'Macrpoint initialization start';flush(9999)
     do i = 1, ms%nmacro
         if (comm_is_root(ms%id_ms_world)) then
+            write(9999, *) trim(base_directory_macro(i)); flush(9999)
+            call create_directory(trim(base_directory_macro(i)))
             write(*, '(a)') "################################"
             write(*, '(a, i6)') "# Initialization of macropoint #", i
         end if
+
+        call comm_sync_all()
+
         if (macropoint_in_mygroup(i)) then
+            ! Override global variables
+            base_directory = trim(base_directory_macro(i))
+            nproc_group_global = ms%icomm_macropoint
+            nproc_id_global = ms%id_macropoint
+            nproc_size_global = ms%isize_macropoint
+                    
+            ! Initializa TDKS system
             call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                                     singlescale,  &
                                     stencil, fg, poisson,  &
@@ -325,16 +325,17 @@ subroutine initialization_ms()
                                     spsi_in, spsi_out, tpsi, srho, srho_s,  &
                                     V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
                                     pp, ppg, ppn )
+
+            ! Override global variables (restore)
+            base_directory = trim(ms%base_directory)
+            nproc_group_global = ms%icomm_ms_world
+            nproc_id_global = ms%id_ms_world
+            nproc_size_global = ms%isize_ms_world        
         end if
-        call comm_sync_all
     end do
-    
-    
-    ! Override Global Variables (Repair)
-    nproc_group_global = ms%icomm_ms_world
-    nproc_id_global = ms%id_ms_world
-    nproc_size_global = ms%isize_ms_world
-    
+    write(9999, *) 'Macrpoint initialization end';flush(9999)
+
+        
     write(9999, *) 'Initialization Complete'
     flush(9999)
     return    

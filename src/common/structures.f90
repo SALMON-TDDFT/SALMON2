@@ -468,7 +468,6 @@ module structures
     integer, allocatable :: ixyz_tbl(:, :)
     integer, allocatable :: imacro_tbl(:, :, :)
     character(256) :: base_directory
-    character(256) :: base_directory_macro
   end type s_multiscale
 
 !===================================================================================================================================
