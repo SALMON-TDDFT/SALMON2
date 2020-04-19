@@ -662,7 +662,7 @@ CONTAINS
     select case(theory)
     case('dft','dft_band','dft_md')
       rion_update = (yn_opt == 'y' .or. theory == 'dft_md')
-    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
       rion_update = (yn_md == 'y')
     case default
       rion_update = .false.

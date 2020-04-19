@@ -172,20 +172,20 @@ contains
         select case (fs%a_bc(1, 1))
         case('periodic')
             Ac_tmp(:, (is(1)-nd):(is(1)-1), i2, i3) = &
-            & Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3)
+                & Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3)
         case('pec')
             Ac_tmp(:, (is(1)-nd):(is(1)-1), i2, i3) = &
-            & fw%vec_Ac%v(:, (is(1)-nd):(is(1)-1), i2, i3)
+                & fw%vec_Ac%v(:, (is(1)-nd):(is(1)-1), i2, i3)
         end select
     
         ! Impose Boundary Condition (Right end)
         select case (fs%a_bc(1, 2))
         case('periodic')
-            Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3) = &
-            & Ac_tmp(:, is(1):(is(1)+nd-1), i2, i3)
+            Ac_tmp(:, (ie(1)+1):(ie(1)+nd), i2, i3) = &
+                & Ac_tmp(:, is(1):(is(1)+nd-1), i2, i3)
         case('pec')
-            Ac_tmp(:, (ie(1)-nd+1):ie(1), i2, i3) = &
-            & fw%vec_Ac%v(:, (ie(1)-nd+1):ie(1), i2, i3)
+            Ac_tmp(:, (ie(1)+1):(ie(1)+nd), i2, i3) = &
+                & fw%vec_Ac%v(:, (ie(1)+1):(ie(1)+nd), i2, i3) 
         end select
     
         ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old

@@ -23,7 +23,7 @@ use math_constants, only: pi
 use salmon_global
 use structures
 use inputoutput, only: nx_m, ny_m, nz_m, dt
-use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, comm_get_groupinfo, comm_sync_all
+use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, comm_get_groupinfo, comm_sync_all, comm_summation
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
@@ -99,7 +99,7 @@ TE : do itt=Mit+1,itotNtime
     write(9999, *) "StartTime evolution"; flush(9999)
     call time_evolution_step_ms_macro()
     write(9999, *) "EndTime evolution"; flush(9999)
-    call test_ms1()
+    call write_RT_Ac_file()
 
 
 !   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
@@ -197,9 +197,9 @@ function base_directory_macro(imacro) result(r)
     ! FLUSH(9999)
     ! write(9999, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/', imacro, '/'
     ! flush(9999)
-    write(r, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/', imacro, '/'
     ! write(9999, *) trim(tmp)
     ! flush(9999)
+    write(r, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/', imacro, '/'
     return
 end function base_directory_macro
 
@@ -228,7 +228,7 @@ function check_input_variables() result(r)
             & write(*, *) "ERROR! MPI procs is too small!"
         r = .false.
     end if
-    if (mod(nx_m * ny_m * nz_m, nproc_size_global) /= 0) then
+    if (mod(nproc_size_global, nx_m * ny_m * nz_m) > 0) then
         if (comm_is_root(nproc_id_global)) &
             & write(*, *) "ERROR! MPI procs number of processes is an integer multiple of macropoints!"
         r = .false.
@@ -280,10 +280,12 @@ subroutine initialization_ms()
     ! Store global information
     ms%nmacro = nx_m * ny_m * nz_m
     ms%base_directory = trim(base_directory)
+    ms%base_directory_RT_Ac = trim(ms%base_directory) // trim(sysname) // "_RT_Ac/"
     ms%icomm_ms_world = nproc_group_global
     ms%isize_ms_world = nproc_size_global
     ms%id_ms_world = nproc_id_global
     
+
     if (ms%nmacro <= ms%isize_ms_world) then
         if (mod(ms%isize_ms_world, ms%nmacro) == 0) then
             nmacro_mygroup = 1
@@ -361,9 +363,9 @@ subroutine initialization_ms()
     fs%origin(1) = 0d0
     fs%origin(2) = 0d0
     fs%origin(3) = 0d0
-    fs%a_bc(1,1:2) = 'pbc'
-    fs%a_bc(2,1:2) = 'pbc'
-    fs%a_bc(3,1:2) = 'pbc'
+    fs%a_bc(1,1:2) = 'periodic'
+    fs%a_bc(2,1:2) = 'periodic'
+    fs%a_bc(3,1:2) = 'periodic'
     fs%imedia(:,:,:) = 0
 
     write(9999, *) 'Initialization FDTD Weyl start';flush(9999)
@@ -371,6 +373,8 @@ subroutine initialization_ms()
     write(9999, *) 'Initialization FDTD Weyl end';flush(9999)
 
     allocate(ms%curr(1:3, 1:ms%nmacro))
+    allocate(ms%vec_Ac(1:3, 1:ms%nmacro))
+    allocate(ms%vec_Ac_old(1:3, 1:ms%nmacro))
     allocate(ms%ixyz_tbl(1:3, 1:ms%nmacro))
     allocate(ms%imacro_tbl( &
         & fs%mg%is(1):fs%mg%ie(1), &
@@ -390,8 +394,9 @@ subroutine initialization_ms()
         end do
     end do
 
+    write(9999, *) trim(ms%base_directory_RT_Ac); flush(9999)
     if (comm_is_root(ms%id_ms_world)) &
-        & call create_directory(trim(ms%base_directory) // trim(sysname) // '_f')
+        & call create_directory(trim(ms%base_directory_RT_Ac))
 
     write(9999, *) 'Macrpoint initialization start';flush(9999)
     do i = 1, ms%nmacro
@@ -410,6 +415,11 @@ subroutine initialization_ms()
             nproc_group_global = ms%icomm_macropoint
             nproc_id_global = ms%id_macropoint
             nproc_size_global = ms%isize_macropoint
+            
+            write(9999, *) "trim(base_directory)", trim(base_directory); flush(9999)
+            write(9999, *) "nproc_group_global", nproc_group_global; flush(9999)
+            write(9999, *) "nproc_id_global", nproc_id_global; flush(9999)
+            write(9999, *) "nproc_size_global", nproc_size_global; flush(9999)
                     
             ! Initializa TDKS system
             call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
@@ -435,7 +445,7 @@ subroutine initialization_ms()
     write(9999, *) 'Incident field setup start';flush(9999)
     call incident()
     write(9999, *) 'Incident field setup end';flush(9999)
-    call test_ms1()
+    call write_RT_Ac_file()
 
     write(9999, *) 'Initialization Complete'
     flush(9999)
@@ -447,41 +457,70 @@ end subroutine initialization_ms
 
 subroutine time_evolution_step_ms_macro
     implicit none
-    integer :: ii, iix, iiy, iiz
+    integer :: ii, iimacro, iix, iiy, iiz
+    real(8) :: curr_tmp(3, ms%nmacro)
 
     ! Override Global Variables
     nproc_group_global = ms%icomm_macropoint
     nproc_id_global = ms%id_macropoint
     nproc_size_global = ms%isize_macropoint
 
+    write(9999, *) "FDTD iteration start"; flush(9999)
     call weyl_calc(fs, fw)
 
-    if (ms%imacro_mygroup_e == ms%imacro_mygroup_s) then
-        ii = ms%imacro_mygroup_s
+    do ii = 1, ms%nmacro
         iix = ms%ixyz_tbl(1, ii)
         iiy = ms%ixyz_tbl(2, ii)
         iiz = ms%ixyz_tbl(3, ii)
+        ms%vec_Ac(1:3, ii) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
+        ms%vec_Ac_old(1:3, ii) = fw%vec_Ac_old%v(1:3, iix, iiy, iiz)
+    end do
+    write(9999, *) "FDTD iteration end"; flush(9999)
 
-        write(9999, *) ii, iix, iiy, iiz
-
-        ! rt%Ac_ext(:, itt) = fw%vec_Ac(1:3, iix, iiy, iiz)
-        ! rt%Ac_ext(:, itt+1) = fw%vec_Ac(1:3, iix, iiy, iiz) &
-        ! & + (fw%vec_Ac(1:3, iix, iiy, iiz) -  fw%vec_Ac_old(1:3, iix, iiy, iiz))
-
-        ! if(mod(itt,2)==1)then
-        !     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-        !     & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-        !     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
-        ! else
-        !     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-        !     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-        !     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
-        ! end if
-
-        ! fw%vec_Ac(1:3, iix, iiy, iiz) = rt%curr(1:3)
+    if (ms%imacro_mygroup_e - ms%imacro_mygroup_s + 1 > 1) then
+        stop "ERROR! Unsupported paralization scheme!"
     else
-        stop "Unsupported paralization scheme"
+        iimacro = ms%imacro_mygroup_s
+
+        rt%Ac_ext(:, itt) = ms%vec_Ac(1:3, iimacro)
+        rt%Ac_ext(:, itt+1) = ms%vec_Ac(1:3, iimacro) &
+            & + (ms%vec_Ac(1:3, iimacro) -  ms%vec_Ac_old(1:3, iimacro))
+
+        write(9999, *) "RT iteration start"; flush(9999)
+        if(mod(itt,2)==1)then
+            call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+            & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+        else
+            call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
+            & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+        end if
+        write(9999, *) "RT iteration end"; flush(9999)
+
+        write(9999, *) "Current summation start"; flush(9999)
+        curr_tmp(:, :) = 0d0
+        if (comm_is_root(ms%id_macropoint)) &
+            & curr_tmp(1:3, iimacro) = rt%curr(1:3, itt)
+        write(9999, *) "iimacro, curr_tmp, curr", iimacro, curr_tmp(3, iimacro), rt%curr(3, itt)
+        call comm_summation(curr_tmp, ms%curr, 3 * ms%nmacro, ms%icomm_ms_world)
+        write(9999, *) "Current summation end"; flush(9999)
+
     end if
+
+    do ii = 1, ms%nmacro
+        iix = ms%ixyz_tbl(1, ii)
+        iiy = ms%ixyz_tbl(2, ii)
+        iiz = ms%ixyz_tbl(3, ii)
+        fw%vec_j_em%v(1:3, iix, iiy, iiz) = - ms%curr(1:3, ii)
+        write(9999, *) "macromove", iix, iiy, iiz, ms%curr(1, ii), ms%curr(2, ii), ms%curr(3, ii)
+    end do
+
+    ! write(9999, *) "Current write start"; flush(9999)
+    ! do ii = 1, ms%nmacro
+    !     write(9999, "(4(e23.15e3, 1x), a, i3.3)") itt * dt, ms%curr(1, ii),  ms%curr(2, ii),  ms%curr(3, ii), " #CURRM", ii
+    ! end do
+    ! write(9999, *) "Current write end"; flush(9999)
 
     ! Override Global Variables (Repair)
     nproc_group_global = ms%icomm_ms_world
@@ -495,34 +534,77 @@ end subroutine time_evolution_step_ms_macro
 
 
 
-subroutine test_ms1()
+subroutine write_RT_Ac_file()
+    use inputoutput, only: t_unit_ac, t_unit_current, t_unit_elec, t_unit_length
     implicit none
     integer ::  iix, iiy, iiz
     character(256) :: filename
 
-    write(9999, *) "Start test_ms1"; flush(9999)
+    write(9999, *) "Start write_RT_Ac_file"; flush(9999)
 
-    iiy = fs%mg%is(2)
-    iiz = fs%mg%is(3)
     if (ms%id_ms_world == 0) then
         if (mod(itt, 100) == 0) then
-            write(filename, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_f/', itt, '.data'
+            write(filename, '(a, a, a, i6.6, a)') trim(ms%base_directory_RT_Ac), trim(sysname), "_Ac_",  itt, '.data'
             write(9999, *) trim(filename); flush(9999)
-            write(9999, *) "iiy", iiy, "iiz", iiz; flush(9999)
             open(8888, file=trim(filename))
+            write(8888, '(a)') "# Multiscale TDDFT calculation"
+            write(8888, '(a)') "# IX, IY, IZ: FDTD Grid index"
+            write(8888, '(a)') "# x, y, z: Coordinates"
+            write(8888, '(a)') "# Ac: Vector potential field"
+            write(8888, '(a)') "# E: Electric field"
+            write(8888, '(a)') "# J_em: Electromagnetic current density"
+            write(8888, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+              & 1, "IX", "none", &
+              & 2, "IY", "none", &
+              & 3, "IZ", "none", &
+              & 4, "x", trim(t_unit_length%name), &
+              & 5, "y", trim(t_unit_length%name), &
+              & 6, "z", trim(t_unit_length%name), &
+              & 7, "Ac_x", trim(t_unit_ac%name), &
+              & 8, "Ac_y", trim(t_unit_ac%name), &
+              & 9, "Ac_z", trim(t_unit_ac%name), &
+              & 10, "E_x", trim(t_unit_elec%name), &
+              & 11, "E_y", trim(t_unit_elec%name), &
+              & 12, "E_z", trim(t_unit_elec%name), &
+              & 13, "B_x", "a.u.", &
+              & 14, "B_y", "a.u.", &
+              & 15, "B_z", "a.u.", &
+              & 16, "Jm_x", trim(t_unit_current%name), &
+              & 17, "Jm_y", trim(t_unit_current%name), &
+              & 18, "Jm_z", trim(t_unit_current%name)
+
+            do iiz = fs%mg%is(3), fs%mg%ie(3)
+            do iiy = fs%mg%is(2), fs%mg%ie(2)
             do iix = fs%mg%is(1), fs%mg%ie(1)
-                write(8888, '(i6, 4(1x, e23.15e3))') iix, iix * fs%hgs(1), &
-                    & fw%vec_Ac%v(1, iix, iiy, iiz), &
-                    & fw%vec_Ac%v(2, iix, iiy, iiz), &
-                    & fw%vec_Ac%v(3, iix, iiy, iiz)
+                write(8888, '(3(i6, 1x), 12(e23.15e3, 1x))')  &
+                    & iix, & 
+                    & iiy, & 
+                    & iiz, & 
+                    & iix * fs%hgs(1) * t_unit_length%conv, &
+                    & iiy * fs%hgs(2) * t_unit_length%conv, &
+                    & iiz * fs%hgs(3) * t_unit_length%conv, &
+                    & fw%vec_Ac%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
+                    & fw%vec_Ac%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
+                    & fw%vec_Ac%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
+                    & fw%vec_E%v(1, iix, iiy, iiz) * t_unit_elec%conv, &
+                    & fw%vec_E%v(2, iix, iiy, iiz) * t_unit_elec%conv, &
+                    & fw%vec_E%v(3, iix, iiy, iiz) * t_unit_elec%conv, &
+                    & fw%vec_H%v(1, iix, iiy, iiz), &
+                    & fw%vec_H%v(2, iix, iiy, iiz), &
+                    & fw%vec_H%v(3, iix, iiy, iiz), &
+                    & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
+                    & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
+                    & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv
+            end do
+            end do
             end do
             close(8888)
         end if
     end if
 
-    write(9999, *) "End test_ms1"; flush(9999)
+    write(9999, *) "End write_RT_Ac_file"; flush(9999)
 
-end subroutine test_ms1
+end subroutine write_RT_Ac_file
 
 
 subroutine incident()
