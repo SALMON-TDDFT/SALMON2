@@ -61,12 +61,12 @@ group.add_option('--disable-mpi',       action='store_false', dest='mpi',       
 group.add_option('--enable-scalapack',  action='store_true',  dest='scalapack')
 group.add_option('--disable-scalapack', action='store_false', dest='scalapack', help='enable/disable computations with ScaLAPACK library.')
 group.add_option('--enable-eigenexa',   action='store_true',  dest='eigenexa')
-group.add_option('--disable-eigenexa',  action='store_false', dest='eigenexa', help='enable/disable computations with EigenExa library.')
+group.add_option('--disable-eigenexa',  action='store_false', dest='eigenexa', help='enable/disable computations with EigenExa library (SALMON will build it internally)')
 group.add_option('--enable-libxc',      action='store_true',  dest='libxc')
 group.add_option('--disable-libxc',     action='store_false', dest='libxc', help='enable/disable Libxc library.')
 group.add_option('--with-lapack',       action='store', type=str, default=None, dest='lapack_installdir', help='specify install path to LAPACK/ScaLAPACK')
 group.add_option('--with-libxc',        action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to Libxc package')
-group.add_option('--build-required-packages', action='store_true', default=False, dest='build_required_packages', help='request build and static link of required packages (We support LAPACK and Libxc)')
+group.add_option('--build-required-packages', action='store_true', default=False, dest='build_required_packages', help='request build and static link of required packages')
 
 parser.add_option_group(group)
 
