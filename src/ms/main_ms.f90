@@ -557,21 +557,21 @@ subroutine write_RT_Ac_file()
               & 1, "IX", "none", &
               & 2, "IY", "none", &
               & 3, "IZ", "none", &
-              & 4, "x", trim(t_unit_length%name), &
-              & 5, "y", trim(t_unit_length%name), &
-              & 6, "z", trim(t_unit_length%name), &
-              & 7, "Ac_x", trim(t_unit_ac%name), &
-              & 8, "Ac_y", trim(t_unit_ac%name), &
-              & 9, "Ac_z", trim(t_unit_ac%name), &
-              & 10, "E_x", trim(t_unit_elec%name), &
-              & 11, "E_y", trim(t_unit_elec%name), &
-              & 12, "E_z", trim(t_unit_elec%name), &
-              & 13, "B_x", "a.u.", &
-              & 14, "B_y", "a.u.", &
-              & 15, "B_z", "a.u.", &
-              & 16, "Jm_x", trim(t_unit_current%name), &
-              & 17, "Jm_y", trim(t_unit_current%name), &
-              & 18, "Jm_z", trim(t_unit_current%name)
+            !   & 4, "x", trim(t_unit_length%name), &
+            !   & 5, "y", trim(t_unit_length%name), &
+            !   & 6, "z", trim(t_unit_length%name), &
+              & 4, "Ac_x", trim(t_unit_ac%name), &
+              & 5, "Ac_y", trim(t_unit_ac%name), &
+              & 6, "Ac_z", trim(t_unit_ac%name), &
+              & 7, "E_x", trim(t_unit_elec%name), &
+              & 8, "E_y", trim(t_unit_elec%name), &
+              & 9, "E_z", trim(t_unit_elec%name), &
+              & 10, "B_x", "a.u.", &
+              & 11, "B_y", "a.u.", &
+              & 12, "B_z", "a.u.", &
+              & 13, "Jm_x", trim(t_unit_current%name), &
+              & 14, "Jm_y", trim(t_unit_current%name), &
+              & 15, "Jm_z", trim(t_unit_current%name)
 
             do iiz = fs%mg%is(3), fs%mg%ie(3)
             do iiy = fs%mg%is(2), fs%mg%ie(2)
@@ -580,9 +580,9 @@ subroutine write_RT_Ac_file()
                     & iix, & 
                     & iiy, & 
                     & iiz, & 
-                    & iix * fs%hgs(1) * t_unit_length%conv, &
-                    & iiy * fs%hgs(2) * t_unit_length%conv, &
-                    & iiz * fs%hgs(3) * t_unit_length%conv, &
+                    ! & iix * fs%hgs(1) * t_unit_length%conv, &
+                    ! & iiy * fs%hgs(2) * t_unit_length%conv, &
+                    ! & iiz * fs%hgs(3) * t_unit_length%conv, &
                     & fw%vec_Ac%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
                     & fw%vec_Ac%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
                     & fw%vec_Ac%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
