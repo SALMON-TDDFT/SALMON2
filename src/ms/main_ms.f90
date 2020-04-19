@@ -76,13 +76,14 @@ integer, allocatable :: iranklists(:)
 character(256) :: file_debug_log
 integer :: nmacro_mygroup, isize_mygroup
 
-call timer_begin(LOG_TOTAL)
+if (.not. check_input_variables()) return
 
 ! Open logfile for debugging
 write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
 open(unit=9999, file=file_debug_log)
 write(9999, *) 'logging start'; flush(9999)
 
+call timer_begin(LOG_TOTAL)
 ! Initialization
 call initialization_ms()
 
@@ -90,6 +91,7 @@ call initialization_ms()
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
+
 TE : do itt=Mit+1,itotNtime
 
     write(9999, *) 'Step', itt; flush(9999)
@@ -202,14 +204,82 @@ function base_directory_macro(imacro) result(r)
 end function base_directory_macro
 
 
+function check_input_variables() result(r)
+    implicit none
+    logical :: r
+    r = .true.
+    if (nx_m < 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nx_m' must be larger than 1!"
+        r = .false.
+    end if
+    if (ny_m /= 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'ny_m' must be 1!"
+        r = .false.
+    end if
+    if (nz_m /= 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nz_m' must be 1!"
+        r = .false.
+    end if
+    if (nproc_size_global < nx_m * ny_m * nz_m) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! MPI procs is too small!"
+        r = .false.
+    end if
+    if (mod(nx_m * ny_m * nz_m, nproc_size_global) /= 0) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! MPI procs number of processes is an integer multiple of macropoints!"
+        r = .false.
+    end if
+    if (hx_m < 1d-6 .and. dl_em(1) < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'hx_m' or 'dl_em(1)' must be specified!"
+        r = .false.
+    end if
+    if (hy_m < 1d-6 .and. dl_em(2) < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'hy_m' or 'dl_em(2)' must be specified!"
+        r = .false.
+    end if
+    if (hz_m < 1d-6 .and. dl_em(3) < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'hz_m' or 'dl_em(3)' must be specified!"
+        r = .false.
+    end if
+    if (dt < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'dt' must be specified!"
+        r = .false.
+    end if
+    if (dt_em > 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'dt_em' must not be specified!"
+        r = .false.
+    end if
+    if (nxvacl_m < 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nxvacl_m' must not larger than 1!"
+        r = .false.
+    end if
+    if (nxvacr_m < 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nxvacr_m' must not larger than 1!"
+        r = .false.
+    end if
+    return
+end function check_input_variables
+
 
 
 
 subroutine initialization_ms()
     implicit none
 
-    ms%base_directory = trim(base_directory)
+    ! Store global information
     ms%nmacro = nx_m * ny_m * nz_m
+    ms%base_directory = trim(base_directory)
     ms%icomm_ms_world = nproc_group_global
     ms%isize_ms_world = nproc_size_global
     ms%id_ms_world = nproc_id_global
@@ -267,9 +337,7 @@ subroutine initialization_ms()
     if (0d0 < hx_m) fs%hgs(1) = hx_m
     if (0d0 < hy_m) fs%hgs(2) = hy_m
     if (0d0 < hz_m) fs%hgs(3) = hz_m
-    
-    fs%mg%is(1) = -nxvacl_m
-    
+        
     write(9999, *) 'fs%mg%ndir:', fs%mg%ndir
     write(9999, *) 'fs%mg%nd:', fs%mg%nd
     write(9999, *) 'fs%hgs(1:3):', fs%hgs(1:3)
@@ -302,6 +370,7 @@ subroutine initialization_ms()
     call Weyl_init(fs, fw)
     write(9999, *) 'Initialization FDTD Weyl end';flush(9999)
 
+    allocate(ms%curr(1:3, 1:ms%nmacro))
     allocate(ms%ixyz_tbl(1:3, 1:ms%nmacro))
     allocate(ms%imacro_tbl( &
         & fs%mg%is(1):fs%mg%ie(1), &
