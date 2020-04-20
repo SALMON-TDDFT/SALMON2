@@ -105,15 +105,16 @@
   propagator = 'etrs'
 /
 
+!explainations of these will be added after multi-scale calcution will be moved from ARTED
 &multiscale
-  !explainations of these will be added after multi-scale calcution will be moved from ARTED
-  fdtddim    = '1d'
-  twod_shape = 'periodic'
-  nx_m       = 8
-  ny_m       = 1
-  hx_m       = 188.97
-  nxvacl_m   = -500
-  nxvacr_m   = +500
+  nx_m = 8
+  ny_m = 1
+  nz_m = 1
+  hx_m = 100 
+  hy_m = 100
+  hz_m = 100
+  nxvacl_m = 1000
+  nxvacr_m = 1000
 /
 
 &atomic_red_coor

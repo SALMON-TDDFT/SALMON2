@@ -1,4 +1,4 @@
-program main
+  program main
   use salmon_global
   use parallelization
   use communication, only: comm_is_root
@@ -30,14 +30,13 @@ program main
   case('tddft_response','tddft_pulse'); call main_tddft
   case('dft_k_expand')                ; call main_dft_k_expand !convert DFT/k-points data to supercell/gammma DFT
   case('single_scale_maxwell_tddft'  ); call main_tddft
-  case('multi_scale_maxwell_tddft'   ); stop 'Multi-scale Maxwell-TDDFT is not implemented' !temporally
-  case('multiscale_experiment' )      ; call main_ms    ! experimental
+  case('multi_scale_maxwell_tddft'   ); call main_ms    ! experimental
   case('maxwell')                     ; call main_maxwell
  !case('sbe')                         ; call main_sbe
  !case('maxwell_sbe')                 ; call main_maxwell_sbe
  !case('ttm')                         ; call main_ttm
  !case('maxwell_ttm')                 ; call main_maxwell_ttm
-  case default ; stop 'invalid theory'
+  case default ; stop 'invalid theory @ main'
   end select
 
 

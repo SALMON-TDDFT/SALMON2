@@ -78,11 +78,11 @@ subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
   select case(theory)
   case('dft','dft_band','dft_md') 
     suffix = "dns"
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
   case default
-    stop 'invalid theory'
+    stop 'invalid theory @ writefield'
   end select
 
   phys_quantity = "dns"
@@ -96,7 +96,7 @@ subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
   end if
 
   select case(theory)
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     !$OMP parallel do collapse(2) private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)
@@ -399,11 +399,11 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   select case(theory)
   case('dft','dft_band','dft_md') 
     suffix = "elf"
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
     suffix = "elf_"//adjustl(filenum)
   case default
-    stop 'invalid theory'
+    stop 'invalid theory @ writefield'
   end select
 
   phys_quantity = "elf"
