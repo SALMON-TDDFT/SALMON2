@@ -79,7 +79,7 @@
   yn_out_psi  = 'y'
   yn_out_dns  = 'y'
   yn_out_dos  = 'y'
-!  yn_out_pdos = 'y'
+  yn_out_pdos = 'y'
 !  yn_out_elf  = 'y'
 /
 
