@@ -5,6 +5,10 @@ if (USE_EIGENEXA)
     message(FATAL_ERROR "EigenExa requires LAPACK and ScaLAPACK library.")
   endif ()
 
+  if (BUILD_REQUIRED_PACKAGES)
+    message(FATAL_ERROR "We require system-optimized BLAS/LAPACK/ScaLAPACK library when using EigenExa.")
+  endif ()
+
   set(EIGENEXA_VERSION "2.4b")
   message(STATUS "Build RIKEN R-CCS EigenExa library version ${EIGENEXA_VERSION}")
 
