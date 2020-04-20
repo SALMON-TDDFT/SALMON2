@@ -1,24 +1,61 @@
 include(ExternalProject)
 
 
-### Numerical library
-if (USE_SLACAPACK)
-  message(FATAL_ERROR "We don't support builiding ScaLAPACK. Please contact your system administrator.")
+### LAPACK
+find_package(LAPACK QUIET)
+
+if (LAPACK_FOUND)
+  message(STATUS "LAPACK library found.")
+  set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${LAPACK_LIBRARIES})
+  set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${LAPACK_FLAGS})
 else ()
-  set(FILE_MATHLIB lapack)
-  find_package(LAPACK QUIET)
+  # NOTE: LAPACK 3.7.0 and later version can't build by GCC 4.8.5, which RHEL7 provided compiler.
+  set(LAPACK_VERSION "3.6.1")
+  message(STATUS "Build Netlib LAPACK library version ${LAPACK_VERSION}")
 
-  if (LAPACK_FOUND)
-    message(STATUS "LAPACK library found.")
-    set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${LAPACK_LIBRARIES})
-    set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${LAPACK_FLAGS})
+  ExternalProject_Add(lapack-project
+    URL              "http://www.netlib.org/lapack/lapack-${LAPACK_VERSION}.tgz"
+    PREFIX           "${CMAKE_BINARY_DIR}/lapack"
+    CMAKE_ARGS       -D BUILD_SHARED_LIBS=off
+                     -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
+                     -D CMAKE_C_COMPILER=${CMAKE_C_COMPILER} -D CMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}
+                     -D CMAKE_C_FLAGS=${CMAKE_C_FLAGS} -D CMAKE_Fortran_FLAGS=${CMAKE_Fortran_FLAGS}
+                     -D CMAKE_C_FLAGS_DEBUG=${CMAKE_C_FLAGS_DEBUG} -D CMAKE_Fortran_FLAGS_DEBUG=${CMAKE_Fortran_FLAGS_DEBUG}
+                     -D CMAKE_C_FLAGS_RELEASE=${CMAKE_C_FLAGS_RELEASE} -D CMAKE_Fortran_FLAGS_RELEASE=${CMAKE_Fortran_FLAGS_RELEASE}
+    STEP_TARGETS     install
+    EXCLUDE_FROM_ALL on
+  )
+
+  add_library(lapack STATIC IMPORTED)
+  add_library(blas   STATIC IMPORTED)
+  set_target_properties(lapack PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib64/liblapack.a)
+  set_target_properties(blas   PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib64/libblas.a)
+  add_dependencies(lapack lapack-project-install)
+  add_dependencies(blas   lapack-project-install)
+  set(EXTERNAL_LIBS lapack blas ${EXTERNAL_LIBS})
+endif ()
+
+
+### ScaLAPACK
+if (USE_SCALAPACK)
+  if (USE_MPI)
   else ()
-    set(LAPACK_VERSION "3.8.0")
-    message(STATUS "Build Netlib LAPACK library version ${LAPACK_VERSION}")
+    message(FATAL_ERROR "Use ScaLAPACK: but MPI feature disabled.")
+  endif ()
 
-    ExternalProject_Add(lapack-project
-      URL              "http://www.netlib.org/lapack/lapack-${LAPACK_VERSION}.tar.gz"
-      PREFIX           "${CMAKE_BINARY_DIR}/lapack"
+  find_package(ScaLAPACK QUIET)
+
+  if (ScaLAPACK_FOUND)
+    message(STATUS "ScaLAPACK library found.")
+    set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${ScaLAPACK_LIBRARIES})
+    set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${ScaLAPACK_FLAGS})
+  else ()
+    set(SCALAPACK_VERSION "2.1.0")
+    message(STATUS "Build Netlib ScaLAPACK library version ${SCALAPACK_VERSION}")
+
+    ExternalProject_Add(scalapack-project
+      URL              "https://github.com/Reference-ScaLAPACK/scalapack/archive/v${SCALAPACK_VERSION}.tar.gz"
+      PREFIX           "${CMAKE_BINARY_DIR}/scalapack"
       CMAKE_ARGS       -D BUILD_SHARED_LIBS=off
                        -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
                        -D CMAKE_C_COMPILER=${CMAKE_C_COMPILER} -D CMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}
@@ -29,13 +66,11 @@ else ()
       EXCLUDE_FROM_ALL on
     )
 
-    add_library(lapack STATIC IMPORTED)
-    add_library(blas   STATIC IMPORTED)
-    set_target_properties(lapack PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib64/liblapack.a)
-    set_target_properties(blas   PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib64/libblas.a)
-    add_dependencies(lapack lapack-project-install)
-    add_dependencies(blas   lapack-project-install)
-    set(EXTERNAL_LIBS ${EXTERNAL_LIBS} lapack blas)
+    add_library(scalapack STATIC IMPORTED)
+    set_target_properties(scalapack PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/libscalapack.a)
+    add_dependencies(scalapack-project-install    lapack-project-install)
+    add_dependencies(scalapack                 scalapack-project-install)
+    set(EXTERNAL_LIBS scalapack ${EXTERNAL_LIBS})
   endif ()
 endif ()
 
@@ -77,5 +112,5 @@ endif ()
 
 
 # add search path
-include_directories("${CMAKE_CURRENT_BINARY_DIR}/include")
+#include_directories("${CMAKE_CURRENT_BINARY_DIR}/include")
 link_directories("${CMAKE_CURRENT_BINARY_DIR}/lib")
