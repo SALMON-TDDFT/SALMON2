@@ -1375,14 +1375,15 @@ contains
   
   subroutine write_pdos(lg,mg,system,info,pp,energy,tpsi)
     use structures
-    use math_constants, only: pi,zi
-    use salmon_math, only: ylm
-    use parallelization, only: nproc_id_global
-    use communication, only: comm_is_root, comm_summation
-    use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
-    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, nelec, kion, natom, nstate, unit_energy
-    use inputoutput, only: uenergy_from_au
-    use prep_pp_sub, only: bisection
+    use math_constants      ,only: pi,zi
+    use salmon_math         ,only: ylm
+    use parallelization     ,only: nproc_id_global
+    use communication       ,only: comm_is_root, comm_summation
+    use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
+                                   out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
+                                   nelec, kion, natom, nstate, unit_energy
+    use inputoutput         ,only: uenergy_from_au
+    use prep_pp_sub         ,only: bisection
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1457,7 +1458,11 @@ contains
               phi_r= ratio1*pp%upp_f(intr,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi)) +  &
                      ratio2*pp%upp_f(intr-1,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi))
                                             !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-              rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+              if(allocated(tpsi%rwf)) then
+                rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+              else
+                rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+              end if
             end do
             end do
             end do
