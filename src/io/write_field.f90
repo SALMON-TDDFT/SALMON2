@@ -313,14 +313,21 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   io_e = info%io_e
   
   rho_half = 0.d0
+  ztmp     = 0.d0
   gradzpsi = 0.d0
   mrelftau = 0.d0
   mrcurden = 0.d0
   elftau   = 0.d0
   curden   = 0.d0
   box      = 0.d0
+  gradrho  = 0.d0
+  gradrho2 = 0.d0
+  elfc     = 0.d0
+  elfcuni  = 0.d0
+  matbox_l = 0.d0
+  elf      = 0.d0
   
-  !$OMP parallel do private(iz,iy,ix)
+!$OMP parallel do private(iz,iy,ix)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -338,7 +345,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
     ik=1    ! --> do loop (future work)
     ispin=1 ! --> do loop (future work)
     
-    do io=1,no
+    do io=io_s,io_e
       ztmp = cmplx(tpsi%rwf(:,:,:,ispin,io,ik,1))
       call calc_gradient_psi(ztmp,gradzpsi,mg%is_array,mg%ie_array,is,ie, &
                              mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
@@ -389,7 +396,6 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
     end do
     
     ! matbox_l stores ELF
-    matbox_l=0.d0
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -400,7 +406,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
     end do
     end do
     
-    call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
+    call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
     
     select case(theory)
     case('dft','dft_band','dft_md') 
