@@ -1,5 +1,4 @@
 set(SOURCES
-    alltoall_1d.f90
     factor.f
     fft235.f
     kernel.f
