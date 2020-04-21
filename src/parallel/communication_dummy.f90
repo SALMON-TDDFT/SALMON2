@@ -257,6 +257,11 @@ module communication
     module procedure comm_logical_and_scalar
   end interface
 
+  interface comm_logical_or
+    ! 1-D array (in-place)
+    module procedure comm_ip_logical_or_array1d
+  end interface
+
   private :: get_rank, error_check, abort_show_message
 
 #define ABORT_MESSAGE(target,msg) if(target/=COMM_PROC_NULL) call abort_show_message(msg)
@@ -964,6 +969,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array1d_integer")
   end subroutine
@@ -972,6 +978,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array2d_integer")
   end subroutine
@@ -980,6 +987,7 @@ contains
     implicit none
     real(8), intent(inout) :: values(:,:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array3d_double")
   end subroutine
@@ -988,6 +996,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:,:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array3d_integer")
   end subroutine
@@ -996,6 +1005,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:,:,:,:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array5d_integer")
   end subroutine
@@ -1266,6 +1276,15 @@ contains
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_logical_and_scalar")
     outvalue = invalue
+  end subroutine
+
+  subroutine comm_ip_logical_or_array1d(values, ngroup)
+    implicit none
+    logical, intent(inout) :: values(:)
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_ip_logical_or_array")
   end subroutine
 
 
