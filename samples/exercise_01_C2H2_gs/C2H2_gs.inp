@@ -80,7 +80,7 @@
   yn_out_dns  = 'y'
   yn_out_dos  = 'y'
   yn_out_pdos = 'y'
-!  yn_out_elf  = 'y'
+  yn_out_elf  = 'y'
 /
 
 &atomic_coor
