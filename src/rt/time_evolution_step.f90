@@ -378,8 +378,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      ! When wave function is complex, this version cannot output elf now. !TT
-      ! call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
+      call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
