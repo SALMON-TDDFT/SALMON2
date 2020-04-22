@@ -404,8 +404,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
         call write_dns(lg,mg,srho%f,system%hgs,srho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        ! When wave function is complex, this version cannot output elf now. !TT
-        ! call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
+        call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
         call write_estatic(lg,mg,system%hgs,stencil,info,sVh,srg_scalar,itt)

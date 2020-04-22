@@ -237,8 +237,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   use salmon_global       ,only: format_voxel_data,theory
   use structures
   use math_constants      ,only: pi
-  use communication       ,only: comm_is_root,comm_summation
-  use parallelization     ,only: nproc_id_global
+  use communication       ,only: comm_summation
   use misc_routines       ,only: get_wtime
   use sendrecv_grid       ,only: update_overlap_complex8,update_overlap_real8
   use stencil_sub         ,only: calc_gradient_field
@@ -336,107 +335,107 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   end do
   end do
   
-  if(allocated(tpsi%rwf)) then
-    
-    if(info%if_divide_rspace) then
-     call update_overlap_real8(srg, mg, tpsi%rwf)
+  if(info%if_divide_rspace) then
+    if(allocated(tpsi%rwf)) then
+      call update_overlap_real8(srg, mg, tpsi%rwf)
+    else
+      call update_overlap_complex8(srg, mg, tpsi%zwf)
     end if
+  end if
+  
+  do ik=ik_s,ik_e
+  do io=io_s,io_e
+  do ispin=1,nspin
     
-    ik=1    ! --> do loop (future work)
-    ispin=1 ! --> do loop (future work)
-    
-    do io=io_s,io_e
+    if(allocated(tpsi%rwf)) then
       ztmp = cmplx(tpsi%rwf(:,:,:,ispin,io,ik,1))
-      call calc_gradient_psi(ztmp,gradzpsi,mg%is_array,mg%ie_array,is,ie, &
-                             mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+    else
+      ztmp = tpsi%zwf(:,:,:,ispin,io,ik,1)
+    end if
+    
+    call calc_gradient_psi(ztmp,gradzpsi,mg%is_array,mg%ie_array,is,ie, &
+                           mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+    
 !$OMP parallel do private(iz,iy,ix)
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-          mrelftau(ix,iy,iz)=mrelftau(ix,iy,iz)            &
-                             +abs(gradzpsi(1,ix,iy,iz))**2 &
-                             +abs(gradzpsi(2,ix,iy,iz))**2 &
-                             +abs(gradzpsi(3,ix,iy,iz))**2
-          mrcurden(ix,iy,iz)=mrcurden(ix,iy,iz)      &
-                            +( abs(conjg(ztmp(ix,iy,iz))*gradzpsi(1,ix,iy,iz)      &
-                                  -ztmp(ix,iy,iz)*conjg(gradzpsi(1,ix,iy,iz)))**2  &
-                              +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(2,ix,iy,iz)      &
-                                  -ztmp(ix,iy,iz)*conjg(gradzpsi(2,ix,iy,iz)))**2  &
-                              +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(3,ix,iy,iz)      &
-                                  -ztmp(ix,iy,iz)*conjg(gradzpsi(3,ix,iy,iz)))**2 )/2.d0
-        end do
-        end do
-        end do
-    end do
-    
-    call comm_summation(mrelftau,elftau,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
-    call comm_summation(mrcurden,curden,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
-    
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      box(ix,iy,iz) = rho_half(ix,iy,iz)
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+      mrelftau(ix,iy,iz)=mrelftau(ix,iy,iz)            &
+                         +abs(gradzpsi(1,ix,iy,iz))**2 &
+                         +abs(gradzpsi(2,ix,iy,iz))**2 &
+                         +abs(gradzpsi(3,ix,iy,iz))**2
+      mrcurden(ix,iy,iz)=mrcurden(ix,iy,iz)      &
+                        +( abs(conjg(ztmp(ix,iy,iz))*gradzpsi(1,ix,iy,iz)      &
+                              -ztmp(ix,iy,iz)*conjg(gradzpsi(1,ix,iy,iz)))**2  &
+                          +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(2,ix,iy,iz)      &
+                              -ztmp(ix,iy,iz)*conjg(gradzpsi(2,ix,iy,iz)))**2  &
+                          +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(3,ix,iy,iz)      &
+                              -ztmp(ix,iy,iz)*conjg(gradzpsi(3,ix,iy,iz)))**2 )/2.d0
     end do
     end do
     end do
     
-    if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
-    call calc_gradient_field(mg,stencil%coef_nab,box,gradrho)
-    
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2 &
-                        +gradrho(2,ix,iy,iz)**2 &
-                        +gradrho(3,ix,iy,iz)**2
-      elfc(ix,iy,iz)=elftau(ix,iy,iz)-gradrho2(ix,iy,iz)/rho_half(ix,iy,iz)/4.d0  &
-                                     -curden(ix,iy,iz)/rho_half(ix,iy,iz)
-    end do
-    end do
-    end do
-    
-    ! matbox_l stores ELF
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      elfcuni(ix,iy,iz)=3.d0/5.d0*(6.d0*Pi**2)**(2.d0/3.d0)      &
-                       *rho_half(ix,iy,iz)**(5.d0/3.d0)
-      matbox_l(ix,iy,iz)=1.d0/(1.d0+elfc(ix,iy,iz)**2/elfcuni(ix,iy,iz)**2)
-    end do
-    end do
-    end do
-    
-    call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
-    
-    select case(theory)
-    case('dft','dft_band','dft_md') 
-      suffix = "elf"
-    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
-      write(filenum, '(i6.6)') itt
-      suffix = "elf_"//adjustl(filenum)
-    case default
-      stop 'invalid theory'
-    end select
-    
-    phys_quantity = "elf"
-    if(format_voxel_data=='avs')then
-      header_unit = "none"
-      call write_avs(lg,103,suffix,header_unit,elf)
-    else if(format_voxel_data=='cube')then
-      call write_cube(lg,103,suffix,phys_quantity,elf,system%hgs)
-    else if(format_voxel_data=='vtk')then
-      call write_vtk(lg,103,suffix,elf,system%hgs)
-    end if
-    
-  else
-    
-    !future work: for zwf
-    if(comm_is_root(nproc_id_global)) then
-      write(*,*) "**************************************************************"
-      write(*,*) "When wave function is complex, this version cannot output elf."
-      write(*,*) "**************************************************************"
-    end if
-    
+  end do
+  end do
+  end do
+  
+  call comm_summation(mrelftau,elftau,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+  call comm_summation(mrcurden,curden,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+  
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    box(ix,iy,iz) = rho_half(ix,iy,iz)
+  end do
+  end do
+  end do
+  
+  if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
+  call calc_gradient_field(mg,stencil%coef_nab,box,gradrho)
+  
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2 &
+                      +gradrho(2,ix,iy,iz)**2 &
+                      +gradrho(3,ix,iy,iz)**2
+    elfc(ix,iy,iz)=elftau(ix,iy,iz)-gradrho2(ix,iy,iz)/rho_half(ix,iy,iz)/4.d0  &
+                                   -curden(ix,iy,iz)/rho_half(ix,iy,iz)
+  end do
+  end do
+  end do
+  
+  ! matbox_l stores ELF
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    elfcuni(ix,iy,iz)=3.d0/5.d0*(6.d0*Pi**2)**(2.d0/3.d0)      &
+                     *rho_half(ix,iy,iz)**(5.d0/3.d0)
+    matbox_l(ix,iy,iz)=1.d0/(1.d0+elfc(ix,iy,iz)**2/elfcuni(ix,iy,iz)**2)
+  end do
+  end do
+  end do
+  
+  call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
+  
+  select case(theory)
+  case('dft','dft_band','dft_md') 
+    suffix = "elf"
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
+    write(filenum, '(i6.6)') itt
+    suffix = "elf_"//adjustl(filenum)
+  case default
+    stop 'invalid theory'
+  end select
+  
+  phys_quantity = "elf"
+  if(format_voxel_data=='avs')then
+    header_unit = "none"
+    call write_avs(lg,103,suffix,header_unit,elf)
+  else if(format_voxel_data=='cube')then
+    call write_cube(lg,103,suffix,phys_quantity,elf,system%hgs)
+  else if(format_voxel_data=='vtk')then
+    call write_vtk(lg,103,suffix,elf,system%hgs)
   end if
   
 end subroutine write_elf
