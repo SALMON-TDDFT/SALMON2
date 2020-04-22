@@ -350,7 +350,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
     if(allocated(tpsi%rwf)) then
       ztmp = cmplx(tpsi%rwf(:,:,:,ispin,io,ik,1))
     else
-      ztmp = cmplx(tpsi%zwf(:,:,:,ispin,io,ik,1))
+      ztmp = tpsi%zwf(:,:,:,ispin,io,ik,1)
     end if
     
     call calc_gradient_psi(ztmp,gradzpsi,mg%is_array,mg%ie_array,is,ie, &
