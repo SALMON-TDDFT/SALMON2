@@ -1,0 +1,112 @@
+#!/usr/bin/env python
+
+# This verification script file is automatically executed after the SALMON.
+# If necessary, this script file can used for the verification of the result.
+# The script MUST indicate a "return-code 0", if the calculation is successful.
+# If a negative value is returned, it is treated as a test failure.
+
+import sys
+import os
+import numpy as np
+
+# test rule
+reference = {}
+
+reference['Si_m/000001/Si_rt.data'] = [
+    # Row, Col, Reference, Tolerance, Info
+    [143, 4-1, -8.787480e-03, 1e-6, "Ac_z(imacro=1,t=22.88)"],
+    [143, 16-1, -6.781798e-05, 1e-8, "Jm_z(imacro=1,t=22.88)"],
+]
+
+reference['Si_m/000002/Si_rt.data'] = [
+    # Row, Col, Reference, Tolerance, Info
+    [143, 4-1, -5.192433e-03, 1e-6, "Ac_z(imacro=1,t=22.88)"],
+    [143, 16-1, -5.255905e-05, 1e-8, "Jm_z(imacro=1,t=22.88)"],
+]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+message = """[{STATUS}] {INFO}
+    {ITEM}[{I:d},{J:d}]: {VAL:+.18e} (ref: {REF:+.4e})
+    err: {ERR:1.4e} {CMP} tol: {TOL:1.4e}"""
+
+def main():
+    print("#" * 60)
+    print("# Verification start")
+
+    return_code = 0
+
+    for item, table in reference.items():
+        if os.path.isfile(item):
+            data = np.loadtxt(item)
+            for i, j, ref, tol, info in table:
+                err = np.abs(data[i, j] - ref)
+                if err <= tol:
+                    status, cmp = 'Success', '<='
+                else:
+                    status, cmp = 'Failure', '>'
+                    return_code = -1
+
+                print(message.format(
+                    STATUS=status, INFO=info, ITEM=item, I=i, J=j, VAL=data[i, j],
+                    REF=ref, ERR=err, CMP=cmp, TOL=tol
+                ))
+        else:
+            print('[Error] "%s" is not found' % item)
+            return_code = -1
+
+    print("# Verification end")
+    print("#" * 60)
+
+    sys.exit(return_code)
+
+if __name__ == "__main__":
+    main()
+
