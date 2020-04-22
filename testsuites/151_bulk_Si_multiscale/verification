@@ -12,37 +12,12 @@ import numpy as np
 # test rule
 reference = {}
 
-reference['multiscale/M000001/Si_Ac_M.data'] = [
+reference['Si_m/000001/Si_rt.data'] = [
     # Row, Col, Reference, Tolerance, Info
-    [2200, 4-1, -1.080e-02, 1e-3, "Ac_z(imacro=1,t=220.0)"],
-    [2200, 7-1, -1.824e-04, 1e-5, "Jm_z(imacro=1,t=220.0)"],
+    [143, 4-1, -2.254296e-10, 1e-13, "Ac_z(imacro=1,t=22.88)"],
+    [143, 16-1, -6.78179833718706e-05, 1e-8, "Jm_z(imacro=1,t=22.88)"],
 ]
 
-reference['multiscale/M000002/Si_Ac_M.data'] = [
-    # Row, Col, Reference, Tolerance, Info
-    [2200, 4-1, -4.110e-03, 1e-3, "Ac_z(imacro=2,t=220.0)"],
-    [2200, 7-1, -8.896e-05, 5e-7, "Jm_z(imacro=2,t=220.0)"],
-]
-
-reference['multiscale/M000003/Si_Ac_M.data'] = [
-    # Row, Col, Reference, Tolerance, Info
-    [2200, 4-1, -1.040e-03, 5e-4, "Ac_z(imacro=3,t=220.0)"],
-    [2200, 7-1, -4.140e-05, 2e-6, "Jm_z(imacro=3,t=220.0)"],
-]
-
-reference['multiscale/M000004/Si_Ac_M.data'] = [    
-    # Row, Col, Reference, Tolerance, Info
-    [2200, 7-1, -2.000e-05, 3e-6, "Jm_z(imacro=4,t=220.0)"],
-]
-
-reference['multiscale/RT_Ac/Si_Ac_002200.data'] = [
-    # Row, Col, Reference, Tolerance, Info
-    [2001,  6-1, -1.100000e-02, 5e-03, "Ac(ix_m=1,t=220.0)"],
-    [2001, 15-1, -1.900000e-04, 5e-05, "Jm_z(ix_m=1,t=220.0)"],
-    [2001, 16-1, +5.900000e-03, 7e-04, "Eex(ix_m=1,t=220.0)"],
-    [2001, 17-1, +5.700000e-03, 3e-04, "Eabs(ix_m=1,t=220.0)"],
-    [2001, 18-1, +1.470000e-03, 3e-05, "Eemf(ix_m=1,t=220.0)"],
-]
 
 
 

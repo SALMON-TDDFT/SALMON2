@@ -59,12 +59,12 @@
 
 !explainations of these will be added after multi-scale calcution will be moved from ARTED
 &multiscale
-  nx_m = 4
+  nx_m = 2
   ny_m = 1
   nz_m = 1
-  hx_m = 100 
-  hy_m = 100
-  hz_m = 100
+  hx_m = 250 
+  hy_m = 250
+  hz_m = 250
   nxvacl_m = 1000
   nxvacr_m = 1000
 /
