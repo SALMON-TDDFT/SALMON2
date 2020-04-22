@@ -14,10 +14,15 @@ reference = {}
 
 reference['Si_m/000001/Si_rt.data'] = [
     # Row, Col, Reference, Tolerance, Info
-    [143, 4-1, -2.254296e-10, 1e-13, "Ac_z(imacro=1,t=22.88)"],
-    [143, 16-1, -6.78179833718706e-05, 1e-8, "Jm_z(imacro=1,t=22.88)"],
+    [143, 4-1, -8.787480e-03, 1e-6, "Ac_z(imacro=1,t=22.88)"],
+    [143, 16-1, -6.781798e-05, 1e-8, "Jm_z(imacro=1,t=22.88)"],
 ]
 
+reference['Si_m/000002/Si_rt.data'] = [
+    # Row, Col, Reference, Tolerance, Info
+    [143, 4-1, -5.192433e-03, 1e-6, "Ac_z(imacro=1,t=22.88)"],
+    [143, 16-1, -5.255905e-05, 1e-8, "Jm_z(imacro=1,t=22.88)"],
+]
 
 
 
@@ -104,3 +109,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
