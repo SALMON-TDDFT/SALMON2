@@ -234,19 +234,20 @@ end subroutine write_dns_ac_je
 !===================================================================================================================================
 
 subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
-  use salmon_global, only: format_voxel_data,theory
+  use salmon_global       ,only: format_voxel_data,theory
   use structures
-  use math_constants, only: pi
-  use communication, only: comm_summation
-  use misc_routines, only: get_wtime
-  use sendrecv_grid, only: update_overlap_complex8,update_overlap_real8
-  use stencil_sub, only: calc_gradient_field
+  use math_constants      ,only: pi
+  use communication       ,only: comm_is_root,comm_summation
+  use parallelization     ,only: nproc_id_global
+  use misc_routines       ,only: get_wtime
+  use sendrecv_grid       ,only: update_overlap_complex8,update_overlap_real8
+  use stencil_sub         ,only: calc_gradient_field
   use write_file3d
   implicit none
   integer                 ,intent(in) :: itt
   type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_parallel_info),intent(in) :: info
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_stencil)         ,intent(in) :: stencil
   type(s_scalar)          ,intent(in) :: srho
   type(s_sendrecv_grid)               :: srg,srg_scalar
@@ -260,7 +261,6 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
   integer :: io,ik,ispin,ix,iy,iz
   integer,parameter :: Nd=4
-  complex(8) :: ztmp
   !
   real(8) :: elftau(mg%is(1):mg%ie(1),   &
                     mg%is(2):mg%ie(2),   &
@@ -293,23 +293,41 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
                       mg%is(2):mg%ie(2),   &
                       mg%is(3):mg%ie(3))
   real(8) :: box(mg%is_array(1):mg%ie_array(1), &
-  & mg%is_array(2):mg%ie_array(2), &
-  & mg%is_array(3):mg%ie_array(3))
+                 mg%is_array(2):mg%ie_array(2), &
+                 mg%is_array(3):mg%ie_array(3))
   real(8) :: matbox_l(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-
+  complex(8) :: ztmp(mg%is_array(1):mg%ie_array(1), &
+                     mg%is_array(2):mg%ie_array(2), &
+                     mg%is_array(3):mg%ie_array(3))
+  
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ calc_elf"
 
   nspin = system%nspin
-  no = system%no
-  nk = system%nk
-  is = mg%is
-  ie = mg%ie
+  no   = system%no
+  nk   = system%nk
+  is   = mg%is
+  ie   = mg%ie
   ik_s = info%ik_s
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-
-  !$OMP parallel do private(iz,iy,ix)
+  
+  rho_half = 0.d0
+  ztmp     = 0.d0
+  gradzpsi = 0.d0
+  mrelftau = 0.d0
+  mrcurden = 0.d0
+  elftau   = 0.d0
+  curden   = 0.d0
+  box      = 0.d0
+  gradrho  = 0.d0
+  gradrho2 = 0.d0
+  elfc     = 0.d0
+  elfcuni  = 0.d0
+  matbox_l = 0.d0
+  elf      = 0.d0
+  
+!$OMP parallel do private(iz,iy,ix)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -317,103 +335,108 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   end do
   end do
   end do
-  mrelftau=0.d0
-  mrcurden=0.d0
-
-  if(info%if_divide_rspace) then
-     call update_overlap_complex8(srg, mg, tpsi%zwf)
-  end if
-
-  ik=1    ! --> do loop (future work)
-  ispin=1 ! --> do loop (future work)
-
-    do io=1,no
-
-        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,1),gradzpsi,mg%is_array,mg%ie_array,is,ie, &
-        & mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-
-  !$OMP parallel do private(iz,iy,ix)
+  
+  if(allocated(tpsi%rwf)) then
+    
+    if(info%if_divide_rspace) then
+     call update_overlap_real8(srg, mg, tpsi%rwf)
+    end if
+    
+    ik=1    ! --> do loop (future work)
+    ispin=1 ! --> do loop (future work)
+    
+    do io=io_s,io_e
+      ztmp = cmplx(tpsi%rwf(:,:,:,ispin,io,ik,1))
+      call calc_gradient_psi(ztmp,gradzpsi,mg%is_array,mg%ie_array,is,ie, &
+                             mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
+!$OMP parallel do private(iz,iy,ix)
         do iz=is(3),ie(3)
         do iy=is(2),ie(2)
         do ix=is(1),ie(1)
-          ztmp = tpsi%zwf(ix,iy,iz,ispin,io,ik,1)
-    
-          mrelftau(ix,iy,iz)=mrelftau(ix,iy,iz)+abs(gradzpsi(1,ix,iy,iz))**2      &
-                             +abs(gradzpsi(2,ix,iy,iz))**2      &
+          mrelftau(ix,iy,iz)=mrelftau(ix,iy,iz)            &
+                             +abs(gradzpsi(1,ix,iy,iz))**2 &
+                             +abs(gradzpsi(2,ix,iy,iz))**2 &
                              +abs(gradzpsi(3,ix,iy,iz))**2
-    
           mrcurden(ix,iy,iz)=mrcurden(ix,iy,iz)      &
-               +( abs(conjg(ztmp)*gradzpsi(1,ix,iy,iz)      &
-                    -ztmp*conjg(gradzpsi(1,ix,iy,iz)))**2      &
-                 +abs(conjg(ztmp)*gradzpsi(2,ix,iy,iz)      &
-                    -ztmp*conjg(gradzpsi(2,ix,iy,iz)))**2      &
-                 +abs(conjg(ztmp)*gradzpsi(3,ix,iy,iz)      &
-                    -ztmp*conjg(gradzpsi(3,ix,iy,iz)))**2 )/2.d0
-    
+                            +( abs(conjg(ztmp(ix,iy,iz))*gradzpsi(1,ix,iy,iz)      &
+                                  -ztmp(ix,iy,iz)*conjg(gradzpsi(1,ix,iy,iz)))**2  &
+                              +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(2,ix,iy,iz)      &
+                                  -ztmp(ix,iy,iz)*conjg(gradzpsi(2,ix,iy,iz)))**2  &
+                              +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(3,ix,iy,iz)      &
+                                  -ztmp(ix,iy,iz)*conjg(gradzpsi(3,ix,iy,iz)))**2 )/2.d0
         end do
         end do
         end do
-        
     end do
-
+    
     call comm_summation(mrelftau,elftau,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
     call comm_summation(mrcurden,curden,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
     
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      box(ix,iy,iz) = srho%f(ix,iy,iz)
+      box(ix,iy,iz) = rho_half(ix,iy,iz)
     end do
     end do
     end do
     
     if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
     call calc_gradient_field(mg,stencil%coef_nab,box,gradrho)
-
+    
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2      &
-            +gradrho(2,ix,iy,iz)**2      &
-            +gradrho(3,ix,iy,iz)**2
+      gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2 &
+                        +gradrho(2,ix,iy,iz)**2 &
+                        +gradrho(3,ix,iy,iz)**2
       elfc(ix,iy,iz)=elftau(ix,iy,iz)-gradrho2(ix,iy,iz)/rho_half(ix,iy,iz)/4.d0  &
                                      -curden(ix,iy,iz)/rho_half(ix,iy,iz)
     end do
     end do
     end do
-
-  ! matbox_l stores ELF
-  matbox_l=0.d0
-  do iz=mg%is(3),mg%ie(3)
-  do iy=mg%is(2),mg%ie(2)
-  do ix=mg%is(1),mg%ie(1)
-    elfcuni(ix,iy,iz)=3.d0/5.d0*(6.d0*Pi**2)**(2.d0/3.d0)      &
-              *rho_half(ix,iy,iz)**(5.d0/3.d0)
-    matbox_l(ix,iy,iz)=1.d0/(1.d0+elfc(ix,iy,iz)**2/elfcuni(ix,iy,iz)**2)
-  end do
-  end do
-  end do
-
-  call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-
-  select case(theory)
-  case('dft','dft_band','dft_md') 
-    suffix = "elf"
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
-    write(filenum, '(i6.6)') itt
-    suffix = "elf_"//adjustl(filenum)
-  case default
-    stop 'invalid theory @ writefield'
-  end select
-
-  phys_quantity = "elf"
-  if(format_voxel_data=='avs')then
-    header_unit = "none"
-    call write_avs(lg,103,suffix,header_unit,elf)
-  else if(format_voxel_data=='cube')then
-    call write_cube(lg,103,suffix,phys_quantity,elf,system%hgs)
-  else if(format_voxel_data=='vtk')then
-    call write_vtk(lg,103,suffix,elf,system%hgs)
+    
+    ! matbox_l stores ELF
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      elfcuni(ix,iy,iz)=3.d0/5.d0*(6.d0*Pi**2)**(2.d0/3.d0)      &
+                       *rho_half(ix,iy,iz)**(5.d0/3.d0)
+      matbox_l(ix,iy,iz)=1.d0/(1.d0+elfc(ix,iy,iz)**2/elfcuni(ix,iy,iz)**2)
+    end do
+    end do
+    end do
+    
+    call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
+    
+    select case(theory)
+    case('dft','dft_band','dft_md') 
+      suffix = "elf"
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
+      write(filenum, '(i6.6)') itt
+      suffix = "elf_"//adjustl(filenum)
+    case default
+      stop 'invalid theory'
+    end select
+    
+    phys_quantity = "elf"
+    if(format_voxel_data=='avs')then
+      header_unit = "none"
+      call write_avs(lg,103,suffix,header_unit,elf)
+    else if(format_voxel_data=='cube')then
+      call write_cube(lg,103,suffix,phys_quantity,elf,system%hgs)
+    else if(format_voxel_data=='vtk')then
+      call write_vtk(lg,103,suffix,elf,system%hgs)
+    end if
+    
+  else
+    
+    !future work: for zwf
+    if(comm_is_root(nproc_id_global)) then
+      write(*,*) "**************************************************************"
+      write(*,*) "When wave function is complex, this version cannot output elf."
+      write(*,*) "**************************************************************"
+    end if
+    
   end if
   
 end subroutine write_elf
@@ -502,16 +525,16 @@ end subroutine write_estatic
 !===================================================================================================================================
 
 subroutine write_psi(lg,mg,system,info,spsi)
-  use inputoutput, only: au_length_aa
+  use inputoutput   ,only: au_length_aa
   use structures
-  use salmon_global, only: format_voxel_data
-  use communication, only: comm_summation
+  use salmon_global ,only: format_voxel_data
+  use communication ,only: comm_summation
   use write_file3d
   implicit none
-  type(s_rgrid),intent(in) :: lg,mg
-  type(s_dft_system),intent(in) :: system
+  type(s_rgrid)        ,intent(in) :: lg,mg
+  type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
-  type(s_orbital),intent(in) :: spsi
+  type(s_orbital)      ,intent(in) :: spsi
   !
   integer :: io,ik,ispin,ix,iy,iz
   complex(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: cmatbox,cmatbox2
