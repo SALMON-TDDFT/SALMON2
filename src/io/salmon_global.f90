@@ -167,6 +167,7 @@ module salmon_global
 !! &emfield
   character(2)   :: trans_longi
   character(16)  :: ae_shape1
+  character(256) :: file_input1
   real(8)        :: e_impulse
   real(8)        :: E_amplitude1
   real(8)        :: I_wcm2_1

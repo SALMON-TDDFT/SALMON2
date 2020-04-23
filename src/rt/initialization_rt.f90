@@ -53,7 +53,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
   use salmon_Total_Energy
-  use em_field, only: set_vonf,calc_Ac_ext
+  use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
   implicit none
@@ -412,10 +412,11 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     end do
   
   if(iperiodic==3) then
-    do itt=Mit+1,itotNtime+1
-      tt = dt*dble(itt)
-      call calc_Ac_ext(tt,rt%Ac_ext(:,itt))
-    end do
+    ! do itt=Mit+1,itotNtime+1
+    !   tt = dt*dble(itt)
+    !   call calc_Ac_ext(tt,rt%Ac_ext(:,itt))
+    ! end do
+    call calc_Ac_ext_t(0d0, dt, Mit+1, itotNtime+1, rt%Ac_ext(:,Mit+1:itotNtime+1))
   end if
   
   if(yn_md=='y') call init_md(system,md)
