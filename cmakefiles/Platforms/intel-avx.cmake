@@ -1,6 +1,4 @@
 ### Intel Compiler for Ivy-, Sandy-Bridge
-set(TARGET_SUFFIX               ".cpu")
-
 set(ARCH                        "-xAVX")
 set(SIMD_SET                    "")
 set(OPENMP_FLAGS                "-qopenmp")

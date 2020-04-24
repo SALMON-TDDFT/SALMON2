@@ -1,6 +1,4 @@
 ### Intel Compiler for AVX-512 processors (since Skylake-SP)
-set(TARGET_SUFFIX               ".cpu")
-
 set(ARCH                        "-xCORE-AVX512")
 set(SIMD_SET                    "avx512")
 set(OPENMP_FLAGS                "-qopenmp")

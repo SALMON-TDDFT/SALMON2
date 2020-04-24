@@ -1,6 +1,4 @@
 ### Fujitsu Compiler, Fugaku supercomputer (early access version)
-set(TARGET_SUFFIX               "")
-
 set(ARCH                        "")
 set(SIMD_SET                    "")
 #set(OPENMP_FLAGS                "-Kopenmp")

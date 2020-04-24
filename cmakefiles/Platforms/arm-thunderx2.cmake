@@ -1,7 +1,5 @@
 ### Arm HPC compiler
 # NOTE: SALMON outputs NaN when compiling with Arm HPC compiler version 19.1, don't use it.
-set(TARGET_SUFFIX               ".cpu")
-
 set(ARCH                        "-mcpu=thunderx2t99")
 set(SIMD_SET                    "")
 set(OPENMP_FLAGS                "-fopenmp")

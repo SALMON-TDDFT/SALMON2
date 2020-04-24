@@ -1,6 +1,4 @@
 ### Arm HPC compiler
-set(TARGET_SUFFIX               ".cpu")
-
 set(ARCH                        "-mcpu=generic -march=armv8.1-a+sve")
 set(SIMD_SET                    "")
 set(OPENMP_FLAGS                "-fopenmp")

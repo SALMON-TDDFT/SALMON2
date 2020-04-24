@@ -61,7 +61,7 @@ option_set(USE_OPT_SOFTWARE_PREFETCH       "Enable software prefetch in the expl
 
 
 # variables
-set(TARGET_NAME         "salmon${TARGET_SUFFIX}") # FIXME: TARGET_SUFFIX will remove at version 2 ?
+set(TARGET_NAME         "salmon")
 set(CMAKE_Fortran_FLAGS "${ARCH} ${OPENMP_FLAGS} ${Fortran_FLAGS_General} ${ADDITIONAL_OPTIMIZE_FLAGS} ${CMAKE_Fortran_FLAGS}")
 set(CMAKE_C_FLAGS       "${ARCH} ${OPENMP_FLAGS} ${C_FLAGS_General} ${ADDITIONAL_OPTIMIZE_FLAGS} ${CMAKE_C_FLAGS}")
 add_definitions("${ADDITIONAL_MACRO}")
