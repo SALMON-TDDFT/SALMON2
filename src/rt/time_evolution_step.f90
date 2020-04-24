@@ -378,7 +378,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_out)
+      call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
