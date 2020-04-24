@@ -26,7 +26,7 @@ contains
     use math_constants,only : zi,pi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use communication, only: comm_summation
-    use nonlocal_potential, only: calc_uVpsi_rdivided
+    use nonlocal_potential, only: calc_uVpsi_rdivided, calc_uVpsi
     use sym_vector_sub, only: sym_vector_xyz
     use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
@@ -138,7 +138,11 @@ contains
     end if
 
   ! uVpsibox2 = < uV | exp(ikr) | psi >
-    call calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
+    if (info%if_divide_rspace) then
+      call calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
+    else
+      call calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox2)
+    end if
 
     if( PLUS_U_ON )then
       Nlma_ao = size(ppg%ia_tbl_ao)
@@ -321,7 +325,8 @@ contains
 
     if(allocated(tpsi%rwf)) deallocate(tpsi%zwf)
     if(allocated(gtpsi)) deallocate(gtpsi)
-    deallocate(F_tmp,F_sum,uVpsibox,uVpsibox2)
+    if(allocated(uVpsibox)) deallocate(uVpsibox)
+    deallocate(F_tmp,F_sum,uVpsibox2)
     if( PLUS_U_ON )then
       deallocate( phipsibox, phipsibox2 )
       deallocate( dphipsi_lma )

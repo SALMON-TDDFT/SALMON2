@@ -274,6 +274,66 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   return
 end subroutine zpseudo
 
+subroutine calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox)
+  use structures
+  use timer
+  implicit none
+  integer        ,intent(in) :: nspin
+  type(s_parallel_info),intent(in) :: info
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_orbital),intent(in) :: tpsi
+  complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
+  integer :: ilma,ia,j,ix,iy,iz,Nlma
+  complex(8) :: uVpsi
+  integer :: ilocal
+
+  call timer_begin(LOG_UHPSI_PSEUDO)
+
+  im_s = info%im_s
+  im_e = info%im_e
+  ik_s = info%ik_s
+  ik_e = info%ik_e
+  io_s = info%io_s
+  io_e = info%io_e
+  norb = Nspin* info%numo * info%numk * info%numm
+
+  Nlma = ppg%Nlma
+
+  allocate(uVpsibox(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+
+!$omp parallel do collapse(4) &
+!$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
+  do im=im_s,im_e
+  do ik=ik_s,ik_e
+  do io=io_s,io_e
+  do ispin=1,Nspin
+
+    do ilocal=1,ppg%ilocal_nlma
+      ilma=ppg%ilocal_nlma2ilma(ilocal)
+      ia  =ppg%ilocal_nlma2ia  (ilocal)
+      uVpsi = 0.d0
+      do j=1,ppg%mps(ia)
+        ix = ppg%jxyz(1,j,ia)
+        iy = ppg%jxyz(2,j,ia)
+        iz = ppg%jxyz(3,j,ia)
+        uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+      end do
+      uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+      uVpsibox(ispin,io,ik,im,ilma) = uVpsi
+    end do
+
+  end do
+  end do
+  end do
+  end do
+!$omp end parallel do
+
+  call timer_end(LOG_UHPSI_PSEUDO)
+
+  return
+end subroutine calc_uVpsi
+
 subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
   use timer
