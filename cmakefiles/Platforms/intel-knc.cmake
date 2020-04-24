@@ -1,6 +1,4 @@
 ### Intel Compiler for Knights Corner
-set(TARGET_SUFFIX               ".mic")
-
 set(ARCH                        "-mmic")
 set(SIMD_SET                    "avx512")
 set(OPENMP_FLAGS                "-qopenmp")

@@ -1,6 +1,4 @@
 ### Intel Compiler for Knights-Landing
-set(TARGET_SUFFIX               ".mic")
-
 set(ARCH                        "-xMIC-AVX512")
 set(SIMD_SET                    "avx512")
 set(OPENMP_FLAGS                "-qopenmp")

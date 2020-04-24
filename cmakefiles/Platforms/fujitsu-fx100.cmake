@@ -1,6 +1,4 @@
 ### Fujitsu Compiler, FX100 system
-set(TARGET_SUFFIX               ".cpu")
-
 set(ARCH                        "-KHPC_ACE2")
 set(SIMD_SET                    "HPC_ACE2")
 set(OPENMP_FLAGS                "-Kopenmp")

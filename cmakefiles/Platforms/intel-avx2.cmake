@@ -1,6 +1,4 @@
 ### Intel Compiler for Haswell, Broadwell...
-set(TARGET_SUFFIX               ".cpu")
-
 set(ARCH                        "-xCORE-AVX2")
 set(SIMD_SET                    "")
 set(OPENMP_FLAGS                "-qopenmp")

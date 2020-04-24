@@ -1,6 +1,4 @@
 ### Intel Compiler for Nehalem
-set(TARGET_SUFFIX               ".cpu")
-
 set(ARCH                        "")
 set(SIMD_SET                    "")
 set(OPENMP_FLAGS                "-qopenmp")

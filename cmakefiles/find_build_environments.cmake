@@ -37,8 +37,6 @@ if (USE_MPI)
 
 endif ()
 
-set(TARGET_SUFFIX ".cpu")
-
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
 set(CMAKE_Fortran_FLAGS_RELEASE "-O3")
 set(Fortran_FLAGS_General       "${FCC_PP_OPTION} ${MPI_Fortran_COMPILE_FLAGS}")
