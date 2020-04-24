@@ -458,7 +458,7 @@ CONTAINS
   
 !===================================================================================================================================
 
-  subroutine init_ewald(system,info,ewald,fg)
+  subroutine init_ewald(system,info,ewald)
     use structures
     use salmon_math
 !    use math_constants,only : pi,zi
@@ -471,7 +471,6 @@ CONTAINS
     type(s_dft_system) ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
     type(s_ewald_ion_ion) :: ewald
-    type(s_reciprocal_grid),intent(in) :: fg
     !
     integer :: ix,iy,iz,iia,ia,ib,ir,ipair   !,ig
     integer :: npair_bk_max, npair_bk_loc

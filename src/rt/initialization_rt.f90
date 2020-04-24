@@ -242,7 +242,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
      ewald%yn_bookkeep='y'
      call  init_nion_div(system,lg,mg,info)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald,fg)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)

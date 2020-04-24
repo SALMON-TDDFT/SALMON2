@@ -107,7 +107,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   end if
 
 call timer_begin(LOG_INIT_PS_CALC_NPS)
-  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,lg%num(1),lg%num(2),lg%num(3), &
+  call calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz, &
                                    lg%num(1)*lg%num(2)*lg%num(3),   &
                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
@@ -459,7 +459,7 @@ subroutine finalize_jxyz(ppg)
 end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
+subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
   use salmon_global,only : natom,kion,rion,iperiodic
   use structures
   use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
@@ -467,7 +467,7 @@ subroutine calc_nps(pp,ppg,alx,aly,alz,lx,ly,lz,nlx,nly,nlz,nl,mx,my,mz,ml,hx,hy
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   real(8),intent(in) :: alx,aly,alz
-  integer,intent(in) :: nl,ml,nlx,nly,nlz
+  integer,intent(in) :: nl,ml
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
   integer,intent(in) :: mx(ml),my(ml),mz(ml)
   real(8),intent(in) :: hx,hy,hz

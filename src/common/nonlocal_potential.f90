@@ -276,12 +276,13 @@ end subroutine zpseudo
 
 subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
-  use salmon_global, only: natom
   use timer
-  use communication, only: comm_summation
 #ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
+  use salmon_global, only: natom
   use communication, only: comm_wait_all
   use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
+#else
+  use communication, only: comm_summation
 #endif
   implicit none
   integer        ,intent(in) :: nspin
@@ -291,9 +292,11 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
   complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns
+  integer :: ilma,ia,j,ix,iy,iz,Nlma,ilocal
   complex(8) :: uVpsi
-  integer :: ireqs(natom), nreq, ilocal
+#ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
+  integer :: ireqs(natom),nreq,ierr,is,ie,ns
+#endif
 
   call timer_begin(LOG_UHPSI_PSEUDO)
 

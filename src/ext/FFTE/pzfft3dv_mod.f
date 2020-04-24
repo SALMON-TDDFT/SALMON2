@@ -413,10 +413,11 @@ C     1                  MPI_DOUBLE_COMPLEX,ICOMMY,IERR)
       END
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       SUBROUTINE CONVERT_1D(A,B,NN,ICOMM,NPU)
+      USE COMMUNICATION, ONLY: COMM_ALLTOALL
       IMPLICIT REAL*8 (A-H,O-Z)
-      COMPLEX*16 A(*),B(*)
-     
-      CALL ALLTOALL_1D(A,B,NN,ICOMM,NPU)
- 
+      COMPLEX*16 A(NN),B(NN)
+
+      CALL COMM_ALLTOALL(A,B,ICOMM,NN/NPU)
+
       END
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
