@@ -296,7 +296,7 @@ real(8) :: rNe0,rNe
      ewald%yn_bookkeep='y'
      call  init_nion_div(system,lg,mg,info)
   end select
-  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald,fg)
+  if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
 
   call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
   rion_update = .true. ! it's first calculation

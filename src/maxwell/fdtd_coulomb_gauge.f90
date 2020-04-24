@@ -234,7 +234,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
       do ix=mg%is(1),mg%ie(1)
         wrk(1) = wrk(1) + Ac%v(1,ix,iy,mg%is(3))
         wrk(2) = wrk(2) + Ac%v(2,ix,iy,mg%is(3))
-        wrk(3) = wrk(2) + Ac%v(3,ix,iy,mg%is(3))
+        wrk(3) = wrk(3) + Ac%v(3,ix,iy,mg%is(3))
       end do
     end do
   end if
@@ -247,7 +247,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
       do ix=mg%is(1),mg%ie(1)
         wrk3(1) = wrk3(1) + Ac%v(1,ix,iy,mg%ie(3))
         wrk3(2) = wrk3(2) + Ac%v(2,ix,iy,mg%ie(3))
-        wrk3(3) = wrk3(2) + Ac%v(3,ix,iy,mg%ie(3))
+        wrk3(3) = wrk3(3) + Ac%v(3,ix,iy,mg%ie(3))
       end do
     end do
   end if
@@ -255,7 +255,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
   rtmp1 = [wrk, wrk3]
-  call comm_summation(rtmp1,rtmp2,6,info%icomm_xy)
+  call comm_summation(rtmp1,rtmp2,6,info%icomm_r)
   wrk (1:3) = rtmp2(1:3)
   wrk3(1:3) = rtmp2(4:6)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
@@ -288,7 +288,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
   e_poynting_wrk = [e_poy1, e_poy2]
-  call comm_summation(e_poynting_wrk,e_poynting,2,info%icomm_xy)
+  call comm_summation(e_poynting_wrk,e_poynting,2,info%icomm_r)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
   call timer_begin(LOG_SS_FDTD_CALC)
