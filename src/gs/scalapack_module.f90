@@ -17,7 +17,7 @@ module scalapack_module
   implicit none
 
   public :: create_gridmap
-  public :: get_blocking_factor, get_appropriate_matsize
+  public :: get_blocking_factor
   public :: init_blacs
 
 private
@@ -145,44 +145,14 @@ contains
     type(s_parallel_info),intent(in) :: info
     integer,intent(in)               :: n
     integer,intent(inout)            :: mb,nb
-    integer :: k1,k2
 
     if (.not. allocated(info%gridmap)) &
       stop 'scalapack_module: gridmap not constructed.'
 
-    k1 = (n+info%nprow-1)/info%nprow
-    k2 = (n+info%npcol-1)/info%npcol
-    mb = min(k1,k2)
-    nb = mb
+    ! cyclic distribution
+    mb = 1
+    nb = 1
   end subroutine get_blocking_factor
-
-  subroutine get_appropriate_matsize(info,n)
-    use structures, only: s_parallel_info
-    use communication, only: comm_is_root
-    implicit none
-    type(s_parallel_info),intent(in) :: info
-    integer,intent(inout) :: n
-    integer :: mb,nb  ! blocking factor
-    integer :: k
-
-    if (.not. allocated(info%gridmap)) &
-      stop 'scalapack_module: gridmap not constructed.'
-
-    call get_blocking_factor(info,n,mb,nb)
-
-    if (nb * info%npcol /= n) then
-      k = max(nb*info%npcol, n)
-      k = min(k, (nb+1)*info%npcol)
-      if (comm_is_root(info%id_rko)) then
-        print '(A)',       '[WARNING] scalapack_module'
-        print '(A,2I6)' ,  '  nprow,npcol = ',info%nprow,info%npcol
-        print '(A,2I6)' ,  '  mb,nb       = ',mb,nb
-        print '(2(A,I6))', '  nb*npcol = ',nb*info%npcol,' /= ',n
-        print '(A,I6,A)',  '  appropriated value is ',k,' replaced it.'
-      end if
-      n = k
-    end if
-  end subroutine get_appropriate_matsize
 
   subroutine init_blacs(info,m)
     use structures, only: s_parallel_info
@@ -205,7 +175,6 @@ contains
       stop 'scalapack_module: gridmap not constructed.'
 
     n = m
-    call get_appropriate_matsize(info,n)
     call get_blocking_factor(info,n,mb,nb)
 
     call BLACS_PINFO( info%iam, info%nprocs )
@@ -248,10 +217,10 @@ contains
     end do
     info%ndiv = icount
 
-    allocate( info%i_tbl( max(1,info%ndiv(info%id_o)), 0:npo-1), &
-              info%j_tbl( max(1,info%ndiv(info%id_o)), 0:npo-1), &
-              info%iloc_tbl( max(1,info%ndiv(info%id_o)), 0:npo-1), &
-              info%jloc_tbl( max(1,info%ndiv(info%id_o)), 0:npo-1) )
+    allocate( info%i_tbl( maxval(info%ndiv), 0:npo-1), &
+              info%j_tbl( maxval(info%ndiv), 0:npo-1), &
+              info%iloc_tbl( maxval(info%ndiv), 0:npo-1), &
+              info%jloc_tbl( maxval(info%ndiv), 0:npo-1) )
 
     icount(:) = 0
     info%i_tbl = 0
