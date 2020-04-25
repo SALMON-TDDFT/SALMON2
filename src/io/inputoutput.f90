@@ -333,6 +333,7 @@ contains
     namelist/emfield/ &
       & trans_longi, &
       & ae_shape1, &
+      & file_input1, &
       & e_impulse, &
       & E_amplitude1, &
       & I_wcm2_1, &
@@ -669,6 +670,7 @@ contains
 !! == default for &emfield
     trans_longi    = 'tr'
     ae_shape1      = 'none'
+    file_input1    = ''
     e_impulse      = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
     E_amplitude1   = 0d0
     I_wcm2_1       = -1d0
@@ -1095,6 +1097,7 @@ contains
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
     call comm_bcast(ae_shape1  ,nproc_group_global)
+    call comm_bcast(file_input1,nproc_group_global)
     call comm_bcast(e_impulse,nproc_group_global)
     e_impulse = e_impulse *uenergy_to_au/ulength_to_au*utime_to_au
     call comm_bcast(E_amplitude1 ,nproc_group_global)
@@ -1854,6 +1857,7 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
       write(fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', file_input1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
@@ -2264,7 +2268,7 @@ contains
       end if
 
       select case(ae_shape1)
-      case("impulse","Ecos2","Acos2")
+      case("impulse","Ecos2","Acos2","input")
         continue
       case default
         stop 'set ae_shape1 to "impulse", "Ecos2", or "Acos2"'

@@ -53,18 +53,33 @@ end subroutine calc_emfields
 !===================================================================================================================================
 
 Subroutine calc_Ac_ext(t,Ac_ext)
+  real(8),intent(in) :: t
+  real(8)            :: Ac_ext(1:3)
+  real(8)            :: Ac_ext_t(1:3, 0:0)
+
+  call calc_Ac_ext_t(t, 0d0, 0, 0, Ac_ext_t)
+  Ac_ext(1:3) = Ac_ext_t(1:3, 0)
+  return
+end subroutine calc_Ac_ext
+
+!===================================================================================================================================
+
+Subroutine calc_Ac_ext_t(t0, delta_t, is, ie, Ac_ext_t)
   use math_constants,only: zi,pi
   use salmon_global, only: I_wcm2_1,I_wcm2_2,E_amplitude1,E_amplitude2,ae_shape1,ae_shape2, &
                          & epdir_re1,epdir_re2,epdir_im1,epdir_im2,tw1,tw2,t1_start,omega1,omega2, &
-                         & phi_CEP1,phi_CEP2,T1_T2,e_impulse
+                         & phi_CEP1,phi_CEP2,T1_T2,e_impulse,file_input1
   implicit none
-  real(8),intent(in) :: t
-  real(8)            :: Ac_ext(3)
+  real(8),intent(in) :: t0
+  real(8),intent(in) :: delta_t
+  integer,intent(in) :: is
+  integer,intent(in) :: ie
+  real(8),intent(out) :: Ac_ext_t(1:3, is:ie)
   !
-  integer :: npower
-  real(8) :: f0_1,f0_2,tt,T1_T2_tmp
+  integer :: i,npower
+  real(8) :: t,f0_1,f0_2,tt,T1_T2_tmp
   
-  Ac_ext = 0d0
+  Ac_ext_t(:,:) = 0d0
   if(t < 0d0) return
 
   if(I_wcm2_1 < 0d0)then
@@ -82,10 +97,14 @@ Subroutine calc_Ac_ext(t,Ac_ext)
 
   select case(AE_shape1)
   case('impulse')
-  
-    Ac_ext(1) = epdir_re1(1)*e_impulse
-    Ac_ext(2) = epdir_re1(2)*e_impulse
-    Ac_ext(3) = epdir_re1(3)*e_impulse
+    do i=is, ie
+      t=t0+i*delta_t
+      if (0d0 <= t) then
+        Ac_ext_t(1,i) = epdir_re1(1)*e_impulse
+        Ac_ext_t(2,i) = epdir_re1(2)*e_impulse
+        Ac_ext_t(3,i) = epdir_re1(3)*e_impulse
+      end if
+    end do
     
   case('Acos2','Acos3','Acos4','Acos6','Acos8')
   
@@ -99,13 +118,16 @@ Subroutine calc_Ac_ext(t,Ac_ext)
       stop 'Error in init_rt.f90'
     end select
 
-    tt = t - 0.5d0*tw1 - t1_start
-    if (abs(tt)<0.5d0*tw1) then
-      Ac_ext(:) = -f0_1/omega1*(cos(pi*tt/tw1))**npower &
-        *aimag( (epdir_re1(:) + zI*epdir_im1(:)) &
-        *exp(zI*(omega1*tt+phi_CEP1*2d0*pi))  &
-        )
-    end if
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t - 0.5d0*tw1 - t1_start
+      if (abs(tt)<0.5d0*tw1) then
+        Ac_ext_t(:,i) = -f0_1/omega1*(cos(pi*tt/tw1))**npower &
+          *aimag( (epdir_re1(:) + zI*epdir_im1(:)) &
+          *exp(zI*(omega1*tt+phi_CEP1*2d0*pi))  &
+          )
+      end if
+    end do
     T1_T2_tmp = T1_T2 + t1_start
 
   case('Ecos2')
@@ -116,14 +138,17 @@ Subroutine calc_Ac_ext(t,Ac_ext)
     if(sum(abs(epdir_im1(:)))>1.0d-8)then
       stop "Error: ae_shape1 should be 'Acos2' when epdir_im1 is used."
     end if
-    tt = t - 0.5d0*tw1 - t1_start
-    if (abs(tt)<0.5d0*tw1) then
-      Ac_ext(:) = -epdir_re1(:)*f0_1/(8d0*pi**2*omega1 - 2d0*tw1**2*omega1**3) &
-        *( &
-        (-4d0*pi**2+tw1**2*omega1**2 + tw1**2*omega1**2*cos(2d0*pi*tt/tw1))*cos(omega1*tt) &
-        +2d0*pi*(2d0*pi*cos(tw1*omega1/2d0) &
-        +tw1*omega1*sin(2d0*pi*tt/tw1)*sin(omega1*tt)))
-    end if
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t - 0.5d0*tw1 - t1_start
+      if (abs(tt)<0.5d0*tw1) then
+        Ac_ext_t(:,i) = -epdir_re1(:)*f0_1/(8d0*pi**2*omega1 - 2d0*tw1**2*omega1**3) &
+          *( &
+          (-4d0*pi**2+tw1**2*omega1**2 + tw1**2*omega1**2*cos(2d0*pi*tt/tw1))*cos(omega1*tt) &
+          +2d0*pi*(2d0*pi*cos(tw1*omega1/2d0) &
+          +tw1*omega1*sin(2d0*pi*tt/tw1)*sin(omega1*tt)))
+      end if
+    end do
     T1_T2_tmp = T1_T2 + t1_start
 
   case('Esin2sin')
@@ -134,29 +159,36 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   
     ! pulse shape : A(t)=f0/omega*sin(Pi t/T)**2 *cos (omega t+phi_CEP*2d0*pi) 
     ! pump laser
-    tt = t
-    if (tt<tw1) then
-      Ac_ext(:) = -epdir_re1(:)*f0_1/omega1*(sin(pi*tt/tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
-    end if
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t
+      if (tt<tw1) then
+        Ac_ext_t(:,i) = -epdir_re1(:)*f0_1/omega1*(sin(pi*tt/tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
+      end if
+    end do
     
   case('input')
      
-     stop "ae_shape1='input' is not implemented"
+    call add_Ac_from_file(trim(file_input1), t0, delta_t, is, ie, Ac_ext_t)
+    !  stop "ae_shape1='input' is not implemented"
     
   case('Asin2_cw')
   
     ! pulse shape : A(t)=f0/omega*sin(Pi t/T)**2 *cos (omega t+phi_CEP*2d0*pi) 
     ! pump laser
-    tt = t
-    if (tt<tw1*0.5d0) then
-      Ac_ext(:) = -Epdir_re1(:)*f0_1/omega1*(sin(pi*tt/tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
-    else
-      Ac_ext(:) = -Epdir_re1(:)*f0_1/omega1*cos(omega1*tt+phi_CEP1*2d0*pi)
-    end if
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t
+      if (tt<tw1*0.5d0) then
+        Ac_ext_t(:,i) = -Epdir_re1(:)*f0_1/omega1*(sin(pi*tt/tw1))**2*cos(omega1*tt+phi_CEP1*2d0*pi)
+      else
+        Ac_ext_t(:,i) = -Epdir_re1(:)*f0_1/omega1*cos(omega1*tt+phi_CEP1*2d0*pi)
+      end if
+    end do
     
   case('none')
   
-    Ac_ext = 0d0
+    Ac_ext_t(:,:) = 0d0
     
   case default
   
@@ -167,13 +199,16 @@ Subroutine calc_Ac_ext(t,Ac_ext)
 ! Probe
   select case(ae_shape2)
   case('impulse')
-  
-    tt = t - 0.5d0*tw1 - T1_T2_tmp
-    if(tt > 0d0)then
-      Ac_ext(1) = Ac_ext(1) + epdir_re2(1)*e_impulse
-      Ac_ext(2) = Ac_ext(2) + epdir_re2(2)*e_impulse
-      Ac_ext(3) = Ac_ext(3) + epdir_re2(3)*e_impulse
-    end if
+
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t - 0.5d0*tw1 - T1_T2_tmp
+      if(tt > 0d0)then
+        Ac_ext_t(1,i) = Ac_ext_t(1,i) + epdir_re2(1)*e_impulse
+        Ac_ext_t(2,i) = Ac_ext_t(2,i) + epdir_re2(2)*e_impulse
+        Ac_ext_t(3,i) = Ac_ext_t(3,i) + epdir_re2(3)*e_impulse
+      end if
+    end do
     
   case('Acos2','Acos3','Acos4','Acos6','Acos8')
   
@@ -187,14 +222,17 @@ Subroutine calc_Ac_ext(t,Ac_ext)
       stop 'Error in init_Ac.f90'
     end select
 
-    tt = t - 0.5d0*tw1 - T1_T2_tmp
-    if (abs(tt)<0.5d0*tw2) then
-      Ac_ext(:)=Ac_ext(:) &
-        -f0_2/omega2*(cos(pi*tt/tw2))**npower &
-        *aimag( (epdir_re2(:) + zI*epdir_im2(:)) &
-        *exp(zI*(omega2*tt+phi_CEP2*2d0*pi))  &
-        )
-    end if
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t - 0.5d0*tw1 - T1_T2_tmp
+      if (abs(tt)<0.5d0*tw2) then
+        Ac_ext_t(:,i)=Ac_ext_t(:,i) &
+          -f0_2/omega2*(cos(pi*tt/tw2))**npower &
+          *aimag( (epdir_re2(:) + zI*epdir_im2(:)) &
+          *exp(zI*(omega2*tt+phi_CEP2*2d0*pi))  &
+          )
+      end if
+    end do
 
   case('Ecos2')
   
@@ -204,15 +242,19 @@ Subroutine calc_Ac_ext(t,Ac_ext)
     if(sum(abs(epdir_im2(:)))>1.0d-8)then
       stop "Error: ae_shape2 should be 'Acos2' when epdir_im2 is used."
     end if
-    tt = t - 0.5d0*tw1 - T1_T2_tmp
-    if (abs(tt)<0.5d0*tw2) then
-      Ac_ext(:)=Ac_ext(:) &
-        -epdir_re2(:)*f0_2/(8d0*pi**2*omega2 - 2d0*tw2**2*omega2**3) &
-        *( &
-        (-4d0*pi**2+tw2**2*omega2**2 + tw2**2*omega2**2*cos(2d0*pi*tt/tw2))*cos(omega2*tt) &
-        +2d0*pi*(2d0*pi*cos(tw2*omega2/2d0) &
-        +tw2*omega2*sin(2d0*pi*tt/tw2)*sin(omega2*tt)))
-    end if
+
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t - 0.5d0*tw1 - T1_T2_tmp
+      if (abs(tt)<0.5d0*tw2) then
+        Ac_ext_t(:,i)=Ac_ext_t(:,i) &
+          -epdir_re2(:)*f0_2/(8d0*pi**2*omega2 - 2d0*tw2**2*omega2**3) &
+          *( &
+          (-4d0*pi**2+tw2**2*omega2**2 + tw2**2*omega2**2*cos(2d0*pi*tt/tw2))*cos(omega2*tt) &
+          +2d0*pi*(2d0*pi*cos(tw2*omega2/2d0) &
+          +tw2*omega2*sin(2d0*pi*tt/tw2)*sin(omega2*tt)))
+      end if
+    end do
 
   case('Esin2sin')
       
@@ -222,11 +264,15 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   
       ! pulse shape : A(t)=f0/omega*sin(Pi t/T)**2 *cos (omega t+phi_CEP*2d0*pi) 
     ! probe laser
-    tt = t
-    if ( (tt-T1_T2_tmp>0d0) .and. (tt-T1_T2_tmp<tw2) ) then
-      Ac_ext(:) = Ac_ext(:) &
-        &-Epdir_re2(:)*f0_2/omega2*(sin(pi*(tt-T1_T2_tmp)/tw2))**2*cos(omega2*(tt-T1_T2_tmp)+phi_CEP2*2d0*pi)
-    endif
+
+    do i=is, ie
+      t=t0+i*delta_t
+      tt = t
+      if ( (tt-T1_T2_tmp>0d0) .and. (tt-T1_T2_tmp<tw2) ) then
+        Ac_ext_t(:,i) = Ac_ext_t(:,i) &
+          &-Epdir_re2(:)*f0_2/omega2*(sin(pi*(tt-T1_T2_tmp)/tw2))**2*cos(omega2*(tt-T1_T2_tmp)+phi_CEP2*2d0*pi)
+      endif
+    end do
 
   case('input')
   case('Asin2_cw')
@@ -238,7 +284,7 @@ Subroutine calc_Ac_ext(t,Ac_ext)
   end select
 
   return
-End Subroutine calc_Ac_ext
+End Subroutine calc_Ac_ext_t
 
 !===================================================================================================================================
 
@@ -287,6 +333,68 @@ Subroutine calc_E_ext(ipulse,t,E_ext,amp_flag)
   
   return
 End Subroutine calc_E_ext
+
+!===================================================================================================================================
+
+subroutine add_Ac_from_file(filename, t0, delta_t, is, ie, Ac_ext_t)
+  use read_rtdata_file, only: count_rows_from_rtdata_file, load_Ac_from_rtdata_file
+  implicit none
+  character(256), intent(in) :: filename
+  real(8),intent(in) :: t0
+  real(8),intent(in) :: delta_t
+  integer,intent(in) :: is, ie
+  real(8),intent(inout) :: Ac_ext_t(1:3, is:ie)
+  
+  integer :: n_dat, i
+  real(8), allocatable :: t_dat(:), Ac_dat(:, :)
+  real(8) :: t, dt_dat, Ac(1:3)
+
+  n_dat = count_rows_from_rtdata_file(trim(filename))
+
+  allocate(t_dat(1:n_dat), Ac_dat(1:3, 1:n_dat))
+  call load_Ac_from_rtdata_file(trim(filename), n_dat, t_dat, Ac_dat)
+
+  do i = is, ie
+      call interp_Ac(t0 + delta_t * i, Ac)
+      Ac_ext_t(1:3, i) = Ac_ext_t(1:3, i) + Ac(1:3)
+  end do
+
+  deallocate(t_dat, Ac_dat)
+
+  return
+
+contains
+
+  subroutine interp_Ac(tt, Ac)
+    ! Linear interpolation of `Ac` at time `tt`.
+    ! If a value outside the range of the data is requested, 
+    ! the value at the nearest end is returned.
+    implicit none
+    real(8), intent(in) :: tt
+    real(8), intent(out) :: Ac(1:3)
+    integer :: ii
+    real(8) :: x, rii
+    if (tt < t_dat(1)) then
+      Ac(1:3) = Ac_dat(1:3, 1)
+    else if (t_dat(n_dat) <= tt) then
+      Ac(1:3) = Ac_dat(1:3, n_dat)
+    else
+      ! Linear estimation of row index: ii
+      ii = int(floor((tt - t_dat(1)) / (t_dat(n_dat) - t_dat(1)) * (n_dat - 1))) + 1
+      if (.not. (t_dat(ii) <= tt .and. tt < t_dat(ii+1))) then
+        ! Bluteforce search of row index: ii
+        do ii = 1, n_dat-1
+          if ((t_dat(ii) <= tt) .and. (tt < t_dat(ii+1))) exit
+        end do
+      end if
+      x = (tt - t_dat(ii)) / (t_dat(ii+1) - t_dat(ii))
+      Ac(1:3) = (1d0 - x) * Ac_dat(1:3, ii) + x * Ac_dat(1:3, ii+1)
+    end if
+    return
+  end subroutine interp_Ac
+
+
+end subroutine add_Ac_from_file
 
 !===================================================================================================================================
 

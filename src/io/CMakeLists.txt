@@ -10,6 +10,7 @@ set(SOURCES
     write.f90
     main_dft_k_expand.f90
     main_dft_k_expand_slice.f90
+    read_rtdata_file.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

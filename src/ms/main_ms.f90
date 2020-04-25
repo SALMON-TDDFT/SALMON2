@@ -608,22 +608,33 @@ end subroutine write_RT_Ac_file
 
 
 subroutine incident()
+    use em_field, only: calc_Ac_ext_t
     implicit none
     integer :: iix, iiy, iiz
+    real(8), allocatable :: Ac(:, :)
+    real(8), allocatable :: Ac_old(:, :)
 
-    fw%vec_Ac%v(:, :, :, :) = 0d0
-    fw%vec_Ac_old%v(:, :, :, :) = 0d0
+    fw%vec_Ac%v = 0d0
+    fw%vec_Ac_old%v = 0d0
+
+    ! x-directed incident
+    allocate(Ac(1:3, fs%mg%is_overlap(1):0))
+    allocate(Ac_old(1:3, fs%mg%is_overlap(1):0))
+
+    call calc_Ac_ext_t(0d0, -fs%hgs(1) / cspeed_au, &
+        & fs%mg%is_overlap(1), 0, Ac)
+    call calc_Ac_ext_t(-fw%dt, -fs%hgs(1) / cspeed_au, &
+        & fs%mg%is_overlap(1), 0, Ac_old)
 
     do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
         do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
-            do iix = fs%mg%is_overlap(1), fs%mg%ie_overlap(1)
-                call calc_Ac_ext(- iix * fs%hgs(1) / cspeed_au , &
-                    & fw%vec_Ac%v(1:3, iix, iiy, iiz))
-                call calc_Ac_ext(- iix * fs%hgs(1) / cspeed_au - fw%dt , & 
-                    & fw%vec_Ac_old%v(1:3, iix, iiy, iiz))
-            end do
+            fw%vec_Ac%v(1:3, :, iiy, iiz) = Ac(1:3, :)
+            fw%vec_Ac_old%v(1:3, :, iiy, iiz) = Ac_old(1:3, :)
         end do
     end do
+
+    deallocate(Ac, Ac_old)
+
     return
  end subroutine incident
 
