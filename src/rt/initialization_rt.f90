@@ -436,25 +436,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     end if
 
   end if
-  
-
-  !(header of standard output)
-  if(comm_is_root(nproc_id_global))then
-    write(*,*)
-    select case(iperiodic)
-    case(0)
-      write(*,'(1x,a10,a11,a48,a15,a18,a10)') &
-                  "time-step ", "time[fs]",   &
-                  "Dipole moment(xyz)[A]"     &
-                 ,"electrons", "Total energy[eV]", "iterVh"
-    case(3)
-      write(*,'(1x,a10,a11,a48,a15,a18)')   &
-                  "time-step", "time[fs] ", &
-                  "Current(xyz)[a.u.]",     &
-                  "electrons", "Total energy[eV] "
-    end select
-    write(*,'("#",7("----------"))')
-  endif
 
   !-------------------------------------------------- Time evolution
   
