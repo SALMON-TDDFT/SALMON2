@@ -86,6 +86,7 @@ write(9999, *) 'logging start'; flush(9999)
 call timer_begin(LOG_TOTAL)
 ! Initialization
 call initialization_ms()
+! if (comm_is_root(ms%id_ms_world)) call print_header()
 
 
 call comm_sync_all
@@ -452,7 +453,26 @@ subroutine initialization_ms()
     return    
 end subroutine initialization_ms
 
-
+subroutine print_header()
+    implicit none
+    !(header of standard output)
+    ! if(comm_is_root(nproc_id_global))then
+        write(*,*)
+        select case(iperiodic)
+        case(0)
+        write(*,'(1x,a10,a11,a11,a10,a48,a15,a18,a10)') &
+                    "time-step ", "time[fs]", "macropoint", &
+                    "Dipole moment(xyz)[A]"     &
+                    ,"electrons", "Total energy[eV]", "iterVh"
+        case(3)
+        write(*,'(1x,a10,a11,a10,a48,a15,a18)')   &
+                    "time-step", "time[fs] ", "macropoint", &
+                    "Current(xyz)[a.u.]",     &
+                    "electrons", "Total energy[eV] "
+        end select
+        write(*,'("#",7("----------"))')
+    ! endif
+end subroutine print_header
 
 
 subroutine time_evolution_step_ms_macro
@@ -628,8 +648,8 @@ subroutine incident()
 
     do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
         do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
-            fw%vec_Ac%v(1:3, :, iiy, iiz) = Ac(1:3, :)
-            fw%vec_Ac_old%v(1:3, :, iiy, iiz) = Ac_old(1:3, :)
+            fw%vec_Ac%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3,  fs%mg%is_overlap(1):0)
+            fw%vec_Ac_old%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3,  fs%mg%is_overlap(1):0)
         end do
     end do
 
