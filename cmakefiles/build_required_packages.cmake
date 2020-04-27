@@ -6,8 +6,6 @@ find_package(LAPACK QUIET)
 
 if (LAPACK_FOUND)
   message(STATUS "LAPACK library found.")
-  set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${LAPACK_LIBRARIES})
-  set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${LAPACK_FLAGS})
 else ()
   # NOTE: LAPACK 3.7.0 and later version can't build by GCC 4.8.5, which RHEL7 provided compiler.
   set(LAPACK_VERSION "3.6.1")
@@ -47,8 +45,6 @@ if (USE_SCALAPACK)
 
   if (ScaLAPACK_FOUND)
     message(STATUS "ScaLAPACK library found.")
-    set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${ScaLAPACK_LIBRARIES})
-    set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${ScaLAPACK_FLAGS})
   else ()
     set(SCALAPACK_VERSION "2.1.0")
     message(STATUS "Build Netlib ScaLAPACK library version ${SCALAPACK_VERSION}")
@@ -73,6 +69,20 @@ if (USE_SCALAPACK)
     set(EXTERNAL_LIBS scalapack ${EXTERNAL_LIBS})
   endif ()
 endif ()
+
+
+if (USE_SCALAPACK)
+  if (ScaLAPACK_FOUND)
+    set(EXTERNAL_LIBS  ${EXTERNAL_LIBS}  ${ScaLAPACK_LIBRARIES})
+    set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${ScaLAPACK_FLAGS})
+  endif ()
+else()
+  if (LAPACK_FOUND)
+    set(EXTERNAL_LIBS  ${EXTERNAL_LIBS}  ${LAPACK_LIBRARIES})
+    set(EXTERNAL_FLAGS ${EXTERNAL_FLAGS} ${LAPACK_FLAGS})
+  endif ()
+endif ()
+
 
 
 ### Libxc
@@ -112,5 +122,5 @@ endif ()
 
 
 # add search path
-#include_directories("${CMAKE_CURRENT_BINARY_DIR}/include")
+include_directories("${CMAKE_CURRENT_BINARY_DIR}/include")
 link_directories("${CMAKE_CURRENT_BINARY_DIR}/lib")
