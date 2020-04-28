@@ -66,7 +66,6 @@ group.add_option('--enable-libxc',      action='store_true',  dest='libxc')
 group.add_option('--disable-libxc',     action='store_false', dest='libxc', help='enable/disable Libxc library.')
 group.add_option('--with-lapack',       action='store', type=str, default=None, dest='lapack_installdir', help='specify install path to LAPACK/ScaLAPACK')
 group.add_option('--with-libxc',        action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to Libxc package')
-group.add_option('--build-required-packages', action='store_true', default=False, dest='build_required_packages', help='request build and static link of required packages')
 
 parser.add_option_group(group)
 
@@ -109,8 +108,6 @@ add_option(dict, 'USE_MPI',             options.mpi)
 add_option(dict, 'USE_SCALAPACK',       options.scalapack)
 add_option(dict, 'USE_EIGENEXA',        options.eigenexa)
 add_option(dict, 'USE_LIBXC',           options.libxc)
-
-add_option(dict, 'BUILD_REQUIRED_PACKAGES', options.build_required_packages)
 
 add_option(dict, 'USE_OPT_DOMAIN_IS_POW2',         options.domain_two)
 add_option(dict, 'USE_OPT_ARRAY_PADDING',          options.padding)

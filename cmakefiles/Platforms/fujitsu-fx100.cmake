@@ -1,24 +1,21 @@
 ### Fujitsu Compiler, FX100 system
-set(ARCH                        "-KHPC_ACE2")
-set(SIMD_SET                    "HPC_ACE2")
+set(ARCH_FLAGS                  "-KHPC_ACE2")
 set(OPENMP_FLAGS                "-Kopenmp")
-set(LAPACK_FLAGS                "-SSL2BLAMP")
-set(ScaLAPACK_FLAGS             "-SCALAPACK -SSL2BLAMP")
-set(ADDITIONAL_MACRO            "")
-set(ADDITIONAL_OPTIMIZE_FLAGS   "")
-
-set(Fortran_FLAGS_General       "-Cpp -Kocl,nooptmsg -v03s")
-set(C_FLAGS_General             "-Kocl,nooptmsg -Xg -std=gnu99")
+set(LAPACK_VENDOR_FLAGS         "-SSL2BLAMP")
+set(ScaLAPACK_VENDOR_FLAGS      "-SCALAPACK -SSL2BLAMP")
+set(Fortran_PP_FLAGS            "-Cpp")
 
 set(CMAKE_Fortran_COMPILER      "mpifrtpx")
-set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
-set(CMAKE_Fortran_FLAGS_RELEASE "-O3 -Kfast,simd=1")
 set(CMAKE_C_COMPILER            "mpifccpx")
-set(CMAKE_C_FLAGS_DEBUG         "-O2 -g")
-set(CMAKE_C_FLAGS_RELEASE       "-O3 -Kfast,simd=1")
+
+set(General_Fortran_FLAGS       "-Kocl,nooptmsg -v03s")
+set(General_C_FLAGS             "-Kocl,nooptmsg -Xg -std=gnu99")
+set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g ${General_Fortran_FLAGS}")
+set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS}")
+set(CMAKE_Fortran_FLAGS_RELEASE "-O3 -Kfast,simd=1 ${General_Fortran_FLAGS}")
+set(CMAKE_C_FLAGS_RELEASE       "-O3 -Kfast,simd=1 ${General_C_FLAGS}")
 
 set(USE_MPI_DEFAULT             ON)
-
 
 ########
 # Platform-specific variables

@@ -1,25 +1,19 @@
 ### Fujitsu Compiler, Fugaku supercomputer (early access version)
-set(ARCH                        "")
-set(SIMD_SET                    "")
 #set(OPENMP_FLAGS                "-Kopenmp")
 set(OPENMP_FLAGS                "-Kopenmp -Nfjomplib")     # use Fujitsu OpenMP library
-set(LAPACK_FLAGS                "-SSL2BLAMP")
-set(ScaLAPACK_FLAGS             "-SCALAPACK -SSL2BLAMP")
-set(ADDITIONAL_MACRO            "")
-set(ADDITIONAL_OPTIMIZE_FLAGS   "")
-
-set(Fortran_FLAGS_General       "-Kocl -Cpp -Nlst=t -Koptmsg=2 -Ncheck_std=03s")
-set(C_FLAGS_General             "-Kocl      -Nlst=t -Koptmsg=2 -Xg -std=gnu99")
+set(LAPACK_VENDOR_FLAGS         "-SSL2BLAMP")
+set(ScaLAPACK_VENDOR_FLAGS      "-SCALAPACK -SSL2BLAMP")
+set(Fortran_PP_FLAGS            "-Cpp")
 
 set(CMAKE_Fortran_COMPILER      "mpifrtpx")
 set(CMAKE_C_COMPILER            "mpifccpx")
 
-set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g")
-set(CMAKE_C_FLAGS_DEBUG         "${CMAKE_Fortran_FLAGS_DEBUG}")
-
-#set(CMAKE_Fortran_FLAGS_RELEASE "-Kfast -Kloop_nofission")  # stop loop fissing
-set(CMAKE_Fortran_FLAGS_RELEASE "-Kfast")
-set(CMAKE_C_FLAGS_RELEASE       "${CMAKE_Fortran_FLAGS_RELEASE}")
+set(General_Fortran_FLAGS       "-Kocl -Nlst=t -Koptmsg=2 -Ncheck_std=03s")
+set(General_C_FLAGS             "-Kocl -Nlst=t -Koptmsg=2 -Xg -std=gnu99")
+set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g ${General_Fortran_FLAGS}")
+set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS}")
+set(CMAKE_Fortran_FLAGS_RELEASE "-Kfast ${General_Fortran_FLAGS}")
+set(CMAKE_C_FLAGS_RELEASE       "-Kfast ${General_C_FLAGS}")
 
 set(USE_MPI_DEFAULT ON)
 
