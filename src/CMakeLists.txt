@@ -25,7 +25,3 @@ target_link_libraries(${TARGET_NAME} ${EXTERNAL_LIBS})
 
 # Install binary
 install(TARGETS ${TARGET_NAME} DESTINATION "bin")
-
-if (INSTALL_REQUIRED_PACKAGES)
-  add_dependencies(${TARGET_NAME} ${EXTERNAL_LIBS})
-endif ()

@@ -1,0 +1,55 @@
+include(ExternalProject)
+include(CheckLibraryExists)
+
+if (USE_MPI)
+else ()
+  message(FATAL_ERROR "Use ScaLAPACK: but MPI feature disabled.")
+endif ()
+
+if (ScaLAPACK_VENDOR_FLAGS)
+  message(STATUS "Set vendor-specific ScaLAPACK libraries: ${ScaLAPACK_VENDOR_FLAGS}")
+  set(EXTERNAL_FLAGS ${ScaLAPACK_VENDOR_FLAGS} ${EXTERNAL_FLAGS})
+elseif (LAPACK_VENDOR_FLAGS)
+  message(FATAL_ERROR "Set vendor-specific LAPACK libraries: ${LAPACK_VENDOR_FLAGS}, however, ScaLAPACK will ignore it.")
+else ()
+  # NOTE: ScaLAPACK with CMake will builds LAPACK libraries as necessary.
+  find_package(ScaLAPACK QUIET)
+
+  if (ScaLAPACK_FOUND)
+    message(STATUS "ScaLAPACK library found.")
+    set(EXTERNAL_LIBS ${EXTERNAL_LIBS} ${ScaLAPACK_LINKER_FLAGS} ${ScaLAPACK_LIBRARIES})
+  else ()
+    set(SCALAPACK_VERSION "2.1.0")
+    message(STATUS "Build Netlib ScaLAPACK library version ${SCALAPACK_VERSION}")
+
+    find_package(LAPACK QUIET)
+    if (LAPACK_FOUND)
+    else ()
+      include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_lapack.cmake)
+    endif ()
+
+    ExternalProject_Add(scalapack-project
+      URL              "https://github.com/Reference-ScaLAPACK/scalapack/archive/v${SCALAPACK_VERSION}.tar.gz"
+      PREFIX           "${CMAKE_BINARY_DIR}/scalapack"
+      CMAKE_ARGS       -D BUILD_SHARED_LIBS=off -D BUILD_TESTING=off
+                       -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
+                       -D CMAKE_C_COMPILER=${CMAKE_C_COMPILER} -D CMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}
+                       -D CMAKE_C_FLAGS=${CMAKE_C_FLAGS} -D CMAKE_Fortran_FLAGS=${CMAKE_Fortran_FLAGS}
+                       -D CMAKE_C_FLAGS_DEBUG=${CMAKE_C_FLAGS_DEBUG} -D CMAKE_Fortran_FLAGS_DEBUG=${CMAKE_Fortran_FLAGS_DEBUG}
+                       -D CMAKE_C_FLAGS_RELEASE=${CMAKE_C_FLAGS_RELEASE} -D CMAKE_Fortran_FLAGS_RELEASE=${CMAKE_Fortran_FLAGS_RELEASE}
+      STEP_TARGETS     install
+      EXCLUDE_FROM_ALL on
+    )
+
+    if (LAPACK_FOUND)
+    else ()
+      add_dependencies(scalapack-project-install lapack-project-install)
+    endif ()
+
+    set(SCALAPACK_LIBPATH ${CMAKE_CURRENT_BINARY_DIR}/lib/libscalapack.a)
+    add_library(scalapack STATIC IMPORTED)
+    set_target_properties(scalapack PROPERTIES IMPORTED_LOCATION ${SCALAPACK_LIBPATH})
+    add_dependencies(scalapack scalapack-project-install)
+    set(EXTERNAL_LIBS scalapack ${EXTERNAL_LIBS})
+  endif ()
+endif ()

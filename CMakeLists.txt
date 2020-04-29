@@ -29,16 +29,7 @@ message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
 message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
 message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
-
-# cross-compile or native-compile
-if (${CMAKE_CROSSCOMPILING})
-  # (For supercomputer systems) cross compile mode, use toolchain file.
-  message(STATUS "Target platform ${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
-else ()
-  # (For PC clusters and PC) compiler environment detects automatically.
-  message(STATUS "Target platform is Native (${CMAKE_HOST_SYSTEM})")
-  include(cmakefiles/find_build_environments.cmake)
-endif ()
+include(cmakefiles/check_build_environments.cmake)
 
 
 # Bulid options
@@ -50,9 +41,6 @@ option_set(USE_LIBXC               "Use Libxc library"       OFF)
 
 option_set(BUILD_REQUIRED_PACKAGES "Request build and static link required packages" OFF)
 
-## Optimization
-option_set(CURRENT_PREPROCESSING   "Enable preprocessing of the current computation in RT"    OFF)
-
 ## Optimization for stencil compitations
 option_set(USE_OPT_DOMAIN_IS_POW2          "Enable whether the opimization assumes that a stencil domain size is power of two" OFF)
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"                                              ON)
@@ -61,35 +49,16 @@ option_set(USE_OPT_SOFTWARE_PREFETCH       "Enable software prefetch in the expl
 
 
 # variables
-set(TARGET_NAME         "salmon")
-set(CMAKE_Fortran_FLAGS "${ARCH} ${OPENMP_FLAGS} ${Fortran_FLAGS_General} ${ADDITIONAL_OPTIMIZE_FLAGS} ${CMAKE_Fortran_FLAGS}")
-set(CMAKE_C_FLAGS       "${ARCH} ${OPENMP_FLAGS} ${C_FLAGS_General} ${ADDITIONAL_OPTIMIZE_FLAGS} ${CMAKE_C_FLAGS}")
-add_definitions("${ADDITIONAL_MACRO}")
-
+set(TARGET_NAME "salmon")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR})
 include_directories(${CMAKE_BINARY_DIR})
 
-add_compile_definitions_if(CURRENT_PREPROCESSING ARTED_CURRENT_PREPROCESSING)
-
-include (${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
+include(${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
 
 
 # for third party libraries
-if (LAPACK_INSTALLDIR)
-  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${LAPACK_INSTALLDIR})
-endif ()
-
-if (LIBXC_INSTALLDIR)
-  set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${LIBXC_INSTALLDIR})
-endif ()
-
-if (BUILD_REQUIRED_PACKAGES)
-  include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)
-else ()
-  include(${CMAKE_SOURCE_DIR}/cmakefiles/find_required_packages.cmake)
-endif ()
-include(${CMAKE_SOURCE_DIR}/cmakefiles/build_eigenexa.cmake)
+include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
 set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
 
