@@ -1238,7 +1238,6 @@ contains
   end subroutine
 
   subroutine comm_get_max_integer(svalue, ngroup)
-    use mpi, only: MPI_INTEGER, MPI_MAX, MPI_IN_PLACE
     implicit none
     integer, intent(inout) :: svalue
     integer, intent(in)    :: ngroup
