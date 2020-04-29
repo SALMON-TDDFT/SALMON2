@@ -69,6 +69,11 @@
   nxvacr_m = 1000
 /
 
+&maxwell
+  boundary_em(1,1) = 'abc'
+  boundary_em(1,2) = 'abc'
+/
+
 &atomic_coor
   'Si'	.0	.0	.0	1
   'Si'	2.565	2.565	2.565	1

@@ -117,6 +117,11 @@
   nxvacr_m = 1000
 /
 
+&maxwell
+  boundary_em(1,1) = 'abc'
+  boundary_em(1,2) = 'abc'
+/
+
 &atomic_red_coor
   !cartesian atomic reduced coodinates
   'Si'	.0	.0	.0	1

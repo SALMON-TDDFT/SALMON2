@@ -29,6 +29,8 @@ module fdtd_weyl
         type(s_scalar) :: edensity_emfield
         type(s_scalar) :: edensity_absorb
         character(16) :: fdtddim
+        real(8) :: Ac_inc(3)
+        real(8) :: Ac_inc_old(3)
     end type ls_fdtd_weyl
 
 
@@ -55,6 +57,7 @@ contains
         fw%vec_j_em%v = 0d0
         fw%edensity_emfield%f = 0d0
         fw%edensity_absorb%f = 0d0
+        fw%Ac_inc_old(:) = 0d0
 
         write(9999, *) "(fw%vec_Ac%v, 1)", lbound(fw%vec_Ac%v, 1), ubound(fw%vec_Ac%v, 1)
         write(9999, *) "(fw%vec_Ac%v, 2)", lbound(fw%vec_Ac%v, 2), ubound(fw%vec_Ac%v, 2)
@@ -176,21 +179,31 @@ contains
         case('pec')
             Ac_tmp(:, (is(1)-nd):(is(1)-1), i2, i3) = &
                 & fw%vec_Ac%v(:, (is(1)-nd):(is(1)-1), i2, i3)
+        case('abc')
+            Ac_tmp(:, is(1)-1, i2, i3) = fw%vec_Ac%v(:, is(1), i2, i3) &
+                & + (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * Ac_tmp(:, is(1), i2, i3) &
+                & - (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, is(1)-1, i2, i3) &
+                & + (4d0*fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * (fw%Ac_inc(:)-fw%Ac_inc_old(:))
         end select
-    
+
         ! Impose Boundary Condition (Right end)
         select case (fs%a_bc(1, 2))
         case('periodic')
             Ac_tmp(:, (ie(1)+1):(ie(1)+nd), i2, i3) = &
-                & Ac_tmp(:, is(1):(is(1)+nd-1), i2, i3)
+                & Ac_tmp(:, is(1):(is(1)+nd-1), i2, i3) 
         case('pec')
             Ac_tmp(:, (ie(1)+1):(ie(1)+nd), i2, i3) = &
                 & fw%vec_Ac%v(:, (ie(1)+1):(ie(1)+nd), i2, i3) 
+        case('abc')
+            Ac_tmp(:, ie(1)+1, i2, i3) = fw%vec_Ac%v(:, ie(1), i2, i3) &
+                & + (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * Ac_tmp(:, ie(1), i2, i3) &
+                & - (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, ie(1)+1, i2, i3)    
         end select
     
         ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
         call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
         call copy_data(Ac_tmp, fw%vec_Ac%v)
+        fw%Ac_inc_old(:) = fw%Ac_inc(:)
         return
         end subroutine dt_evolve_Ac_1d
     

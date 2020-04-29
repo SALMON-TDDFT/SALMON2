@@ -73,6 +73,8 @@ integer :: i, ix, iy, iz
 
 integer, allocatable :: iranklists(:)
 
+real(8), allocatable :: Ac_inc(:, :)
+
 character(256) :: file_debug_log
 integer :: nmacro_mygroup, isize_mygroup
 
@@ -277,6 +279,7 @@ end function check_input_variables
 
 subroutine initialization_ms()
     implicit none
+    integer :: ii, jj
 
     ! Store global information
     ms%nmacro = nx_m * ny_m * nz_m
@@ -364,9 +367,11 @@ subroutine initialization_ms()
     fs%origin(1) = 0d0
     fs%origin(2) = 0d0
     fs%origin(3) = 0d0
-    fs%a_bc(1,1:2) = 'periodic'
-    fs%a_bc(2,1:2) = 'periodic'
-    fs%a_bc(3,1:2) = 'periodic'
+    do ii = 1, 3
+        do jj = 1, 2
+        fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
+        end do
+    end do
     fs%imedia(:,:,:) = 0
 
     write(9999, *) 'Initialization FDTD Weyl start';flush(9999)
@@ -486,6 +491,7 @@ subroutine time_evolution_step_ms_macro
     nproc_size_global = ms%isize_macropoint
 
     write(9999, *) "FDTD iteration start"; flush(9999)
+    fw%Ac_inc(:) = Ac_inc(:, itt)
     call weyl_calc(fs, fw)
 
     do ii = 1, ms%nmacro
@@ -640,11 +646,14 @@ subroutine incident()
     ! x-directed incident
     allocate(Ac(1:3, fs%mg%is_overlap(1):0))
     allocate(Ac_old(1:3, fs%mg%is_overlap(1):0))
+    allocate(Ac_inc(1:3, -1:itotNtime))
 
-    call calc_Ac_ext_t(0d0, -fs%hgs(1) / cspeed_au, &
+    call calc_Ac_ext_t(-fw%dt*1, -fs%hgs(1) / cspeed_au, &
         & fs%mg%is_overlap(1), 0, Ac)
-    call calc_Ac_ext_t(-fw%dt, -fs%hgs(1) / cspeed_au, &
+    call calc_Ac_ext_t(-fw%dt*2, -fs%hgs(1) / cspeed_au, &
         & fs%mg%is_overlap(1), 0, Ac_old)
+    call calc_Ac_ext_t(-(fs%mg%is(1)-0.5d0)*fs%hgs(1) / cspeed_au, fw%dt, &
+        & -1, itotNtime, Ac_inc)
 
     do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
         do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
@@ -654,6 +663,11 @@ subroutine incident()
     end do
 
     deallocate(Ac, Ac_old)
+
+    ! Evolve the first (0-th timestep)
+    fw%Ac_inc_old(1:3) = Ac_inc(1:3,-1)
+    fw%Ac_inc(1:3) = Ac_inc(1:3,0)
+    call weyl_calc(fs, fw)
 
     return
  end subroutine incident
