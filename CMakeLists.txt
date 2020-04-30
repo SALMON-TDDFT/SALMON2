@@ -39,8 +39,6 @@ option_set(USE_SCALAPACK           "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA            "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC               "Use Libxc library"       OFF)
 
-option_set(BUILD_REQUIRED_PACKAGES "Request build and static link required packages" OFF)
-
 ## Optimization for stencil compitations
 option_set(USE_OPT_DOMAIN_IS_POW2          "Enable whether the opimization assumes that a stencil domain size is power of two" OFF)
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"                                              ON)
