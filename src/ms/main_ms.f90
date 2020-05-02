@@ -207,72 +207,6 @@ function base_directory_macro(imacro) result(r)
 end function base_directory_macro
 
 
-function check_input_variables() result(r)
-    implicit none
-    logical :: r
-    r = .true.
-    if (nx_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nx_m' must be larger than 1!"
-        r = .false.
-    end if
-    if (ny_m /= 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'ny_m' must be 1!"
-        r = .false.
-    end if
-    if (nz_m /= 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nz_m' must be 1!"
-        r = .false.
-    end if
-    if (nproc_size_global < nx_m * ny_m * nz_m) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! MPI procs is too small!"
-        r = .false.
-    end if
-    if (mod(nproc_size_global, nx_m * ny_m * nz_m) > 0) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! MPI procs number of processes is an integer multiple of macropoints!"
-        r = .false.
-    end if
-    if (hx_m < 1d-6 .and. dl_em(1) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hx_m' or 'dl_em(1)' must be specified!"
-        r = .false.
-    end if
-    if (hy_m < 1d-6 .and. dl_em(2) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hy_m' or 'dl_em(2)' must be specified!"
-        r = .false.
-    end if
-    if (hz_m < 1d-6 .and. dl_em(3) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hz_m' or 'dl_em(3)' must be specified!"
-        r = .false.
-    end if
-    if (dt < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'dt' must be specified!"
-        r = .false.
-    end if
-    if (dt_em > 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'dt_em' must not be specified!"
-        r = .false.
-    end if
-    if (nxvacl_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nxvacl_m' must not larger than 1!"
-        r = .false.
-    end if
-    if (nxvacr_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nxvacr_m' must not larger than 1!"
-        r = .false.
-    end if
-    return
-end function check_input_variables
 
 
 
@@ -671,6 +605,90 @@ subroutine incident()
 
     return
  end subroutine incident
+
+
+
+
+function check_input_variables() result(r)
+    implicit none
+    logical :: r
+    r = .true.
+    if (nx_m < 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nx_m' must be larger than 1!"
+        r = .false.
+    end if
+    if (ny_m /= 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'ny_m' must be 1!"
+        r = .false.
+    end if
+    if (nz_m /= 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nz_m' must be 1!"
+        r = .false.
+    end if
+    if (nproc_size_global < nx_m * ny_m * nz_m) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! MPI procs is too small!"
+        r = .false.
+    end if
+    if (mod(nproc_size_global, nx_m * ny_m * nz_m) > 0) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! MPI procs number of processes is an integer multiple of macropoints!"
+        r = .false.
+    end if
+    if (hx_m < 1d-6 .and. dl_em(1) < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'hx_m' or 'dl_em(1)' must be specified!"
+        r = .false.
+    end if
+    if (hy_m < 1d-6 .and. dl_em(2) < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'hy_m' or 'dl_em(2)' must be specified!"
+        r = .false.
+    end if
+    if (hz_m < 1d-6 .and. dl_em(3) < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'hz_m' or 'dl_em(3)' must be specified!"
+        r = .false.
+    end if
+    if (dt < 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'dt' must be specified!"
+        r = .false.
+    end if
+    if (dt_em > 1d-6) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'dt_em' must not be specified!"
+        r = .false.
+    end if
+    if (nxvacl_m < 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nxvacl_m' must not larger than 1!"
+        r = .false.
+    end if
+    if (nxvacr_m < 1) then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'nxvacr_m' must not larger than 1!"
+        r = .false.
+    end if
+    if (trim(boundary_em(1,1)) .ne. 'periodic' &
+        & .and. trim(boundary_em(1,1)) .ne. 'pec' &
+        & .and. trim(boundary_em(1,1)) .ne. 'abc') then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'boundary_em(1,1)' unknown boundary condition!"
+        r = .false.
+    end if
+    if (trim(boundary_em(1,2)) .ne. 'periodic' &
+        & .and. trim(boundary_em(1,2)) .ne. 'pec' &
+        & .and. trim(boundary_em(1,2)) .ne. 'abc') then
+        if (comm_is_root(nproc_id_global)) &
+            & write(*, *) "ERROR! 'boundary_em(1,2)' unknown boundary condition!"
+        r = .false.
+    end if
+    return
+end function check_input_variables
 
 end subroutine main_ms
 
