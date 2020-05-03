@@ -458,8 +458,9 @@ module structures
     complex(8),allocatable :: a_ffte(:,:,:,:),b_ffte(:,:,:,:),Vh_ffte_old(:,:,:),zf_old(:,:,:,:),zc_old(:,:,:,:),zs_old(:,:,:,:)
   end type s_singlescale
 
+
+  
   type s_multiscale
-    ! Parallelization options
     integer :: nmacro
     integer :: icomm_ms_world, isize_ms_world, id_ms_world ! Top level communicator
     integer :: icomm_macropoint, isize_macropoint, id_macropoint ! Macropoint communicator
@@ -472,6 +473,7 @@ module structures
     real(8), allocatable :: curr(:, :)
     real(8), allocatable :: vec_Ac(:, :)
     real(8), allocatable :: vec_Ac_old(:, :)
+    character(256) :: directory_read_data
   end type s_multiscale
 
 !===================================================================================================================================

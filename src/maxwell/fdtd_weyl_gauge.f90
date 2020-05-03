@@ -59,40 +59,40 @@ contains
         fw%edensity_absorb%f = 0d0
         fw%Ac_inc_old(:) = 0d0
 
-        write(9999, *) "(fw%vec_Ac%v, 1)", lbound(fw%vec_Ac%v, 1), ubound(fw%vec_Ac%v, 1)
-        write(9999, *) "(fw%vec_Ac%v, 2)", lbound(fw%vec_Ac%v, 2), ubound(fw%vec_Ac%v, 2)
-        write(9999, *) "(fw%vec_Ac%v, 3)", lbound(fw%vec_Ac%v, 3), ubound(fw%vec_Ac%v, 3)
-        write(9999, *) "(fw%vec_Ac%v, 4)", lbound(fw%vec_Ac%v, 4), ubound(fw%vec_Ac%v, 4)
+        ! write(9999, *) "(fw%vec_Ac%v, 1)", lbound(fw%vec_Ac%v, 1), ubound(fw%vec_Ac%v, 1)
+        ! write(9999, *) "(fw%vec_Ac%v, 2)", lbound(fw%vec_Ac%v, 2), ubound(fw%vec_Ac%v, 2)
+        ! write(9999, *) "(fw%vec_Ac%v, 3)", lbound(fw%vec_Ac%v, 3), ubound(fw%vec_Ac%v, 3)
+        ! write(9999, *) "(fw%vec_Ac%v, 4)", lbound(fw%vec_Ac%v, 4), ubound(fw%vec_Ac%v, 4)
 
-        write(9999, *) "(fw%vec_Ac_old%v, 1)", lbound(fw%vec_Ac_old%v, 1), ubound(fw%vec_Ac_old%v, 1)
-        write(9999, *) "(fw%vec_Ac_old%v, 2)", lbound(fw%vec_Ac_old%v, 2), ubound(fw%vec_Ac_old%v, 2)
-        write(9999, *) "(fw%vec_Ac_old%v, 3)", lbound(fw%vec_Ac_old%v, 3), ubound(fw%vec_Ac_old%v, 3)
-        write(9999, *) "(fw%vec_Ac_old%v, 4)", lbound(fw%vec_Ac_old%v, 4), ubound(fw%vec_Ac_old%v, 4)
+        ! write(9999, *) "(fw%vec_Ac_old%v, 1)", lbound(fw%vec_Ac_old%v, 1), ubound(fw%vec_Ac_old%v, 1)
+        ! write(9999, *) "(fw%vec_Ac_old%v, 2)", lbound(fw%vec_Ac_old%v, 2), ubound(fw%vec_Ac_old%v, 2)
+        ! write(9999, *) "(fw%vec_Ac_old%v, 3)", lbound(fw%vec_Ac_old%v, 3), ubound(fw%vec_Ac_old%v, 3)
+        ! write(9999, *) "(fw%vec_Ac_old%v, 4)", lbound(fw%vec_Ac_old%v, 4), ubound(fw%vec_Ac_old%v, 4)
         
-        write(9999, *) "(fw%vec_e%v, 1)", lbound(fw%vec_e%v, 1), ubound(fw%vec_e%v, 1)
-        write(9999, *) "(fw%vec_e%v, 2)", lbound(fw%vec_e%v, 2), ubound(fw%vec_e%v, 2)
-        write(9999, *) "(fw%vec_e%v, 3)", lbound(fw%vec_e%v, 3), ubound(fw%vec_e%v, 3)
-        write(9999, *) "(fw%vec_e%v, 4)", lbound(fw%vec_e%v, 4), ubound(fw%vec_e%v, 4)
+        ! write(9999, *) "(fw%vec_e%v, 1)", lbound(fw%vec_e%v, 1), ubound(fw%vec_e%v, 1)
+        ! write(9999, *) "(fw%vec_e%v, 2)", lbound(fw%vec_e%v, 2), ubound(fw%vec_e%v, 2)
+        ! write(9999, *) "(fw%vec_e%v, 3)", lbound(fw%vec_e%v, 3), ubound(fw%vec_e%v, 3)
+        ! write(9999, *) "(fw%vec_e%v, 4)", lbound(fw%vec_e%v, 4), ubound(fw%vec_e%v, 4)
 
-        write(9999, *) "(fw%vec_h%v, 1)", lbound(fw%vec_h%v, 1), ubound(fw%vec_h%v, 1)
-        write(9999, *) "(fw%vec_h%v, 2)", lbound(fw%vec_h%v, 2), ubound(fw%vec_h%v, 2)
-        write(9999, *) "(fw%vec_h%v, 3)", lbound(fw%vec_h%v, 3), ubound(fw%vec_h%v, 3)
-        write(9999, *) "(fw%vec_h%v, 4)", lbound(fw%vec_h%v, 4), ubound(fw%vec_h%v, 4)
+        ! write(9999, *) "(fw%vec_h%v, 1)", lbound(fw%vec_h%v, 1), ubound(fw%vec_h%v, 1)
+        ! write(9999, *) "(fw%vec_h%v, 2)", lbound(fw%vec_h%v, 2), ubound(fw%vec_h%v, 2)
+        ! write(9999, *) "(fw%vec_h%v, 3)", lbound(fw%vec_h%v, 3), ubound(fw%vec_h%v, 3)
+        ! write(9999, *) "(fw%vec_h%v, 4)", lbound(fw%vec_h%v, 4), ubound(fw%vec_h%v, 4)
         
-        write(9999, *) "(fw%vec_j_em%v, 1)", lbound(fw%vec_j_em%v, 1), ubound(fw%vec_j_em%v, 1)
-        write(9999, *) "(fw%vec_j_em%v, 2)", lbound(fw%vec_j_em%v, 2), ubound(fw%vec_j_em%v, 2)
-        write(9999, *) "(fw%vec_j_em%v, 3)", lbound(fw%vec_j_em%v, 3), ubound(fw%vec_j_em%v, 3)
-        write(9999, *) "(fw%vec_j_em%v, 4)", lbound(fw%vec_j_em%v, 4), ubound(fw%vec_j_em%v, 4)
+        ! write(9999, *) "(fw%vec_j_em%v, 1)", lbound(fw%vec_j_em%v, 1), ubound(fw%vec_j_em%v, 1)
+        ! write(9999, *) "(fw%vec_j_em%v, 2)", lbound(fw%vec_j_em%v, 2), ubound(fw%vec_j_em%v, 2)
+        ! write(9999, *) "(fw%vec_j_em%v, 3)", lbound(fw%vec_j_em%v, 3), ubound(fw%vec_j_em%v, 3)
+        ! write(9999, *) "(fw%vec_j_em%v, 4)", lbound(fw%vec_j_em%v, 4), ubound(fw%vec_j_em%v, 4)
 
-        write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
-        write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
-        write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
+        ! write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
+        ! write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
+        ! write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
 
-        write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
-        write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
-        write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
+        ! write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
+        ! write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
+        ! write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
 
-        flush(9999)
+        ! flush(9999)
 
         contains
 

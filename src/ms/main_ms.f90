@@ -23,7 +23,7 @@ use math_constants, only: pi
 use salmon_global
 use structures
 use inputoutput, only: nx_m, ny_m, nz_m, dt
-use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, comm_get_groupinfo, comm_sync_all, comm_summation
+use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, comm_get_groupinfo, comm_sync_all, comm_summation, comm_bcast
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
@@ -31,7 +31,7 @@ use initialization_rt_sub
 use checkpoint_restart_sub
 use fdtd_weyl, only: ls_fdtd_weyl, weyl_init, weyl_calc, weyl_finalize
 use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global
-use filesystem, only: create_directory
+use filesystem, only: create_directory, get_filehandle
 use phys_constants, only: cspeed_au
 use em_field, only: calc_Ac_ext
 implicit none
@@ -80,94 +80,41 @@ integer :: nmacro_mygroup, isize_mygroup
 
 if (.not. check_input_variables()) return
 
-! Open logfile for debugging
-write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
-open(unit=9999, file=file_debug_log)
-write(9999, *) 'logging start'; flush(9999)
+!! Open logfile for debugging
+! write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
+! open(unit=9999, file=file_debug_log)
+! write(9999, *) 'logging start'; flush(9999)
 
 call timer_begin(LOG_TOTAL)
 ! Initialization
+
 call initialization_ms()
 ! if (comm_is_root(ms%id_ms_world)) call print_header()
-
 
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 
 TE : do itt=Mit+1,itotNtime
-
-    write(9999, *) 'Step', itt; flush(9999)
-
-    write(9999, *) "StartTime evolution"; flush(9999)
-    call time_evolution_step_ms_macro()
-    write(9999, *) "EndTime evolution"; flush(9999)
+    call time_evolution_step_ms()
     call write_RT_Ac_file()
 
-
-!   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
-!     call timer_begin(LOG_CHECKPOINT_SYNC)
-!     call timer_begin(LOG_CHECKPOINT_SELF)
-!     if (mod(itt,2)==1) then
-!       call checkpoint_rt(lg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale)
-!     else
-!       call checkpoint_rt(lg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale)
-!     endif
-!     call timer_end(LOG_CHECKPOINT_SELF)
-!     call comm_sync_all
-!     call timer_end(LOG_CHECKPOINT_SYNC)
-!   endif
-
-
+   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) &
+        & call checkpoint_ms()
 end do TE
-
-write(9999, *) 'Loop Complete'
-flush(9999)
 
 call timer_end(LOG_RT_ITERATION)
 call timer_disable_sub
 
-! #ifdef __FUJITSU
-! call fapp_stop('time_evol',1,0) ! performance profiling
-! #endif
-
-! close(030) ! laser
-
-
-! !--------------------------------- end of time-evolution
-
-
-! !------------ Writing part -----------
-
-! ! write RT: 
-! call timer_begin(LOG_WRITE_RT_RESULTS)
-
-! !
-! select case(iperiodic)
-! case(0)
-!   if(theory=="tddft_response")then
-!     call write_response_0d(ofl,rt)
-!   else
-!     call write_pulse_0d(ofl,rt)
-!   end if
-! case(3)
-!   if(theory=="tddft_response")then
-!     call write_response_3d(ofl,rt)
-!   else
-!     call write_pulse_3d(ofl,rt)
-!   end if
-! end select
-
-! call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
-! if(write_rt_wfn_k=='y')then
-!   call checkpoint_rt(lg,mg,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,singlescale,ofl%dir_out_restart)
-! end if
+if(write_rt_wfn_k=='y')then
+    call checkpoint_ms(ofl%dir_out_restart)
+end if
 
 call finalize_xc(xc_func)
 
-close(9999)
+! close(gp)
 
 contains
 
@@ -192,23 +139,38 @@ end function macropoint_in_mygroup
 function base_directory_macro(imacro) result(r)
     implicit none
     integer, intent(in) :: imacro
-    ! character(256) :: tmp
     character(256) :: r
-    ! write(9999, *) trim(ms%base_directory)
-    ! write(9999, *) trim(sysname)
-    ! write(9999, *) imacro
-    ! FLUSH(9999)
-    ! write(9999, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/', imacro, '/'
-    ! flush(9999)
-    ! write(9999, *) trim(tmp)
-    ! flush(9999)
-    write(r, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/', imacro, '/'
+    write(r, '(a, a, a, i6.6, a)') trim(ms%base_directory), trim(sysname), '_m/m', imacro, '/'
     return
 end function base_directory_macro
 
 
 
 
+
+
+function directory_read_data_macro(basedir, imacro) result(r)
+    implicit none
+    character(*), intent(in) :: basedir
+    integer, intent(in) :: imacro
+    character(256) :: r
+    write(r, '(a,a,i6.6,a)') trim(basedir), 'm', imacro, '/'
+    return
+end function directory_read_data_macro
+
+
+
+
+
+function restart_directory_macro(iter, imacro) result(r)
+    implicit none
+    integer, intent(in) :: iter
+    integer, intent(in) :: imacro
+    character(256) :: r
+    write(r,'(a,i6.6,a)') "checkpoint_ms_", iter, "/"
+    r = trim(directory_read_data_macro(trim(r), imacro))
+    return
+end function restart_directory_macro
 
 
 subroutine initialization_ms()
@@ -222,6 +184,7 @@ subroutine initialization_ms()
     ms%icomm_ms_world = nproc_group_global
     ms%isize_ms_world = nproc_size_global
     ms%id_ms_world = nproc_id_global
+    ms%directory_read_data = trim(directory_read_data)
     
 
     if (ms%nmacro <= ms%isize_ms_world) then
@@ -238,16 +201,6 @@ subroutine initialization_ms()
     else
         stop "number of procs must be larger than number of points!"
     end if
-
-    ! allocate(iranklists())
-    write(9999, *) 'nmacro_mygroup:', nmacro_mygroup
-    write(9999, *) 'isize_mygroup:', isize_mygroup
-    write(9999, *) 'ms%imacro_mygroup_s:', ms%imacro_mygroup_s
-    write(9999, *) 'ms%imacro_mygroup_e:', ms%imacro_mygroup_e
-    write(9999, *) 'ms%id_mygroup_s:', ms%id_mygroup_s
-    write(9999, *) 'ms%id_mygroup_e:', ms%id_mygroup_e
-    write(9999, *) 'ms%base_directory:', trim(ms%base_directory)
-    flush(9999)
     
     if (ms%nmacro < 1) stop "Invalid macropoint number"
     
@@ -256,20 +209,9 @@ subroutine initialization_ms()
         iranklists(i) = ms%id_mygroup_s + (i - 1)
     end do
     
-    write(9999, *) 'iranklists:', iranklists(:)
-    flush(9999)
-    
     ms%icomm_macropoint = comm_create_group_byid(ms%icomm_ms_world, iranklists)
     call comm_get_groupinfo(ms%icomm_macropoint, ms%id_macropoint, ms%isize_macropoint)
-    
-    write(9999, *) 'ms%icomm_ms_world:', ms%icomm_ms_world
-    write(9999, *) 'ms%id_ms_world:', ms%id_ms_world
-    write(9999, *) 'ms%isize_ms_world:', ms%isize_ms_world
-    write(9999, *) 'ms%icomm_macropoint:', ms%icomm_macropoint
-    write(9999, *) 'ms%id_macropoint:', ms%id_macropoint
-    write(9999, *) 'ms%isize_macropoint:', ms%isize_macropoint
-    flush(9999)
-    
+
     fs%mg%ndir = 3
     fs%mg%nd = 1
     
@@ -277,11 +219,6 @@ subroutine initialization_ms()
     if (0d0 < hx_m) fs%hgs(1) = hx_m
     if (0d0 < hy_m) fs%hgs(2) = hy_m
     if (0d0 < hz_m) fs%hgs(3) = hz_m
-        
-    write(9999, *) 'fs%mg%ndir:', fs%mg%ndir
-    write(9999, *) 'fs%mg%nd:', fs%mg%nd
-    write(9999, *) 'fs%hgs(1:3):', fs%hgs(1:3)
-    flush(9999)
 
     fw%dt = dt
     fw%fdtddim = '1d'
@@ -308,9 +245,7 @@ subroutine initialization_ms()
     end do
     fs%imedia(:,:,:) = 0
 
-    write(9999, *) 'Initialization FDTD Weyl start';flush(9999)
     call Weyl_init(fs, fw)
-    write(9999, *) 'Initialization FDTD Weyl end';flush(9999)
 
     allocate(ms%curr(1:3, 1:ms%nmacro))
     allocate(ms%vec_Ac(1:3, 1:ms%nmacro))
@@ -334,18 +269,15 @@ subroutine initialization_ms()
         end do
     end do
 
-    write(9999, *) trim(ms%base_directory_RT_Ac); flush(9999)
-    if (comm_is_root(ms%id_ms_world)) &
-        & call create_directory(trim(ms%base_directory_RT_Ac))
 
-    write(9999, *) 'Macrpoint initialization start';flush(9999)
-    do i = 1, ms%nmacro
-        if (comm_is_root(ms%id_ms_world)) then
-            write(9999, *) trim(base_directory_macro(i)); flush(9999)
+    if (comm_is_root(ms%id_ms_world)) then
+        call create_directory(trim(ms%base_directory_RT_Ac))
+        do i = 1, ms%nmacro
             call create_directory(trim(base_directory_macro(i)))
-            write(*, '(a)') "################################"
-            write(*, '(a, i6)') "# Initialization of macropoint #", i
-        end if
+        end do
+    end if
+
+    do i = 1, ms%nmacro
 
         call comm_sync_all()
 
@@ -355,11 +287,10 @@ subroutine initialization_ms()
             nproc_group_global = ms%icomm_macropoint
             nproc_id_global = ms%id_macropoint
             nproc_size_global = ms%isize_macropoint
-            
-            write(9999, *) "trim(base_directory)", trim(base_directory); flush(9999)
-            write(9999, *) "nproc_group_global", nproc_group_global; flush(9999)
-            write(9999, *) "nproc_id_global", nproc_id_global; flush(9999)
-            write(9999, *) "nproc_size_global", nproc_size_global; flush(9999)
+
+            if (yn_restart == 'y') then
+                directory_read_data = trim(directory_read_data_macro(trim(ms%directory_read_data), i))
+            end if
                     
             ! Initializa TDKS system
             call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
@@ -378,19 +309,18 @@ subroutine initialization_ms()
             nproc_group_global = ms%icomm_ms_world
             nproc_id_global = ms%id_ms_world
             nproc_size_global = ms%isize_ms_world        
+            directory_read_data = trim(ms%directory_read_data)
         end if
     end do
-    write(9999, *) 'Macrpoint initialization end';flush(9999)
 
-    write(9999, *) 'Incident field setup start';flush(9999)
     call incident()
-    write(9999, *) 'Incident field setup end';flush(9999)
-    call write_RT_Ac_file()
 
-    write(9999, *) 'Initialization Complete'
-    flush(9999)
     return    
 end subroutine initialization_ms
+
+
+
+
 
 subroutine print_header()
     implicit none
@@ -414,7 +344,10 @@ subroutine print_header()
 end subroutine print_header
 
 
-subroutine time_evolution_step_ms_macro
+
+
+
+subroutine time_evolution_step_ms
     implicit none
     integer :: ii, iimacro, iix, iiy, iiz
     real(8) :: curr_tmp(3, ms%nmacro)
@@ -424,8 +357,8 @@ subroutine time_evolution_step_ms_macro
     nproc_id_global = ms%id_macropoint
     nproc_size_global = ms%isize_macropoint
 
-    write(9999, *) "FDTD iteration start"; flush(9999)
     fw%Ac_inc(:) = Ac_inc(:, itt)
+    fw%Ac_inc_old(:) = Ac_inc(:, itt-1)
     call weyl_calc(fs, fw)
 
     do ii = 1, ms%nmacro
@@ -435,7 +368,6 @@ subroutine time_evolution_step_ms_macro
         ms%vec_Ac(1:3, ii) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
         ms%vec_Ac_old(1:3, ii) = fw%vec_Ac_old%v(1:3, iix, iiy, iiz)
     end do
-    write(9999, *) "FDTD iteration end"; flush(9999)
 
     if (ms%imacro_mygroup_e - ms%imacro_mygroup_s + 1 > 1) then
         stop "ERROR! Unsupported paralization scheme!"
@@ -446,7 +378,6 @@ subroutine time_evolution_step_ms_macro
         rt%Ac_ext(:, itt+1) = ms%vec_Ac(1:3, iimacro) &
             & + (ms%vec_Ac(1:3, iimacro) -  ms%vec_Ac_old(1:3, iimacro))
 
-        write(9999, *) "RT iteration start"; flush(9999)
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
@@ -456,15 +387,11 @@ subroutine time_evolution_step_ms_macro
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
             & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
-        write(9999, *) "RT iteration end"; flush(9999)
 
-        write(9999, *) "Current summation start"; flush(9999)
         curr_tmp(:, :) = 0d0
         if (comm_is_root(ms%id_macropoint)) &
             & curr_tmp(1:3, iimacro) = rt%curr(1:3, itt)
-        write(9999, *) "iimacro, curr_tmp, curr", iimacro, curr_tmp(3, iimacro), rt%curr(3, itt)
         call comm_summation(curr_tmp, ms%curr, 3 * ms%nmacro, ms%icomm_ms_world)
-        write(9999, *) "Current summation end"; flush(9999)
 
     end if
 
@@ -473,14 +400,7 @@ subroutine time_evolution_step_ms_macro
         iiy = ms%ixyz_tbl(2, ii)
         iiz = ms%ixyz_tbl(3, ii)
         fw%vec_j_em%v(1:3, iix, iiy, iiz) = - ms%curr(1:3, ii)
-        write(9999, *) "macromove", iix, iiy, iiz, ms%curr(1, ii), ms%curr(2, ii), ms%curr(3, ii)
     end do
-
-    ! write(9999, *) "Current write start"; flush(9999)
-    ! do ii = 1, ms%nmacro
-    !     write(9999, "(4(e23.15e3, 1x), a, i3.3)") itt * dt, ms%curr(1, ii),  ms%curr(2, ii),  ms%curr(3, ii), " #CURRM", ii
-    ! end do
-    ! write(9999, *) "Current write end"; flush(9999)
 
     ! Override Global Variables (Repair)
     nproc_group_global = ms%icomm_ms_world
@@ -488,8 +408,72 @@ subroutine time_evolution_step_ms_macro
     nproc_size_global = ms%isize_ms_world
 
     return
-end subroutine time_evolution_step_ms_macro
+end subroutine time_evolution_step_ms
 
+
+
+
+
+subroutine checkpoint_ms(odir)
+    implicit none
+    character(*),optional, intent(in) :: odir
+    character(256) :: idir
+    integer :: fh_bin
+    
+    ! Override Global Variables
+    base_directory = trim(base_directory_macro(i))
+    nproc_group_global = ms%icomm_macropoint
+    nproc_id_global = ms%id_macropoint
+    nproc_size_global = ms%isize_macropoint
+    
+    call timer_begin(LOG_CHECKPOINT_SYNC)
+    call timer_begin(LOG_CHECKPOINT_SELF)
+    
+    do i = 1, ms%nmacro
+        if (present(odir)) then
+            idir = trim(directory_read_data_macro(trim(odir), i))
+        else
+            idir = trim(restart_directory_macro(itt, i))
+        end if
+
+        if (comm_is_root(ms%id_ms_world)) call create_directory(trim(idir))
+
+        call comm_sync_all()
+
+        if (macropoint_in_mygroup(i)) then
+            if (mod(itt,2)==1) then
+                call checkpoint_rt(lg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale,idir)
+            else
+                call checkpoint_rt(lg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale,idir)
+            endif
+        end if
+    end do
+
+    if (comm_is_root(ms%id_ms_world)) then
+        fh_bin = get_filehandle()
+
+        open(fh_bin,file=trim(idir) // '../vec_Ac.bin',form='unformatted')
+        write(fh_bin) fw%vec_Ac%v
+        close(fh_bin)
+
+        open(fh_bin,file=trim(idir) // '../vec_Ac_old.bin',form='unformatted')
+        write(fh_bin) fw%vec_Ac_old%v
+        close(fh_bin)
+    end if
+
+
+    call timer_end(LOG_CHECKPOINT_SELF)
+    call comm_sync_all
+    call timer_end(LOG_CHECKPOINT_SYNC)
+
+    ! Override Global Variables (Repair)
+    base_directory = trim(ms%base_directory)
+    nproc_group_global = ms%icomm_ms_world
+    nproc_id_global = ms%id_ms_world
+    nproc_size_global = ms%isize_ms_world        
+
+    return
+end subroutine checkpoint_ms
 
 
 
@@ -500,12 +484,10 @@ subroutine write_RT_Ac_file()
     integer ::  iix, iiy, iiz
     character(256) :: filename
 
-    write(9999, *) "Start write_RT_Ac_file"; flush(9999)
 
     if (ms%id_ms_world == 0) then
         if (mod(itt, 100) == 0) then
             write(filename, '(a, a, a, i6.6, a)') trim(ms%base_directory_RT_Ac), trim(sysname), "_Ac_",  itt, '.data'
-            write(9999, *) trim(filename); flush(9999)
             open(8888, file=trim(filename))
             write(8888, '(a)') "# Multiscale TDDFT calculation"
             write(8888, '(a)') "# IX, IY, IZ: FDTD Grid index"
@@ -562,7 +544,6 @@ subroutine write_RT_Ac_file()
         end if
     end if
 
-    write(9999, *) "End write_RT_Ac_file"; flush(9999)
 
 end subroutine write_RT_Ac_file
 
@@ -573,35 +554,61 @@ subroutine incident()
     integer :: iix, iiy, iiz
     real(8), allocatable :: Ac(:, :)
     real(8), allocatable :: Ac_old(:, :)
+    integer :: fh_bin
 
     fw%vec_Ac%v = 0d0
     fw%vec_Ac_old%v = 0d0
 
     ! x-directed incident
-    allocate(Ac(1:3, fs%mg%is_overlap(1):0))
-    allocate(Ac_old(1:3, fs%mg%is_overlap(1):0))
     allocate(Ac_inc(1:3, -1:itotNtime))
 
-    call calc_Ac_ext_t(-fw%dt*1, -fs%hgs(1) / cspeed_au, &
-        & fs%mg%is_overlap(1), 0, Ac)
-    call calc_Ac_ext_t(-fw%dt*2, -fs%hgs(1) / cspeed_au, &
-        & fs%mg%is_overlap(1), 0, Ac_old)
     call calc_Ac_ext_t(-(fs%mg%is(1)-0.5d0)*fs%hgs(1) / cspeed_au, fw%dt, &
         & -1, itotNtime, Ac_inc)
 
-    do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
-        do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
-            fw%vec_Ac%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3,  fs%mg%is_overlap(1):0)
-            fw%vec_Ac_old%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3,  fs%mg%is_overlap(1):0)
+    if (yn_restart == 'y') then
+
+        if (comm_is_root(ms%id_ms_world)) then
+            fh_bin = get_filehandle()
+
+            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_Ac.bin',form='unformatted')
+            read(fh_bin) fw%vec_Ac%v
+            close(fh_bin)
+
+            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_Ac_old.bin',form='unformatted')
+            read(fh_bin) fw%vec_Ac_old%v
+            close(fh_bin)
+        end if
+
+        call comm_bcast(fw%vec_Ac%v, ms%icomm_ms_world)
+        call comm_bcast(fw%vec_Ac_old%v, ms%icomm_ms_world)
+
+    else
+
+        allocate(Ac(1:3, fs%mg%is_overlap(1):0))
+        allocate(Ac_old(1:3, fs%mg%is_overlap(1):0))    
+
+        call calc_Ac_ext_t(-fw%dt*1, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac)
+        call calc_Ac_ext_t(-fw%dt*2, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac_old)
+
+        do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
+            do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
+                fw%vec_Ac%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3,  fs%mg%is_overlap(1):0)
+                fw%vec_Ac_old%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3,  fs%mg%is_overlap(1):0)
+            end do
         end do
-    end do
 
-    deallocate(Ac, Ac_old)
+        ! Evolve the first (0-th timestep)
+        fw%Ac_inc_old(1:3) = Ac_inc(1:3,-1)
+        fw%Ac_inc(1:3) = Ac_inc(1:3,0)
+        call weyl_calc(fs, fw)
 
-    ! Evolve the first (0-th timestep)
-    fw%Ac_inc_old(1:3) = Ac_inc(1:3,-1)
-    fw%Ac_inc(1:3) = Ac_inc(1:3,0)
-    call weyl_calc(fs, fw)
+        if (comm_is_root(ms%id_ms_world)) &
+            call write_RT_Ac_file()
+
+        deallocate(Ac, Ac_old)
+    end if
 
     return
  end subroutine incident
