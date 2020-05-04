@@ -374,6 +374,7 @@ subroutine time_evolution_step_ms
     else
         iimacro = ms%imacro_mygroup_s
 
+        rt%Ac_ext(:, itt-1) = ms%vec_Ac_old(1:3, iimacro)
         rt%Ac_ext(:, itt) = ms%vec_Ac(1:3, iimacro)
         rt%Ac_ext(:, itt+1) = ms%vec_Ac(1:3, iimacro) &
             & + (ms%vec_Ac(1:3, iimacro) -  ms%vec_Ac_old(1:3, iimacro))

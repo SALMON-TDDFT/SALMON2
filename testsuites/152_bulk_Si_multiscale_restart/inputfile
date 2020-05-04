@@ -4,7 +4,8 @@
 
 &control
   sysname = 'Si'
-  checkpoint_interval = 100
+  directory_read_data = 'checkpoint_ms_000100/'
+  yn_restart = 'y'
 /
 
 &units
