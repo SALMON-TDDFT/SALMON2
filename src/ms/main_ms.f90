@@ -460,6 +460,10 @@ subroutine checkpoint_ms(odir)
         open(fh_bin,file=trim(idir) // '../vec_Ac_old.bin',form='unformatted')
         write(fh_bin) fw%vec_Ac_old%v
         close(fh_bin)
+
+        open(fh_bin,file=trim(idir) // '../vec_j_em.bin',form='unformatted')
+        write(fh_bin) fw%vec_j_em%v
+        close(fh_bin)
     end if
 
 
@@ -577,6 +581,10 @@ subroutine incident()
 
             open(fh_bin,file=trim(ms%directory_read_data) // 'vec_Ac_old.bin',form='unformatted')
             read(fh_bin) fw%vec_Ac_old%v
+            close(fh_bin)
+
+            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_j_em.bin',form='unformatted')
+            read(fh_bin) fw%vec_j_em%v
             close(fh_bin)
         end if
 
