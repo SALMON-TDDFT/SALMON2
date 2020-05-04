@@ -44,6 +44,11 @@ subroutine init_dir_out_restart(ofl)
         ofl%dir_out_restart = 'data_for_restart_rt/'
         call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
       end if
+    case('multi_scale_maxwell_tddft')
+      if (write_rt_wfn_k == 'y') then
+        ofl%dir_out_restart = 'data_for_restart_ms'
+        call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
+      end if
     case('dft2tddft')
       ofl%dir_out_restart = 'data_for_restart_rt/'
       call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
