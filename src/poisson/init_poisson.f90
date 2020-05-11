@@ -20,13 +20,14 @@ module init_poisson_sub
 contains
 
 !=====================================================================
-subroutine make_corr_pole(lg,mg,poisson)
-  use salmon_global, only: natom,Rion,layout_multipole,num_multipole_xyz,al
+subroutine make_corr_pole(lg,mg,system,poisson)
+  use salmon_global, only: natom,layout_multipole,num_multipole_xyz,al
   use inputoutput, only: au_length_aa
-  use structures, only: s_rgrid,s_poisson
+  use structures, only: s_rgrid,s_dft_system,s_poisson
   implicit none
   type(s_rgrid), intent(in) :: lg
   type(s_rgrid), intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
   type(s_poisson),intent(inout) :: poisson
   integer :: a,i
   integer :: ix,iy,iz
@@ -48,7 +49,7 @@ subroutine make_corr_pole(lg,mg,poisson)
   
     amax=natom
     allocate(Rion2(3,natom))
-    Rion2(:,:)=Rion(:,:)
+    Rion2(:,:)=system%Rion(:,:)
   
     allocate(poisson%ig_num(1:amax))
     allocate(nearatomnum(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))

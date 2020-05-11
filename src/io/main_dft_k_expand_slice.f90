@@ -727,7 +727,7 @@ subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
   write(fp,'(i5,3f12.6)') mz,0.d0,0.d0,hgs(3)
   do i=1,n
      !ik=Kion(iatom)
-     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(rion(j,iatom),j=1,3)
+     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(Rion(j,iatom),j=1,3)
      write(fp,'(i5,4f12.6)') 8,dble(8),(crd(j,i),j=1,3)
   end do
   

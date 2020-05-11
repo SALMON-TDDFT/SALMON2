@@ -233,7 +233,7 @@ subroutine laplacian_poisson(mg,pk,rlap_wk,lap0,lapt)
 end subroutine laplacian_poisson
 
 subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
-  use inputoutput, only: natom,rion,lmax_lmp,layout_multipole,natom
+  use inputoutput, only: natom,lmax_lmp,layout_multipole,natom
   use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_poisson
   use salmon_math, only: ylm
   use communication, only: comm_summation
@@ -274,10 +274,8 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   real(8),allocatable :: center_trho_nume_deno2(:,:)
   real(8) :: xp2,yp2,zp2,xy,yz,xz
   real(8) :: deno(25)
-  real(8) :: rinv
-  real(8) :: rbox
-  real(8),allocatable :: rion2(:,:)
-  real(8) :: hvol
+  real(8) :: rinv, rbox, hvol
+  real(8),allocatable :: Rion2(:,:)
   integer,allocatable :: ig_num(:)
   integer,allocatable :: ig(:,:,:)
   real(8),allocatable :: coordinate(:,:)
@@ -371,8 +369,8 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   allocate (rholm2((lmax_lmp+1)**2,natom))
   allocate(itrho(natom))
   allocate(center_trho(3,natom))
-  allocate(rion2(3,natom))
-  rion2(:,:)=rion(:,:)
+  allocate(Rion2(3,natom))
+  Rion2(:,:)=system%Rion(:,:)
   
   !$OMP parallel do private(icen, lm, jj)
   do icen=1,num_center
@@ -381,7 +379,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       rholm2(lm,icen)=0.d0
     end do
     do jj=1,3
-      center_trho(jj,icen)=rion2(jj,icen)
+      center_trho(jj,icen)=Rion2(jj,icen)
     end do
     itrho(icen)=1
   end do
@@ -397,9 +395,9 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
         ix=ig(1,jj,icen)
         iy=ig(2,jj,icen)
         iz=ig(3,jj,icen)
-        xx=coordinate(ix,1)-rion2(1,poisson%ipole_tbl(icen))
-        yy=coordinate(iy,2)-rion2(2,poisson%ipole_tbl(icen))
-        zz=coordinate(iz,3)-rion2(3,poisson%ipole_tbl(icen))
+        xx=coordinate(ix,1)-Rion2(1,poisson%ipole_tbl(icen))
+        yy=coordinate(iy,2)-Rion2(2,poisson%ipole_tbl(icen))
+        zz=coordinate(iz,3)-Rion2(3,poisson%ipole_tbl(icen))
         rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
         rholm2box=rholm2box+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ix,iy,iz)*hvol
       end do

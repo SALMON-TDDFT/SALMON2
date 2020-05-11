@@ -267,7 +267,7 @@ end subroutine cal_Tion_Temperature_ion
 
 subroutine time_evolution_step_md_part1(itt,system,md)
   use structures, only: s_dft_system, s_md
-  use salmon_global, only: natom,Kion,dt, Rion, ensemble,thermostat
+  use salmon_global, only: natom,Kion,dt, ensemble,thermostat  !, Rion
   use const, only: umass,hartree2J,kB
   use inputoutput, only: step_velocity_scaling
   use timer
@@ -315,11 +315,12 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   enddo
 !$omp end parallel do
 
-!$omp parallel do private(iatom)
-  do iatom=1,natom
-     Rion(:,iatom) = system%Rion(:,iatom) !copy (old variable, Rion, is still used in somewhere)
-  enddo
-!$omp end parallel do
+!(remove later)
+!!$omp parallel do private(iatom)
+!  do iatom=1,natom
+!     Rion(:,iatom) = system%Rion(:,iatom) !copy (old variable, Rion, is still used in somewhere)
+!  enddo
+!!$omp end parallel do
 
   !put SHAKE here in future (if needed)
 

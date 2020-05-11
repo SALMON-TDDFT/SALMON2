@@ -739,7 +739,7 @@ subroutine update_kvector_nonlocalpt_microAc(ik_s,ik_e,system,ppg)
 !      r1(1) = dble(ix)*hgs(1)
 !      r1(2) = dble(iy)*hgs(2)
 !      r1(3) = dble(iz)*hgs(3)
-!      r1_r0 = ppg%rxyz(1:3,j,iatom) - system%rion(1:3,iatom)
+!      r1_r0 = ppg%rxyz(1:3,j,iatom) - system%Rion(1:3,iatom)
 !      r0 = r1 - r1_r0
 !      ! path: r0 --> r1 = (ix*hgs(1),iy*hgs(2),iz*hgs(3))
 !      call line_integral(integral,r0,vec_Ac,lg%num(1),lg%num(2),lg%num(3),ix,iy,iz,Hgs(1),Hgs(2),Hgs(3) &

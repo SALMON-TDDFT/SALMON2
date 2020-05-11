@@ -76,7 +76,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   poisson%iterVh = 0 ! Iteration counter
   select case(iperiodic)
   case(0)
-    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,mg,poisson)
+    if(layout_multipole==2.or.layout_multipole==3) call make_corr_pole(lg,mg,system,poisson)
   case(3)
     call init_reciprocal_grid(lg,mg,fg,system,info,poisson)
   end select
@@ -94,7 +94,7 @@ subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & nproc_rgrid,rion,rion_red,nelec,calc_mode,temperature,nelec_spin, &
+  & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin, &
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
@@ -792,7 +792,7 @@ subroutine init_nion_div(system,lg,mg,info)
   logical :: flag_cuboid
  !integer :: k,irank,nproc
   integer :: ia,j,nc,ix,iy,iz,iia,nion_total
-  real(8) :: hgs(3), rion_tmp(3,system%nion), al0(3,3)
+  real(8) :: hgs(3), Rion_tmp(3,system%nion), al0(3,3)
   real(8) :: r_mg_min(3), r_mg_max(3), al_min(3), al_max(3), al_len(3)
 
   al0(:,:) = system%primitive_a(:,:)
@@ -822,23 +822,23 @@ subroutine init_nion_div(system,lg,mg,info)
   do ia = 1,system%nion
      j=1
      do ix = -nc, nc
-        rion_tmp(j,ia) = system%Rion(j,ia) + ix*al_len(j)
-        if( rion_tmp(j,ia) .ge. al_min(j) .and. rion_tmp(j,ia) .lt. al_max(j) ) exit
+        Rion_tmp(j,ia) = system%Rion(j,ia) + ix*al_len(j)
+        if( Rion_tmp(j,ia) .ge. al_min(j) .and. Rion_tmp(j,ia) .lt. al_max(j) ) exit
      enddo
      j=2
      do iy = -nc, nc
-        rion_tmp(j,ia) = system%Rion(j,ia) + iy*al_len(j)
-        if( rion_tmp(j,ia) .ge. al_min(j) .and. rion_tmp(j,ia) .lt. al_max(j) ) exit
+        Rion_tmp(j,ia) = system%Rion(j,ia) + iy*al_len(j)
+        if( Rion_tmp(j,ia) .ge. al_min(j) .and. Rion_tmp(j,ia) .lt. al_max(j) ) exit
      enddo
      j=3
      do iz = -nc, nc
-        rion_tmp(j,ia) = system%Rion(j,ia) + iz*al_len(j)
-        if( rion_tmp(j,ia) .ge. al_min(j) .and. rion_tmp(j,ia) .lt. al_max(j) ) exit
+        Rion_tmp(j,ia) = system%Rion(j,ia) + iz*al_len(j)
+        if( Rion_tmp(j,ia) .ge. al_min(j) .and. Rion_tmp(j,ia) .lt. al_max(j) ) exit
      enddo
 
-     if( (rion_tmp(1,ia).ge.r_mg_min(1) .and. rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
-         (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
-         (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
+     if( (Rion_tmp(1,ia).ge.r_mg_min(1) .and. Rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
+         (Rion_tmp(2,ia).ge.r_mg_min(2) .and. Rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
+         (Rion_tmp(3,ia).ge.r_mg_min(3) .and. Rion_tmp(3,ia).lt.r_mg_max(3)) ) then
         info%nion_mg = info%nion_mg + 1
      endif
   enddo
@@ -847,9 +847,9 @@ subroutine init_nion_div(system,lg,mg,info)
 
   iia = 0
   do ia = 1,system%nion
-     if( (rion_tmp(1,ia).ge.r_mg_min(1) .and. rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
-         (rion_tmp(2,ia).ge.r_mg_min(2) .and. rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
-         (rion_tmp(3,ia).ge.r_mg_min(3) .and. rion_tmp(3,ia).lt.r_mg_max(3)) ) then
+     if( (Rion_tmp(1,ia).ge.r_mg_min(1) .and. Rion_tmp(1,ia).lt.r_mg_max(1)) .and. &
+         (Rion_tmp(2,ia).ge.r_mg_min(2) .and. Rion_tmp(2,ia).lt.r_mg_max(2)) .and. &
+         (Rion_tmp(3,ia).ge.r_mg_min(3) .and. Rion_tmp(3,ia).lt.r_mg_max(3)) ) then
         iia = iia + 1
         info%ia_mg(iia) = ia
      endif

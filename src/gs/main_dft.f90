@@ -251,7 +251,7 @@ if(yn_opt=='y') then
    if(.not.flag_opt_conv) call structure_opt(opt,iopt,system)
    !! Rion is old variables to be removed
    !! but currently it is used in many subroutines.
-   Rion(:,:) = system%Rion(:,:)
+   !!Rion(:,:) = system%Rion(:,:)
 
    write(comment_line,10) iopt
    call write_xyz(comment_line,"add","r  ",system)

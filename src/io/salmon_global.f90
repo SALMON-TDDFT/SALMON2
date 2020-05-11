@@ -352,8 +352,8 @@ module salmon_global
 !! &atomic_coor
 !! &atomic_red_coor
 integer,allocatable :: kion(:)
-real(8),allocatable :: rion(:,:)
-real(8),allocatable :: rion_red(:,:)
+real(8),allocatable :: Rion(:,:)
+real(8),allocatable :: Rion_red(:,:)
 character(1),allocatable :: flag_opt_atom(:)
 character(256),allocatable :: atom_name(:)
 

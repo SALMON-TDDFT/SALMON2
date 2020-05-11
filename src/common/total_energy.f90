@@ -43,7 +43,7 @@ CONTAINS
 
     Nspin = system%Nspin
 
-    if (Rion_update) then
+    if (rion_update) then
       Eion = 0d0
 !$omp parallel do default(none) &
 !$omp          reduction(+:Eion) &
@@ -186,7 +186,7 @@ CONTAINS
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
         rho_i = ppg%zrhoG_ion(ix,iy,iz)
-        E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2 * fg%exp_ewald(ix,iy,iz) *0.5d0) ! ewald (--> Rion_update)
+        E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2 * fg%exp_ewald(ix,iy,iz) *0.5d0) ! ewald (--> rion_update)
       end do
       end do
       end do
