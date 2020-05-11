@@ -24,7 +24,7 @@ contains
 SUBROUTINE init_wf(lg,mg,system,info,spsi)
   use structures
   use inputoutput, only: au_length_aa, method_init_wf
-  use salmon_global, only: yn_periodic,natom,rion
+  use salmon_global, only: yn_periodic,natom,Rion
   use gram_schmidt_orth
   implicit none
 
@@ -69,9 +69,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
     case ('gauss','gauss2','gauss3','gauss4','gauss5','gauss10')
       Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
       do a=1,natom
-        if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
-        if ( abs(Rion(2,a)) > Ymax ) Ymax=abs(Rion(2,a))
-        if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
+        if ( abs(system%Rion(1,a)) > Xmax ) Xmax=abs(system%Rion(1,a))
+        if ( abs(system%Rion(2,a)) > Ymax ) Ymax=abs(system%Rion(2,a))
+        if ( abs(system%Rion(3,a)) > Zmax ) Zmax=abs(system%Rion(3,a))
       end do
 
       Xmax=Xmax-Xzero+1.d0/au_length_aa

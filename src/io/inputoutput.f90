@@ -1410,9 +1410,9 @@ contains
     end if
 
     allocate(atom_name(natom))
-    allocate(rion(3,natom), rion_red(3,natom),kion(natom), flag_opt_atom(natom))
-    rion = 0d0
-    rion_red = 0d0
+    allocate(Rion(3,natom), Rion_red(3,natom),kion(natom), flag_opt_atom(natom))
+    Rion     = 0d0
+    Rion_red = 0d0
     kion = 0
     flag_opt_atom = 'n'
 
@@ -1425,20 +1425,20 @@ contains
         case(ntype_atom_coor_cartesian)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i), flag_opt_atom(i)
+                 read(fh_atomic_coor, *) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
               else
-                 read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i)
+                 read(fh_atomic_coor, *) char_atom, Rion(:,i), kion(i)
               end if
               atom_name(i) = char_atom
            end do
-           rion = rion*ulength_to_au
+           Rion = Rion*ulength_to_au
 
         case(ntype_atom_coor_reduced)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i), flag_opt_atom(i)
+                 read(fh_atomic_coor, *) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
               else
-                 read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i)
+                 read(fh_atomic_coor, *) char_atom, Rion_red(:,i), kion(i)
               end if
               atom_name(i) = char_atom
            end do
@@ -1448,8 +1448,8 @@ contains
 
       end if
 
-      call comm_bcast(rion,nproc_group_global)
-      call comm_bcast(rion_red,nproc_group_global)
+      call comm_bcast(Rion,nproc_group_global)
+      call comm_bcast(Rion_red,nproc_group_global)
       call comm_bcast(kion,nproc_group_global)
       call comm_bcast(flag_opt_atom,nproc_group_global)
       call comm_bcast(atom_name,nproc_group_global)
@@ -2106,12 +2106,12 @@ contains
       case(ntype_atom_coor_cartesian)
         write(fh_variables_log, '("#namelist: ",A)') 'atom_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'rion(',i,')', rion(1:3,i)
+          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion(',i,')', Rion(1:3,i)
         end do
       case(ntype_atom_coor_reduced)
         write(fh_variables_log, '("#namelist: ",A)') 'atom_red_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'rion_red(',i,')', rion_red(1:3,i)
+          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion_red(',i,')', Rion_red(1:3,i)
         end do
       case default
       end select
