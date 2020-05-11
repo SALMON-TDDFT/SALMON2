@@ -1672,7 +1672,7 @@ end subroutine write_Velocity
 !(currently not used: see subroutine "read_atomic_coordinates")
 subroutine read_Rion(idir,system)
   use structures, only: s_dft_system
-  use salmon_global, only: natom, atom_name, kion, rion, unit_length
+  use salmon_global, only: natom, atom_name, kion, Rion, unit_length
 !  use inputoutput, only: au_length_aa  !?? why error??
   use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -1711,7 +1711,7 @@ subroutine read_Rion(idir,system)
   call comm_bcast(system%Rion,comm)
   call comm_bcast(atom_name,comm)
   call comm_bcast(kion,comm)
-  Rion(:,:) = system%Rion(:,:)  !remove later 
+  !Rion(:,:) = system%Rion(:,:)  !remove later 
 
 10 continue
 

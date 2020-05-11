@@ -95,7 +95,7 @@ end subroutine write_avs
 !======================================================================
 
 subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,hgs)
-  use inputoutput, only: natom,kion,rion,izatom
+  use inputoutput, only: natom,kion,Rion,izatom
   use structures, only: s_rgrid
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
@@ -137,7 +137,7 @@ subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,hgs)
     write(fp,'(i5,3f12.6)') lg%num(3),0.d0,0.d0,hgs(3)
     do iatom=1,natom
       ik=Kion(iatom)
-      write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(rion(j,iatom),j=1,3)
+      write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(Rion(j,iatom),j=1,3)  !should be system%Rion XXX
     end do
 
     do ix=lg%is(1),lg%ie(1)

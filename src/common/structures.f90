@@ -252,7 +252,7 @@ module structures
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
     !
-    real(8),allocatable :: rion_old(:,:) ! old position
+    real(8),allocatable :: Rion_old(:,:) ! old position
     integer,allocatable :: jxyz_old(:,:,:)
     integer,allocatable :: jxx_old(:,:)
     integer,allocatable :: jyy_old(:,:)

@@ -22,11 +22,7 @@ else ()
     set(SCALAPACK_VERSION "2.1.0")
     message(STATUS "Build Netlib ScaLAPACK library version ${SCALAPACK_VERSION}")
 
-    find_package(LAPACK QUIET)
-    if (LAPACK_FOUND)
-    else ()
-      include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_lapack.cmake)
-    endif ()
+    include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_lapack.cmake)
 
     ExternalProject_Add(scalapack-project
       URL              "https://github.com/Reference-ScaLAPACK/scalapack/archive/v${SCALAPACK_VERSION}.tar.gz"
