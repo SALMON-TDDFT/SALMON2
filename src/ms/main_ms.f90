@@ -23,7 +23,9 @@ use math_constants, only: pi
 use salmon_global
 use structures
 use inputoutput, only: nx_m, ny_m, nz_m, dt
-use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, comm_get_groupinfo, comm_sync_all, comm_summation, comm_bcast
+use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, &
+                         comm_get_groupinfo, comm_sync_all, comm_summation, &
+                         comm_bcast
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
@@ -243,9 +245,13 @@ subroutine initialization_ms()
         fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
         end do
     end do
-    fs%imedia(:,:,:) = 0
 
     call Weyl_init(fs, fw)
+
+    allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
+                       fs%mg%is_array(2):fs%mg%ie_array(2), &
+                       fs%mg%is_array(3):fs%mg%ie_array(3)))
+    fs%imedia(:,:,:) = 0
 
     allocate(ms%curr(1:3, 1:ms%nmacro))
     allocate(ms%vec_Ac(1:3, 1:ms%nmacro))
