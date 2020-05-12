@@ -225,7 +225,7 @@ subroutine restart_opt(Miopt,opt)
 
 end subroutine restart_opt
 
-subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,sVh_stock1,sVh_stock2,singlescale,idir)
+subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2,singlescale,idir)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint,use_singlescale
@@ -236,7 +236,7 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,sVh_stock1,sVh_stock2,singl
   type(s_parallel_info),intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
-  type(s_scalar)          ,intent(in) :: sVh_stock1,sVh_stock2
+  type(s_scalar)          ,intent(in) :: Vh_stock1,Vh_stock2
   type(s_singlescale)     ,intent(in) :: singlescale
   character(*),optional   ,intent(in) :: idir
 
@@ -261,13 +261,13 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,sVh_stock1,sVh_stock2,singl
   call write_Rion(wdir,system)
   call write_Velocity(wdir,system)
   call write_bin(wdir,lg,mg,system,info,spsi,iter &
-                ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
+                ,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2,is_self_checkpoint=iself)
   if(use_singlescale=='y') then
     call write_singlescale(wdir,lg,mg,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
   end if
 end subroutine checkpoint_rt
 
-subroutine restart_rt(lg,mg,system,info,spsi,iter,sVh_stock1,sVh_stock2)
+subroutine restart_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
@@ -276,7 +276,7 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   type(s_parallel_info)  ,intent(in) :: info
   type(s_orbital)        ,intent(inout) :: spsi
   integer                  ,intent(out) :: iter
-  type(s_scalar)         ,intent(inout) :: sVh_stock1,sVh_stock2
+  type(s_scalar)         ,intent(inout) :: Vh_stock1,Vh_stock2
 
   character(256) :: gdir,wdir
   logical :: iself
@@ -289,12 +289,12 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   end if
 
   call read_bin(wdir,lg,mg,system,info,spsi,iter &
-               ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
+               ,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2,is_self_checkpoint=iself)
 end subroutine restart_rt
 
 !===================================================================================================================================
 
-subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use salmon_global, only: theory,calc_mode,write_gs_restart_data
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global, nproc_size_global
@@ -307,7 +307,7 @@ subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,sVh_stock1,sVh_stoc
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_mixing) ,optional,intent(in) :: mixing
-  type(s_scalar) ,optional,intent(in) :: sVh_stock1,sVh_stock2
+  type(s_scalar) ,optional,intent(in) :: Vh_stock1,Vh_stock2
   logical        ,optional,intent(in) :: is_self_checkpoint
 
   logical :: flag_GS, flag_RT
@@ -373,8 +373,8 @@ subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,sVh_stock1,sVh_stoc
 
   !Vh_stock
   if( flag_RT )then
-    if (present(sVh_stock1) .and. present(sVh_stock2)) then
-      call write_Vh_stock(odir,lg,mg,info,sVh_stock1,sVh_stock2,iself)
+    if (present(Vh_stock1) .and. present(Vh_stock2)) then
+      call write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,iself)
     end if
   end if
 
@@ -382,7 +382,7 @@ end subroutine write_bin
 
 !===================================================================================================================================
 
-subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -395,7 +395,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock
   type(s_orbital)        ,intent(inout) :: spsi
   integer                  ,intent(out) :: iter
   type(s_mixing),optional,intent(inout) :: mixing
-  type(s_scalar),optional,intent(inout) :: sVh_stock1,sVh_stock2
+  type(s_scalar),optional,intent(inout) :: Vh_stock1,Vh_stock2
   logical       ,optional,intent(in)    :: is_self_checkpoint
 
   logical :: flag_GS, flag_RT
@@ -507,8 +507,8 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock
 
   !Vh_stock
   if( flag_RT .and. yn_restart=='y')then
-    if (present(sVh_stock1) .and. present(sVh_stock2)) then
-      call read_Vh_stock(idir,lg,mg,info,sVh_stock1,sVh_stock2,iself)
+    if (present(Vh_stock1) .and. present(Vh_stock2)) then
+      call read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,iself)
     end if
   end if
 
@@ -622,18 +622,18 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
-      write(iu1_w) mixing%srho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+      write(iu1_w) mixing%rho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     do i=1,mixing%num_rho_stock
-      write(iu1_w) mixing%srho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+      write(iu1_w) mixing%rho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     if(system%nspin==2) then
       do is=1,2
         do i=1,mixing%num_rho_stock+1
-          write(iu1_w) mixing%srho_s_in (i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+          write(iu1_w) mixing%rho_s_in (i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
         do i=1,mixing%num_rho_stock
-          write(iu1_w) mixing%srho_s_out(i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+          write(iu1_w) mixing%rho_s_out(i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
       end do
     end if
@@ -661,7 +661,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        matbox2(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
+        matbox2(ix,iy,iz) = mixing%rho_in(i)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -676,7 +676,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        matbox2(ix,iy,iz) = mixing%srho_out(i)%f(ix,iy,iz)
+        matbox2(ix,iy,iz) = mixing%rho_out(i)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -693,7 +693,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            matbox2(ix,iy,iz) = mixing%srho_s_in(i,is)%f(ix,iy,iz)
+            matbox2(ix,iy,iz) = mixing%rho_s_in(i,is)%f(ix,iy,iz)
           end do
           end do
           end do
@@ -708,7 +708,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            matbox2(ix,iy,iz) = mixing%srho_s_out(i,is)%f(ix,iy,iz)
+            matbox2(ix,iy,iz) = mixing%rho_s_out(i,is)%f(ix,iy,iz)
           end do
           end do
           end do
@@ -767,7 +767,7 @@ subroutine write_rho(odir,lg,mg,system,info,mixing)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-     matbox2(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
+     matbox2(ix,iy,iz) = mixing%rho_in(i)%f(ix,iy,iz)
   end do
   end do
   end do
@@ -783,7 +783,7 @@ subroutine write_rho(odir,lg,mg,system,info,mixing)
      do iz=mg%is(3),mg%ie(3)
      do iy=mg%is(2),mg%ie(2)
      do ix=mg%is(1),mg%ie(1)
-        matbox2(ix,iy,iz) = mixing%srho_s_in(i,is)%f(ix,iy,iz)
+        matbox2(ix,iy,iz) = mixing%rho_s_in(i,is)%f(ix,iy,iz)
      end do
      end do
      end do
@@ -802,7 +802,7 @@ end subroutine write_rho
 
 !===================================================================================================================================
 
-subroutine write_Vh_stock(odir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_parallel_info, s_scalar
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -810,7 +810,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoi
   character(*)   :: odir
   type(s_rgrid), intent(in)    :: lg,mg
   type(s_parallel_info),intent(in) :: info
-  type(s_scalar),intent(in) :: sVh_stock1,sVh_stock2
+  type(s_scalar),intent(in) :: Vh_stock1,Vh_stock2
   logical,intent(in) :: is_self_checkpoint
 
   character(256) ::  dir_file_out
@@ -824,8 +824,8 @@ subroutine write_Vh_stock(odir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoi
   if (is_self_checkpoint) then
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
-    write(iu1_w) sVh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-    write(iu1_w) sVh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) Vh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) Vh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     close(iu1_w)
   else
     ! write root process
@@ -846,7 +846,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoi
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      matbox0(ix,iy,iz) = sVh_stock1%f(ix,iy,iz)
+      matbox0(ix,iy,iz) = Vh_stock1%f(ix,iy,iz)
     end do
     end do
     end do
@@ -856,7 +856,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoi
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      matbox0(ix,iy,iz) = sVh_stock2%f(ix,iy,iz)
+      matbox0(ix,iy,iz) = Vh_stock2%f(ix,iy,iz)
     end do
     end do
     end do
@@ -1175,18 +1175,18 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
     ! read all processses
     open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
-      read(iu1_r) mixing%srho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+      read(iu1_r) mixing%rho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     do i=1,mixing%num_rho_stock
-      read(iu1_r) mixing%srho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+      read(iu1_r) mixing%rho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     if(system%nspin==2) then
       do is=1,2
         do i=1,mixing%num_rho_stock+1
-          read(iu1_r) mixing%srho_s_in (i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+          read(iu1_r) mixing%rho_s_in (i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
         do i=1,mixing%num_rho_stock
-          read(iu1_r) mixing%srho_s_out(i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+          read(iu1_r) mixing%rho_s_out(i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
       end do
     end if
@@ -1209,7 +1209,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+        mixing%rho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
       end do
       end do
       end do
@@ -1225,7 +1225,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        mixing%srho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+        mixing%rho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
       end do
       end do
       end do
@@ -1243,7 +1243,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+            mixing%rho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
           end do
           end do
           end do
@@ -1259,7 +1259,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            mixing%srho_s_out(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+            mixing%rho_s_out(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
           end do
           end do
           end do
@@ -1310,7 +1310,7 @@ subroutine read_rho(idir,lg,mg,system,info,mixing)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-     mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+     mixing%rho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
   end do
   end do
   end do
@@ -1327,7 +1327,7 @@ subroutine read_rho(idir,lg,mg,system,info,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-           mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+           mixing%rho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
         end do
         end do
         end do
@@ -1343,7 +1343,7 @@ end subroutine read_rho
 
 !===================================================================================================================================
 
-subroutine read_Vh_stock(idir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_parallel_info, s_scalar
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -1351,7 +1351,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoin
   character(*), intent(in) :: idir
   type(s_rgrid), intent(in)    :: lg,mg
   type(s_parallel_info),intent(in) :: info
-  type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
+  type(s_scalar),intent(inout) :: Vh_stock1,Vh_stock2
   logical,intent(in) :: is_self_checkpoint
 
   integer :: iu1_r
@@ -1365,8 +1365,8 @@ subroutine read_Vh_stock(idir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoin
   if (is_self_checkpoint) then
     ! read all processes
     open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
-    read(iu1_r) sVh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-    read(iu1_r) sVh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) Vh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) Vh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     close(iu1_r)
   else
     ! read root process
@@ -1387,7 +1387,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoin
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      sVh_stock1%f(ix,iy,iz)=matbox1(ix,iy,iz)
+      Vh_stock1%f(ix,iy,iz)=matbox1(ix,iy,iz)
     end do
     end do
     end do
@@ -1396,7 +1396,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,sVh_stock1,sVh_stock2,is_self_checkpoin
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      sVh_stock2%f(ix,iy,iz)=matbox2(ix,iy,iz)
+      Vh_stock2%f(ix,iy,iz)=matbox2(ix,iy,iz)
     end do
     end do
     end do

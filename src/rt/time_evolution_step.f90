@@ -17,7 +17,7 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc,sVpsl,dmat,fg,energy, &
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -58,8 +58,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_pp_nlcc),intent(inout)    :: ppn
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
-  type(s_scalar), intent(inout) :: srho,srho_s(system%nspin),V_local(system%nspin),sVh,sVxc(system%nspin),sVpsl
-  type(s_scalar), intent(inout) :: sVh_stock1,sVh_stock2,Vbox
+  type(s_scalar), intent(inout) :: rho,rho_s(system%nspin),V_local(system%nspin),Vh,Vxc(system%nspin),Vpsl
+  type(s_scalar), intent(inout) :: Vh_stock1,Vh_stock2,Vbox
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
   type(s_singlescale) :: singlescale
@@ -130,7 +130,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
-     call update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
+     call update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
@@ -203,14 +203,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
 
   call timer_begin(LOG_CALC_RHO)
-  call calc_density(system,srho_s,spsi_out,info,mg)
+  call calc_density(system,rho_s,spsi_out,info,mg)
 
   if(nspin==1)then
 !$OMP parallel do private(iz,iy,ix) collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      srho%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+      rho%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -219,7 +219,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      srho%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)+srho_s(2)%f(ix,iy,iz)
+      rho%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)+rho_s(2)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -236,24 +236,24 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_HARTREE)
   if(iperiodic==0 .and. itt/=1)then
-    sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
-    sVh_stock2%f = sVh_stock1%f
+    Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
+    Vh_stock2%f = Vh_stock1%f
   end if
   if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
-    call fourier_singlescale(lg,mg,info,fg,srho,rt%j_e,sVh,poisson,singlescale)
+    call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
   else
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   end if
   if(iperiodic==0 .and. itt/=1)then
-    sVh_stock1%f = sVh%f
+    Vh_stock1%f = Vh%f
   end if
   call timer_end(LOG_CALC_HARTREE)
 
   call timer_begin(LOG_CALC_EXC_COR)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi_out,stencil,sVxc,energy%E_xc)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
   call timer_end(LOG_CALC_EXC_COR)
 
-  call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
 ! result
 
@@ -273,7 +273,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   select case(iperiodic)
   case(0)
 
-    call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
+    call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
 
   case(3)
 
@@ -307,8 +307,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     if(use_singlescale=='y') then
       call timer_begin(LOG_CALC_SINGLESCALE)
       singlescale%E_electron = energy%E_tot
-      call fdtd_singlescale(itt,lg,mg,system,info,srho, &
-      & sVh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
+      call fdtd_singlescale(itt,lg,mg,system,info,rho, &
+      & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
       call timer_end(LOG_CALC_SINGLESCALE)
     end if
@@ -316,7 +316,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(info%icomm_r,itt,rt,lg,mg,srho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(info%icomm_r,itt,rt,lg,mg,rho,rNe,poisson,energy%E_tot,system,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   !(force)
@@ -368,22 +368,22 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,srho%f,system%hgs,srho%f,itt)
+      call write_dns(lg,mg,rho%f,system%hgs,rho%f,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. use_singlescale=='y')then
     if(mod(itt,out_dns_ac_je_step)==0)then
-      call write_dns_ac_je(info,mg,system,srho%f,rt%j_e,itt,"bin")
+      call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
     end if
   end if
   if(yn_out_elf_rt=='y')then
     if(mod(itt,out_elf_rt_step)==0)then
-      call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
+      call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
     end if
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call write_estatic(lg,mg,system%hgs,stencil,info,sVh,srg_scalar,itt)
+      call write_estatic(lg,mg,system%hgs,stencil,info,Vh,srg_scalar,itt)
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)

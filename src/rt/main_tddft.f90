@@ -43,9 +43,9 @@ type(s_ewald_ion_ion) :: ewald
 type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
-type(s_scalar) :: sVpsl
-type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2,Vbox
-type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
+type(s_scalar) :: Vpsl
+type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
@@ -68,8 +68,8 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                         info,  &
                         xc_func, dmat, ofl,  &
                         srg, srg_scalar,  &
-                        spsi_in, spsi_out, tpsi, srho, srho_s,  &
-                        V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
+                        spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                        V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                         pp, ppg, ppn )
 
 
@@ -84,21 +84,21 @@ TE : do itt=Mit+1,itotNtime
 
   if(mod(itt,2)==1)then
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-     & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+     & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+     & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   else
     call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-     & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+     & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+     & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
   end if
 
   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) then
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
     if (mod(itt,2)==1) then
-      call checkpoint_rt(lg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,system,info,spsi_out,itt,Vh_stock1,Vh_stock2,singlescale)
     else
-      call checkpoint_rt(lg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale)
+      call checkpoint_rt(lg,mg,system,info,spsi_in, itt,Vh_stock1,Vh_stock2,singlescale)
     endif
     call timer_end(LOG_CHECKPOINT_SELF)
     call comm_sync_all
@@ -144,7 +144,7 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call checkpoint_rt(lg,mg,system,info,spsi_out,Mit,sVh_stock1,sVh_stock2,singlescale,ofl%dir_out_restart)
+  call checkpoint_rt(lg,mg,system,info,spsi_out,Mit,Vh_stock1,Vh_stock2,singlescale,ofl%dir_out_restart)
 end if
 
 call finalize_xc(xc_func)

@@ -27,8 +27,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      lg, mg, info,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_scalar,  &
-                     spsi_in, spsi_out, tpsi, srho, srho_s,  &
-                     V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
+                     spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                     V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                      pp, ppg, ppn )
   use inputoutput
   use math_constants, only: pi, zi
@@ -75,9 +75,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
-  type(s_scalar) :: sVpsl
-  type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2,Vbox
-  type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
+  type(s_scalar) :: Vpsl
+  type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
   type(s_dmatrix) :: dmat
   type(s_orbital) :: spsi_in,spsi_out
   type(s_orbital) :: tpsi ! temporary wavefunctions
@@ -162,20 +162,20 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call init_code_optimization
   
-  call allocate_scalar(mg,srho)
-  call allocate_scalar(mg,sVh)
-  call allocate_scalar(mg,sVh_stock1)
-  call allocate_scalar(mg,sVh_stock2)
+  call allocate_scalar(mg,rho)
+  call allocate_scalar(mg,Vh)
+  call allocate_scalar(mg,Vh_stock1)
+  call allocate_scalar(mg,Vh_stock2)
   call allocate_scalar_with_shadow(lg,Nd,Vbox)
-  call allocate_scalar(mg,sVpsl)
-  allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
+  call allocate_scalar(mg,Vpsl)
+  allocate(rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin))
   do jspin=1,system%nspin
-    call allocate_scalar(mg,srho_s(jspin))
+    call allocate_scalar(mg,rho_s(jspin))
     call allocate_scalar(mg,V_local(jspin))
-    call allocate_scalar(mg,sVxc(jspin))
+    call allocate_scalar(mg,Vxc(jspin))
   end do
   call read_pslfile(system,pp,ppg)
-  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
@@ -194,7 +194,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  call restart_rt(lg,mg,system,info,spsi_in,Mit,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2)
+  call restart_rt(lg,mg,system,info,spsi_in,Mit,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   if(yn_reset_step_restart=='y' ) Mit=0
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
@@ -207,26 +207,26 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
   end if
   
-  call calc_density(system,srho_s,spsi_in,info,mg)
-  srho%f = 0d0
+  call calc_density(system,rho_s,spsi_in,info,mg)
+  rho%f = 0d0
   do jspin=1,system%nspin
-     srho%f = srho%f + srho_s(jspin)%f
+     rho%f = rho%f + rho_s(jspin)%f
   end do
   if(yn_restart=='y')then
-    sVh%f = 2.d0*sVh_stock1%f - sVh_stock2%f
-    sVh_stock2%f = sVh_stock1%f
+    Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
+    Vh_stock2%f = Vh_stock1%f
   end if
   spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
-  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi_in,stencil,sVxc,energy%E_xc)
-  call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
-    sVh_stock1%f=sVh%f
+    Vh_stock1%f=Vh%f
   else if(yn_restart=='n')then
-    sVh_stock1%f=sVh%f
-    sVh_stock2%f=sVh%f
+    Vh_stock1%f=Vh%f
+    Vh_stock2%f=Vh%f
   end if
   
   allocate(energy%esp(system%no,system%nk,system%nspin))
@@ -249,7 +249,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
+     call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
   case(3)
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
@@ -369,7 +369,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   if(yn_restart /= 'y')then
-    call calc_dip(info%icomm_r,lg,mg,srho,rbox_array2)
+    call calc_dip(info%icomm_r,lg,mg,rho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
   if(comm_is_root(nproc_id_global))then
@@ -400,14 +400,14 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-         !!XXX bug XXX dnsdiff data is wrong as reference dns is srho%f now !AY
-        call write_dns(lg,mg,srho%f,system%hgs,srho%f,itt)
+         !!XXX bug XXX dnsdiff data is wrong as reference dns is rho%f now !AY
+        call write_dns(lg,mg,rho%f,system%hgs,rho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
-        call write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi_in)
+        call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,mg,system%hgs,stencil,info,sVh,srg_scalar,itt)
+        call write_estatic(lg,mg,system%hgs,stencil,info,Vh,srg_scalar,itt)
       end if
     end do
   
@@ -426,13 +426,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
 
-    call init_singlescale(mg,lg,info,system%hgs,srho,sVh &
+    call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
     & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit
-       call write_dns_ac_je(info,mg,system,srho%f,rt%j_e,itt,"new")
-       call write_dns_ac_je(info,mg,system,srho%f,rt%j_e,itt,"bin")
+       call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"new")
+       call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
     end if
 
   end if
