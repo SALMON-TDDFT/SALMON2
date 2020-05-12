@@ -22,7 +22,7 @@ SUBROUTINE ne2mu(energy,system)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: nelec, temperature
+  use salmon_global, only: nelec, nelec_spin, temperature
   implicit none
   type(s_dft_energy),intent(in) :: energy
   type(s_dft_system)            :: system
@@ -36,11 +36,15 @@ SUBROUTINE ne2mu(energy,system)
   
   if(nspin==1) then
     wspin = 2d0
-  else
+  else if(nspin==2) then
     wspin = 1d0
   end if
 
-  nein = dble(nelec)
+  if(nelec/=0) then
+    nein = dble(nelec)
+  else if(nspin==2 .and. sum(nelec_spin(:))>0) then
+    nein = dble(nelec_spin(1)+nelec_spin(2))
+  end if
 
   mu1 = minval(energy%esp)
   mu2 = maxval(energy%esp)
