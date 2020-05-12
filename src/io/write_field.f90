@@ -21,17 +21,17 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
+subroutine write_dns(lg,mg,system,rho,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa,theory
-  use structures, only: s_rgrid,s_scalar,allocate_scalar,deallocate_scalar
+  use structures, only: s_rgrid,s_scalar,s_dft_system,allocate_scalar,deallocate_scalar
   use parallelization, only: nproc_group_global
   use communication, only: comm_summation
   use write_file3d
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(in) :: hgs(3)
   real(8),intent(in),optional :: rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer,intent(in),optional :: itt
   integer :: ix,iy,iz
@@ -90,9 +90,9 @@ subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
     header_unit='A**(-3)'
     call write_avs(lg,103,suffix,header_unit,work_l2%f)
   else if(format_voxel_data=='cube')then
-    call write_cube(lg,103,suffix,phys_quantity,work_l2%f,hgs)
+    call write_cube(lg,103,suffix,phys_quantity,work_l2%f,system)
   else if(format_voxel_data=='vtk')then
-    call write_vtk(lg,103,suffix,work_l2%f,hgs)
+    call write_vtk(lg,103,suffix,work_l2%f,system%hgs)
   end if
 
   select case(theory)
@@ -135,9 +135,9 @@ subroutine write_dns(lg,mg,rho,hgs,rho0,itt)
       header_unit='A**(-3)'
       call write_avs(lg,103,suffix,header_unit,work_l2%f)
     else if(format_voxel_data=='cube')then
-      call write_cube(lg,103,suffix,phys_quantity,work_l2%f,hgs)
+      call write_cube(lg,103,suffix,phys_quantity,work_l2%f,system)
     else if(format_voxel_data=='vtk')then
-      call write_vtk(lg,103,suffix,work_l2%f,hgs)
+      call write_vtk(lg,103,suffix,work_l2%f,system%hgs)
     end if
   case default
   end select
@@ -433,7 +433,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
     header_unit = "none"
     call write_avs(lg,103,suffix,header_unit,elf)
   else if(format_voxel_data=='cube')then
-    call write_cube(lg,103,suffix,phys_quantity,elf,system%hgs)
+    call write_cube(lg,103,suffix,phys_quantity,elf,system)
   else if(format_voxel_data=='vtk')then
     call write_vtk(lg,103,suffix,elf,system%hgs)
   end if
@@ -442,7 +442,7 @@ end subroutine write_elf
 
 !===================================================================================================================================
 
-subroutine write_estatic(lg,mg,hgs,stencil,info,Vh,srg_scalar,itt)
+subroutine write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
   use salmon_global, only: format_voxel_data
   use structures
   use sendrecv_grid, only: update_overlap_real8
@@ -450,9 +450,9 @@ subroutine write_estatic(lg,mg,hgs,stencil,info,Vh,srg_scalar,itt)
   use communication, only: comm_summation
   use write_file3d
   implicit none
-  type(s_rgrid)   ,intent(in) :: lg,mg
-  real(8)         ,intent(in) :: hgs(3)
-  type(s_stencil) ,intent(in) :: stencil
+  type(s_rgrid)   ,  intent(in) :: lg,mg
+  type(s_dft_system),intent(in) :: system
+  type(s_stencil) ,  intent(in) :: stencil
   type(s_parallel_info),intent(in) :: info
   type(s_scalar)  ,intent(in) :: Vh
   type(s_sendrecv_grid)       :: srg_scalar
@@ -512,9 +512,9 @@ subroutine write_estatic(lg,mg,hgs,stencil,info,Vh,srg_scalar,itt)
       header_unit = "V/A"
       call write_avs(lg,103,suffix,header_unit,rmat2)
     else if(format_voxel_data=='cube')then
-      call write_cube(lg,103,suffix,phys_quantity,rmat2,hgs)
+      call write_cube(lg,103,suffix,phys_quantity,rmat2,system)
     else if(format_voxel_data=='vtk')then
-      call write_vtk(lg,103,suffix,rmat2,hgs)
+      call write_vtk(lg,103,suffix,rmat2,system%hgs)
     end if
 
   end do  
@@ -588,7 +588,7 @@ subroutine write_psi(lg,mg,system,info,spsi)
           header_unit = "A**(-3/2)"
           call write_avs(lg,103,suffix_re,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
         else if(format_voxel_data=='cube')then
-          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system%hgs)
+          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system)
         end if
       else
         write(fileid_k,    '(i8)') ik
@@ -607,8 +607,8 @@ subroutine write_psi(lg,mg,system,info,spsi)
           call write_avs(lg,103,suffix_re,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
           call write_avs(lg,103,suffix_im,header_unit,aimag(cmatbox2)/sqrt(au_length_aa)**3)
         else if(format_voxel_data=='cube')then
-          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system%hgs)
-          call write_cube(lg,103,suffix_im,phys_quantity,aimag(cmatbox2),system%hgs)
+          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system)
+          call write_cube(lg,103,suffix_im,phys_quantity,aimag(cmatbox2),system)
         end if
       endif
       

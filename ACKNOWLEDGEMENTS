@@ -10,3 +10,4 @@ Acknowledgements
     - Netlib LAPACK (http://www.netlib.org/lapack/)
     - Netlib ScaLAPACK (http://www.netlib.org/scalapack/)
     - RIKEN R-CCS EigenExa (https://www.r-ccs.riken.jp/labs/lpnctrt/en/projects/eigenexa/)
+    - Libxc (https://www.tddft.org/programs/libxc/)

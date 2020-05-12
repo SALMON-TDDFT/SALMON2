@@ -368,7 +368,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(yn_out_dns_rt=='y')then
     if(mod(itt,out_dns_rt_step)==0)then
-      call write_dns(lg,mg,rho%f,system%hgs,rho%f,itt)
+      call write_dns(lg,mg,system,rho%f,rho%f,itt)
     end if
   end if
   if(yn_out_dns_ac_je=='y' .and. use_singlescale=='y')then
@@ -383,7 +383,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   if(yn_out_estatic_rt=='y')then
     if(mod(itt,out_estatic_rt_step)==0)then
-      call write_estatic(lg,mg,system%hgs,stencil,info,Vh,srg_scalar,itt)
+      call write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
     end if
   end if
   call timer_end(LOG_WRITE_RT_INFOS)
