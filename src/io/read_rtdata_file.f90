@@ -16,6 +16,7 @@
 !=======================================================================
 module read_rtdata_file
   use filesystem, only: open_filehandle
+  use inputoutput, only: t_unit_ac
   implicit none
 
 contains
@@ -75,6 +76,9 @@ contains
         i = i + 1
     end do
     close(fh)
+
+    ! Transform unit of Ac field
+    Ac_dat(:, :) = Ac_dat(:, :) / t_unit_ac%conv
 
     return
   end subroutine load_Ac_from_rtdata_file
