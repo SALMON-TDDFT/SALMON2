@@ -228,6 +228,12 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     Vh_stock1%f=Vh%f
     Vh_stock2%f=Vh%f
   end if
+  if(propagator=='etrs')then
+    do jspin=1,system%nspin
+      rt%vloc_old(jspin,1)%f = V_local(jspin)%f
+      rt%vloc_old(jspin,2)%f = V_local(jspin)%f
+    end do
+  end if
   
   allocate(energy%esp(system%no,system%nk,system%nspin))
   
