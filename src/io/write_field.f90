@@ -233,7 +233,7 @@ end subroutine write_dns_ac_je
 
 !===================================================================================================================================
 
-subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
+subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
   use salmon_global       ,only: format_voxel_data,theory
   use structures
   use math_constants      ,only: pi
@@ -248,7 +248,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info)   ,intent(in) :: info
   type(s_stencil)         ,intent(in) :: stencil
-  type(s_scalar)          ,intent(in) :: srho
+  type(s_scalar)          ,intent(in) :: rho
   type(s_sendrecv_grid)               :: srg,srg_scalar
   type(s_orbital)                     :: tpsi
   !
@@ -330,7 +330,7 @@ subroutine write_elf(itt,lg,mg,system,info,stencil,srho,srg,srg_scalar,tpsi)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
-    rho_half(ix,iy,iz)=srho%f(ix,iy,iz)/2.d0
+    rho_half(ix,iy,iz)=rho%f(ix,iy,iz)/2.d0
   end do
   end do
   end do
@@ -442,7 +442,7 @@ end subroutine write_elf
 
 !===================================================================================================================================
 
-subroutine write_estatic(lg,mg,hgs,stencil,info,sVh,srg_scalar,itt)
+subroutine write_estatic(lg,mg,hgs,stencil,info,Vh,srg_scalar,itt)
   use salmon_global, only: format_voxel_data
   use structures
   use sendrecv_grid, only: update_overlap_real8
@@ -454,7 +454,7 @@ subroutine write_estatic(lg,mg,hgs,stencil,info,sVh,srg_scalar,itt)
   real(8)         ,intent(in) :: hgs(3)
   type(s_stencil) ,intent(in) :: stencil
   type(s_parallel_info),intent(in) :: info
-  type(s_scalar)  ,intent(in) :: sVh
+  type(s_scalar)  ,intent(in) :: Vh
   type(s_sendrecv_grid)       :: srg_scalar
   integer,intent(in),optional :: itt
   !
@@ -475,7 +475,7 @@ subroutine write_estatic(lg,mg,hgs,stencil,info,sVh,srg_scalar,itt)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    box(ix,iy,iz) = sVh%f(ix,iy,iz)
+    box(ix,iy,iz) = Vh%f(ix,iy,iz)
   end do
   end do
   end do

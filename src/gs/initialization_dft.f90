@@ -25,7 +25,7 @@ subroutine initialization1_dft( system, energy, stencil, fg, poisson,  &
                                 lg, mg,  &
                                 info,  &
                                 srg, srg_scalar,  &
-                                srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
+                                rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
                                 spsi, shpsi, sttpsi,  &
                                 pp, ppg, ppn,  &
                                 ofl )
@@ -59,9 +59,9 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 !type(s_xc_functional) :: xc_func
-type(s_scalar) :: srho,sVh,sVpsl !,rho_old,Vlocal_old
-!type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
-type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
+type(s_scalar) :: rho,Vh,Vpsl !,rho_old,Vlocal_old
+!type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
+type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
@@ -82,17 +82,17 @@ call init_code_optimization
 
 allocate( energy%esp(system%no,system%nk,system%nspin) ); energy%esp=0.0d0
 
-!allocate(srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin))
-call allocate_scalar(mg,srho)
-call allocate_scalar(mg,sVh)
-call allocate_scalar(mg,sVpsl)
+!allocate(rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin))
+call allocate_scalar(mg,rho)
+call allocate_scalar(mg,Vh)
+call allocate_scalar(mg,Vpsl)
 do jspin=1,system%nspin
-  call allocate_scalar(mg,srho_s(jspin))
+  call allocate_scalar(mg,rho_s(jspin))
   call allocate_scalar(mg,V_local(jspin))
-  call allocate_scalar(mg,sVxc(jspin))
+  call allocate_scalar(mg,Vxc(jspin))
 end do
 call read_pslfile(system,pp,ppg)
-call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
 call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
 if(comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
@@ -144,7 +144,7 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 system,energy,ewald,stencil,fg,poisson,&
                                 lg,mg,info,  &
                                 srg,srg_scalar,  &
-                                srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
+                                rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
                                 xc_func,mixing )
@@ -183,9 +183,9 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: srho,sVh,sVpsl
-!type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
-type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
+type(s_scalar) :: rho,Vh,Vpsl
+!type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
+type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
@@ -219,16 +219,16 @@ real(8) :: rNe0,rNe
   if (yn_restart == 'y') then
      call restart_gs(lg,mg,system,info,spsi,Miter,mixing=mixing)
      if(read_gs_restart_data=='wfn') then
-        call calc_density(system,srho_s,spsi,info,mg)
+        call calc_density(system,rho_s,spsi,info,mg)
      else 
         i = mixing%num_rho_stock+1
-        !srho%f      => mg (orbital domain allocation)
-        !srho_s(j)%f => mg (orbital domain allocation)
-        !mixing%srho_in(i)%f => mg (density domain allocation)
+        !rho%f      => mg (orbital domain allocation)
+        !rho_s(j)%f => mg (orbital domain allocation)
+        !mixing%rho_in(i)%f => mg (density domain allocation)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-           srho_s(1)%f(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
+           rho_s(1)%f(ix,iy,iz) = mixing%rho_in(i)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -237,7 +237,7 @@ real(8) :: rNe0,rNe
               do iz=mg%is(3),mg%ie(3)
               do iy=mg%is(2),mg%ie(2)
               do ix=mg%is(1),mg%ie(1)
-                 srho_s(jspin)%f(ix,iy,iz) = mixing%srho_s_in(i,jspin)%f(ix,iy,iz)
+                 rho_s(jspin)%f(ix,iy,iz) = mixing%rho_s_in(i,jspin)%f(ix,iy,iz)
               end do
               end do
               end do
@@ -257,37 +257,37 @@ real(8) :: rNe0,rNe
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     call init_wf(lg,mg,system,info,spsi)
-    call calc_density(system,srho_s,spsi,info,mg)
+    call calc_density(system,rho_s,spsi,info,mg)
   end if
 
-  srho%f = 0d0
+  rho%f = 0d0
   do jspin=1,nspin
-     srho%f = srho%f + srho_s(jspin)%f
+     rho%f = rho%f + rho_s(jspin)%f
   end do
   
   if(read_gs_dns_cube == 'y') then
-    call read_dns(lg,mg,srho%f) ! cube file only
+    call read_dns(lg,mg,rho%f) ! cube file only
     rNe0 = 0d0
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      rNe0 = rNe0 + srho%f(ix,iy,iz) *system%Hvol
+      rNe0 = rNe0 + rho%f(ix,iy,iz) *system%Hvol
     end do
     end do
     end do
     call comm_summation(rNe0,rNe,info%icomm_r)
-    srho%f = srho%f *(dble(nelec)/rNe)
+    rho%f = rho%f *(dble(nelec)/rNe)
     if(system%nspin==1) then
-      srho_s(1)%f = srho%f
+      rho_s(1)%f = rho%f
     else if(system%nspin==2) then
-      srho_s(1)%f = srho%f/2d0
-      srho_s(2)%f = srho%f/2d0
+      rho_s(1)%f = rho%f/2d0
+      rho_s(2)%f = rho%f/2d0
     end if
   end if
 
-  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
-  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
-  call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
   select case(iperiodic)
   case(0)
@@ -302,7 +302,7 @@ real(8) :: rNe0,rNe
   rion_update = .true. ! it's first calculation
   select case(iperiodic)
   case(0)
-     call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
+     call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
   case(3)
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
@@ -316,7 +316,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                                 lg,mg,  &
                                 info,  &
                                 srg,srg_scalar,  &
-                                srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
+                                rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
                                 xc_func,mixing )
@@ -357,8 +357,8 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
   type(s_xc_functional) :: xc_func
-  type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
-  type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
+  type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+  type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
@@ -382,7 +382,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-     rho_old%f(ix,iy,iz)   = srho%f(ix,iy,iz)
+     rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
      Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
   end do
   end do
@@ -400,8 +400,8 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           stencil,  &
                           srg,srg_scalar,   &
                           spsi,shpsi,sttpsi,  &
-                          srho,srho_s,  &
-                          V_local,sVh,sVxc,sVpsl,xc_func,  &
+                          rho,rho_s,  &
+                          V_local,Vh,Vxc,Vpsl,xc_func,  &
                           pp,ppg,ppn,  &
                           rho_old,Vlocal_old,  &
                           band, 1 )

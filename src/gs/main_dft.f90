@@ -61,8 +61,8 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
-type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
+type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
@@ -89,14 +89,14 @@ call timer_begin(LOG_INIT_GS)
 
 ! please move folloings into initialization_dft
 call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
-allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
+allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg,   &
                           info,  &
                           srg, srg_scalar,  &
-                          srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
+                          rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,  &
                           ofl )
@@ -105,7 +105,7 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           system, energy, ewald, stencil, fg, poisson,&
                           lg, mg, info,   &
                           srg, srg_scalar,  &
-                          srho, srho_s, sVh,V_local, sVpsl, sVxc,  &
+                          rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
@@ -130,7 +130,7 @@ if(iopt>=2)then
   Miter = 0        ! Miter: Iteration counter set to zero
   rion_update = .true.
   call dealloc_init_ps(ppg)
-  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call calc_nlcc(pp, system, mg, ppn)
   call timer_end(LOG_INIT_GS)
 end if
@@ -166,7 +166,7 @@ call allocate_scalar(mg,Vlocal_old)
 do iz=mg%is(3),mg%ie(3)
 do iy=mg%is(2),mg%ie(2)
 do ix=mg%is(1),mg%ie(1)
-   rho_old%f(ix,iy,iz)   = srho%f(ix,iy,iz)
+   rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
    Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
 end do
 end do
@@ -187,8 +187,8 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         stencil,  &
                         srg,srg_scalar,   &
                         spsi,shpsi,sttpsi,  &
-                        srho,srho_s,  &
-                        V_local,sVh,sVxc,sVpsl,xc_func,  &
+                        rho,rho_s,  &
+                        V_local,Vh,Vxc,Vpsl,xc_func,  &
                         pp,ppg,ppn,  &
                         rho_old,Vlocal_old,  &
                         band, 2 )
@@ -307,10 +307,10 @@ call write_info_data(Miter,system,energy,pp)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,srho%f,system%hgs)
+if(yn_out_dns =='y') call write_dns(lg,mg,rho%f,system%hgs)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
-if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,srho,srg,srg_scalar,spsi)
+if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 

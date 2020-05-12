@@ -52,9 +52,9 @@ type(s_ewald_ion_ion) :: ewald
 type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
-type(s_scalar) :: sVpsl
-type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2,Vbox
-type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
+type(s_scalar) :: Vpsl
+type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
@@ -306,8 +306,8 @@ subroutine initialization_ms()
                                     info,  &
                                     xc_func, dmat, ofl,  &
                                     srg, srg_scalar,  &
-                                    spsi_in, spsi_out, tpsi, srho, srho_s,  &
-                                    V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
+                                    spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                                    V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                                     pp, ppg, ppn )
 
             ! Override global variables (restore)
@@ -387,12 +387,12 @@ subroutine time_evolution_step_ms
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-            & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         else
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-            & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
 
         curr_tmp(:, :) = 0d0
@@ -449,9 +449,9 @@ subroutine checkpoint_ms(odir)
 
         if (macropoint_in_mygroup(i)) then
             if (mod(itt,2)==1) then
-                call checkpoint_rt(lg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale,idir)
+                call checkpoint_rt(lg,mg,system,info,spsi_out,itt,Vh_stock1,Vh_stock2,singlescale,idir)
             else
-                call checkpoint_rt(lg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale,idir)
+                call checkpoint_rt(lg,mg,system,info,spsi_in, itt,Vh_stock1,Vh_stock2,singlescale,idir)
             endif
         end if
     end do

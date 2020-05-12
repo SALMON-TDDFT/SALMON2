@@ -24,8 +24,8 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               stencil,  &
                               srg,srg_scalar,   &
                               spsi,shpsi,sttpsi,  &
-                              srho,srho_s,  &
-                              V_local,sVh,sVxc,sVpsl,xc_func,  &
+                              rho,rho_s,  &
+                              V_local,Vh,Vxc,Vpsl,xc_func,  &
                               pp,ppg,ppn,  &
                               rho_old,Vlocal_old,  &
                               band,ilevel_print )
@@ -71,9 +71,9 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
-!type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
-type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
+type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+!type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
+type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
@@ -101,18 +101,18 @@ if(step_initial_mix_zero.gt.1)then
    DFT_NoMix_Iteration : do iter=1,step_initial_mix_zero
 
       rion_update = check_rion_update() .or. (iter == 1)
-      call copy_density(iter,system%nspin,mg,srho_s,mixing)
+      call copy_density(iter,system%nspin,mg,rho_s,mixing)
       call scf_iteration_step(lg,mg,system,info,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
+                     srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
                      cg,ppg,V_local,  &
                      iter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
-                     poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-      call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+      call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
       call get_band_gap(system,energy,ene_gap)
@@ -167,14 +167,14 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system)
       end if
    end if
-   call copy_density(Miter,system%nspin,mg,srho_s,mixing)
+   call copy_density(Miter,system%nspin,mg,rho_s,mixing)
    call scf_iteration_step(lg,mg,system,info,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
+                     srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &
                      iditer_nosubspace_diag,mixing,iter,  &
-                     poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )
@@ -183,7 +183,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    call get_band_gap(system,energy,ene_gap)
    if(calc_mode/='DFT_BAND')then
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,srho_s,sVh,sVxc,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
       case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
    end if
@@ -224,7 +224,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       do iz=mg%is(3),mg%ie(3) 
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-         sum0 = sum0 + abs(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+         sum0 = sum0 + abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
       end do
       end do
       end do
@@ -244,7 +244,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       do iz=mg%is(3),mg%ie(3) 
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-         sum0 = sum0 + (srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
+         sum0 = sum0 + (rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
       end do
       end do
       end do
@@ -322,7 +322,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    do iz=mg%is(3),mg%ie(3)
    do iy=mg%is(2),mg%ie(2)
    do ix=mg%is(1),mg%ie(1)
-      rNebox1 = rNebox1 + srho%f(ix,iy,iz)
+      rNebox1 = rNebox1 + rho%f(ix,iy,iz)
    end do
    end do
    end do
@@ -337,7 +337,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    do iz=mg%is(3),mg%ie(3)
    do iy=mg%is(2),mg%ie(2)
    do ix=mg%is(1),mg%ie(1)
-      rho_old%f(ix,iy,iz)    = srho%f(ix,iy,iz)
+      rho_old%f(ix,iy,iz)    = rho%f(ix,iy,iz)
       Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
    end do
    end do
