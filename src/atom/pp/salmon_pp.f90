@@ -322,7 +322,7 @@ module salmon_pp
     integer :: a, ik, ir, intr
     integer :: i, i1, i2, i3, j1, j2, j3
     integer :: irepr_min, irepr_max
-    real(8) :: rion_repr(3)
+    real(8) :: Rion_repr(3)
     real(8) :: r, rc, r1, r2, r3
     real(8) :: ratio1, ratio2
 
@@ -367,15 +367,15 @@ module salmon_pp
       do i1 = irepr_min, irepr_max
       do i2 = irepr_min, irepr_max
       do i3 = irepr_min, irepr_max
-        rion_repr(1) = sys%rion(1, a) + i1 * sys%primitive_a(1, 1)
-        rion_repr(2) = sys%rion(2, a) + i2 * sys%primitive_a(2, 2)
-        rion_repr(3) = sys%rion(3, a) + i3 * sys%primitive_a(3, 3)
+        Rion_repr(1) = sys%Rion(1, a) + i1 * sys%primitive_a(1, 1)
+        Rion_repr(2) = sys%Rion(2, a) + i2 * sys%primitive_a(2, 2)
+        Rion_repr(3) = sys%Rion(3, a) + i3 * sys%primitive_a(3, 3)
         do j1 = rg%is(1), rg%ie(1)
         do j2 = rg%is(2), rg%ie(2)
         do j3 = rg%is(3), rg%ie(3)
-          r1 = (j1-1) * sys%hgs(1) - rion_repr(1) ! iwata
-          r2 = (j2-1) * sys%hgs(2) - rion_repr(2) ! iwata
-          r3 = (j3-1) * sys%hgs(3) - rion_repr(3) ! iwata
+          r1 = (j1-1) * sys%hgs(1) - Rion_repr(1) ! iwata
+          r2 = (j2-1) * sys%hgs(2) - Rion_repr(2) ! iwata
+          r3 = (j3-1) * sys%hgs(3) - Rion_repr(3) ! iwata
           r = sqrt(r1**2 + r2**2 + r3**2)
           if (r <= rc) then
             do ir = 1, pp%nrmax ! iwata

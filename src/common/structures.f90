@@ -252,7 +252,7 @@ module structures
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
     !
-    real(8),allocatable :: rion_old(:,:) ! old position
+    real(8),allocatable :: Rion_old(:,:) ! old position
     integer,allocatable :: jxyz_old(:,:,:)
     integer,allocatable :: jxx_old(:,:)
     integer,allocatable :: jyy_old(:,:)
@@ -396,7 +396,7 @@ module structures
   type s_mixing
     logical :: flag_mix_zero
     integer :: num_rho_stock
-    type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
+    type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)
     real(8) :: mixrate, alpha_mb, beta_p
     real(8) :: convergence_value_prev
   end type s_mixing

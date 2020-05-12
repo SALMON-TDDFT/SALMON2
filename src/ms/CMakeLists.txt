@@ -1,4 +1,5 @@
 set(SOURCES
+    input_checker_ms.f90
     main_ms.f90
    )
 

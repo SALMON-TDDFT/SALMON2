@@ -23,7 +23,9 @@ use math_constants, only: pi
 use salmon_global
 use structures
 use inputoutput, only: nx_m, ny_m, nz_m, dt
-use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, comm_get_groupinfo, comm_sync_all, comm_summation, comm_bcast
+use communication, only: comm_is_root, comm_sync_all, comm_create_group_byid, &
+                         comm_get_groupinfo, comm_sync_all, comm_summation, &
+                         comm_bcast
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
@@ -34,6 +36,7 @@ use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use filesystem, only: create_directory, get_filehandle
 use phys_constants, only: cspeed_au
 use em_field, only: calc_Ac_ext
+use input_checker_ms, only: check_input_variables_ms
 implicit none
 
 type(s_rgrid) :: lg
@@ -49,9 +52,9 @@ type(s_ewald_ion_ion) :: ewald
 type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
-type(s_scalar) :: sVpsl
-type(s_scalar) :: srho,sVh,sVh_stock1,sVh_stock2,Vbox
-type(s_scalar),allocatable :: srho_s(:),V_local(:),sVxc(:)
+type(s_scalar) :: Vpsl
+type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
 type(s_orbital) :: tpsi ! temporary wavefunctions
@@ -75,25 +78,26 @@ integer, allocatable :: iranklists(:)
 
 real(8), allocatable :: Ac_inc(:, :)
 
-character(256) :: file_debug_log
 integer :: nmacro_mygroup, isize_mygroup
 
-if (.not. check_input_variables()) return
-
+! character(256) :: file_debug_log
 !! Open logfile for debugging
 ! write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
 ! open(unit=9999, file=file_debug_log)
 ! write(9999, *) 'logging start'; flush(9999)
 
+if (.not. check_input_variables_ms()) return
+
 call timer_begin(LOG_TOTAL)
 ! Initialization
 
 call initialization_ms()
-! if (comm_is_root(ms%id_ms_world)) call print_header()
 
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
+
+! if (comm_is_root(ms%id_ms_world)) call print_header()
 
 TE : do itt=Mit+1,itotNtime
     call time_evolution_step_ms()
@@ -113,8 +117,6 @@ if(write_rt_wfn_k=='y')then
 end if
 
 call finalize_xc(xc_func)
-
-! close(gp)
 
 contains
 
@@ -243,9 +245,13 @@ subroutine initialization_ms()
         fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
         end do
     end do
-    fs%imedia(:,:,:) = 0
 
     call Weyl_init(fs, fw)
+
+    allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
+                       fs%mg%is_array(2):fs%mg%ie_array(2), &
+                       fs%mg%is_array(3):fs%mg%ie_array(3)))
+    fs%imedia(:,:,:) = 0
 
     allocate(ms%curr(1:3, 1:ms%nmacro))
     allocate(ms%vec_Ac(1:3, 1:ms%nmacro))
@@ -300,8 +306,8 @@ subroutine initialization_ms()
                                     info,  &
                                     xc_func, dmat, ofl,  &
                                     srg, srg_scalar,  &
-                                    spsi_in, spsi_out, tpsi, srho, srho_s,  &
-                                    V_local, Vbox, sVh, sVh_stock1, sVh_stock2, sVxc, sVpsl,&
+                                    spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                                    V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                                     pp, ppg, ppn )
 
             ! Override global variables (restore)
@@ -381,12 +387,12 @@ subroutine time_evolution_step_ms
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-            & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         else
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,srho,srho_s,V_local,Vbox,sVh,sVh_stock1,sVh_stock2,sVxc &
-            & ,sVpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
 
         curr_tmp(:, :) = 0d0
@@ -443,9 +449,9 @@ subroutine checkpoint_ms(odir)
 
         if (macropoint_in_mygroup(i)) then
             if (mod(itt,2)==1) then
-                call checkpoint_rt(lg,mg,system,info,spsi_out,itt,sVh_stock1,sVh_stock2,singlescale,idir)
+                call checkpoint_rt(lg,mg,system,info,spsi_out,itt,Vh_stock1,Vh_stock2,singlescale,idir)
             else
-                call checkpoint_rt(lg,mg,system,info,spsi_in, itt,sVh_stock1,sVh_stock2,singlescale,idir)
+                call checkpoint_rt(lg,mg,system,info,spsi_in, itt,Vh_stock1,Vh_stock2,singlescale,idir)
             endif
         end if
     end do
@@ -622,89 +628,6 @@ subroutine incident()
     return
  end subroutine incident
 
-
-
-
-function check_input_variables() result(r)
-    implicit none
-    logical :: r
-    r = .true.
-    if (nx_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nx_m' must be larger than 1!"
-        r = .false.
-    end if
-    if (ny_m /= 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'ny_m' must be 1!"
-        r = .false.
-    end if
-    if (nz_m /= 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nz_m' must be 1!"
-        r = .false.
-    end if
-    if (nproc_size_global < nx_m * ny_m * nz_m) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! MPI procs is too small!"
-        r = .false.
-    end if
-    if (mod(nproc_size_global, nx_m * ny_m * nz_m) > 0) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! MPI procs number of processes is an integer multiple of macropoints!"
-        r = .false.
-    end if
-    if (hx_m < 1d-6 .and. dl_em(1) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hx_m' or 'dl_em(1)' must be specified!"
-        r = .false.
-    end if
-    if (hy_m < 1d-6 .and. dl_em(2) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hy_m' or 'dl_em(2)' must be specified!"
-        r = .false.
-    end if
-    if (hz_m < 1d-6 .and. dl_em(3) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hz_m' or 'dl_em(3)' must be specified!"
-        r = .false.
-    end if
-    if (dt < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'dt' must be specified!"
-        r = .false.
-    end if
-    if (dt_em > 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'dt_em' must not be specified!"
-        r = .false.
-    end if
-    if (nxvacl_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nxvacl_m' must not larger than 1!"
-        r = .false.
-    end if
-    if (nxvacr_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nxvacr_m' must not larger than 1!"
-        r = .false.
-    end if
-    if (trim(boundary_em(1,1)) .ne. 'periodic' &
-        & .and. trim(boundary_em(1,1)) .ne. 'pec' &
-        & .and. trim(boundary_em(1,1)) .ne. 'abc') then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'boundary_em(1,1)' unknown boundary condition!"
-        r = .false.
-    end if
-    if (trim(boundary_em(1,2)) .ne. 'periodic' &
-        & .and. trim(boundary_em(1,2)) .ne. 'pec' &
-        & .and. trim(boundary_em(1,2)) .ne. 'abc') then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'boundary_em(1,2)' unknown boundary condition!"
-        r = .false.
-    end if
-    return
-end function check_input_variables
 
 end subroutine main_ms
 

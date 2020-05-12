@@ -19,13 +19,13 @@ module mixing_sub
 contains
 
 !===================================================================================================================================
-subroutine simple_mixing(mg,system,c1,c2,srho_s,mixing)
+subroutine simple_mixing(mg,system,c1,c2,rho_s,mixing)
   use structures, only: s_rgrid, s_dft_system, s_scalar, s_mixing
   implicit none
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: c1,c2
-  type(s_scalar),intent(inout) :: srho_s(system%nspin)
+  type(s_scalar),intent(inout) :: rho_s(system%nspin)
   type(s_mixing),intent(inout) :: mixing
   
   integer :: ix,iy,iz
@@ -35,7 +35,7 @@ subroutine simple_mixing(mg,system,c1,c2,srho_s,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+      mixing%rho_out(mixing%num_rho_stock)%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -44,8 +44,8 @@ subroutine simple_mixing(mg,system,c1,c2,srho_s,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      mixing%srho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
-      mixing%srho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)=srho_s(2)%f(ix,iy,iz)
+      mixing%rho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
+      mixing%rho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)=rho_s(2)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -57,9 +57,9 @@ subroutine simple_mixing(mg,system,c1,c2,srho_s,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      srho_s(1)%f(ix,iy,iz) = c1*mixing%srho_in(mixing%num_rho_stock)%f(ix,iy,iz) &
-                              + c2*mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)
-      mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz)
+      rho_s(1)%f(ix,iy,iz) = c1*mixing%rho_in(mixing%num_rho_stock)%f(ix,iy,iz) &
+                              + c2*mixing%rho_out(mixing%num_rho_stock)%f(ix,iy,iz)
+      mixing%rho_in(mixing%num_rho_stock+1)%f(ix,iy,iz) = rho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -68,12 +68,12 @@ subroutine simple_mixing(mg,system,c1,c2,srho_s,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      srho_s(1)%f(ix,iy,iz) = c1*mixing%srho_s_in(mixing%num_rho_stock,1)%f(ix,iy,iz) &
-                              + c2*mixing%srho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)
-      srho_s(2)%f(ix,iy,iz) = c1*mixing%srho_s_in(mixing%num_rho_stock,2)%f(ix,iy,iz) &
-                              + c2*mixing%srho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)
-      mixing%srho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz) = srho_s(1)%f(ix,iy,iz)
-      mixing%srho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz) = srho_s(2)%f(ix,iy,iz)
+      rho_s(1)%f(ix,iy,iz) = c1*mixing%rho_s_in(mixing%num_rho_stock,1)%f(ix,iy,iz) &
+                              + c2*mixing%rho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)
+      rho_s(2)%f(ix,iy,iz) = c1*mixing%rho_s_in(mixing%num_rho_stock,2)%f(ix,iy,iz) &
+                              + c2*mixing%rho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)
+      mixing%rho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz) = rho_s(1)%f(ix,iy,iz)
+      mixing%rho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz) = rho_s(2)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -86,14 +86,14 @@ end subroutine simple_mixing
 
 !===================================================================================================================================
 
-subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
+subroutine wrapper_broyden(comm,mg,system,rho_s,iter,mixing)
   use structures, only: s_rgrid,s_dft_system,s_scalar,s_mixing
   use broyden_sub
   implicit none
   integer,intent(in) :: comm
   type(s_rgrid) :: mg
   type(s_dft_system),intent(in) :: system
-  type(s_scalar),intent(inout) :: srho_s(system%nspin)
+  type(s_scalar),intent(inout) :: rho_s(system%nspin)
   integer,intent(in) :: iter
   type(s_mixing),intent(inout) :: mixing
   integer :: ix,iy,iz,is
@@ -108,7 +108,7 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-       vecr(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+       vecr(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -118,8 +118,8 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
        do ix=mg%is(1),mg%ie(1)
-          vecr_in(ix,iy,iz,i) =mixing%srho_in(i)%f(ix,iy,iz)
-          vecr_out(ix,iy,iz,i)=mixing%srho_out(i)%f(ix,iy,iz)
+          vecr_in(ix,iy,iz,i) =mixing%rho_in(i)%f(ix,iy,iz)
+          vecr_out(ix,iy,iz,i)=mixing%rho_out(i)%f(ix,iy,iz)
        end do
        end do
        end do
@@ -133,7 +133,7 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-       srho_s(1)%f(ix,iy,iz)= vecr(ix,iy,iz)
+       rho_s(1)%f(ix,iy,iz)= vecr(ix,iy,iz)
     end do
     end do
     end do
@@ -143,8 +143,8 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
        do iz=mg%is(3),mg%ie(3)
        do iy=mg%is(2),mg%ie(2)
        do ix=mg%is(1),mg%ie(1)
-          mixing%srho_in(i)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
-          mixing%srho_out(i)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
+          mixing%rho_in(i)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
+          mixing%rho_out(i)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
        end do
        end do
        end do
@@ -157,7 +157,7 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-         vecr(ix,iy,iz)=srho_s(is)%f(ix,iy,iz)
+         vecr(ix,iy,iz)=rho_s(is)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -167,8 +167,8 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-           vecr_in(ix,iy,iz,i)=mixing%srho_s_in(i,is)%f(ix,iy,iz)
-           vecr_out(ix,iy,iz,i)=mixing%srho_s_out(i,is)%f(ix,iy,iz)
+           vecr_in(ix,iy,iz,i)=mixing%rho_s_in(i,is)%f(ix,iy,iz)
+           vecr_out(ix,iy,iz,i)=mixing%rho_s_out(i,is)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -182,7 +182,7 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-         srho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
+         rho_s(is)%f(ix,iy,iz)= vecr(ix,iy,iz)
       end do
       end do
       end do
@@ -192,8 +192,8 @@ subroutine wrapper_broyden(comm,mg,system,srho_s,iter,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-           mixing%srho_s_in(i,is)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
-           mixing%srho_s_out(i,is)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
+           mixing%rho_s_in(i,is)%f(ix,iy,iz)=vecr_in(ix,iy,iz,i)
+           mixing%rho_s_out(i,is)%f(ix,iy,iz)=vecr_out(ix,iy,iz,i)
         end do
         end do
         end do
@@ -206,7 +206,7 @@ end subroutine wrapper_broyden
 
 !===================================================================================================================================
 
-subroutine pulay(mg,info,system,srho_s,iter,mixing)
+subroutine pulay(mg,info,system,rho_s,iter,mixing)
   use salmon_global, only: nmemory_p
   use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_scalar,s_mixing,allocate_scalar,deallocate_scalar
   use communication, only: comm_summation
@@ -214,7 +214,7 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
   type(s_rgrid),intent(in)            :: mg
   type(s_parallel_info),intent(in) :: info
   type(s_dft_system),intent(in)       :: system
-  type(s_scalar),intent(inout)        :: srho_s(system%nspin)
+  type(s_scalar),intent(inout)        :: rho_s(system%nspin)
   integer,intent(in)                  :: iter
   type(s_mixing),intent(inout)        :: mixing
   integer :: nsize
@@ -231,7 +231,7 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
 
   if(iter==1.or.nmemory_p==1)then
 
-    call simple_mixing(mg,system,1.d0-mixing%beta_p,mixing%beta_p,srho_s,mixing)
+    call simple_mixing(mg,system,1.d0-mixing%beta_p,mixing%beta_p,rho_s,mixing)
 
   else
 !pulay mixing
@@ -241,7 +241,7 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        mixing%srho_out(mixing%num_rho_stock)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+        mixing%rho_out(mixing%num_rho_stock)%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -250,8 +250,8 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        mixing%srho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
-        mixing%srho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)=srho_s(2)%f(ix,iy,iz)
+        mixing%rho_s_out(mixing%num_rho_stock,1)%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
+        mixing%rho_s_out(mixing%num_rho_stock,2)%f(ix,iy,iz)=rho_s(2)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -287,8 +287,8 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          ss=ss+(mixing%srho_out(i)%f(ix,iy,iz)-mixing%srho_in(i)%f(ix,iy,iz))* &
-                (mixing%srho_out(j)%f(ix,iy,iz)-mixing%srho_in(j)%f(ix,iy,iz))
+          ss=ss+(mixing%rho_out(i)%f(ix,iy,iz)-mixing%rho_in(i)%f(ix,iy,iz))* &
+                (mixing%rho_out(j)%f(ix,iy,iz)-mixing%rho_in(j)%f(ix,iy,iz))
         end do
         end do
         end do
@@ -298,8 +298,8 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            ss=ss+(mixing%srho_s_out(i,is)%f(ix,iy,iz)-mixing%srho_s_in(i,is)%f(ix,iy,iz))* &
-                  (mixing%srho_s_out(j,is)%f(ix,iy,iz)-mixing%srho_s_in(j,is)%f(ix,iy,iz))
+            ss=ss+(mixing%rho_s_out(i,is)%f(ix,iy,iz)-mixing%rho_s_in(i,is)%f(ix,iy,iz))* &
+                  (mixing%rho_s_out(j,is)%f(ix,iy,iz)-mixing%rho_s_in(j,is)%f(ix,iy,iz))
           end do
           end do
           end do
@@ -337,8 +337,8 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            x%f(ix,iy,iz)=x%f(ix,iy,iz)+b1(i0)*mixing%srho_in(i)%f(ix,iy,iz)
-            y%f(ix,iy,iz)=y%f(ix,iy,iz)+b1(i0)*mixing%srho_out(i)%f(ix,iy,iz)
+            x%f(ix,iy,iz)=x%f(ix,iy,iz)+b1(i0)*mixing%rho_in(i)%f(ix,iy,iz)
+            y%f(ix,iy,iz)=y%f(ix,iy,iz)+b1(i0)*mixing%rho_out(i)%f(ix,iy,iz)
           end do
           end do
           end do
@@ -347,8 +347,8 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
           do iz=mg%is(3),mg%ie(3)
           do iy=mg%is(2),mg%ie(2)
           do ix=mg%is(1),mg%ie(1)
-            x%f(ix,iy,iz)=x%f(ix,iy,iz)+b1(i0)*mixing%srho_s_in(i,is)%f(ix,iy,iz)
-            y%f(ix,iy,iz)=y%f(ix,iy,iz)+b1(i0)*mixing%srho_s_out(i,is)%f(ix,iy,iz)
+            x%f(ix,iy,iz)=x%f(ix,iy,iz)+b1(i0)*mixing%rho_s_in(i,is)%f(ix,iy,iz)
+            y%f(ix,iy,iz)=y%f(ix,iy,iz)+b1(i0)*mixing%rho_s_out(i,is)%f(ix,iy,iz)
           end do
           end do
           end do
@@ -360,9 +360,9 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz) = max(1.d-20,  &
+          mixing%rho_in(mixing%num_rho_stock+1)%f(ix,iy,iz) = max(1.d-20,  &
                                                                    x%f(ix,iy,iz) + mixing%beta_p*( y%f(ix,iy,iz)-x%f(ix,iy,iz) ))
-          srho_s(is)%f(ix,iy,iz) = mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)
+          rho_s(is)%f(ix,iy,iz) = mixing%rho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -371,9 +371,9 @@ subroutine pulay(mg,info,system,srho_s,iter,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          mixing%srho_s_in(mixing%num_rho_stock+1,is)%f(ix,iy,iz) = max(1.d-20,  &
+          mixing%rho_s_in(mixing%num_rho_stock+1,is)%f(ix,iy,iz) = max(1.d-20,  &
                                                                      x%f(ix,iy,iz) + mixing%beta_p*( y%f(ix,iy,iz)-x%f(ix,iy,iz) ))
-          srho_s(is)%f(ix,iy,iz) = mixing%srho_s_in(mixing%num_rho_stock+1,is)%f(ix,iy,iz)
+          rho_s(is)%f(ix,iy,iz) = mixing%rho_s_in(mixing%num_rho_stock+1,is)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -406,24 +406,24 @@ subroutine init_mixing(nspin,mg,mixing)
   mixing%beta_p=beta_p
   mixing%convergence_value_prev=1.d10
 
-  allocate(mixing%srho_in(1:mixing%num_rho_stock+1))
-  allocate(mixing%srho_out(1:mixing%num_rho_stock+1))
+  allocate(mixing%rho_in(1:mixing%num_rho_stock+1))
+  allocate(mixing%rho_out(1:mixing%num_rho_stock+1))
   do i=1,mixing%num_rho_stock+1
-    allocate(mixing%srho_in(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    allocate(mixing%srho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-    mixing%srho_in(i)%f(:,:,:) =0.d0
-    mixing%srho_out(i)%f(:,:,:)=0.d0
+    allocate(mixing%rho_in(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    allocate(mixing%rho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+    mixing%rho_in(i)%f(:,:,:) =0.d0
+    mixing%rho_out(i)%f(:,:,:)=0.d0
   end do
 
   if(nspin==2)then
-    allocate(mixing%srho_s_in(1:mixing%num_rho_stock+1,2))
-    allocate(mixing%srho_s_out(1:mixing%num_rho_stock+1,2))
+    allocate(mixing%rho_s_in(1:mixing%num_rho_stock+1,2))
+    allocate(mixing%rho_s_out(1:mixing%num_rho_stock+1,2))
     do j=1,2
       do i=1,mixing%num_rho_stock+1
-        allocate(mixing%srho_s_in(i,j)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-        allocate(mixing%srho_s_out(i,j)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
-        mixing%srho_s_in(i,j)%f(:,:,:) =0.d0
-        mixing%srho_s_out(i,j)%f(:,:,:)=0.d0
+        allocate(mixing%rho_s_in(i,j)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+        allocate(mixing%rho_s_out(i,j)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
+        mixing%rho_s_in(i,j)%f(:,:,:) =0.d0
+        mixing%rho_s_out(i,j)%f(:,:,:)=0.d0
       end do
     end do
   end if
@@ -434,12 +434,12 @@ end subroutine init_mixing
 
 !===================================================================================================================================
 
-subroutine copy_density(Miter,nspin,mg,srho_s,mixing)
+subroutine copy_density(Miter,nspin,mg,rho_s,mixing)
   use structures, only: s_rgrid, s_scalar, s_mixing
   implicit none
   integer       ,intent(in) :: Miter,nspin
   type(s_rgrid), intent(in) :: mg
-  type(s_scalar),intent(in) :: srho_s(nspin)
+  type(s_scalar),intent(in) :: rho_s(nspin)
   type(s_mixing),intent(inout) :: mixing
   !
   integer :: iiter
@@ -451,7 +451,7 @@ subroutine copy_density(Miter,nspin,mg,srho_s,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      mixing%srho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
+      mixing%rho_in(mixing%num_rho_stock+1)%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -460,8 +460,8 @@ subroutine copy_density(Miter,nspin,mg,srho_s,mixing)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        mixing%srho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz)=srho_s(1)%f(ix,iy,iz)
-        mixing%srho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz)=srho_s(2)%f(ix,iy,iz)
+        mixing%rho_s_in(mixing%num_rho_stock+1,1)%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
+        mixing%rho_s_in(mixing%num_rho_stock+1,2)%f(ix,iy,iz)=rho_s(2)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -473,7 +473,7 @@ subroutine copy_density(Miter,nspin,mg,srho_s,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      mixing%srho_in(iiter)%f(ix,iy,iz)=mixing%srho_in(iiter+1)%f(ix,iy,iz)
+      mixing%rho_in(iiter)%f(ix,iy,iz)=mixing%rho_in(iiter+1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -483,7 +483,7 @@ subroutine copy_density(Miter,nspin,mg,srho_s,mixing)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      mixing%srho_out(iiter)%f(ix,iy,iz)=mixing%srho_out(iiter+1)%f(ix,iy,iz)
+      mixing%rho_out(iiter)%f(ix,iy,iz)=mixing%rho_out(iiter+1)%f(ix,iy,iz)
     end do
     end do
     end do
@@ -496,7 +496,7 @@ subroutine copy_density(Miter,nspin,mg,srho_s,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          mixing%srho_s_in(iiter,is)%f(ix,iy,iz)=mixing%srho_s_in(iiter+1,is)%f(ix,iy,iz)
+          mixing%rho_s_in(iiter,is)%f(ix,iy,iz)=mixing%rho_s_in(iiter+1,is)%f(ix,iy,iz)
         end do
         end do
         end do
@@ -508,7 +508,7 @@ subroutine copy_density(Miter,nspin,mg,srho_s,mixing)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          mixing%srho_s_out(iiter,is)%f(ix,iy,iz)=mixing%srho_s_out(iiter+1,is)%f(ix,iy,iz)
+          mixing%rho_s_out(iiter,is)%f(ix,iy,iz)=mixing%rho_s_out(iiter+1,is)%f(ix,iy,iz)
         end do
         end do
         end do

@@ -53,8 +53,8 @@ subroutine main_dft_k_expand_slice
   type(s_dft_system) :: system
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
-  type(s_scalar) :: srho,sVh,sVpsl
-  type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
+  type(s_scalar) :: rho,Vh,Vpsl
+  type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
@@ -81,14 +81,14 @@ subroutine main_dft_k_expand_slice
   if(method_wf_distributor /= 'slice') stop "error: method_wf_distributor must be slice"
 
   call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_ng,ofl)
-  allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
+  allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 
   call initialization1_dft( system, energy, stencil, fg, poisson,  &
                             lg, mg,  &
                             info,  &
                             srg, srg_ng,  &
-                            srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
+                            rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
                             spsi, shpsi, sttpsi,  &
                             pp, ppg, ppn,  &
                             ofl )
@@ -727,7 +727,7 @@ subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
   write(fp,'(i5,3f12.6)') mz,0.d0,0.d0,hgs(3)
   do i=1,n
      !ik=Kion(iatom)
-     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(rion(j,iatom),j=1,3)
+     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(Rion(j,iatom),j=1,3)
      write(fp,'(i5,4f12.6)') 8,dble(8),(crd(j,i),j=1,3)
   end do
   
