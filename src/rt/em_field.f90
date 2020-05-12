@@ -375,9 +375,9 @@ contains
     integer :: ii
     real(8) :: x, rii
     if (tt < t_dat(1)) then
-      Ac(1:3) = Ac_dat(1:3, 1)
+      Ac(1:3) = 0d0 !Ac_dat(1:3, 1)
     else if (t_dat(n_dat) <= tt) then
-      Ac(1:3) = Ac_dat(1:3, n_dat)
+      Ac(1:3) = 0d0 !Ac_dat(1:3, n_dat)
     else
       ! Linear estimation of row index: ii
       ii = int(floor((tt - t_dat(1)) / (t_dat(n_dat) - t_dat(1)) * (n_dat - 1))) + 1
