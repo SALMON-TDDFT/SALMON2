@@ -36,6 +36,7 @@ use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_globa
 use filesystem, only: create_directory, get_filehandle
 use phys_constants, only: cspeed_au
 use em_field, only: calc_Ac_ext
+use input_checker_ms, only: check_input_variables_ms
 implicit none
 
 type(s_rgrid) :: lg
@@ -77,25 +78,26 @@ integer, allocatable :: iranklists(:)
 
 real(8), allocatable :: Ac_inc(:, :)
 
-character(256) :: file_debug_log
 integer :: nmacro_mygroup, isize_mygroup
 
-if (.not. check_input_variables()) return
-
+! character(256) :: file_debug_log
 !! Open logfile for debugging
 ! write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
 ! open(unit=9999, file=file_debug_log)
 ! write(9999, *) 'logging start'; flush(9999)
 
+if (.not. check_input_variables_ms()) return
+
 call timer_begin(LOG_TOTAL)
 ! Initialization
 
 call initialization_ms()
-! if (comm_is_root(ms%id_ms_world)) call print_header()
 
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
+
+! if (comm_is_root(ms%id_ms_world)) call print_header()
 
 TE : do itt=Mit+1,itotNtime
     call time_evolution_step_ms()
@@ -115,8 +117,6 @@ if(write_rt_wfn_k=='y')then
 end if
 
 call finalize_xc(xc_func)
-
-! close(gp)
 
 contains
 
@@ -628,89 +628,6 @@ subroutine incident()
     return
  end subroutine incident
 
-
-
-
-function check_input_variables() result(r)
-    implicit none
-    logical :: r
-    r = .true.
-    if (nx_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nx_m' must be larger than 1!"
-        r = .false.
-    end if
-    if (ny_m /= 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'ny_m' must be 1!"
-        r = .false.
-    end if
-    if (nz_m /= 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nz_m' must be 1!"
-        r = .false.
-    end if
-    if (nproc_size_global < nx_m * ny_m * nz_m) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! MPI procs is too small!"
-        r = .false.
-    end if
-    if (mod(nproc_size_global, nx_m * ny_m * nz_m) > 0) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! MPI procs number of processes is an integer multiple of macropoints!"
-        r = .false.
-    end if
-    if (hx_m < 1d-6 .and. dl_em(1) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hx_m' or 'dl_em(1)' must be specified!"
-        r = .false.
-    end if
-    if (hy_m < 1d-6 .and. dl_em(2) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hy_m' or 'dl_em(2)' must be specified!"
-        r = .false.
-    end if
-    if (hz_m < 1d-6 .and. dl_em(3) < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'hz_m' or 'dl_em(3)' must be specified!"
-        r = .false.
-    end if
-    if (dt < 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'dt' must be specified!"
-        r = .false.
-    end if
-    if (dt_em > 1d-6) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'dt_em' must not be specified!"
-        r = .false.
-    end if
-    if (nxvacl_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nxvacl_m' must not larger than 1!"
-        r = .false.
-    end if
-    if (nxvacr_m < 1) then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'nxvacr_m' must not larger than 1!"
-        r = .false.
-    end if
-    if (trim(boundary_em(1,1)) .ne. 'periodic' &
-        & .and. trim(boundary_em(1,1)) .ne. 'pec' &
-        & .and. trim(boundary_em(1,1)) .ne. 'abc') then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'boundary_em(1,1)' unknown boundary condition!"
-        r = .false.
-    end if
-    if (trim(boundary_em(1,2)) .ne. 'periodic' &
-        & .and. trim(boundary_em(1,2)) .ne. 'pec' &
-        & .and. trim(boundary_em(1,2)) .ne. 'abc') then
-        if (comm_is_root(nproc_id_global)) &
-            & write(*, *) "ERROR! 'boundary_em(1,2)' unknown boundary condition!"
-        r = .false.
-    end if
-    return
-end function check_input_variables
 
 end subroutine main_ms
 
