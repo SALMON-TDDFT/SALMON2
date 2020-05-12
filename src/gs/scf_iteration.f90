@@ -20,11 +20,11 @@ module scf_iteration_sub
 contains
 
 subroutine scf_iteration_step(lg,mg,system,info,stencil, &
-               srg,srg_scalar,spsi,shpsi,srho,srho_s, &
+               srg,srg_scalar,spsi,shpsi,rho,rho_s, &
                cg,ppg,vlocal,  &
                miter,   &
                iditer_nosubspace_diag,mixing,iter, &
-               poisson,fg,sVh,xc_func,ppn,sVxc,energy)
+               poisson,fg,Vh,xc_func,ppn,Vxc,energy)
   use salmon_global, only: calc_mode,method_mixing  &
                         ,yn_subspace_diagonalization,ncg,ncg_init
   use structures
@@ -43,8 +43,8 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   type(s_dft_system),    intent(in)    :: system
   type(s_parallel_info), intent(in)    :: info
   type(s_orbital),       intent(inout) :: spsi,shpsi
-  type(s_scalar),        intent(inout) :: srho
-  type(s_scalar),        intent(inout) :: srho_s(system%nspin)
+  type(s_scalar),        intent(inout) :: rho
+  type(s_scalar),        intent(inout) :: rho_s(system%nspin)
   type(s_stencil),       intent(in)    :: stencil
   type(s_sendrecv_grid), intent(inout) :: srg
   type(s_sendrecv_grid), intent(inout) :: srg_scalar
@@ -57,10 +57,10 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   integer,               intent(in)    :: iter
   type(s_poisson),       intent(inout) :: poisson
   type(s_reciprocal_grid),intent(inout):: fg
-  type(s_scalar),        intent(inout) :: sVh
+  type(s_scalar),        intent(inout) :: Vh
   type(s_xc_functional), intent(in)    :: xc_func
   type(s_pp_nlcc),       intent(in)    :: ppn
-  type(s_scalar),        intent(inout) :: sVxc(system%nspin)
+  type(s_scalar),        intent(inout) :: Vxc(system%nspin)
   type(s_dft_energy),    intent(inout) :: energy
   !
   integer :: j,nncg
@@ -97,28 +97,28 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
 ! density
   call timer_begin(LOG_CALC_RHO)
 
-  call calc_density(system,srho_s,spsi,info,mg)
+  call calc_density(system,rho_s,spsi,info,mg)
 
   select case(method_mixing)
-    case ('simple') ; call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,srho_s,mixing)
-    case ('broyden'); call wrapper_broyden(info%icomm_r,mg,system,srho_s,iter,mixing)
-    case ('pulay')  ; call pulay(mg,info,system,srho_s,iter,mixing)
+    case ('simple') ; call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
+    case ('broyden'); call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter,mixing)
+    case ('pulay')  ; call pulay(mg,info,system,rho_s,iter,mixing)
   end select
   call timer_end(LOG_CALC_RHO)
 
-  srho%f = 0d0
+  rho%f = 0d0
   do j=1,system%nspin
-    srho%f = srho%f + srho_s(j)%f
+    rho%f = rho%f + rho_s(j)%f
   end do
 
   if(calc_mode/='DFT_BAND')then
 
     call timer_begin(LOG_CALC_HARTREE)
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,srho,sVh)
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,srho_s,ppn,info,spsi,stencil,sVxc,energy%E_xc)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
 
   end if

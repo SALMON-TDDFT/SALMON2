@@ -335,7 +335,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   call timer_end(LOG_MD_TEVOL_PART1)
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
+subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   use structures, only: s_dft_system,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
     s_parallel_info, s_scalar, s_pp_info
   use salmon_global, only: step_update_ps !,step_update_ps2
@@ -352,7 +352,7 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
   type(s_pp_info),intent(inout) :: pp
   type(s_pp_nlcc) :: ppn
   type(s_pp_grid) :: ppg
-  type(s_scalar) :: sVpsl
+  type(s_scalar) :: Vpsl
   integer :: itt
 
   call timer_begin(LOG_MD_UPDATE_PSEUDO_PT)
@@ -361,12 +361,12 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,sVpsl)
   if (mod(itt,step_update_ps)==0 ) then
      call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+     call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   !else if (mod(itt,step_update_ps2)==0 ) then
   !   !xxxxxxx this option is not yet made xxxxxx
   !   call dealloc_init_ps(ppg)
   !   call calc_nlcc(pp, system, mg, ppn)
-  !   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+  !   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   endif
 
   call timer_end(LOG_MD_UPDATE_PSEUDO_PT)

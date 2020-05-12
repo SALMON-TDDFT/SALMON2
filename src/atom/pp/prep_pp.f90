@@ -19,7 +19,7 @@ module prep_pp_sub
 
 contains
 
-subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use structures
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
@@ -36,7 +36,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
   type(s_poisson)                     :: poisson
   type(s_pp_info)                     :: pp
   type(s_pp_grid)                     :: ppg
-  type(s_scalar)                      :: sVpsl
+  type(s_scalar)                      :: Vpsl
   !
   integer :: ix,iy,iz,i,nl, ilevel_print
   integer :: mmx(mg%num(1)*mg%num(2)*mg%num(3))
@@ -142,9 +142,9 @@ call timer_end(LOG_INIT_PS_LMA_UV)
 call timer_begin(LOG_INIT_PS_CALC_VPSL)
   select case(iperiodic)
   case(0)
-    call calc_Vpsl_isolated(mg,lg,system,pp,sVpsl,ppg)
+    call calc_Vpsl_isolated(mg,lg,system,pp,Vpsl,ppg)
   case(3)
-    call calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,sVpsl,ppg,property)
+    call calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   end select
 call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -238,7 +238,7 @@ END SUBROUTINE calc_Vpsl_isolated
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,vpsl,ppg,property)
+subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   use salmon_global,only : nelem, kion, yn_ffte
   use communication, only: comm_summation
   use math_constants,only : pi,zi
@@ -250,7 +250,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,vpsl,ppg,property)
   type(s_pp_info)        ,intent(in) :: pp
   type(s_reciprocal_grid),intent(in) :: fg
   type(s_poisson)                    :: poisson
-  type(s_scalar)                     :: vpsl
+  type(s_scalar)                     :: Vpsl
   type(s_pp_grid)                    :: ppg
   character(17)                      :: property
   !

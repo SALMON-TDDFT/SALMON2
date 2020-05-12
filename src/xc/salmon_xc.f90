@@ -47,7 +47,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, srho_s, ppn, info, spsi, stencil, sVxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, ppn, info, spsi, stencil, Vxc, E_xc)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -57,12 +57,12 @@ contains
     type(s_xc_functional)   ,intent(in) :: xc_func
     type(s_rgrid)           ,intent(in) :: mg
     type(s_sendrecv_grid)               :: srg_scalar, srg
-    type(s_scalar)          ,intent(in) :: srho_s(system%nspin)
+    type(s_scalar)          ,intent(in) :: rho_s(system%nspin)
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)                     :: spsi
     type(s_stencil)         ,intent(in) :: stencil
-    type(s_scalar)                      :: sVxc(system%nspin)
+    type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
     !
     integer :: ix,iy,iz,is,nspin
@@ -81,7 +81,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        rho_tmp(ix,iy,iz)=srho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        rho_tmp(ix,iy,iz)=rho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -93,7 +93,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        rho_s_tmp(ix,iy,iz,is)=srho_s(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        rho_s_tmp(ix,iy,iz,is)=rho_s(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -117,7 +117,7 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rhd(ix,iy,iz)=dble(srho_s(1)%f(ix,iy,iz))
+        rhd(ix,iy,iz)=dble(rho_s(1)%f(ix,iy,iz))
       enddo
       enddo
       enddo
@@ -159,7 +159,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        sVxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
+        Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
       end do
       end do
       end do
@@ -171,7 +171,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        sVxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
+        Vxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
       end do
       end do
       end do
