@@ -401,13 +401,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     do itt=0,0
       if(yn_out_dns_rt=='y')then
          !!XXX bug XXX dnsdiff data is wrong as reference dns is rho%f now !AY
-        call write_dns(lg,mg,rho%f,system%hgs,rho%f,itt)
+        call write_dns(lg,mg,system,rho%f,rho%f,itt)
       end if
       if(yn_out_elf_rt=='y')then
         call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
       end if
       if(yn_out_estatic_rt=='y')then
-        call write_estatic(lg,mg,system%hgs,stencil,info,Vh,srg_scalar,itt)
+        call write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
       end if
     end do
   
