@@ -52,7 +52,7 @@ use prep_pp_sub
 use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
-use salmon_total_energy
+use total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none

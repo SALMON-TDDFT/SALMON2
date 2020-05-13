@@ -42,7 +42,7 @@ use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
 use structure_opt_sub
-use salmon_total_energy
+use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
 use initialization_dft

@@ -40,7 +40,7 @@ use prep_pp_sub
 use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
-use salmon_total_energy
+use total_energy
 use init_gs, only: init_wf
 use md_sub, only: init_md, update_pseudo_rt, &
                   time_evolution_step_md_part1,time_evolution_step_md_part2
