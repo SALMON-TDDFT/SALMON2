@@ -80,7 +80,7 @@ Subroutine calc_Ac_ext_t(t0, delta_t, is, ie, Ac_ext_t)
   real(8) :: t,f0_1,f0_2,tt,T1_T2_tmp
   
   Ac_ext_t(:,:) = 0d0
-  if(t < 0d0) return
+  if(t0 < 0d0) return
 
   if(I_wcm2_1 < 0d0)then
     f0_1 = E_amplitude1

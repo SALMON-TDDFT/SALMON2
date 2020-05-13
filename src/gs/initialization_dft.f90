@@ -48,7 +48,7 @@ use input_pp_sub
 use prep_pp_sub
 use checkpoint_restart_sub
 use hamiltonian
-use salmon_total_energy
+use total_energy
 implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -170,7 +170,7 @@ use prep_pp_sub
 use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
-use salmon_total_energy
+use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
 implicit none
@@ -343,7 +343,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   use mixing_sub
   use checkpoint_restart_sub
   use hamiltonian
-  use salmon_total_energy
+  use total_energy
   use band_dft_sub
   use md_sub, only: init_md
   implicit none

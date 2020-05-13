@@ -55,7 +55,7 @@ subroutine main_dft_k_expand_single
   use checkpoint_restart_sub
   use filesystem
   use hamiltonian
-  use salmon_total_energy
+  use total_energy
   use initialization_dft
   implicit none
   type(s_rgrid) :: lg

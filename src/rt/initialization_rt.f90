@@ -52,7 +52,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use fdtd_coulomb_gauge, only: init_singlescale
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
-  use salmon_Total_Energy
+  use Total_Energy
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
