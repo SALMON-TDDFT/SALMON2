@@ -40,12 +40,12 @@
 /
 
 &tgrid
- nt=3000
- dt=0.16  
+ nt=6000
+ dt=0.08
 /
 
 &propagation
-  propagator='etrs'
+  propagator='middlepoint'
 /
 
 &scf

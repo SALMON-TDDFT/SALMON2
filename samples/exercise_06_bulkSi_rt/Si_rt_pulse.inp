@@ -74,8 +74,8 @@
 
 &tgrid
   !time step size and number of time grids(steps)
-  dt = 0.16d0
-  nt = 3000
+  dt = 0.08d0
+  nt = 6000
 /
 
 &emfield
@@ -99,10 +99,6 @@
   !---------------------------------------------------------------------!
 /
 
-&propagation
-  !propagator('etrs': time-reversal symmetry propagator)
-  propagator = 'etrs'
-/
 
 &atomic_red_coor
   !cartesian atomic reduced coodinates
