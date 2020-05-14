@@ -207,8 +207,6 @@ contains
 
     namelist/calculation/ &
       & theory, &
-      & calc_mode,        &  !remove later (but this is used currently)
-      & use_singlescale,  &  !remove later (but this is used currently)
       & yn_md,  &
       & yn_opt
 
@@ -317,15 +315,10 @@ contains
       & beta_p, &
       & yn_auto_mixing, &
       & update_mixing_ratio, &
-      & fsset_option, &
-      & nfsset_start, &
-      & nfsset_every, &
       & nscf, &
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
-      & omp_loop, &
-      & skip_gsortho, &
       & iditer_notemperature, &
       & step_initial_mix_zero, &
       & conv_gap_mix_zero
@@ -352,9 +345,6 @@ contains
       & phi_cep2, &
       & t1_t2, &
       & t1_start, &
-      & yn_local_field , &
-      & rlaserbound_sta , &
-      & rlaserbound_end , &
       & num_dipole_source , &
       & vec_dipole_source , &
       & cood_dipole_source , &
@@ -412,7 +402,7 @@ contains
 
     namelist/analysis/ &
       & projection_option, &
-      & projection_decomp, &
+      & out_projection_step, &
       & nenergy, &
       & de, &
       & yn_out_psi, &
@@ -440,7 +430,6 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_tm, &
-      & out_projection_step, &
       & out_ms_step, &
       & format_voxel_data, &
       & nsplit_voxel_data, &
@@ -460,26 +449,18 @@ contains
 
     namelist/opt/ &
       & nopt, &
-      & cg_alpha_ini, &   !(only in ARTED)not use if flag_use_grad_wf_on_force=.T.
-      & cg_alpha_up, &    !(only in ARTED)
-      & cg_alpha_down, &  !(only in ARTED)
       & max_step_len_adjust, &
-      & convrg_scf_force, & !(only in ARTED)
-      & convrg_scf_ene, &   !(only in ARTED)
-      & convrg_opt_fmax, &
-      & convrg_opt_ene      !not use now if flag_use_grad_wf_on_force=.T.
+      & convrg_opt_fmax
 
     namelist/md/ &
       & ensemble, &
       & thermostat, &
       & step_velocity_scaling, &
       & step_update_ps, &
-      & step_update_ps2,&
       & temperature0_ion_k, &
       & yn_set_ini_velocity, &
       & file_ini_velocity, &
       & thermostat_tau, &
-      & friction, &
       & yn_stop_system_momt
 
     namelist/group_fundamental/ &
@@ -555,8 +536,6 @@ contains
 
 !! == default for &calculation
     theory              = 'tddft'
-    calc_mode           = 'none'   !remove later
-    use_singlescale     = 'n'  !remove later
     yn_md               = 'n'
     yn_opt              = 'n'
 !! == default for &control
@@ -654,15 +633,10 @@ contains
     beta_p        = 0.75d0
     yn_auto_mixing = 'n'
     update_mixing_ratio = 3.d0
-    fsset_option  = 'n'
-    nfsset_start  = 75
-    nfsset_every  = 25
     nscf          = 0
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
-    omp_loop      = 'k'
-    skip_gsortho  = 'n'
     iditer_notemperature = 10
     step_initial_mix_zero= -1
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
@@ -689,13 +663,6 @@ contains
     phi_cep2       = 0d0
     t1_t2          = 0d0
     t1_start       = 0d0
-    yn_local_field = 'n'
-    rlaserbound_sta(1) = -1.d7*ulength_from_au ! a.u.
-    rlaserbound_sta(2) = -1.d7*ulength_from_au ! a.u.
-    rlaserbound_sta(3) = -1.d7*ulength_from_au ! a.u.
-    rlaserbound_end(1) =  1.d7*ulength_from_au ! a.u.
-    rlaserbound_end(2) =  1.d7*ulength_from_au ! a.u.
-    rlaserbound_end(3) =  1.d7*ulength_from_au ! a.u.
     num_dipole_source  = 0
     vec_dipole_source  = 0d0
     cood_dipole_source = 0d0
@@ -752,7 +719,7 @@ contains
 
 !! == default for &analysis
     projection_option   = 'no'
-    projection_decomp   = 'n'
+    out_projection_step = 100
     nenergy             = 1000
     de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
     yn_out_psi          = 'n'
@@ -781,7 +748,6 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_tm           = 'n'
-    out_projection_step = 100
     out_ms_step         = 100
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
@@ -799,25 +765,17 @@ contains
     cutoff_g = -1d0
 !! == default for &opt
     nopt                = 100
-    cg_alpha_ini        =  0.8d0 !not use now
-    cg_alpha_up         =  1.3d0
-    cg_alpha_down       =  0.5d0
     max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
-    convrg_scf_force    = -1d0
-    convrg_scf_ene      = -1d0
     convrg_opt_fmax     =  1d-3
-    convrg_opt_ene      =  1d-6  !not use now
 !! == default for &md
     ensemble              = 'nve'
     thermostat            = 'nose-hoover'
     step_velocity_scaling = -1
     step_update_ps        = 10
-    step_update_ps2       = 1
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'
     file_ini_velocity     = 'none'
     thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
-    friction              =  0d0
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
     iditer_nosubspace_diag = 10
@@ -938,8 +896,6 @@ contains
 ! Broad cast
 !! == bcast for &calculation
     call comm_bcast(theory             ,nproc_group_global)
-    call comm_bcast(calc_mode          ,nproc_group_global)  !remove later
-    call comm_bcast(use_singlescale    ,nproc_group_global)  !remove later
     call comm_bcast(yn_md              ,nproc_group_global)
     call comm_bcast(yn_opt             ,nproc_group_global)
 
@@ -1061,9 +1017,6 @@ contains
     call comm_bcast(beta_p                  ,nproc_group_global)
     call comm_bcast(yn_auto_mixing          ,nproc_group_global)
     call comm_bcast(update_mixing_ratio     ,nproc_group_global)
-    call comm_bcast(fsset_option            ,nproc_group_global)
-    call comm_bcast(nfsset_start            ,nproc_group_global)
-    call comm_bcast(nfsset_every            ,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
@@ -1087,8 +1040,6 @@ contains
          threshold = threshold * (uenergy_to_au)**2 / (ulength_to_au)**6
       end select
     endif
-    call comm_bcast(omp_loop                ,nproc_group_global)
-    call comm_bcast(skip_gsortho            ,nproc_group_global)
     call comm_bcast(iditer_notemperature    ,nproc_group_global)
     call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
     call comm_bcast(conv_gap_mix_zero       ,nproc_group_global)
@@ -1133,11 +1084,6 @@ contains
     t1_t2 = t1_t2 * utime_to_au
     call comm_bcast(t1_start ,nproc_group_global)
     t1_start = t1_start * utime_to_au
-    call comm_bcast(yn_local_field  ,nproc_group_global)
-    call comm_bcast(rlaserbound_sta,nproc_group_global)
-    rlaserbound_sta = rlaserbound_sta * ulength_to_au
-    call comm_bcast(rlaserbound_end,nproc_group_global)
-    rlaserbound_end = rlaserbound_end * ulength_to_au
     call comm_bcast(num_dipole_source,nproc_group_global)
     call comm_bcast(vec_dipole_source,nproc_group_global)
     vec_dipole_source = vec_dipole_source * ulength_to_au
@@ -1211,7 +1157,7 @@ contains
 
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
-    call comm_bcast(projection_decomp   ,nproc_group_global)
+    call comm_bcast(out_projection_step ,nproc_group_global)
     call comm_bcast(nenergy             ,nproc_group_global)
     call comm_bcast(de                  ,nproc_group_global)
     de = de * uenergy_to_au
@@ -1244,7 +1190,6 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
-    call comm_bcast(out_projection_step ,nproc_group_global)
     call comm_bcast(out_ms_step         ,nproc_group_global)
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
@@ -1266,26 +1211,18 @@ contains
     cutoff_g      = cutoff_g / ulength_to_au
 !! == bcast for &opt
     call comm_bcast(nopt                ,nproc_group_global)
-    call comm_bcast(cg_alpha_ini        ,nproc_group_global)
-    call comm_bcast(cg_alpha_up         ,nproc_group_global)
-    call comm_bcast(cg_alpha_down       ,nproc_group_global)
     call comm_bcast(max_step_len_adjust ,nproc_group_global)
-    call comm_bcast(convrg_scf_force    ,nproc_group_global)
-    call comm_bcast(convrg_scf_ene      ,nproc_group_global)
     call comm_bcast(convrg_opt_fmax     ,nproc_group_global)
-    call comm_bcast(convrg_opt_ene      ,nproc_group_global)
 !! == bcast for &md
     call comm_bcast(ensemble               ,nproc_group_global)
     call comm_bcast(thermostat             ,nproc_group_global)
     call comm_bcast(step_velocity_scaling  ,nproc_group_global)
     call comm_bcast(step_update_ps         ,nproc_group_global)
-    call comm_bcast(step_update_ps2        ,nproc_group_global)
     call comm_bcast(temperature0_ion_k     ,nproc_group_global)
     call comm_bcast(yn_set_ini_velocity    ,nproc_group_global)
     call comm_bcast(file_ini_velocity      ,nproc_group_global)
     call comm_bcast(thermostat_tau         ,nproc_group_global)
     thermostat_tau = thermostat_tau * utime_to_au
-    call comm_bcast(friction               ,nproc_group_global)
     call comm_bcast(yn_stop_system_momt    ,nproc_group_global)
 !! == bcast for &group_fundamental
     call comm_bcast(iditer_nosubspace_diag,nproc_group_global)
@@ -1703,8 +1640,6 @@ contains
       if(inml_calculation >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'calculation', inml_calculation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'calc_mode', calc_mode                 !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_singlescale', use_singlescale     !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
 
@@ -1840,15 +1775,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'beta_p', beta_p
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'fsset_option', fsset_option
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_start', nfsset_start
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_every', nfsset_every
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'omp_loop', omp_loop
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'skip_gsortho', skip_gsortho
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
@@ -1884,13 +1814,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep2', phi_cep2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_t2', t1_t2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_start', t1_start
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_local_field', yn_local_field
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(1)', rlaserbound_sta(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(2)', rlaserbound_sta(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(3)', rlaserbound_sta(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(1)', rlaserbound_end(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(2)', rlaserbound_end(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(3)', rlaserbound_end(3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_dipole_source', num_dipole_source
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,1)', vec_dipole_source(1,1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,1)', vec_dipole_source(2,1)
@@ -1988,7 +1911,7 @@ contains
       if(inml_analysis >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_decomp', projection_decomp
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
@@ -2016,7 +1939,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
@@ -2041,26 +1963,18 @@ contains
       if(inml_opt >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'opt', inml_opt
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
-     !write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_ini', cg_alpha_ini !not use now
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_up', cg_alpha_up
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_down', cg_alpha_down
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_scf_force', convrg_scf_force
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_scf_ene', convrg_scf_ene
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
-     !write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_ene', convrg_opt_ene !not use now
       if(inml_md >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', inml_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
       write(fh_variables_log, '("#",4X,A,"=",A)') 'thermostat', thermostat
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_velocity_scaling', step_velocity_scaling
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps', step_update_ps
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps2', step_update_ps2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature0_ion_k', temperature0_ion_k
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_set_ini_velocity', yn_set_ini_velocity
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_ini_velocity', trim(file_ini_velocity)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'friction', friction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
 
       if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
@@ -2168,7 +2082,6 @@ contains
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_subspace_diagonalization)
-    call yn_argument_check(yn_local_field)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
     call yn_argument_check(yn_out_dos_set_fe_origin)
