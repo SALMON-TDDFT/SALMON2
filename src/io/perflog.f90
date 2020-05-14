@@ -136,7 +136,7 @@ contains
   subroutine write_performance(fd,mode)
     use parallelization
     use communication
-    use salmon_global, only: theory,yn_gbp,use_singlescale,yn_ffte
+    use salmon_global, only: theory,yn_gbp,yn_ffte
     use timer
     implicit none
     integer, intent(in) :: fd, mode
@@ -202,7 +202,7 @@ contains
       call set_sub( 2, LOG_CALC_VBOX            , 'Vbox')
       call set_sub( 3, LOG_CALC_TIME_PROPAGATION, 'time propagation')
       call set_sub( 4, LOG_CALC_RHO             , 'calculating rho')
-      if (yn_gbp=='y' .and. use_singlescale=='y' .and. yn_ffte=='y') then
+      if (theory=='single_scale_maxwell_tddft' .and. yn_gbp=='y' .and. yn_ffte=='y') then
         call set_sub( 5, LOG_CALC_HARTREE       , 'Hartree+FDTD by FFTE')
       else
         call set_sub( 5, LOG_CALC_HARTREE       , 'Hartree routine')

@@ -35,11 +35,12 @@ module salmon_global
   integer,parameter :: ntype_atom_coor_cartesian = 1
   integer,parameter :: ntype_atom_coor_reduced   = 2
 
+
+  character(16)  :: calc_mode      !old input variable, but used as a flag; move later
+
 !Input variables
 !! &calculation
   character(32)  :: theory
-  character(16)  :: calc_mode          !remove later
-  character(1)   :: use_singlescale    !remove later
   character(1)   :: yn_md
   character(1)   :: yn_opt
 !! &control

@@ -51,7 +51,6 @@ contains
     implicit none
     character(32)  :: theory
 
-    use_singlescale='n'    
     if(theory=="maxwell ") return
 
     select case(theory)
@@ -66,7 +65,6 @@ contains
        calc_mode='RT'
     case('single_scale_maxwell_tddft')
        calc_mode='RT'
-       use_singlescale='y'
     case('dft_tddft')
        calc_mode='GS_RT'  !legacy-- this is not supported officially now
        write(*,*) "theory=dft_tddft is not supported officially !!"
