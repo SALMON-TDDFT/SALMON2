@@ -150,15 +150,10 @@ module salmon_global
   real(8)        :: beta_p
   character(1)   :: yn_auto_mixing
   real(8)        :: update_mixing_ratio
-  character(1)   :: fsset_option
-  integer        :: nfsset_start
-  integer        :: nfsset_every
   integer        :: nscf
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
-  character(1)   :: omp_loop
-  character(1)   :: skip_gsortho
   integer        :: iditer_notemperature
   integer        :: step_initial_mix_zero
   real(8)        :: conv_gap_mix_zero
@@ -186,9 +181,6 @@ module salmon_global
   real(8)        :: phi_cep2
   real(8)        :: t1_t2
   real(8)        :: t1_start
-  character(1)   :: yn_local_field
-  real(8)        :: rlaserbound_sta(3)
-  real(8)        :: rlaserbound_end(3)
   integer        :: num_dipole_source
   real(8)        :: vec_dipole_source(3,2)
   real(8)        :: cood_dipole_source(3,2)
@@ -250,7 +242,6 @@ module salmon_global
 
 !! &analysis
   character(2)   :: projection_option
-  character(4)   :: projection_decomp
   integer        :: nenergy
   real(8)        :: de
   character(1)   :: yn_out_psi
@@ -298,26 +289,18 @@ module salmon_global
 
 !! &opt
   integer        :: nopt
-  real(8)        :: cg_alpha_ini
-  real(8)        :: cg_alpha_up
-  real(8)        :: cg_alpha_down
   real(8)        :: max_step_len_adjust
-  real(8)        :: convrg_scf_force
-  real(8)        :: convrg_scf_ene
   real(8)        :: convrg_opt_fmax
-  real(8)        :: convrg_opt_ene
 
 !! &md
   character(10)  :: ensemble
   character(20)  :: thermostat
   integer        :: step_velocity_scaling
   integer        :: step_update_ps
-  integer        :: step_update_ps2
   real(8)        :: temperature0_ion_k
   character(1)   :: yn_set_ini_velocity
   character(256) :: file_ini_velocity
   real(8)        :: thermostat_tau
-  real(8)        :: friction
   character(1)   :: yn_stop_system_momt
 
 !! &group_fundamental
