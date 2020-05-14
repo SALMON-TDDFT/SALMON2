@@ -144,22 +144,22 @@ contains
       select case(boundary_em(ii,ij))
       case('default')
         if(yn_periodic=='n') then
-          fs%a_bc(ii,ij)='pml'
-          iflag_pml   =1
+          fs%a_bc(ii,ij) = 'pml'
+          iflag_pml      = 1
         elseif(yn_periodic=='y') then
-          fs%a_bc(ii,ij)='periodic'
+          fs%a_bc(ii,ij) = 'periodic'
         end if
-      case('pml')
-        fs%a_bc(ii,ij)='pml'
-        iflag_pml   =1
+      case('abc')
+        fs%a_bc(ii,ij) = 'pml'
+        iflag_pml      = 1
       case('pec')
         if(comm_is_root(nproc_id_global).and.(yn_periodic=='y')) &
-        write(*,*) "For yn_periodic = y, boundary_em must be default or pml."
+        write(*,*) "For yn_periodic = y, boundary_em must be default or abc."
         stop
-        fs%a_bc(ii,ij)='pec'
+        fs%a_bc(ii,ij) = 'pec'
       case('periodic')
         if(comm_is_root(nproc_id_global).and.(yn_periodic=='n')) &
-        write(*,*) "For yn_periodic = n, boundary_em must be default, pml, or pec."
+        write(*,*) "For yn_periodic = n, boundary_em must be default, abc, or pec."
         stop
       end select
     end do
