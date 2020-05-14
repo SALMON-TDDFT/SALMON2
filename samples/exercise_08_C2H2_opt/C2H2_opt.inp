@@ -39,7 +39,7 @@
   nelem  = 2
   natom  = 4
   nelec  = 10
-  nstate = 10
+  nstate = 6
 /
 
 &pseudo
