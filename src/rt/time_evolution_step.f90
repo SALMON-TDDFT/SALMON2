@@ -85,7 +85,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   idensity=0
   idiffDensity=1
   ielf=2
-  if_use_dmat = .false. !(use_singlescale=='y') ! .or. if_metaGGA ! (future work)
+  if_use_dmat = .false. !(singlescale%flag_use==.true.) ! .or. if_metaGGA ! (future work)
 
   ! for calc_total_energy_periodic
   if(yn_md=='y') then
@@ -116,7 +116,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       end do
     end if
   case(3)
-    if(use_singlescale=='n') then
+    if(.not.singlescale%flag_use) then
       system%vec_Ac(1:3) = rt%Ac_ext(1:3,itt) + rt%Ac_ind(1:3,itt)
       system%vec_E(1:3) = -((rt%Ac_ext(1:3,itt) + rt%Ac_ind(1:3,itt))-(rt%Ac_ext(1:3,itt-1) + rt%Ac_ind(1:3,itt-1)))/dt
       system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt) 
@@ -171,7 +171,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
         end do
       end if
     case(3)
-      if(use_singlescale=='y') then
+      if(singlescale%flag_use) then
         stop "etrs mode for single-scale Maxwell-TDDFT is not implemented"
       else
         system%vec_Ac(1:3) = rt%Ac_ext(1:3,itt+1) + rt%Ac_ind(1:3,itt+1)
@@ -226,7 +226,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   call timer_end(LOG_CALC_RHO)
   
-  if(use_singlescale=='y') then
+  if(singlescale%flag_use) then
     if(info%if_divide_rspace) then
       call update_overlap_complex8(srg, mg, spsi_out%zwf)
     end if
@@ -239,7 +239,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
     Vh_stock2%f = Vh_stock1%f
   end if
-  if(use_singlescale=='y' .and. yn_gbp=='y' .and. yn_ffte=='y') then
+  if(singlescale%flag_use .and. yn_gbp=='y' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
   else
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
@@ -304,7 +304,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
 
-    if(use_singlescale=='y') then
+    if(singlescale%flag_use) then
       call timer_begin(LOG_CALC_SINGLESCALE)
       singlescale%E_electron = energy%E_tot
       call fdtd_singlescale(itt,lg,mg,system,info,rho, &
@@ -371,7 +371,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call write_dns(lg,mg,system,rho%f,rho%f,itt)
     end if
   end if
-  if(yn_out_dns_ac_je=='y' .and. use_singlescale=='y')then
+  if(yn_out_dns_ac_je=='y' .and. singlescale%flag_use)then
     if(mod(itt,out_dns_ac_je_step)==0)then
       call write_dns_ac_je(info,mg,system,rho%f,rt%j_e,itt,"bin")
     end if

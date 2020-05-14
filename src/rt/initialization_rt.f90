@@ -428,7 +428,10 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   if(yn_md=='y') call init_md(system,md)
   
   ! single-scale Maxwell-TDDFT
-  if(use_singlescale=='y') then
+  singlescale%flag_use=.false.
+  if(theory=='single_scale_maxwell_tddft') singlescale%flag_use=.true.
+
+  if(singlescale%flag_use) then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
 

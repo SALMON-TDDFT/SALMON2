@@ -228,7 +228,7 @@ end subroutine restart_opt
 subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2,singlescale,idir)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint,use_singlescale
+  use salmon_global, only: yn_self_checkpoint
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg
@@ -262,7 +262,7 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2,singles
   call write_Velocity(wdir,system)
   call write_bin(wdir,lg,mg,system,info,spsi,iter &
                 ,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2,is_self_checkpoint=iself)
-  if(use_singlescale=='y') then
+  if(singlescale%flag_use) then
     call write_singlescale(wdir,lg,mg,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
   end if
 end subroutine checkpoint_rt
