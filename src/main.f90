@@ -50,7 +50,8 @@ contains
   subroutine set_basic_flag(theory)
     implicit none
     character(32)  :: theory
-    
+
+    use_singlescale='n'    
     if(theory=="maxwell ") return
 
     select case(theory)
