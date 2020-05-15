@@ -241,8 +241,7 @@ contains
       & yn_scalapack, &
       & yn_scalapack_red_mem, &
       & yn_eigenexa, &
-      & process_allocation, &
-      & yn_collective_opt
+      & process_allocation
 
     namelist/system/ &
       & yn_periodic, &
@@ -567,7 +566,6 @@ contains
     yn_scalapack_red_mem = 'n'
     yn_eigenexa          = 'n'
     process_allocation   = 'grid_sequential'
-    yn_collective_opt    = 'n'
 !! == default for &system
     yn_periodic        = 'n'
     ispin              = 0
@@ -935,7 +933,6 @@ contains
     call comm_bcast(yn_scalapack_red_mem ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
-    call comm_bcast(yn_collective_opt   ,nproc_group_global)
 !! == bcast for &system
     call comm_bcast(yn_periodic,nproc_group_global)
     if(yn_periodic=='y') iperiodic=3
@@ -1681,7 +1678,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack_red_mem', yn_scalapack_red_mem
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_collective_opt', yn_collective_opt
 
       if(inml_system >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', inml_system
