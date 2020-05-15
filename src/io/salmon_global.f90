@@ -80,7 +80,6 @@ module salmon_global
   character(1)   :: yn_scalapack_red_mem
   character(1)   :: yn_eigenexa
   character(32)  :: process_allocation
-  character(1)   :: yn_collective_opt
 
 !! &system
   integer        :: iperiodic  !this is old keyword but still defined here

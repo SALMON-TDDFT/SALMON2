@@ -30,7 +30,7 @@ contains
     use sym_vector_sub, only: sym_vector_xyz
     use sym_sub, only: use_symmetry
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
-    use salmon_global, only: kion,cutoff_g,iperiodic,yn_collective_opt,process_allocation
+    use salmon_global, only: kion,cutoff_g,iperiodic
     use code_optimization, only: force_omp_mode
     use timer
     implicit none
@@ -296,20 +296,7 @@ contains
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
     !end do
 
-    if (yn_collective_opt == 'y') then
-      ! NOTE: EXPERIMENTAL: two-phase summation for MPP system
-      select case(process_allocation)
-      case ('grid_sequential')    ! rgrid-major ordering
-        call comm_summation(F_tmp,F_sum,3*nion,info%icomm_r)
-        call comm_summation(F_sum,F_tmp,3*nion,info%icomm_ko)
-      case ('orbital_sequential') ! orbital-major ordering
-        call comm_summation(F_tmp,F_sum,3*nion,info%icomm_ko)
-        call comm_summation(F_sum,F_tmp,3*nion,info%icomm_r)
-      end select
-      F_sum = F_tmp
-    else
-      call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
-    end if
+    call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
 !$omp parallel do private(ia)
     do ia=1,nion
