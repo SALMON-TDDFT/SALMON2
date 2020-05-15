@@ -134,6 +134,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
+  
+! predictor-corrector for metaGGA
+  if(xc == 'tbmbj') then
+    call predictor_corrector
+  end if
 
   if(info%numo.ge.1)then
     ! spsi_in --> spsi_out (tpsi = working array)
@@ -151,23 +156,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call calc_density(system,rho_s,spsi_out,info,mg)
 
   if(nspin==1)then
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      rho%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)
-    end do
-    end do
-    end do
+    !$omp workshare
+    rho%f = rho_s(1)%f
+    !$omp end workshare
   else if(nspin==2)then
-!$OMP parallel do private(iz,iy,ix) collapse(2)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      rho%f(ix,iy,iz)=rho_s(1)%f(ix,iy,iz)+rho_s(2)%f(ix,iy,iz)
-    end do
-    end do
-    end do
+    !$omp workshare
+    rho%f = rho_s(1)%f + rho_s(2)%f
+    !$omp end workshare
   end if
   call timer_end(LOG_CALC_RHO)
   
@@ -334,6 +329,94 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call timer_end(LOG_WRITE_RT_INFOS)
 
   return
+  
+contains
+
+  subroutine predictor_corrector
+    implicit none
+    real(8) :: V_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin)
+    complex(8) :: psi_tmp(mg%is_array(1):mg%ie_array(1), &
+                        & mg%is_array(2):mg%ie_array(2), &
+                        & mg%is_array(3):mg%ie_array(3), &
+                        & 1:system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e)
+
+    !$omp workshare
+    V_tmp(:,:,:,1) = V_local(1)%f
+    !$omp end workshare
+    if(nspin==2) then
+      !$omp workshare
+      V_tmp(:,:,:,2) = V_local(2)%f
+      !$omp end workshare
+    end if
+    
+    !$omp workshare
+    psi_tmp = spsi_in%zwf
+    !$omp end workshare
+    
+!  if(functional == 'VS98' .or. functional == 'TPSS')then
+!    tmass_t=tmass
+!    tjr_t=tjr
+!    tjr2_t=tjr2
+!  end if
+    
+    ! spsi_in --> spsi_out (tpsi = working array)
+    call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
+    
+    call calc_density(system,rho_s,spsi_out,info,mg)
+    if(nspin==1)then
+      !$omp workshare
+      rho%f = rho_s(1)%f
+      !$omp end workshare
+    else if(nspin==2)then
+      !$omp workshare
+      rho%f = rho_s(1)%f + rho_s(2)%f
+      !$omp end workshare
+    end if
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+    
+    !$omp workshare
+    V_local(1)%f = 0.5d0* ( V_tmp(:,:,:,1) + V_local(1)%f )
+    !$omp end workshare
+    if(nspin==2) then
+      !$omp workshare
+      V_local(2)%f = 0.5d0* ( V_tmp(:,:,:,2) + V_local(2)%f )
+      !$omp end workshare
+    end if
+    
+    !$omp workshare
+    spsi_in%zwf = psi_tmp
+    !$omp end workshare
+    
+    if(yn_periodic=='y') then
+    
+      if(trans_longi=="lo")then
+        call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+        if(nspin==1) then
+          rt%curr(1:3,itt) = curr_e_tmp(1:3,1)
+        else if(nspin==2) then
+          rt%curr(1:3,itt) = curr_e_tmp(1:3,1) + curr_e_tmp(1:3,2)
+        end if
+        rt%Ac_ind(:,itt+1) = 2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
+      else if(trans_longi=="tr")then
+        rt%Ac_ind(:,itt+1) = 0d0
+      end if
+      rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
+      
+      system%vec_Ac(1:3) = 0.5d0* ( rt%Ac_tot(:,itt) + rt%Ac_tot(:,itt+1) )
+      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+      
+    end if
+
+!  if(functional == 'VS98' .or. functional == 'TPSS')then
+!    tmass=0.5d0*(tmass+tmass_t)
+!    tjr=0.5d0*(tjr+tjr_t)
+!    tjr2=0.5d0*(tjr2+tjr2_t)
+!  end if
+    
+    return
+  end subroutine predictor_corrector
 
 END SUBROUTINE time_evolution_step
 
