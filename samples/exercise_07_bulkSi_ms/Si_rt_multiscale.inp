@@ -102,12 +102,12 @@
 
 
 &multiscale
-  !number of macro grids in electromagnetic analysis for x-z directions
+  !number of macro grids in electromagnetic analysis for x, y, and z directions
   nx_m = 8
   ny_m = 1
   nz_m = 1
   
-  !macro grid spacing for x-z directions
+  !macro grid spacing for x, y, and z directions
   hx_m = 100 
   hy_m = 100
   hz_m = 100
