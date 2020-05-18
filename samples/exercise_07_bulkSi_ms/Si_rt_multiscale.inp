@@ -108,9 +108,9 @@
   nz_m = 1
   
   !macro grid spacing for x, y, and z directions
-  hx_m = 100 
-  hy_m = 100
-  hz_m = 100
+  hx_m = 100.0d0
+  hy_m = 100.0d0
+  hz_m = 100.0d0
   
   !number of macroscopic grids for vacumm region
   !(nxvacl_m is for negative x-direction in front of material)
