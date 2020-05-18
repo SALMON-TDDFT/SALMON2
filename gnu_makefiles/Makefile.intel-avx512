@@ -1,15 +1,15 @@
-# intel
+# intel-avx2
 
 TARGET = salmon
-FC = ifort
-CC = icc
-FFLAGS = -O3  -ansi-alias -fno-alias -fpp -nogen-interface -std03 -warn all
-CFLAGS = -O3  -ansi-alias -fno-alias -Wall -restrict -std=c99
+FC = mpiifort
+CC = mpiicc
+FFLAGS = -O3 -xCORE-AVX512 -ansi-alias -fno-alias -fpp -nogen-interface -std03 -warn all
+CFLAGS = -O3 -xCORE-AVX512 -ansi-alias -fno-alias -Wall -restrict -std=c99
 OMPFLAG = -qopenmp
-MPIFLAG = 
-SIMD_SET = 
+MPIFLAG = -DUSE_MPI
+SIMD_SET = avx512
 
-LIBLAPACK = -mkl=parallel
+LIBLAPACK = -mkl=cluster
 # LIBLAPACK = -llapack -lblas
 
 LIBXC = 
@@ -27,9 +27,9 @@ CONFIG = \
     -DSYSTEM_HAS_PATH_MAX_IN_LINUX_LIMITS_H \
     -DUSE_OPT_DOMAIN_IS_POW2 \
     -DUSE_OPT_ARRAY_PADDING \
+    -DUSE_OPT_EXPLICIT_VECTORIZATION \
     -DUSE_OPT_SOFTWARE_PREFETCH 
 #    -DFORTRAN_COMPILER_HAS_MPI_VERSION3 \
-#    -DUSE_OPT_EXPLICIT_VECTORIZATION \
 
 MODULE_SWITCH = -module
 
