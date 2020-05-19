@@ -505,8 +505,8 @@ subroutine init_grid_parallel(info,lg,mg)
       nsize = (lg%num(j) + nproc_domain_orbital(j) - 1) / nproc_domain_orbital(j)
       mg%is_all(j,ibox) = lg%is(j) + nsize * npo(j)
       mg%ie_all(j,ibox) = mg%is_all(j,ibox) + nsize - 1
-      if (mg%ie_all(j,ibox) > lg%num(j)) then
-        mg%ie_all(j,ibox) = lg%num(j)
+      if (mg%ie_all(j,ibox) > lg%ie(j)) then
+        mg%ie_all(j,ibox) = lg%ie(j)
       end if
     end do
   end do
