@@ -17,6 +17,13 @@
 module poisson_isolated
   implicit none
 
+! NOTE: Conjugate-Gradient (CG) method has a reproducibility problem
+!       in SALMON calculation...
+!       This problem is caused by `omp reduction` clause, which uses
+!       atomic instructions as popular implementation.
+!       We assure the computation order when merging results between
+!       thread.
+
 contains
 
 !============================ Hartree potential (Solve Poisson equation)
@@ -26,6 +33,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   use communication, only: comm_is_root, comm_summation
   use math_constants, only : pi
   use sendrecv_grid, only: update_overlap_real8
+  use parallelization, only: get_nthreads, get_thread_id
   implicit none
   integer,parameter :: ndh=4
   type(s_rgrid),intent(in) :: lg
@@ -56,7 +64,11 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   real(8) :: pk(mg%is_array(1):mg%ie_array(1),   &
                 mg%is_array(2):mg%ie_array(2),   &
                 mg%is_array(3):mg%ie_array(3))
-  
+
+  integer :: tid
+  real(8),allocatable :: reduce_work(:)
+  allocate(reduce_work(0:get_nthreads()-1))
+
   call poisson_boundary(lg,mg,info,system,poisson,trho,pk)
   
 !------------------------- C-G minimization
@@ -101,15 +113,20 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   end do
   end do
   
-  sum1=0.d0
-!$omp parallel do reduction(+ : sum1) private(iz,iy,ix) collapse(2)
+  reduce_work=0d0
+!$omp parallel private(iz,iy,ix,tid)
+  tid=get_thread_id()
+!$omp do collapse(2)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
-    sum1=sum1+zk(ix,iy,iz)**2*system%hvol
+    reduce_work(tid)=reduce_work(tid)+zk(ix,iy,iz)**2*system%hvol
   end do
   end do
   end do
+!$omp end do
+!$omp end parallel
+  sum1=sum(reduce_work)
   
   if(info%isize_r==1)then
   else
@@ -122,15 +139,20 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
     if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, pk)
     call laplacian_poisson(mg,pk,rlap_wk,stencil%coef_lap0,stencil%coef_lap)
   
-    totbox=0d0
-!$omp parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)
+    reduce_work=0d0
+!$omp parallel private(iz,iy,ix,tid)
+    tid=get_thread_id()
+!$omp do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      totbox=totbox+(zk(ix,iy,iz)*rlap_wk(ix,iy,iz))
+      reduce_work(tid)=reduce_work(tid)+(zk(ix,iy,iz)*rlap_wk(ix,iy,iz))
     end do
     end do
     end do
+!$omp end do
+!$omp end parallel
+    totbox=sum(reduce_work)
   
     if(info%isize_r==1)then
       tottmp=totbox
@@ -150,15 +172,20 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
     end do
     end do
   
-    totbox=0d0
-!$omp parallel do reduction(+ : totbox) private(iz,iy,ix) collapse(2)
+    reduce_work=0d0
+!$omp parallel private(iz,iy,ix,tid)
+    tid=get_thread_id()
+!$omp do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      totbox=totbox+zk(ix,iy,iz)**2
+      reduce_work(tid)=reduce_work(tid)+zk(ix,iy,iz)**2
     end do
     end do
     end do
+!$omp end do
+!$omp end parallel
+    totbox=sum(reduce_work)
   
     if(info%isize_r==1)then
       tottmp=totbox
@@ -237,6 +264,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   use structures, only: s_rgrid,s_parallel_info,s_dft_system,s_poisson
   use salmon_math, only: ylm
   use communication, only: comm_summation
+  use parallelization, only: get_nthreads, get_thread_id
   
   use omp_lib, only: omp_get_num_threads, omp_get_thread_num, omp_get_max_threads
   use misc_routines, only: ceiling_pow2
@@ -264,8 +292,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   integer :: num_center
   real(8) :: ylm2(25)
   integer :: l2(25)
-  real(8) :: xx,yy,zz,rr,sum1,xxxx,yyyy,zzzz,rrrr,sumbox1,sumbox2,sumbox3
-  real(8) :: rholm2box
+  real(8) :: xx,yy,zz,rr,sum1,xxxx,yyyy,zzzz,rrrr
   real(8),allocatable :: rholm(:,:),rholm2(:,:) !,rholm3(:,:)
  !integer :: tid
   real(8) :: center_trho2(3)
@@ -281,6 +308,12 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   real(8),allocatable :: coordinate(:,:)
  !integer :: lmax_lmp_tmp !iwata
   integer :: comm_xyz(3),nproc_xyz(3),myrank_xyz(3)
+
+  integer :: tid
+  real(8),allocatable :: reduce_work(:)
+  real(8),allocatable :: reduce_work4(:,:)
+  allocate(reduce_work(0:get_nthreads()-1))
+  allocate(reduce_work4(4,0:get_nthreads()-1))
   
   comm_xyz(1) = info%icomm_x
   comm_xyz(2) = info%icomm_y
@@ -344,9 +377,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   do ll=0,lmax_lmp
   do m=-ll,ll
     lm=ll*ll+ll+1+m
-    rholm2box=0.d0
-  !$OMP parallel do reduction ( + : rholm2box)&
-  !$OMP private(ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz)
+    reduce_work=0d0
+!$omp parallel private(ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,tid)
+    tid=get_thread_id()
+!$omp do collapse(2)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -354,11 +388,13 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       yy=coordinate(iy,2)-center_trho(2,1)
       zz=coordinate(iz,3)-center_trho(3,1)
       rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
-      rholm2box=rholm2box+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ix,iy,iz)*hvol
+      reduce_work(tid)=reduce_work(tid)+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ix,iy,iz)*hvol
     end do
     end do
     end do
-    rholm2(lm,1)=rholm2box
+!$omp end do
+!$omp end parallel
+    rholm2(lm,1)=sum(reduce_work)
   end do
   end do
   
@@ -388,9 +424,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
     do ll=0,lmax_lmp
     do m=-ll,ll
       lm=ll*ll+ll+1+m
-      rholm2box=0.d0
-  !$OMP parallel do reduction ( + : rholm2box)&
-  !$OMP private(jj,ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz)
+      reduce_work=0d0
+!$omp parallel private(jj,ix,iy,iz,xx,yy,zz,rr,xxxx,yyyy,zzzz,tid)
+      tid=get_thread_id()
+!$omp do
       do jj=1,ig_num(icen)
         ix=ig(1,jj,icen)
         iy=ig(2,jj,icen)
@@ -399,9 +436,11 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
         yy=coordinate(iy,2)-Rion2(2,poisson%ipole_tbl(icen))
         zz=coordinate(iz,3)-Rion2(3,poisson%ipole_tbl(icen))
         rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
-        rholm2box=rholm2box+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ix,iy,iz)*hvol
+        reduce_work(tid)=reduce_work(tid)+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ix,iy,iz)*hvol
       end do
-      rholm2(lm,poisson%ipole_tbl(icen))=rholm2box
+!$omp end do
+!$omp end parallel
+      rholm2(lm,poisson%ipole_tbl(icen))=sum(reduce_work)
     end do
     end do
   end do
@@ -429,12 +468,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   end do
   
   do ii=1,poisson%npole_partial
-    sum1=0.d0
-    sumbox1=0.d0
-    sumbox2=0.d0
-    sumbox3=0.d0
-  !$OMP parallel do reduction (+ : sumbox1, sumbox2, sumbox3, sum1) &
-  !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz)
+    reduce_work4=0d0
+!$omp parallel private(jj,ixbox,iybox,izbox,xx,yy,zz,tid)
+    tid=get_thread_id()
+!$omp do
     do jj=1,ig_num(ii)
       ixbox=ig(1,jj,ii)
       iybox=ig(2,jj,ii)
@@ -442,15 +479,18 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
       xx=coordinate(ixbox,1)
       yy=coordinate(iybox,2)
       zz=coordinate(izbox,3)
-      sumbox1=sumbox1+trho(ixbox,iybox,izbox)*xx
-      sumbox2=sumbox2+trho(ixbox,iybox,izbox)*yy
-      sumbox3=sumbox3+trho(ixbox,iybox,izbox)*zz
-      sum1=sum1+trho(ixbox,iybox,izbox)
+      tid=get_thread_id()
+      reduce_work4(1,tid)=reduce_work4(1,tid)+trho(ixbox,iybox,izbox)*xx
+      reduce_work4(2,tid)=reduce_work4(2,tid)+trho(ixbox,iybox,izbox)*yy
+      reduce_work4(3,tid)=reduce_work4(3,tid)+trho(ixbox,iybox,izbox)*zz
+      reduce_work4(4,tid)=reduce_work4(4,tid)+trho(ixbox,iybox,izbox)
     end do
-    center_trho_nume_deno2(1,poisson%ipole_tbl(ii))=sumbox1
-    center_trho_nume_deno2(2,poisson%ipole_tbl(ii))=sumbox2
-    center_trho_nume_deno2(3,poisson%ipole_tbl(ii))=sumbox3
-    center_trho_nume_deno2(4,poisson%ipole_tbl(ii))=sum1
+!$omp end do
+!$omp end parallel
+    center_trho_nume_deno2(1,poisson%ipole_tbl(ii))=sum(reduce_work4(1,:))
+    center_trho_nume_deno2(2,poisson%ipole_tbl(ii))=sum(reduce_work4(2,:))
+    center_trho_nume_deno2(3,poisson%ipole_tbl(ii))=sum(reduce_work4(3,:))
+    center_trho_nume_deno2(4,poisson%ipole_tbl(ii))=sum(reduce_work4(4,:))
   end do
   
   call comm_summation(center_trho_nume_deno2,center_trho_nume_deno,4*poisson%npole_total,info%icomm_r)
@@ -529,9 +569,10 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
         do ll=0,lmax_lmp
         do m=-ll,ll
           lm=ll*ll+ll+1+m
-          rholm2box=0.d0
-  !$OMP parallel do reduction ( + : rholm2box)&
-  !$OMP private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz)
+          reduce_work=0d0
+!$omp parallel private(jj,ixbox,iybox,izbox,xx,yy,zz,rr,xxxx,yyyy,zzzz,tid)
+          tid=get_thread_id()
+!$omp do
           do jj=1,ig_num(ii)
             ixbox=ig(1,jj,ii)
             iybox=ig(2,jj,ii)
@@ -540,9 +581,11 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
             yy=coordinate(iybox,2)-center_trho(2,poisson%ipole_tbl(ii))
             zz=coordinate(izbox,3)-center_trho(3,poisson%ipole_tbl(ii))
             rr=sqrt(xx*xx+yy*yy+zz*zz)+1.d-50 ; xxxx=xx/rr ; yyyy=yy/rr ; zzzz=zz/rr
-            rholm2box=rholm2box+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
+            reduce_work(tid)=reduce_work(tid)+rr**ll*ylm(xxxx,yyyy,zzzz,ll,m)*trho(ixbox,iybox,izbox)*hvol
           end do
-          rholm2(lm,poisson%ipole_tbl(ii))=rholm2box
+!$omp end do
+!$omp end parallel
+          rholm2(lm,poisson%ipole_tbl(ii))=sum(reduce_work)
         end do
         end do
       end if
