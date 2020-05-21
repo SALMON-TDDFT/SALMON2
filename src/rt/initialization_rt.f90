@@ -41,11 +41,10 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                        write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
   use code_optimization
   use initialization_sub
-  use input_pp_sub
   use prep_pp_sub
   use density_matrix, only: calc_density,calc_microscopic_current
   use writefield
-  use salmon_pp, only: calc_nlcc
+  use salmon_pp, only: calc_nlcc, read_pslfile
   use force_sub, only: calc_force
   use hamiltonian
   use md_sub, only: init_md
@@ -174,7 +173,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call allocate_scalar(mg,V_local(jspin))
     call allocate_scalar(mg,Vxc(jspin))
   end do
-  call read_pslfile(system,pp,ppg)
+  call read_pslfile(system,pp)
   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)

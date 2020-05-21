@@ -35,7 +35,7 @@ use inputoutput
 use parallelization, only: nproc_id_global!,nproc_group_global
 use communication, only: comm_is_root, comm_summation, comm_bcast
 use salmon_xc
-use salmon_pp, only: calc_nlcc
+use salmon_pp, only: calc_nlcc, read_pslfile
 use timer
 use scf_iteration_sub
 use writefield
@@ -44,7 +44,6 @@ use read_gs
 use code_optimization
 use initialization_sub
 use occupation
-use input_pp_sub
 use prep_pp_sub
 use checkpoint_restart_sub
 use hamiltonian
@@ -91,7 +90,7 @@ do jspin=1,system%nspin
   call allocate_scalar(mg,V_local(jspin))
   call allocate_scalar(mg,Vxc(jspin))
 end do
-call read_pslfile(system,pp,ppg)
+call read_pslfile(system,pp)
 call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
 call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
 if(comm_is_root(nproc_id_global)) then
@@ -165,7 +164,6 @@ use read_gs
 use code_optimization
 use initialization_sub
 use occupation
-use input_pp_sub
 use prep_pp_sub
 use mixing_sub
 use checkpoint_restart_sub
@@ -338,7 +336,6 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   use code_optimization
   use initialization_sub
   use occupation
-  use input_pp_sub
   use prep_pp_sub
   use mixing_sub
   use checkpoint_restart_sub

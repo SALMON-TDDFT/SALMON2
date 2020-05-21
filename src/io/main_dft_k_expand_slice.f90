@@ -36,7 +36,6 @@ subroutine main_dft_k_expand_slice
   use code_optimization
   use initialization_sub
   use occupation
-  use input_pp_sub
   use prep_pp_sub
   use mixing_sub
   use checkpoint_restart_sub

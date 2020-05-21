@@ -58,6 +58,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
      property='update'
   else
      property='initial'
+     call init_mps(ppg)
   endif
      
   if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1)then
