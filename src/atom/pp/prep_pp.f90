@@ -24,7 +24,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   use hamiltonian, only: update_kvector_nonlocalpt
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
-  use salmon_global, only: iperiodic!,Rion
+  use salmon_global, only: iperiodic,natom
   use prep_pp_so_sub, only: calc_uv_so, SPIN_ORBIT_ON
   use prep_pp_plusU_sub, only: calc_uv_plusU, PLUS_U_ON
   use timer
@@ -34,7 +34,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   type(s_parallel_info)   ,intent(in) :: info
   type(s_reciprocal_grid) ,intent(in) :: fg
   type(s_poisson)                     :: poisson
-  type(s_pp_info)                     :: pp
+  type(s_pp_info)         ,intent(in) :: pp
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: Vpsl
   !
@@ -55,9 +55,18 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   if(abs(ppg%Hvol).lt.1d-99) ilevel_print=2 !judge the first init_ps or not
 
   if(allocated(ppg%save_udVtbl_a)) then
-     property='update'
+    property='update'
   else
-     property='initial'
+    property='initial'
+    allocate(ppg%mps(natom))
+    if (.not. allocated(ppg%jxyz_max)) then
+      allocate(ppg%jxyz_max(1:3,natom))
+      allocate(ppg%jxyz_min(1:3,natom))
+      allocate(ppg%jxyz_changed(natom))
+      ppg%jxyz_max = 0
+      ppg%jxyz_min = ppg%nps
+      ppg%jxyz_changed = .false.
+    end if
   endif
      
   if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1)then
@@ -114,7 +123,8 @@ call timer_begin(LOG_INIT_PS_CALC_NPS)
 call timer_end(LOG_INIT_PS_CALC_NPS)
 
 call timer_begin(LOG_INIT_PS_CALC_JXYZ)
-  call init_jxyz(ppg)
+  allocate(ppg%jxyz(3,ppg%nps,natom))
+  allocate(ppg%rxyz(3,ppg%nps,natom))
   call calc_jxyz(pp,ppg,system,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
                                     mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
                                     hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
@@ -123,10 +133,8 @@ call timer_end(LOG_INIT_PS_CALC_JXYZ)
   call cache_jxyz(ppg,system%Rion)
 
 call timer_begin(LOG_INIT_PS_LMA_UV)
-  call set_nlma(pp,ppg)
-  call init_lma_tbl(pp,ppg)
-  call init_uv(pp,ppg)
-  call set_lma_tbl(pp,ppg)
+
+  call set_lma
 
   call calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,system%Hvol)
 
@@ -160,6 +168,56 @@ call timer_end(LOG_INIT_PS_UVPSI)
   if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1) write(*,*)'end init_ps'
 
   call timer_end(LOG_INIT_PS_TOTAL)
+  
+  contains
+
+  subroutine set_lma
+    use salmon_global,only : kion
+    implicit none
+    integer :: lma,lm,ia,ik,m,l,ll,l0,n
+
+    lma=0
+    do ia=1,natom
+      ik=kion(ia)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        if(pp%inorm(l,ik)==0) cycle
+        do m=-ll,ll
+          lma=lma+1
+        enddo
+      enddo
+      l0=l
+      enddo
+    enddo
+    ppg%nlma=lma
+    
+    n=maxval(pp%nproj)*(pp%lmax+1)**2
+    allocate(ppg%lma_tbl(n,natom)); ppg%lma_tbl=0
+    allocate(ppg%ia_tbl(n*natom)); ppg%ia_tbl=0
+    allocate(ppg%rinv_uvu(n*natom)); ppg%rinv_uvu=0.0d0
+    allocate(ppg%uv(ppg%nps,ppg%nlma),ppg%duv(ppg%nps,ppg%nlma,3))
+
+    lma=0
+    do ia=1,natom
+      ik=kion(ia)
+      lm=0
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        if(pp%inorm(l,ik)==0) cycle
+        do m=-ll,ll
+          lm=lm+1
+          lma=lma+1
+          ppg%lma_tbl(lm,ia)=lma
+          ppg%ia_tbl(lma)=ia
+        enddo
+      enddo
+      l0=l
+      enddo
+    enddo
+    return
+  end subroutine set_lma
 
 end subroutine init_ps
 
@@ -175,8 +233,10 @@ SUBROUTINE dealloc_init_ps(ppg)
   deallocate(ppg%rinv_uvu,ppg%uv,ppg%duv)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
-  call finalize_uvpsi_summation(ppg)
-  call finalize_uvpsi_table(ppg)
+  if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
+  if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
+  if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
+  if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
 END SUBROUTINE dealloc_init_ps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -418,53 +478,12 @@ end subroutine calc_vpsl_periodic
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-subroutine init_mps(ppg)
-  use salmon_global,only : natom
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
-
-  allocate(ppg%mps(natom))
-
-  if (.not. allocated(ppg%jxyz_max)) then
-    allocate(ppg%jxyz_max(1:3,natom))
-    allocate(ppg%jxyz_min(1:3,natom))
-    allocate(ppg%jxyz_changed(natom))
-    ppg%jxyz_max = 0
-    ppg%jxyz_min = ppg%nps
-    ppg%jxyz_changed = .false.
-  end if
-
-end subroutine init_mps
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine init_jxyz(ppg)
-  use salmon_global,only : natom
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
-
-  allocate(ppg%jxyz(3,ppg%nps,natom))
-  allocate(ppg%rxyz(3,ppg%nps,natom))
-
-end subroutine init_jxyz
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine finalize_jxyz(ppg)
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
-
-  deallocate(ppg%jxyz)
-  deallocate(ppg%rxyz)
-
-end subroutine finalize_jxyz
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-
 subroutine calc_nps(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
   use salmon_global,only : natom,kion,iperiodic !,Rion
   use structures
   use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
   implicit none
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in)  :: pp
   type(s_pp_grid) :: ppg
   type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: alx,aly,alz
@@ -686,7 +705,7 @@ subroutine calc_jxyz(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,
   use structures
   use communication,only: comm_get_groupinfo,comm_summation
   implicit none
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: alx,aly,alz
@@ -877,118 +896,15 @@ subroutine calc_jxyz(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,
   end if
 
 end subroutine calc_jxyz
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine init_lma_tbl(pp,ppg)
-  use salmon_global,only : natom
-  use structures,only : s_pp_info,s_pp_grid
-  implicit none 
-  type(s_pp_info) :: pp
-  type(s_pp_grid) :: ppg
-  integer :: n
 
-  n=maxval(pp%nproj)*(pp%lmax+1)**2
-  allocate(ppg%lma_tbl(n,natom)); ppg%lma_tbl=0
-
-end subroutine init_lma_tbl
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine finalize_lma_tbl(ppg)
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
-
-  deallocate(ppg%lma_tbl)
-
-end subroutine finalize_lma_tbl
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine init_uv(pp,ppg)
-  use salmon_global,only : natom
-  use structures,only : s_pp_info,s_pp_grid
-  implicit none 
-  type(s_pp_info) :: pp
-  type(s_pp_grid) :: ppg
-  integer :: n
-
-  n=maxval(pp%nproj)*(pp%lmax+1)**2
-  allocate(ppg%ia_tbl(n*natom)); ppg%ia_tbl=0
-  allocate(ppg%rinv_uvu(n*natom)); ppg%rinv_uvu=0.0d0
-  allocate(ppg%uv(ppg%nps,ppg%nlma),ppg%duv(ppg%nps,ppg%nlma,3))
-
-end subroutine init_uv
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine finalize_uv(ppg)
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
-
-  deallocate(ppg%ia_tbl,ppg%rinv_uvu)
-  deallocate(ppg%uv,ppg%duv)
-
-end subroutine finalize_uv
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine set_nlma(pp,ppg)
-  use salmon_global,only : natom,kion
-  use structures,only : s_pp_info,s_pp_grid
-  implicit none 
-  type(s_pp_info) :: pp
-  type(s_pp_grid) :: ppg
-  integer :: lma
-  integer :: ia,ik,m,l,ll,l0
-
-  lma=0
-  do ia=1,natom
-    ik=kion(ia)
-    l0=0
-    do ll=0,pp%mlps(ik)
-    do l=l0,l0+pp%nproj(ll,ik)-1
-      if(pp%inorm(l,ik)==0) cycle
-      do m=-ll,ll
-        lma=lma+1
-      enddo
-    enddo
-    l0=l
-    enddo
-  enddo
-  ppg%nlma=lma
-
-end subroutine set_nlma
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine set_lma_tbl(pp,ppg)
-  use salmon_global,only : natom,kion
-  use structures,only : s_pp_info,s_pp_grid
-  implicit none 
-  type(s_pp_info) :: pp
-  type(s_pp_grid) :: ppg
-  integer :: lm,lma
-  integer :: ia,ik,m,l,l0,ll
-
-  lma=0
-  do ia=1,natom
-    ik=kion(ia)
-    lm=0
-    l0=0
-    do ll=0,pp%mlps(ik)
-    do l=l0,l0+pp%nproj(ll,ik)-1
-      if(pp%inorm(l,ik)==0) cycle
-      do m=-ll,ll
-        lm=lm+1
-        lma=lma+1
-        ppg%lma_tbl(lm,ia)=lma
-        ppg%ia_tbl(lma)=ia
-      enddo
-    enddo
-    l0=l
-    enddo
-  enddo
-
-end subroutine set_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
   use salmon_global,only : natom,kion,iperiodic,nelem
   use math_constants,only : pi
-  use salmon_math,only : ylm,dylm
+  use salmon_math,only : ylm,dylm,spline
   use structures,only : s_pp_info,s_pp_grid
   implicit none
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   integer,intent(in) :: nl
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
@@ -1118,98 +1034,6 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
  
 end subroutine calc_uv
 
-
-subroutine spline(Np,xn,yn,an,bn,cn,dn)
-  integer,intent(in) :: Np
-  real(8),intent(in) :: xn(0:Np-1),yn(0:Np-1)
-  real(8),intent(out) :: an(0:Np-2),bn(0:Np-2),cn(0:Np-2),dn(0:Np-2)
-  integer :: i,Npm2,info
-  real(8) :: dxn(0:Np-1),dyn(0:Np-1),u(1:Np-2),v(1:Np-2),Amat(1:Np-2,1:Np-2)
-  real(8) :: Amat_t(1:Np-2,1:Np-2)
-! for lapack
-  integer :: LWORK
-  integer, allocatable :: IPIV(:) ! dimension N
-  real(8), allocatable :: WORK(:) ! dimension LWORK
-! for check inverse matrix problem
-!  integer :: j,k
-!  real(8) :: Amat_chk(1:Np-2,1:Np-2)
-!  real(8) :: ss
-
-  Npm2 = Np-2
-  LWORK = Npm2*Npm2*6
-  allocate(IPIV(Npm2),WORK(LWORK))
-
-
-  do i = 0,Np-2
-    dxn(i) = xn(i+1) - xn(i)
-    dyn(i) = yn(i+1) - yn(i)
-  end do
-
-  do i = 1,Npm2
-    v(i) = 6d0*(dyn(i)/dxn(i) - dyn(i-1)/dxn(i-1))
-  end do
-
-  Amat = 0d0
-  Amat(1,1) = 2d0*(dxn(1) + dxn(0))
-  Amat(1,2) = dxn(1)
-  do i = 2,Npm2-1
-    Amat(i,i+1) = dxn(i)
-    Amat(i,i  ) = 2d0*(dxn(i)+dxn(i-1))
-    Amat(i,i-1) = dxn(i-1)
-  end do
-  Amat(Npm2,Npm2  ) = 2d0*(dxn(Npm2)+dxn(Npm2-1))
-  Amat(Npm2,Npm2-1) = dxn(Npm2-1)
-
-! inverse matrix problem
-  Amat_t = Amat
-
-
-  call DGETRF(Npm2, Npm2, Amat_t, Npm2, IPIV, info)  ! factorize
-  call DGETRI(Npm2, Amat_t, Npm2, IPIV, WORK, LWORK, info)  ! inverse
-
-!  check inverse matrix problem
-!  do i = 1,Npm2
-!    do j = 1,Npm2
-!      ss = 0d0
-!      do k = 1,Npm2
-!        ss = ss + Amat(i,k)*Amat_t(k,j)
-!      end do
-!      Amat_chk(i,j) = ss
-!    end do
-!  end do
-!
-!  do i = 1,Npm2
-!    write(*,'(999e16.6e3)')(Amat_chk(i,j),j=1,Npm2)
-!  end do
-!
-!  stop
-
-
-  do i = 1,Npm2
-    u(i) = sum(Amat_t(i,:)*v(:))
-  end do
-
-! for b
-  bn(0) = 0d0
-  bn(1:Np-2) = 0.5d0*u(1:Np-2)
-! for a
-  do i = 0,Npm2-1
-    an(i) = (u(i+1) -2d0*bn(i))/(6d0*dxn(i))
-  end do
-  an(Npm2) = (0d0 -2d0*bn(Npm2))/(6d0*dxn(Npm2))
-! for d
-  dn(0:Npm2) = yn(0:Npm2)
-! for c
-  i=0
-  cn(i) = dyn(i)/dxn(i) - dxn(i)*(u(i+1)+2d0*0.d0)/6d0
-  do i = 1,Npm2-1
-     cn(i) = dyn(i)/dxn(i) - dxn(i)*(u(i+1)+2d0*u(i))/6d0
-  end do
-  cn(Npm2) = dyn(Npm2)/dxn(Npm2) - dxn(Npm2)*(0d0+2d0*u(Npm2))/6d0
-
-  return
-end subroutine spline
-
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine bisection(xx,inode,iak,nr,rad_psl)
   use salmon_global,only : nelem
@@ -1330,17 +1154,6 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     end if
   end do
 end subroutine init_uvpsi_summation
-
-subroutine finalize_uvpsi_summation(ppg)
-  use structures,    only: s_pp_grid
-  use communication, only: comm_free_group
-  implicit none
-  type(s_pp_grid),intent(inout) :: ppg
-
-  if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
-  if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
-end subroutine
-
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_uvpsi_table(ppg)
   use structures,    only: s_pp_grid
@@ -1369,13 +1182,5 @@ subroutine init_uvpsi_table(ppg)
     end if
   end do
 end subroutine init_uvpsi_table
-
-subroutine finalize_uvpsi_table(ppg)
-  use structures,    only: s_pp_grid
-  implicit none
-  type(s_pp_grid),intent(inout) :: ppg
-  if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
-  if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
-end subroutine
 
 end module prep_pp_sub

@@ -163,10 +163,10 @@ contains
 
   subroutine calc_uv_plusU(pp,ppg,property)
     use salmon_global, only : natom, kion
-    use salmon_math,   only : ylm, dylm
+    use salmon_math,   only : ylm, dylm, spline
     use structures,    only : s_pp_info, s_pp_grid
     implicit none
-    type(s_pp_info),intent(inout) :: pp
+    type(s_pp_info),intent(in) :: pp
     type(s_pp_grid),intent(inout) :: ppg
     character(17),intent(in) :: property
     real(8) :: save_upptbl_a(pp%nrmax,0:2*pp%lmax+1,natom)
@@ -261,99 +261,6 @@ contains
 !stop "stop@calc_uv_plusU"
 
   end subroutine calc_uv_plusU
-
-
-
-  subroutine spline(Np,xn,yn,an,bn,cn,dn)
-  integer,intent(in) :: Np
-  real(8),intent(in) :: xn(0:Np-1),yn(0:Np-1)
-  real(8),intent(out) :: an(0:Np-2),bn(0:Np-2),cn(0:Np-2),dn(0:Np-2)
-  integer :: i,Npm2,info
-  real(8) :: dxn(0:Np-1),dyn(0:Np-1),u(1:Np-2),v(1:Np-2),Amat(1:Np-2,1:Np-2)
-  real(8) :: Amat_t(1:Np-2,1:Np-2)
-! for lapack
-  integer :: LWORK
-  integer, allocatable :: IPIV(:) ! dimension N
-  real(8), allocatable :: WORK(:) ! dimension LWORK
-! for check inverse matrix problem
-!  integer :: j,k
-!  real(8) :: Amat_chk(1:Np-2,1:Np-2)
-!  real(8) :: ss
-
-  Npm2 = Np-2
-  LWORK = Npm2*Npm2*6
-  allocate(IPIV(Npm2),WORK(LWORK))
-
-
-  do i = 0,Np-2
-    dxn(i) = xn(i+1) - xn(i)
-    dyn(i) = yn(i+1) - yn(i)
-  end do
-
-  do i = 1,Npm2
-    v(i) = 6d0*(dyn(i)/dxn(i) - dyn(i-1)/dxn(i-1))
-  end do
-
-  Amat = 0d0
-  Amat(1,1) = 2d0*(dxn(1) + dxn(0))
-  Amat(1,2) = dxn(1)
-  do i = 2,Npm2-1
-    Amat(i,i+1) = dxn(i)
-    Amat(i,i  ) = 2d0*(dxn(i)+dxn(i-1))
-    Amat(i,i-1) = dxn(i-1)
-  end do
-  Amat(Npm2,Npm2  ) = 2d0*(dxn(Npm2)+dxn(Npm2-1))
-  Amat(Npm2,Npm2-1) = dxn(Npm2-1)
-
-! inverse matrix problem
-  Amat_t = Amat
-
-
-  call DGETRF(Npm2, Npm2, Amat_t, Npm2, IPIV, info)  ! factorize
-  call DGETRI(Npm2, Amat_t, Npm2, IPIV, WORK, LWORK, info)  ! inverse
-
-!  check inverse matrix problem
-!  do i = 1,Npm2
-!    do j = 1,Npm2
-!      ss = 0d0
-!      do k = 1,Npm2
-!        ss = ss + Amat(i,k)*Amat_t(k,j)
-!      end do
-!      Amat_chk(i,j) = ss
-!    end do
-!  end do
-!
-!  do i = 1,Npm2
-!    write(*,'(999e16.6e3)')(Amat_chk(i,j),j=1,Npm2)
-!  end do
-!
-!  stop
-
-
-  do i = 1,Npm2
-    u(i) = sum(Amat_t(i,:)*v(:))
-  end do
-
-! for b
-  bn(0) = 0d0
-  bn(1:Np-2) = 0.5d0*u(1:Np-2)
-! for a
-  do i = 0,Npm2-1
-    an(i) = (u(i+1) -2d0*bn(i))/(6d0*dxn(i))
-  end do
-  an(Npm2) = (0d0 -2d0*bn(Npm2))/(6d0*dxn(Npm2))
-! for d
-  dn(0:Npm2) = yn(0:Npm2)
-! for c
-  i=0
-  cn(i) = dyn(i)/dxn(i) - dxn(i)*(u(i+1)+2d0*0.d0)/6d0
-  do i = 1,Npm2-1
-     cn(i) = dyn(i)/dxn(i) - dxn(i)*(u(i+1)+2d0*u(i))/6d0
-  end do
-  cn(Npm2) = dyn(Npm2)/dxn(Npm2) - dxn(Npm2)*(0d0+2d0*u(Npm2))/6d0
-
-  return
-  end subroutine spline
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
   subroutine bisection(xx,inode,iak,nr,rad_psl)
