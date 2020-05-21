@@ -34,7 +34,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   type(s_parallel_info)   ,intent(in) :: info
   type(s_reciprocal_grid) ,intent(in) :: fg
   type(s_poisson)                     :: poisson
-  type(s_pp_info)                     :: pp
+  type(s_pp_info)         ,intent(in) :: pp
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: Vpsl
   !
@@ -176,8 +176,10 @@ SUBROUTINE dealloc_init_ps(ppg)
   deallocate(ppg%rinv_uvu,ppg%uv,ppg%duv)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
-  call finalize_uvpsi_summation(ppg)
-  call finalize_uvpsi_table(ppg)
+  if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
+  if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
+  if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
+  if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
 END SUBROUTINE dealloc_init_ps
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -448,16 +450,7 @@ subroutine init_jxyz(ppg)
   allocate(ppg%rxyz(3,ppg%nps,natom))
 
 end subroutine init_jxyz
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine finalize_jxyz(ppg)
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
 
-  deallocate(ppg%jxyz)
-  deallocate(ppg%rxyz)
-
-end subroutine finalize_jxyz
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine calc_nps(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
@@ -465,7 +458,7 @@ subroutine calc_nps(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,a
   use structures
   use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
   implicit none
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in)  :: pp
   type(s_pp_grid) :: ppg
   type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: alx,aly,alz
@@ -687,7 +680,7 @@ subroutine calc_jxyz(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,
   use structures
   use communication,only: comm_get_groupinfo,comm_summation
   implicit none
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: alx,aly,alz
@@ -883,7 +876,7 @@ subroutine init_lma_tbl(pp,ppg)
   use salmon_global,only : natom
   use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   integer :: n
 
@@ -892,20 +885,11 @@ subroutine init_lma_tbl(pp,ppg)
 
 end subroutine init_lma_tbl
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine finalize_lma_tbl(ppg)
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
-
-  deallocate(ppg%lma_tbl)
-
-end subroutine finalize_lma_tbl
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_uv(pp,ppg)
   use salmon_global,only : natom
   use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   integer :: n
 
@@ -916,21 +900,11 @@ subroutine init_uv(pp,ppg)
 
 end subroutine init_uv
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine finalize_uv(ppg)
-  use structures,only : s_pp_grid
-  implicit none 
-  type(s_pp_grid) :: ppg
-
-  deallocate(ppg%ia_tbl,ppg%rinv_uvu)
-  deallocate(ppg%uv,ppg%duv)
-
-end subroutine finalize_uv
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine set_nlma(pp,ppg)
   use salmon_global,only : natom,kion
   use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   integer :: lma
   integer :: ia,ik,m,l,ll,l0
@@ -957,7 +931,7 @@ subroutine set_lma_tbl(pp,ppg)
   use salmon_global,only : natom,kion
   use structures,only : s_pp_info,s_pp_grid
   implicit none 
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   integer :: lm,lma
   integer :: ia,ik,m,l,l0,ll
@@ -989,7 +963,7 @@ subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
   use salmon_math,only : ylm,dylm
   use structures,only : s_pp_info,s_pp_grid
   implicit none
-  type(s_pp_info) :: pp
+  type(s_pp_info),intent(in) :: pp
   type(s_pp_grid) :: ppg
   integer,intent(in) :: nl
   integer,intent(in) :: lx(nl),ly(nl),lz(nl)
@@ -1331,17 +1305,6 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     end if
   end do
 end subroutine init_uvpsi_summation
-
-subroutine finalize_uvpsi_summation(ppg)
-  use structures,    only: s_pp_grid
-  use communication, only: comm_free_group
-  implicit none
-  type(s_pp_grid),intent(inout) :: ppg
-
-  if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
-  if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
-end subroutine
-
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine init_uvpsi_table(ppg)
   use structures,    only: s_pp_grid
@@ -1370,13 +1333,5 @@ subroutine init_uvpsi_table(ppg)
     end if
   end do
 end subroutine init_uvpsi_table
-
-subroutine finalize_uvpsi_table(ppg)
-  use structures,    only: s_pp_grid
-  implicit none
-  type(s_pp_grid),intent(inout) :: ppg
-  if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
-  if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
-end subroutine
 
 end module prep_pp_sub

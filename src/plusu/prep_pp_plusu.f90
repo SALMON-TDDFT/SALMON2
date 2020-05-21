@@ -166,7 +166,7 @@ contains
     use salmon_math,   only : ylm, dylm
     use structures,    only : s_pp_info, s_pp_grid
     implicit none
-    type(s_pp_info),intent(inout) :: pp
+    type(s_pp_info),intent(in) :: pp
     type(s_pp_grid),intent(inout) :: ppg
     character(17),intent(in) :: property
     real(8) :: save_upptbl_a(pp%nrmax,0:2*pp%lmax+1,natom)
