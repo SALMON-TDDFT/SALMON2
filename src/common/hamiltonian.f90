@@ -311,7 +311,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       call zpseudo(tpsi,htpsi,info,nspin,ppg)
     end if
     if ( PLUS_U_ON ) then
-      call pseudo_plusU(tpsi,htpsi,info,nspin,ppg)
+      call pseudo_plusU(tpsi,htpsi,system,info,ppg)
     end if
 
   end if

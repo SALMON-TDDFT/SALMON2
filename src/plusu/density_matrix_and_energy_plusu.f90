@@ -95,7 +95,7 @@ contains
           phipsi = phipsi + conjg( ppg%zekr_phi_ao(j,ilma,ik) ) &
                           * psi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
-        phipsi_lma(ilma) = phipsi * ppg%Hvol
+        phipsi_lma(ilma) = phipsi * system%Hvol
       end do !ilma
 
       do iprj=1,Nproj_pairs

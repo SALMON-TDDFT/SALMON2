@@ -38,26 +38,32 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: Vpsl
   !
-  integer :: ix,iy,iz,i,nl, ilevel_print
-  integer :: mmx(mg%num(1)*mg%num(2)*mg%num(3))
-  integer :: mmy(mg%num(1)*mg%num(2)*mg%num(3))
-  integer :: mmz(mg%num(1)*mg%num(2)*mg%num(3))
+  integer :: ix,iy,iz,i,nl,ml
+  integer :: mx(mg%num(1)*mg%num(2)*mg%num(3))
+  integer :: my(mg%num(1)*mg%num(2)*mg%num(3))
+  integer :: mz(mg%num(1)*mg%num(2)*mg%num(3))
   integer :: lx(lg%num(1)*lg%num(2)*lg%num(3))
   integer :: ly(lg%num(1)*lg%num(2)*lg%num(3))
   integer :: lz(lg%num(1)*lg%num(2)*lg%num(3))
   real(8) :: alx,aly,alz
   real(8) :: hx,hy,hz
   character(17) :: property
+  real(8) :: matrix_a(3,3),al(3,3),rshift(3),hvol
+  integer :: ia_s,ia_e
+  logical :: flag_cuboid
+  real(8) :: Rion_min(3), Rion_max(3), rps_max
+  integer :: mg_min(3), mg_max(3), nc(3), ixyz
 
   call timer_begin(LOG_INIT_PS_TOTAL)
-
-  ilevel_print = 0
-  if(abs(ppg%Hvol).lt.1d-99) ilevel_print=2 !judge the first init_ps or not
 
   if(allocated(ppg%save_udVtbl_a)) then
     property='update'
   else
     property='initial'
+    if(comm_is_root(nproc_id_global))then
+      write(*,*) ''
+      write(*,*) '============init_ps=============='
+    endif
     allocate(ppg%mps(natom))
     if (.not. allocated(ppg%jxyz_max)) then
       allocate(ppg%jxyz_max(1:3,natom))
@@ -68,13 +74,16 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
       ppg%jxyz_changed = .false.
     end if
   endif
-     
-  if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1)then
-    write(*,*) ''
-    write(*,*) '============init_ps=============='
-  endif
   
-  ppg%Hvol = system%Hvol
+  ia_s = info%ia_s
+  ia_e = info%ia_e
+  matrix_a = system%rmatrix_A
+  al = system%primitive_a
+  hvol = system%hvol
+
+  flag_cuboid = .true.
+  if( abs(al(1,2)).ge.1d-10 .or. abs(al(1,3)).ge.1d-10.or. &
+         abs(al(2,3)).ge.1d-10 )  flag_cuboid=.false.
 
   hx = system%Hgs(1)
   hy = system%Hgs(2)
@@ -83,16 +92,16 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   aly = system%Hgs(2)*dble(lg%num(2))
   alz = system%Hgs(3)*dble(lg%num(3))
   nl = lg%num(1)*lg%num(2)*lg%num(3)
-
+  ml = mg%num(1)*mg%num(2)*mg%num(3)
 
 !$omp parallel do private(iz,iy,ix,i) collapse(2)
   do iz=mg%is(3),mg%ie(3)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
      i=(iz-mg%is(3))*mg%num(1)*mg%num(2)+(iy-mg%is(2))*mg%num(1)+ix-mg%is(1)+1
-     mmx(i)=ix
-     mmy(i)=iy
-     mmz(i)=iz
+     mx(i)=ix
+     my(i)=iy
+     mz(i)=iz
   end do
   end do
   end do
@@ -111,65 +120,296 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   end do
 !$omp end parallel do
 
+  if( flag_cuboid ) then
+     rps_max   = maxval( pp%rps(:)) + 1.5d0*max(hx,hy,hz) + 1d-2
+     mg_min(1) = minval( mx(1:ml) )
+     mg_min(2) = minval( my(1:ml) )
+     mg_min(3) = minval( mz(1:ml) )
+     mg_max(1) = maxval( mx(1:ml) )
+     mg_max(2) = maxval( my(1:ml) )
+     mg_max(3) = maxval( mz(1:ml) )
+  endif
+
+  if(iperiodic==0)then
+    nc(:)=0
+  else if(iperiodic==3)then
+    if( flag_cuboid ) then
+       do ixyz=1,3
+          Rion_min(ixyz) = minval(system%Rion(ixyz,:))
+          Rion_max(ixyz) = maxval(system%Rion(ixyz,:))
+          if( Rion_min(ixyz) + 2d0*al(ixyz,ixyz) .gt. al(ixyz,ixyz) + rps_max .and. &
+              Rion_max(ixyz) - 2d0*al(ixyz,ixyz) .lt.               - rps_max ) then
+             nc(ixyz) = 1
+          else
+             nc(ixyz) = 2
+          endif
+       enddo
+    else
+       nc(:)=2
+    endif
+  end if
+
+  if(iperiodic==0)then
+    if(mod(lx(nl)-lx(1)+1,2)==1)then
+      rshift(1)=0.d0
+    else
+      rshift(1)=-0.5d0*Hx
+    end if
+    if(mod(ly(nl)-ly(1)+1,2)==1)then
+      rshift(2)=0.d0
+    else
+      rshift(2)=-0.5d0*Hy
+    end if
+    if(mod(lz(nl)-lz(1)+1,2)==1)then
+      rshift(3)=0.d0
+    else
+      rshift(3)=-0.5d0*Hz
+    end if
+  else if(iperiodic==3)then
+    rshift(1)=-Hx
+    rshift(2)=-Hy
+    rshift(3)=-Hz
+  end if
+
   if (.not. allocated(ppg%Rion_old)) then
     call cache_jxyz(ppg,system%Rion)
   end if
 
-call timer_begin(LOG_INIT_PS_CALC_NPS)
-  call calc_nps(pp,ppg,system,alx,aly,alz,lx,ly,lz, &
-                                   lg%num(1)*lg%num(2)*lg%num(3),   &
-                                   mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                   hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
-call timer_end(LOG_INIT_PS_CALC_NPS)
+  call timer_begin(LOG_INIT_PS_CALC_NPS)
+  call calc_nps
+  call timer_end(LOG_INIT_PS_CALC_NPS)
 
-call timer_begin(LOG_INIT_PS_CALC_JXYZ)
+  call timer_begin(LOG_INIT_PS_CALC_JXYZ)
   allocate(ppg%jxyz(3,ppg%nps,natom))
   allocate(ppg%rxyz(3,ppg%nps,natom))
-  call calc_jxyz(pp,ppg,system,alx,aly,alz,lx,ly,lz,lg%num(1)*lg%num(2)*lg%num(3),   &
-                                    mmx,mmy,mmz,mg%num(1)*mg%num(2)*mg%num(3),   &
-                                    hx,hy,hz,system%primitive_a,system%rmatrix_A,info)
-call timer_end(LOG_INIT_PS_CALC_JXYZ)
+  call calc_jxyz
+  call timer_end(LOG_INIT_PS_CALC_JXYZ)
 
   call cache_jxyz(ppg,system%Rion)
 
-call timer_begin(LOG_INIT_PS_LMA_UV)
-
+  call timer_begin(LOG_INIT_PS_LMA_UV)
   call set_lma
-
-  call calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,system%Hvol)
-
+  call calc_uv
   if ( SPIN_ORBIT_ON ) then
     call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,property,system%Hvol)
   end if
-
   if ( PLUS_U_ON ) then
     call calc_uv_plusU( pp, ppg, property )
   end if
-call timer_end(LOG_INIT_PS_LMA_UV)
+  call timer_end(LOG_INIT_PS_LMA_UV)
 
-call timer_begin(LOG_INIT_PS_CALC_VPSL)
+  call timer_begin(LOG_INIT_PS_CALC_VPSL)
   select case(iperiodic)
   case(0)
     call calc_Vpsl_isolated(mg,lg,system,pp,Vpsl,ppg)
   case(3)
     call calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   end select
-call timer_end(LOG_INIT_PS_CALC_VPSL)
+  call timer_end(LOG_INIT_PS_CALC_VPSL)
 
-call timer_begin(LOG_INIT_PS_UVPSI)
+  call timer_begin(LOG_INIT_PS_UVPSI)
   call init_uvpsi_summation(ppg,info%icomm_r)
   call init_uvpsi_table(ppg)
-call timer_end(LOG_INIT_PS_UVPSI)
+  call timer_end(LOG_INIT_PS_UVPSI)
   
   if(iperiodic==3) then
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   end if
   
-  if(comm_is_root(nproc_id_global) .and. ilevel_print.gt.1) write(*,*)'end init_ps'
+  if(comm_is_root(nproc_id_global) .and. property=='initial') write(*,*)'end init_ps'
 
   call timer_end(LOG_INIT_PS_TOTAL)
   
-  contains
+contains
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+  subroutine calc_nps
+    use salmon_global,only : kion
+    use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
+    implicit none
+    !
+    integer :: ia,i,ik,ix,iy,iz,j,ixyz
+    integer :: mps_tmp
+    real(8) :: tmpx,tmpy,tmpz
+    real(8) :: x,y,z,r,u,v,w
+    real(8) :: rr(3),xyz(3)
+
+    mps_tmp = 0
+    ppg%jxyz_changed(:) = .false.
+  !$omp parallel
+  !$omp do private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
+  !$omp    reduction(max:mps_tmp)
+    do ia=ia_s,ia_e
+      ik=kion(ia)
+      j=0
+      do ix=-nc(1),nc(1)
+        if( flag_cuboid ) then
+          xyz(1) = system%Rion(1,ia) + ix*al(1,1)
+          if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
+              xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
+        endif
+      do iy=-nc(2),nc(2)
+        if( flag_cuboid ) then
+          xyz(2) = system%Rion(2,ia) + iy*al(2,2)
+          if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
+              xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
+        endif
+      do iz=-nc(3),nc(3)
+        if( flag_cuboid ) then
+          xyz(3) = system%Rion(3,ia) + iz*al(3,3)
+          if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
+              xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
+        endif
+
+        rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
+        rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
+        rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
+        tmpx = system%Rion(1,ia)+ rr(1)
+        tmpy = system%Rion(2,ia)+ rr(2)
+        tmpz = system%Rion(3,ia)+ rr(3)
+  !      tmpx = system%Rion(1,a)+ix*alx
+  !      tmpy = system%Rion(2,a)+iy*aly
+  !      tmpz = system%Rion(3,a)+iz*alz
+        do i=1,ml
+          u = mx(i)*hx + rshift(1)
+          v = my(i)*hy + rshift(2)
+          w = mz(i)*hz + rshift(3)
+          rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
+          rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
+          rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
+          x = rr(1) - tmpx
+          y = rr(2) - tmpy
+          z = rr(3) - tmpz
+  !        x=mx(i)*Hx+rshift(1)-tmpx
+  !        y=my(i)*Hy+rshift(2)-tmpy
+  !        z=mz(i)*Hz+rshift(3)-tmpz
+          r=sqrt(x*x+y*y+z*z)
+          if (r<pp%rps(ik)+1.d-12) then
+            j=j+1
+            if (ppg%mps_old(ia) < j) then
+              ppg%jxyz_changed(ia) = .true.
+            else
+              ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
+                                     mx(i) /= ppg%jxyz_old(1,j,ia) .or. &
+                                     my(i) /= ppg%jxyz_old(2,j,ia) .or. &
+                                     mz(i) /= ppg%jxyz_old(3,j,ia)
+            end if
+          end if
+        enddo
+      enddo
+      enddo
+      enddo
+      ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia) .or. (ppg%mps_old(ia) /= j)
+      mps_tmp = max(mps_tmp,j)
+    end do
+  !$omp end do
+  !$omp end parallel
+
+    ppg%nps=mps_tmp
+    if (allocated(ppg%jxyz_old)) then
+      ppg%nps = max(ppg%nps, size(ppg%jxyz_old,2))
+    end if
+    call comm_get_max(ppg%nps,info%icomm_ko)
+    call comm_logical_or(ppg%jxyz_changed,info%icomm_ko)
+
+  end subroutine calc_nps
+
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+  subroutine calc_jxyz
+    use salmon_global,only : kion
+    use communication,only: comm_get_groupinfo,comm_summation
+    implicit none
+    !
+    integer :: ia,i,ik,ix,iy,iz,j
+    integer :: ixyz
+    real(8) :: tmpx,tmpy,tmpz
+    real(8) :: r,x,y,z,u,v,w
+    real(8) :: rr(3),xyz(3)
+
+    ppg%jxyz = 0
+    ppg%rxyz = 0d0
+    ppg%mps  = 0
+
+  !$omp parallel do default(none) &
+  !$omp    private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
+  !$omp    shared(ia_s,ia_e,natom,kion,nc,al,system,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg) &
+  !$omp    shared(mg_min,mg_max,flag_cuboid,rps_max)
+    do ia=ia_s,ia_e
+      if (ppg%jxyz_changed(ia)) then
+        ik=kion(ia)
+        j=0
+        do ix=-nc(1),nc(1)
+          if( flag_cuboid ) then
+            xyz(1) = system%Rion(1,ia) + ix*al(1,1)
+            if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
+                xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
+          endif
+        do iy=-nc(2),nc(2)
+          if( flag_cuboid ) then
+            xyz(2) = system%Rion(2,ia) + iy*al(2,2)
+            if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
+                xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
+          endif
+        do iz=-nc(3),nc(3)
+          if( flag_cuboid ) then
+            xyz(3) = system%Rion(3,ia) + iz*al(3,3)
+            if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
+                xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
+          endif
+
+          rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
+          rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
+          rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
+          tmpx = system%Rion(1,ia) + rr(1)
+          tmpy = system%Rion(2,ia) + rr(2)
+          tmpz = system%Rion(3,ia) + rr(3)
+          do i=1,ml
+            u = mx(i)*hx + rshift(1)
+            v = my(i)*hy + rshift(2)
+            w = mz(i)*hz + rshift(3)
+            rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
+            rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
+            rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
+            x = rr(1) - tmpx
+            y = rr(2) - tmpy
+            z = rr(3) - tmpz
+            r=sqrt(x*x+y*y+z*z)
+            if (r<pp%rps(ik)+1.d-12) then
+              j=j+1
+              if (j<=ppg%nps) then
+                ppg%jxyz(1,j,ia)=mx(i)
+                ppg%jxyz(2,j,ia)=my(i)
+                ppg%jxyz(3,j,ia)=mz(i)
+                ppg%rxyz(1,j,ia)=x
+                ppg%rxyz(2,j,ia)=y
+                ppg%rxyz(3,j,ia)=z
+              end if
+            end if
+          end do
+        end do
+        end do
+        end do
+        ppg%mps(ia)=j
+      else
+        i = ppg%mps_old(ia)
+        ppg%mps(ia) = i
+        ppg%jxyz(1:3,1:i,ia) = ppg%jxyz_old(1:3,1:i,ia)
+        do j=1,i
+          ppg%rxyz(1:3,j,ia) = ppg%rxyz_old(1:3,j,ia) - (system%Rion(1:3,ia) - ppg%rion_old(1:3,ia))
+        end do
+      end if
+    end do
+  !$omp end parallel do
+
+    call comm_summation(ppg%jxyz,info%icomm_ko)
+    call comm_summation(ppg%rxyz,info%icomm_ko)
+    call comm_summation(ppg%mps, info%icomm_ko)
+
+  end subroutine calc_jxyz
+
+!-----------------------------------------------------------------------------------------------------------------------------------
 
   subroutine set_lma
     use salmon_global,only : kion
@@ -218,10 +458,115 @@ call timer_end(LOG_INIT_PS_UVPSI)
     enddo
     return
   end subroutine set_lma
+  
+!-----------------------------------------------------------------------------------------------------------------------------------
+
+  subroutine calc_uv
+    use salmon_global,only : kion,nelem
+    use math_constants,only : pi
+    use salmon_math,only : ylm,dylm,spline
+    implicit none
+    integer :: ia,ik,j,l,lm,m,ll,l0
+    integer :: ilma,intr,ir,lma
+    real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)
+    real(8) :: uvr(0:2*pp%lmax+1), r,x,y,z, xx
+
+    if( property == 'initial' ) then
+      allocate( ppg%save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,nelem) )
+      allocate( ppg%save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,nelem) )
+      allocate( ppg%save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,nelem) )
+      allocate( ppg%save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,nelem) )
+
+      do ik=1,nelem
+        allocate(xn(0:pp%nrps(ik)-1),yn(0:pp%nrps(ik)-1),an(0:pp%nrps(ik)-2) &
+                ,bn(0:pp%nrps(ik)-2),cn(0:pp%nrps(ik)-2),dn(0:pp%nrps(ik)-2))
+    
+        xn(0:pp%nrps(ik)-1) = pp%radnl(1:pp%nrps(ik),ik)
+        l0=0
+        do ll=0,pp%mlps(ik)
+        do l=l0,l0+pp%nproj(ll,ik)-1
+          yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
+          call spline(pp%nrps(ik),xn,yn,an,bn,cn,dn)
+          ppg%save_udvtbl_a(1:pp%nrps(ik)-1,l,ik) = an(0:pp%nrps(ik)-2)
+          ppg%save_udvtbl_b(1:pp%nrps(ik)-1,l,ik) = bn(0:pp%nrps(ik)-2)
+          ppg%save_udvtbl_c(1:pp%nrps(ik)-1,l,ik) = cn(0:pp%nrps(ik)-2)
+          ppg%save_udvtbl_d(1:pp%nrps(ik)-1,l,ik) = dn(0:pp%nrps(ik)-2)
+        end do
+        l0=l
+        end do
+        deallocate(xn,yn,an,bn,cn,dn)
+      enddo
+    end if
+    
+    do ia=1,natom
+       ik=kion(ia)
+
+    !!$omp parallel
+    !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,ilma,l0,ll)
+       do j=1,ppg%mps(ia)
+         x=ppg%rxyz(1,j,ia)
+         y=ppg%rxyz(2,j,ia)
+         z=ppg%rxyz(3,j,ia)
+         r=sqrt(x*x+y*y+z*z)+1d-50
+         do ir=1,pp%nrps(ik)
+           if(pp%radnl(ir,ik).gt.r) exit
+         enddo
+         intr=ir-1
+         if(intr.lt.0.or.intr.ge.pp%nrps(ik)) stop 'bad intr at prep_ps'
+         xx = r - pp%radnl(intr,ik)
+
+         l0=0
+         do ll=0,pp%mlps(ik)
+         do l=l0,l0+pp%nproj(ll,ik)-1
+            uvr(l)=   ppg%save_udvtbl_a(intr,l,ik)*xx**3 &
+                    + ppg%save_udvtbl_b(intr,l,ik)*xx**2 &
+                    + ppg%save_udvtbl_c(intr,l,ik)*xx    &
+                    + ppg%save_udvtbl_d(intr,l,ik)
+         enddo
+         l0=l
+         enddo
+   
+         lm=0
+         l0=0
+         do ll=0,pp%mlps(ik)
+         do l=l0,l0+pp%nproj(ll,ik)-1
+           if(pp%inorm(l,ik)==0) cycle
+           do m=-ll,ll
+             lm=lm+1
+             ilma=ppg%lma_tbl(lm,ia)
+             ppg%uv(j,ilma)   = uvr(l)* ylm(x,y,z,ll,m)
+           enddo
+         enddo
+         l0=l
+         enddo
+   
+       enddo
+   !!$omp end do
+   !!$omp end parallel
+   
+    enddo
+
+    lma=0
+    do ia=1,natom
+      ik=kion(ia)
+      l0=0
+      do ll=0,pp%mlps(ik)
+      do l=l0,l0+pp%nproj(ll,ik)-1
+        if(pp%inorm(l,ik)==0) cycle
+        do m=-ll,ll
+          lma=lma+1
+          ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol
+        enddo
+      enddo
+      l0=l
+      enddo
+    enddo
+   
+  end subroutine calc_uv
 
 end subroutine init_ps
 
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+!===================================================================================================================================
 
 SUBROUTINE dealloc_init_ps(ppg)
   use structures, only: s_pp_grid
@@ -239,7 +584,7 @@ SUBROUTINE dealloc_init_ps(ppg)
   if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
 END SUBROUTINE dealloc_init_ps
 
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+!===================================================================================================================================
 
 SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
   use structures
@@ -296,7 +641,7 @@ SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
   return
 END SUBROUTINE calc_Vpsl_isolated
 
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+!===================================================================================================================================
 
 subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   use salmon_global,only : nelem, kion, yn_ffte
@@ -476,196 +821,8 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   return
 end subroutine calc_vpsl_periodic
 
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+!===================================================================================================================================
 
-subroutine calc_nps(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
-  use salmon_global,only : natom,kion,iperiodic !,Rion
-  use structures
-  use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
-  implicit none
-  type(s_pp_info),intent(in)  :: pp
-  type(s_pp_grid) :: ppg
-  type(s_dft_system),intent(in) :: system
-  real(8),intent(in) :: alx,aly,alz
-  integer,intent(in) :: nl,ml
-  integer,intent(in) :: lx(nl),ly(nl),lz(nl)
-  integer,intent(in) :: mx(ml),my(ml),mz(ml)
-  real(8),intent(in) :: hx,hy,hz
-  real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  type(s_parallel_info),intent(in),optional :: info
-  !
-  integer :: ia,i,ik,ix,iy,iz,j,ixyz
-  integer :: nc(3),mps_tmp
-  real(8) :: tmpx,tmpy,tmpz
-  real(8) :: x,y,z,r,u,v,w
-  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3), xyz(3)
-  integer :: ia_s,ia_e
-  real(8) :: Rion_min(3), Rion_max(3), rps_max
-  integer :: mg_min(3), mg_max(3)
-  logical :: flag_cuboid
-
-  if (present(info)) then
-    ia_s = info%ia_s
-    ia_e = info%ia_e
-  else
-    ia_s = 1
-    ia_e = natom
-  end if
-
-  matrix_a      = 0d0
-  matrix_a(1,1) = 1d0
-  matrix_a(2,2) = 1d0
-  matrix_a(3,3) = 1d0
-  if(present(matrix_A0)) matrix_a = matrix_A0
-
-  al      = 0d0
-  al(1,1) = alx
-  al(2,2) = aly
-  al(3,3) = alz
-  if(present(al0)) al = al0
-
-  flag_cuboid = .true.
-  if(present(al0)) then
-     if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
-         abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
-  endif
-
-  if( flag_cuboid ) then
-     rps_max   = maxval( pp%rps(:)) + 1.5d0*max(hx,hy,hz) + 1d-2
-     mg_min(1) = minval( mx(1:ml) )
-     mg_min(2) = minval( my(1:ml) )
-     mg_min(3) = minval( mz(1:ml) )
-     mg_max(1) = maxval( mx(1:ml) )
-     mg_max(2) = maxval( my(1:ml) )
-     mg_max(3) = maxval( mz(1:ml) )
-  endif
-
-
-  if(iperiodic==0)then
-    nc(:)=0
-  else if(iperiodic==3)then
-    if( flag_cuboid ) then
-       do ixyz=1,3
-          Rion_min(ixyz) = minval(system%Rion(ixyz,:))
-          Rion_max(ixyz) = maxval(system%Rion(ixyz,:))
-          if( Rion_min(ixyz) + 2d0*al(ixyz,ixyz) .gt. al(ixyz,ixyz) + rps_max .and. &
-              Rion_max(ixyz) - 2d0*al(ixyz,ixyz) .lt.               - rps_max ) then
-             nc(ixyz) = 1
-          else
-             nc(ixyz) = 2
-          endif
-       enddo
-    else
-       nc(:)=2
-    endif
-  end if
-
-  if(iperiodic==0)then
-    if(mod(lx(nl)-lx(1)+1,2)==1)then
-      rshift(1)=0.d0
-    else
-      rshift(1)=-0.5d0*Hx
-    end if
-    if(mod(ly(nl)-ly(1)+1,2)==1)then
-      rshift(2)=0.d0
-    else
-      rshift(2)=-0.5d0*Hy
-    end if
-    if(mod(lz(nl)-lz(1)+1,2)==1)then
-      rshift(3)=0.d0
-    else
-      rshift(3)=-0.5d0*Hz
-    end if
-  else if(iperiodic==3)then
-    rshift(1)=-Hx
-    rshift(2)=-Hy
-    rshift(3)=-Hz
-  end if
-
-
-  mps_tmp = 0
-  ppg%jxyz_changed(:) = .false.
-!$omp parallel
-!$omp do private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
-!$omp    reduction(max:mps_tmp)
-  do ia=ia_s,ia_e
-    ik=kion(ia)
-    j=0
-    do ix=-nc(1),nc(1)
-      if( flag_cuboid ) then
-        xyz(1) = system%Rion(1,ia) + ix*al(1,1)
-        if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
-            xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
-      endif
-    do iy=-nc(2),nc(2)
-      if( flag_cuboid ) then
-        xyz(2) = system%Rion(2,ia) + iy*al(2,2)
-        if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
-            xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
-      endif
-    do iz=-nc(3),nc(3)
-      if( flag_cuboid ) then
-        xyz(3) = system%Rion(3,ia) + iz*al(3,3)
-        if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
-            xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
-      endif
-
-      rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
-      rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
-      rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
-      tmpx = system%Rion(1,ia)+ rr(1)
-      tmpy = system%Rion(2,ia)+ rr(2)
-      tmpz = system%Rion(3,ia)+ rr(3)
-!      tmpx = system%Rion(1,a)+ix*alx
-!      tmpy = system%Rion(2,a)+iy*aly
-!      tmpz = system%Rion(3,a)+iz*alz
-      do i=1,ml
-        u = mx(i)*hx + rshift(1)
-        v = my(i)*hy + rshift(2)
-        w = mz(i)*hz + rshift(3)
-        rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
-        rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
-        rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
-        x = rr(1) - tmpx
-        y = rr(2) - tmpy
-        z = rr(3) - tmpz
-!        x=mx(i)*Hx+rshift(1)-tmpx
-!        y=my(i)*Hy+rshift(2)-tmpy
-!        z=mz(i)*Hz+rshift(3)-tmpz
-        r=sqrt(x*x+y*y+z*z)
-        if (r<pp%rps(ik)+1.d-12) then
-          j=j+1
-          if (ppg%mps_old(ia) < j) then
-            ppg%jxyz_changed(ia) = .true.
-          else
-            ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
-                                   mx(i) /= ppg%jxyz_old(1,j,ia) .or. &
-                                   my(i) /= ppg%jxyz_old(2,j,ia) .or. &
-                                   mz(i) /= ppg%jxyz_old(3,j,ia)
-          end if
-        end if
-      enddo
-    enddo
-    enddo
-    enddo
-    ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia) .or. (ppg%mps_old(ia) /= j)
-    mps_tmp = max(mps_tmp,j)
-  end do
-!$omp end do
-!$omp end parallel
-
-  ppg%nps=mps_tmp
-  if (allocated(ppg%jxyz_old)) then
-    ppg%nps = max(ppg%nps, size(ppg%jxyz_old,2))
-  end if
-  if (present(info)) then
-    call comm_get_max(ppg%nps,info%icomm_ko)
-    call comm_logical_or(ppg%jxyz_changed,info%icomm_ko)
-  end if
-
-end subroutine calc_nps
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine cache_jxyz(ppg,sysRion)
   use salmon_global, only: natom
   use structures
@@ -699,342 +856,8 @@ subroutine cache_jxyz(ppg,sysRion)
   end if
 end subroutine
 
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine calc_jxyz(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0,info)
-  use salmon_global,only : natom,kion,iperiodic !,Rion
-  use structures
-  use communication,only: comm_get_groupinfo,comm_summation
-  implicit none
-  type(s_pp_info),intent(in) :: pp
-  type(s_pp_grid) :: ppg
-  type(s_dft_system),intent(in) :: system
-  real(8),intent(in) :: alx,aly,alz
-  integer,intent(in) :: nl,ml
-  integer,intent(in) :: lx(nl),ly(nl),lz(nl)
-  integer,intent(in) :: mx(ml),my(ml),mz(ml)
-  real(8),intent(in) :: hx,hy,hz
-  real(8),intent(in),optional :: al0(3,3),matrix_A0(3,3)
-  type(s_parallel_info),intent(in),optional :: info
-  !
-  integer :: ia,i,ik,ix,iy,iz,j
-  integer :: nc(3), ixyz
-  real(8) :: tmpx,tmpy,tmpz
-  real(8) :: r,x,y,z,u,v,w
-  real(8) :: rshift(3),matrix_a(3,3),rr(3),al(3,3),xyz(3)
-  integer :: ia_s,ia_e
-  real(8) :: Rion_min(3), Rion_max(3), rps_max
-  integer :: mg_min(3), mg_max(3)
-  logical :: flag_cuboid
-  !
-  logical :: is_proc_distributed
+!===================================================================================================================================
 
-
-  if (allocated(ppg%rion_old)) then
-    is_proc_distributed = .false.
-  else
-    is_proc_distributed = present(info)
-  end if
-
-  if (is_proc_distributed) then
-    ia_s = info%ia_s
-    ia_e = info%ia_e
-  else
-    ia_s = 1
-    ia_e = natom
-  end if
-
-  matrix_a = 0d0
-  matrix_a(1,1) = 1d0
-  matrix_a(2,2) = 1d0
-
-  matrix_a(3,3) = 1d0
-  if(present(matrix_A0)) matrix_a = matrix_A0
-
-  al = 0d0
-  al(1,1) = alx
-  al(2,2) = aly
-  al(3,3) = alz
-  if(present(al0)) al = al0
-
-  flag_cuboid = .true.
-  if(present(al0)) then
-     if( abs(al0(1,2)).ge.1d-10 .or. abs(al0(1,3)).ge.1d-10.or. &
-         abs(al0(2,3)).ge.1d-10 )  flag_cuboid=.false. 
-  endif
-
-  if( flag_cuboid ) then
-     rps_max   = maxval( pp%rps(:)) + max(hx,hy,hz) + 1d-2
-     mg_min(1) = minval( mx(1:ml) )
-     mg_min(2) = minval( my(1:ml) )
-     mg_min(3) = minval( mz(1:ml) )
-     mg_max(1) = maxval( mx(1:ml) )
-     mg_max(2) = maxval( my(1:ml) )
-     mg_max(3) = maxval( mz(1:ml) )
-  endif
-
-
-  if(iperiodic==0)then
-    nc(:)=0
-  else if(iperiodic==3)then
-    if( flag_cuboid ) then
-       do ixyz=1,3
-          Rion_min(ixyz) = minval(system%Rion(ixyz,:))
-          Rion_max(ixyz) = maxval(system%Rion(ixyz,:))
-          if( Rion_min(ixyz) + 2d0*al(ixyz,ixyz) .gt. al(ixyz,ixyz) + rps_max .and. &
-              Rion_max(ixyz) - 2d0*al(ixyz,ixyz) .lt.               - rps_max ) then
-             nc(ixyz) = 1
-          else
-             nc(ixyz) = 2
-          endif
-       enddo
-    else
-       nc(:)=2
-    endif
-  end if
-
-  if(iperiodic==0)then
-    if(mod(lx(nl)-lx(1)+1,2)==1)then
-      rshift(1)=0.d0
-    else
-      rshift(1)=-0.5d0*Hx
-    end if
-    if(mod(ly(nl)-ly(1)+1,2)==1)then
-      rshift(2)=0.d0
-    else
-      rshift(2)=-0.5d0*Hy
-    end if
-    if(mod(lz(nl)-lz(1)+1,2)==1)then
-      rshift(3)=0.d0
-    else
-      rshift(3)=-0.5d0*Hz
-    end if
-  else if(iperiodic==3)then
-    rshift(1)=-Hx
-    rshift(2)=-Hy
-    rshift(3)=-Hz
-  end if
-
-  ppg%jxyz = 0
-  ppg%rxyz = 0d0
-  ppg%mps  = 0
-
-!$omp parallel do default(none) &
-!$omp    private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
-!$omp    shared(ia_s,ia_e,natom,kion,nc,al,system,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg) &
-!$omp    shared(mg_min,mg_max,flag_cuboid,rps_max)
-  do ia=ia_s,ia_e
-    if (ppg%jxyz_changed(ia)) then
-      ik=kion(ia)
-      j=0
-      do ix=-nc(1),nc(1)
-        if( flag_cuboid ) then
-          xyz(1) = system%Rion(1,ia) + ix*al(1,1)
-          if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
-              xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
-        endif
-      do iy=-nc(2),nc(2)
-        if( flag_cuboid ) then
-          xyz(2) = system%Rion(2,ia) + iy*al(2,2)
-          if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
-              xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
-        endif
-      do iz=-nc(3),nc(3)
-        if( flag_cuboid ) then
-          xyz(3) = system%Rion(3,ia) + iz*al(3,3)
-          if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
-              xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
-        endif
-
-        rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
-        rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
-        rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
-        tmpx = system%Rion(1,ia) + rr(1)
-        tmpy = system%Rion(2,ia) + rr(2)
-        tmpz = system%Rion(3,ia) + rr(3)
-        do i=1,ml
-          u = mx(i)*hx + rshift(1)
-          v = my(i)*hy + rshift(2)
-          w = mz(i)*hz + rshift(3)
-          rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
-          rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
-          rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
-          x = rr(1) - tmpx
-          y = rr(2) - tmpy
-          z = rr(3) - tmpz
-          r=sqrt(x*x+y*y+z*z)
-          if (r<pp%rps(ik)+1.d-12) then
-            j=j+1
-            if (j<=ppg%nps) then
-              ppg%jxyz(1,j,ia)=mx(i)
-              ppg%jxyz(2,j,ia)=my(i)
-              ppg%jxyz(3,j,ia)=mz(i)
-              ppg%rxyz(1,j,ia)=x
-              ppg%rxyz(2,j,ia)=y
-              ppg%rxyz(3,j,ia)=z
-            end if
-          end if
-        end do
-      end do
-      end do
-      end do
-      ppg%mps(ia)=j
-    else
-      i = ppg%mps_old(ia)
-      ppg%mps(ia) = i
-      ppg%jxyz(1:3,1:i,ia) = ppg%jxyz_old(1:3,1:i,ia)
-      do j=1,i
-        ppg%rxyz(1:3,j,ia) = ppg%rxyz_old(1:3,j,ia) - (system%Rion(1:3,ia) - ppg%rion_old(1:3,ia))
-      end do
-    end if
-  end do
-!$omp end parallel do
-
-  if (is_proc_distributed) then
-    call comm_summation(ppg%jxyz,info%icomm_ko)
-    call comm_summation(ppg%rxyz,info%icomm_ko)
-    call comm_summation(ppg%mps, info%icomm_ko)
-  end if
-
-end subroutine calc_jxyz
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine calc_uv(pp,ppg,lx,ly,lz,nl,hx,hy,hz, property,hvol0)
-  use salmon_global,only : natom,kion,iperiodic,nelem
-  use math_constants,only : pi
-  use salmon_math,only : ylm,dylm,spline
-  use structures,only : s_pp_info,s_pp_grid
-  implicit none
-  type(s_pp_info),intent(in) :: pp
-  type(s_pp_grid) :: ppg
-  integer,intent(in) :: nl
-  integer,intent(in) :: lx(nl),ly(nl),lz(nl)
-  real(8),intent(in) :: hx,hy,hz
-  character(17),intent(in) :: property
-  real(8),intent(in),optional :: hvol0
-  integer :: ia,ik,j,l,lm,m,ll,l0
-  integer :: ilma,intr,ir,lma
-  real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
-  real(8) :: uvr(0:2*pp%lmax+1), r,x,y,z, xx, rshift(3), hvol
-
-  hvol=hx*hy*hz
-  if(present(hvol0)) hvol = hvol0
-
-  if(iperiodic==0)then
-    if(mod(lx(nl)-lx(1)+1,2)==1)then
-      rshift(1)=0.d0
-    else
-      rshift(1)=-0.5d0*Hx
-    end if
-    if(mod(ly(nl)-ly(1)+1,2)==1)then
-      rshift(2)=0.d0
-    else
-      rshift(2)=-0.5d0*Hy
-    end if
-    if(mod(lz(nl)-lz(1)+1,2)==1)then
-      rshift(3)=0.d0
-    else
-      rshift(3)=-0.5d0*Hz
-    end if
-  else if(iperiodic==3)then
-    rshift(1)=-Hx
-    rshift(2)=-Hy
-    rshift(3)=-Hz
-  end if
-
-  if( property == 'initial' ) then
-    allocate( ppg%save_udVtbl_a(pp%nrmax,0:2*pp%lmax+1,nelem) )
-    allocate( ppg%save_udVtbl_b(pp%nrmax,0:2*pp%lmax+1,nelem) )
-    allocate( ppg%save_udVtbl_c(pp%nrmax,0:2*pp%lmax+1,nelem) )
-    allocate( ppg%save_udVtbl_d(pp%nrmax,0:2*pp%lmax+1,nelem) )
-
-    do ik=1,nelem
-      allocate(xn(0:pp%nrps(ik)-1),yn(0:pp%nrps(ik)-1),an(0:pp%nrps(ik)-2) &
-              ,bn(0:pp%nrps(ik)-2),cn(0:pp%nrps(ik)-2),dn(0:pp%nrps(ik)-2))
-  
-      xn(0:pp%nrps(ik)-1) = pp%radnl(1:pp%nrps(ik),ik)
-      l0=0
-      do ll=0,pp%mlps(ik)
-      do l=l0,l0+pp%nproj(ll,ik)-1
-        yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
-        call spline(pp%nrps(ik),xn,yn,an,bn,cn,dn)
-        ppg%save_udvtbl_a(1:pp%nrps(ik)-1,l,ik) = an(0:pp%nrps(ik)-2)
-        ppg%save_udvtbl_b(1:pp%nrps(ik)-1,l,ik) = bn(0:pp%nrps(ik)-2)
-        ppg%save_udvtbl_c(1:pp%nrps(ik)-1,l,ik) = cn(0:pp%nrps(ik)-2)
-        ppg%save_udvtbl_d(1:pp%nrps(ik)-1,l,ik) = dn(0:pp%nrps(ik)-2)
-      end do
-      l0=l
-      end do
-      deallocate(xn,yn,an,bn,cn,dn)
-    enddo
-  end if
-  
-  do ia=1,natom
-     ik=kion(ia)
-
-  !!$omp parallel
-  !!$omp do private(j,x,y,z,r,ir,intr,xx,l,lm,m,uvr,ilma,l0,ll)
-     do j=1,ppg%mps(ia)
-       x=ppg%rxyz(1,j,ia)
-       y=ppg%rxyz(2,j,ia)
-       z=ppg%rxyz(3,j,ia)
-       r=sqrt(x*x+y*y+z*z)+1d-50
-       do ir=1,pp%nrps(ik)
-         if(pp%radnl(ir,ik).gt.r) exit
-       enddo
-       intr=ir-1
-       if(intr.lt.0.or.intr.ge.pp%nrps(ik)) stop 'bad intr at prep_ps'
-       xx = r - pp%radnl(intr,ik)
-
-       l0=0
-       do ll=0,pp%mlps(ik)
-       do l=l0,l0+pp%nproj(ll,ik)-1
-          uvr(l)=   ppg%save_udvtbl_a(intr,l,ik)*xx**3 &
-                  + ppg%save_udvtbl_b(intr,l,ik)*xx**2 &
-                  + ppg%save_udvtbl_c(intr,l,ik)*xx    &
-                  + ppg%save_udvtbl_d(intr,l,ik)
-       enddo
-       l0=l
-       enddo
- 
-       lm=0
-       l0=0
-       do ll=0,pp%mlps(ik)
-       do l=l0,l0+pp%nproj(ll,ik)-1
-         if(pp%inorm(l,ik)==0) cycle
-         do m=-ll,ll
-           lm=lm+1
-           ilma=ppg%lma_tbl(lm,ia)
-           ppg%uv(j,ilma)   = uvr(l)* ylm(x,y,z,ll,m)
-         enddo
-       enddo
-       l0=l
-       enddo
- 
-     enddo
- !!$omp end do
- !!$omp end parallel
- 
-  enddo
-
-  lma=0
-  do ia=1,natom
-    ik=kion(ia)
-    l0=0
-    do ll=0,pp%mlps(ik)
-    do l=l0,l0+pp%nproj(ll,ik)-1
-      if(pp%inorm(l,ik)==0) cycle
-      do m=-ll,ll
-        lma=lma+1
-        ppg%rinv_uvu(lma)=dble(pp%inorm(l,ik))*hvol
-      enddo
-    enddo
-    l0=l
-    enddo
-  enddo
- 
-end subroutine calc_uv
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine bisection(xx,inode,iak,nr,rad_psl)
   use salmon_global,only : nelem
   implicit none
@@ -1059,7 +882,8 @@ subroutine bisection(xx,inode,iak,nr,rad_psl)
 
 end subroutine bisection
 
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+!===================================================================================================================================
+
 subroutine init_uvpsi_summation(ppg,icomm_r)
   use structures,    only: s_pp_grid
   use salmon_global, only: natom
@@ -1154,7 +978,9 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     end if
   end do
 end subroutine init_uvpsi_summation
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+!===================================================================================================================================
+
 subroutine init_uvpsi_table(ppg)
   use structures,    only: s_pp_grid
   implicit none
