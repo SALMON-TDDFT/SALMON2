@@ -276,7 +276,6 @@ module structures
     integer,allocatable :: jyy_ao(:,:)
     integer,allocatable :: jzz_ao(:,:)
     real(8),allocatable :: rxyz_ao(:,:,:)
-    real(8) :: Hvol
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)    ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:)   ! uVpsi(n:m) is referred in this process

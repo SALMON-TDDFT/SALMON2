@@ -163,7 +163,7 @@ contains
             phipsi = phipsi + conjg(ppg%zekr_phi_ao(j,ilma,ik)) &
                             * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           end do
-          phipsi = phipsi * ppg%Hvol
+          phipsi = phipsi * system%Hvol
           phipsibox(ilma,iorb) = phipsi
         end do
       end do
@@ -250,7 +250,7 @@ contains
                 w  = gtpsi(:,ix,iy,iz) + zI* kAc(:) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
                 dphipsi(:) = dphipsi(:) + conjg(ppg%zekr_phi_ao(j,ilma,ik)) * w(:)
              end do
-             dphipsi_lma(:,ilma) = dphipsi(:) * ppg%Hvol
+             dphipsi_lma(:,ilma) = dphipsi(:) * system%Hvol
           end do
        end if
        if( PLUS_U_ON )then
