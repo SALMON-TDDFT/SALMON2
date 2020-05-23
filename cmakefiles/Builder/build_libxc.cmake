@@ -1,14 +1,13 @@
 include(ExternalProject)
 
-  message(STATUS "=====before find package====")
-#find_package(Libxc QUIET)
-find_package(LIBXCF90)
+find_package(LIBXCF90 QUIET)
 
 if (LIBXCF90_FOUND)
-  message(STATUS "Libxc found.")
+  set(LIBXC_VERSION ${LIBXCF90_VERSION})
+  message(STATUS "Found Libxc version ${LIBXC_VERSION}")
   include_directories(${LIBXCF90_INCLUDE_DIRS})
   link_libraries(${LIBXCF90_LIBRARIES})
-  
+
 else ()
   set(LIBXC_VERSION "4.3.4")
   message(STATUS "Build Libxc version ${LIBXC_VERSION}")
