@@ -17,11 +17,19 @@
 
 #include "config.h"
 
-module structures
 #ifdef USE_LIBXC
-  use xc_f90_types_m
-  use xc_f90_lib_m
+#include "xc_version.h"
 #endif
+
+module structures
+
+#ifdef USE_LIBXC
+#if XC_MAJOR_VERSION <= 4 
+    use xc_f90_types_m
+#endif
+    use xc_f90_lib_m
+#endif
+
   implicit none
 
 ! scalar field
@@ -307,8 +315,13 @@ module structures
     logical :: use_kinetic_energy
     logical :: use_current
 #ifdef USE_LIBXC
+#if XC_MAJOR_VERSION <= 4 
     type(xc_f90_pointer_t) :: func(3)
     type(xc_f90_pointer_t) :: info(3)
+#else
+    TYPE(xc_f90_func_t) :: func(3)
+    TYPE(xc_f90_func_info_t) :: info(3)
+#endif
 #endif
   end type
 
