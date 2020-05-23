@@ -70,7 +70,8 @@ find_path(
   PATHS ${PC_LIBXCF90_INCLUDE_DIRS} ${_libxc_paths} 
 )
 
-
+file(STRINGS "${LIBXCF90_INCLUDE_DIRS}/xc_version.h" XC_VERSION_H REGEX "^#define XC_VERSION \"[^\"]*\"$")
+string(REGEX REPLACE "^.*XC_VERSION \"([0-9\.]+).*$" "\\1" LIBXCF90_VERSION "${XC_VERSION_H}")
 
 # Show error messages
 include(FindPackageHandleStandardArgs)
@@ -79,7 +80,6 @@ find_package_handle_standard_args(
   LIBXCF90_LIBRARIES LIBXCF90_INCLUDE_DIRS
 )
 
-
 # Store results
-mark_as_advanced(LIBXCF90_INCLUDE_DIRS LIBXCF90_LIBRARIES )
+mark_as_advanced(LIBXCF90_INCLUDE_DIRS LIBXCF90_LIBRARIES LIBXCF90_VERSION)
 
