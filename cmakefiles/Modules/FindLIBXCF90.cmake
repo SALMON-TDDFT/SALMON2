@@ -25,21 +25,16 @@
 #  LIBXCF90_LIBRARIES
 #  LIBXCF90_DEFINITIONS
 #  LIBXCF90_FOUND
+#  LIBXCF90_VERSION
 
 find_package(PkgConfig)
 
 # Detect libxc setting
-pkg_check_modules(PC_LIBXCF90 QUIET libxc)
+pkg_check_modules(PC_LIBXCF90 QUIET libxcf90)
 
-set(_libxc_hints 
-  ${PC_LIBXCF90_INCLUDEDIR} 
-  ${PC_LIBXCF90_INCLUDE_DIRS}
-)
-
-# Search-path priority
-set(_libxc_paths 
+set(_libxc_pathes
   ~/program            # Uemoto's environment :P
-  ~/local              #
+  ~/.local
   /usr/local/Celler    # Homebrew
   /opt/local           # MacPorts
   ~/Library/Frameworks # MacOS
@@ -49,35 +44,42 @@ set(_libxc_paths
   /opt                 #
 )
 
-# Search 'include' directory containing fortran90 module file
-find_path(
-  LIBXCF90_INCLUDE_DIR 
-  xc_f90_types_m.mod HINTS ${_libxc_hints} PATHS ${_libxc_paths}
-)
 
-# Search libxcf90 (fortran90 library)
+# Search libxc libxcf90 (fortran90 library)
 find_library(
-  LIBXCF90_LIBRARY
-  NAMES xcf90 HINTS ${_libxc_hints} PATHS ${_libxc_paths}
+  LIBXCF90_LIBRARY_XCF90
+  NAMES xcf90
+  PATHS ${PC_LIBXCF90_LIBRARY_DIRS} ${_libxc_paths}
 )
 
 # Search libxc (general libxc library)
 find_library(
-  LIBXC_LIBRARY
-  NAMES xc HINTS ${_libxc_hints} PATHS ${_libxc_paths}
+  LIBXCF90_LIBRARY_XC
+  NAMES xc 
+  PATHS ${PC_LIBXCF90_LIBRARY_DIRS} ${_libxc_paths}
 )
+
+set(LIBXCF90_LIBRARIES ${LIBXCF90_LIBRARY_XCF90} ${LIBXCF90_LIBRARY_XC})
+
+
+
+# Search 'include' directory containing header file
+find_path(
+  LIBXCF90_INCLUDE_DIRS
+  NAMES xc_version.h
+  PATHS ${PC_LIBXCF90_INCLUDE_DIRS} ${_libxc_paths} 
+)
+
+file(STRINGS "${LIBXCF90_INCLUDE_DIRS}/xc_version.h" XC_VERSION_H REGEX "^#define XC_VERSION \"[^\"]*\"$")
+string(REGEX REPLACE "^.*XC_VERSION \"([0-9\.]+).*$" "\\1" LIBXCF90_VERSION "${XC_VERSION_H}")
 
 # Show error messages
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
   LIBXCF90 DEFAULT_MSG
-  LIBXCF90_INCLUDE_DIR LIBXCF90_LIBRARY LIBXCF90_INCLUDE_DIR
+  LIBXCF90_LIBRARIES LIBXCF90_INCLUDE_DIRS
 )
 
-
-mark_as_advanced(LIBXCF90_INCLUDE_DIR LIBXCF90_LIBRARY LIBXC_LIBRARY)
-
 # Store results
-set(LIBXCF90_LIBRARIES ${LIBXCF90_LIBRARY} ${LIBXC_LIBRARY})
-set(LIBXCF90_INCLUDE_DIRS ${LIBXCF90_INCLUDE_DIR})
-set(LIBXCF90_DEFINITIONS ${PC_LIBXCF90_CFLAGS_OTHER})
+mark_as_advanced(LIBXCF90_INCLUDE_DIRS LIBXCF90_LIBRARIES LIBXCF90_VERSION)
+

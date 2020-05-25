@@ -5,8 +5,7 @@
 *.dat
 
 # Executable binaries
-*.cpu
-*.mic
+/bin/
 
 # temporary namelist
 *.tmp

@@ -17,6 +17,10 @@
 
 #include "config.h"
 
+#ifdef USE_LIBXC
+#include "xc_version.h"
+#endif
+
 module salmon_xc
   use structures, only: s_xc_functional
   use builtin_pz, only: exc_cor_pz
@@ -24,8 +28,11 @@ module salmon_xc
   use builtin_pzm, only: exc_cor_pzm
   use builtin_pbe, only: exc_cor_pbe
   use builtin_tbmbj, only: exc_cor_tbmbj
+
 #ifdef USE_LIBXC
+#if XC_MAJOR_VERSION <= 4 
   use xc_f90_types_m
+#endif
   use xc_f90_lib_m
 #endif
 
@@ -524,11 +531,18 @@ contains
         stop
       end if
 
-      call xc_f90_func_init( &
-        & xc%func(ii), xc%info(ii), ixc, XC_UNPOLARIZED &
-        & )
+#if XC_MAJOR_VERSION <= 4
+      call xc_f90_func_init(xc%func(ii), xc%info(ii), ixc, XC_UNPOLARIZED)
+#else
+      call xc_f90_func_init(xc%func(ii), ixc, XC_UNPOLARIZED)
+      xc%info(ii) = xc_f90_func_get_info(xc%func(ii))
+#endif         
 
-      select case(xc_f90_info_family(xc%info(ii)))
+#if XC_MAJOR_VERSION <= 4
+      select case (xc_f90_info_family(xc%info(ii)))
+#else
+      select case (xc_f90_func_info_get_family(xc%info(ii)))
+#endif
       case (XC_FAMILY_LDA)
       case (XC_FAMILY_GGA)
         xc%use_gradient = .true.
@@ -863,7 +877,11 @@ contains
         tau_1d = reshape(tau, (/nl/))
       end if
 
+#if XC_MAJOR_VERSION <= 4
       select case (xc_f90_info_family(xc%info(ii)))
+#else
+      select case (xc_f90_func_info_get_family(xc%info(ii)))
+#endif
       case(XC_FAMILY_LDA)
         call xc_f90_lda_exc_vxc( &
           & xc%func(ii), nl, rho_1d(1), &
