@@ -38,21 +38,12 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   type(s_pp_grid)                     :: ppg
   type(s_scalar)                      :: Vpsl
   !
-  integer :: ix,iy,iz,i,nl,ml
-  integer :: mx(mg%num(1)*mg%num(2)*mg%num(3))
-  integer :: my(mg%num(1)*mg%num(2)*mg%num(3))
-  integer :: mz(mg%num(1)*mg%num(2)*mg%num(3))
-  integer :: lx(lg%num(1)*lg%num(2)*lg%num(3))
-  integer :: ly(lg%num(1)*lg%num(2)*lg%num(3))
-  integer :: lz(lg%num(1)*lg%num(2)*lg%num(3))
-  real(8) :: alx,aly,alz
-  real(8) :: hx,hy,hz
   character(17) :: property
-  real(8) :: matrix_a(3,3),al(3,3),rshift(3),hvol
+  real(8) :: matrix_a(3,3),al(3,3),rshift(3),hvol,hgs(3)
   integer :: ia_s,ia_e
   logical :: flag_cuboid
   real(8) :: Rion_min(3), Rion_max(3), rps_max
-  integer :: mg_min(3), mg_max(3), nc(3), ixyz
+  integer :: nc(3), ixyz
 
   call timer_begin(LOG_INIT_PS_TOTAL)
 
@@ -80,54 +71,14 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   matrix_a = system%rmatrix_A
   al = system%primitive_a
   hvol = system%hvol
+  hgs = system%Hgs
 
   flag_cuboid = .true.
   if( abs(al(1,2)).ge.1d-10 .or. abs(al(1,3)).ge.1d-10.or. &
          abs(al(2,3)).ge.1d-10 )  flag_cuboid=.false.
 
-  hx = system%Hgs(1)
-  hy = system%Hgs(2)
-  hz = system%Hgs(3)
-  alx = system%Hgs(1)*dble(lg%num(1))
-  aly = system%Hgs(2)*dble(lg%num(2))
-  alz = system%Hgs(3)*dble(lg%num(3))
-  nl = lg%num(1)*lg%num(2)*lg%num(3)
-  ml = mg%num(1)*mg%num(2)*mg%num(3)
-
-!$omp parallel do private(iz,iy,ix,i) collapse(2)
-  do iz=mg%is(3),mg%ie(3)
-  do iy=mg%is(2),mg%ie(2)
-  do ix=mg%is(1),mg%ie(1)
-     i=(iz-mg%is(3))*mg%num(1)*mg%num(2)+(iy-mg%is(2))*mg%num(1)+ix-mg%is(1)+1
-     mx(i)=ix
-     my(i)=iy
-     mz(i)=iz
-  end do
-  end do
-  end do
-!$omp end parallel do
-
-!$omp parallel do private(iz,iy,ix,i) collapse(2)
-  do iz=lg%is(3),lg%ie(3)
-  do iy=lg%is(2),lg%ie(2)
-  do ix=lg%is(1),lg%ie(1)
-     i=(iz-lg%is(3))*lg%num(1)*lg%num(2)+(iy-lg%is(2))*lg%num(1)+ix-lg%is(1)+1
-     lx(i)=ix
-     ly(i)=iy
-     lz(i)=iz
-  end do
-  end do
-  end do
-!$omp end parallel do
-
   if( flag_cuboid ) then
-     rps_max   = maxval( pp%rps(:)) + 1.5d0*max(hx,hy,hz) + 1d-2
-     mg_min(1) = minval( mx(1:ml) )
-     mg_min(2) = minval( my(1:ml) )
-     mg_min(3) = minval( mz(1:ml) )
-     mg_max(1) = maxval( mx(1:ml) )
-     mg_max(2) = maxval( my(1:ml) )
-     mg_max(3) = maxval( mz(1:ml) )
+     rps_max   = maxval( pp%rps(:)) + 1.5d0*maxval(hgs) + 1d-2
   endif
 
   if(iperiodic==0)then
@@ -150,25 +101,25 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   end if
 
   if(iperiodic==0)then
-    if(mod(lx(nl)-lx(1)+1,2)==1)then
+    if(mod(lg%num(1),2)==1)then
       rshift(1)=0.d0
     else
-      rshift(1)=-0.5d0*Hx
+      rshift(1)=-0.5d0*hgs(1)
     end if
-    if(mod(ly(nl)-ly(1)+1,2)==1)then
+    if(mod(lg%num(2),2)==1)then
       rshift(2)=0.d0
     else
-      rshift(2)=-0.5d0*Hy
+      rshift(2)=-0.5d0*hgs(2)
     end if
-    if(mod(lz(nl)-lz(1)+1,2)==1)then
+    if(mod(lg%num(3),2)==1)then
       rshift(3)=0.d0
     else
-      rshift(3)=-0.5d0*Hz
+      rshift(3)=-0.5d0*hgs(3)
     end if
   else if(iperiodic==3)then
-    rshift(1)=-Hx
-    rshift(2)=-Hy
-    rshift(3)=-Hz
+    rshift(1)=-hgs(1)
+    rshift(2)=-hgs(2)
+    rshift(3)=-hgs(3)
   end if
 
   if (.not. allocated(ppg%Rion_old)) then
@@ -191,17 +142,17 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call set_lma
   call calc_uv
   if ( SPIN_ORBIT_ON ) then
-    call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,property,system%Hvol)
+!    call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,property,system%Hvol)
   end if
   if ( PLUS_U_ON ) then
-    call calc_uv_plusU( pp, ppg, property )
+!    call calc_uv_plusU( pp, ppg, property )
   end if
   call timer_end(LOG_INIT_PS_LMA_UV)
 
   call timer_begin(LOG_INIT_PS_CALC_VPSL)
   select case(iperiodic)
   case(0)
-    call calc_Vpsl_isolated(mg,lg,system,pp,Vpsl,ppg)
+    call calc_Vpsl_isolated(lg,mg,system,pp,Vpsl,ppg)
   case(3)
     call calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   end select
@@ -229,82 +180,74 @@ contains
     use communication, only: comm_get_max,comm_get_groupinfo,comm_logical_or
     implicit none
     !
-    integer :: ia,i,ik,ix,iy,iz,j,ixyz
+    integer :: ia,ik,i1,i2,i3,j1,j2,j3,j,ixyz
     integer :: mps_tmp
     real(8) :: tmpx,tmpy,tmpz
     real(8) :: x,y,z,r,u,v,w
-    real(8) :: rr(3),xyz(3)
+    real(8) :: xyz(3)
 
     mps_tmp = 0
     ppg%jxyz_changed(:) = .false.
-  !$omp parallel
-  !$omp do private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
-  !$omp    reduction(max:mps_tmp)
+!$omp parallel do default(none) &
+!$omp private(ia,ik,j,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
+!$omp shared(ia_s,ia_e,kion,nc,flag_cuboid,system,al,hgs,rps_max,mg,rshift,matrix_a,pp,ppg) &
+!$omp reduction(max:mps_tmp)
     do ia=ia_s,ia_e
       ik=kion(ia)
       j=0
-      do ix=-nc(1),nc(1)
+      do j1=-nc(1),nc(1)
         if( flag_cuboid ) then
-          xyz(1) = system%Rion(1,ia) + ix*al(1,1)
-          if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
-              xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
+          xyz(1) = system%Rion(1,ia) + j1*al(1,1)
+          if( xyz(1) .le. mg%is(1)* hgs(1) - rps_max  .or. &
+              xyz(1) .ge. mg%ie(1)* hgs(1) + rps_max ) cycle
         endif
-      do iy=-nc(2),nc(2)
+      do j2=-nc(2),nc(2)
         if( flag_cuboid ) then
-          xyz(2) = system%Rion(2,ia) + iy*al(2,2)
-          if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
-              xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
+          xyz(2) = system%Rion(2,ia) + j2*al(2,2)
+          if( xyz(2) .le. mg%is(2)* hgs(2) - rps_max  .or. &
+              xyz(2) .ge. mg%ie(2)* hgs(2) + rps_max ) cycle
         endif
-      do iz=-nc(3),nc(3)
+      do j3=-nc(3),nc(3)
         if( flag_cuboid ) then
-          xyz(3) = system%Rion(3,ia) + iz*al(3,3)
-          if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
-              xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
+          xyz(3) = system%Rion(3,ia) + j3*al(3,3)
+          if( xyz(3) .le. mg%is(3)* hgs(3) - rps_max  .or. &
+              xyz(3) .ge. mg%ie(3)* hgs(3) + rps_max ) cycle
         endif
 
-        rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
-        rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
-        rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
-        tmpx = system%Rion(1,ia)+ rr(1)
-        tmpy = system%Rion(2,ia)+ rr(2)
-        tmpz = system%Rion(3,ia)+ rr(3)
-  !      tmpx = system%Rion(1,a)+ix*alx
-  !      tmpy = system%Rion(2,a)+iy*aly
-  !      tmpz = system%Rion(3,a)+iz*alz
-        do i=1,ml
-          u = mx(i)*hx + rshift(1)
-          v = my(i)*hy + rshift(2)
-          w = mz(i)*hz + rshift(3)
-          rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
-          rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
-          rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
-          x = rr(1) - tmpx
-          y = rr(2) - tmpy
-          z = rr(3) - tmpz
-  !        x=mx(i)*Hx+rshift(1)-tmpx
-  !        y=my(i)*Hy+rshift(2)-tmpy
-  !        z=mz(i)*Hz+rshift(3)-tmpz
-          r=sqrt(x*x+y*y+z*z)
+        tmpx = system%Rion(1,ia) + j1*al(1,1) + j2*al(1,2) + j3*al(1,3)
+        tmpy = system%Rion(2,ia) + j1*al(2,1) + j2*al(2,2) + j3*al(2,3)
+        tmpz = system%Rion(3,ia) + j1*al(3,1) + j2*al(3,2) + j3*al(3,3)
+        do i3=mg%is(3),mg%ie(3)
+        do i2=mg%is(2),mg%ie(2)
+        do i1=mg%is(1),mg%ie(1)
+          u = i1*hgs(1) + rshift(1)
+          v = i2*hgs(2) + rshift(2)
+          w = i3*hgs(3) + rshift(3)
+          x = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3) - tmpx
+          y = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3) - tmpy
+          z = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3) - tmpz
+          r = sqrt(x*x+y*y+z*z)
           if (r<pp%rps(ik)+1.d-12) then
             j=j+1
             if (ppg%mps_old(ia) < j) then
               ppg%jxyz_changed(ia) = .true.
             else
               ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia)          .or. &
-                                     mx(i) /= ppg%jxyz_old(1,j,ia) .or. &
-                                     my(i) /= ppg%jxyz_old(2,j,ia) .or. &
-                                     mz(i) /= ppg%jxyz_old(3,j,ia)
+                                     i1 /= ppg%jxyz_old(1,j,ia) .or. &
+                                     i2 /= ppg%jxyz_old(2,j,ia) .or. &
+                                     i3 /= ppg%jxyz_old(3,j,ia)
             end if
           end if
-        enddo
-      enddo
-      enddo
-      enddo
+        end do
+        end do
+        end do
+      end do
+      end do
+      end do
       ppg%jxyz_changed(ia) = ppg%jxyz_changed(ia) .or. (ppg%mps_old(ia) /= j)
       mps_tmp = max(mps_tmp,j)
     end do
-  !$omp end do
-  !$omp end parallel
+!$omp end parallel do
 
     ppg%nps=mps_tmp
     if (allocated(ppg%jxyz_old)) then
@@ -322,7 +265,7 @@ contains
     use communication,only: comm_get_groupinfo,comm_summation
     implicit none
     !
-    integer :: ia,i,ik,ix,iy,iz,j
+    integer :: ia,i,ik,i1,i2,i3,j1,j2,j3,j
     integer :: ixyz
     real(8) :: tmpx,tmpy,tmpz
     real(8) :: r,x,y,z,u,v,w
@@ -332,66 +275,64 @@ contains
     ppg%rxyz = 0d0
     ppg%mps  = 0
 
-  !$omp parallel do default(none) &
-  !$omp    private(ia,ik,j,i,ix,iy,iz,tmpx,tmpy,tmpz,x,y,z,r,rr,u,v,w,xyz) &
-  !$omp    shared(ia_s,ia_e,natom,kion,nc,al,system,ml,mx,hx,my,hy,mz,hz,rshift,matrix_a,pp,ppg) &
-  !$omp    shared(mg_min,mg_max,flag_cuboid,rps_max)
+!$omp parallel do default(none) &
+!$omp    private(ia,ik,j,i,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
+!$omp    shared(ia_s,ia_e,natom,kion,nc,al,system,hgs,rshift,matrix_a,pp,ppg) &
+!$omp    shared(mg,flag_cuboid,rps_max)
     do ia=ia_s,ia_e
       if (ppg%jxyz_changed(ia)) then
         ik=kion(ia)
         j=0
-        do ix=-nc(1),nc(1)
+        do j1=-nc(1),nc(1)
           if( flag_cuboid ) then
-            xyz(1) = system%Rion(1,ia) + ix*al(1,1)
-            if( xyz(1) .le. mg_min(1)* hx - rps_max  .or. &
-                xyz(1) .ge. mg_max(1)* hx + rps_max ) cycle
+            xyz(1) = system%Rion(1,ia) + j1*al(1,1)
+            if( xyz(1) .le. mg%is(1)* hgs(1) - rps_max  .or. &
+                xyz(1) .ge. mg%ie(1)* hgs(1) + rps_max ) cycle
           endif
-        do iy=-nc(2),nc(2)
+        do j2=-nc(2),nc(2)
           if( flag_cuboid ) then
-            xyz(2) = system%Rion(2,ia) + iy*al(2,2)
-            if( xyz(2) .le. mg_min(2)* hy - rps_max  .or. &
-                xyz(2) .ge. mg_max(2)* hy + rps_max ) cycle
+            xyz(2) = system%Rion(2,ia) + j2*al(2,2)
+            if( xyz(2) .le. mg%is(2)* hgs(2) - rps_max  .or. &
+                xyz(2) .ge. mg%ie(2)* hgs(2) + rps_max ) cycle
           endif
-        do iz=-nc(3),nc(3)
+        do j3=-nc(3),nc(3)
           if( flag_cuboid ) then
-            xyz(3) = system%Rion(3,ia) + iz*al(3,3)
-            if( xyz(3) .le. mg_min(3)* hz - rps_max  .or. &
-                xyz(3) .ge. mg_max(3)* hz + rps_max ) cycle
+            xyz(3) = system%Rion(3,ia) + j3*al(3,3)
+            if( xyz(3) .le. mg%is(3)* hgs(3) - rps_max  .or. &
+                xyz(3) .ge. mg%ie(3)* hgs(3) + rps_max ) cycle
           endif
 
-          rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
-          rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
-          rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
-          tmpx = system%Rion(1,ia) + rr(1)
-          tmpy = system%Rion(2,ia) + rr(2)
-          tmpz = system%Rion(3,ia) + rr(3)
-          do i=1,ml
-            u = mx(i)*hx + rshift(1)
-            v = my(i)*hy + rshift(2)
-            w = mz(i)*hz + rshift(3)
-            rr(1) = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3)
-            rr(2) = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3)
-            rr(3) = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3)
-            x = rr(1) - tmpx
-            y = rr(2) - tmpy
-            z = rr(3) - tmpz
-            r=sqrt(x*x+y*y+z*z)
+          tmpx = system%Rion(1,ia) + j1*al(1,1) + j2*al(1,2) + j3*al(1,3)
+          tmpy = system%Rion(2,ia) + j1*al(2,1) + j2*al(2,2) + j3*al(2,3)
+          tmpz = system%Rion(3,ia) + j1*al(3,1) + j2*al(3,2) + j3*al(3,3)
+          do i3=mg%is(3),mg%ie(3)
+          do i2=mg%is(2),mg%ie(2)
+          do i1=mg%is(1),mg%ie(1)
+            u = i1*hgs(1) + rshift(1)
+            v = i2*hgs(2) + rshift(2)
+            w = i3*hgs(3) + rshift(3)
+            x = u*matrix_a(1,1) + v*matrix_a(1,2) + w*matrix_a(1,3) - tmpx
+            y = u*matrix_a(2,1) + v*matrix_a(2,2) + w*matrix_a(2,3) - tmpy
+            z = u*matrix_a(3,1) + v*matrix_a(3,2) + w*matrix_a(3,3) - tmpz
+            r = sqrt(x*x+y*y+z*z)
             if (r<pp%rps(ik)+1.d-12) then
-              j=j+1
+              j = j + 1
               if (j<=ppg%nps) then
-                ppg%jxyz(1,j,ia)=mx(i)
-                ppg%jxyz(2,j,ia)=my(i)
-                ppg%jxyz(3,j,ia)=mz(i)
-                ppg%rxyz(1,j,ia)=x
-                ppg%rxyz(2,j,ia)=y
-                ppg%rxyz(3,j,ia)=z
+                ppg%jxyz(1,j,ia) = i1
+                ppg%jxyz(2,j,ia) = i2
+                ppg%jxyz(3,j,ia) = i3
+                ppg%rxyz(1,j,ia) = x
+                ppg%rxyz(2,j,ia) = y
+                ppg%rxyz(3,j,ia) = z
               end if
             end if
+          end do
+          end do
           end do
         end do
         end do
         end do
-        ppg%mps(ia)=j
+        ppg%mps(ia) = j
       else
         i = ppg%mps_old(ia)
         ppg%mps(ia) = i
@@ -401,7 +342,7 @@ contains
         end do
       end if
     end do
-  !$omp end parallel do
+!$omp end parallel do
 
     call comm_summation(ppg%jxyz,info%icomm_ko)
     call comm_summation(ppg%rxyz,info%icomm_ko)
@@ -586,16 +527,16 @@ END SUBROUTINE dealloc_init_ps
 
 !===================================================================================================================================
 
-SUBROUTINE calc_Vpsl_isolated(mg,lg,system,pp,vpsl,ppg)
+SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
   use structures
   use salmon_global,only : natom, kion
   use parallelization, only: nproc_id_global
   implicit none
-  type(s_rgrid)     ,intent(in) :: mg,lg
+  type(s_rgrid)     ,intent(in) :: lg,mg
   type(s_dft_system),intent(in) :: system
-  type(s_pp_info),intent(in) :: pp
-  type(s_scalar)             :: vpsl
-  type(s_pp_grid)            :: ppg
+  type(s_pp_info)   ,intent(in) :: pp
+  type(s_scalar)                :: vpsl
+  type(s_pp_grid)               :: ppg
   !
   integer :: ix,iy,iz,ak
   integer :: j,a,intr
@@ -657,7 +598,7 @@ subroutine calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   type(s_poisson)                    :: poisson
   type(s_scalar)                     :: Vpsl
   type(s_pp_grid)                    :: ppg
-  character(17)                      :: property
+  character(17)          ,intent(in) :: property
   !
   integer :: ia,i,ik,ix,iy,iz,kx,ky,kz,iiy,iiz
   real(8) :: g(3),gd,s,g2sq,r1,dr,vloc_av
