@@ -43,7 +43,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   integer :: ia_s,ia_e
   logical :: flag_cuboid
   real(8) :: Rion_min(3), Rion_max(3), rps_max
-  integer :: nc(3), ixyz
+  integer :: nc(3), ixyz, n
 
   call timer_begin(LOG_INIT_PS_TOTAL)
 
@@ -64,6 +64,10 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
       ppg%jxyz_min = ppg%nps
       ppg%jxyz_changed = .false.
     end if
+    n=maxval(pp%nproj)*(pp%lmax+1)**2
+    allocate(ppg%lma_tbl(n,natom))
+    allocate(ppg%ia_tbl(n*natom))
+    allocate(ppg%rinv_uvu(n*natom))
   endif
   
   ia_s = info%ia_s
@@ -131,8 +135,6 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call timer_end(LOG_INIT_PS_CALC_NPS)
 
   call timer_begin(LOG_INIT_PS_CALC_JXYZ)
-  allocate(ppg%jxyz(3,ppg%nps,natom))
-  allocate(ppg%rxyz(3,ppg%nps,natom))
   call calc_jxyz
   call timer_end(LOG_INIT_PS_CALC_JXYZ)
 
@@ -154,7 +156,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   case(0)
     call calc_Vpsl_isolated(lg,mg,system,pp,Vpsl,ppg)
   case(3)
-    call calc_vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
+    call calc_Vpsl_periodic(lg,mg,system,info,pp,fg,poisson,Vpsl,ppg,property)
   end select
   call timer_end(LOG_INIT_PS_CALC_VPSL)
 
@@ -170,6 +172,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   if(comm_is_root(nproc_id_global) .and. property=='initial') write(*,*)'end init_ps'
 
   call timer_end(LOG_INIT_PS_TOTAL)
+  return
   
 contains
 
@@ -269,16 +272,18 @@ contains
     integer :: ixyz
     real(8) :: tmpx,tmpy,tmpz
     real(8) :: r,x,y,z,u,v,w
-    real(8) :: rr(3),xyz(3)
+    real(8) :: xyz(3)
+    
+    allocate(ppg%jxyz(3,ppg%nps,natom))
+    allocate(ppg%rxyz(3,ppg%nps,natom))
 
     ppg%jxyz = 0
     ppg%rxyz = 0d0
     ppg%mps  = 0
 
 !$omp parallel do default(none) &
-!$omp    private(ia,ik,j,i,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
-!$omp    shared(ia_s,ia_e,natom,kion,nc,al,system,hgs,rshift,matrix_a,pp,ppg) &
-!$omp    shared(mg,flag_cuboid,rps_max)
+!$omp private(ia,ik,j,i,i1,i2,i3,j1,j2,j3,tmpx,tmpy,tmpz,x,y,z,r,u,v,w,xyz) &
+!$omp shared(ia_s,ia_e,natom,kion,nc,al,system,hgs,rshift,matrix_a,pp,ppg,mg,flag_cuboid,rps_max)
     do ia=ia_s,ia_e
       if (ppg%jxyz_changed(ia)) then
         ik=kion(ia)
@@ -355,7 +360,7 @@ contains
   subroutine set_lma
     use salmon_global,only : kion
     implicit none
-    integer :: lma,lm,ia,ik,m,l,ll,l0,n
+    integer :: lma,lm,ia,ik,m,l,ll,l0
 
     lma=0
     do ia=1,natom
@@ -373,10 +378,10 @@ contains
     enddo
     ppg%nlma=lma
     
-    n=maxval(pp%nproj)*(pp%lmax+1)**2
-    allocate(ppg%lma_tbl(n,natom)); ppg%lma_tbl=0
-    allocate(ppg%ia_tbl(n*natom)); ppg%ia_tbl=0
-    allocate(ppg%rinv_uvu(n*natom)); ppg%rinv_uvu=0.0d0
+    ppg%lma_tbl=0
+    ppg%ia_tbl=0
+    ppg%rinv_uvu=0.0d0
+    
     allocate(ppg%uv(ppg%nps,ppg%nlma),ppg%duv(ppg%nps,ppg%nlma,3))
 
     lma=0
@@ -514,15 +519,15 @@ SUBROUTINE dealloc_init_ps(ppg)
   implicit none
   type(s_pp_grid) :: ppg
 
-  deallocate(ppg%jxyz, ppg%rxyz)
-  deallocate(ppg%lma_tbl, ppg%ia_tbl)
-  deallocate(ppg%rinv_uvu,ppg%uv,ppg%duv)
+  deallocate(ppg%jxyz, ppg%rxyz, ppg%uv, ppg%duv)
   if(allocated(ppg%zekr_uV)) deallocate(ppg%zekr_uV)
 
   if (allocated(ppg%irange_atom))    deallocate(ppg%irange_atom)
   if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
   if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
   if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
+  
+  return
 END SUBROUTINE dealloc_init_ps
 
 !===================================================================================================================================
@@ -542,6 +547,10 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
   integer :: j,a,intr
   real(8) :: ratio1,ratio2,r
 
+  if(.not.allocated(ppg%Vpsl_ion)) then
+    allocate(ppg%Vpsl_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:natom))
+  end if
+  
   Vpsl%f=0.d0
 
   do a=1,natom
@@ -570,7 +579,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
       Vpsl%f(ix,iy,iz)=Vpsl%f(ix,iy,iz)      &
                   +ratio1*pp%vpp_f(intr,pp%Lref(ak),ak)      &
                   +ratio2*pp%vpp_f(intr-1,pp%Lref(ak),ak)  !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-
+      ppg%Vpsl_ion(ix,iy,iz,a) = ratio1*pp%vpp_f(intr,pp%Lref(ak),ak) + ratio2*pp%vpp_f(intr-1,pp%Lref(ak),ak)
     end do
     end do
     end do
