@@ -76,7 +76,7 @@
 
 &tgrid
   !time step size and number of time grids(steps)
-  dt = 1.25d-3
+  dt = 1.00d-3
   nt = 5000
 /
 
