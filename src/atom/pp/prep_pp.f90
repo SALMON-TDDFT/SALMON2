@@ -547,6 +547,10 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
   integer :: j,a,intr
   real(8) :: ratio1,ratio2,r
 
+  if(.not.allocated(ppg%Vpsl_ion)) then
+    allocate(ppg%Vpsl_ion(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:natom))
+  end if
+  
   Vpsl%f=0.d0
 
   do a=1,natom
@@ -575,7 +579,7 @@ SUBROUTINE calc_Vpsl_isolated(lg,mg,system,pp,vpsl,ppg)
       Vpsl%f(ix,iy,iz)=Vpsl%f(ix,iy,iz)      &
                   +ratio1*pp%vpp_f(intr,pp%Lref(ak),ak)      &
                   +ratio2*pp%vpp_f(intr-1,pp%Lref(ak),ak)  !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-
+      ppg%Vpsl_ion(ix,iy,iz,a) = ratio1*pp%vpp_f(intr,pp%Lref(ak),ak) + ratio2*pp%vpp_f(intr-1,pp%Lref(ak),ak)
     end do
     end do
     end do
