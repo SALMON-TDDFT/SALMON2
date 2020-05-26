@@ -101,7 +101,6 @@ call timer_begin(LOG_RT_ITERATION)
 
 TE : do itt=Mit+1,itotNtime
     call time_evolution_step_ms()
-    call write_RT_Ac_file()
 
    if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) &
         & call checkpoint_ms()
@@ -355,35 +354,31 @@ end subroutine print_header
 
 subroutine time_evolution_step_ms
     implicit none
-    integer :: ii, iimacro, iix, iiy, iiz
-    real(8) :: curr_tmp(3, ms%nmacro)
+    integer :: iimacro, iix, iiy, iiz
+    real(8) :: curr_tmp(3, ms%nmacro), curr(3, ms%nmacro)
 
+    ! ----------------------------------------
+    ! Time Evolution of FDTD System
+    ! ----------------------------------------
+    fw%Ac_inc_new(:) = Ac_inc(:, itt+1)
+    fw%Ac_inc(:) = Ac_inc(:, itt)
+    call weyl_calc(fs, fw)
+    if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
+
+    ! ----------------------------------------
+    ! Time Evolution of TDDFT System
+    ! ----------------------------------------
     ! Override Global Variables
     nproc_group_global = ms%icomm_macropoint
     nproc_id_global = ms%id_macropoint
     nproc_size_global = ms%isize_macropoint
-
-    fw%Ac_inc(:) = Ac_inc(:, itt)
-    fw%Ac_inc_old(:) = Ac_inc(:, itt-1)
-    call weyl_calc(fs, fw)
-
-    do ii = 1, ms%nmacro
-        iix = ms%ixyz_tbl(1, ii)
-        iiy = ms%ixyz_tbl(2, ii)
-        iiz = ms%ixyz_tbl(3, ii)
-        ms%vec_Ac(1:3, ii) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
-        ms%vec_Ac_old(1:3, ii) = fw%vec_Ac_old%v(1:3, iix, iiy, iiz)
-    end do
-
-    if (ms%imacro_mygroup_e - ms%imacro_mygroup_s + 1 > 1) then
-        stop "ERROR! Unsupported paralization scheme!"
-    else
-        iimacro = ms%imacro_mygroup_s
-
-        rt%Ac_ext(:, itt-1) = ms%vec_Ac_old(1:3, iimacro)
-        rt%Ac_ext(:, itt) = ms%vec_Ac(1:3, iimacro)
-        rt%Ac_ext(:, itt+1) = ms%vec_Ac(1:3, iimacro) &
-            & + (ms%vec_Ac(1:3, iimacro) -  ms%vec_Ac_old(1:3, iimacro))
+    curr_tmp(:, :) = 0d0
+    do iimacro = ms%imacro_mygroup_s, ms%imacro_mygroup_s
+        iix = ms%ixyz_tbl(1, iimacro)
+        iiy = ms%ixyz_tbl(2, iimacro)
+        iiz = ms%ixyz_tbl(3, iimacro)
+        rt%Ac_ext(1:3, itt) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
+        rt%Ac_ext(1:3, itt + 1) = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
@@ -394,25 +389,23 @@ subroutine time_evolution_step_ms
             & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
-
-        curr_tmp(:, :) = 0d0
+    
         if (comm_is_root(ms%id_macropoint)) &
             & curr_tmp(1:3, iimacro) = rt%curr(1:3, itt)
-        call comm_summation(curr_tmp, ms%curr, 3 * ms%nmacro, ms%icomm_ms_world)
-
-    end if
-
-    do ii = 1, ms%nmacro
-        iix = ms%ixyz_tbl(1, ii)
-        iiy = ms%ixyz_tbl(2, ii)
-        iiz = ms%ixyz_tbl(3, ii)
-        fw%vec_j_em%v(1:3, iix, iiy, iiz) = - ms%curr(1:3, ii)
     end do
-
     ! Override Global Variables (Repair)
     nproc_group_global = ms%icomm_ms_world
     nproc_id_global = ms%id_ms_world
     nproc_size_global = ms%isize_ms_world
+
+    call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
+
+    do iimacro = 1, ms%nmacro
+        iix = ms%ixyz_tbl(1, iimacro)
+        iiy = ms%ixyz_tbl(2, iimacro)
+        iiz = ms%ixyz_tbl(3, iimacro)
+        fw%vec_j_em%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
+    end do
 
     return
 end subroutine time_evolution_step_ms
@@ -459,6 +452,10 @@ subroutine checkpoint_ms(odir)
     if (comm_is_root(ms%id_ms_world)) then
         fh_bin = get_filehandle()
 
+        open(fh_bin,file=trim(idir) // '../vec_Ac_new.bin',form='unformatted')
+        write(fh_bin) fw%vec_Ac_new%v
+        close(fh_bin)
+
         open(fh_bin,file=trim(idir) // '../vec_Ac.bin',form='unformatted')
         write(fh_bin) fw%vec_Ac%v
         close(fh_bin)
@@ -497,7 +494,6 @@ subroutine write_RT_Ac_file()
 
 
     if (ms%id_ms_world == 0) then
-        if (mod(itt, 100) == 0) then
             write(filename, '(a, a, a, i6.6, a)') trim(ms%base_directory_RT_Ac), trim(sysname), "_Ac_",  itt, '.data'
             open(8888, file=trim(filename))
             write(8888, '(a)') "# Multiscale TDDFT calculation"
@@ -552,7 +548,6 @@ subroutine write_RT_Ac_file()
             end do
             end do
             close(8888)
-        end if
     end if
 
 
@@ -563,23 +558,28 @@ subroutine incident()
     use em_field, only: calc_Ac_ext_t
     implicit none
     integer :: iix, iiy, iiz
-    real(8), allocatable :: Ac(:, :)
+    real(8), allocatable :: Ac(:, :), Ac_new(:, :)
     real(8), allocatable :: Ac_old(:, :)
     integer :: fh_bin
 
+    fw%vec_Ac_new%v = 0d0
     fw%vec_Ac%v = 0d0
     fw%vec_Ac_old%v = 0d0
 
     ! x-directed incident
-    allocate(Ac_inc(1:3, -1:itotNtime))
+    allocate(Ac_inc(1:3, -1:itotNtime+1))
 
     call calc_Ac_ext_t(-(fs%mg%is(1)-0.5d0)*fs%hgs(1) / cspeed_au, fw%dt, &
-        & -1, itotNtime, Ac_inc)
+        & -1, itotNtime+1, Ac_inc)
 
     if (yn_restart == 'y') then
 
         if (comm_is_root(ms%id_ms_world)) then
             fh_bin = get_filehandle()
+
+            open(fh_bin,file=trim(ms%directory_read_data) // 'vec_Ac_new.bin',form='unformatted')
+            read(fh_bin) fw%vec_Ac_new%v
+            close(fh_bin)
 
             open(fh_bin,file=trim(ms%directory_read_data) // 'vec_Ac.bin',form='unformatted')
             read(fh_bin) fw%vec_Ac%v
@@ -594,35 +594,36 @@ subroutine incident()
             close(fh_bin)
         end if
 
-        call comm_bcast(fw%vec_Ac%v, ms%icomm_ms_world)
+        call comm_bcast(fw%vec_Ac_new%v, ms%icomm_ms_world)
         call comm_bcast(fw%vec_Ac_old%v, ms%icomm_ms_world)
+        call comm_bcast(fw%vec_Ac%v, ms%icomm_ms_world)
+        call comm_bcast(fw%vec_j_em%v, ms%icomm_ms_world)
 
     else
 
+        allocate(Ac_new(1:3, fs%mg%is_overlap(1):0))
         allocate(Ac(1:3, fs%mg%is_overlap(1):0))
         allocate(Ac_old(1:3, fs%mg%is_overlap(1):0))    
-
-        call calc_Ac_ext_t(-fw%dt*1, -fs%hgs(1) / cspeed_au, &
+        call calc_Ac_ext_t(0*fw%dt, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac_new)
+        call calc_Ac_ext_t(-1*fw%dt, -fs%hgs(1) / cspeed_au, &
             & fs%mg%is_overlap(1), 0, Ac)
-        call calc_Ac_ext_t(-fw%dt*2, -fs%hgs(1) / cspeed_au, &
+        call calc_Ac_ext_t(-2*fw%dt, -fs%hgs(1) / cspeed_au, &
             & fs%mg%is_overlap(1), 0, Ac_old)
-
         do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
             do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
                 fw%vec_Ac%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3,  fs%mg%is_overlap(1):0)
+                fw%vec_Ac_new%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_new(1:3,  fs%mg%is_overlap(1):0)
                 fw%vec_Ac_old%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3,  fs%mg%is_overlap(1):0)
             end do
         end do
+        deallocate(Ac_new, Ac, Ac_old)
 
-        ! Evolve the first (0-th timestep)
-        fw%Ac_inc_old(1:3) = Ac_inc(1:3,-1)
-        fw%Ac_inc(1:3) = Ac_inc(1:3,0)
+        fw%Ac_inc(:) = Ac_inc(:, 0)
+        fw%Ac_inc_new(:) = Ac_inc(:, 1)
         call weyl_calc(fs, fw)
 
-        if (comm_is_root(ms%id_ms_world)) &
-            call write_RT_Ac_file()
-
-        deallocate(Ac, Ac_old)
+        call write_RT_Ac_file()
     end if
 
     return
