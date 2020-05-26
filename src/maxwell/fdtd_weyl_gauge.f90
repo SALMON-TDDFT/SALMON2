@@ -25,12 +25,14 @@ module fdtd_weyl
         real(8) :: dt
         type(s_scalar) :: phi, rho_em
         type(s_vector) :: vec_e, vec_h, vec_j_em
-        type(s_vector) :: vec_Ac, vec_Ac_old
+        type(s_vector) :: vec_Ac_new    ! itt+1 step
+        type(s_vector) :: vec_Ac        ! itt step
+        type(s_vector) :: vec_Ac_old    ! itt-1 step
         type(s_scalar) :: edensity_emfield
         type(s_scalar) :: edensity_absorb
         character(16) :: fdtddim
+        real(8) :: Ac_inc_new(3)
         real(8) :: Ac_inc(3)
-        real(8) :: Ac_inc_old(3)
     end type ls_fdtd_weyl
 
 
@@ -43,6 +45,7 @@ contains
         type(ls_fdtd_weyl), intent(inout) :: fw
 
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac)
+        call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_new)
         call allocate_vector_with_ovlp(fs%mg, fw%vec_Ac_old)
         call allocate_vector(fs%mg, fw%vec_e)
         call allocate_vector(fs%mg, fw%vec_h)
@@ -50,6 +53,7 @@ contains
         call allocate_scalar(fs%mg, fw%edensity_emfield)
         call allocate_scalar(fs%mg, fw%edensity_absorb)
 
+        fw%vec_Ac_new%v = 0d0
         fw%vec_Ac%v = 0d0
         fw%vec_Ac_old%v = 0d0
         fw%vec_e%v = 0d0
@@ -57,43 +61,8 @@ contains
         fw%vec_j_em%v = 0d0
         fw%edensity_emfield%f = 0d0
         fw%edensity_absorb%f = 0d0
-        fw%Ac_inc_old(:) = 0d0
-
-        ! write(9999, *) "(fw%vec_Ac%v, 1)", lbound(fw%vec_Ac%v, 1), ubound(fw%vec_Ac%v, 1)
-        ! write(9999, *) "(fw%vec_Ac%v, 2)", lbound(fw%vec_Ac%v, 2), ubound(fw%vec_Ac%v, 2)
-        ! write(9999, *) "(fw%vec_Ac%v, 3)", lbound(fw%vec_Ac%v, 3), ubound(fw%vec_Ac%v, 3)
-        ! write(9999, *) "(fw%vec_Ac%v, 4)", lbound(fw%vec_Ac%v, 4), ubound(fw%vec_Ac%v, 4)
-
-        ! write(9999, *) "(fw%vec_Ac_old%v, 1)", lbound(fw%vec_Ac_old%v, 1), ubound(fw%vec_Ac_old%v, 1)
-        ! write(9999, *) "(fw%vec_Ac_old%v, 2)", lbound(fw%vec_Ac_old%v, 2), ubound(fw%vec_Ac_old%v, 2)
-        ! write(9999, *) "(fw%vec_Ac_old%v, 3)", lbound(fw%vec_Ac_old%v, 3), ubound(fw%vec_Ac_old%v, 3)
-        ! write(9999, *) "(fw%vec_Ac_old%v, 4)", lbound(fw%vec_Ac_old%v, 4), ubound(fw%vec_Ac_old%v, 4)
-        
-        ! write(9999, *) "(fw%vec_e%v, 1)", lbound(fw%vec_e%v, 1), ubound(fw%vec_e%v, 1)
-        ! write(9999, *) "(fw%vec_e%v, 2)", lbound(fw%vec_e%v, 2), ubound(fw%vec_e%v, 2)
-        ! write(9999, *) "(fw%vec_e%v, 3)", lbound(fw%vec_e%v, 3), ubound(fw%vec_e%v, 3)
-        ! write(9999, *) "(fw%vec_e%v, 4)", lbound(fw%vec_e%v, 4), ubound(fw%vec_e%v, 4)
-
-        ! write(9999, *) "(fw%vec_h%v, 1)", lbound(fw%vec_h%v, 1), ubound(fw%vec_h%v, 1)
-        ! write(9999, *) "(fw%vec_h%v, 2)", lbound(fw%vec_h%v, 2), ubound(fw%vec_h%v, 2)
-        ! write(9999, *) "(fw%vec_h%v, 3)", lbound(fw%vec_h%v, 3), ubound(fw%vec_h%v, 3)
-        ! write(9999, *) "(fw%vec_h%v, 4)", lbound(fw%vec_h%v, 4), ubound(fw%vec_h%v, 4)
-        
-        ! write(9999, *) "(fw%vec_j_em%v, 1)", lbound(fw%vec_j_em%v, 1), ubound(fw%vec_j_em%v, 1)
-        ! write(9999, *) "(fw%vec_j_em%v, 2)", lbound(fw%vec_j_em%v, 2), ubound(fw%vec_j_em%v, 2)
-        ! write(9999, *) "(fw%vec_j_em%v, 3)", lbound(fw%vec_j_em%v, 3), ubound(fw%vec_j_em%v, 3)
-        ! write(9999, *) "(fw%vec_j_em%v, 4)", lbound(fw%vec_j_em%v, 4), ubound(fw%vec_j_em%v, 4)
-
-        ! write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
-        ! write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
-        ! write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
-
-        ! write(9999, *) "(fw%edensity_emfield%f, 1)", lbound(fw%edensity_emfield%f, 1), ubound(fw%edensity_emfield%f, 1)
-        ! write(9999, *) "(fw%edensity_emfield%f, 2)", lbound(fw%edensity_emfield%f, 2), ubound(fw%edensity_emfield%f, 2)
-        ! write(9999, *) "(fw%edensity_emfield%f, 3)", lbound(fw%edensity_emfield%f, 3), ubound(fw%edensity_emfield%f, 3)
-
-        ! flush(9999)
-
+        fw%Ac_inc(:) = 0d0
+        fw%Ac_inc_new(:) = 0d0
         contains
 
         subroutine weyl_allocate
@@ -154,6 +123,9 @@ contains
             & is(1)-nd:ie(1)+nd, &
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
+
+        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
+        call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
         
         i2 = fs%mg%is(2)
         i3 = fs%mg%is(3)
@@ -183,7 +155,7 @@ contains
             Ac_tmp(:, is(1)-1, i2, i3) = fw%vec_Ac%v(:, is(1), i2, i3) &
                 & + (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * Ac_tmp(:, is(1), i2, i3) &
                 & - (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, is(1)-1, i2, i3) &
-                & + (4d0*fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * (fw%Ac_inc(:)-fw%Ac_inc_old(:))
+                & + (4d0*fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * (fw%Ac_inc_new(:)-fw%Ac_inc(:))
         end select
 
         ! Impose Boundary Condition (Right end)
@@ -199,11 +171,7 @@ contains
                 & + (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * Ac_tmp(:, ie(1), i2, i3) &
                 & - (cspeed_au*fw%dt-fs%hgs(1))/(cspeed_au*fw%dt+fs%hgs(1)) * fw%vec_Ac%v(:, ie(1)+1, i2, i3)    
         end select
-    
-        ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
-        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
-        call copy_data(Ac_tmp, fw%vec_Ac%v)
-        fw%Ac_inc_old(:) = fw%Ac_inc(:)
+        call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
         end subroutine dt_evolve_Ac_1d
     
@@ -218,6 +186,9 @@ contains
             & is(1)-nd:ie(1)+nd, &
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
+
+        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
+        call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)
         
         r_inv_h(1:2) = 1d0 / fs%hgs(1:2)
         i3 = fs%mg%is(3)
@@ -288,10 +259,7 @@ contains
             Ac_tmp(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, i3) = &
             & fw%vec_Ac%v(1:3, is(1):ie(1), ie(2)+1:ie(2)+nd, i3)
         end select
-        
-        ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
-        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
-        call copy_data(Ac_tmp, fw%vec_Ac%v)
+        call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
         end subroutine dt_evolve_Ac_2d
     
@@ -306,6 +274,9 @@ contains
             & is(1)-nd:ie(1)+nd, &
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
+
+        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
+        call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)
     
         r_inv_h(:) = 1.00 / fs%hgs(:)
     
@@ -432,10 +403,7 @@ contains
             & fw%vec_Ac%v(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd), &
             & Ac_tmp(1:3, is(1):ie(1), is(2):ie(2), ie(3)+1:ie(3)+nd))
         end select
-    
-        ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
-        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
-        call copy_data(Ac_tmp, fw%vec_Ac%v)
+        call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
         end subroutine dt_evolve_Ac_3d
     
@@ -452,6 +420,9 @@ contains
             & is(2)-nd:ie(2)+nd, &
             & is(3)-nd:ie(3)+nd)
     
+        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
+        call copy_data(fw%vec_Ac_new%v, fw%vec_Ac%v)            
+
         r_inv_h(:) = 1d0 / fs%hgs(:)
         i3 = fs%mg%is(3)
         !$omp parallel do collapse(2) default(shared) private(i1, i2, rot2_Ac,Y)
@@ -484,9 +455,7 @@ contains
             end do
         end do
         !$omp end parallel do
-        ! Temporal data transfer: Ac_tmp -> Ac -> Ac_old
-        call copy_data(fw%vec_Ac%v, fw%vec_Ac_old%v)
-        call copy_data(Ac_tmp, fw%vec_Ac%v)
+        call copy_data(Ac_tmp, fw%vec_Ac_new%v)
         return
         end subroutine dt_evolve_Ac_3d_cylindal
     
@@ -501,7 +470,7 @@ contains
             do i2 = fs%mg%is(2), fs%mg%ie(2)
             do i1 = fs%mg%is(1), fs%mg%ie(1)
                 ! Calculate: E = - diff(Ac, t)
-                fw%vec_e%v(:, i1, i2, i3) = - (fw%vec_Ac%v(:, i1, i2, i3) - fw%vec_Ac_old%v(:, i1, i2, i3)) * r_inv_dt
+                fw%vec_e%v(:, i1, i2, i3) = - (fw%vec_Ac_new%v(:, i1, i2, i3) - fw%vec_Ac_old%v(:, i1, i2, i3)) * 0.5d0 * r_inv_dt
             end do
             end do
         end do
