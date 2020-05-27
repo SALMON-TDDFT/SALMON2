@@ -1419,7 +1419,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
   type(s_vector)           :: Ac
   type(s_scalar)           :: div_Ac
   !
-  integer :: iu1_r
+  integer :: iu1_r, ierr
   integer :: ix,iy,iz
   real(8),allocatable :: matbox1(:,:,:,:,:),matbox2(:,:,:,:,:),matbox3(:,:,:,:),matbox4(:,:,:,:)
   complex(8),allocatable :: zbox(:,:,:,:,:)
@@ -1473,7 +1473,8 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     if(yn_gbp=='y') allocate(zbox(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3,1:3))
 
     if(comm_is_root(nproc_id_global))then
-      open(iu1_r,file=dir_file_in,form='unformatted')
+      open(iu1_r,file=dir_file_in,form='unformatted',status='old',iostat=ierr)
+      if(ierr==0) then
       read(iu1_r) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       read(iu1_r) matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
@@ -1487,7 +1488,11 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
         read(iu1_r) singlescale%Ac_zt_boundary_top_old
       end if
       close(iu1_r)
+      endif
     end if
+
+    call comm_bcast(ierr,comm)
+    if(ierr.ne.0) goto 20
 
     call comm_bcast(matbox1,comm)
     call comm_bcast(matbox2,comm)
@@ -1672,7 +1677,7 @@ end subroutine write_Velocity
 !(currently not used: see subroutine "read_atomic_coordinates")
 subroutine read_Rion(idir,system)
   use structures, only: s_dft_system
-  use salmon_global, only: natom, atom_name, kion, Rion, unit_length
+  use salmon_global, only: natom, atom_name, kion, unit_length !, Rion
 !  use inputoutput, only: au_length_aa  !?? why error??
   use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
