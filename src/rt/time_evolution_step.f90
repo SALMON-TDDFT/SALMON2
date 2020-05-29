@@ -135,7 +135,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
-  if(propagator == 'etrs' .or. propagator 'aetrs')then
+  if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
 ! predictor-corrector for metaGGA
   else if(xc == 'tbmbj') then
@@ -467,6 +467,8 @@ contains
   end select
 
   spsi_in%zwf = spsi_out%zwf
+
+! self-consistent loop will be implemented for ETRS propagator
 
   end subroutine time_evolution_half_step_etrs
 
