@@ -190,6 +190,7 @@ contains
 !$omp   private(jlma,l,n,m1,m2,ddm_mms_nla,gtpsi) &
 !$omp   shared(im,ik_s,ik_e,io_s,io_e,nspin,tpsi,mg,stencil,system,ppg,uVpsibox2,yn_periodic) &
 !$omp   shared(PLUS_U_ON,Nlma_ao,phipsibox2,iorb,zF_tmp,U_eff,dm_mms_nla) &
+!$omp   shared(dden) &
 !$omp   reduction(+:F_tmp) &
 !$omp   if(force_omp_mode)
 
