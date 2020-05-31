@@ -884,7 +884,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
   implicit none
   character(*)            ,intent(in) :: odir
   type(s_rgrid)           ,intent(in) :: lg,mg
-  type(s_parallel_info),intent(in) :: info
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_singlescale)     ,intent(in) :: singlescale
   type(s_vector)          ,intent(in) :: Ac
   type(s_scalar)          ,intent(in) :: div_Ac
@@ -915,6 +915,8 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     write(iu1_w) singlescale%vec_Ac_boundary_top       (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
     write(iu1_w) div_Ac%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     write(iu1_w) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) singlescale%Energy_joule
+    write(iu1_w) singlescale%Energy_poynting
     if(yn_gbp=='y') then
       write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       write(iu1_w) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
@@ -1029,6 +1031,8 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
       write(iu1_w) v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       write(iu1_w) b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
       write(iu1_w) d1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      write(iu1_w) singlescale%Energy_joule
+      write(iu1_w) singlescale%Energy_poynting
       if(yn_gbp=='y') then
         write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1)
@@ -1453,6 +1457,8 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     read(iu1_r) singlescale%vec_Ac_boundary_top       (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
     read(iu1_r) div_Ac%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     read(iu1_r) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) singlescale%Energy_joule
+    read(iu1_r) singlescale%Energy_poynting
     if(yn_gbp=='y') then
       read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       read(iu1_r) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
@@ -1479,6 +1485,8 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
       read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       read(iu1_r) matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
       read(iu1_r) matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
+      read(iu1_r) singlescale%Energy_joule
+      read(iu1_r) singlescale%Energy_poynting
       if(yn_gbp=='y') then
         read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         read(iu1_r) zbox(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3)
@@ -1498,6 +1506,8 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     call comm_bcast(matbox2,comm)
     call comm_bcast(matbox3,comm)
     call comm_bcast(matbox4,comm)
+    call comm_bcast(singlescale%Energy_joule,comm)
+    call comm_bcast(singlescale%Energy_poynting,comm)
     if(yn_gbp=='y') then
       call comm_bcast(singlescale%Ac_zt_m,comm)
       call comm_bcast(zbox,comm)
