@@ -134,9 +134,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
-  
+
+  if(propagator == 'aetrs')then
+    call time_evolution_half_step_etrs
 ! predictor-corrector for metaGGA
-  if(xc == 'tbmbj') then
+  else if(xc == 'tbmbj') then
     call predictor_corrector
   end if
 
@@ -417,6 +419,58 @@ contains
     
     return
   end subroutine predictor_corrector
+
+  subroutine time_evolution_half_step_etrs
+
+    if(info%numo.ge.1)then
+      ! spsi_in --> spsi_out (tpsi = working array)
+      call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
+    end if
+
+!$OMP parallel do private(is,iz,iy,ix) collapse(3)
+    do is=1,nspin
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      rt%vloc_t(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz)
+      rt%vloc_new(is)%f(ix,iy,iz) = 3d0*V_local(is)%f(ix,iy,iz) - 3d0*rt%vloc_old(is,1)%f(ix,iy,iz) + rt%vloc_old(is,2)%f(ix,iy,iz)
+      rt%vloc_old(is,2)%f(ix,iy,iz) = rt%vloc_old(is,1)%f(ix,iy,iz)
+      rt%vloc_old(is,1)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz)
+      V_local(is)%f(ix,iy,iz) = rt%vloc_new(is)%f(ix,iy,iz)
+    end do
+    end do
+    end do
+    end do
+
+
+  select case(iperiodic)
+  case(0)
+    if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt+1,system,rt,Vbox)
+    if(ihpsieff==1) then
+!$OMP parallel do collapse(3) private(is,iz,iy,ix)
+      do is=1,nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + Vbox%f(ix,iy,iz)
+      end do
+      end do
+      end do
+      end do
+    end if
+  case(3)
+    if(.not.singlescale%flag_use) then
+      system%vec_Ac(1:3) = rt%Ac_ext(1:3,itt+1) + 2d0*rt%Ac_ind(1:3,itt) - rt%Ac_ind(1:3,itt-1)
+      system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt+1)
+      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+    end if
+  end select
+
+  spsi_in%zwf = spsi_out%zwf
+
+! self-consistent loop will be implemented for ETRS propagator
+
+  end subroutine time_evolution_half_step_etrs
 
 END SUBROUTINE time_evolution_step
 

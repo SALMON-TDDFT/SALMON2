@@ -180,6 +180,17 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi)
   call allocate_dmatrix(system%nspin,mg,info,dmat)
+
+  if(propagator=='aetrs')then
+    allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
+    do jspin=1,system%nspin
+      call allocate_scalar(mg,rt%vloc_t(jspin))
+      call allocate_scalar(mg,rt%vloc_new(jspin))
+      call allocate_scalar(mg,rt%vloc_old(jspin,1))
+      call allocate_scalar(mg,rt%vloc_old(jspin,2))
+    end do
+  end if
+
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
@@ -216,6 +227,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   else if(yn_restart=='n')then
     Vh_stock1%f=Vh%f
     Vh_stock2%f=Vh%f
+  end if
+
+  if(propagator=='aetrs')then
+    do jspin=1,system%nspin
+      rt%vloc_old(jspin,1)%f = V_local(jspin)%f
+      rt%vloc_old(jspin,2)%f = V_local(jspin)%f
+    end do
   end if
   
   allocate(energy%esp(system%no,system%nk,system%nspin))
@@ -451,12 +469,21 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 
   allocate(rt%zc(N_hamil))
 
-  do n=1,N_hamil
-    rt%zc(n)=(-zi*dt)**n
-    do m=1,n
-      rt%zc(n)=rt%zc(n)/m
+  if(propagator=='aetrs')then
+    do n=1,N_hamil
+      rt%zc(n)=(-zi*dt/2.d0)**n
+      do m=1,n
+        rt%zc(n)=rt%zc(n)/m
+      end do
     end do
-  end do
+  else
+    do n=1,N_hamil
+      rt%zc(n)=(-zi*dt)**n
+      do m=1,n
+        rt%zc(n)=rt%zc(n)/m
+      end do
+    end do
+  end if
 
 
   deallocate (R1)
