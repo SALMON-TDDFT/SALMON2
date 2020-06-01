@@ -2316,7 +2316,7 @@ contains
     use parallelization,   only: nproc_group_global
     use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
     use init_communicator, only: init_communicator_dft
-    use sendrecv_grid,     only: create_sendrecv_neig_scalar,init_sendrecv_grid
+    use sendrecv_grid,     only: create_sendrecv_neig,init_sendrecv_grid
     use structures,        only: s_fdtd_system, s_parallel_info
     use initialization_sub
     implicit none
@@ -2324,7 +2324,7 @@ contains
     type(ls_fdtd_eh),   intent(inout) :: fe
     type(s_parallel_info)             :: info
     integer                           :: neig_ng_eh(1:2,1:3)
-    integer                           :: ii,iperi
+    integer                           :: ii
     
     !set mpi condition
     info%npk       = nproc_k
@@ -2364,12 +2364,7 @@ contains
     fs%mg%Nd=fe%Nd
     
     !set sendrecv environment
-    if    (yn_periodic=='n') then
-      iperi=0
-    elseif(yn_periodic=='y') then
-      iperi=3
-    end if
-    call create_sendrecv_neig_scalar(neig_ng_eh,info,iperi) ! neighboring node array
+    call create_sendrecv_neig(neig_ng_eh,info) ! neighboring node array
     call init_sendrecv_grid(fs%srg_ng,fs%mg,1,info%icomm_r,neig_ng_eh)
     
     return
