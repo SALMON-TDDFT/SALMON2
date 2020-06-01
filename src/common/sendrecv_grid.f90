@@ -471,16 +471,16 @@ module sendrecv_grid
 
   end subroutine update_overlap_complex8
 
-  subroutine create_sendrecv_neig_orbital(neig_mg, info, iperiodic)
-    use network_address, only: get_neighbour => get_orbital_neighbour_rank
+  subroutine create_sendrecv_neig(neig, info)
+    use network_address, only: get_neighbour_rank
     use structures, only: s_parallel_info
     use communication, only: comm_proc_null
+    use salmon_global, only: yn_periodic
     implicit none
-    integer, intent(out) :: neig_mg(1:2, 1:3)
+    integer, intent(out) :: neig(1:2, 1:3)
     type(s_parallel_info), intent(in) :: info
-    integer, intent(in) :: iperiodic
     !
-    integer :: idir,iside,idisp
+    integer :: idir,iside,idisp,iret
 
     do idir=1,3
     do iside=1,2
@@ -489,41 +489,16 @@ module sendrecv_grid
         case(2); idisp = -1
       end select
 
-      neig_mg(iside,idir) = get_neighbour(info, idir, idisp)
+      iret = get_neighbour_rank(info, idir, idisp)
 
-      if (neig_mg(iside,idir) < 0 .and. iperiodic == 0) then
-        neig_mg(iside,idir) = comm_proc_null
+      if (iret < 0 .and. yn_periodic == 'n') then
+        neig(iside,idir) = comm_proc_null
+      else
+        neig(iside,idir) = iret
       end if
     end do
     end do
-  end subroutine create_sendrecv_neig_orbital
-
-  subroutine create_sendrecv_neig_scalar(neig_ng, info, iperiodic)
-    use network_address, only: get_neighbour => get_field_neighbour_rank
-    use structures, only: s_parallel_info
-    use communication, only: comm_proc_null
-    implicit none
-    integer, intent(out) :: neig_ng(1:2, 1:3)
-    type(s_parallel_info), intent(in) :: info
-    integer, intent(in) :: iperiodic
-    !
-    integer :: idir,iside,idisp
-
-    do idir=1,3
-    do iside=1,2
-      select case(iside)
-        case(1); idisp = 1
-        case(2); idisp = -1
-      end select
-
-      neig_ng(iside,idir) = get_neighbour(info, idir, idisp)
-
-      if (neig_ng(iside,idir) < 0 .and. iperiodic == 0) then
-        neig_ng(iside,idir) = comm_proc_null
-      end if
-    end do
-    end do
-  end subroutine create_sendrecv_neig_scalar
+  end subroutine create_sendrecv_neig
 
 end module sendrecv_grid
 

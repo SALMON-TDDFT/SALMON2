@@ -44,7 +44,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   type(s_sendrecv_grid)    :: srg,srg_scalar
   type(s_ofile)            :: ofile
   !
-  integer,dimension(2,3) :: neig,neig_ng
+  integer,dimension(2,3) :: neig
 
 ! electron system
   call init_dft_system(lg,system,stencil)
@@ -60,12 +60,11 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   call check_ffte_condition(info,lg)
   call init_grid_parallel(info,lg,mg) ! lg --> mg
   call init_parallel_dft(system,info)
+  call create_sendrecv_neig(neig, info) ! neighboring node array
   ! sendrecv_grid object for wavefunction updates
-  call create_sendrecv_neig_orbital(neig, info, iperiodic) ! neighboring node array
   call init_sendrecv_grid(srg, mg, info%numo*info%numk*system%nspin, info%icomm_rko, neig)
   ! sendrecv_grid object for scalar field updates
-  call create_sendrecv_neig_scalar(neig_ng, info, iperiodic) ! neighboring node array
-  call init_sendrecv_grid(srg_scalar, mg, 1, info%icomm_rko, neig_ng)
+  call init_sendrecv_grid(srg_scalar, mg, 1, info%icomm_rko, neig)
 
 ! symmetry
 
