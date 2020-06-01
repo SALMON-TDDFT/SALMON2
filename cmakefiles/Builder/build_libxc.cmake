@@ -13,7 +13,8 @@ else ()
   message(STATUS "Build Libxc version ${LIBXC_VERSION}")
 
   ExternalProject_Add(libxc-project
-    URL              "http://www.tddft.org/programs/libxc/down.php?file=${LIBXC_VERSION}/libxc-${LIBXC_VERSION}.tar.gz"
+    GIT_REPOSITORY   "https://gitlab.com/libxc/libxc.git"
+    GIT_TAG          "${LIBXC_VERSION}"
     PREFIX           "${CMAKE_BINARY_DIR}/libxc"
     CMAKE_ARGS       -D BUILD_SHARED_LIBS=off -D ENABLE_FORTRAN=on -D ENABLE_XHOST=off
                      -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
