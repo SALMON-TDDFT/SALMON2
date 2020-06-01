@@ -59,8 +59,6 @@ integer :: Mit, itt,itotNtime
 
 call timer_begin(LOG_TOTAL)
 
-call print_header()
-
 call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                         singlescale,  &
                         stencil, fg, poisson,  &
@@ -76,6 +74,8 @@ call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 #ifdef __FUJITSU
 call fapp_start('time_evol',1,0) ! performance profiling
 #endif
+
+call print_header()
 
 call comm_sync_all
 call timer_enable_sub
