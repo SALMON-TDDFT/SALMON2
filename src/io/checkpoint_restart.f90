@@ -520,6 +520,10 @@ end subroutine read_bin
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
   use communication, only: comm_is_root, comm_summation, comm_bcast
+#ifdef USE_MPI
+#else
+  use salmon_global, only: method_wf_distributor
+#endif
   implicit none
   character(*),            intent(in) :: odir
   type(s_rgrid),           intent(in) :: lg, mg
@@ -566,6 +570,28 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
     call distributed_rw_wavefunction(odir,lg,mg,system,info,spsi,system%nk,system%no,system%if_real_orbital,write_mode)
 #else
     ! single process execution
+    select case(method_wf_distributor)
+    ! create single shared file
+    case('single')
+      call write_all
+    ! sliced shared file
+    case('slice')
+      call write_sliced
+    case default
+      stop 'write_wavefunction: fatal error'
+    end select
+#endif
+  end if
+
+  !close file iu2_w
+  inquire(iu2_w, opened=is_written)
+  if (is_written) close(iu2_w)
+
+#ifdef USE_MPI
+#else
+contains
+  subroutine write_all
+    implicit none
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
 
@@ -588,12 +614,77 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
     end do
     end do
     end do
-#endif
-  end if
+  end subroutine
 
-  !close file iu2_w
-  inquire(iu2_w, opened=is_written)
-  if (is_written) close(iu2_w)
+  subroutine write_sliced
+    use salmon_global, only: nblock_wf_distribute
+    use filesystem
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io,nb,io_e
+    logical :: check
+    integer :: mo
+
+    mo = info%io_e - info%io_s + 1
+    nblock_orbital = min(mo,nblock_wf_distribute)
+
+    ! create all directory
+    if (mod(info%io_e,nblock_orbital) > 0) then
+      io_e = (info%io_e / nblock_orbital + 1) * nblock_orbital
+    else
+      io_e = info%io_e
+    end if
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,io_e,nblock_orbital
+      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+      if (nb >= (info%io_s - nblock_orbital + 1)) then
+        write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',nb
+        if (comm_is_root(info%id_r)) then
+          call create_directory(dir_file_out)
+        end if
+      end if
+    end do
+    end do
+
+    ! check own path
+    do while(.true.)
+      check = .true.
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,io_e,nblock_orbital
+        nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+        write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',nb
+        check = check .and. directory_exists(dir_file_out)
+      end do
+      end do
+      if (check) exit
+    end do
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+      write (dir_file_out,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
+
+      do is=1,system%nspin
+        if(allocated(spsi%rwf))then
+          write (iu2_w) spsi%rwf(lg%is(1):lg%ie(1),   &
+                                 lg%is(2):lg%ie(2),   &
+                                 lg%is(3):lg%ie(3),   &
+                                 is,io,ik,1)
+        else if(allocated(spsi%zwf))then
+          write (iu2_w) spsi%zwf(lg%is(1):lg%ie(1),   &
+                                 lg%is(2):lg%ie(2),   &
+                                 lg%is(3):lg%ie(3),   &
+                                 is,io,ik,1)
+        end if
+      end do
+
+      close(iu2_w)
+    end do
+    end do
+  end subroutine
+#endif
 end subroutine write_wavefunction
 
 !===================================================================================================================================
@@ -1058,6 +1149,10 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
   use communication, only: comm_is_root, comm_summation, comm_bcast
+#ifdef USE_MPI
+#else
+  use salmon_global, only: method_wf_distributor
+#endif
   implicit none
   character(*),            intent(in) :: idir
   type(s_rgrid),           intent(in) :: lg, mg
@@ -1070,13 +1165,6 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
   integer :: iu2_r
   character(256) :: dir_file_in
   logical :: is_read
-
-#ifdef USE_MPI
-#else
-  real(8),allocatable :: ddummy(:,:,:)
-  complex(8),allocatable :: zdummy(:,:,:)
-  integer :: im,ik,io,is
-#endif
 
   iu2_r = 86
 
@@ -1107,6 +1195,33 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
     call distributed_rw_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,read_mode)
 #else
     ! single process execution
+    select case(method_wf_distributor)
+    ! create single shared file
+    case('single')
+      call read_all
+    ! sliced shared file
+    case ('slice')
+      call read_sliced
+    case default
+      stop 'read_wavefunction: fatal error'
+    end select
+
+#endif
+  end if
+
+  !close file iu2_r
+  inquire(iu2_r, opened=is_read)
+  if (is_read) close(iu2_r)
+
+#ifdef USE_MPI
+#else
+contains
+  subroutine read_all
+    implicit none
+    real(8),allocatable :: ddummy(:,:,:)
+    complex(8),allocatable :: zdummy(:,:,:)
+    integer :: im,ik,io,is
+
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
 
@@ -1145,12 +1260,55 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
 
     if (allocated(ddummy)) deallocate(ddummy)
     if (allocated(zdummy)) deallocate(zdummy)
-#endif
-  end if
+  end subroutine
 
-  !close file iu2_r
-  inquire(iu2_r, opened=is_read)
-  if (is_read) close(iu2_r)
+  subroutine read_sliced
+    use salmon_global, only: nblock_wf_distribute
+    use filesystem
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io,nb,io_e,is
+    logical :: check
+    real(8),allocatable :: ddummy(:,:,:)
+    complex(8),allocatable :: zdummy(:,:,:)
+
+    nblock_orbital = min(mo,nblock_wf_distribute)
+
+    if (if_real_orbital) then
+      allocate(ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    else
+      allocate(zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    end if
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+      write (dir_file_in,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
+
+      do is=1,system%nspin
+        if (if_real_orbital) then
+          read (iu2_r) ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+        else
+          read (iu2_r) zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+        endif
+
+        if (if_real_orbital) then
+          if (allocated(spsi%rwf)) then
+            spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = ddummy(:,:,:)
+          else
+            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = cmplx(ddummy(:,:,:))
+          end if
+        else
+          spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = zdummy(:,:,:)
+        end if
+      end do
+
+      close(iu2_r)
+    end do
+    end do
+  end subroutine
+#endif
 end subroutine read_wavefunction
 
 !===================================================================================================================================
