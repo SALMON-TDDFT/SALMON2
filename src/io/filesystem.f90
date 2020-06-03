@@ -87,14 +87,19 @@ contains
   end function
 
   ! dirpath: directory path (relative or absolute)
-  subroutine create_directory(dirpath)
+  subroutine create_directory(dirpath, iret)
     implicit none
     character(*), intent(in) :: dirpath
+    integer, intent(out), optional :: iret
     integer :: retcode
     if (.not. directory_exists(dirpath)) then
       call posix_mkdir(adjustl(trim(dirpath))//c_null_char, retcode)
-      if (retcode /= 0) then
-        stop 'fail: create_directory'
+      if (present(iret)) then
+        iret = retcode
+      else
+        if (retcode /= 0) then
+          stop 'fail: create_directory'
+        end if
       end if
     end if
   end subroutine
