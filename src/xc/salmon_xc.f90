@@ -337,15 +337,6 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef USE_LIBXC
-      ! Libxc prefix is used...
-      if (lower(name(1:6)) == 'libxc:') then
-        xc%xctype(1) = salmon_xctype_libxc
-        call init_libxc(name(7:), 1)
-        return
-      end if
-#endif
-
       select case(lower(name))
       case('none')
 
@@ -435,9 +426,13 @@ contains
 
       case default
 
+#ifdef USE_LIBXC
+        xc%xctype(1) = salmon_xctype_libxc
+        call init_libxc(name, 1)
+        return
+#endif
         print '(A, A)', "Error! Undefined exchange functional:", trim(name)
         stop
-
       end select
       return
     end subroutine
@@ -448,13 +443,7 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef USE_LIBXC
-      if (lower(name(1:6)) == 'libxc:') then
-        xc%xctype(2) = salmon_xctype_libxc
-        call init_libxc(name(7:), 2)
-        return
-      end if
-#endif
+
 
       select case(name)
       case('none')
@@ -469,6 +458,12 @@ contains
 
       case default
 
+#ifdef USE_LIBXC
+        xc%xctype(2) = salmon_xctype_libxc
+        call init_libxc(name, 2)
+        return
+#endif
+
         print '(A, A)', "Error! Undefined exchange functional:", trim(name)
         stop
 
@@ -482,13 +477,6 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef USE_LIBXC
-      if (lower(name(1:6)) == 'libxc:') then
-        xc%xctype(3) = salmon_xctype_libxc
-        call init_libxc(name(7:), 3)
-        return
-      end if
-#endif
 
       select case(name)
       case('none')
@@ -502,6 +490,12 @@ contains
       !   return
 
       case default
+
+#ifdef USE_LIBXC
+        xc%xctype(3) = salmon_xctype_libxc
+        call init_libxc(name, 3)
+        return
+#endif
 
         print '(A, A)', "Undefined correlation functional:", trim(name)
         stop

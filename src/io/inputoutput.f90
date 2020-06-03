@@ -971,9 +971,9 @@ contains
 !! == bcast for &functional
 
 #ifdef USE_LIBXC
-    if (alibxc .ne. 'none') xc = 'libxc:' // trim(alibxc)
-    if (alibx .ne. 'none') xname = 'libxc:' // trim(alibx)
-    if (alibc .ne. 'none') cname = 'libxc:' // trim(alibc)
+    if (alibxc .ne. 'none') xc =  trim(alibxc)
+    if (alibx .ne. 'none') xname =  trim(alibx)
+    if (alibc .ne. 'none') cname =  trim(alibc)
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
