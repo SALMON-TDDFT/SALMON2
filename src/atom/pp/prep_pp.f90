@@ -849,7 +849,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   integer :: ilma,ia
   integer :: irank_r,isize_r,n,i
   integer :: nlma
-  logical :: is_all,t,u
+  logical :: t,u
   logical,allocatable :: ireferred_atom_comm_r(:,:),iupdated(:)
   integer,allocatable :: iranklist(:)
 
@@ -871,12 +871,11 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     ppg%icomm_atom(:) = comm_group_null
   end if
 
-  ppg%ireferred_atom(:) = .false.
   ppg%irange_atom(1,:) = 1
   ppg%irange_atom(2,:) = 0
 !$omp parallel do private(ia,ilma)
   do ia=1,natom
-    ppg%ireferred_atom(ia) = ppg%ireferred_atom(ia) .or. (ppg%mps(ia) > 0)
+    ppg%ireferred_atom(ia) = (ppg%mps(ia) > 0)
 
     ! forward search
     do ilma=1,nlma
@@ -899,7 +898,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
   call comm_allgather(ppg%ireferred_atom, ireferred_atom_comm_r, icomm_r)
 
   iupdated = .false.
-!$omp parallel do private(ia,i,is_all,t,u)
+!$omp parallel do private(ia,i,t,u)
   do ia=1,natom
     do i=1,isize_r
       t = ppg%ireferred_atom_comm_r(ia,i)

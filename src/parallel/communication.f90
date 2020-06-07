@@ -65,6 +65,7 @@ module communication
 
   ! utils
   public :: comm_is_root
+  public :: comm_show_error
 
 
   type, public :: comm_maxloc_type
@@ -331,6 +332,12 @@ contains
     logical :: comm_is_root
     comm_is_root = npid == ROOT_PROCID
   end function
+
+  subroutine comm_show_error(errcode)
+    implicit none
+    integer, intent(in) :: errcode
+    call error_check(errcode)
+  end subroutine
 
   subroutine comm_sync_all(ngid)
     use mpi, only: MPI_COMM_WORLD
