@@ -339,7 +339,7 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use timer
 #ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
   use salmon_global, only: natom
-  use communication, only: comm_wait_all
+  use communication, only: comm_wait_all,comm_show_error
   use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
 #else
   use communication, only: comm_summation
@@ -372,6 +372,12 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
   allocate(uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
   allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+
+#ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
+  uVpsibox2 = 0d0
+#else
+  uVpsibox  = 0d0
+#endif
 
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
@@ -417,10 +423,10 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
                          , uvpsibox2(1,io_s,ik_s,im_s,is) &
                          , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
                          , ireqs(nreq), ierr )
-    else
+      call comm_show_error(ierr)
+    !else
       ! uvpsibox2(:,:,:,:,ppg%irange_ia(1:2,ia)) does not use in this process...
       ! We can skip self copy, but zero clear required
-      uvpsibox2(:,io_s:io_e,ik_s:ik_e,im_s:im_e,is:ie) = 0d0
     end if
   end do
   call comm_wait_all(ireqs(1:nreq))
