@@ -525,7 +525,7 @@ contains
         stop
       end if
 
-      if (ispin > 0) then
+      if (spin /= 'unpolarized') then
         print '(A)', "Spin polarized is not available"
         stop
       end if
