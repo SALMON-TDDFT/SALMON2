@@ -318,7 +318,8 @@ contains
       & convergence, &
       & threshold, &
       & iditer_notemperature, &
-      & step_initial_mix_zero, &
+      & nscf_init_no_diagonal, &
+      & nscf_init_mix_zero, &
       & conv_gap_mix_zero
 
     namelist/emfield/ &
@@ -461,9 +462,7 @@ contains
       & yn_stop_system_momt
 
     namelist/group_fundamental/ &
-      & iditer_nosubspace_diag, &
       & ntmg, &
-      & idisnum, &
       & iwrite_projection, &
       & itwproj, &
       & iwrite_projnum, &
@@ -473,21 +472,9 @@ contains
       & lmax_lmp
 
     namelist/group_others/ &
-      & iswitch_orbital_mesh, &
-      & iflag_psicube, &
       & num_projection, &
       & iwrite_projection_ob, &
-      & iwrite_projection_k, &
-      & filename_pot, &
-      & iwrite_external, &
-      & iflag_intelectron, &
-      & num_dip2, &
-      & dip2boundary, &
-      & dip2center, &
-      & itotntime2, &
-      & iwdenoption, &
-      & iwdenstep, &
-      & iflag_estatic
+      & iwrite_projection_k
 
     namelist/code/ &
       & yn_want_stencil_hand_vectorization, &
@@ -628,12 +615,13 @@ contains
     beta_p        = 0.75d0
     yn_auto_mixing = 'n'
     update_mixing_ratio = 3.d0
-    nscf          = 0
+    nscf          = 300
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
     iditer_notemperature = 10
-    step_initial_mix_zero= -1
+    nscf_init_no_diagonal= 10
+    nscf_init_mix_zero   = -1
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
 
 !! == default for &emfield
@@ -772,9 +760,7 @@ contains
     thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
-    iditer_nosubspace_diag = 10
     ntmg                   = 1
-    idisnum                = (/1,2/)
     iwrite_projection      = 0
     itwproj                = -1
     iwrite_projnum         = 0
@@ -782,23 +768,11 @@ contains
 !! == default for &group_hartree
     lmax_lmp = 4
 !! == default for &group_others
-    iswitch_orbital_mesh = 0
-    iflag_psicube        = 0
     num_projection       = 1
     do ii=1,200
       iwrite_projection_ob(ii) = ii
     end do
     iwrite_projection_k(1:200) = 1
-    filename_pot               = 'pot'
-    iwrite_external            = 0
-    iflag_intelectron          = 0
-    num_dip2                   = 1
-    dip2boundary(1:100)        = 0.d0*ulength_from_au ! a.u.
-    dip2center(1:100)          = 0.d0*ulength_from_au ! a.u.
-    itotntime2                 = 0
-    iwdenoption                = 0
-    iwdenstep                  = 0
-    iflag_estatic              = 0
 !! == default for code
     yn_want_stencil_hand_vectorization = 'y'
     yn_want_communication_overlapping  = 'n'
@@ -1032,9 +1006,10 @@ contains
          threshold = threshold * (uenergy_to_au)**2 / (ulength_to_au)**6
       end select
     endif
-    call comm_bcast(iditer_notemperature    ,nproc_group_global)
-    call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
-    call comm_bcast(conv_gap_mix_zero       ,nproc_group_global)
+    call comm_bcast(iditer_notemperature  ,nproc_group_global)
+    call comm_bcast(nscf_init_no_diagonal ,nproc_group_global)
+    call comm_bcast(nscf_init_mix_zero    ,nproc_group_global)
+    call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
     conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
 
 !! == bcast for &emfield
@@ -1216,9 +1191,7 @@ contains
     thermostat_tau = thermostat_tau * utime_to_au
     call comm_bcast(yn_stop_system_momt    ,nproc_group_global)
 !! == bcast for &group_fundamental
-    call comm_bcast(iditer_nosubspace_diag,nproc_group_global)
     call comm_bcast(ntmg                  ,nproc_group_global)
-    call comm_bcast(idisnum               ,nproc_group_global)
     call comm_bcast(iwrite_projection     ,nproc_group_global)
     call comm_bcast(itwproj               ,nproc_group_global)
     call comm_bcast(iwrite_projnum        ,nproc_group_global)
@@ -1226,23 +1199,9 @@ contains
 !! == bcast for &group_hartree
     call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_others
-    call comm_bcast(iswitch_orbital_mesh,nproc_group_global)
-    call comm_bcast(iflag_psicube       ,nproc_group_global)
     call comm_bcast(num_projection      ,nproc_group_global)
     call comm_bcast(iwrite_projection_ob,nproc_group_global)
     call comm_bcast(iwrite_projection_k ,nproc_group_global)
-    call comm_bcast(filename_pot        ,nproc_group_global)
-    call comm_bcast(iwrite_external     ,nproc_group_global)
-    call comm_bcast(iflag_intelectron   ,nproc_group_global)
-    call comm_bcast(num_dip2            ,nproc_group_global)
-    call comm_bcast(dip2boundary        ,nproc_group_global)
-    dip2boundary  = dip2boundary  * ulength_to_au
-    call comm_bcast(dip2center          ,nproc_group_global)
-    dip2center    = dip2center    * ulength_to_au
-    call comm_bcast(itotntime2          ,nproc_group_global)
-    call comm_bcast(iwdenoption         ,nproc_group_global)
-    call comm_bcast(iwdenstep           ,nproc_group_global)
-    call comm_bcast(iflag_estatic       ,nproc_group_global)
 !! == bcast for code
     call comm_bcast(yn_want_stencil_hand_vectorization     ,nproc_group_global)
     call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
@@ -1769,7 +1728,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
@@ -1967,10 +1927,7 @@ contains
 
       if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iditer_nosubspace_diag', iditer_nosubspace_diag
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'ntmg', ntmg
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'idisnum(1)', idisnum(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'idisnum(2)', idisnum(2)
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
@@ -1982,26 +1939,12 @@ contains
 
       if(inml_group_others >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iswitch_orbital_mesh', iswitch_orbital_mesh
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_psicube', iflag_psicube
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'filename_pot', filename_pot
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_external', iwrite_external
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_intelectron', iflag_intelectron
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_dip2', num_dip2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2boundary(1)', dip2boundary(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2boundary(2)', dip2boundary(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2center(1)', dip2center(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2center(2)', dip2center(2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itotntime2', itotntime2
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwdenoption', iwdenoption
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwdenstep', iwdenstep
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_estatic', iflag_estatic
 
 
       select case(iflag_atom_coor)

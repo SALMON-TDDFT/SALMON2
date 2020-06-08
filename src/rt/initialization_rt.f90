@@ -103,8 +103,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
 
   call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
   
-  iwdenstep=30 
-  
   Ntime=nt
   
   if(comm_is_root(nproc_id_global))then
@@ -113,7 +111,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     write(*,*) "Time step[fs]        =",dt*au_time_fs
     write(*,*) "Energy range         =",Nenergy
     write(*,*) "Energy resolution[eV]=",dE*au_energy_ev
-    write(*,*) "Step for writing dens=", iwdenstep
     if(ae_shape1 == 'impulse')then 
       write(*,*) "Field strength[a.u.] =",e_impulse
     else

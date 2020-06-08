@@ -25,6 +25,7 @@ Specify the input/output file by options:
 Or use stdin as below:
     %prog < old_inputfile.inp 
 '''
+#this script is old (not updated)
 
 keyword_table = [
     # Inputfile group and parameter table:
@@ -142,6 +143,7 @@ keyword_table = [
         ['omp_loop',             ('scf', 'omp_loop')],
         ['skip_gsortho',         ('scf', 'skip_gsortho')],
         ['iditer_notemperature', ('scf', 'iditer_notemperature')],
+        ['nscf_init_no_diagonal',('group_fundamental', 'iditer_nosubspace_diag')],
     ]],
     ['emfield', [
         ['trans_longi',          ('emfield', 'trans_longi')],
@@ -288,7 +290,6 @@ keyword_table = [
     ]],
     ['group_fundamental', [
         ['iditerybcg',           ('group_fundamental', 'iditerybcg')],
-        ['iditer_nosubspace_diag', ('group_fundamental', 'iditer_nosubspace_diag')],
         ['ntmg',                 ('group_fundamental', 'ntmg')],
         ['idisnum',              ('group_fundamental', 'idisnum')],
         ['iwrite_projection',    ('group_fundamental', 'iwrite_projection')],
