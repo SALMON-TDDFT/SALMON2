@@ -32,7 +32,7 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
 use math_constants, only: pi, zi
 use structures
 use inputoutput
-use parallelization, only: nproc_id_global
+use parallelization, only: nproc_id_global,adjust_elapse_time
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
@@ -85,6 +85,7 @@ type(s_band_dft) :: band
 
 logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
+logical :: is_checkpoint_iter, is_shutdown_time
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: tol_esp_diff, ene_gap
@@ -343,11 +344,22 @@ DFT_Iteration : do iter=Miter+1,nscf
    end do
 
    if(theory=='dft' .and. yn_opt=='n')then
-   if((checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval)==0)) then
-      call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing)
-      if(comm_is_root(nproc_id_global)) write(*,'(a)')"  checkpoint data is printed"
-      call comm_sync_all
-   endif
+     is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval) == 0)
+     is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+
+     if (is_checkpoint_iter .or. is_shutdown_time) then
+       if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+         print *, 'shutdown the calculation, iter =', Miter
+       end if
+
+       call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing)
+       if(comm_is_root(nproc_id_global)) write(*,'(a)')"  checkpoint data is printed"
+       call comm_sync_all
+
+       if (is_shutdown_time) then
+         exit DFT_Iteration
+       end if
+     endif
    endif
 
 end do DFT_Iteration

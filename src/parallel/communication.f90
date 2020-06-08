@@ -239,6 +239,9 @@ module communication
   end interface
 
   interface comm_get_min
+    ! scalar
+    module procedure comm_get_min_double
+
     ! 1-D array
     module procedure comm_get_min_array1d_double
   end interface
@@ -1325,6 +1328,14 @@ contains
     call error_check(ierr)
   end subroutine
 
+  subroutine comm_get_min_double(svalue, ngroup)
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_MIN, MPI_IN_PLACE
+    implicit none
+    real(8), intent(inout) :: svalue
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, svalue, 1, MPI_DOUBLE_PRECISION, MPI_MIN, ngroup, ierr))
+  end subroutine
 
   subroutine comm_get_min_array1d_double(invalue, outvalue, N, ngroup)
     use mpi, only: MPI_DOUBLE_PRECISION, MPI_MIN

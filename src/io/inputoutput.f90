@@ -528,7 +528,7 @@ contains
     yn_restart            = 'n'
     directory_read_data   = 'restart/'
     yn_self_checkpoint    = 'n'
-    checkpoint_interval   = 0
+    checkpoint_interval   = -1
     yn_reset_step_restart = 'n'
     read_gs_restart_data  = 'all'
     write_gs_restart_data = 'all'
@@ -879,6 +879,8 @@ contains
     if(directory_read_data(ii:ii).ne.'/') &
        directory_read_data = trim(directory_read_data)//'/'
     call comm_bcast(yn_self_checkpoint    ,nproc_group_global)
+    if(checkpoint_interval == 0) &
+      checkpoint_interval = -1 ! FIXME: workaround for zero-divide problem
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
     call comm_bcast(yn_reset_step_restart ,nproc_group_global)
     call comm_bcast(read_gs_restart_data  ,nproc_group_global)
