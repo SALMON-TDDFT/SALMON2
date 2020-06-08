@@ -95,10 +95,10 @@ if(calc_mode=='DFT_BAND') then
    esp_old=0d0
 endif
 
-if(nscf_init_no_diagonal.gt.1)then
+if(nscf_init_mix_zero.gt.1)then
    icnt_conv_nomix = 0
    mixing%flag_mix_zero = .true.
-   DFT_NoMix_Iteration : do iter=1,nscf_init_no_diagonal
+   DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       rion_update = check_rion_update() .or. (iter == 1)
       call copy_density(iter,system%nspin,mg,rho_s,mixing)
