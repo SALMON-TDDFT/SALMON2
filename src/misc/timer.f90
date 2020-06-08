@@ -185,6 +185,7 @@ module timer
 
   public :: timer_initialize
   public :: timer_set, timer_reset
+  public :: timer_now
   public :: timer_get, timer_thread_get
   public :: timer_begin, timer_end
   public :: timer_thread_begin, timer_thread_end
@@ -397,6 +398,16 @@ contains
       write(fd,'(a,i4,a,f16.8,a)') 'tid =',i,': ',time,' [s]'
     end do
   end subroutine
+
+  function timer_now(id)
+    implicit none
+    integer,intent(in) :: id
+    real(8)            :: timer_now
+    if (.not. ticked(id)) then
+      stop 'error'
+    end if
+    timer_now = log_time(id,1) + get_wtime() - log_temp(id,1)
+  end function
 
   function timer_get(id)
     implicit none

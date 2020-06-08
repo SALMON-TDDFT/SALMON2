@@ -21,7 +21,7 @@ subroutine main_dft
 use math_constants, only: pi, zi
 use structures
 use inputoutput
-use parallelization, only: nproc_id_global,nproc_group_global
+use parallelization, only: nproc_id_global,nproc_group_global,adjust_elapse_time
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
@@ -78,6 +78,7 @@ logical :: rion_update
 logical :: flag_opt_conv
 integer :: Miopt, iopt,nopt_max
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
+logical :: is_checkpoint_iter, is_shutdown_time
 
 if(theory=='dft_band'.and.iperiodic/=3) return
 
@@ -269,7 +270,14 @@ if(yn_opt=='y') then
    if(flag_opt_conv) then
       call structure_opt_fin(opt)
    else
-      if((checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval)==0)) then
+      is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval) == 0)
+      is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+
+      if(is_checkpoint_iter .or. is_shutdown_time) then
+         if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+           print *, 'shutdown the calculation, iopt =', iopt
+         end if
+
          call checkpoint_gs(lg,mg,system,info,spsi,iopt,mixing)
          call comm_sync_all
          call checkpoint_opt(iopt,opt)
@@ -277,6 +285,10 @@ if(yn_opt=='y') then
             write(*,'(a,i5)')"  checkpoint data is printed: iopt=", iopt
          endif
          call comm_sync_all
+
+         if (is_shutdown_time) then
+           exit Structure_Optimization_Iteration
+         end if
       endif
    endif
 
