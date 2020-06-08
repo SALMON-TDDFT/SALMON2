@@ -244,7 +244,7 @@ contains
 
     namelist/system/ &
       & yn_periodic, &
-      & ispin, &
+      & spin, &
       & al, &
       & al_vec1,al_vec2,al_vec3, &
       & isym, &
@@ -565,7 +565,7 @@ contains
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
-    ispin              = 0
+    spin               = 'unpolarized'
     al                 = 0d0
     al_vec1            = 0d0
     al_vec2            = 0d0
@@ -932,7 +932,7 @@ contains
     call comm_bcast(yn_periodic,nproc_group_global)
     if(yn_periodic=='y') iperiodic=3
     if(yn_periodic=='n') iperiodic=0
-    call comm_bcast(ispin      ,nproc_group_global)
+    call comm_bcast(spin       ,nproc_group_global)
     call comm_bcast(al         ,nproc_group_global)
     al = al * ulength_to_au
     call comm_bcast(al_vec1            ,nproc_group_global)
@@ -1675,7 +1675,7 @@ contains
       if(inml_system >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', inml_system
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_periodic', yn_periodic
-      write(fh_variables_log, '("#",4X,A,"=",I1)') 'ispin', ispin
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'spin', spin
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(1)', al(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(2)', al(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(3)', al(3)
@@ -2151,6 +2151,13 @@ contains
     if (yn_eigenexa == 'y' .and. yn_scalapack == 'y') then
       stop "both yn_scalapack and yn_eigenexa is specified 'y'"
     end if
+    
+    select case(spin)
+    case('unpolarized','polarized')
+      continue
+    case default
+      stop "set spin to 'unpolarized' or 'polarized'"
+    end select
 
   ! for main_tddft
     select case(theory)

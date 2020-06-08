@@ -81,7 +81,7 @@ integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 
 if(theory=='dft_band'.and.iperiodic/=3) return
 
-call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
+call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)

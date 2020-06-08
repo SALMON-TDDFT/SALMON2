@@ -92,7 +92,7 @@ end subroutine init_dft
 subroutine init_dft_system(lg,system,stencil)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,ispin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
   & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin, &
   & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
   use sym_sub, only: init_sym_sub
@@ -157,9 +157,9 @@ subroutine init_dft_system(lg,system,stencil)
 
   system%nion = natom
 
-  if(ispin==0)then
+  if(spin=='unpolarized') then
     system%nspin=1
-  else
+  else if(spin=='polarized') then
     system%nspin=2
   end if
 
