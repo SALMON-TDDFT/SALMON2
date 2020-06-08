@@ -75,7 +75,7 @@ real(8) :: dt_h, sum1
 character(100) :: comment_line
 
 
-call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
+call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)

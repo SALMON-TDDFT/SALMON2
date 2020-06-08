@@ -150,7 +150,7 @@ contains
     end if
 
     if (xc_func%use_gradient) then
-      if(nspin==2) stop "error: GGA or metaGGA & ispin==1"
+      if(nspin==2) stop "error: GGA or metaGGA & spin=='polarized'"
       call calc_xc(xc_func, rho=rho_tmp, grho=delr, rlrho=lrho, tau=tau, rj=j, &
       & eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
     else
@@ -292,10 +292,10 @@ contains
 
 
 
-  subroutine init_xc(xc, ispin, cval, xcname, xname, cname)
+  subroutine init_xc(xc, spin, cval, xcname, xname, cname)
     implicit none
     type(s_xc_functional), intent(inout) :: xc
-    integer, intent(in)                :: ispin
+    character(*), intent(in)           :: spin
     real(8), intent(in)                :: cval
     character(*), intent(in), optional :: xcname
     character(*), intent(in), optional :: xname
@@ -303,12 +303,17 @@ contains
 
     ! Initialization of xc variable
     xc%xctype(1:3) = salmon_xctype_none
-    xc%ispin = ispin
     xc%cval = cval
     xc%use_gradient = .false.
     xc%use_laplacian = .false.
     xc%use_kinetic_energy = .false.
     xc%use_current = .false.
+    
+    if(spin=='unpolarized') then
+      xc%ispin=0
+    else if(spin=='polarized') then
+      xc%ispin=1
+    end if
 
     ! Exchange correlation
     if (present(xcname) .and. (len_trim(xcname) > 0)) then
