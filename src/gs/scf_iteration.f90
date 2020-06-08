@@ -23,7 +23,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
                srg,srg_scalar,spsi,shpsi,rho,rho_s, &
                cg,ppg,vlocal,  &
                miter,   &
-               iditer_nosubspace_diag,mixing,iter, &
+               nscf_init_no_diagonal, mixing, iter, &
                poisson,fg,Vh,xc_func,ppn,Vxc,energy)
   use salmon_global, only: calc_mode,method_mixing  &
                         ,yn_subspace_diagonalization,ncg,ncg_init
@@ -52,7 +52,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   type(s_cg),            intent(inout) :: cg
   type(s_scalar),        intent(in)    :: vlocal(system%nspin)
   integer,               intent(in)    :: miter
-  integer,               intent(in)    :: iditer_nosubspace_diag
+  integer,               intent(in)    :: nscf_init_no_diagonal
   type(s_mixing),        intent(inout) :: mixing
   integer,               intent(in)    :: iter
   type(s_poisson),       intent(inout) :: poisson
@@ -86,7 +86,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
   if(yn_subspace_diagonalization == 'y')then
-    if(miter>iditer_nosubspace_diag)then
+    if(miter > nscf_init_no_diagonal)then
       call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
   end if

@@ -94,10 +94,10 @@ if(calc_mode=='DFT_BAND') then
    esp_old=0d0
 endif
 
-if(step_initial_mix_zero.gt.1)then
+if(nscf_init_no_diagonal.gt.1)then
    icnt_conv_nomix = 0
    mixing%flag_mix_zero = .true.
-   DFT_NoMix_Iteration : do iter=1,step_initial_mix_zero
+   DFT_NoMix_Iteration : do iter=1,nscf_init_no_diagonal
 
       rion_update = check_rion_update() .or. (iter == 1)
       call copy_density(iter,system%nspin,mg,rho_s,mixing)
@@ -105,7 +105,7 @@ if(step_initial_mix_zero.gt.1)then
                      srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
                      cg,ppg,V_local,  &
                      iter,  &
-                     iditer_nosubspace_diag,mixing,iter,  &
+                     nscf_init_no_diagonal, mixing, iter,  &
                      poisson,fg,Vh,xc_func,ppn,Vxc,energy)
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
@@ -171,7 +171,7 @@ DFT_Iteration : do iter=Miter+1,nscf
                      srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &
-                     iditer_nosubspace_diag,mixing,iter,  &
+                     nscf_init_no_diagonal, mixing, iter,  &
                      poisson,fg,Vh,xc_func,ppn,Vxc,energy)
    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
    call timer_begin(LOG_CALC_TOTAL_ENERGY)

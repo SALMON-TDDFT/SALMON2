@@ -154,7 +154,8 @@ module salmon_global
   character(16)  :: convergence
   real(8)        :: threshold
   integer        :: iditer_notemperature
-  integer        :: step_initial_mix_zero
+  integer        :: nscf_init_no_diagonal
+  integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
 
 
@@ -302,9 +303,7 @@ module salmon_global
   character(1)   :: yn_stop_system_momt
 
 !! &group_fundamental
-  integer        :: iditer_nosubspace_diag
   integer        :: ntmg
-  integer        :: idisnum(2)
   integer        :: iwrite_projection
   integer        :: itwproj
   integer        :: iwrite_projnum
@@ -314,21 +313,9 @@ module salmon_global
   integer        :: lmax_lmp
 
 !! &group_others
-  integer        :: iswitch_orbital_mesh
-  integer        :: iflag_psicube
   integer        :: num_projection
   integer        :: iwrite_projection_ob(200)
   integer        :: iwrite_projection_k(200)
-  character(100) :: filename_pot
-  integer        :: iwrite_external
-  integer        :: iflag_intelectron
-  integer        :: num_dip2
-  real(8)        :: dip2boundary(100)
-  real(8)        :: dip2center(100)
-  integer        :: itotntime2
-  integer        :: iwdenoption
-  integer        :: iwdenstep
-  integer        :: iflag_estatic
 
 !! &atomic_coor
 !! &atomic_red_coor
