@@ -466,7 +466,7 @@ module structures
     & ,integral_poynting_tmp(:),integral_poynting_tmp2(:)
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
     type(s_rgrid)         :: eg
-  ! for yn_gbp
+  ! for method_singlescale=='1d','1d_fourier'
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
     real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)
     real(8),allocatable :: Ac_fourier(:,:,:,:)

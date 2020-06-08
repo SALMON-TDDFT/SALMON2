@@ -48,6 +48,7 @@ module inputoutput
   integer :: inml_propagation
   integer :: inml_scf
   integer :: inml_emfield
+  integer :: inml_singlescale
   integer :: inml_multiscale
   integer :: inml_maxwell
   integer :: inml_analysis
@@ -223,8 +224,6 @@ contains
       & time_shutdown,         &
       & method_wf_distributor, &
       & nblock_wf_distribute,  &
-      & yn_gbp,            &  !should change name or temporary
-      & yn_gbp_fourier0,   &  !should change name or temporary
       & read_gs_dns_cube,  &  !remove later (but this is used currently)
       & write_gs_wfn_k,    &  !remove later (but this is used currently)
       & write_rt_wfn_k        !remove later (but this is used currently)
@@ -347,7 +346,10 @@ contains
       & num_dipole_source , &
       & vec_dipole_source , &
       & cood_dipole_source , &
-      & rad_dipole_source, &
+      & rad_dipole_source
+      
+    namelist/singlescale/ &
+      & method_singlescale, &
       & cutoff_G2_emfield
 
     namelist/multiscale/ &
@@ -535,8 +537,6 @@ contains
     time_shutdown         = -1d0
     method_wf_distributor = 'single'
     nblock_wf_distribute = 16
-    yn_gbp        = 'n'
-    yn_gbp_fourier0 = 'n' ! temporary
     !remove later
     read_gs_dns_cube = 'n'
     write_gs_wfn_k   = 'n'
@@ -650,6 +650,9 @@ contains
     vec_dipole_source  = 0d0
     cood_dipole_source = 0d0
     rad_dipole_source  = 2d0 ! a.u.
+    
+!! == default for &singlescale
+    method_singlescale = '3d'
     cutoff_G2_emfield  = -1d0
 
 !! == default for &multiscale
@@ -819,6 +822,9 @@ contains
 
       read(fh_namelist, nml=emfield, iostat=inml_emfield)
       rewind(fh_namelist)
+      
+      read(fh_namelist, nml=singlescale, iostat=inml_singlescale)
+      rewind(fh_namelist)
 
       read(fh_namelist, nml=multiscale, iostat=inml_multiscale)
       rewind(fh_namelist)
@@ -888,9 +894,6 @@ contains
     call comm_bcast(time_shutdown         ,nproc_group_global)
     call comm_bcast(method_wf_distributor ,nproc_group_global)
     call comm_bcast(nblock_wf_distribute  ,nproc_group_global)
-    call comm_bcast(yn_gbp                ,nproc_group_global)
-    call comm_bcast(yn_gbp_fourier0       ,nproc_group_global) ! temporary
-    !remove later
     call comm_bcast(read_gs_dns_cube,nproc_group_global)
     call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
     call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
@@ -1060,6 +1063,9 @@ contains
     cood_dipole_source = cood_dipole_source * ulength_to_au
     call comm_bcast(rad_dipole_source,nproc_group_global)
     rad_dipole_source = rad_dipole_source * ulength_to_au
+
+!! == bcast for &singlescale
+    call comm_bcast(method_singlescale,nproc_group_global)
     call comm_bcast(cutoff_G2_emfield,nproc_group_global)
     cutoff_G2_emfield = cutoff_G2_emfield * uenergy_to_au
 
@@ -1609,8 +1615,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp_fourier0', yn_gbp_fourier0 ! temporary
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
@@ -1779,6 +1783,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,2)', cood_dipole_source(2,2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,2)', cood_dipole_source(3,2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rad_dipole_source', rad_dipole_source
+      
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'singlescale', inml_singlescale
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_singlescale', method_singlescale
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
@@ -2032,8 +2039,6 @@ contains
     call yn_argument_check(yn_stop_system_momt)
     call yn_argument_check(yn_want_stencil_hand_vectorization)
     call yn_argument_check(yn_want_communication_overlapping)
-    call yn_argument_check(yn_gbp)
-    call yn_argument_check(yn_gbp_fourier0) ! temporary
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2134,7 +2139,16 @@ contains
         stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
       end select
     end select
-
+    
+    select case(method_singlescale)
+    case('3d', '1d', '1d_fourier')
+      if(method_singlescale=='1d_fourier') then
+        if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
+      end if
+    case default
+      stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
+    end select
+    
   end subroutine check_bad_input
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)

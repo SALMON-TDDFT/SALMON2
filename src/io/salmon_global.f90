@@ -56,8 +56,6 @@ module salmon_global
   real(8)        :: time_shutdown
   character(20)  :: method_wf_distributor
   integer        :: nblock_wf_distribute
-  character(1)   :: yn_gbp
-  character(1)   :: yn_gbp_fourier0 ! temporary
   !remove later
   character(1)   :: read_gs_dns_cube
   character(1)   :: write_gs_wfn_k
@@ -185,6 +183,9 @@ module salmon_global
   real(8)        :: vec_dipole_source(3,2)
   real(8)        :: cood_dipole_source(3,2)
   real(8)        :: rad_dipole_source
+
+!! &singlescale
+  character(32)  :: method_singlescale
   real(8)        :: cutoff_G2_emfield
 
 !! &multiscale
