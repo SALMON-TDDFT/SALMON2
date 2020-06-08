@@ -32,7 +32,8 @@ use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pu
 use initialization_rt_sub
 use checkpoint_restart_sub
 use fdtd_weyl, only: ls_fdtd_weyl, weyl_init, weyl_calc, weyl_finalize
-use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global
+use parallelization, only: nproc_id_global, nproc_size_global, nproc_group_global, &
+                           adjust_elapse_time
 use filesystem, only: create_directory, get_filehandle
 use phys_constants, only: cspeed_au
 use em_field, only: calc_Ac_ext
@@ -80,6 +81,8 @@ real(8), allocatable :: Ac_inc(:, :)
 
 integer :: nmacro_mygroup, isize_mygroup
 
+logical :: is_checkpoint_iter, is_shutdown_time
+
 ! character(256) :: file_debug_log
 !! Open logfile for debugging
 ! write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
@@ -102,8 +105,20 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,itotNtime
     call time_evolution_step_ms()
 
-   if((checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)) &
-        & call checkpoint_ms()
+    is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
+    is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+
+    if (is_checkpoint_iter .or. is_shutdown_time) then
+      if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+        print *, 'shutdown the calculation, iter =', itt
+      end if
+
+      call checkpoint_ms()
+
+      if (is_shutdown_time) then
+        exit TE
+      end if
+    end if
 end do TE
 
 call timer_end(LOG_RT_ITERATION)
