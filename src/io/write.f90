@@ -38,7 +38,7 @@ contains
     character(100) :: file_k_data
 
     NK = system%nk
-    file_k_data = trim(sysname)//'_k.data'!??????
+    file_k_data = trim(sysname)//'_k.data'
 
     if (comm_is_root(nproc_id_global)) then
       fh_k = open_filehandle(file_k_data, status="replace")

@@ -198,11 +198,6 @@ if(theory=='dft_band')then
    call write_band(system,energy)
 end if
 
-! print k-point, but now only with yn_gbp option (no printing in default??)
-if(yn_gbp /= 'n') then
-   call write_k_data(system,stencil)
-endif
-
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
    select case(iperiodic)
@@ -219,14 +214,14 @@ end if
 if(yn_out_tm  == 'y') then
    select case(iperiodic)
    case(3)
-      call write_k_data(system,stencil)
+      call write_k_data(system,stencil)  !need? (probably remove later)
       call write_tm_data(spsi,system,info,mg,stencil,srg,ppg)
    case(0)
      write(*,*) "error: yn_out_tm='y' & iperiodic=0"
   end select
 end if
 
-! force
+   ! force
    call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
    if(comm_is_root(nproc_id_global))then
       write(*,*) "===== force ====="
@@ -315,6 +310,7 @@ call timer_begin(LOG_WRITE_GS_RESULTS)
 call write_band_information(system,energy)
 call write_eigen(ofl,system,energy)
 call write_info_data(Miter,system,energy,pp)
+call write_k_data(system,stencil)
 
 ! write GS: analysis option
 if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
