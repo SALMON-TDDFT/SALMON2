@@ -101,7 +101,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_INIT_RT)
 
-  call init_xc(xc_func, ispin, cval, xcname=xc, xname=xname, cname=cname)
+  call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
   
   Ntime=nt
   

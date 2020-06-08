@@ -83,7 +83,7 @@ module salmon_global
 !! &system
   integer        :: iperiodic  !this is old keyword but still defined here
   character(1)   :: yn_periodic
-  integer        :: ispin
+  character(16)  :: spin
   real(8)        :: al(3)
   real(8)        :: al_vec1(3),al_vec2(3),al_vec3(3)
   integer        :: isym
