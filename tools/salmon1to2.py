@@ -260,6 +260,8 @@ keyword_table = [
     ['poisson', [
         ['layout_multipole',     ('hartree', 'meo')],
         ['num_multipole_xyz',    ('hartree', 'num_pole_xyz')],
+        ['lmax_multipole',       ('group_hartree', 'lmax_meo')],
+        ['threshold_cg',         ('group_hartree', 'hconv')],
     ]],
     ['ewald', [
         ['newald',               ('ewald', 'newald')],
@@ -300,10 +302,6 @@ keyword_table = [
     ['group_parallel', [
         ['imesh_s_all',          ('group_parallel', 'imesh_s_all')],
         ['iflag_comm_rho',       ('group_parallel', 'iflag_comm_rho')],
-    ]],
-    ['group_hartree', [
-        ['hconv',                ('group_hartree', 'hconv')],
-        ['lmax_lmp',             ('group_hartree', 'lmax_meo')],
     ]],
     ['group_file', [
         ['ic',                   ('group_file', 'ic')],
