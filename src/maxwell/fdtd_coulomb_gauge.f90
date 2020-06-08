@@ -25,7 +25,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,yn_gbp
+  use salmon_global, only: dt,method_singlescale
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
   use communication, only: comm_is_root, comm_summation
@@ -110,10 +110,10 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
 
 ! FDTD loop: Ac(t) --> Ac(t+dt)
 
-  if(yn_gbp=='y') then
-    call fdtd_gbp
-  else
+  if(method_singlescale=='3d') then
     call fdtd
+  else
+    call fdtd_gbp
   end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -615,7 +615,7 @@ end subroutine fdtd_singlescale
 subroutine fourier_singlescale(lg,mg,info,fg,rho,j_e,Vh,poisson,singlescale)
   use structures
   use math_constants,only : zi,pi
-  use salmon_global,only: dt,yn_gbp_fourier0
+  use salmon_global,only: dt,method_singlescale
   use phys_constants, only: cspeed_au
   use communication, only: comm_summation,comm_bcast
   implicit none
@@ -756,7 +756,7 @@ subroutine fourier_singlescale(lg,mg,info,fg,rho,j_e,Vh,poisson,singlescale)
   end do
   end do
   
-  if(yn_gbp_fourier0=='y') then
+  if(method_singlescale=='1d') then
     singlescale%Ac_fourier = 0d0
   end if
 
@@ -769,7 +769,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
-  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,yn_gbp
+  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,method_singlescale
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use initialization_sub, only: set_bn
@@ -845,7 +845,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   fw%tmp_zt = 0d0
   
 ! gbp
-  if(yn_gbp=='y') then
+  if(method_singlescale/='3d') then
     allocate( fw%curr4pi_zt(lg%is(3):lg%ie(3),3) )
     allocate(fw%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3))
     allocate(fw%Ac_fourier(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3))

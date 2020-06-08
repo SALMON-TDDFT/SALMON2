@@ -971,7 +971,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_gbp
+  use salmon_global, only: method_singlescale
   implicit none
   character(*)            ,intent(in) :: odir
   type(s_rgrid)           ,intent(in) :: lg,mg
@@ -1008,7 +1008,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     write(iu1_w) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     write(iu1_w) singlescale%Energy_joule
     write(iu1_w) singlescale%Energy_poynting
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       write(iu1_w) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
       write(iu1_w) singlescale%zc_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
@@ -1093,7 +1093,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     end do
     call comm_summation(d0,d1,lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_r)
     
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
     
       allocate(z0(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3))
       allocate(z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3))
@@ -1124,7 +1124,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
       write(iu1_w) d1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
       write(iu1_w) singlescale%Energy_joule
       write(iu1_w) singlescale%Energy_poynting
-      if(yn_gbp=='y') then
+      if(method_singlescale/='3d') then
         write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,2)
@@ -1138,7 +1138,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     end if
 
     deallocate(matbox0,matbox1,v0,v1,b0,b1,d0,d1)
-    if(yn_gbp=='y') deallocate(z0,z1)
+    if(method_singlescale/='3d') deallocate(z0,z1)
   end if
 
 end subroutine write_singlescale
@@ -1573,7 +1573,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: directory_read_data,yn_self_checkpoint,yn_gbp
+  use salmon_global, only: directory_read_data,yn_self_checkpoint,method_singlescale
   implicit none
   integer      ,intent(in) :: comm
   type(s_rgrid),intent(in) :: lg,mg
@@ -1617,7 +1617,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     read(iu1_r) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     read(iu1_r) singlescale%Energy_joule
     read(iu1_r) singlescale%Energy_poynting
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
       read(iu1_r) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
       read(iu1_r) singlescale%zc_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
@@ -1634,7 +1634,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     allocate(matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
     allocate(matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
     allocate(matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
-    if(yn_gbp=='y') allocate(zbox(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3,1:3))
+    if(method_singlescale/='3d') allocate(zbox(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3,1:3))
 
     if(comm_is_root(nproc_id_global))then
       open(iu1_r,file=dir_file_in,form='unformatted',status='old',iostat=ierr)
@@ -1645,7 +1645,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
       read(iu1_r) matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
       read(iu1_r) singlescale%Energy_joule
       read(iu1_r) singlescale%Energy_poynting
-      if(yn_gbp=='y') then
+      if(method_singlescale/='3d') then
         read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         read(iu1_r) zbox(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3)
         read(iu1_r) singlescale%Ac_zt_boundary_bottom
@@ -1666,7 +1666,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     call comm_bcast(matbox4,comm)
     call comm_bcast(singlescale%Energy_joule,comm)
     call comm_bcast(singlescale%Energy_poynting,comm)
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       call comm_bcast(singlescale%Ac_zt_m,comm)
       call comm_bcast(zbox,comm)
       call comm_bcast(singlescale%Ac_zt_boundary_bottom,comm)
@@ -1699,7 +1699,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     end do
     end do
 
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       !$omp parallel do collapse(2)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -1713,7 +1713,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     end if
 
     deallocate(matbox1,matbox2,matbox3,matbox4)
-    if(yn_gbp=='y') deallocate(zbox)
+    if(method_singlescale/='3d') deallocate(zbox)
   end if
 
   return

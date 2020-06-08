@@ -181,7 +181,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
     Vh_stock2%f = Vh_stock1%f
   end if
-  if(singlescale%flag_use .and. yn_gbp=='y' .and. yn_ffte=='y') then
+  if(singlescale%flag_use .and. method_singlescale=='1d_fourier' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
   else
     call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
