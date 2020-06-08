@@ -213,7 +213,6 @@ contains
     namelist/control/ &
       & sysname, &
       & base_directory, &
-      & output_buffer_interval, &
       & yn_restart, &
       & directory_read_data, &
       & yn_self_checkpoint,  &
@@ -431,8 +430,7 @@ contains
       & yn_out_tm, &
       & out_ms_step, &
       & format_voxel_data, &
-      & nsplit_voxel_data, &
-      & timer_process
+      & nsplit_voxel_data
 
     namelist/poisson/ &
       & layout_multipole, &
@@ -540,7 +538,6 @@ contains
 !! == default for &control
     sysname               = 'default'
     base_directory        = './'
-    output_buffer_interval= -1
     yn_restart            = 'n'
     directory_read_data   = 'restart/'
     yn_self_checkpoint    = 'n'
@@ -749,7 +746,6 @@ contains
     out_ms_step         = 100
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
-    timer_process       = 'n'
 
 !! == default for &poisson
     layout_multipole  = 3
@@ -903,7 +899,6 @@ contains
     ii = len_trim(base_directory)
     if(base_directory(ii:ii).ne.'/') &
        base_directory = trim(base_directory)//'/'
-    call comm_bcast(output_buffer_interval,nproc_group_global)
     call comm_bcast(yn_restart            ,nproc_group_global)
     call comm_bcast(directory_read_data   ,nproc_group_global)
     ii = len_trim(directory_read_data)
@@ -1190,7 +1185,6 @@ contains
     call comm_bcast(out_ms_step         ,nproc_group_global)
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
-    call comm_bcast(timer_process       ,nproc_group_global)
 
 !! == bcast for &poisson
     call comm_bcast(layout_multipole  ,nproc_group_global)
@@ -1644,7 +1638,6 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', inml_control
       write(fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'output_buffer_interval', output_buffer_interval
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
@@ -1938,7 +1931,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'timer_process', timer_process
 
       if(inml_poisson >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', inml_poisson

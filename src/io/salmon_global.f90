@@ -46,7 +46,6 @@ module salmon_global
 !! &control
   character(256) :: sysname
   character(256) :: base_directory
-  integer        :: output_buffer_interval
   character(1)   :: yn_restart
   character(256) :: directory_read_data
   character(1)   :: yn_self_checkpoint
@@ -273,7 +272,6 @@ module salmon_global
   integer        :: out_ms_step
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
-  character(1)   :: timer_process
 
 !! &poisson
   integer        :: layout_multipole
