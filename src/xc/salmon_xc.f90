@@ -389,7 +389,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "TPSS functional is not implemented" ! future work
 
       case ('vs98')
 
@@ -398,7 +398,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "VS98 functional is not implemented" ! future work
 
       ! Please insert additional functional here:
       ! e.g.
