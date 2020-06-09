@@ -245,8 +245,6 @@ contains
       & spin, &
       & al, &
       & al_vec1,al_vec2,al_vec3, &
-      & isym, &
-      & crystal_structure, &
       & nstate, &
       & nstate_spin, &
       & nelec, &
@@ -315,7 +313,7 @@ contains
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
-      & iditer_notemperature, &
+      & nscf_init_redistribution, &
       & nscf_init_no_diagonal, &
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero
@@ -553,8 +551,6 @@ contains
     al_vec1            = 0d0
     al_vec2            = 0d0
     al_vec3            = 0d0
-    isym               = 1
-    crystal_structure  = 'none'
     nstate             = 0
     nstate_spin(:)     = 0
     nelec              = 0
@@ -615,7 +611,7 @@ contains
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
-    iditer_notemperature = 10
+    nscf_init_redistribution = 10
     nscf_init_no_diagonal= 10
     nscf_init_mix_zero   = -1
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
@@ -911,8 +907,6 @@ contains
     al_vec1 = al_vec1 * ulength_to_au
     al_vec2 = al_vec2 * ulength_to_au
     al_vec3 = al_vec3 * ulength_to_au
-    call comm_bcast(isym               ,nproc_group_global)
-    call comm_bcast(crystal_structure  ,nproc_group_global)
     call comm_bcast(nstate             ,nproc_group_global)
     call comm_bcast(nstate_spin        ,nproc_group_global)
     call comm_bcast(nelec              ,nproc_group_global)
@@ -1002,7 +996,7 @@ contains
          threshold = threshold * (uenergy_to_au)**2 / (ulength_to_au)**6
       end select
     endif
-    call comm_bcast(iditer_notemperature  ,nproc_group_global)
+    call comm_bcast(nscf_init_redistribution  ,nproc_group_global)
     call comm_bcast(nscf_init_no_diagonal ,nproc_group_global)
     call comm_bcast(nscf_init_mix_zero    ,nproc_group_global)
     call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
@@ -1636,8 +1630,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec1(1:3)', al_vec1(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2(1:3)', al_vec2(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3(1:3)', al_vec3(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",I1)') 'isym', isym
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'crystal_structure', crystal_structure
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nstate', nstate
       write(fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nstate_spin(1:2)', nstate_spin
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nelec', nelec
@@ -1722,7 +1714,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_redistribution', nscf_init_redistribution
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero

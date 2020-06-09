@@ -15,8 +15,6 @@
   nelec = 32
   nelem = 1
   natom = 8
-  isym = 8
-  crystal_structure="diamond"
 /
 
 

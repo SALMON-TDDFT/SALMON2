@@ -14,7 +14,6 @@
 &system
   yn_periodic = 'y'
   al = 5.0d0, 5.0d0, 5.0d0
-  isym = 1
   nstate = 8
   nelec  = 8
   nelem  = 2

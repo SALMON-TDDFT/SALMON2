@@ -84,8 +84,6 @@ module salmon_global
   character(16)  :: spin
   real(8)        :: al(3)
   real(8)        :: al_vec1(3),al_vec2(3),al_vec3(3)
-  integer        :: isym
-  character(32)  :: crystal_structure
   integer        :: nstate
   integer        :: nstate_spin(2)
   integer        :: nelec
@@ -151,7 +149,7 @@ module salmon_global
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
-  integer        :: iditer_notemperature
+  integer        :: nscf_init_redistribution
   integer        :: nscf_init_no_diagonal
   integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
