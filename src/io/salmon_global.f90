@@ -278,6 +278,7 @@ module salmon_global
 !! &poisson
   integer        :: layout_multipole
   integer        :: num_multipole_xyz(3)
+  integer        :: lmax_multipole
   real(8)        :: threshold_cg
 
 !! &ewald
@@ -309,9 +310,6 @@ module salmon_global
   integer        :: itwproj
   integer        :: iwrite_projnum
   integer        :: itcalc_ene
-
-!! &group_hartree
-  integer        :: lmax_lmp
 
 !! &group_others
   integer        :: num_projection

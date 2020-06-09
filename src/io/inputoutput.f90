@@ -57,7 +57,6 @@ module inputoutput
   integer :: inml_opt
   integer :: inml_md
   integer :: inml_group_fundamental
-  integer :: inml_group_hartree
   integer :: inml_group_others
   integer :: inml_code
 
@@ -438,6 +437,7 @@ contains
     namelist/poisson/ &
       & layout_multipole, &
       & num_multipole_xyz, &
+      & lmax_multipole, &
       & threshold_cg
 
     namelist/ewald/ &
@@ -469,9 +469,6 @@ contains
       & itwproj, &
       & iwrite_projnum, &
       & itcalc_ene
-
-    namelist/group_hartree/ &
-      & lmax_lmp
 
     namelist/group_others/ &
       & num_projection, &
@@ -741,6 +738,7 @@ contains
 !! == default for &poisson
     layout_multipole  = 3
     num_multipole_xyz = 0
+    lmax_multipole    = 4
     threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
 !! == default for &ewald
     newald = 4
@@ -768,8 +766,6 @@ contains
     itwproj                = -1
     iwrite_projnum         = 0
     itcalc_ene             = 10
-!! == default for &group_hartree
-    lmax_lmp = 4
 !! == default for &group_others
     num_projection       = 1
     do ii=1,200
@@ -848,9 +844,6 @@ contains
       rewind(fh_namelist)
 
       read(fh_namelist, nml=group_fundamental, iostat=inml_group_fundamental)
-      rewind(fh_namelist)
-
-      read(fh_namelist, nml=group_hartree, iostat=inml_group_hartree)
       rewind(fh_namelist)
 
       read(fh_namelist, nml=group_others, iostat=inml_group_others)
@@ -1172,6 +1165,7 @@ contains
 !! == bcast for &poisson
     call comm_bcast(layout_multipole  ,nproc_group_global)
     call comm_bcast(num_multipole_xyz ,nproc_group_global)
+    call comm_bcast(lmax_multipole    ,nproc_group_global)
     call comm_bcast(threshold_cg      ,nproc_group_global)
     threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3
 !! == bcast for &ewald
@@ -1204,8 +1198,6 @@ contains
     call comm_bcast(itwproj               ,nproc_group_global)
     call comm_bcast(iwrite_projnum        ,nproc_group_global)
     call comm_bcast(itcalc_ene            ,nproc_group_global)
-!! == bcast for &group_hartree
-    call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_others
     call comm_bcast(num_projection      ,nproc_group_global)
     call comm_bcast(iwrite_projection_ob,nproc_group_global)
@@ -1907,6 +1899,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_multipole', lmax_multipole
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
 
       if(inml_ewald >0)ierr_nml = ierr_nml +1
@@ -1941,10 +1934,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'itcalc_ene', itcalc_ene
-
-      if(inml_group_hartree >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_hartree', inml_group_hartree
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_lmp', lmax_lmp
 
       if(inml_group_others >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
