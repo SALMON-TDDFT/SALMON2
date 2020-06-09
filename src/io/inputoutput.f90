@@ -313,7 +313,7 @@ contains
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
-      & iditer_notemperature, &
+      & nscf_init_redistribution, &
       & nscf_init_no_diagonal, &
       & nscf_init_mix_zero, &
       & conv_gap_mix_zero
@@ -611,7 +611,7 @@ contains
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
-    iditer_notemperature = 10
+    nscf_init_redistribution = 10
     nscf_init_no_diagonal= 10
     nscf_init_mix_zero   = -1
     conv_gap_mix_zero    = 99999d0*uenergy_from_au
@@ -996,7 +996,7 @@ contains
          threshold = threshold * (uenergy_to_au)**2 / (ulength_to_au)**6
       end select
     endif
-    call comm_bcast(iditer_notemperature  ,nproc_group_global)
+    call comm_bcast(nscf_init_redistribution  ,nproc_group_global)
     call comm_bcast(nscf_init_no_diagonal ,nproc_group_global)
     call comm_bcast(nscf_init_mix_zero    ,nproc_group_global)
     call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
@@ -1714,7 +1714,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_redistribution', nscf_init_redistribution
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero

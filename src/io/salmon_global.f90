@@ -149,7 +149,7 @@ module salmon_global
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
-  integer        :: iditer_notemperature
+  integer        :: nscf_init_redistribution
   integer        :: nscf_init_no_diagonal
   integer        :: nscf_init_mix_zero
   real(8)        :: conv_gap_mix_zero
