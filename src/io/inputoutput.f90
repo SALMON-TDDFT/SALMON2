@@ -2125,19 +2125,19 @@ contains
         stop "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
       end if
 
-      select case(ae_shape1)
-      case("impulse","Ecos2","Acos2","input")
-        continue
-      case default
-        stop 'set ae_shape1 to "impulse", "Ecos2", or "Acos2"'
-      end select
+      !select case(ae_shape1)
+      !case("impulse","Ecos2","Acos2","input")
+      !  continue
+      !case default
+      !  stop 'set ae_shape1 to "impulse", "Ecos2", or "Acos2"'
+      !end select
 
-      select case(ae_shape2)
-      case("none","impulse","Ecos2","Acos2")
-        continue
-      case default
-        stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
-      end select
+      !select case(ae_shape2)
+      !case("none","impulse","Ecos2","Acos2")
+      !  continue
+      !case default
+      !  stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
+      !end select
     end select
     
     select case(method_singlescale)

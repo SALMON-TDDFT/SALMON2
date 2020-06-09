@@ -91,7 +91,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   integer :: iob, i1,iik,jspin, Mit, m, n
   integer :: idensity, idiffDensity
   integer :: jj, ix,iy,iz
-  real(8) :: rbox_array2(4),tt
+  real(8) :: rbox_array2(4) !,tt
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line

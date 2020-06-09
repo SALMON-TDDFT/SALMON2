@@ -347,7 +347,7 @@ subroutine add_Ac_from_file(filename, t0, delta_t, is, ie, Ac_ext_t)
   
   integer :: n_dat, i
   real(8), allocatable :: t_dat(:), Ac_dat(:, :)
-  real(8) :: t, dt_dat, Ac(1:3)
+  real(8) :: Ac(1:3)   !,t,dt_dat
 
   n_dat = count_rows_from_rtdata_file(trim(filename))
 
