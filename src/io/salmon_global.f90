@@ -131,6 +131,7 @@ module salmon_global
   integer        :: n_hamil
   character(16)  :: propagator
   character(1)   :: yn_fix_func
+  character(1)   :: yn_predictor_corrector
 
 !! &scf
   character(8)   :: method_init_wf

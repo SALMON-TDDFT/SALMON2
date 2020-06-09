@@ -293,7 +293,8 @@ contains
     namelist/propagation/ &
       & n_hamil, &
       & propagator, &
-      & yn_fix_func
+      & yn_fix_func, &
+      & yn_predictor_corrector
 
     namelist/scf/ &
       & method_init_wf, &
@@ -593,6 +594,7 @@ contains
     n_hamil     = 4
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
+    yn_predictor_corrector = 'n'
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
@@ -959,6 +961,7 @@ contains
     call comm_bcast(n_hamil    ,nproc_group_global)
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
+    call comm_bcast(yn_predictor_corrector,nproc_group_global)
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)
     call comm_bcast(iseed_number_change     ,nproc_group_global)
@@ -1694,6 +1697,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
       write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
@@ -1997,6 +2001,7 @@ contains
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)
+    call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)
