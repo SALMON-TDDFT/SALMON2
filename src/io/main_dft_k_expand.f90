@@ -483,7 +483,7 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
   type(s_parallel_info) :: info
   type(s_mixing) :: mixing
   character(*)    :: odir
-  character(1024) :: dir_file_out, ofile_cube
+  character(1024) :: dir_file_out  !,ofile_cube
   integer :: iu1,ik, num_rho_stock
   integer :: lg_is_new(3), lg_ie_new(3), ixyz, nval
   integer :: ix_add, iy_add, iz_add,iix,iiy,iiz
@@ -611,13 +611,13 @@ subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
   type(s_parallel_info) :: info
   type(s_mixing)  :: mixing
   character(*)    :: odir(kex%nk)
-  character(1024) :: dir_file_out, ofile_cube
-  real(8) :: tmp_norm(system%nk,system%no), norm_all(system%nk,system%no)
-  real(8) :: norm, scale, rshift(3), r(3)
-  integer :: ix_add, iy_add, iz_add !,mx,my,mz
+  character(1024) :: dir_file_out    !,ofile_cube
+ !real(8) :: tmp_norm(system%nk,system%no), norm_all(system%nk,system%no)
+  real(8) :: scale, rshift(3), r(3)  !,norm
+  integer :: ix_add, iy_add, iz_add  !,mx,my,mz
   integer :: iu,id,ip_x,ip_y,ip_z, inkx,inky,inkz, ip_o,ip_k
-  integer :: im,ik,is,ix,iy,iz,iix,iiy,iiz, io
-  real(8),allocatable :: orb_real(:,:,:)
+  integer :: im,ik,is,ix,iy,iz,iix,iiy,iiz !, io
+ !real(8),allocatable :: orb_real(:,:,:)
   complex(8) :: ai,ekr
   complex(8),allocatable :: zwf_ekr(:,:,:,:)
 
