@@ -610,7 +610,7 @@ contains
     use structures, only: s_ofile,s_dft_energy,s_md
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_global, only: ensemble, thermostat, itcalc_ene
+    use salmon_global, only: ensemble, thermostat, out_rt_energy_step
     use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
@@ -678,7 +678,7 @@ contains
        flush(uid)
 
     else  !it>=0
-       if(mod(it,itcalc_ene)==0)then
+       if(mod(it,out_rt_energy_step)==0)then
           uid = ofl%fh_rt_energy
    
           write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
@@ -1152,7 +1152,7 @@ contains
   !! export SYSNAME_info.data file (GS info)
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
-    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,ntmg,unit_system
+    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,unit_system
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1214,9 +1214,7 @@ contains
        write(fh,*)       
 100    format(1x,4(i5,f15.4,2x))
 
-       do ii=1,ntmg
-          write(fh,200) "Size of the box (A) = ", system%primitive_a*au_length_aa
-       end do
+       write(fh,200) "Size of the box (A) = ", system%primitive_a*au_length_aa
        write(fh,200) "Grid spacing (A)    = ", (system%Hgs(jj)*au_length_aa,jj=1,3)
        write(fh,*)
 200    format(1x,a,30f14.8)

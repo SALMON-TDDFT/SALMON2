@@ -406,6 +406,7 @@ contains
       & out_projection_step, &
       & nenergy, &
       & de, &
+      & out_rt_energy_step, &
       & yn_out_psi, &
       & yn_out_dos, &
       & yn_out_dos_set_fe_origin, &
@@ -464,11 +465,9 @@ contains
       & yn_stop_system_momt
 
     namelist/group_fundamental/ &
-      & ntmg, &
       & iwrite_projection, &
       & itwproj, &
-      & iwrite_projnum, &
-      & itcalc_ene
+      & iwrite_projnum
 
     namelist/group_hartree/ &
       & lmax_lmp
@@ -708,6 +707,7 @@ contains
     out_projection_step = 100
     nenergy             = 1000
     de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
+    out_rt_energy_step  = 10
     yn_out_psi          = 'n'
     yn_out_dos          = 'n'
     yn_out_dos_set_fe_origin = 'n'
@@ -763,11 +763,9 @@ contains
     thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
-    ntmg                   = 1
     iwrite_projection      = 0
     itwproj                = -1
     iwrite_projnum         = 0
-    itcalc_ene             = 10
 !! == default for &group_hartree
     lmax_lmp = 4
 !! == default for &group_others
@@ -1136,6 +1134,7 @@ contains
     call comm_bcast(nenergy             ,nproc_group_global)
     call comm_bcast(de                  ,nproc_group_global)
     de = de * uenergy_to_au
+    call comm_bcast(out_rt_energy_step  ,nproc_group_global)
     call comm_bcast(yn_out_psi          ,nproc_group_global)
     call comm_bcast(yn_out_dos          ,nproc_group_global)
     call comm_bcast(yn_out_dos_set_fe_origin ,nproc_group_global)
@@ -1199,11 +1198,9 @@ contains
     thermostat_tau = thermostat_tau * utime_to_au
     call comm_bcast(yn_stop_system_momt    ,nproc_group_global)
 !! == bcast for &group_fundamental
-    call comm_bcast(ntmg                  ,nproc_group_global)
     call comm_bcast(iwrite_projection     ,nproc_group_global)
     call comm_bcast(itwproj               ,nproc_group_global)
     call comm_bcast(iwrite_projnum        ,nproc_group_global)
-    call comm_bcast(itcalc_ene            ,nproc_group_global)
 !! == bcast for &group_hartree
     call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_others
@@ -1872,6 +1869,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
@@ -1936,11 +1934,9 @@ contains
 
       if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'ntmg', ntmg
       write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itcalc_ene', itcalc_ene
 
       if(inml_group_hartree >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_hartree', inml_group_hartree
