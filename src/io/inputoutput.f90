@@ -245,8 +245,6 @@ contains
       & spin, &
       & al, &
       & al_vec1,al_vec2,al_vec3, &
-      & isym, &
-      & crystal_structure, &
       & nstate, &
       & nstate_spin, &
       & nelec, &
@@ -554,8 +552,6 @@ contains
     al_vec1            = 0d0
     al_vec2            = 0d0
     al_vec3            = 0d0
-    isym               = 1
-    crystal_structure  = 'none'
     nstate             = 0
     nstate_spin(:)     = 0
     nelec              = 0
@@ -913,8 +909,6 @@ contains
     al_vec1 = al_vec1 * ulength_to_au
     al_vec2 = al_vec2 * ulength_to_au
     al_vec3 = al_vec3 * ulength_to_au
-    call comm_bcast(isym               ,nproc_group_global)
-    call comm_bcast(crystal_structure  ,nproc_group_global)
     call comm_bcast(nstate             ,nproc_group_global)
     call comm_bcast(nstate_spin        ,nproc_group_global)
     call comm_bcast(nelec              ,nproc_group_global)
@@ -1639,8 +1633,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec1(1:3)', al_vec1(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2(1:3)', al_vec2(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3(1:3)', al_vec3(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",I1)') 'isym', isym
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'crystal_structure', crystal_structure
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nstate', nstate
       write(fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nstate_spin(1:2)', nstate_spin
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nelec', nelec
