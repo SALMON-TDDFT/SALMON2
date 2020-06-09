@@ -297,9 +297,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_INIT_RT)
   
-  ntmg=1
   ! 'Hartree' parameter
-  
   poisson%iterVh = 0        ! Iteration counter
   
   call timer_end(LOG_INIT_RT)

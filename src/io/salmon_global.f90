@@ -243,6 +243,7 @@ module salmon_global
   character(2)   :: projection_option
   integer        :: nenergy
   real(8)        :: de
+  integer        :: out_rt_energy_step
   character(1)   :: yn_out_psi
   character(1)   :: yn_out_dos
   character(1)   :: yn_out_dos_set_fe_origin
@@ -303,11 +304,9 @@ module salmon_global
   character(1)   :: yn_stop_system_momt
 
 !! &group_fundamental
-  integer        :: ntmg
   integer        :: iwrite_projection
   integer        :: itwproj
   integer        :: iwrite_projnum
-  integer        :: itcalc_ene
 
 !! &group_others
   integer        :: num_projection
