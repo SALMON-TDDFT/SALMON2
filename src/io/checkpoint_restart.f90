@@ -571,14 +571,9 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 #else
     ! single process execution
     select case(method_wf_distributor)
-    ! create single shared file
-    case('single')
-      call write_all
-    ! sliced shared file
-    case('slice')
-      call write_sliced
-    case default
-      stop 'write_wavefunction: fatal error'
+    case('single') ; call write_all    ! create single shared file
+    case('slice')  ; call write_sliced ! sliced shared file
+    case default   ; stop 'write_wavefunction: fatal error'
     end select
 #endif
   end if
@@ -621,43 +616,18 @@ contains
     use filesystem
     implicit none
     integer :: nblock_orbital
-    integer :: ik,io,nb,io_e
-    logical :: check
+    integer :: ik,io,nb
     integer :: mo
 
     mo = info%io_e - info%io_s + 1
     nblock_orbital = min(mo,nblock_wf_distribute)
 
     ! create all directory
-    if (mod(info%io_e,nblock_orbital) > 0) then
-      io_e = (info%io_e / nblock_orbital + 1) * nblock_orbital
-    else
-      io_e = info%io_e
-    end if
-
     do ik=info%ik_s,info%ik_e
-    do io=info%io_s,io_e,nblock_orbital
-      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-      if (nb >= (info%io_s - nblock_orbital + 1)) then
-        write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',nb
-        if (comm_is_root(info%id_r)) then
-          call create_directory(dir_file_out)
-        end if
-      end if
+    do io=info%io_s,info%io_e,nblock_orbital
+      write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',io
+      call create_directory(dir_file_out)
     end do
-    end do
-
-    ! check own path
-    do while(.true.)
-      check = .true.
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,io_e,nblock_orbital
-        nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-        write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',nb
-        check = check .and. directory_exists(dir_file_out)
-      end do
-      end do
-      if (check) exit
     end do
 
     do ik=info%ik_s,info%ik_e
@@ -1165,6 +1135,11 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
   integer :: iu2_r
   character(256) :: dir_file_in
   logical :: is_read
+#ifdef USE_MPI
+#else
+  real(8),allocatable :: ddummy(:,:,:)
+  complex(8),allocatable :: zdummy(:,:,:)
+#endif
 
   iu2_r = 86
 
@@ -1196,16 +1171,10 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
 #else
     ! single process execution
     select case(method_wf_distributor)
-    ! create single shared file
-    case('single')
-      call read_all
-    ! sliced shared file
-    case ('slice')
-      call read_sliced
-    case default
-      stop 'read_wavefunction: fatal error'
+    case('single') ; call read_all    ! create single shared file
+    case('slice')  ; call read_sliced ! sliced shared file
+    case default   ; stop 'read_wavefunction: fatal error'
     end select
-
 #endif
   end if
 
@@ -1218,8 +1187,6 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
 contains
   subroutine read_all
     implicit none
-    real(8),allocatable :: ddummy(:,:,:)
-    complex(8),allocatable :: zdummy(:,:,:)
     integer :: im,ik,io,is
 
     dir_file_in = trim(idir)//"wfn.bin"
@@ -1268,9 +1235,6 @@ contains
     implicit none
     integer :: nblock_orbital
     integer :: ik,io,nb,io_e,is
-    logical :: check
-    real(8),allocatable :: ddummy(:,:,:)
-    complex(8),allocatable :: zdummy(:,:,:)
 
     nblock_orbital = min(mo,nblock_wf_distribute)
 
@@ -1957,31 +1921,26 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
   if (allocated(spsi%rwf)) then
     source_type = MPI_DOUBLE
   else if (allocated(spsi%zwf)) then
-    source_type = MPI_DOUBLE_COMPLEX
-  end if
-
-  if (rw_mode == read_mode .and. if_real_orbital) then
-    source_type = MPI_DOUBLE
+    if (rw_mode == read_mode .and. if_real_orbital) then
+      source_type = MPI_DOUBLE
+    else
+      source_type = MPI_DOUBLE_COMPLEX
+    end if
   end if
 
   call set_mpi_info
 
   select case(method_wf_distributor)
-  ! create single shared file
-  case('single')
-    call write_all
-  ! sliced shared file
-  case ('slice')
-    call write_sliced
-  case default
-    stop 'rw_wavefunction: fatal error'
+  case('single') ; call rw_all    ! create single shared file
+  case('slice')  ; call rw_sliced ! sliced shared file
+  case default   ; stop 'rw_wavefunction: fatal error'
   end select
 
   call free_mpi_info
   call deallocate_orbital(dummy)
 
 contains
-  subroutine write_all
+  subroutine rw_all
     implicit none
 
     iofile = trim(iodir)//"wfn.bin"
@@ -2028,8 +1987,7 @@ contains
         else if (allocated(spsi%zwf)) then
           if (source_type == MPI_DOUBLE) then
             ! convert from double to double complex
-            ! NOTE: When simulating large-scale isolated system, it's possible that
-            !       SALMON hangs by failing memory allocation.
+            ! NOTE: When simulating large-scale isolated system, it's possible that SALMON hangs by failing memory allocation.
             MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
             spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:) &
               = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
@@ -2042,9 +2000,9 @@ contains
     MPI_CHECK(MPI_File_close(mfile, ierr))
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
-  end subroutine write_all
+  end subroutine rw_all
 
-  subroutine write_sliced
+  subroutine rw_sliced
     use filesystem
     use communication, only: comm_is_root
     implicit none
@@ -2163,7 +2121,7 @@ contains
 
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
-  end subroutine write_sliced
+  end subroutine rw_sliced
 
   subroutine set_mpi_info
     implicit none
