@@ -2053,16 +2053,10 @@ contains
 
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,io_e,nblock_orbital
-        nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-        if (nb >= (info%io_s - nblock_orbital + 1) .and. nb <= info%io_e) then
+        if (mod((io - 1) / nblock_orbital, info%isize_o) == info%id_o) then
+          nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
           write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
-          if (comm_is_root(info%id_r)) then
-            ! FIXME: Any process will randomly crashes when a directory is
-            ! already created by other process, because this routine is
-            ! sometimes called by some processes.
-            ! Currently, we ignore an error of the routine.
-            call create_directory(iofile,iret)
-          end if
+          call create_directory(iofile,iret)
         end if
       end do
       end do
