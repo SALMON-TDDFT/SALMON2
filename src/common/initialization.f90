@@ -98,6 +98,7 @@ subroutine init_dft_system(lg,system,stencil)
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
+  use occupation_so, only: SPIN_ORBIT_ON, init_occupation_so
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -193,24 +194,28 @@ subroutine init_dft_system(lg,system,stencil)
 
 ! initial value of occupation
   system%rocc = 0d0
-  select case(system%nspin)
-  case(1)
-    system%rocc(1:nelec/2,:,1) = 2d0
-  case(2)
-    if ( nelec > 0 ) then
-      if ( mod(nelec,2) == 0 ) then
-        system%rocc(1:nelec/2,:,1:2) = 1d0
+  if ( SPIN_ORBIT_ON ) then
+    call init_occupation_so( system%rocc, nelec )
+  else
+    select case(system%nspin)
+    case(1)
+      system%rocc(1:nelec/2,:,1) = 2d0
+    case(2)
+      if ( nelec > 0 ) then
+        if ( mod(nelec,2) == 0 ) then
+          system%rocc(1:nelec/2,:,1:2) = 1d0
+        else
+          system%rocc(1:(nelec-1)/2,:,1:2) = 1d0
+          system%rocc((nelec-1)/2+1,:,1  ) = 1d0
+        end if
+      else if ( any(nelec_spin>0) ) then
+        system%rocc(1:nelec_spin(1),:,1) = 1d0
+        system%rocc(1:nelec_spin(2),:,2) = 1d0
       else
-        system%rocc(1:(nelec-1)/2,:,1:2) = 1d0
-        system%rocc((nelec-1)/2+1,:,1  ) = 1d0
+        write(*,*) "nelect or nelec_spin should be specified in input"
       end if
-    else if ( any(nelec_spin>0) ) then
-      system%rocc(1:nelec_spin(1),:,1) = 1d0
-      system%rocc(1:nelec_spin(2),:,2) = 1d0
-    else
-      write(*,*) "nelect or nelec_spin should be specified in input"
-    end if
-  end select
+    end select
+  end if
 
   call set_bn(bnmat)
   call set_cn(cnmat)

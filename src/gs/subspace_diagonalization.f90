@@ -18,9 +18,11 @@
 
 module subspace_diagonalization
 
-  use subspace_diagonalization_so, only: ssdg_periodic_so, SPIN_ORBIT_ON
+  use subspace_diagonalization_so, only: ssdg_so, SPIN_ORBIT_ON
 
   implicit none
+  private
+  public :: ssdg
 
 contains
 
@@ -42,6 +44,11 @@ subroutine ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)
   type(s_orbital)            :: spsi,shpsi
   type(s_sendrecv_grid)      :: srg
+
+  if ( SPIN_ORBIT_ON ) then
+     call ssdg_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+     return
+  end if
 
   if (system%if_real_orbital) then
     if (yn_scalapack_red_mem == 'y') then
@@ -267,11 +274,6 @@ end subroutine ssdg_rwf
   complex(8) :: hmat_block_tmp(info%numo_max, info%numo)
   real(8) :: eval(system%no)
 
-  if ( SPIN_ORBIT_ON ) then
-    call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-    return
-  end if
-
   call timer_begin(LOG_SSDG_PERIODIC_HPSI)
   call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
   call timer_end(LOG_SSDG_PERIODIC_HPSI)
@@ -435,11 +437,6 @@ real(8) :: hmat_block(info%numo_max, info%numo)
 real(8) :: hmat_block_tmp(info%numo_max, info%numo)
 !complex(8),dimension(system%no,system%no) :: zhmat, zevec
 real(8) :: eval(system%no)
-
-if ( SPIN_ORBIT_ON ) then
-  call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-  return
-end if
 
 call timer_begin(LOG_SSDG_PERIODIC_HPSI)
 call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
@@ -613,11 +610,6 @@ real(8) :: hmat_block_tmp(info%numo_max, info%numo)
 !complex(8),dimension(system%no,system%no) :: zhmat, zevec
 real(8) :: eval(system%no)
 
-if ( SPIN_ORBIT_ON ) then
-  call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-  return
-end if
-
 call timer_begin(LOG_SSDG_PERIODIC_HPSI)
 call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
 call timer_end(LOG_SSDG_PERIODIC_HPSI)
@@ -785,11 +777,6 @@ subroutine ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   complex(8) :: wf_io1(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   complex(8) :: wf_io2(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3))
   real(8) :: eval(system%no)
-
-  if ( SPIN_ORBIT_ON ) then
-    call ssdg_periodic_so(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
-    return
-  end if
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ subspace_diag"
 

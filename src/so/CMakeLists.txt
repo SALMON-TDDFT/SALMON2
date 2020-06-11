@@ -6,6 +6,7 @@ set(SOURCES
     spin_orbit_global.f90
     subspace_diagonalization_so.f90
     update_kvector_so.f90
+    occupation_so.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
