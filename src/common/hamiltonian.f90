@@ -304,8 +304,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   ! nonlocal potential
     if ( SPIN_ORBIT_ON ) then
-      call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
-      call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+!      call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
+!      call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+      call zpseudo(tpsi,htpsi,info,nspin,ppg)
     else
     ! pseudopotential
       call zpseudo(tpsi,htpsi,info,nspin,ppg)
@@ -683,8 +684,8 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
     call update_kvector_plusU( ppg, kAc, ik_s, ik_e )
   end if
   if ( SPIN_ORBIT_ON ) then
-    call update_kvector_so( ppg, kAc, ik_s, ik_e )
-    return
+    !call update_kvector_so( ppg, kAc, ik_s, ik_e )
+    !return
   end if
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))

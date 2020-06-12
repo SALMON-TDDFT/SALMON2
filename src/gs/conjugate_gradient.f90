@@ -14,7 +14,13 @@
 !  limitations under the License.
 !
 module Conjugate_Gradient
+
+  use Conjugate_Gradient_so, only: gscg_rwf_so, gscg_zwf_so, SPIN_ORBIT_ON
+
   implicit none
+  private
+  public :: gscg_rwf
+  public :: gscg_zwf
 
 contains
 
@@ -40,6 +46,11 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: nspin,io,ispin,io_s,io_e,is(3),ie(3),iy,iz
   integer :: iter
   real(8),dimension(system%nspin,system%no) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
+
+  if ( SPIN_ORBIT_ON ) then
+    call gscg_rwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+    return
+  end if
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 
@@ -348,6 +359,11 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
   integer :: nspin,ik,io,ispin,ik_s,ik_e,io_s,io_e,is(3),ie(3),iy,iz
   integer :: iter
   complex(8),dimension(system%nspin,system%no,system%nk) :: sum,xkxk,xkHxk,xkHpk,pkHpk,gkgk,uk,ev,cx,cp,zs
+
+  if ( SPIN_ORBIT_ON ) then
+    call gscg_zwf_so(ncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,cg)
+    return
+  end if
 
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ gscg"
 

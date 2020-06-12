@@ -325,6 +325,11 @@ CONTAINS
       end do
       
       call timer_begin(LOG_EIGEN_ENERGY_CALC)
+      if ( SPIN_ORBIT_ON ) then
+        energy%esp(:,:,1) = energy%esp(:,:,1) + energy%esp(:,:,2)
+        energy%esp(:,:,2) = energy%esp(:,:,1)
+      end if
+
     ! kinetic energy (E_kin)
       E_tmp = 0d0
 !$omp parallel do collapse(3) default(none) &
