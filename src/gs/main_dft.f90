@@ -132,6 +132,7 @@ if(iopt>=2)then
   call dealloc_init_ps(ppg)
   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call calc_nlcc(pp, system, mg, ppn)
+  if(yn_auto_mixing=='y') call reset_mixing_rate(mixing)
   call timer_end(LOG_INIT_GS)
 end if
 

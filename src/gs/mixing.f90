@@ -567,5 +567,19 @@ subroutine check_mixing_half(Miter,convergence_value,mixing)
 
 end subroutine check_mixing_half
 
+subroutine reset_mixing_rate(mixing)
+  use salmon_global, only: mixrate, alpha_mb, beta_p
+  use structures, only: s_mixing
+  implicit none
+  type(s_mixing), intent(inout) :: mixing
+
+  mixing%mixrate  = mixrate
+  mixing%alpha_mb = alpha_mb
+  mixing%beta_p   = beta_p
+  mixing%convergence_value_prev = 1.d10
+
+end subroutine reset_mixing_rate
+
+
 !===================================================================================================================================
 end module mixing_sub
