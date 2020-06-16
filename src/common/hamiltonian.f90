@@ -102,8 +102,20 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     end do
     call timer_end(LOG_UHPSI_STENCIL)
 
-  ! pseudopotential
-    call dpseudo(tpsi,htpsi,info,Nspin,ppg)
+    ! nonlocal potential
+    if ( SPIN_ORBIT_ON ) then
+      !call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
+!      call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+      call dpseudo(tpsi,htpsi,info,nspin,ppg)
+    else
+      ! pseudopotential
+      call dpseudo(tpsi,htpsi,info,Nspin,ppg)
+    end if
+
+    ! DFT+U
+    if ( PLUS_U_ON ) then
+      call pseudo_plusU(tpsi,htpsi,system,info,ppg)
+    end if
 
   else
 
