@@ -465,15 +465,15 @@ contains
       & thermostat_tau, &
       & yn_stop_system_momt
 
-    namelist/group_fundamental/ &
-      & iwrite_projection, &
-      & itwproj, &
-      & iwrite_projnum
+    namelist/group_fundamental/ &  !remove later
+      & iwrite_projection, &       !remove later
+      & itwproj, &                 !remove later
+      & iwrite_projnum             !remove later
 
-    namelist/group_others/ &
-      & num_projection, &
-      & iwrite_projection_ob, &
-      & iwrite_projection_k
+    namelist/group_others/ &       !remove later
+      & num_projection, &          !remove later
+      & iwrite_projection_ob, &    !remove later
+      & iwrite_projection_k        !remove later
 
     namelist/code/ &
       & yn_want_stencil_hand_vectorization, &
@@ -1930,20 +1930,22 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
 
-      if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
+!(remove later)
+!      if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
+!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
+!      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
 
-      if(inml_group_others >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
+!(remove later)
+!      if(inml_group_others >0)ierr_nml = ierr_nml +1
+!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
 
 
       select case(iflag_atom_coor)
