@@ -147,6 +147,8 @@ call timer_begin(LOG_GS_ITERATION)
 
 MD_Loop : do it=1,nt
 
+   if(yn_auto_mixing=='y') call reset_mixing_rate(mixing)
+
    call time_evolution_step_md_part1(it,system,md)
 
    call update_pseudo_rt(it,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
