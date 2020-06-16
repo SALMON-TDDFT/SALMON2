@@ -56,7 +56,10 @@ use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik,is
-integer :: ilevel_print !=2:print-all, =1:print-minimum, =1:no-print
+integer :: ilevel_print !=3:print-all
+                        !=2:print-only energy & convergence
+                        !=1:print-minimum
+                        !=0:no-print
 integer :: iter,Miter,iob,p1,p2,p5
 real(8) :: sum0,sum1
 real(8) :: rNebox1,rNebox2
@@ -148,7 +151,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    if( sum1 < threshold ) then
       flag_conv = .true.
-      if( ilevel_print.ge.2 .and. comm_is_root(nproc_id_global)) then
+      if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
       endif
       exit DFT_Iteration
@@ -203,7 +206,7 @@ DFT_Iteration : do iter=Miter+1,nscf
                if( iob <= band%nref_band ) band%check_conv_esp(iob,ik,is)=.true.
             end if
          end do !io
-         if( ilevel_print.ge.2 ) then
+         if( ilevel_print.ge.3 ) then
          if( is==1 .and. ik==1 ) then
             write(*,'(/,1x,"ispin","   ik",2x,"converged bands (total, maximum band index)")')
          end if
@@ -268,7 +271,7 @@ DFT_Iteration : do iter=Miter+1,nscf
       end if
    end select
    
-   if( ilevel_print.ge.2 ) then
+   if( ilevel_print.ge.3 ) then
    if(comm_is_root(nproc_id_global)) then
       write(*,*) '-----------------------------------------------'
       select case(iperiodic)
@@ -310,7 +313,21 @@ DFT_Iteration : do iter=Miter+1,nscf
 204   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids)= ",i6,e15.8)
 
    end if
-   end if
+
+   else if( ilevel_print==2 ) then
+
+   if(comm_is_root(nproc_id_global)) then
+      select case(iperiodic)
+      case(0)
+         write(*,400) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1,poisson%iterVh
+      case(3)
+         write(*,401) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1
+      end select
+400   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7,3x,"Vh iter=",i4)
+401   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7)
+   endif
+
+   end if  !ilevel_print
 
 ! modification of mixing rate for auto_mixing
    if(yn_auto_mixing=='y')then
@@ -327,7 +344,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    end do
    end do
    call comm_summation(rNebox1,rNebox2,info%icomm_r)
-   if( ilevel_print.ge.2 ) then
+   if( ilevel_print.ge.3 ) then
    if(comm_is_root(nproc_id_global))then
       write(*,*) "Ne=",rNebox2*system%Hvol
    end if
