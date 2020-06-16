@@ -752,7 +752,7 @@ subroutine read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 
   icount=-1
   do
-    read(4,*) cbuf
+    read(4,*,END=9) cbuf
     if ( cbuf == "<density.PCC" ) then
       icount=0
       cycle
@@ -774,6 +774,9 @@ subroutine read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
      r=r+rhor_nlcc(i,0)*pp%rad(i+1,ik)**2*(pp%rad(i+1,ik)-pp%rad(i,ik))
   end do
   write(*,*) "r=",r, r*4.0d0*acos(-1.0d0)
+
+9 continue
+
   close(4)
 
 end subroutine read_ps_adpack
