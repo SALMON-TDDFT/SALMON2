@@ -1215,11 +1215,11 @@ contains
     use parallelization
     use communication
     use filesystem, only: get_filehandle
-    use salmon_global, only: directory_read_data,yn_restart
+    use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
     use checkpoint_restart_sub, only: generate_restart_directory_name
     character(256) :: filename_tmp,char_atom, gdir,wdir
     integer :: icount,i
-    logical :: if_error, if_cartesian
+    logical :: if_error, if_cartesian, iself
 
     if (comm_is_root(nproc_id_global)) then
 
@@ -1266,7 +1266,8 @@ contains
 
         icount = icount + 1
         if_cartesian = .true.
-        if(yn_self_checkpoint == 'y') then
+        iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'   !refer restart_rt
+        if(iself) then
            filename_tmp = trim(gdir)//"rank_000000/atomic_coor.txt"
         else
            filename_tmp = trim(gdir)//"atomic_coor.txt"
