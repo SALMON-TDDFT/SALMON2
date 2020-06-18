@@ -591,7 +591,7 @@ contains
 !! == default for &tgrid
     nt = 0
     dt = 0
-    gram_schmidt_interval = 0
+    gram_schmidt_interval = -1
 !! == default for &propagation
     n_hamil     = 4
     propagator  = 'middlepoint'
