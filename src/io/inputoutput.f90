@@ -1951,12 +1951,12 @@ contains
 
       select case(iflag_atom_coor)
       case(ntype_atom_coor_cartesian)
-        write(fh_variables_log, '("#namelist: ",A)') 'atom_coor'
+        write(fh_variables_log, '("#namelist: ",A)') 'atomic_coor'
         do i = 1,natom
           write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion(',i,')', Rion(1:3,i)
         end do
       case(ntype_atom_coor_reduced)
-        write(fh_variables_log, '("#namelist: ",A)') 'atom_red_coor'
+        write(fh_variables_log, '("#namelist: ",A)') 'atomic_red_coor'
         do i = 1,natom
           write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion_red(',i,')', Rion_red(1:3,i)
         end do
