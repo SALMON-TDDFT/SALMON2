@@ -217,9 +217,7 @@ subroutine initialization_ms()
     else
         stop "number of procs must be larger than number of points!"
     end if
-    
-    if (ms%nmacro < 1) stop "Invalid macropoint number"
-    
+        
     allocate(iranklists(isize_mygroup))
     do i = 1, isize_mygroup
         iranklists(i) = ms%id_mygroup_s + (i - 1)
@@ -238,8 +236,8 @@ subroutine initialization_ms()
 
     fw%dt = dt
     fw%fdtddim = '1d'
-    fs%mg%is(1) = -nxvacl_m
-    fs%mg%ie(1) = nx_m+nxvacr_m
+    fs%mg%is(1) = - abs(nxvacl_m)
+    fs%mg%ie(1) = nx_m + abs(nxvacr_m)
     fs%mg%is(2) = 1
     fs%mg%ie(2) = ny_m
     fs%mg%is(3) = 1
@@ -256,7 +254,7 @@ subroutine initialization_ms()
     fs%origin(3) = 0d0
     do ii = 1, 3
         do jj = 1, 2
-        fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
+            fs%a_bc(ii,jj) = trim(boundary_em(ii,jj))
         end do
     end do
 
@@ -502,7 +500,7 @@ end subroutine checkpoint_ms
 
 
 subroutine write_RT_Ac_file()
-    use inputoutput, only: t_unit_ac, t_unit_current, t_unit_elec, t_unit_length
+    use inputoutput, only: t_unit_ac, t_unit_current, t_unit_elec, t_unit_length, t_unit_energy
     implicit none
     integer ::  iix, iiy, iiz
     character(256) :: filename
@@ -521,9 +519,6 @@ subroutine write_RT_Ac_file()
               & 1, "IX", "none", &
               & 2, "IY", "none", &
               & 3, "IZ", "none", &
-            !   & 4, "x", trim(t_unit_length%name), &
-            !   & 5, "y", trim(t_unit_length%name), &
-            !   & 6, "z", trim(t_unit_length%name), &
               & 4, "Ac_x", trim(t_unit_ac%name), &
               & 5, "Ac_y", trim(t_unit_ac%name), &
               & 6, "Ac_z", trim(t_unit_ac%name), &
@@ -533,20 +528,19 @@ subroutine write_RT_Ac_file()
               & 10, "B_x", "a.u.", &
               & 11, "B_y", "a.u.", &
               & 12, "B_z", "a.u.", &
-              & 13, "Jm_x", trim(t_unit_current%name), &
-              & 14, "Jm_y", trim(t_unit_current%name), &
-              & 15, "Jm_z", trim(t_unit_current%name)
+              & 13, "Jem_x", trim(t_unit_current%name), &
+              & 14, "Jem_y", trim(t_unit_current%name), &
+              & 15, "Jem_z", trim(t_unit_current%name)
+              & 16, "E_em", trim(t_unit_energy%name) // "/vol"
+              & 17, "E_abs", trim(t_unit_energy%name) //  "/vol"
 
             do iiz = fs%mg%is(3), fs%mg%ie(3)
             do iiy = fs%mg%is(2), fs%mg%ie(2)
             do iix = fs%mg%is(1), fs%mg%ie(1)
-                write(8888, '(3(i6, 1x), 12(e23.15e3, 1x))')  &
+                write(8888, '(3(i6, 1x), 14(e23.15e3, 1x))')  &
                     & iix, & 
                     & iiy, & 
                     & iiz, & 
-                    ! & iix * fs%hgs(1) * t_unit_length%conv, &
-                    ! & iiy * fs%hgs(2) * t_unit_length%conv, &
-                    ! & iiz * fs%hgs(3) * t_unit_length%conv, &
                     & fw%vec_Ac%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
                     & fw%vec_Ac%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
                     & fw%vec_Ac%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
@@ -558,7 +552,9 @@ subroutine write_RT_Ac_file()
                     & fw%vec_H%v(3, iix, iiy, iiz), &
                     & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
                     & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
-                    & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv
+                    & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv, &
+                    & fw%edensity_emfield%s(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
+                    & fw%edensity_absorb%s(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
             end do
             end do
             end do
