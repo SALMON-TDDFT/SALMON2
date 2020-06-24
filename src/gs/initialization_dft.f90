@@ -93,7 +93,7 @@ end do
 call read_pslfile(system,pp)
 call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
 call calc_nlcc(pp, system, mg, ppn)  !setup NLCC term from pseudopotential
-if(comm_is_root(nproc_id_global)) then
+if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
   write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
   write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
 end if
@@ -131,7 +131,7 @@ subroutine init_code_optimization
   end if
   call set_modulo_tables(ignum)
 
-  if (comm_is_root(nproc_id_global)) then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
     call optimization_log(info)
   end if
 end subroutine

@@ -94,7 +94,7 @@ subroutine init_dft_system(lg,system,stencil)
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
   & nproc_rgrid,Rion,Rion_red,nelec,calc_mode,temperature,nelec_spin, &
-  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin
+  & iflag_atom_coor,ntype_atom_coor_reduced,epdir_re1,nstate_spin,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
@@ -151,7 +151,7 @@ subroutine init_dft_system(lg,system,stencil)
       end if
     end select
   end if
-  if(comm_is_root(nproc_id_global)) then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      write(*,*) "  use of real value orbitals = ", system%if_real_orbital
   endif
 
@@ -465,7 +465,7 @@ end subroutine check_ffte_condition
 
 subroutine init_grid_parallel(info,lg,mg)
   use communication, only: comm_is_root
-  use salmon_global, only: yn_periodic
+  use salmon_global, only: yn_periodic, quiet
   use structures, only: s_rgrid,s_parallel_info
   implicit none
   type(s_parallel_info),intent(in)    :: info
@@ -530,7 +530,8 @@ subroutine init_grid_parallel(info,lg,mg)
           ,mg%idz(mg%is_overlap(3):mg%ie_overlap(3)))
 
   if(yn_periodic=='y' .and. product(nproc_domain_orbital)==1) then
-    if(comm_is_root(myrank)) write(*,*) "r-space parallelization: off"
+    if((.not. quiet) .and. comm_is_root(myrank)) &
+      & write(*,*) "r-space parallelization: off"
     mg%is_array(1:3) = mg%is(1:3)
     mg%ie_array(1:3) = mg%ie(1:3)
     do j=mg%is_overlap(1),mg%ie_overlap(1)

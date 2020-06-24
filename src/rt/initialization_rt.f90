@@ -55,6 +55,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
+  use salmon_global, only: quiet
   use gram_schmidt_orth, only: gram_schmidt
   implicit none
   integer,parameter :: Nd = 4
@@ -106,7 +107,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   Ntime=nt
   
-  if(comm_is_root(nproc_id_global))then
+  if((.not. quiet) .and. comm_is_root(nproc_id_global))then
     write(*,*)
     write(*,*) "Total time step      =",Ntime
     write(*,*) "Time step[fs]        =",dt*au_time_fs
@@ -132,8 +133,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   23 format(a21,2f5.2, a4)
   24 format(a21,2f16.8,a4)
   25 format(a21,2e16.8,a8)
+  endif
   
-  end if
   
   debye2au = 0.393428d0
 
@@ -204,7 +205,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
 
   call calc_nlcc(pp, system, mg, ppn)
-  if (comm_is_root(nproc_id_global)) then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
     write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
     write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
   end if
@@ -379,7 +380,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call calc_dip(info%icomm_r,lg,mg,rho,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
-  if(comm_is_root(nproc_id_global))then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global))then
     write(*,'(a30)', advance="no") "Static dipole moment(xyz) ="
     write(*,'(3e20.10)') (rt%Dp0_e(i1)*au_length_aa, i1=1,3)
     write(*,*)
@@ -506,7 +507,7 @@ subroutine init_code_optimization
   end if
   call set_modulo_tables(ignum)
 
-  if (comm_is_root(nproc_id_global)) then
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      call optimization_log(info)
   end if
 end subroutine init_code_optimization

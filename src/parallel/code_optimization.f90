@@ -111,7 +111,7 @@ contains
     use parallelization, only: is_distributed_parallel, get_nthreads
     implicit none
     type(s_parallel_info), intent(in) :: info
-    print *, '========== code optimization log =========='
+    print *, '======'
     if (is_distributed_parallel()) then
       print *, 'MPI distribution:'
       print *, '  nproc_k     :', info%npk
