@@ -100,7 +100,7 @@ call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 
-! if (comm_is_root(ms%id_ms_world)) call print_header()
+call print_header()
 
 TE : do itt=Mit+1,itotNtime
     call time_evolution_step_ms()
@@ -297,6 +297,9 @@ subroutine initialization_ms()
 
     do i = 1, ms%nmacro
 
+        if (comm_is_root(ms%id_ms_world)) &
+            write(*, *) "Initializing of macropoint:", i
+
         call comm_sync_all()
 
         if (macropoint_in_mygroup(i)) then
@@ -305,11 +308,12 @@ subroutine initialization_ms()
             nproc_group_global = ms%icomm_macropoint
             nproc_id_global = ms%id_macropoint
             nproc_size_global = ms%isize_macropoint
+            quiet = (1 < i)
 
             if (yn_restart == 'y') then
                 directory_read_data = trim(directory_read_data_macro(trim(ms%directory_read_data), i))
             end if
-                    
+            
             ! Initializa TDKS system
             call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                                     singlescale,  &
@@ -328,6 +332,7 @@ subroutine initialization_ms()
             nproc_id_global = ms%id_ms_world
             nproc_size_global = ms%isize_ms_world        
             directory_read_data = trim(ms%directory_read_data)
+            quiet = .false.
         end if
     end do
 
@@ -338,27 +343,13 @@ end subroutine initialization_ms
 
 
 
-
-
 subroutine print_header()
     implicit none
-    !(header of standard output)
-    ! if(comm_is_root(nproc_id_global))then
+    if (comm_is_root(ms%id_ms_world)) then
         write(*,*)
-        select case(iperiodic)
-        case(0)
-        write(*,'(1x,a10,a11,a11,a10,a48,a15,a18,a10)') &
-                    "time-step ", "time[fs]", "macropoint", &
-                    "Dipole moment(xyz)[A]"     &
-                    ,"electrons", "Total energy[eV]", "iterVh"
-        case(3)
-        write(*,'(1x,a10,a11,a10,a48,a15,a18)')   &
-                    "time-step", "time[fs] ", "macropoint", &
-                    "Current(xyz)[a.u.]",     &
-                    "electrons", "Total energy[eV] "
-        end select
+        write(*,'(a)') " istep  time     imacro current(xyz)"
         write(*,'("#",7("----------"))')
-    ! endif
+    endif
 end subroutine print_header
 
 
@@ -366,6 +357,7 @@ end subroutine print_header
 
 
 subroutine time_evolution_step_ms
+    use inputoutput, only: t_unit_ac, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
     implicit none
     integer :: iimacro, iix, iiy, iiz
     real(8) :: curr_tmp(3, ms%nmacro), curr(3, ms%nmacro)
@@ -385,6 +377,8 @@ subroutine time_evolution_step_ms
     nproc_group_global = ms%icomm_macropoint
     nproc_id_global = ms%id_macropoint
     nproc_size_global = ms%isize_macropoint
+    quiet = .true.
+
     curr_tmp(:, :) = 0d0
     do iimacro = ms%imacro_mygroup_s, ms%imacro_mygroup_s
         iix = ms%ixyz_tbl(1, iimacro)
@@ -410,6 +404,7 @@ subroutine time_evolution_step_ms
     nproc_group_global = ms%icomm_ms_world
     nproc_id_global = ms%id_ms_world
     nproc_size_global = ms%isize_ms_world
+    quiet = .false.
 
     call comm_summation(curr_tmp, curr, 3 * ms%nmacro, ms%icomm_ms_world)
 
@@ -420,9 +415,23 @@ subroutine time_evolution_step_ms
         fw%vec_j_em%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
     end do
 
+    ! print time step message
+    if (mod(itt, out_ms_step) == 0) then
+        if (comm_is_root(ms%id_ms_world)) then
+            do iimacro = 1, ms%nmacro
+                iix = ms%ixyz_tbl(1, iimacro)
+                iiy = ms%ixyz_tbl(2, iimacro)
+                iiz = ms%ixyz_tbl(3, iimacro)
+                write(*,'(i7,f12.3,i7,3e12.3e3)') &
+                    & itt, itt * dt * t_unit_time%conv, &
+                    & iimacro, &
+                    & fw%vec_j_em%v(1:3, iix, iiy, iiz) * t_unit_current%conv
+            end do
+        end if
+    end if
+
     return
 end subroutine time_evolution_step_ms
-
 
 
 
@@ -530,8 +539,8 @@ subroutine write_RT_Ac_file()
               & 12, "B_z", "a.u.", &
               & 13, "Jem_x", trim(t_unit_current%name), &
               & 14, "Jem_y", trim(t_unit_current%name), &
-              & 15, "Jem_z", trim(t_unit_current%name)
-              & 16, "E_em", trim(t_unit_energy%name) // "/vol"
+              & 15, "Jem_z", trim(t_unit_current%name), &
+              & 16, "E_em", trim(t_unit_energy%name) // "/vol", &
               & 17, "E_abs", trim(t_unit_energy%name) //  "/vol"
 
             do iiz = fs%mg%is(3), fs%mg%ie(3)
@@ -553,8 +562,8 @@ subroutine write_RT_Ac_file()
                     & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
                     & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
                     & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv, &
-                    & fw%edensity_emfield%s(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
-                    & fw%edensity_absorb%s(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
+                    & fw%edensity_emfield%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
+                    & fw%edensity_absorb%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
             end do
             end do
             end do

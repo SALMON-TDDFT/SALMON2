@@ -462,7 +462,7 @@ CONTAINS
     use structures
     use salmon_math
 !    use math_constants,only : pi,zi
-    use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g
+    use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g, quiet
     use communication, only: comm_is_root,comm_summation,comm_get_groupinfo
     use parallelization, only: nproc_id_global
     use inputoutput, only: au_length_aa
@@ -492,7 +492,7 @@ CONTAINS
     endif
     if(cutoff_g .lt. 0d0) cutoff_g = 99d99 ![1/Bohr]   !cutoff in G space
 
-    if(comm_is_root(nproc_id_global)) then
+    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
        write(*,900) " == Ewald =="
        write(*,800) " cutoff length in real-space in ewald =", cutoff_r*au_length_aa, " [A]"
        write(*,800) " (buffer length in bookkeeping =", cutoff_r_buff*au_length_aa, " [A])"
@@ -547,7 +547,7 @@ CONTAINS
       allocate( ewald%bk(4,ewald%nmax_pair_bk,info%nion_mg) )
       allocate( ewald%npair_bk(info%nion_mg) )
 
-      if(comm_is_root(nproc_id_global)) then
+      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
          write(*,820) " number of ion-ion pair(/atom) used for allocation of bookkeeping=", ewald%nmax_pair_bk
          write(*,*)"==========="
 820      format(a,i6)

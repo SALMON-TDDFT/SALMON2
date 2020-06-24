@@ -35,6 +35,8 @@ module salmon_global
   integer,parameter :: ntype_atom_coor_cartesian = 1
   integer,parameter :: ntype_atom_coor_reduced   = 2
 
+! Flag for suppress standard outputs 
+  logical :: quiet
 
   character(16)  :: calc_mode      !old input variable, but used as a flag; move later
 
@@ -327,5 +329,6 @@ character(256),allocatable :: atom_name(:)
   character(10) :: stencil_openmp_mode  ! 'auto', 'orbital', 'rgrid'
   character(10) :: current_openmp_mode  ! 'auto', 'orbital', 'rgrid'
   character(10) :: force_openmp_mode    ! 'auto', 'orbital', 'rgrid'
+
 
 end module salmon_global

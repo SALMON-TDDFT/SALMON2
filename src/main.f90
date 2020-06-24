@@ -22,6 +22,8 @@
 
   call timer_initialize
 
+  quiet = .false. ! enable to output message into stdout
+
   !GCEED: (main)
   if(nproc_id_global==0) write(*,*)"  theory= ", trim(theory)
   select case(theory)

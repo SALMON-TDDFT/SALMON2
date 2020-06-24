@@ -70,12 +70,12 @@ subroutine subdip(comm,itt,rt,lg,mg,rho,rNe,poisson,Etot,system,pp)
      select case(iperiodic)
      case(0)
        if(mod(itt,out_rt_energy_step)==0)then
-          write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)')   &
+          if (.not. quiet) write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8,i5)') &
               itt,time, rt%dDp_e(1:3,itt)*au_length_aa, rNe, Etot*au_energy_ev,poisson%iterVh
        end if
      case(3)
        if(mod(itt,out_rt_energy_step)==0)then
-         write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)')       &
+         if (.not. quiet) write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)') &
              itt, time, rt%curr(1:3,itt), rNe, Etot*au_energy_ev
        end if
      end select
