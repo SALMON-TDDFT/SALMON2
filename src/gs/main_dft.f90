@@ -132,6 +132,7 @@ if(iopt>=2)then
   call dealloc_init_ps(ppg)
   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call calc_nlcc(pp, system, mg, ppn)
+  if(yn_auto_mixing=='y') call reset_mixing_rate(mixing)
   call timer_end(LOG_INIT_GS)
 end if
 
@@ -191,7 +192,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         V_local,Vh,Vxc,Vpsl,xc_func,  &
                         pp,ppg,ppn,  &
                         rho_old,Vlocal_old,  &
-                        band, 2 )
+                        band, 3 )
 
 
 if(theory=='dft_band')then

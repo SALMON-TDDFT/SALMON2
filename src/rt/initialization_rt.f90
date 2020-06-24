@@ -56,6 +56,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use dip, only: calc_dip
   use sendrecv_grid
   use salmon_global, only: quiet
+  use gram_schmidt_orth, only: gram_schmidt
   implicit none
   integer,parameter :: Nd = 4
 
@@ -198,7 +199,11 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call comm_sync_all
   call timer_end(LOG_RESTART_SYNC)
   if(yn_restart=='n') Mit=0
-  
+
+  if((gram_schmidt_interval == 0) ) then
+    call gram_schmidt(system, mg, info, spsi_in)
+  end if
+
   call calc_nlcc(pp, system, mg, ppn)
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
     write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)

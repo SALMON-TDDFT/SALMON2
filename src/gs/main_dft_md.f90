@@ -147,6 +147,8 @@ call timer_begin(LOG_GS_ITERATION)
 
 MD_Loop : do it=1,nt
 
+   if(yn_auto_mixing=='y') call reset_mixing_rate(mixing)
+
    call time_evolution_step_md_part1(it,system,md)
 
    call update_pseudo_rt(it,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
@@ -182,7 +184,7 @@ MD_Loop : do it=1,nt
                            V_local,Vh,Vxc,Vpsl,xc_func,  &
                            pp,ppg,ppn,  &
                            rho_old,Vlocal_old,  &
-                           band,1 )
+                           band,2 )
 
    ! force
    call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)

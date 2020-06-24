@@ -225,11 +225,19 @@ contains
       
       tau_tmp1 = 0d0
       j_tmp1 = 0d0
-      
-      if(info%if_divide_rspace) then
-         call update_overlap_complex8(srg, mg, spsi%zwf)
-      end if
-      
+
+      if(allocated(spsi%rwf)) then
+         if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
+         if(.not.allocated(spsi%zwf)) &
+              allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1) &
+                               ,mg%is_array(2):mg%ie_array(2) &
+                               ,mg%is_array(3):mg%ie_array(3) &
+                               ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+         spsi%zwf = cmplx(spsi%rwf)
+      else
+         if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
+      endif
+
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
       do ispin=1,Nspin
@@ -270,6 +278,8 @@ contains
       end do
       end do
 !$omp end parallel do
+
+      if(allocated(spsi%rwf)) deallocate(spsi%zwf)
   
       return
     end subroutine calc_tau
@@ -337,8 +347,6 @@ contains
 
 
     subroutine setup_xcfunc(name)
-      use salmon_global, only: iperiodic
-      use inputoutput, only: stop_by_bad_input2
       implicit none
       character(*), intent(in) :: name
 
@@ -389,7 +397,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "TPSS functional is not implemented" ! future work
 
       case ('vs98')
 
@@ -398,7 +406,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "VS98 functional is not implemented" ! future work
 
       ! Please insert additional functional here:
       ! e.g.

@@ -1270,21 +1270,21 @@ contains
        ofl%fh_eigen = open_filehandle(trim(ofl%file_eigen_data))
        uid = ofl%fh_eigen
        open(uid,file=ofl%file_eigen_data)
-       write(uid,'("# 1 particle energies")')
+       write(uid,'("#esp: single-particle energies (eigen energies)")')
+       write(uid,'("#occ: occupation numbers, io: orbital index")')
        select case(unit_energy)
        case('au','a.u.')
-          write(uid,'("# Orbital   Energy[a.u.]")')
+          write(uid,'("# 1:io, 2:esp[a.u.], 3:occ")')
        case('ev','eV')
-          write(uid,'("# Orbital   Energy[eV]")')
+          write(uid,'("# 1:io, 2:esp[eV], 3:occ")')
        end select
-       write(uid,'("#-----------------------")')
        do is=1,system%nspin
        do iik=1,system%nk
           if(iperiodic==3)then
              write(uid,'("k=",1x,i5,",  spin=",1x,i5)') iik,is
           end if
           do iob=1,system%no
-             write(uid,'(1x,i5,e26.16e3)') iob, energy%esp(iob,iik,is)*uenergy_from_au
+             write(uid,'(1x,i5,2(e26.16e3))') iob, energy%esp(iob,iik,is)*uenergy_from_au, system%rocc(iob,iik,is)
           end do
        end do
        end do

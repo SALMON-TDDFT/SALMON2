@@ -137,8 +137,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
-! predictor-corrector for metaGGA
-  else if(xc == 'tbmbj') then
+  else if(yn_predictor_corrector=='y' .or. xc=='tbmbj' .or. xc=='bj_pw') then
     call predictor_corrector
   end if
 

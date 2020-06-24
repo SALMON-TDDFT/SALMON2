@@ -1238,6 +1238,7 @@ contains
   subroutine comm_get_min_double(svalue, ngroup)
     implicit none
     real(8), intent(inout) :: svalue
+    integer, intent(in)    :: ngroup
     UNUSED_VARIABLE(svalue)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_get_min_double")

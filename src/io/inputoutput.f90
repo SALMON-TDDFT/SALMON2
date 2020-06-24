@@ -293,7 +293,8 @@ contains
     namelist/propagation/ &
       & n_hamil, &
       & propagator, &
-      & yn_fix_func
+      & yn_fix_func, &
+      & yn_predictor_corrector
 
     namelist/scf/ &
       & method_init_wf, &
@@ -431,7 +432,9 @@ contains
       & yn_out_tm, &
       & out_ms_step, &
       & format_voxel_data, &
-      & nsplit_voxel_data
+      & nsplit_voxel_data, &
+      & yn_out_perflog, &
+      & format_perflog
 
     namelist/poisson/ &
       & layout_multipole, &
@@ -462,15 +465,15 @@ contains
       & thermostat_tau, &
       & yn_stop_system_momt
 
-    namelist/group_fundamental/ &
-      & iwrite_projection, &
-      & itwproj, &
-      & iwrite_projnum
+    namelist/group_fundamental/ &  !remove later
+      & iwrite_projection, &       !remove later
+      & itwproj, &                 !remove later
+      & iwrite_projnum             !remove later
 
-    namelist/group_others/ &
-      & num_projection, &
-      & iwrite_projection_ob, &
-      & iwrite_projection_k
+    namelist/group_others/ &       !remove later
+      & num_projection, &          !remove later
+      & iwrite_projection_ob, &    !remove later
+      & iwrite_projection_k        !remove later
 
     namelist/code/ &
       & yn_want_stencil_hand_vectorization, &
@@ -588,11 +591,12 @@ contains
 !! == default for &tgrid
     nt = 0
     dt = 0
-    gram_schmidt_interval = 0
+    gram_schmidt_interval = -1
 !! == default for &propagation
     n_hamil     = 4
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
+    yn_predictor_corrector = 'n'
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
@@ -730,6 +734,9 @@ contains
     out_ms_step         = 100
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
+
+    yn_out_perflog      = 'y'
+    format_perflog      = 'stdout'
 
 !! == default for &poisson
     layout_multipole  = 3
@@ -959,6 +966,7 @@ contains
     call comm_bcast(n_hamil    ,nproc_group_global)
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
+    call comm_bcast(yn_predictor_corrector,nproc_group_global)
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)
     call comm_bcast(iseed_number_change     ,nproc_group_global)
@@ -1154,6 +1162,8 @@ contains
     call comm_bcast(out_ms_step         ,nproc_group_global)
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
+    call comm_bcast(yn_out_perflog      ,nproc_group_global)
+    call comm_bcast(format_perflog      ,nproc_group_global)
 
 !! == bcast for &poisson
     call comm_bcast(layout_multipole  ,nproc_group_global)
@@ -1205,11 +1215,11 @@ contains
     use parallelization
     use communication
     use filesystem, only: get_filehandle
-    use salmon_global, only: directory_read_data,yn_restart
+    use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
     use checkpoint_restart_sub, only: generate_restart_directory_name
     character(256) :: filename_tmp,char_atom, gdir,wdir
     integer :: icount,i
-    logical :: if_error, if_cartesian
+    logical :: if_error, if_cartesian, iself
 
     if (comm_is_root(nproc_id_global)) then
 
@@ -1256,7 +1266,8 @@ contains
 
         icount = icount + 1
         if_cartesian = .true.
-        if(yn_self_checkpoint == 'y') then
+        iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'   !refer restart_rt
+        if(iself) then
            filename_tmp = trim(gdir)//"rank_000000/atomic_coor.txt"
         else
            filename_tmp = trim(gdir)//"atomic_coor.txt"
@@ -1694,6 +1705,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
       write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
@@ -1882,6 +1894,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
       if(inml_poisson >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', inml_poisson
@@ -1917,30 +1931,32 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
 
-      if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
+!(remove later)
+!      if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
+!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
+!      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
 
-      if(inml_group_others >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
+!(remove later)
+!      if(inml_group_others >0)ierr_nml = ierr_nml +1
+!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
 
 
       select case(iflag_atom_coor)
       case(ntype_atom_coor_cartesian)
-        write(fh_variables_log, '("#namelist: ",A)') 'atom_coor'
+        write(fh_variables_log, '("#namelist: ",A)') 'atomic_coor'
         do i = 1,natom
           write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion(',i,')', Rion(1:3,i)
         end do
       case(ntype_atom_coor_reduced)
-        write(fh_variables_log, '("#namelist: ",A)') 'atom_red_coor'
+        write(fh_variables_log, '("#namelist: ",A)') 'atomic_red_coor'
         do i = 1,natom
           write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion_red(',i,')', Rion_red(1:3,i)
         end do
@@ -1997,6 +2013,7 @@ contains
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)
+    call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_subspace_diagonalization)
     call yn_argument_check(yn_out_psi)

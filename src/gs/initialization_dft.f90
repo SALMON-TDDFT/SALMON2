@@ -401,7 +401,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           V_local,Vh,Vxc,Vpsl,xc_func,  &
                           pp,ppg,ppn,  &
                           rho_old,Vlocal_old,  &
-                          band, 1 )
+                          band, 2 )
 
   call init_md(system,md)
   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)

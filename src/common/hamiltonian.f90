@@ -688,6 +688,8 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   end if
   
   if(.not.allocated(ppg%zekr_uV)) allocate(ppg%zekr_uV(ppg%nps,ppg%nlma,ik_s:ik_e))
+
+!$omp parallel do collapse(2) private(ik,ilma,iatom,j,x,y,z,ekr)
   do ik=ik_s,ik_e
     do ilma=1,ppg%nlma
       iatom = ppg%ia_tbl(ilma)
@@ -700,7 +702,8 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
       end do
     end do
   end do
-  
+!$omp end parallel do  
+
   deallocate(kAc)
   return
 end subroutine update_kvector_nonlocalpt

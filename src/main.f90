@@ -41,9 +41,8 @@
   case default ; stop 'invalid theory @ main'
   end select
 
+  if (yn_out_perflog == 'y') call write_perflog
 
-  call write_perflog_csv
-  
   if (nproc_id_global == 0) print '(A)',"end SALMON"
 
   call end_parallel
@@ -92,25 +91,42 @@ contains
     call print_xc_info()    
   end subroutine
 
-  subroutine write_perflog_csv
-    use perflog
+  subroutine write_perflog
     use misc_routines, only: gen_logfilename
     use filesystem, only: get_filehandle
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use iso_fortran_env, only: output_unit
+    use perflog
     implicit none
-    integer :: fh
+    integer :: fh, imode
+    logical :: is_opened
 
-    if (comm_is_root(nproc_id_global)) then
-      fh = get_filehandle()
-      open(fh, file=gen_logfilename('perflog','csv'))
+    fh = -1
+
+    select case(format_perflog)
+    case default
+      fh    = output_unit
+      imode = write_mode_readable
+    case('text')
+      if (comm_is_root(nproc_id_global)) then
+        fh = get_filehandle()
+        open(fh, file=gen_logfilename('perflog','txt'))
+      end if
+      imode = write_mode_readable
+    case('csv')
+      if (comm_is_root(nproc_id_global)) then
+        fh = get_filehandle()
+        open(fh, file=gen_logfilename('perflog','csv'))
+      end if
+      imode = write_mode_csv
+    end select
+
+    call write_performance(fh,imode)
+
+    if (fh /= output_unit) then
+      inquire(fh, opened=is_opened)
+      if (is_opened) close(fh)
     end if
-
-    call write_performance(fh,write_mode_csv)
-
-    if (comm_is_root(nproc_id_global)) then
-      close(fh)
-    end if
-  end subroutine
+  end subroutine write_perflog
 end program main

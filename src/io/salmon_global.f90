@@ -133,6 +133,7 @@ module salmon_global
   integer        :: n_hamil
   character(16)  :: propagator
   character(1)   :: yn_fix_func
+  character(1)   :: yn_predictor_corrector
 
 !! &scf
   character(8)   :: method_init_wf
@@ -275,6 +276,8 @@ module salmon_global
   integer        :: out_ms_step
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
+  character(1)   :: yn_out_perflog
+  character(6)   :: format_perflog ! 'stdout','text','csv'
 
 !! &poisson
   integer        :: layout_multipole
