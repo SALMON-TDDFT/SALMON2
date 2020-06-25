@@ -38,6 +38,8 @@ use filesystem, only: create_directory, get_filehandle
 use phys_constants, only: cspeed_au
 use em_field, only: calc_Ac_ext
 use input_checker_ms, only: check_input_variables_ms
+
+use inputoutput, only: t_unit_ac, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
 implicit none
 
 type(s_rgrid) :: lg
@@ -347,17 +349,39 @@ subroutine print_header()
     implicit none
     if (comm_is_root(ms%id_ms_world)) then
         write(*,*)
-        write(*,'(a)') " istep  time     imacro current(xyz)"
+        write(*,'(a7,a7,a9,a33,a11)') &
+            & "Step", "Macro", "Time", "Current", "Eabs/cell"
+        write(*,'(7x,7x,a9,a33,a11)') &
+            & trim(t_unit_time%name), &
+            & trim(t_unit_current%name), &
+            & trim(t_unit_energy%name)
         write(*,'("#",7("----------"))')
     endif
 end subroutine print_header
+
+
+subroutine print_linelog()
+    implicit none
+    integer :: iimacro, iix, iiy, iiz
+    if (comm_is_root(ms%id_ms_world)) then
+        do iimacro = 1, ms%nmacro
+            iix = ms%ixyz_tbl(1, iimacro)
+            iiy = ms%ixyz_tbl(2, iimacro)
+            iiz = ms%ixyz_tbl(3, iimacro)
+            write(*,'(i7,i7,f9.3,4(es11.2e3))') &
+                & itt, iimacro, &
+                & itt * dt * t_unit_time%conv, &
+                & fw%vec_j_em%v(1:3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%edensity_absorb%f(iix, iiy, iiz) * system%det_a * t_unit_energy%conv
+        end do
+    end if
+end subroutine
 
 
 
 
 
 subroutine time_evolution_step_ms
-    use inputoutput, only: t_unit_ac, t_unit_current, t_unit_time, t_unit_length, t_unit_energy
     implicit none
     integer :: iimacro, iix, iiy, iiz
     real(8) :: curr_tmp(3, ms%nmacro), curr(3, ms%nmacro)
@@ -415,20 +439,7 @@ subroutine time_evolution_step_ms
         fw%vec_j_em%v(1:3, iix, iiy, iiz) = -1.0d0 * curr(1:3, iimacro)
     end do
 
-    ! print time step message
-    if (mod(itt, out_ms_step) == 0) then
-        if (comm_is_root(ms%id_ms_world)) then
-            do iimacro = 1, ms%nmacro
-                iix = ms%ixyz_tbl(1, iimacro)
-                iiy = ms%ixyz_tbl(2, iimacro)
-                iiz = ms%ixyz_tbl(3, iimacro)
-                write(*,'(i7,f12.3,i7,3e12.3e3)') &
-                    & itt, itt * dt * t_unit_time%conv, &
-                    & iimacro, &
-                    & fw%vec_j_em%v(1:3, iix, iiy, iiz) * t_unit_current%conv
-            end do
-        end if
-    end if
+    if (mod(itt, out_ms_step) == 0) call print_linelog()
 
     return
 end subroutine time_evolution_step_ms
