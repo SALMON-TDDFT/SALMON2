@@ -1,5 +1,5 @@
 # tm2lr.f90
-generates the electric conductivity \sigma_{\mu,\nu}(omega) and the dielectric function \varepsilon_{\mu,\nu}(omega)) from the transition-dipole moments calculated by SALMON.
+generates the electric conductivity \sigma_{\mu,\nu}(\omega) and the dielectric function \varepsilon_{\mu,\nu}(\omega)) from the transition-dipole moments calculated by SALMON.
 cf. Eq. (13.37) of Ashcroft-Mermin, Solid State Physics.
 
 ## Compilation

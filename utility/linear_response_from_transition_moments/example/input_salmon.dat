@@ -1,0 +1,67 @@
+&calculation
+  theory='DFT'
+!  theory='TDDFT_response'
+/
+
+&control
+  sysname = 'Li'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 6.62,6.62,6.62
+  nstate = 10
+  nelem = 1
+  natom = 2
+  nelec = 2
+  temperature = 0.0
+/
+
+&pseudo
+  izatom(1) = 3
+  file_pseudo(1) = './Li_rps.dat'
+  lloc_ps(1) = 1
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  num_rgrid = 10,10,10
+/
+
+&kgrid
+  num_kgrid = 24,24,24
+/
+
+&tgrid
+  nt = 70000
+  dt = 0.01
+/
+
+&scf
+  alpha_mb=0.1
+  ncg = 4
+  nscf = 150
+  nmemory_mb=4
+  threshold = 1.d-9
+/
+
+&emfield
+  ae_shape1 = 'impulse'
+  epdir_re1 = 0., 0., 1.
+/
+
+&analysis
+  yn_out_tm='y'
+/
+
+&atomic_red_coor
+'Li'  0.0  0.0  0.0  1
+'Li'  0.5  0.5  0.5  1
+/
