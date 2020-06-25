@@ -1,3 +1,4 @@
+! cf. Eq. (13.37) of Ashcroft-Mermin, Solid State Physics.
 ! atomic unit
 program main
   implicit none
@@ -23,7 +24,7 @@ program main
 
 !===================================================================================================================================
 
- read(*,input)
+  read(*,input)
 
   nk = num_kgrid(1)*num_kgrid(2)*num_kgrid(3)
   nb = nstate
@@ -110,14 +111,6 @@ contains
         end do !jb
       end do !ib
     end do !ik
-    read(fh, '(a)') dummy !Skip
-    do ik=1,NK
-      do ib=1,NB
-        do i=1,3
-          read(fh, '(a)') dummy !Skip
-        enddo
-      enddo
-    enddo
     read(fh, '(a)') dummy !Skip
     do ik =1,NK
       do ib=1,NB
