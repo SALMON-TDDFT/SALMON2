@@ -746,14 +746,14 @@ contains
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
         & 1, "Energy", trim(t_unit_energy%name), &
         & 2, "Re(alpha_x)", trim(t_unit_polarizability%name), &
-        & 3, "Im(alpha_x)", trim(t_unit_polarizability%name), &
-        & 4, "Re(alpha_y)", trim(t_unit_polarizability%name), &
-        & 5, "Im(alpha_y)", trim(t_unit_polarizability%name), &
-        & 6, "Re(alpha_z)", trim(t_unit_polarizability%name), &
+        & 3, "Re(alpha_y)", trim(t_unit_polarizability%name), &
+        & 4, "Re(alpha_z)", trim(t_unit_polarizability%name), &
+        & 5, "Im(alpha_x)", trim(t_unit_polarizability%name), &
+        & 6, "Im(alpha_y)", trim(t_unit_polarizability%name), &
         & 7, "Im(alpha_z)", trim(t_unit_polarizability%name), &
         & 8, "df_x/dE", "none", &
         & 9, "df_y/dE", "none", &
-        & 10, "df_z/dE", "none"
+        & 10,"df_z/dE", "none"
 
       tt = dt*dble(nt)
 
@@ -806,30 +806,31 @@ contains
       write(uid,10) "eps", "Dielectric constant"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "Energy", trim(t_unit_energy%name), &
-        & 2, "Re(sigma_x)", trim(t_unit_conductivity%name), &
-        & 3, "Im(sigma_x)", trim(t_unit_conductivity%name), &
-        & 4, "Re(sigma_y)", trim(t_unit_conductivity%name), &
-        & 5, "Im(sigma_y)", trim(t_unit_conductivity%name), &
-        & 6, "Re(sigma_z)", trim(t_unit_conductivity%name), &
-        & 7, "Im(sigma_z)", trim(t_unit_conductivity%name), &
-        & 8, "Re(eps_x)", "none", &
-        & 9, "Im(eps_x)", "none", &
-        & 10, "Re(eps_y)", "none", &
-        & 11, "Im(eps_y)", "none", &
-        & 12, "Re(eps_z)", "none", &
+        & 1,  "Energy", trim(t_unit_energy%name), &
+        & 2,  "Re(sigma_x)", trim(t_unit_conductivity%name), &
+        & 3,  "Re(sigma_y)", trim(t_unit_conductivity%name), &
+        & 4,  "Re(sigma_z)", trim(t_unit_conductivity%name), &
+        & 5,  "Im(sigma_x)", trim(t_unit_conductivity%name), &
+        & 6,  "Im(sigma_y)", trim(t_unit_conductivity%name), &
+        & 7,  "Im(sigma_z)", trim(t_unit_conductivity%name), &
+        & 8,  "Re(eps_x)", "none", &
+        & 9,  "Re(eps_y)", "none", &
+        & 10, "Re(eps_z)", "none", &
+        & 11, "Im(eps_x)", "none", &
+        & 12, "Im(eps_y)", "none", &
         & 13, "Im(eps_z)", "none"
 
       tt = dt*dble(nt)
 
       do ihw=1,nenergy
-        hw=dble(ihw)*de ; zsigma(:)=(0.d0,0.d0)  
+        hw=dble(ihw)*de
+        zsigma(:)=(0.d0,0.d0)
         do n=1,nt
-          t2=dble(n)*dt ; zsigma(:)=zsigma(:)+exp(zi*hw*t2)*rt%curr(:,n) & 
-                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          t2=dble(n)*dt
+          zsigma(:)=zsigma(:)+exp(zi*hw*t2)*rt%curr(:,n) *(1-3*(t2/tt)**2+2*(t2/tt)**3)
         end do
 
-        zsigma(:)=zsigma(:)/e_impulse*dt
+        zsigma(:) = (zsigma(:)/e_impulse)*dt
         if(trans_longi=="tr")then
           zeps(:)=1.d0+4.d0*pi*zi*zsigma(:)/hw
         else if(trans_longi=="lo")then
@@ -947,15 +948,15 @@ contains
       write(uid,10) "dm", "Dopile moment"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "energy", trim(t_unit_energy%name), &
-        & 2, "Re(dm_x)", trim(t_unit_spectrum_dipole%name), &
-        & 3, "Im(dm_x)", trim(t_unit_spectrum_dipole%name), &
-        & 4, "|dm_x|^2", trim(t_unit_spectrum_dipole%name), &
-        & 5, "Re(dm_y)", trim(t_unit_spectrum_dipole%name), &
-        & 6, "Im(dm_y)", trim(t_unit_spectrum_dipole%name), &
-        & 7, "|dm_y|^2", trim(t_unit_spectrum_dipole%name), &
-        & 8, "Re(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
-        & 9, "Im(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
+        & 1,  "energy", trim(t_unit_energy%name), &
+        & 2,  "Re(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 3,  "Re(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 4,  "Re(dm_z)", trim(t_unit_spectrum_dipole%name), &
+        & 5,  "Im(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 6,  "Im(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 7,  "Im(dm_z)", trim(t_unit_spectrum_dipole%name), &
+        & 8,  "|dm_x|^2", trim(t_unit_spectrum_dipole_square%name), &
+        & 9,  "|dm_y|^2", trim(t_unit_spectrum_dipole_square%name), &
         & 10, "|dm_z|^2", trim(t_unit_spectrum_dipole_square%name)
 
       tt = dt*dble(nt)
@@ -1011,33 +1012,33 @@ contains
       write(uid,10) "E_tot", "Total electric field"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "energy", trim(t_unit_energy%name), &
-        & 2, "Re(Jm_x)", trim(t_unit_spectrum_current%name), &
-        & 3, "Im(Jm_x)", trim(t_unit_spectrum_current%name), &
-        & 4, "|Jm_x|^2", trim(t_unit_spectrum_current%name), &
-        & 5, "Re(Jm_y)", trim(t_unit_spectrum_current%name), &
-        & 6, "Im(Jm_y)", trim(t_unit_spectrum_current%name), &
-        & 7, "|Jm_y|^2", trim(t_unit_spectrum_current%name), &
-        & 8, "Re(Jm_z)", trim(t_unit_spectrum_current_square%name), &
-        & 9, "Im(Jm_z)", trim(t_unit_spectrum_current_square%name), &
+        & 1,  "energy", trim(t_unit_energy%name), &
+        & 2,  "Re(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 3,  "Re(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 4,  "Re(Jm_z)", trim(t_unit_spectrum_current%name), &
+        & 5,  "Im(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 6,  "Im(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 7,  "Im(Jm_z)", trim(t_unit_spectrum_current%name), &
+        & 8,  "|Jm_x|^2", trim(t_unit_spectrum_current_square%name), &
+        & 9,  "|Jm_y|^2", trim(t_unit_spectrum_current_square%name), &
         & 10, "|Jm_z|^2", trim(t_unit_spectrum_current_square%name), &
         & 11, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 12, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 13, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
-        & 14, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 12, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 13, "Re(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 14, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
         & 15, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
-        & 16, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
-        & 17, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
-        & 18, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 16, "Im(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 17, "|E_ext_x|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 18, "|E_ext_y|^2", trim(t_unit_spectrum_elec_square%name), &
         & 19, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name), &
         & 20, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 21, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 22, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
-        & 23, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 21, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 22, "Re(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 23, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
         & 24, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
-        & 25, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
-        & 26, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
-        & 27, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 25, "Im(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 26, "|E_ext_x|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 27, "|E_ext_y|^2", trim(t_unit_spectrum_elec_square%name), &
         & 28, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name)
 
       tt = dt*dble(nt)
