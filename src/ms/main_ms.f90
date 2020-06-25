@@ -300,7 +300,7 @@ subroutine initialization_ms()
     do i = 1, ms%nmacro
 
         if (comm_is_root(ms%id_ms_world)) &
-            write(*, *) "Initializing of macropoint:", i
+            write(*, *) "Initializing macropoint:", i
 
         call comm_sync_all()
 
