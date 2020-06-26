@@ -18,14 +18,13 @@ program main
   namelist/input/sysname,num_kgrid,nstate,nelec,al,mu,nu,nomega,omega_max,delta
   !
   integer :: nk,nb
-  real(8) :: n_e,V
-  !
-  character(256) :: filename
+  real(8) :: n_e,V,delta_munu
   real(8),allocatable :: eigen(:,:),occ(:,:)
   complex(8),allocatable :: matrix_p(:,:,:,:),matrix_v(:,:,:,:)
   integer :: ib1,ib2,ik,iw
   real(8) :: domega,w
   complex(8) :: sigma,eps,sigma_intra,sigma_inter,eps_intra,eps_inter
+  character(256) :: filename
   integer,parameter :: fh_s=333,fh_e=777
 
 !===================================================================================================================================
@@ -36,6 +35,12 @@ program main
   nb = nstate
   V = al(1)*al(2)*al(3)* dble(nk) ! volume
   n_e = dble(nelec)/(al(1)*al(2)*al(3)) ! averaged electron number density
+  
+  if(mu==nu) then
+    delta_munu = 1d0
+  else
+    delta_munu = 0d0
+  end if
   
   domega = omega_max/dble(nomega)
   if(mu<1 .or. mu>3 .or. nu<1 .or. nu>3) then
@@ -57,18 +62,14 @@ program main
                             
   filename = trim(sysname) // '_epsilon.data'
   open(fh_e, file=filename, status='replace')
-  write(fh_e,*) "#1:omega[a.u.], 2:Re(epsilon)[a.u.], 3:Im(epsilon)[a.u.]", &
-                            & ", 4:Re(epsilon_intra)[a.u.], 5:Im(epsilon_intra)[a.u.]", &
-                            & ", 6:Re(epsilon_inter)[a.u.], 7:Im(epsilon_inter)[a.u.]"
+  write(fh_e,*) "#1:omega[a.u.], 2:Re(epsilon), 3:Im(epsilon)", &
+                            & ", 4:Re(epsilon_intra), 5:Im(epsilon_intra)", &
+                            & ", 6:Re(epsilon_inter), 7:Im(epsilon_inter)"
                             
   do iw=1,nomega
     w = dble(iw)*domega
-    sigma = 0d0
-    sigma_intra = 0d0
-    if(mu==nu) then
-      sigma = sigma + zi*n_e/w
-      sigma_intra = sigma_intra + zi*n_e/w
-    end if
+    sigma = (zi*n_e/w)* delta_munu
+    sigma_intra = (zi*n_e/w)* delta_munu
     do ik=1,nk
       do ib1=1,nb
         if(occ(ib1,ik)==0d0) cycle
@@ -85,8 +86,8 @@ program main
     end do
     sigma_inter = sigma - sigma_intra
     
-    eps = cmplx(1d0) + (4d0*pi*zi/w)* sigma
-    eps_intra = cmplx(1d0) + (4d0*pi*zi/w)* sigma_intra
+    eps = cmplx(delta_munu) + (4d0*pi*zi/w)* sigma
+    eps_intra = cmplx(delta_munu) + (4d0*pi*zi/w)* sigma_intra
     eps_inter = (4d0*pi*zi/w)* sigma_inter
     
     write(fh_s,'(7(1X,E23.15E3))') w,dble(sigma),imag(sigma), &
