@@ -56,13 +56,13 @@ program main
 
   filename = trim(sysname) // '_sigma.data'
   open(fh_s, file=filename, status='replace')
-  write(fh_s,*) "#1:omega[a.u.], 2:Re(sigma)[a.u.], 3:Im(sigma)[a.u.]", &
+  write(fh_s,'(3a)') "#1:omega[a.u.], 2:Re(sigma)[a.u.], 3:Im(sigma)[a.u.]", &
                             & ", 4:Re(sigma_intra)[a.u.], 5:Im(sigma_intra)[a.u.]", &
                             & ", 6:Re(sigma_inter)[a.u.], 7:Im(sigma_inter)[a.u.]"
                             
   filename = trim(sysname) // '_epsilon.data'
   open(fh_e, file=filename, status='replace')
-  write(fh_e,*) "#1:omega[a.u.], 2:Re(epsilon), 3:Im(epsilon)", &
+  write(fh_e,'(3a)') "#1:omega[a.u.], 2:Re(epsilon), 3:Im(epsilon)", &
                             & ", 4:Re(epsilon_intra), 5:Im(epsilon_intra)", &
                             & ", 6:Re(epsilon_inter), 7:Im(epsilon_inter)"
                             
