@@ -339,6 +339,7 @@ subroutine initialization_ms()
         end if
     end do
 
+    itt = mit
     call incident()
 
     ! Experimental implementation
@@ -542,33 +543,33 @@ subroutine write_RT_Ac_file()
     character(256) :: filename
 
 
-    if (ms%id_ms_world == 0) then
-            write(filename, '(a, a, a, i6.6, a)') trim(ms%base_directory_RT_Ac), trim(sysname), "_Ac_",  itt, '.data'
-            open(8888, file=trim(filename))
-            write(8888, '(a)') "# Multiscale TDDFT calculation"
-            write(8888, '(a)') "# IX, IY, IZ: FDTD Grid index"
-            write(8888, '(a)') "# x, y, z: Coordinates"
-            write(8888, '(a)') "# Ac: Vector potential field"
-            write(8888, '(a)') "# E: Electric field"
-            write(8888, '(a)') "# J_em: Electromagnetic current density"
-            write(8888, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-              & 1, "IX", "none", &
-              & 2, "IY", "none", &
-              & 3, "IZ", "none", &
-              & 4, "Ac_x", trim(t_unit_ac%name), &
-              & 5, "Ac_y", trim(t_unit_ac%name), &
-              & 6, "Ac_z", trim(t_unit_ac%name), &
-              & 7, "E_x", trim(t_unit_elec%name), &
-              & 8, "E_y", trim(t_unit_elec%name), &
-              & 9, "E_z", trim(t_unit_elec%name), &
-              & 10, "B_x", "a.u.", &
-              & 11, "B_y", "a.u.", &
-              & 12, "B_z", "a.u.", &
-              & 13, "Jem_x", trim(t_unit_current%name), &
-              & 14, "Jem_y", trim(t_unit_current%name), &
-              & 15, "Jem_z", trim(t_unit_current%name), &
-              & 16, "E_em", trim(t_unit_energy%name) // "/vol", &
-              & 17, "E_abs", trim(t_unit_energy%name) //  "/vol"
+    if (comm_is_root(ms%id_ms_world)) then
+        write(filename, '(a,a,"_Ac_",i6.6,".data")') trim(ms%base_directory_RT_Ac), trim(sysname), itt
+        open(8888, file=trim(filename))
+        write(8888, '(a)') "# Multiscale TDDFT calculation"
+        write(8888, '(a)') "# IX, IY, IZ: FDTD Grid index"
+        write(8888, '(a)') "# x, y, z: Coordinates"
+        write(8888, '(a)') "# Ac: Vector potential field"
+        write(8888, '(a)') "# E: Electric field"
+        write(8888, '(a)') "# J_em: Electromagnetic current density"
+        write(8888, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+            & 1, "IX", "none", &
+            & 2, "IY", "none", &
+            & 3, "IZ", "none", &
+            & 4, "Ac_x", trim(t_unit_ac%name), &
+            & 5, "Ac_y", trim(t_unit_ac%name), &
+            & 6, "Ac_z", trim(t_unit_ac%name), &
+            & 7, "E_x", trim(t_unit_elec%name), &
+            & 8, "E_y", trim(t_unit_elec%name), &
+            & 9, "E_z", trim(t_unit_elec%name), &
+            & 10, "B_x", "a.u.", &
+            & 11, "B_y", "a.u.", &
+            & 12, "B_z", "a.u.", &
+            & 13, "Jem_x", trim(t_unit_current%name), &
+            & 14, "Jem_y", trim(t_unit_current%name), &
+            & 15, "Jem_z", trim(t_unit_current%name), &
+            & 16, "E_em", trim(t_unit_energy%name) // "/vol", &
+            & 17, "E_abs", trim(t_unit_energy%name) //  "/vol"
 
             do iiz = fs%mg%is(3), fs%mg%ie(3)
             do iiy = fs%mg%is(2), fs%mg%ie(2)
