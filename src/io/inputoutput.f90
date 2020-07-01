@@ -369,7 +369,8 @@ contains
       & file_macropoint, &
       & num_macropoint,  &
       & set_ini_coor_vel,&
-      & nmacro_write_group
+      & nmacro_write_group, &
+      & nmacro_chunk
 
     namelist/maxwell/    &
       & al_em,           &
@@ -670,6 +671,7 @@ contains
     file_macropoint = ''
     set_ini_coor_vel= 'n'
     nmacro_write_group= -1
+    nmacro_chunk = 20
 
 !! == default for &maxwell
     al_em(:)           = 0d0
@@ -1085,6 +1087,7 @@ contains
     call comm_bcast(num_macropoint,  nproc_group_global)
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
+    call comm_bcast(nmacro_chunk,nproc_group_global)
 
 !! == bcast for &maxwell
     call comm_bcast(al_em           ,nproc_group_global)
@@ -1801,6 +1804,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_macropoint', num_macropoint
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
 
       if(inml_maxwell >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', inml_maxwell

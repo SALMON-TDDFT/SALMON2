@@ -213,6 +213,7 @@ module salmon_global
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   !! TODO: remove num_macropoint later
+  integer        :: nmacro_chunk
 
 !! &maxwell
   real(8)        :: al_em(3)
