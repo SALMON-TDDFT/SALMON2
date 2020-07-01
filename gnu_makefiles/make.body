@@ -14,124 +14,121 @@ endif
 
 ifdef SIMD_SET
 	C_STENCIL_FILE= \
-		common/zstencil_core/$(SIMD_SET)/omp.c \
-		common/zstencil_core/$(SIMD_SET)/seq.c
+		zstencil_core/${SIMD_SET}/omp.c
+		zstencil_core/${SIMD_SET}/seq.c
 	F90_STENCIL_FILE=
 else
 	C_STENCIL_FILE=
-	F90_STENCIL_FILE= \
-		common/zstencil_core/typical/omp.f90 \
-		common/zstencil_core/typical/seq.f90
+	F90_STENCIL_FILE=
 endif
 
-
 F90_SRCS = \
-	./misc/backup_routines.f90 \
-	./misc/misc_routines.f90 \
-	./misc/timer.f90 \
-	./misc/unusedvar.f90 \
-	./math/math_constants.f90 \
-	./math/phys_constants.f90 \
-	./math/salmon_math.f90 \
-	./common/calc_gradient_psi.f90 \
-	./common/const.f90 \
-	./common/pack_unpack.f90 \
-	./common/structures.f90 \
-	./common/zstencil_core/typical/omp.f90 \
-	./common/zstencil_core/typical/seq.f90 \
-	./common/zstencil_microac_core/typical/omp.f90 \
-	./common/zstencil_microac_core/typical/seq.f90 \
-	./io/salmon_global.f90 \
-	./parallel/communication$(COMM_SET).f90 \
-	./common/broyden.f90 \
-	./common/nonlocal_potential.f90 \
-	./io/filesystem.f90 \
-	./parallel/init_communicator.f90 \
-	./parallel/network_address.f90 \
-	./common/sendrecv_grid.f90 \
-	./parallel/parallelization.f90 \
-	./io/checkpoint_restart.f90 \
-	./io/inputoutput.f90 \
-	./io/perflog.f90 \
-	./io/read_rtdata_file.f90 \
-	./io/write_file3d.f90 \
-	./parallel/code_optimization.f90 \
-	./common/stencil.f90 \
-	./io/write_field.f90 \
-	./parallel/set_numcpu.f90 \
-	./symmetry/symmetry.f90 \
-	./symmetry/symmetry_kvector.f90 \
-	./common/lattice.f90 \
-	./symmetry/symmetry_rho.f90 \
-	./symmetry/symmetry_vector.f90 \
-	./common/density_matrix.f90 \
-	./atom/pp/salmon_pp.f90 \
-	./poisson/init_poisson.f90 \
-	./common/initialization.f90 \
-	./poisson/poisson_isolated.f90 \
-	./poisson/poisson_periodic.f90 \
-	./poisson/hartree.f90 \
-	./xc/builtin_pbe.f90 \
-	./xc/builtin_pz.f90 \
-	./xc/builtin_pz_sp.f90 \
-	./xc/builtin_pzm.f90 \
-	./xc/builtin_tbmbj.f90 \
-	./xc/salmon_xc.f90 \
-	./plusu/calc_jxyz_plusu.f90 \
-	./plusu/calc_nps_plusu.f90 \
-	./plusu/plusu_global.f90 \
-	./common/force.f90 \
-	./plusu/density_matrix_and_energy_plusu.f90 \
-	./plusu/prep_pp_plusu.f90 \
-	./plusu/pseudo_pt_plusu.f90 \
-	./plusu/update_kvector_plusu.f90 \
-	./so/nondiagonal_so.f90 \
-	./so/spin_orbit_global.f90 \
-	./so/gram_schmidt_so.f90 \
-	./so/prep_pp_so.f90 \
-	./so/pseudo_pt_so.f90 \
-	./so/update_kvector_so.f90 \
-	./common/hamiltonian.f90 \
-	./common/total_energy.f90 \
-	./atom/pp/prep_pp.f90 \
-	./atom/pp/input_pp.f90 \
-	./gs/band.f90 \
-	./io/write.f90 \
-	./gs/band_dft.f90 \
-	./gs/conjugate_gradient.f90 \
-	./gs/eigen_subdiag_lapack.f90 \
-	./gs/eigen_subdiag.f90 \
-	./so/subspace_diagonalization_so.f90 \
-	./gs/gram_schmidt_orth.f90 \
-	./gs/init_gs.f90 \
-	./gs/mixing.f90 \
-	./gs/occupation.f90 \
-	./gs/read_gs.f90 \
-	./gs/structure_opt.f90 \
-	./gs/subspace_diagonalization.f90 \
-	./gs/scf_iteration.f90 \
-	./gs/scf_iteration_dft.f90 \
-	./rt/dip.f90 \
-	./rt/em_field.f90 \
-	./rt/md.f90 \
-	./gs/initialization_dft.f90 \
-	./io/main_dft_k_expand.f90 \
-	./io/main_dft_k_expand_slice.f90 \
-	./gs/main_dft.f90 \
-	./gs/main_dft_md.f90 \
-	./rt/taylor.f90 \
-	./ms/input_checker_ms.f90 \
-	./maxwell/common_maxwell.f90 \
-	./maxwell/fdtd_coulomb_gauge.f90 \
-	./rt/initialization_rt.f90 \
-	./rt/main_tddft.f90 \
-	./rt/time_evolution_step.f90 \
-	./maxwell/fdtd_weyl_gauge.f90 \
-	./ms/main_ms.f90 \
-	./ttm/ttm.f90 \
-	./maxwell/fdtd_eh.f90 \
-	./maxwell/main_maxwell.f90 \
-	./main.f90
+./misc/backup_routines.f90 \
+./misc/misc_routines.f90 \
+./misc/timer.f90 \
+./misc/unusedvar.f90 \
+./math/math_constants.f90 \
+./math/phys_constants.f90 \
+./math/salmon_math.f90 \
+./common/calc_gradient_psi.f90 \
+./common/const.f90 \
+./common/pack_unpack.f90 \
+./common/structures.f90 \
+./common/zstencil_core/typical/omp.f90 \
+./common/zstencil_core/typical/seq.f90 \
+./common/zstencil_microac_core/typical/omp.f90 \
+./common/zstencil_microac_core/typical/seq.f90 \
+./io/salmon_global.f90 \
+./parallel/communication$(COMM_SET).f90 \
+./common/broyden.f90 \
+./common/nonlocal_potential.f90 \
+./io/filesystem.f90 \
+./parallel/init_communicator.f90 \
+./parallel/network_address.f90 \
+./common/sendrecv_grid.f90 \
+./parallel/parallelization.f90 \
+./io/checkpoint_restart.f90 \
+./io/inputoutput.f90 \
+./io/perflog.f90 \
+./io/read_rtdata_file.f90 \
+./io/write_file3d.f90 \
+./parallel/code_optimization.f90 \
+./common/stencil.f90 \
+./io/write_field.f90 \
+./parallel/set_numcpu.f90 \
+./symmetry/symmetry.f90 \
+./symmetry/symmetry_kvector.f90 \
+./common/lattice.f90 \
+./symmetry/symmetry_rho.f90 \
+./symmetry/symmetry_vector.f90 \
+./common/density_matrix.f90 \
+./atom/pp/input_pp.f90 \
+./atom/pp/salmon_pp.f90 \
+./poisson/init_poisson.f90 \
+./common/initialization.f90 \
+./poisson/poisson_isolated.f90 \
+./poisson/poisson_periodic.f90 \
+./poisson/hartree.f90 \
+./maxwell/common_maxwell.f90 \
+./maxwell/fdtd_weyl_gauge.f90 \
+./xc/builtin_pbe.f90 \
+./xc/builtin_pz.f90 \
+./xc/builtin_pz_sp.f90 \
+./xc/builtin_pzm.f90 \
+./xc/builtin_tbmbj.f90 \
+./xc/salmon_xc.f90 \
+./plusu/calc_jxyz_plusu.f90 \
+./plusu/calc_nps_plusu.f90 \
+./plusu/plusu_global.f90 \
+./common/force.f90 \
+./plusu/density_matrix_and_energy_plusu.f90 \
+./plusu/prep_pp_plusu.f90 \
+./plusu/pseudo_pt_plusu.f90 \
+./plusu/update_kvector_plusu.f90 \
+./so/nondiagonal_so.f90 \
+./so/spin_orbit_global.f90 \
+./so/gram_schmidt_so.f90 \
+./so/prep_pp_so.f90 \
+./so/pseudo_pt_so.f90 \
+./so/update_kvector_so.f90 \
+./common/hamiltonian.f90 \
+./common/total_energy.f90 \
+./atom/pp/prep_pp.f90 \
+./gs/band.f90 \
+./io/write.f90 \
+./gs/band_dft.f90 \
+./gs/conjugate_gradient.f90 \
+./gs/eigen_subdiag_lapack.f90 \
+./gs/eigen_subdiag.f90 \
+./so/subspace_diagonalization_so.f90 \
+./gs/gram_schmidt_orth.f90 \
+./gs/init_gs.f90 \
+./gs/mixing.f90 \
+./gs/occupation.f90 \
+./gs/read_gs.f90 \
+./gs/structure_opt.f90 \
+./gs/subspace_diagonalization.f90 \
+./gs/scf_iteration.f90 \
+./gs/scf_iteration_dft.f90 \
+./rt/dip.f90 \
+./rt/em_field.f90 \
+./maxwell/fdtd_coulomb_gauge.f90 \
+./rt/md.f90 \
+./gs/initialization_dft.f90 \
+./io/main_dft_k_expand.f90 \
+./io/main_dft_k_expand_slice.f90 \
+./gs/main_dft.f90 \
+./gs/main_dft_md.f90 \
+./rt/initialization_rt.f90 \
+./rt/main_tddft.f90 \
+./rt/taylor.f90 \
+./rt/time_evolution_step.f90 \
+./ttm/ttm.f90 \
+./maxwell/fdtd_eh.f90 \
+./maxwell/main_maxwell.f90 \
+./ms/input_checker_ms.f90 \
+./ms/main_ms.f90 \
+./main.f90
 
 C_SRCS = \
 	io/posix.c \
