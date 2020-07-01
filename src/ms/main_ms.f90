@@ -87,6 +87,7 @@ logical :: is_checkpoint_iter, is_shutdown_time
 ! Only for 1D calculation outputs:
 integer :: fh_wave
 
+
 ! character(256) :: file_debug_log
 !! Open logfile for debugging
 ! write(file_debug_log, "('ms_debug', i3.3, '.log')") nproc_id_global
@@ -196,6 +197,7 @@ end function restart_directory_macro
 subroutine initialization_ms()
     implicit none
     integer :: ii, jj
+    integer :: iimacro_s, iimacro_e, iimacro
 
     ! Store global information
     ms%nmacro = nx_m * ny_m * nz_m
@@ -298,49 +300,50 @@ subroutine initialization_ms()
         end do
     end if
 
-    do i = 1, ms%nmacro
-
+    do iimacro_s = 1, ms%nmacro, nmacro_chunk
+        iimacro_e = min(iimacro_s + nmacro_chunk - 1, ms%nmacro)
         if (comm_is_root(ms%id_ms_world)) &
-            write(*, *) "Initializing macropoint:", i
+            write(*, '(a, i6, "-", i6)') "Initializing macropoint:", iimacro_s, iimacro_e
+        
+        do iimacro = iimacro_s, iimacro_e
 
-        call comm_sync_all()
+            if (macropoint_in_mygroup(iimacro)) then
+                ! Override global variables
+                base_directory = trim(base_directory_macro(iimacro))
+                nproc_group_global = ms%icomm_macropoint
+                nproc_id_global = ms%id_macropoint
+                nproc_size_global = ms%isize_macropoint
+                quiet = (1 < iimacro)
 
-        if (macropoint_in_mygroup(i)) then
-            ! Override global variables
-            base_directory = trim(base_directory_macro(i))
-            nproc_group_global = ms%icomm_macropoint
-            nproc_id_global = ms%id_macropoint
-            nproc_size_global = ms%isize_macropoint
-            quiet = (1 < i)
+                if (yn_restart == 'y') then
+                    directory_read_data = trim(directory_read_data_macro(trim(ms%directory_read_data), iimacro))
+                end if
+                
+                ! Initializa TDKS system
+                call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
+                                        singlescale,  &
+                                        stencil, fg, poisson,  &
+                                        lg, mg,   &
+                                        info,  &
+                                        xc_func, dmat, ofl,  &
+                                        srg, srg_scalar,  &
+                                        spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                                        V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
+                                        pp, ppg, ppn )
 
-            if (yn_restart == 'y') then
-                directory_read_data = trim(directory_read_data_macro(trim(ms%directory_read_data), i))
+                ! Override global variables (restore)
+                base_directory = trim(ms%base_directory)
+                nproc_group_global = ms%icomm_ms_world
+                nproc_id_global = ms%id_ms_world
+                nproc_size_global = ms%isize_ms_world        
+                directory_read_data = trim(ms%directory_read_data)
+                quiet = .false.
             end if
-            
-            ! Initializa TDKS system
-            call initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
-                                    singlescale,  &
-                                    stencil, fg, poisson,  &
-                                    lg, mg,   &
-                                    info,  &
-                                    xc_func, dmat, ofl,  &
-                                    srg, srg_scalar,  &
-                                    spsi_in, spsi_out, tpsi, rho, rho_s,  &
-                                    V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                                    pp, ppg, ppn )
-
-            ! Override global variables (restore)
-            base_directory = trim(ms%base_directory)
-            nproc_group_global = ms%icomm_ms_world
-            nproc_id_global = ms%id_ms_world
-            nproc_size_global = ms%isize_ms_world        
-            directory_read_data = trim(ms%directory_read_data)
-            quiet = .false.
-        end if
+        end do
+        call comm_sync_all()
     end do
 
-    itt = mit
-    call incident()
+    itt = mit; call incident()
 
     ! Experimental implementation
     if (comm_is_root(ms%id_ms_world)) then
@@ -487,7 +490,10 @@ subroutine checkpoint_ms(odir)
             idir = trim(restart_directory_macro(itt, i))
         end if
 
-        if (comm_is_root(ms%id_ms_world)) call create_directory(trim(idir))
+        if (comm_is_root(ms%id_ms_world)) then
+            call create_directory(trim(idir))
+            write(*, *) "Checkpointing macropoint:", i
+        end if
 
         call comm_sync_all()
 
@@ -540,19 +546,20 @@ end subroutine checkpoint_ms
 subroutine write_RT_Ac_file()
     implicit none
     integer ::  iix, iiy, iiz
-    character(256) :: filename
-
-
+    integer :: fh_ac_data   
+    character(256) :: file_ac_data
+    
     if (comm_is_root(ms%id_ms_world)) then
-        write(filename, '(a,a,"_Ac_",i6.6,".data")') trim(ms%base_directory_RT_Ac), trim(sysname), itt
-        open(8888, file=trim(filename))
-        write(8888, '(a)') "# Multiscale TDDFT calculation"
-        write(8888, '(a)') "# IX, IY, IZ: FDTD Grid index"
-        write(8888, '(a)') "# x, y, z: Coordinates"
-        write(8888, '(a)') "# Ac: Vector potential field"
-        write(8888, '(a)') "# E: Electric field"
-        write(8888, '(a)') "# J_em: Electromagnetic current density"
-        write(8888, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        fh_ac_data = get_filehandle()
+        write(file_ac_data, '(a,a,"_Ac_",i6.6,".data")') trim(ms%base_directory_RT_Ac), trim(sysname), itt
+        open(fh_ac_data, file=trim(file_ac_data))
+        write(fh_ac_data, '(a)') "# Multiscale TDDFT calculation"
+        write(fh_ac_data, '(a)') "# IX, IY, IZ: FDTD Grid index"
+        write(fh_ac_data, '(a)') "# x, y, z: Coordinates"
+        write(fh_ac_data, '(a)') "# Ac: Vector potential field"
+        write(fh_ac_data, '(a)') "# E: Electric field"
+        write(fh_ac_data, '(a)') "# J_em: Electromagnetic current density"
+        write(fh_ac_data, '("#",99(1X,I0,":",A,"[",A,"]"))') &
             & 1, "IX", "none", &
             & 2, "IY", "none", &
             & 3, "IZ", "none", &
@@ -571,33 +578,32 @@ subroutine write_RT_Ac_file()
             & 16, "E_em", trim(t_unit_energy%name) // "/vol", &
             & 17, "E_abs", trim(t_unit_energy%name) //  "/vol"
 
-            do iiz = fs%mg%is(3), fs%mg%ie(3)
-            do iiy = fs%mg%is(2), fs%mg%ie(2)
-            do iix = fs%mg%is(1), fs%mg%ie(1)
-                write(8888, '(3(i6, 1x), 14(e23.15e3, 1x))')  &
-                    & iix, & 
-                    & iiy, & 
-                    & iiz, & 
-                    & fw%vec_Ac%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
-                    & fw%vec_Ac%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
-                    & fw%vec_Ac%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
-                    & fw%vec_E%v(1, iix, iiy, iiz) * t_unit_elec%conv, &
-                    & fw%vec_E%v(2, iix, iiy, iiz) * t_unit_elec%conv, &
-                    & fw%vec_E%v(3, iix, iiy, iiz) * t_unit_elec%conv, &
-                    & fw%vec_H%v(1, iix, iiy, iiz), &
-                    & fw%vec_H%v(2, iix, iiy, iiz), &
-                    & fw%vec_H%v(3, iix, iiy, iiz), &
-                    & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
-                    & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
-                    & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv, &
-                    & fw%edensity_emfield%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
-                    & fw%edensity_absorb%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
-            end do
-            end do
-            end do
-            close(8888)
+        do iiz = fs%mg%is(3), fs%mg%ie(3)
+        do iiy = fs%mg%is(2), fs%mg%ie(2)
+        do iix = fs%mg%is(1), fs%mg%ie(1)
+            write(fh_ac_data, '(3(i6, 1x), 14(e23.15e3, 1x))')  &
+                & iix, & 
+                & iiy, & 
+                & iiz, & 
+                & fw%vec_Ac%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_Ac%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_Ac%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_E%v(1, iix, iiy, iiz) * t_unit_elec%conv, &
+                & fw%vec_E%v(2, iix, iiy, iiz) * t_unit_elec%conv, &
+                & fw%vec_E%v(3, iix, iiy, iiz) * t_unit_elec%conv, &
+                & fw%vec_H%v(1, iix, iiy, iiz), &
+                & fw%vec_H%v(2, iix, iiy, iiz), &
+                & fw%vec_H%v(3, iix, iiy, iiz), &
+                & fw%vec_j_em%v(1, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(2, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%vec_j_em%v(3, iix, iiy, iiz) * t_unit_current%conv, &
+                & fw%edensity_emfield%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3, &
+                & fw%edensity_absorb%f(iix, iiy, iiz) * t_unit_energy%conv / t_unit_length%conv ** 3
+        end do
+        end do
+        end do
+        close(fh_ac_data)
     end if
-
 
 end subroutine write_RT_Ac_file
 
