@@ -296,16 +296,14 @@ subroutine zstencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
                           & ,lap0,lapt(4,3),nabt(4,3),k(3)
   complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
 
-  if(yn_gbp_stencil=='y') then
-    call test ! temporary
-  else
-    ! typical version with fortran compiler vectorization
-    if (stencil_is_parallelized_by_omp) then
-      call zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
-    else
-      call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
-    end if
-  end if
+  call test ! temporary
+  
+!    ! typical version with fortran compiler vectorization
+!    if (stencil_is_parallelized_by_omp) then
+!      call zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+!    else
+!      call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+!    end if
 
 contains
 
