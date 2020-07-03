@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2017-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -48,6 +48,7 @@ module inputoutput
   integer :: inml_propagation
   integer :: inml_scf
   integer :: inml_emfield
+  integer :: inml_singlescale
   integer :: inml_multiscale
   integer :: inml_maxwell
   integer :: inml_analysis
@@ -56,10 +57,8 @@ module inputoutput
   integer :: inml_opt
   integer :: inml_md
   integer :: inml_group_fundamental
-  integer :: inml_group_hartree
   integer :: inml_group_others
   integer :: inml_code
-  integer :: inml_dft2tddft
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -208,49 +207,30 @@ contains
 
     namelist/calculation/ &
       & theory, &
-      & calc_mode,        &  !remove later
-      & use_ehrenfest_md, &  !remove later
-      & use_adiabatic_md, &  !remove later
-      & use_ms_maxwell,   &  !remove later
-      & use_geometry_opt, &  !remove later
-      & use_singlescale,  &  !remove later
-      & use_potential_model,&  !AY trial
       & yn_md,  &
       & yn_opt
 
     namelist/control/ &
       & sysname, &
       & base_directory, &
-      & output_buffer_interval, &
       & yn_restart, &
       & directory_read_data, &
       & yn_self_checkpoint,  &
       & checkpoint_interval, &
       & yn_reset_step_restart, &
-      & read_gs_restart_data,&
-      & write_gs_restart_data,&
-      & time_shutdown,       &
+      & read_gs_restart_data,  &
+      & write_gs_restart_data, &
+      & time_shutdown,         &
       & method_wf_distributor, &
-      & nblock_wf_distribute, &
-      & yn_gbp,            &
-      & yn_gbp_stencil,    & ! temporary
-      & dump_filename,     &  !remove later
-      & modify_gs_wfn_k,   &  !remove later
-      & read_gs_wfn_k,     &  !remove later
-      & read_rt_wfn_k,     &  !remove later
-      & read_gs_wfn_k_ms,  &  !remove later
-      & read_rt_wfn_k_ms,  &  !remove later
-      & read_gs_dns_cube,  &  !remove later
-      & write_gs_wfn_k,    &  !remove later
-      & write_rt_wfn_k,    &  !remove later
-      & write_gs_wfn_k_ms, &  !remove later
-      & write_rt_wfn_k_ms     !remove later
+      & nblock_wf_distribute,  &
+      & read_gs_dns_cube,  &  !remove later (but this is used currently)
+      & write_gs_wfn_k,    &  !remove later (but this is used currently)
+      & write_rt_wfn_k        !remove later (but this is used currently)
 
     namelist/units/ &
       & unit_system
 
     namelist/parallel/ &
-      & yn_domain_parallel, &
       & nproc_k, &
       & nproc_ob, &
       & nproc_rgrid, &
@@ -262,11 +242,9 @@ contains
 
     namelist/system/ &
       & yn_periodic, &
-      & ispin, &
+      & spin, &
       & al, &
       & al_vec1,al_vec2,al_vec3, &
-      & isym, &
-      & crystal_structure, &
       & nstate, &
       & nstate_spin, &
       & nelec, &
@@ -315,10 +293,12 @@ contains
     namelist/propagation/ &
       & n_hamil, &
       & propagator, &
-      & yn_fix_func
+      & yn_fix_func, &
+      & yn_predictor_corrector
 
     namelist/scf/ &
       & method_init_wf, &
+      & iseed_number_change, &
       & method_min, &
       & ncg, &
       & ncg_init, &
@@ -328,22 +308,21 @@ contains
       & alpha_mb, &
       & nmemory_p, &
       & beta_p, &
-      & fsset_option, &
-      & nfsset_start, &
-      & nfsset_every, &
+      & yn_auto_mixing, &
+      & update_mixing_ratio, &
       & nscf, &
       & yn_subspace_diagonalization, &
       & convergence, &
       & threshold, &
-      & omp_loop, &
-      & skip_gsortho, &
-      & iditer_notemperature, &
-      & step_initial_mix_zero, &
-      & iseed_number_change
+      & nscf_init_redistribution, &
+      & nscf_init_no_diagonal, &
+      & nscf_init_mix_zero, &
+      & conv_gap_mix_zero
 
     namelist/emfield/ &
       & trans_longi, &
       & ae_shape1, &
+      & file_input1, &
       & e_impulse, &
       & E_amplitude1, &
       & I_wcm2_1, &
@@ -362,13 +341,14 @@ contains
       & phi_cep2, &
       & t1_t2, &
       & t1_start, &
-      & yn_local_field , &
-      & rlaserbound_sta , &
-      & rlaserbound_end , &
       & num_dipole_source , &
       & vec_dipole_source , &
       & cood_dipole_source , &
       & rad_dipole_source
+      
+    namelist/singlescale/ &
+      & method_singlescale, &
+      & cutoff_G2_emfield
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -389,7 +369,8 @@ contains
       & file_macropoint, &
       & num_macropoint,  &
       & set_ini_coor_vel,&
-      & nmacro_write_group
+      & nmacro_write_group, &
+      & nmacro_chunk
 
     namelist/maxwell/    &
       & al_em,           &
@@ -421,9 +402,10 @@ contains
 
     namelist/analysis/ &
       & projection_option, &
-      & projection_decomp, &
+      & out_projection_step, &
       & nenergy, &
       & de, &
+      & out_rt_energy_step, &
       & yn_out_psi, &
       & yn_out_dos, &
       & yn_out_dos_set_fe_origin, &
@@ -449,15 +431,16 @@ contains
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
       & yn_out_tm, &
-      & out_projection_step, &
       & out_ms_step, &
       & format_voxel_data, &
       & nsplit_voxel_data, &
-      & timer_process
+      & yn_out_perflog, &
+      & format_perflog
 
     namelist/poisson/ &
       & layout_multipole, &
       & num_multipole_xyz, &
+      & lmax_multipole, &
       & threshold_cg
 
     namelist/ewald/ &
@@ -469,69 +452,36 @@ contains
 
     namelist/opt/ &
       & nopt, &
-      & cg_alpha_ini, &   !(only in ARTED)not use if flag_use_grad_wf_on_force=.T.
-      & cg_alpha_up, &    !(only in ARTED)
-      & cg_alpha_down, &  !(only in ARTED)
       & max_step_len_adjust, &
-      & convrg_scf_force, & !(only in ARTED)
-      & convrg_scf_ene, &   !(only in ARTED)
-      & convrg_opt_fmax, &
-      & convrg_opt_ene      !not use now if flag_use_grad_wf_on_force=.T.
+      & convrg_opt_fmax
 
     namelist/md/ &
       & ensemble, &
       & thermostat, &
       & step_velocity_scaling, &
       & step_update_ps, &
-      & step_update_ps2,&
       & temperature0_ion_k, &
       & yn_set_ini_velocity, &
       & file_ini_velocity, &
       & thermostat_tau, &
-      & friction, &
       & yn_stop_system_momt
 
-    namelist/group_fundamental/ &
-      & iditer_nosubspace_diag, &
-      & ntmg, &
-      & idisnum, &
-      & iwrite_projection, &
-      & itwproj, &
-      & iwrite_projnum, &
-      & itcalc_ene
+    namelist/group_fundamental/ &  !remove later
+      & iwrite_projection, &       !remove later
+      & itwproj, &                 !remove later
+      & iwrite_projnum             !remove later
 
-    namelist/group_hartree/ &
-      & lmax_lmp
-
-    namelist/group_others/ &
-      & iswitch_orbital_mesh, &
-      & iflag_psicube, &
-      & num_projection, &
-      & iwrite_projection_ob, &
-      & iwrite_projection_k, &
-      & filename_pot, &
-      & iwrite_external, &
-      & iflag_intelectron, &
-      & num_dip2, &
-      & dip2boundary, &
-      & dip2center, &
-      & itotntime2, &
-      & iwdenoption, &
-      & iwdenstep, &
-      & iflag_estatic
+    namelist/group_others/ &       !remove later
+      & num_projection, &          !remove later
+      & iwrite_projection_ob, &    !remove later
+      & iwrite_projection_k        !remove later
 
     namelist/code/ &
-      & yn_want_stencil_openmp_parallelization, &
       & yn_want_stencil_hand_vectorization, &
-      & yn_force_stencil_openmp_parallelization, &
-      & yn_force_stencil_sequential_computation, &
-      & yn_want_communication_overlapping
-
-    namelist/dft2tddft/ &
-      & yn_datafiles_dump, &
-      & target_nproc_k, &
-      & target_nproc_ob, &
-      & target_nproc_rgrid
+      & yn_want_communication_overlapping, &
+      & stencil_openmp_mode, &
+      & current_openmp_mode, &
+      & force_openmp_mode
 
 !! == default for &unit ==
     unit_system='au'
@@ -570,45 +520,26 @@ contains
 
 !! == default for &calculation
     theory              = 'tddft'
-    calc_mode           = 'none'   !remove later
-    use_ehrenfest_md    = 'n'  !remove later
-    use_adiabatic_md    = 'n'  !remove later
-    use_ms_maxwell      = 'n'  !remove later
-    use_geometry_opt    = 'n'  !remove later
-    use_singlescale     = 'n'  !remove later
-    use_potential_model = 'n'
     yn_md               = 'n'
     yn_opt              = 'n'
 !! == default for &control
     sysname               = 'default'
     base_directory        = './'
-    output_buffer_interval= -1
     yn_restart            = 'n'
     directory_read_data   = 'restart/'
     yn_self_checkpoint    = 'n'
-    checkpoint_interval   = 0
+    checkpoint_interval   = -1
     yn_reset_step_restart = 'n'
     read_gs_restart_data  = 'all'
     write_gs_restart_data = 'all'
     time_shutdown         = -1d0
     method_wf_distributor = 'single'
     nblock_wf_distribute = 16
-    yn_gbp        = 'n'
-    yn_gbp_stencil = 'n'
     !remove later
-    dump_filename    = 'default'
-    modify_gs_wfn_k  = 'n'
-    read_gs_wfn_k    = 'n'
-    read_rt_wfn_k    = 'n'
-    read_gs_wfn_k_ms = 'n'
-    read_rt_wfn_k_ms = 'n'
     read_gs_dns_cube = 'n'
     write_gs_wfn_k   = 'n'
     write_rt_wfn_k   = 'n'
-    write_gs_wfn_k_ms= 'n'
-    write_rt_wfn_k_ms= 'n'
 !! == default for &parallel
-    yn_domain_parallel   = 'n'
     nproc_k              = 0
     nproc_ob             = 0
     nproc_rgrid          = 0
@@ -619,13 +550,11 @@ contains
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
-    ispin              = 0
+    spin               = 'unpolarized'
     al                 = 0d0
     al_vec1            = 0d0
     al_vec2            = 0d0
     al_vec3            = 0d0
-    isym               = 1
-    crystal_structure  = 'none'
     nstate             = 0
     nstate_spin(:)     = 0
     nelec              = 0
@@ -663,13 +592,15 @@ contains
 !! == default for &tgrid
     nt = 0
     dt = 0
-    gram_schmidt_interval = 0
+    gram_schmidt_interval = -1
 !! == default for &propagation
     n_hamil     = 4
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
+    yn_predictor_corrector = 'n'
 !! == default for &scf
     method_init_wf = 'gauss'
+    iseed_number_change  =  0
     method_min    = 'cg'
     ncg           = 4
     ncg_init      = 4
@@ -677,24 +608,23 @@ contains
     mixrate       = 0.5d0
     nmemory_mb    = 8
     alpha_mb      = 0.75d0
-    nmemory_p    = 4
+    nmemory_p     = 4
     beta_p        = 0.75d0
-    fsset_option  = 'n'
-    nfsset_start  = 75
-    nfsset_every  = 25
-    nscf          = 0
+    yn_auto_mixing = 'n'
+    update_mixing_ratio = 3.d0
+    nscf          = 300
     yn_subspace_diagonalization = 'y'
     convergence   = 'rho_dne'
     threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
-    omp_loop      = 'k'
-    skip_gsortho  = 'n'
-    iditer_notemperature = 10
-    step_initial_mix_zero= -1
-    iseed_number_change  =  0
+    nscf_init_redistribution = 10
+    nscf_init_no_diagonal= 10
+    nscf_init_mix_zero   = -1
+    conv_gap_mix_zero    = 99999d0*uenergy_from_au
 
 !! == default for &emfield
     trans_longi    = 'tr'
     ae_shape1      = 'none'
+    file_input1    = ''
     e_impulse      = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
     E_amplitude1   = 0d0
     I_wcm2_1       = -1d0
@@ -713,17 +643,14 @@ contains
     phi_cep2       = 0d0
     t1_t2          = 0d0
     t1_start       = 0d0
-    yn_local_field = 'n'
-    rlaserbound_sta(1) = -1.d7*ulength_from_au ! a.u.
-    rlaserbound_sta(2) = -1.d7*ulength_from_au ! a.u.
-    rlaserbound_sta(3) = -1.d7*ulength_from_au ! a.u.
-    rlaserbound_end(1) =  1.d7*ulength_from_au ! a.u.
-    rlaserbound_end(2) =  1.d7*ulength_from_au ! a.u.
-    rlaserbound_end(3) =  1.d7*ulength_from_au ! a.u.
     num_dipole_source  = 0
     vec_dipole_source  = 0d0
     cood_dipole_source = 0d0
     rad_dipole_source  = 2d0 ! a.u.
+    
+!! == default for &singlescale
+    method_singlescale = '3d'
+    cutoff_G2_emfield  = -1d0
 
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -737,13 +664,14 @@ contains
     nksplit    = 0
     nxysplit   = 0
     nxvacl_m   = 1
-    nxvacr_m   = 0
+    nxvacr_m   = 1
     nx_origin_m = 1
     ny_origin_m = 1
     nz_origin_m = 1
     file_macropoint = ''
     set_ini_coor_vel= 'n'
     nmacro_write_group= -1
+    nmacro_chunk = 20
 
 !! == default for &maxwell
     al_em(:)           = 0d0
@@ -775,9 +703,10 @@ contains
 
 !! == default for &analysis
     projection_option   = 'no'
-    projection_decomp   = 'n'
+    out_projection_step = 100
     nenergy             = 1000
     de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
+    out_rt_energy_step  = 10
     yn_out_psi          = 'n'
     yn_out_dos          = 'n'
     yn_out_dos_set_fe_origin = 'n'
@@ -804,15 +733,17 @@ contains
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
     yn_out_tm           = 'n'
-    out_projection_step = 100
     out_ms_step         = 100
     format_voxel_data   = 'cube'
     nsplit_voxel_data   = 1
-    timer_process       = 'n'
+
+    yn_out_perflog      = 'y'
+    format_perflog      = 'stdout'
 
 !! == default for &poisson
     layout_multipole  = 3
     num_multipole_xyz = 0
+    lmax_multipole    = 4
     threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
 !! == default for &ewald
     newald = 4
@@ -822,65 +753,34 @@ contains
     cutoff_g = -1d0
 !! == default for &opt
     nopt                = 100
-    cg_alpha_ini        =  0.8d0 !not use now
-    cg_alpha_up         =  1.3d0
-    cg_alpha_down       =  0.5d0
     max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
-    convrg_scf_force    = -1d0
-    convrg_scf_ene      = -1d0
     convrg_opt_fmax     =  1d-3
-    convrg_opt_ene      =  1d-6  !not use now
 !! == default for &md
     ensemble              = 'nve'
     thermostat            = 'nose-hoover'
     step_velocity_scaling = -1
     step_update_ps        = 10
-    step_update_ps2       = 1
     temperature0_ion_k    = 298.15d0
     yn_set_ini_velocity   = 'n'
     file_ini_velocity     = 'none'
     thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
-    friction              =  0d0
     yn_stop_system_momt   = 'n'
 !! == default for &group_fundamental
-    iditer_nosubspace_diag = 10
-    ntmg                   = 1
-    idisnum                = (/1,2/)
     iwrite_projection      = 0
     itwproj                = -1
     iwrite_projnum         = 0
-    itcalc_ene             = 10
-!! == default for &group_hartree
-    lmax_lmp = 4
 !! == default for &group_others
-    iswitch_orbital_mesh = 0
-    iflag_psicube        = 0
     num_projection       = 1
     do ii=1,200
       iwrite_projection_ob(ii) = ii
     end do
     iwrite_projection_k(1:200) = 1
-    filename_pot               = 'pot'
-    iwrite_external            = 0
-    iflag_intelectron          = 0
-    num_dip2                   = 1
-    dip2boundary(1:100)        = 0.d0*ulength_from_au ! a.u.
-    dip2center(1:100)          = 0.d0*ulength_from_au ! a.u.
-    itotntime2                 = 0
-    iwdenoption                = 0
-    iwdenstep                  = 0
-    iflag_estatic              = 0
 !! == default for code
-    yn_want_stencil_openmp_parallelization = 'y'
-    yn_want_stencil_hand_vectorization     = 'y'
-    yn_force_stencil_openmp_parallelization = 'n'
-    yn_force_stencil_sequential_computation = 'n'
-    yn_want_communication_overlapping = 'n'
-!! == default for dft2tddft
-    yn_datafiles_dump = 'n'
-    target_nproc_k  = 0
-    target_nproc_ob = 0
-    target_nproc_rgrid = 0
+    yn_want_stencil_hand_vectorization = 'y'
+    yn_want_communication_overlapping  = 'n'
+    stencil_openmp_mode = 'auto'
+    current_openmp_mode = 'auto'
+    force_openmp_mode   = 'auto'
 
     if (comm_is_root(nproc_id_global)) then
       fh_namelist = get_filehandle()
@@ -921,6 +821,9 @@ contains
 
       read(fh_namelist, nml=emfield, iostat=inml_emfield)
       rewind(fh_namelist)
+      
+      read(fh_namelist, nml=singlescale, iostat=inml_singlescale)
+      rewind(fh_namelist)
 
       read(fh_namelist, nml=multiscale, iostat=inml_multiscale)
       rewind(fh_namelist)
@@ -946,16 +849,10 @@ contains
       read(fh_namelist, nml=group_fundamental, iostat=inml_group_fundamental)
       rewind(fh_namelist)
 
-      read(fh_namelist, nml=group_hartree, iostat=inml_group_hartree)
-      rewind(fh_namelist)
-
       read(fh_namelist, nml=group_others, iostat=inml_group_others)
       rewind(fh_namelist)
 
       read(fh_namelist, nml=code, iostat=inml_code)
-      rewind(fh_namelist)
-
-      read(fh_namelist, nml=dft2tddft, iostat=inml_dft2tddft)
       rewind(fh_namelist)
 
       close(fh_namelist)
@@ -969,13 +866,6 @@ contains
 ! Broad cast
 !! == bcast for &calculation
     call comm_bcast(theory             ,nproc_group_global)
-    call comm_bcast(calc_mode          ,nproc_group_global)  !remove later
-    call comm_bcast(use_ehrenfest_md   ,nproc_group_global)  !remove later
-    call comm_bcast(use_adiabatic_md   ,nproc_group_global)  !remove later
-    call comm_bcast(use_ms_maxwell     ,nproc_group_global)  !remove later
-    call comm_bcast(use_geometry_opt   ,nproc_group_global)  !remove later
-    call comm_bcast(use_singlescale    ,nproc_group_global)  !remove later
-    call comm_bcast(use_potential_model,nproc_group_global)
     call comm_bcast(yn_md              ,nproc_group_global)
     call comm_bcast(yn_opt             ,nproc_group_global)
 
@@ -985,13 +875,14 @@ contains
     ii = len_trim(base_directory)
     if(base_directory(ii:ii).ne.'/') &
        base_directory = trim(base_directory)//'/'
-    call comm_bcast(output_buffer_interval,nproc_group_global)
     call comm_bcast(yn_restart            ,nproc_group_global)
     call comm_bcast(directory_read_data   ,nproc_group_global)
     ii = len_trim(directory_read_data)
     if(directory_read_data(ii:ii).ne.'/') &
        directory_read_data = trim(directory_read_data)//'/'
     call comm_bcast(yn_self_checkpoint    ,nproc_group_global)
+    if(checkpoint_interval == 0) &
+      checkpoint_interval = -1 ! FIXME: workaround for zero-divide problem
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
     call comm_bcast(yn_reset_step_restart ,nproc_group_global)
     call comm_bcast(read_gs_restart_data  ,nproc_group_global)
@@ -999,23 +890,11 @@ contains
     call comm_bcast(time_shutdown         ,nproc_group_global)
     call comm_bcast(method_wf_distributor ,nproc_group_global)
     call comm_bcast(nblock_wf_distribute  ,nproc_group_global)
-    call comm_bcast(yn_gbp                ,nproc_group_global)
-    call comm_bcast(yn_gbp_stencil        ,nproc_group_global) ! temporary
-    !remove later
-    call comm_bcast(dump_filename   ,nproc_group_global)
-    call comm_bcast(modify_gs_wfn_k ,nproc_group_global)
-    call comm_bcast(read_gs_wfn_k   ,nproc_group_global)
-    call comm_bcast(read_rt_wfn_k   ,nproc_group_global)
     call comm_bcast(read_gs_dns_cube,nproc_group_global)
-    call comm_bcast(read_gs_wfn_k_ms ,nproc_group_global)
-    call comm_bcast(read_rt_wfn_k_ms ,nproc_group_global)
     call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
     call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
-    call comm_bcast(write_gs_wfn_k_ms,nproc_group_global)
-    call comm_bcast(write_rt_wfn_k_ms,nproc_group_global)
 
 !! == bcast for &parallel
-    call comm_bcast(yn_domain_parallel  ,nproc_group_global)
     call comm_bcast(nproc_k             ,nproc_group_global)
     call comm_bcast(nproc_ob            ,nproc_group_global)
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
@@ -1028,7 +907,7 @@ contains
     call comm_bcast(yn_periodic,nproc_group_global)
     if(yn_periodic=='y') iperiodic=3
     if(yn_periodic=='n') iperiodic=0
-    call comm_bcast(ispin      ,nproc_group_global)
+    call comm_bcast(spin       ,nproc_group_global)
     call comm_bcast(al         ,nproc_group_global)
     al = al * ulength_to_au
     call comm_bcast(al_vec1            ,nproc_group_global)
@@ -1037,8 +916,6 @@ contains
     al_vec1 = al_vec1 * ulength_to_au
     al_vec2 = al_vec2 * ulength_to_au
     al_vec3 = al_vec3 * ulength_to_au
-    call comm_bcast(isym               ,nproc_group_global)
-    call comm_bcast(crystal_structure  ,nproc_group_global)
     call comm_bcast(nstate             ,nproc_group_global)
     call comm_bcast(nstate_spin        ,nproc_group_global)
     call comm_bcast(nelec              ,nproc_group_global)
@@ -1062,9 +939,9 @@ contains
 !! == bcast for &functional
 
 #ifdef USE_LIBXC
-    if (alibxc .ne. 'none') xc = 'libxc:' // trim(alibxc)
-    if (alibx .ne. 'none') xname = 'libxc:' // trim(alibx)
-    if (alibc .ne. 'none') cname = 'libxc:' // trim(alibc)
+    if (alibxc .ne. 'none') xc =  trim(alibxc)
+    if (alibx .ne. 'none') xname =  trim(alibx)
+    if (alibc .ne. 'none') cname =  trim(alibc)
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
@@ -1091,20 +968,21 @@ contains
     call comm_bcast(n_hamil    ,nproc_group_global)
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
+    call comm_bcast(yn_predictor_corrector,nproc_group_global)
 !! == bcast for &scf
-    call comm_bcast(method_init_wf        ,nproc_group_global)
-    call comm_bcast(method_min            ,nproc_group_global)
+    call comm_bcast(method_init_wf          ,nproc_group_global)
+    call comm_bcast(iseed_number_change     ,nproc_group_global)
+    call comm_bcast(method_min              ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
     call comm_bcast(ncg_init                ,nproc_group_global)
-    call comm_bcast(method_mixing                 ,nproc_group_global)
-    call comm_bcast(mixrate                ,nproc_group_global)
+    call comm_bcast(method_mixing           ,nproc_group_global)
+    call comm_bcast(mixrate                 ,nproc_group_global)
     call comm_bcast(nmemory_mb              ,nproc_group_global)
     call comm_bcast(alpha_mb                ,nproc_group_global)
     call comm_bcast(nmemory_p               ,nproc_group_global)
     call comm_bcast(beta_p                  ,nproc_group_global)
-    call comm_bcast(fsset_option            ,nproc_group_global)
-    call comm_bcast(nfsset_start            ,nproc_group_global)
-    call comm_bcast(nfsset_every            ,nproc_group_global)
+    call comm_bcast(yn_auto_mixing          ,nproc_group_global)
+    call comm_bcast(update_mixing_ratio     ,nproc_group_global)
     call comm_bcast(nscf                    ,nproc_group_global)
     call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
     call comm_bcast(convergence             ,nproc_group_global)
@@ -1128,15 +1006,16 @@ contains
          threshold = threshold * (uenergy_to_au)**2 / (ulength_to_au)**6
       end select
     endif
-    call comm_bcast(omp_loop                ,nproc_group_global)
-    call comm_bcast(skip_gsortho            ,nproc_group_global)
-    call comm_bcast(iditer_notemperature    ,nproc_group_global)
-    call comm_bcast(step_initial_mix_zero   ,nproc_group_global)
-    call comm_bcast(iseed_number_change     ,nproc_group_global)
+    call comm_bcast(nscf_init_redistribution  ,nproc_group_global)
+    call comm_bcast(nscf_init_no_diagonal ,nproc_group_global)
+    call comm_bcast(nscf_init_mix_zero    ,nproc_group_global)
+    call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
+    conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
 
 !! == bcast for &emfield
     call comm_bcast(trans_longi,nproc_group_global)
     call comm_bcast(ae_shape1  ,nproc_group_global)
+    call comm_bcast(file_input1,nproc_group_global)
     call comm_bcast(e_impulse,nproc_group_global)
     e_impulse = e_impulse *uenergy_to_au/ulength_to_au*utime_to_au
     call comm_bcast(E_amplitude1 ,nproc_group_global)
@@ -1172,11 +1051,6 @@ contains
     t1_t2 = t1_t2 * utime_to_au
     call comm_bcast(t1_start ,nproc_group_global)
     t1_start = t1_start * utime_to_au
-    call comm_bcast(yn_local_field  ,nproc_group_global)
-    call comm_bcast(rlaserbound_sta,nproc_group_global)
-    rlaserbound_sta = rlaserbound_sta * ulength_to_au
-    call comm_bcast(rlaserbound_end,nproc_group_global)
-    rlaserbound_end = rlaserbound_end * ulength_to_au
     call comm_bcast(num_dipole_source,nproc_group_global)
     call comm_bcast(vec_dipole_source,nproc_group_global)
     vec_dipole_source = vec_dipole_source * ulength_to_au
@@ -1184,6 +1058,11 @@ contains
     cood_dipole_source = cood_dipole_source * ulength_to_au
     call comm_bcast(rad_dipole_source,nproc_group_global)
     rad_dipole_source = rad_dipole_source * ulength_to_au
+
+!! == bcast for &singlescale
+    call comm_bcast(method_singlescale,nproc_group_global)
+    call comm_bcast(cutoff_G2_emfield,nproc_group_global)
+    cutoff_G2_emfield = cutoff_G2_emfield * uenergy_to_au
 
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1208,6 +1087,7 @@ contains
     call comm_bcast(num_macropoint,  nproc_group_global)
     call comm_bcast(set_ini_coor_vel,nproc_group_global)
     call comm_bcast(nmacro_write_group,nproc_group_global)
+    call comm_bcast(nmacro_chunk,nproc_group_global)
 
 !! == bcast for &maxwell
     call comm_bcast(al_em           ,nproc_group_global)
@@ -1248,10 +1128,11 @@ contains
 
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
-    call comm_bcast(projection_decomp   ,nproc_group_global)
+    call comm_bcast(out_projection_step ,nproc_group_global)
     call comm_bcast(nenergy             ,nproc_group_global)
     call comm_bcast(de                  ,nproc_group_global)
     de = de * uenergy_to_au
+    call comm_bcast(out_rt_energy_step  ,nproc_group_global)
     call comm_bcast(yn_out_psi          ,nproc_group_global)
     call comm_bcast(yn_out_dos          ,nproc_group_global)
     call comm_bcast(yn_out_dos_set_fe_origin ,nproc_group_global)
@@ -1281,15 +1162,16 @@ contains
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
-    call comm_bcast(out_projection_step ,nproc_group_global)
     call comm_bcast(out_ms_step         ,nproc_group_global)
     call comm_bcast(format_voxel_data   ,nproc_group_global)
     call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
-    call comm_bcast(timer_process       ,nproc_group_global)
+    call comm_bcast(yn_out_perflog      ,nproc_group_global)
+    call comm_bcast(format_perflog      ,nproc_group_global)
 
 !! == bcast for &poisson
     call comm_bcast(layout_multipole  ,nproc_group_global)
     call comm_bcast(num_multipole_xyz ,nproc_group_global)
+    call comm_bcast(lmax_multipole    ,nproc_group_global)
     call comm_bcast(threshold_cg      ,nproc_group_global)
     threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3
 !! == bcast for &ewald
@@ -1303,86 +1185,44 @@ contains
     cutoff_g      = cutoff_g / ulength_to_au
 !! == bcast for &opt
     call comm_bcast(nopt                ,nproc_group_global)
-    call comm_bcast(cg_alpha_ini        ,nproc_group_global)
-    call comm_bcast(cg_alpha_up         ,nproc_group_global)
-    call comm_bcast(cg_alpha_down       ,nproc_group_global)
     call comm_bcast(max_step_len_adjust ,nproc_group_global)
-    call comm_bcast(convrg_scf_force    ,nproc_group_global)
-    call comm_bcast(convrg_scf_ene      ,nproc_group_global)
     call comm_bcast(convrg_opt_fmax     ,nproc_group_global)
-    call comm_bcast(convrg_opt_ene      ,nproc_group_global)
 !! == bcast for &md
     call comm_bcast(ensemble               ,nproc_group_global)
     call comm_bcast(thermostat             ,nproc_group_global)
     call comm_bcast(step_velocity_scaling  ,nproc_group_global)
     call comm_bcast(step_update_ps         ,nproc_group_global)
-    call comm_bcast(step_update_ps2        ,nproc_group_global)
     call comm_bcast(temperature0_ion_k     ,nproc_group_global)
     call comm_bcast(yn_set_ini_velocity    ,nproc_group_global)
     call comm_bcast(file_ini_velocity      ,nproc_group_global)
     call comm_bcast(thermostat_tau         ,nproc_group_global)
     thermostat_tau = thermostat_tau * utime_to_au
-    call comm_bcast(friction               ,nproc_group_global)
     call comm_bcast(yn_stop_system_momt    ,nproc_group_global)
 !! == bcast for &group_fundamental
-    call comm_bcast(iditer_nosubspace_diag,nproc_group_global)
-    call comm_bcast(ntmg                  ,nproc_group_global)
-    call comm_bcast(idisnum               ,nproc_group_global)
     call comm_bcast(iwrite_projection     ,nproc_group_global)
     call comm_bcast(itwproj               ,nproc_group_global)
     call comm_bcast(iwrite_projnum        ,nproc_group_global)
-    call comm_bcast(itcalc_ene            ,nproc_group_global)
-!! == bcast for &group_hartree
-    call comm_bcast(lmax_lmp,nproc_group_global)
 !! == bcast for &group_others
-    call comm_bcast(iswitch_orbital_mesh,nproc_group_global)
-    call comm_bcast(iflag_psicube       ,nproc_group_global)
     call comm_bcast(num_projection      ,nproc_group_global)
     call comm_bcast(iwrite_projection_ob,nproc_group_global)
     call comm_bcast(iwrite_projection_k ,nproc_group_global)
-    call comm_bcast(filename_pot        ,nproc_group_global)
-    call comm_bcast(iwrite_external     ,nproc_group_global)
-    call comm_bcast(iflag_intelectron   ,nproc_group_global)
-    call comm_bcast(num_dip2            ,nproc_group_global)
-    call comm_bcast(dip2boundary        ,nproc_group_global)
-    dip2boundary  = dip2boundary  * ulength_to_au
-    call comm_bcast(dip2center          ,nproc_group_global)
-    dip2center    = dip2center    * ulength_to_au
-    call comm_bcast(itotntime2          ,nproc_group_global)
-    call comm_bcast(iwdenoption         ,nproc_group_global)
-    call comm_bcast(iwdenstep           ,nproc_group_global)
-    call comm_bcast(iflag_estatic       ,nproc_group_global)
 !! == bcast for code
-    call comm_bcast(yn_want_stencil_openmp_parallelization ,nproc_group_global)
     call comm_bcast(yn_want_stencil_hand_vectorization     ,nproc_group_global)
-    call comm_bcast(yn_force_stencil_openmp_parallelization,nproc_group_global)
-    call comm_bcast(yn_force_stencil_sequential_computation,nproc_group_global)
     call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
-!! == bcast for dft2tddft
-    call comm_bcast(yn_datafiles_dump     ,nproc_group_global)
-    call comm_bcast(target_nproc_k        ,nproc_group_global)
-    call comm_bcast(target_nproc_ob       ,nproc_group_global)
-    call comm_bcast(target_nproc_rgrid    ,nproc_group_global)
-
-    if (yn_force_stencil_openmp_parallelization == 'y' .and. yn_force_stencil_sequential_computation == 'y') then
-      if (comm_is_root(nproc_id_global)) then
-        print *, 'WARNING: exclusive options are both specified, could you please check your input file.'
-        print *, "         `yn_force_stencil_openmp_parallelization = 'y'`, and"
-        print *, "         `yn_force_stencil_sequential_computation = 'y'`"
-      end if
-    end if
-
+    call comm_bcast(stencil_openmp_mode                    ,nproc_group_global)
+    call comm_bcast(current_openmp_mode                    ,nproc_group_global)
+    call comm_bcast(force_openmp_mode                      ,nproc_group_global)
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
     use parallelization
     use communication
     use filesystem, only: get_filehandle
-    use salmon_global, only: directory_read_data,yn_restart !,yn_self_checkpoint,yn_datafiles_dump
+    use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
     use checkpoint_restart_sub, only: generate_restart_directory_name
     character(256) :: filename_tmp,char_atom, gdir,wdir
     integer :: icount,i
-    logical :: if_error, if_cartesian
+    logical :: if_error, if_cartesian, iself
 
     if (comm_is_root(nproc_id_global)) then
 
@@ -1429,7 +1269,8 @@ contains
 
         icount = icount + 1
         if_cartesian = .true.
-        if(yn_datafiles_dump == 'y') then
+        iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'   !refer restart_rt
+        if(iself) then
            filename_tmp = trim(gdir)//"rank_000000/atomic_coor.txt"
         else
            filename_tmp = trim(gdir)//"atomic_coor.txt"
@@ -1461,9 +1302,9 @@ contains
     end if
 
     allocate(atom_name(natom))
-    allocate(rion(3,natom), rion_red(3,natom),kion(natom), flag_opt_atom(natom))
-    rion = 0d0
-    rion_red = 0d0
+    allocate(Rion(3,natom), Rion_red(3,natom),kion(natom), flag_opt_atom(natom))
+    Rion     = 0d0
+    Rion_red = 0d0
     kion = 0
     flag_opt_atom = 'n'
 
@@ -1476,20 +1317,20 @@ contains
         case(ntype_atom_coor_cartesian)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i), flag_opt_atom(i)
+                 read(fh_atomic_coor, *) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
               else
-                 read(fh_atomic_coor, *) char_atom, rion(:,i), kion(i)
+                 read(fh_atomic_coor, *) char_atom, Rion(:,i), kion(i)
               end if
               atom_name(i) = char_atom
            end do
-           rion = rion*ulength_to_au
+           Rion = Rion*ulength_to_au
 
         case(ntype_atom_coor_reduced)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i), flag_opt_atom(i)
+                 read(fh_atomic_coor, *) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
               else
-                 read(fh_atomic_coor, *) char_atom, rion_red(:,i), kion(i)
+                 read(fh_atomic_coor, *) char_atom, Rion_red(:,i), kion(i)
               end if
               atom_name(i) = char_atom
            end do
@@ -1499,8 +1340,8 @@ contains
 
       end if
 
-      call comm_bcast(rion,nproc_group_global)
-      call comm_bcast(rion_red,nproc_group_global)
+      call comm_bcast(Rion,nproc_group_global)
+      call comm_bcast(Rion_red,nproc_group_global)
       call comm_bcast(kion,nproc_group_global)
       call comm_bcast(flag_opt_atom,nproc_group_global)
       call comm_bcast(atom_name,nproc_group_global)
@@ -1754,21 +1595,13 @@ contains
       if(inml_calculation >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'calculation', inml_calculation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'calc_mode', calc_mode                 !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_ehrenfest_md', use_ehrenfest_md   !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_adiabatic_md', use_adiabatic_md   !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_ms_maxwell', use_ms_maxwell       !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_geometry_opt', use_geometry_opt   !remove later
-!      write(fh_variables_log, '("#",4X,A,"=",A)') 'use_singlescale', use_singlescale     !remove later
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
-     !write(fh_variables_log, '("#",4X,A,"=",A)') 'use_potential_model', use_potential_model !AY not open now
 
       if(inml_control >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', inml_control
       write(fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'output_buffer_interval', output_buffer_interval
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
@@ -1779,20 +1612,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp', yn_gbp
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gbp_stencil', yn_gbp_stencil
-      !remove later
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dump_filename', trim(dump_filename)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'modify_gs_wfn_k', trim(modify_gs_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_wfn_k', trim(read_gs_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_rt_wfn_k', trim(read_rt_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_dns_cube', trim(read_gs_dns_cube)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_wfn_k_ms', trim(read_gs_wfn_k_ms)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_rt_wfn_k_ms', trim(read_rt_wfn_k_ms)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k_ms', trim(write_gs_wfn_k_ms)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k_ms', trim(write_rt_wfn_k_ms)
 
 
       if(inml_units >0)ierr_nml = ierr_nml +1
@@ -1801,7 +1623,6 @@ contains
 
       if(inml_parallel >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'parallel', inml_parallel
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_domain_parallel', yn_domain_parallel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(1)', nproc_rgrid(1)
@@ -1816,15 +1637,13 @@ contains
       if(inml_system >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', inml_system
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_periodic', yn_periodic
-      write(fh_variables_log, '("#",4X,A,"=",I1)') 'ispin', ispin
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'spin', spin
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(1)', al(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(2)', al(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(3)', al(3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec1(1:3)', al_vec1(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2(1:3)', al_vec2(1:3)
       write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3(1:3)', al_vec3(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",I1)') 'isym', isym
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'crystal_structure', crystal_structure
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nstate', nstate
       write(fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nstate_spin(1:2)', nstate_spin
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'nelec', nelec
@@ -1889,10 +1708,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
       write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_wf', method_init_wf
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iseed_number_change', iseed_number_change
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
@@ -1902,23 +1723,22 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mb', alpha_mb
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_p', nmemory_p
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'beta_p', beta_p
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'fsset_option', fsset_option
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_start', nfsset_start
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nfsset_every', nfsset_every
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'omp_loop', omp_loop
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'skip_gsortho', skip_gsortho
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'iditer_notemperature', iditer_notemperature
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'step_initial_mix_zero', step_initial_mix_zero
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iseed_number_change', iseed_number_change
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_redistribution', nscf_init_redistribution
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
+      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
 
       if(inml_emfield >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
       write(fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', file_input1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
@@ -1945,13 +1765,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep2', phi_cep2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_t2', t1_t2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_start', t1_start
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_local_field', yn_local_field
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(1)', rlaserbound_sta(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(2)', rlaserbound_sta(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_sta(3)', rlaserbound_sta(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(1)', rlaserbound_end(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(2)', rlaserbound_end(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rlaserbound_end(3)', rlaserbound_end(3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_dipole_source', num_dipole_source
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,1)', vec_dipole_source(1,1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,1)', vec_dipole_source(2,1)
@@ -1966,6 +1779,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,2)', cood_dipole_source(2,2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,2)', cood_dipole_source(3,2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rad_dipole_source', rad_dipole_source
+      
+      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'singlescale', inml_singlescale
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_singlescale', method_singlescale
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
@@ -1987,6 +1804,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'num_macropoint', num_macropoint
       write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
+      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
 
       if(inml_maxwell >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', inml_maxwell
@@ -2048,9 +1866,10 @@ contains
       if(inml_analysis >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
       write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_decomp', projection_decomp
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
@@ -2076,11 +1895,11 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'timer_process', timer_process
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
       if(inml_poisson >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', inml_poisson
@@ -2088,6 +1907,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_multipole', lmax_multipole
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
 
       if(inml_ewald >0)ierr_nml = ierr_nml +1
@@ -2101,97 +1921,59 @@ contains
       if(inml_opt >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'opt', inml_opt
       write(fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
-     !write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_ini', cg_alpha_ini !not use now
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_up', cg_alpha_up
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cg_alpha_down', cg_alpha_down
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_scf_force', convrg_scf_force
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_scf_ene', convrg_scf_ene
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
-     !write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_ene', convrg_opt_ene !not use now
       if(inml_md >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', inml_md
       write(fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
       write(fh_variables_log, '("#",4X,A,"=",A)') 'thermostat', thermostat
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_velocity_scaling', step_velocity_scaling
       write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps', step_update_ps
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps2', step_update_ps2
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature0_ion_k', temperature0_ion_k
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_set_ini_velocity', yn_set_ini_velocity
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_ini_velocity', trim(file_ini_velocity)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'friction', friction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
 
-      if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iditer_nosubspace_diag', iditer_nosubspace_diag
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'ntmg', ntmg
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'idisnum(1)', idisnum(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'idisnum(2)', idisnum(2)
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itcalc_ene', itcalc_ene
+!(remove later)
+!      if(inml_group_fundamental >0)ierr_nml = ierr_nml +1
+!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_fundamental', inml_group_fundamental
+!      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_projection', iwrite_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itwproj', itwproj
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projnum', iwrite_projnum
 
-      if(inml_group_hartree >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_hartree', inml_group_hartree
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_lmp', lmax_lmp
-
-      if(inml_group_others >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iswitch_orbital_mesh', iswitch_orbital_mesh
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_psicube', iflag_psicube
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'filename_pot', filename_pot
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwrite_external', iwrite_external
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_intelectron', iflag_intelectron
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_dip2', num_dip2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2boundary(1)', dip2boundary(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2boundary(2)', dip2boundary(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2center(1)', dip2center(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dip2center(2)', dip2center(2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'itotntime2', itotntime2
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iwdenoption', iwdenoption
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwdenstep', iwdenstep
-      write(fh_variables_log, '("#",4X,A,"=",I2)') 'iflag_estatic', iflag_estatic
+!(remove later)
+!      if(inml_group_others >0)ierr_nml = ierr_nml +1
+!      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'group_others', inml_group_others
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_projection', num_projection
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(1)', iwrite_projection_ob(1)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_ob(2)', iwrite_projection_ob(2)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(1)', iwrite_projection_k(1)
+!      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iwrite_projection_k(2)', iwrite_projection_k(2)
 
 
       select case(iflag_atom_coor)
       case(ntype_atom_coor_cartesian)
-        write(fh_variables_log, '("#namelist: ",A)') 'atom_coor'
+        write(fh_variables_log, '("#namelist: ",A)') 'atomic_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'rion(',i,')', rion(1:3,i)
+          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion(',i,')', Rion(1:3,i)
         end do
       case(ntype_atom_coor_reduced)
-        write(fh_variables_log, '("#namelist: ",A)') 'atom_red_coor'
+        write(fh_variables_log, '("#namelist: ",A)') 'atomic_red_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'rion_red(',i,')', rion_red(1:3,i)
+          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion_red(',i,')', Rion_red(1:3,i)
         end do
       case default
       end select
 
       if(inml_code >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'code', inml_code
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_openmp_parallelization', yn_want_stencil_openmp_parallelization
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_hand_vectorization', yn_want_stencil_hand_vectorization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_openmp_parallelization', yn_force_stencil_openmp_parallelization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_force_stencil_sequential_computation', yn_force_stencil_sequential_computation
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
-
-      if(inml_dft2tddft >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dft2tddft', inml_dft2tddft
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_datafiles_dump', yn_datafiles_dump
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_k', target_nproc_k
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_ob', target_nproc_ob
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(1)', target_nproc_rgrid(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(2)', target_nproc_rgrid(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'target_nproc_rgrid(3)', target_nproc_rgrid(3)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'stencil_openmp_mode', stencil_openmp_mode
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'current_openmp_mode', current_openmp_mode
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'force_openmp_mode',   force_openmp_mode
 
       close(fh_variables_log)
 
@@ -2228,7 +2010,6 @@ contains
     call yn_argument_check(yn_restart)
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
-    call yn_argument_check(yn_domain_parallel)
     call yn_argument_check(yn_ffte)
     call yn_argument_check(yn_scalapack)
     call yn_argument_check(yn_scalapack_red_mem)
@@ -2236,8 +2017,9 @@ contains
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)
+    call yn_argument_check(yn_predictor_corrector)
+    call yn_argument_check(yn_auto_mixing)
     call yn_argument_check(yn_subspace_diagonalization)
-    call yn_argument_check(yn_local_field)
     call yn_argument_check(yn_out_psi)
     call yn_argument_check(yn_out_dos)
     call yn_argument_check(yn_out_dos_set_fe_origin)
@@ -2253,13 +2035,8 @@ contains
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_set_ini_velocity)
     call yn_argument_check(yn_stop_system_momt)
-    call yn_argument_check(yn_want_stencil_openmp_parallelization)
     call yn_argument_check(yn_want_stencil_hand_vectorization)
-    call yn_argument_check(yn_force_stencil_openmp_parallelization)
-    call yn_argument_check(yn_force_stencil_sequential_computation)
     call yn_argument_check(yn_want_communication_overlapping)
-    call yn_argument_check(yn_gbp)
-    call yn_argument_check(yn_gbp_stencil)
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2272,37 +2049,29 @@ contains
     case default            ; stop 'method_init_wf must be gauss or random'
     end select
 
-    if(iperiodic==0.or.(iperiodic==3.and.yn_domain_parallel=='y')) then
-      select case(convergence)
-      case('rho_dne')
-        continue
-      case('norm_rho','norm_rho_dng')
-        if(threshold<-1.d-12)then
-          if (comm_is_root(nproc_id_global)) then
-            write(*,*) 'set threshold when convergence is norm_rho or norm_rho_dng.'
-          endif
-          call end_parallel
-        end if
-      case('norm_pot','norm_pot_dng')
-        if(threshold<-1.d-12)then
-          if (comm_is_root(nproc_id_global)) then
-            write(*,*) 'set threshold when convergence is norm_pot or norm_rho_pot.'
-          endif
-          call end_parallel
-        end if
-      case default
+    select case(convergence)
+    case('rho_dne')
+      continue
+    case('norm_rho','norm_rho_dng')
+      if(threshold<-1.d-12)then
         if (comm_is_root(nproc_id_global)) then
-          write(*,*) 'check a keyword of convergence.'
+          write(*,*) 'set threshold when convergence is norm_rho or norm_rho_dng.'
         endif
         call end_parallel
-      end select
-
-    else if(iperiodic==3.and.yn_domain_parallel=='n') then
-      if(convergence.ne.'rho_dne') call stop_by_bad_input2('iperiodic','convergence')
-      if(abs(t1_start).ge.1d-10)then
-         if(index(ae_shape1,'Acos')==0) call stop_by_bad_input2('t1_start','ae_shape1')
+      end if
+    case('norm_pot','norm_pot_dng')
+      if(threshold<-1.d-12)then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) 'set threshold when convergence is norm_pot or norm_rho_pot.'
+        endif
+        call end_parallel
+      end if
+    case default
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'check a keyword of convergence.'
       endif
-    endif
+      call end_parallel
+    end select
 
     if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
       select case(out_dos_function)
@@ -2312,16 +2081,6 @@ contains
         stop 'set out_dos_meshotd to "gaussian" or "lorentzian"'
       end select
     end if
-
-    select case(yn_domain_parallel)
-    case('n')
-       select case(iperiodic)
-       case(3)
-          if( theory/='maxwell' ) then
-            return ! ARTED
-          end if
-       end select
-    end select
 
     if (yn_eigenexa == 'y') then
 #ifdef USE_EIGENEXA
@@ -2340,6 +2099,13 @@ contains
     if (yn_eigenexa == 'y' .and. yn_scalapack == 'y') then
       stop "both yn_scalapack and yn_eigenexa is specified 'y'"
     end if
+    
+    select case(spin)
+    case('unpolarized','polarized')
+      continue
+    case default
+      stop "set spin to 'unpolarized' or 'polarized'"
+    end select
 
   ! for main_tddft
     select case(theory)
@@ -2357,21 +2123,30 @@ contains
         stop "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
       end if
 
-      select case(ae_shape1)
-      case("impulse","Ecos2","Acos2")
-        continue
-      case default
-        stop 'set ae_shape1 to "impulse", "Ecos2", or "Acos2"'
-      end select
+      !select case(ae_shape1)
+      !case("impulse","Ecos2","Acos2","input")
+      !  continue
+      !case default
+      !  stop 'set ae_shape1 to "impulse", "Ecos2", or "Acos2"'
+      !end select
 
-      select case(ae_shape2)
-      case("none","impulse","Ecos2","Acos2")
-        continue
-      case default
-        stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
-      end select
+      !select case(ae_shape2)
+      !case("none","impulse","Ecos2","Acos2")
+      !  continue
+      !case default
+      !  stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
+      !end select
     end select
-
+    
+    select case(method_singlescale)
+    case('3d', '1d', '1d_fourier')
+      if(method_singlescale=='1d_fourier') then
+        if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
+      end if
+    case default
+      stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
+    end select
+    
   end subroutine check_bad_input
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)

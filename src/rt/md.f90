@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -153,6 +153,18 @@ subroutine set_initial_velocity(system,md)
   call comm_bcast(system%Velocity ,nproc_group_global)
  
 end subroutine set_initial_velocity
+
+Subroutine quickrnd(iseed,rnd)
+  implicit none
+  integer,parameter :: im=6075,ia=106,ic=1283
+  integer :: iseed
+  real(8) :: rnd
+
+  iseed=mod(iseed*ia+ic,im)
+  rnd=dble(iseed)/dble(im)
+
+  return
+End Subroutine quickrnd
    
 subroutine read_initial_velocity(system,md)
   ! initial velocity for md option can be given by external file 
@@ -255,7 +267,7 @@ end subroutine cal_Tion_Temperature_ion
 
 subroutine time_evolution_step_md_part1(itt,system,md)
   use structures, only: s_dft_system, s_md
-  use salmon_global, only: natom,Kion,dt, Rion, ensemble,thermostat
+  use salmon_global, only: natom,Kion,dt, ensemble,thermostat  !, Rion
   use const, only: umass,hartree2J,kB
   use inputoutput, only: step_velocity_scaling
   use timer
@@ -303,11 +315,12 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   enddo
 !$omp end parallel do
 
-!$omp parallel do private(iatom)
-  do iatom=1,natom
-     Rion(:,iatom) = system%Rion(:,iatom) !copy (old variable, Rion, is still used in somewhere)
-  enddo
-!$omp end parallel do
+!(remove later)
+!!$omp parallel do private(iatom)
+!  do iatom=1,natom
+!     Rion(:,iatom) = system%Rion(:,iatom) !copy (old variable, Rion, is still used in somewhere)
+!  enddo
+!!$omp end parallel do
 
   !put SHAKE here in future (if needed)
 
@@ -322,7 +335,7 @@ subroutine time_evolution_step_md_part1(itt,system,md)
   call timer_end(LOG_MD_TEVOL_PART1)
 end subroutine 
 
-subroutine update_pseudo_rt(itt,info,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl)
+subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
   use structures, only: s_dft_system,s_rgrid,s_pp_nlcc,s_pp_grid,s_poisson,s_reciprocal_grid, &
     s_parallel_info, s_scalar, s_pp_info
   use salmon_global, only: step_update_ps !,step_update_ps2
@@ -333,13 +346,13 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl
   implicit none
   type(s_parallel_info) :: info
   type(s_dft_system) :: system
-  type(s_rgrid),intent(in) :: lg,mg,ng
+  type(s_rgrid),intent(in) :: lg,mg
   type(s_poisson),intent(inout) :: poisson
   type(s_reciprocal_grid) :: fg
   type(s_pp_info),intent(inout) :: pp
   type(s_pp_nlcc) :: ppn
   type(s_pp_grid) :: ppg
-  type(s_scalar) :: sVpsl
+  type(s_scalar) :: Vpsl
   integer :: itt
 
   call timer_begin(LOG_MD_UPDATE_PSEUDO_PT)
@@ -348,12 +361,12 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,ng,poisson,fg,pp,ppg,ppn,sVpsl
   if (mod(itt,step_update_ps)==0 ) then
      call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
-     call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+     call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   !else if (mod(itt,step_update_ps2)==0 ) then
   !   !xxxxxxx this option is not yet made xxxxxx
   !   call dealloc_init_ps(ppg)
   !   call calc_nlcc(pp, system, mg, ppn)
-  !   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,sVpsl)
+  !   call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   endif
 
   call timer_end(LOG_MD_UPDATE_PSEUDO_PT)

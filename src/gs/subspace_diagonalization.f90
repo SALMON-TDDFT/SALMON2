@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ module subspace_diagonalization
 
 contains
 
-subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use salmon_global, only: yn_scalapack_red_mem
   use communication, only: comm_summation,comm_bcast
@@ -34,10 +34,9 @@ subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
   use sendrecv_grid, only: s_sendrecv_grid
   use pack_unpack, only: copy_data
   implicit none
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_dft_system)      ,intent(in) :: system
+  type(s_rgrid)        ,intent(in) :: mg
+  type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
-  type(s_process_info)    ,intent(in) :: pinfo
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)
@@ -46,13 +45,13 @@ subroutine ssdg(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
 
   if (system%if_real_orbital) then
     if (yn_scalapack_red_mem == 'y') then
-      call ssdg_rwf_rblas_red_mem(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+      call ssdg_rwf_rblas_red_mem(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     else
-      call ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+      call ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     !call ssdg_rwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
     end if
   else
-    call ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+    call ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     !call ssdg_zwf(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg) !old fashion
   end if
 end subroutine
@@ -239,7 +238,7 @@ end subroutine ssdg_rwf
 
   !===================================================================================================================================
 
-  subroutine ssdg_zwf_cblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+  subroutine ssdg_zwf_cblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     use salmon_global, only: yn_scalapack
     use structures
     use communication, only: comm_summation,comm_bcast
@@ -249,10 +248,9 @@ end subroutine ssdg_rwf
     use sendrecv_grid, only: s_sendrecv_grid
     use pack_unpack, only: copy_data
     implicit none
-    type(s_rgrid)           ,intent(in) :: mg
-    type(s_dft_system)      ,intent(in) :: system
+    type(s_rgrid)        ,intent(in) :: mg
+    type(s_dft_system)   ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
-    type(s_process_info),intent(in) :: pinfo
     type(s_stencil),intent(in) :: stencil
     type(s_pp_grid),intent(in) :: ppg
     type(s_scalar) ,intent(in) :: vlocal(system%nspin)
@@ -298,7 +296,7 @@ end subroutine ssdg_rwf
 
     wf_block_send = 0d0
     hmat_tmp = 0d0
-    do m = 0, pinfo%nporbital - 1
+    do m = 0, info%nporbital - 1
 
       if(m == info%id_o ) then
         call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
@@ -350,7 +348,7 @@ end subroutine ssdg_rwf
 
     if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
-     call eigen_pzheevd(pinfo, info, hmat, eval, evec)
+     call eigen_pzheevd(info, hmat, eval, evec)
 #else
      stop "ScaLAPACK does not enabled, please check your build configuration."
 #endif
@@ -368,7 +366,7 @@ end subroutine ssdg_rwf
 
     wf_block_send = 0d0
 
-    do m = 0, pinfo%nporbital - 1
+    do m = 0, info%nporbital - 1
 
       if(m == info%id_o ) then
         call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
@@ -408,7 +406,7 @@ end subroutine ssdg_zwf_cblas
 
 !===================================================================================================================================
 
-subroutine ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -418,10 +416,9 @@ subroutine ssdg_rwf_rblas(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg
   use pack_unpack, only: copy_data
   use salmon_global, only: yn_eigenexa,yn_scalapack
   implicit none
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_dft_system)      ,intent(in) :: system
+  type(s_rgrid)        ,intent(in) :: mg
+  type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
-  type(s_process_info),intent(in) :: pinfo
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)
@@ -468,7 +465,7 @@ do ispin = 1, system%nspin
 
   wf_block_send = 0d0 !to fix NaN for large calc, but this may not real solution
   hmat_tmp = 0d0
-  do m = 0, pinfo%nporbital - 1
+  do m = 0, info%nporbital - 1
 
     if(m == info%id_o ) then
       call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
@@ -521,13 +518,13 @@ do ispin = 1, system%nspin
 
   if(yn_eigenexa=='y') then
 #ifdef USE_EIGENEXA
-     call eigen_pdsyevd_ex(pinfo, info, hmat, eval, evec)
+     call eigen_pdsyevd_ex(info, hmat, eval, evec)
 #else
      stop "EigenExa does not enabled, please check your build configuration."
 #endif
   else if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
-     call eigen_pdsyevd(pinfo, info, hmat, eval, evec)
+     call eigen_pdsyevd(info, hmat, eval, evec)
 #else
      stop "ScaLAPACK does not enabled, please check your build configuration."
 #endif
@@ -545,7 +542,7 @@ do ispin = 1, system%nspin
 
   wf_block_send = 0d0 !to fix NaN for large calc, but this may not real solution
 
-  do m = 0, pinfo%nporbital - 1
+  do m = 0, info%nporbital - 1
 
     if(m == info%id_o ) then
       call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
@@ -583,7 +580,7 @@ end subroutine ssdg_rwf_rblas
 
 !===================================================================================================================================
 
-subroutine ssdg_rwf_rblas_red_mem(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vlocal,srg)
+subroutine ssdg_rwf_rblas_red_mem(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
   use communication, only: comm_summation,comm_bcast
   use timer
@@ -596,10 +593,9 @@ subroutine ssdg_rwf_rblas_red_mem(mg,system,info,pinfo,stencil,spsi,shpsi,ppg,vl
   use pack_unpack, only: copy_data
   use salmon_global, only: yn_eigenexa,yn_scalapack
   implicit none
-  type(s_rgrid)           ,intent(in) :: mg
-  type(s_dft_system)      ,intent(in) :: system
+  type(s_rgrid)        ,intent(in) :: mg
+  type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
-  type(s_process_info),intent(in) :: pinfo
   type(s_stencil),intent(in) :: stencil
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: vlocal(system%nspin)
@@ -646,7 +642,7 @@ do ispin = 1, system%nspin
 
   wf_block_send = 0d0 !to fix NaN for large calc, but this may not real solution
 
-  do m = 0, pinfo%nporbital - 1
+  do m = 0, info%nporbital - 1
 
     if(m == info%id_o ) then
       call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )
@@ -698,13 +694,13 @@ do ispin = 1, system%nspin
 
   if(yn_eigenexa=='y') then
 #ifdef USE_EIGENEXA
-     call eigen_pdsyevd_ex_red_mem(system, pinfo, info, hmat, eval, evec)
+     call eigen_pdsyevd_ex_red_mem(system, info, hmat, eval, evec)
 #else
      stop "EigenExa does not enabled, please check your build configuration."
 #endif
   else if(yn_scalapack=='y') then
 #ifdef USE_SCALAPACK
-     call eigen_pdsyevd_red_mem(system, pinfo, info, hmat, eval, evec)
+     call eigen_pdsyevd_red_mem(system, info, hmat, eval, evec)
 #else
      stop "ScaLAPACK does not enabled, please check your build configuration."
 #endif
@@ -723,7 +719,7 @@ do ispin = 1, system%nspin
 
   wf_block_send = 0d0 !to fix NaN for large calc, but this may not real solution
 
-  do m = 0, pinfo%nporbital - 1
+  do m = 0, info%nporbital - 1
 
     if(m == info%id_o ) then
       call copy_data( wf1_block(:,:,:,:), wf_block_send(:,:,:,1:info%numo) )

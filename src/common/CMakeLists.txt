@@ -15,39 +15,27 @@ set(SOURCES
    calc_gradient_psi.f90
    )
 
- #if (IS_FUJITSU_COMPILER)
+if (IS_FUJITSU_COMPILER)
   set(SOURCES ${SOURCES}
       zstencil_core/typical/seq_frt.f90
       zstencil_core/typical/omp_frt.f90
       zstencil_microac_core/typical/seq_frt.f90
       zstencil_microac_core/typical/omp_frt.f90
       )
-    #else ()
-    #  set(SOURCES ${SOURCES}
-    #      zstencil_core/typical/seq.f90
-    #      zstencil_core/typical/omp.f90
-    #      zstencil_microac_core/typical/seq.f90
-    #      zstencil_microac_core/typical/omp.f90
-    #      )
-    #endif ()
+else ()
+  set(SOURCES ${SOURCES}
+      zstencil_core/typical/seq.f90
+      zstencil_core/typical/omp.f90
+      zstencil_microac_core/typical/seq.f90
+      zstencil_microac_core/typical/omp.f90
+      )
+endif ()
 
 if (USE_OPT_EXPLICIT_VECTORIZATION)
   set(SOURCES
       ${SOURCES}
       zstencil_core/${SIMD_SET}/omp.c
       zstencil_core/${SIMD_SET}/seq.c
-      )
-endif ()
-
-if (USE_SCALAPACK)
-  set(SOURCES ${SOURCES}
-      scalapack_module.f90
-      )
-endif ()
-
-if (USE_EIGENEXA)
-  set(SOURCES ${SOURCES}
-      eigenexa_module.f90
       )
 endif ()
 

@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -65,6 +65,7 @@ module communication
 
   ! utils
   public :: comm_is_root
+  public :: comm_show_error
 
 
   type, public :: comm_maxloc_type
@@ -238,6 +239,9 @@ module communication
   end interface
 
   interface comm_get_min
+    ! scalar
+    module procedure comm_get_min_double
+
     ! 1-D array
     module procedure comm_get_min_array1d_double
   end interface
@@ -254,6 +258,11 @@ module communication
   interface comm_logical_and
     ! scalar
     module procedure comm_logical_and_scalar
+  end interface
+
+  interface comm_logical_or
+    ! 1-D array (in-place)
+    module procedure comm_ip_logical_or_array1d
   end interface
 
   private :: get_rank, error_check, abort_show_message
@@ -326,6 +335,12 @@ contains
     logical :: comm_is_root
     comm_is_root = npid == ROOT_PROCID
   end function
+
+  subroutine comm_show_error(errcode)
+    implicit none
+    integer, intent(in) :: errcode
+    call error_check(errcode)
+  end subroutine
 
   subroutine comm_sync_all(ngid)
     use mpi, only: MPI_COMM_WORLD
@@ -1313,6 +1328,14 @@ contains
     call error_check(ierr)
   end subroutine
 
+  subroutine comm_get_min_double(svalue, ngroup)
+    use mpi, only: MPI_DOUBLE_PRECISION, MPI_MIN, MPI_IN_PLACE
+    implicit none
+    real(8), intent(inout) :: svalue
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, svalue, 1, MPI_DOUBLE_PRECISION, MPI_MIN, ngroup, ierr))
+  end subroutine
 
   subroutine comm_get_min_array1d_double(invalue, outvalue, N, ngroup)
     use mpi, only: MPI_DOUBLE_PRECISION, MPI_MIN
@@ -1360,6 +1383,15 @@ contains
     integer, intent(in)  :: ngroup
     integer :: ierr
     MPI_ERROR_CHECK(call MPI_Allreduce(invalue, outvalue, 1, MPI_LOGICAL, MPI_LAND, ngroup, ierr))
+  end subroutine
+
+  subroutine comm_ip_logical_or_array1d(values, ngroup)
+    use mpi, only: MPI_LOGICAL, MPI_IN_PLACE, MPI_LOR
+    implicit none
+    logical, intent(inout) :: values(:)
+    integer, intent(in)    :: ngroup
+    integer :: ierr
+    MPI_ERROR_CHECK(call MPI_Allreduce(MPI_IN_PLACE, values, size(values), MPI_LOGICAL, MPI_LOR, ngroup, ierr))
   end subroutine
 
 

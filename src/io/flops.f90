@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -43,9 +43,9 @@ contains
     call comm_get_max(tin, tout, nproc_group_global)
     call comm_bcast(pgflops, nproc_group_global, tout%rank)
 
-    if (calc_mode == calc_mode_ms) then
-       call comm_summation(lgflops, mgflops, 4, nproc_group_tdks)
-    end if
+!    if (calc_mode == calc_mode_ms) then
+!       call comm_summation(lgflops, mgflops, 4, nproc_group_tdks)
+!    end if
 
     call comm_summation(lgflops, sgflops, 4, nproc_group_global)
   end subroutine

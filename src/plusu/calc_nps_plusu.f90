@@ -6,12 +6,13 @@ module calc_nps_plusu_sub
 
 contains
 
-  subroutine calc_nps_plusu(pp,ppg,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
-    use salmon_global,only : natom,kion,rion,iperiodic,yn_domain_parallel
-    use structures,only : s_pp_info,s_pp_grid
+  subroutine calc_nps_plusu(pp,ppg,system,alx,aly,alz,lx,ly,lz,nl,mx,my,mz,ml,hx,hy,hz,al0,matrix_A0)
+    use salmon_global,only : natom,kion,iperiodic
+    use structures,only : s_pp_info,s_pp_grid,s_dft_system
     implicit none
     type(s_pp_info) :: pp
     type(s_pp_grid) :: ppg
+    type(s_dft_system),intent(in) :: system
     real(8),intent(in) :: alx,aly,alz
     integer,intent(in) :: nl,ml
     integer,intent(in) :: lx(nl),ly(nl),lz(nl)
@@ -65,13 +66,9 @@ contains
         rshift(3)=-0.5d0*Hz
       end if
     else if( iperiodic == 3 )then
-      if( yn_domain_parallel == 'y' )then
-        rshift(1)=-Hx
-        rshift(2)=-Hy
-        rshift(3)=-Hz
-      else
-        rshift(:)=0.0d0
-      end if
+      rshift(1)=-Hx
+      rshift(2)=-Hy
+      rshift(3)=-Hz
     end if
 
     do a=1,natom
@@ -83,9 +80,9 @@ contains
       rr(1) = ix*al(1,1) + iy*al(1,2) + iz*al(1,3)
       rr(2) = ix*al(2,1) + iy*al(2,2) + iz*al(2,3)
       rr(3) = ix*al(3,1) + iy*al(3,2) + iz*al(3,3)
-      tmpx = rion(1,a) + rr(1)
-      tmpy = rion(2,a) + rr(2)
-      tmpz = rion(3,a) + rr(3)
+      tmpx = system%Rion(1,a) + rr(1)
+      tmpy = system%Rion(2,a) + rr(2)
+      tmpz = system%Rion(3,a) + rr(3)
       do i=1,ml
         u = mx(i)*hx + rshift(1)
         v = my(i)*hy + rshift(2)

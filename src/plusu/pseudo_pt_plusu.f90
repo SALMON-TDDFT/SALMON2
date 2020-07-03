@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -29,11 +29,11 @@ contains
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
-  subroutine pseudo_plusU(tpsi,htpsi,info,nspin,ppg)
+  subroutine pseudo_plusU(tpsi,htpsi,system,info,ppg)
     use structures
     use timer
     implicit none
-    integer,intent(in) :: nspin
+    type(s_dft_system)   ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
     type(s_pp_grid),intent(in) :: ppg
     type(s_orbital),intent(in) :: tpsi
@@ -65,14 +65,14 @@ contains
 
       call timer_end(LOG_UHPSI_PSEUDO)
 
-      call calc_phipsi_rdivided( nspin, info, ppg, tpsi, phipsibox, phipsibox2 )
+      call calc_phipsi_rdivided( system%nspin, info, ppg, tpsi, phipsibox, phipsibox2 )
 
       call timer_begin(LOG_UHPSI_PSEUDO)
 
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
-      do ispin=1,Nspin
+      do ispin=1,system%nspin
 
         do ilma=1,Nlma
 
@@ -104,7 +104,7 @@ contains
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
-      do ispin=1,Nspin
+      do ispin=1,system%nspin
 
         do ilma=1,Nlma
           ia = ppg%ia_tbl_ao(ilma)
@@ -116,7 +116,7 @@ contains
             phipsi = phipsi + conjg( ppg%zekr_phi_ao(j,ilma,ik) ) &
                             * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
           end do
-          phipsi_lma(ilma) = phipsi * ppg%Hvol
+          phipsi_lma(ilma) = phipsi * system%Hvol
         end do !ilma
 
         do iprj=1,Nproj_pairs

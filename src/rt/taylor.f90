@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
   implicit none
-  integer,parameter     :: nd=4 
   type(s_rgrid),intent(in) :: mg
   type(s_dft_system),intent(in) :: system
   type(s_parallel_info),intent(in) :: info
@@ -36,11 +35,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   type(s_orbital),intent(inout) :: sshtpsi
   type(s_pp_grid),intent(in) :: ppg
   type(s_scalar) ,intent(in) :: V_local(system%nspin)
+  type(s_rt),     intent(in) :: rt
   integer :: nn,ix,iy,iz
-  integer :: ik,io,nspin
-  complex(8),parameter :: zi=(0.d0,1.d0)
-  integer :: is
-  type(s_rt) :: rt
+  integer :: ik,io,is,nspin
   nspin = system%nspin
 
   do nn=1,n_hamil
@@ -51,9 +48,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           do is=1,nspin
-            do iz=mg%is_array(3),mg%ie_array(3)
-            do iy=mg%is_array(2),mg%ie_array(2)
-            do ix=mg%is_array(1),mg%ie_array(1)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
               tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_in%zwf(ix,iy,iz,is,io,ik,1)+ &
                                                    rt%zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
             end do
@@ -67,9 +64,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
         do ik=info%ik_s,info%ik_e
         do io=info%io_s,info%io_e
           do is=1,nspin
-            do iz=mg%is_array(3),mg%ie_array(3)
-            do iy=mg%is_array(2),mg%ie_array(2)
-            do ix=mg%is_array(1),mg%ie_array(1)
+            do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+            do ix=mg%is(1),mg%ie(1)
               tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_out%zwf(ix,iy,iz,is,io,ik,1)+ &
                                                    rt%zc(nn)*sshtpsi%zwf(ix,iy,iz,is,io,ik,1)
             end do
@@ -85,9 +82,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         do is=1,nspin
-          do iz=mg%is_array(3),mg%ie_array(3)
-          do iy=mg%is_array(2),mg%ie_array(2)
-          do ix=mg%is_array(1),mg%ie_array(1)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
             tspsi_out%zwf(ix,iy,iz,is,io,ik,1)=tspsi_out%zwf(ix,iy,iz,is,io,ik,1)+ &
                                                rt%zc(nn)*tspsi_in%zwf(ix,iy,iz,is,io,ik,1)
           end do

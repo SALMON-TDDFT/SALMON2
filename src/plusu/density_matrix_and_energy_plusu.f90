@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -95,7 +95,7 @@ contains
           phipsi = phipsi + conjg( ppg%zekr_phi_ao(j,ilma,ik) ) &
                           * psi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
-        phipsi_lma(ilma) = phipsi * ppg%Hvol
+        phipsi_lma(ilma) = phipsi * system%Hvol
       end do !ilma
 
       do iprj=1,Nproj_pairs

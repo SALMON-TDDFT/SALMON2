@@ -7,10 +7,6 @@
   sysname = 'H2O'
 /
 
-&parallel
-  yn_domain_parallel='y'
-/
-
 &units
   unit_system='A_eV_fs'
 /
@@ -18,7 +14,6 @@
 &system
   yn_periodic = 'y'
   al = 5.0d0, 5.0d0, 5.0d0
-  isym = 1
   nstate = 8
   nelec  = 8
   nelem  = 2
@@ -72,7 +67,6 @@
   yn_set_ini_velocity='y'
   temperature0_ion_k=300.0d0
   step_update_ps=       50
-  step_update_ps2=     200
 /
 
 &atomic_coor

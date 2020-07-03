@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -21,22 +21,21 @@ contains
 
 !===================================================================================================================================
 
-subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
+subroutine write_dns(lg,mg,system,rho,rho0,itt)
   use inputoutput, only: format_voxel_data,au_length_aa,theory
-  use structures, only: s_rgrid,s_scalar,allocate_scalar,deallocate_scalar
+  use structures, only: s_rgrid,s_scalar,s_dft_system,allocate_scalar,deallocate_scalar
   use parallelization, only: nproc_group_global
   use communication, only: comm_summation
   use write_file3d
   implicit none
   type(s_rgrid),intent(in) :: lg
   type(s_rgrid),intent(in) :: mg
-  type(s_rgrid),intent(in) :: ng
+  type(s_dft_system),intent(in) :: system
   real(8),intent(in) :: rho(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-  real(8),intent(in) :: hgs(3)
   real(8),intent(in),optional :: rho0(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
   integer,intent(in),optional :: itt
   integer :: ix,iy,iz
-  character(30) :: suffix
+  character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
@@ -55,9 +54,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   end do
 
   !$OMP parallel do collapse(2) private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     work_l1%f(ix,iy,iz)=rho(ix,iy,iz)
   end do
   end do
@@ -65,9 +64,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
 
   if(format_voxel_data=='avs')then
     !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       work_l1%f(ix,iy,iz)=work_l1%f(ix,iy,iz)/(au_length_aa**3)
     end do
     end do
@@ -79,11 +78,11 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   select case(theory)
   case('dft','dft_band','dft_md') 
     suffix = "dns"
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
     suffix = "dns_"//adjustl(filenum)
   case default
-    stop 'invalid theory'
+    stop 'invalid theory @ writefield'
   end select
 
   phys_quantity = "dns"
@@ -91,13 +90,13 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
     header_unit='A**(-3)'
     call write_avs(lg,103,suffix,header_unit,work_l2%f)
   else if(format_voxel_data=='cube')then
-    call write_cube(lg,103,suffix,phys_quantity,work_l2%f,hgs)
+    call write_cube(lg,103,suffix,phys_quantity,work_l2%f,system)
   else if(format_voxel_data=='vtk')then
-    call write_vtk(lg,103,suffix,work_l2%f,hgs)
+    call write_vtk(lg,103,suffix,work_l2%f,system%hgs)
   end if
 
   select case(theory)
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     !$OMP parallel do collapse(2) private(iz,iy,ix)
     do iz=lg%is(3),lg%ie(3)
     do iy=lg%is(2),lg%ie(2)
@@ -108,9 +107,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
     end do
 
     !$OMP parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       work_l1%f(ix,iy,iz)=rho(ix,iy,iz)-rho0(ix,iy,iz)
     end do
     end do
@@ -118,9 +117,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
   
     if(format_voxel_data=='avs')then
       !$OMP parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         work_l1%f(ix,iy,iz)=work_l1%f(ix,iy,iz)/(au_length_aa**3)
       end do
       end do
@@ -136,9 +135,9 @@ subroutine write_dns(lg,mg,ng,rho,hgs,rho0,itt)
       header_unit='A**(-3)'
       call write_avs(lg,103,suffix,header_unit,work_l2%f)
     else if(format_voxel_data=='cube')then
-      call write_cube(lg,103,suffix,phys_quantity,work_l2%f,hgs)
+      call write_cube(lg,103,suffix,phys_quantity,work_l2%f,system)
     else if(format_voxel_data=='vtk')then
-      call write_vtk(lg,103,suffix,work_l2%f,hgs)
+      call write_vtk(lg,103,suffix,work_l2%f,system%hgs)
     end if
   case default
   end select
@@ -234,34 +233,33 @@ end subroutine write_dns_ac_je
 
 !===================================================================================================================================
 
-subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
-  use salmon_global, only: format_voxel_data,theory
+subroutine write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,tpsi)
+  use salmon_global       ,only: format_voxel_data,theory
   use structures
-  use math_constants, only: pi
-  use communication, only: comm_summation
-  use misc_routines, only: get_wtime
-  use sendrecv_grid, only: update_overlap_complex8,update_overlap_real8
-  use stencil_sub, only: calc_gradient_field
+  use math_constants      ,only: pi
+  use communication       ,only: comm_summation
+  use misc_routines       ,only: get_wtime
+  use sendrecv_grid       ,only: update_overlap_complex8,update_overlap_real8
+  use stencil_sub         ,only: calc_gradient_field
   use write_file3d
   implicit none
   integer                 ,intent(in) :: itt
-  type(s_rgrid)           ,intent(in) :: lg,mg,ng
+  type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
-  type(s_parallel_info),intent(in) :: info
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_stencil)         ,intent(in) :: stencil
-  type(s_scalar)          ,intent(in) :: srho
+  type(s_scalar)          ,intent(in) :: rho
   type(s_sendrecv_grid)               :: srg,srg_scalar
   type(s_orbital)                     :: tpsi
   !
   real(8):: elf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-  character(30) :: suffix
+  character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
   integer :: nspin,no,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
   integer :: io,ik,ispin,ix,iy,iz
   integer,parameter :: Nd=4
-  complex(8) :: ztmp
   !
   real(8) :: elftau(mg%is(1):mg%ie(1),   &
                     mg%is(2):mg%ie(2),   &
@@ -278,9 +276,9 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
   complex(8) :: gradzpsi(3,mg%is_array(1):mg%ie_array(1),   &
                        mg%is_array(2):mg%ie_array(2),   &
                        mg%is_array(3):mg%ie_array(3))
-  real(8) :: gradrho(3,ng%is(1):ng%ie(1),   &
-                       ng%is(2):ng%ie(2),   &
-                       ng%is(3):ng%ie(3))
+  real(8) :: gradrho(3,mg%is(1):mg%ie(1),   &
+                       mg%is(2):mg%ie(2),   &
+                       mg%is(3):mg%ie(3))
   real(8) :: gradrho2(mg%is(1):mg%ie(1),   &
                       mg%is(2):mg%ie(2),   &
                       mg%is(3):mg%ie(3))
@@ -293,126 +291,149 @@ subroutine write_elf(itt,lg,mg,ng,system,info,stencil,srho,srg,srg_scalar,tpsi)
   real(8) :: rho_half(mg%is(1):mg%ie(1),   &
                       mg%is(2):mg%ie(2),   &
                       mg%is(3):mg%ie(3))
-  real(8) :: box(ng%is_array(1):ng%ie_array(1), &
-  & ng%is_array(2):ng%ie_array(2), &
-  & ng%is_array(3):ng%ie_array(3))
+  real(8) :: box(mg%is_array(1):mg%ie_array(1), &
+                 mg%is_array(2):mg%ie_array(2), &
+                 mg%is_array(3):mg%ie_array(3))
   real(8) :: matbox_l(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
-
+  complex(8) :: ztmp(mg%is_array(1):mg%ie_array(1), &
+                     mg%is_array(2):mg%ie_array(2), &
+                     mg%is_array(3):mg%ie_array(3))
+  
   if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ calc_elf"
 
   nspin = system%nspin
-  no = system%no
-  nk = system%nk
-  is = mg%is
-  ie = mg%ie
+  no   = system%no
+  nk   = system%nk
+  is   = mg%is
+  ie   = mg%ie
   ik_s = info%ik_s
   ik_e = info%ik_e
   io_s = info%io_s
   io_e = info%io_e
-
-  !$OMP parallel do private(iz,iy,ix)
+  
+  rho_half = 0.d0
+  ztmp     = 0.d0
+  gradzpsi = 0.d0
+  mrelftau = 0.d0
+  mrcurden = 0.d0
+  elftau   = 0.d0
+  curden   = 0.d0
+  box      = 0.d0
+  gradrho  = 0.d0
+  gradrho2 = 0.d0
+  elfc     = 0.d0
+  elfcuni  = 0.d0
+  matbox_l = 0.d0
+  elf      = 0.d0
+  
+!$OMP parallel do private(iz,iy,ix)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
-    rho_half(ix,iy,iz)=srho%f(ix,iy,iz)/2.d0
+    rho_half(ix,iy,iz)=rho%f(ix,iy,iz)/2.d0
   end do
   end do
   end do
-  mrelftau=0.d0
-  mrcurden=0.d0
-
+  
   if(info%if_divide_rspace) then
-     call update_overlap_complex8(srg, mg, tpsi%zwf)
+    if(allocated(tpsi%rwf)) then
+      call update_overlap_real8(srg, mg, tpsi%rwf)
+    else
+      call update_overlap_complex8(srg, mg, tpsi%zwf)
+    end if
   end if
-
-  ik=1    ! --> do loop (future work)
-  ispin=1 ! --> do loop (future work)
-
-    do io=1,no
-
-        call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,1),gradzpsi,mg%is_array,mg%ie_array,is,ie, &
-        & mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
-
-  !$OMP parallel do private(iz,iy,ix)
-        do iz=is(3),ie(3)
-        do iy=is(2),ie(2)
-        do ix=is(1),ie(1)
-          ztmp = tpsi%zwf(ix,iy,iz,ispin,io,ik,1)
+  
+  do ik=ik_s,ik_e
+  do io=io_s,io_e
+  do ispin=1,nspin
     
-          mrelftau(ix,iy,iz)=mrelftau(ix,iy,iz)+abs(gradzpsi(1,ix,iy,iz))**2      &
-                             +abs(gradzpsi(2,ix,iy,iz))**2      &
-                             +abs(gradzpsi(3,ix,iy,iz))**2
+    if(allocated(tpsi%rwf)) then
+      ztmp = cmplx(tpsi%rwf(:,:,:,ispin,io,ik,1))
+    else
+      ztmp = tpsi%zwf(:,:,:,ispin,io,ik,1)
+    end if
     
-          mrcurden(ix,iy,iz)=mrcurden(ix,iy,iz)      &
-               +( abs(conjg(ztmp)*gradzpsi(1,ix,iy,iz)      &
-                    -ztmp*conjg(gradzpsi(1,ix,iy,iz)))**2      &
-                 +abs(conjg(ztmp)*gradzpsi(2,ix,iy,iz)      &
-                    -ztmp*conjg(gradzpsi(2,ix,iy,iz)))**2      &
-                 +abs(conjg(ztmp)*gradzpsi(3,ix,iy,iz)      &
-                    -ztmp*conjg(gradzpsi(3,ix,iy,iz)))**2 )/2.d0
+    call calc_gradient_psi(ztmp,gradzpsi,mg%is_array,mg%ie_array,is,ie, &
+                           mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
     
-        end do
-        end do
-        end do
-        
-    end do
-
-    call comm_summation(mrelftau,elftau,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
-    call comm_summation(mrcurden,curden,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_o)
-    
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      box(ix,iy,iz) = srho%f(ix,iy,iz)
+!$OMP parallel do private(iz,iy,ix)
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+      mrelftau(ix,iy,iz)=mrelftau(ix,iy,iz)            &
+                         +abs(gradzpsi(1,ix,iy,iz))**2 &
+                         +abs(gradzpsi(2,ix,iy,iz))**2 &
+                         +abs(gradzpsi(3,ix,iy,iz))**2
+      mrcurden(ix,iy,iz)=mrcurden(ix,iy,iz)      &
+                        +( abs(conjg(ztmp(ix,iy,iz))*gradzpsi(1,ix,iy,iz)      &
+                              -ztmp(ix,iy,iz)*conjg(gradzpsi(1,ix,iy,iz)))**2  &
+                          +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(2,ix,iy,iz)      &
+                              -ztmp(ix,iy,iz)*conjg(gradzpsi(2,ix,iy,iz)))**2  &
+                          +abs(conjg(ztmp(ix,iy,iz))*gradzpsi(3,ix,iy,iz)      &
+                              -ztmp(ix,iy,iz)*conjg(gradzpsi(3,ix,iy,iz)))**2 )/2.d0
     end do
     end do
     end do
     
-    call update_overlap_real8(srg_scalar, ng, box)
-    call calc_gradient_field(ng,stencil%coef_nab,box,gradrho)
-
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2      &
-            +gradrho(2,ix,iy,iz)**2      &
-            +gradrho(3,ix,iy,iz)**2
-      elfc(ix,iy,iz)=elftau(ix,iy,iz)-gradrho2(ix,iy,iz)/rho_half(ix,iy,iz)/4.d0  &
-                                     -curden(ix,iy,iz)/rho_half(ix,iy,iz)
-    end do
-    end do
-    end do
-
+  end do
+  end do
+  end do
+  
+  call comm_summation(mrelftau,elftau,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+  call comm_summation(mrcurden,curden,mg%num(1)*mg%num(2)*mg%num(3),info%icomm_ko)
+  
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    box(ix,iy,iz) = rho_half(ix,iy,iz)
+  end do
+  end do
+  end do
+  
+  if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
+  call calc_gradient_field(mg,stencil%coef_nab,box,gradrho)
+  
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    gradrho2(ix,iy,iz)=gradrho(1,ix,iy,iz)**2 &
+                      +gradrho(2,ix,iy,iz)**2 &
+                      +gradrho(3,ix,iy,iz)**2
+    elfc(ix,iy,iz)=elftau(ix,iy,iz)-gradrho2(ix,iy,iz)/rho_half(ix,iy,iz)/4.d0  &
+                                   -curden(ix,iy,iz)/rho_half(ix,iy,iz)
+  end do
+  end do
+  end do
+  
   ! matbox_l stores ELF
-  matbox_l=0.d0
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     elfcuni(ix,iy,iz)=3.d0/5.d0*(6.d0*Pi**2)**(2.d0/3.d0)      &
-              *rho_half(ix,iy,iz)**(5.d0/3.d0)
+                     *rho_half(ix,iy,iz)**(5.d0/3.d0)
     matbox_l(ix,iy,iz)=1.d0/(1.d0+elfc(ix,iy,iz)**2/elfcuni(ix,iy,iz)**2)
   end do
   end do
   end do
-
-  call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-
+  
+  call comm_summation(matbox_l,elf,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
+  
   select case(theory)
   case('dft','dft_band','dft_md') 
     suffix = "elf"
-  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+  case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
     write(filenum, '(i6.6)') itt
     suffix = "elf_"//adjustl(filenum)
   case default
     stop 'invalid theory'
   end select
-
+  
   phys_quantity = "elf"
   if(format_voxel_data=='avs')then
     header_unit = "none"
     call write_avs(lg,103,suffix,header_unit,elf)
   else if(format_voxel_data=='cube')then
-    call write_cube(lg,103,suffix,phys_quantity,elf,system%hgs)
+    call write_cube(lg,103,suffix,phys_quantity,elf,system)
   else if(format_voxel_data=='vtk')then
     call write_vtk(lg,103,suffix,elf,system%hgs)
   end if
@@ -421,7 +442,7 @@ end subroutine write_elf
 
 !===================================================================================================================================
 
-subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_scalar,itt)
+subroutine write_estatic(lg,mg,system,stencil,info,Vh,srg_scalar,itt)
   use salmon_global, only: format_voxel_data
   use structures
   use sendrecv_grid, only: update_overlap_real8
@@ -429,45 +450,45 @@ subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_scalar,itt)
   use communication, only: comm_summation
   use write_file3d
   implicit none
-  type(s_rgrid)   ,intent(in) :: lg,ng
-  real(8)         ,intent(in) :: hgs(3)
-  type(s_stencil) ,intent(in) :: stencil
+  type(s_rgrid)   ,  intent(in) :: lg,mg
+  type(s_dft_system),intent(in) :: system
+  type(s_stencil) ,  intent(in) :: stencil
   type(s_parallel_info),intent(in) :: info
-  type(s_scalar)  ,intent(in) :: sVh
+  type(s_scalar)  ,intent(in) :: Vh
   type(s_sendrecv_grid)       :: srg_scalar
   integer,intent(in),optional :: itt
   !
   integer :: ix,iy,iz,jj
   integer,parameter :: Nd=4
-  character(30) :: suffix
+  character(60) :: suffix
   character(30) :: phys_quantity
   character(10) :: filenum
   character(20) :: header_unit
-  real(8) :: grad_Vh(3,ng%is(1):ng%ie(1),   &
-                       ng%is(2):ng%ie(2),   &
-                       ng%is(3):ng%ie(3))
-  real(8) :: box(ng%is_array(1):ng%ie_array(1), &
-  & ng%is_array(2):ng%ie_array(2), &
-  & ng%is_array(3):ng%ie_array(3))
+  real(8) :: grad_Vh(3,mg%is(1):mg%ie(1),   &
+                       mg%is(2):mg%ie(2),   &
+                       mg%is(3):mg%ie(3))
+  real(8) :: box(mg%is_array(1):mg%ie_array(1), &
+  & mg%is_array(2):mg%ie_array(2), &
+  & mg%is_array(3):mg%ie_array(3))
   real(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: rmat,rmat2
   
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-    box(ix,iy,iz) = sVh%f(ix,iy,iz)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+    box(ix,iy,iz) = Vh%f(ix,iy,iz)
   end do
   end do
   end do
 
-  call update_overlap_real8(srg_scalar, ng, box)
-  call calc_gradient_field(ng,stencil%coef_nab,box,grad_Vh)
+  if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, box)
+  call calc_gradient_field(mg,stencil%coef_nab,box,grad_Vh)
 
   do jj=1,3
     
     rmat = 0d0
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rmat(ix,iy,iz) = grad_Vh(jj,ix,iy,iz)
     end do
     end do
@@ -491,9 +512,9 @@ subroutine write_estatic(lg,ng,hgs,stencil,info,sVh,srg_scalar,itt)
       header_unit = "V/A"
       call write_avs(lg,103,suffix,header_unit,rmat2)
     else if(format_voxel_data=='cube')then
-      call write_cube(lg,103,suffix,phys_quantity,rmat2,hgs)
+      call write_cube(lg,103,suffix,phys_quantity,rmat2,system)
     else if(format_voxel_data=='vtk')then
-      call write_vtk(lg,103,suffix,rmat2,hgs)
+      call write_vtk(lg,103,suffix,rmat2,system%hgs)
     end if
 
   end do  
@@ -503,26 +524,26 @@ end subroutine write_estatic
 !===================================================================================================================================
 
 subroutine write_psi(lg,mg,system,info,spsi)
-  use inputoutput, only: au_length_aa
+  use inputoutput   ,only: au_length_aa
   use structures
-  use salmon_global, only: format_voxel_data
-  use communication, only: comm_summation
+  use salmon_global ,only: format_voxel_data
+  use communication ,only: comm_summation
   use write_file3d
   implicit none
-  type(s_rgrid),intent(in) :: lg,mg
-  type(s_dft_system),intent(in) :: system
+  type(s_rgrid)        ,intent(in) :: lg,mg
+  type(s_dft_system)   ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
-  type(s_orbital),intent(in) :: spsi
+  type(s_orbital)      ,intent(in) :: spsi
   !
   integer :: io,ik,ispin,ix,iy,iz
   complex(8),dimension(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)) :: cmatbox,cmatbox2
-  character(30) :: suffix
+  character(60) :: suffix_re, suffix_im
   character(30) :: phys_quantity
-  character(10) :: filenum
+  character(10) :: fileid_k, fileid_ob, fileid_spin
   character(20) :: header_unit
   
   cmatbox = 0d0
- 
+  
   do ik=1,system%nk
   do io=1,system%no
   do ispin=1,system%nspin
@@ -537,31 +558,59 @@ subroutine write_psi(lg,mg,system,info,spsi)
       end do
       if(info%ik_s <= ik .and. ik <= info%ik_e .and.   &
          info%io_s <= io .and. io <= info%io_e) then
-        
+        if(allocated(spsi%rwf)) then
 !$omp parallel do collapse(2)
-        do iz=mg%is(3),mg%ie(3)
-        do iy=mg%is(2),mg%ie(2)
-        do ix=mg%is(1),mg%ie(1)
-          cmatbox(ix,iy,iz) = spsi%zwf(ix,iy,iz,ispin,io,ik,1) ! future work: rwf
-        end do
-        end do
-        end do
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            cmatbox(ix,iy,iz) = spsi%rwf(ix,iy,iz,ispin,io,ik,1)
+          end do
+          end do
+          end do
+        else
+!$omp parallel do collapse(2)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            cmatbox(ix,iy,iz) = spsi%zwf(ix,iy,iz,ispin,io,ik,1)
+          end do
+          end do
+          end do
+        end if
       end if
       call comm_summation(cmatbox,cmatbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_rko)
-
-      write(filenum, '(i5)') io ! future work: ik,ispin
-      suffix = "psi"//trim(adjustl(filenum))
+      
       phys_quantity = "psi"
-      if(format_voxel_data=='avs')then
-        header_unit = "A**(-3/2)"
-      ! future work: real & imaginary part
-        call write_avs(lg,103,suffix,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
-        call write_avs(lg,103,suffix,header_unit,aimag(cmatbox2)/sqrt(au_length_aa)**3)
-      else if(format_voxel_data=='cube')then
-      ! future work: real & imaginary part
-        call write_cube(lg,103,suffix,phys_quantity,dble(cmatbox2),system%hgs)
-        call write_cube(lg,103,suffix,phys_quantity,aimag(cmatbox2),system%hgs)
-      end if
+      if(allocated(spsi%rwf)) then
+        write(fileid_ob, '(i8)') io
+        suffix_re = "psi_ob"//trim(adjustl(fileid_ob))
+        if(format_voxel_data=='avs')then
+          header_unit = "A**(-3/2)"
+          call write_avs(lg,103,suffix_re,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
+        else if(format_voxel_data=='cube')then
+          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system)
+        end if
+      else
+        write(fileid_k,    '(i8)') ik
+        write(fileid_ob,   '(i8)') io
+        write(fileid_spin, '(i8)') ispin
+        suffix_re = "psi_k"//trim(adjustl(fileid_k))   // &
+                    "_ob"  //trim(adjustl(fileid_ob))  // &
+                    "_spin"//trim(adjustl(fileid_spin))// &
+                    "_real" 
+        suffix_im = "psi_k"//trim(adjustl(fileid_k))   // &
+                    "_ob"  //trim(adjustl(fileid_ob))  // &
+                    "_spin"//trim(adjustl(fileid_spin))// &
+                    "_imag" 
+        if(format_voxel_data=='avs')then
+          header_unit = "A**(-3/2)"
+          call write_avs(lg,103,suffix_re,header_unit,dble(cmatbox2)/sqrt(au_length_aa)**3)
+          call write_avs(lg,103,suffix_im,header_unit,aimag(cmatbox2)/sqrt(au_length_aa)**3)
+        else if(format_voxel_data=='cube')then
+          call write_cube(lg,103,suffix_re,phys_quantity,dble(cmatbox2),system)
+          call write_cube(lg,103,suffix_im,phys_quantity,aimag(cmatbox2),system)
+        end if
+      endif
       
   end do
   end do

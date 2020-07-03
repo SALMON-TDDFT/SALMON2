@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -17,22 +17,22 @@
 
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,ewald,  &
-                              lg,mg,ng,  &
-                              info,pinfo,  &
+                              lg,mg,  &
+                              info,  &
                               poisson,fg,  &
                               cg,mixing,  &
                               stencil,  &
                               srg,srg_scalar,   &
                               spsi,shpsi,sttpsi,  &
-                              srho,srho_s,  &
-                              V_local,sVh,sVxc,sVpsl,xc_func,  &
+                              rho,rho_s,  &
+                              V_local,Vh,Vxc,Vpsl,xc_func,  &
                               pp,ppg,ppn,  &
                               rho_old,Vlocal_old,  &
                               band,ilevel_print )
 use math_constants, only: pi, zi
 use structures
 use inputoutput
-use parallelization, only: nproc_id_global
+use parallelization, only: nproc_id_global,adjust_elapse_time
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
 use timer
@@ -47,35 +47,35 @@ use read_gs
 use code_optimization
 use initialization_sub
 use occupation
-use input_pp_sub
 use prep_pp_sub
 use mixing_sub
 use checkpoint_restart_sub
 use hamiltonian
-use salmon_total_energy
+use total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 implicit none
 integer :: ix,iy,iz,ik,is
-integer :: ilevel_print !=2:print-all, =1:print-minimum, =1:no-print
+integer :: ilevel_print !=3:print-all
+                        !=2:print-only energy & convergence
+                        !=1:print-minimum
+                        !=0:no-print
 integer :: iter,Miter,iob,p1,p2,p5
 real(8) :: sum0,sum1
 real(8) :: rNebox1,rNebox2
 
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
-type(s_rgrid) :: ng
 type(s_parallel_info) :: info
-type(s_process_info),intent(in) :: pinfo
 type(s_sendrecv_grid) :: srg, srg_scalar
 type(s_orbital) :: spsi,shpsi,sttpsi
 type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: srho,sVh,sVpsl,rho_old,Vlocal_old
-!type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
-type(s_scalar) :: V_local(system%nspin),srho_s(system%nspin),sVxc(system%nspin)
+type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+!type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
+type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
 type(s_pp_grid) :: ppg
@@ -87,7 +87,8 @@ type(s_mixing) :: mixing
 type(s_band_dft) :: band
 
 logical :: rion_update, flag_conv
-integer :: i,j
+integer :: i,j, icnt_conv_nomix
+logical :: is_checkpoint_iter, is_shutdown_time
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: tol_esp_diff, ene_gap
@@ -97,24 +98,25 @@ if(calc_mode=='DFT_BAND') then
    esp_old=0d0
 endif
 
-if(step_initial_mix_zero.gt.1)then
+if(nscf_init_mix_zero.gt.1)then
+   icnt_conv_nomix = 0
    mixing%flag_mix_zero = .true.
-   DFT_NoMix_Iteration : do iter=1,step_initial_mix_zero
+   DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       rion_update = check_rion_update() .or. (iter == 1)
-      call copy_density(iter,system%nspin,ng,srho_s,mixing)
-      call scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
+      call copy_density(iter,system%nspin,mg,rho_s,mixing)
+      call scf_iteration_step(lg,mg,system,info,stencil,  &
+                     srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
                      cg,ppg,V_local,  &
                      iter,  &
-                     iditer_nosubspace_diag,mixing,iter,  &
-                     poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-      call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+                     nscf_init_no_diagonal, mixing, iter,  &
+                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+      call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
-      case(3); call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+      case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
       call get_band_gap(system,energy,ene_gap)
       call timer_end(LOG_CALC_TOTAL_ENERGY)
@@ -125,6 +127,16 @@ if(step_initial_mix_zero.gt.1)then
          end select
 300      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 301      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
+      endif
+      !(convergence: energy gap is over specified energy)
+      if(ene_gap .ge. conv_gap_mix_zero) then
+         icnt_conv_nomix = icnt_conv_nomix + 1
+         if(icnt_conv_nomix==5) then
+            if(comm_is_root(nproc_id_global)) write(*,*) "  converged no-mixing iteration"
+            exit
+         endif
+      else
+         icnt_conv_nomix = 0
       endif
 
    end do DFT_NoMix_Iteration
@@ -139,7 +151,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    if( sum1 < threshold ) then
       flag_conv = .true.
-      if( ilevel_print.ge.2 .and. comm_is_root(nproc_id_global)) then
+      if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
       endif
       exit DFT_Iteration
@@ -154,18 +166,18 @@ DFT_Iteration : do iter=Miter+1,nscf
       ! for calc_total_energy_periodic
       rion_update = check_rion_update() .or. (iter == 1)
   
-      if(temperature>=0.d0 .and. Miter>iditer_notemperature) then
+      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
          call ne2mu(energy,system)
       end if
    end if
-   call copy_density(Miter,system%nspin,ng,srho_s,mixing)
-   call scf_iteration_step(lg,mg,ng,system,info,pinfo,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,srho,srho_s,  &
+   call copy_density(Miter,system%nspin,mg,rho_s,mixing)
+   call scf_iteration_step(lg,mg,system,info,stencil,  &
+                     srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
                      cg,ppg,V_local,  &
                      Miter,  &
-                     iditer_nosubspace_diag,mixing,iter,  &
-                     poisson,fg,sVh,xc_func,ppn,sVxc,energy)
-   call update_vlocal(mg,system%nspin,sVh,sVpsl,sVxc,V_local)
+                     nscf_init_no_diagonal, mixing, iter,  &
+                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
       call calc_density_matrix_and_energy_plusU( spsi,ppg,info,system,energy%E_U )
@@ -174,8 +186,8 @@ DFT_Iteration : do iter=Miter+1,nscf
    call get_band_gap(system,energy,ene_gap)
    if(calc_mode/='DFT_BAND')then
       select case(iperiodic)
-      case(0); call calc_Total_Energy_isolated(system,info,ng,pp,srho_s,sVh,sVxc,rion_update,energy)
-      case(3); call calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+      case(0); call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
+      case(3); call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
       end select
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
@@ -194,7 +206,7 @@ DFT_Iteration : do iter=Miter+1,nscf
                if( iob <= band%nref_band ) band%check_conv_esp(iob,ik,is)=.true.
             end if
          end do !io
-         if( ilevel_print.ge.2 ) then
+         if( ilevel_print.ge.3 ) then
          if( is==1 .and. ik==1 ) then
             write(*,'(/,1x,"ispin","   ik",2x,"converged bands (total, maximum band index)")')
          end if
@@ -212,10 +224,10 @@ DFT_Iteration : do iter=Miter+1,nscf
    case('rho_dne')
       sum0=0d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3) 
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-         sum0 = sum0 + abs(srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      do iz=mg%is(3),mg%ie(3) 
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+         sum0 = sum0 + abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
       end do
       end do
       end do
@@ -232,10 +244,10 @@ DFT_Iteration : do iter=Miter+1,nscf
    case('norm_rho','norm_rho_dng')
       sum0=0.d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3) 
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-         sum0 = sum0 + (srho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
+      do iz=mg%is(3),mg%ie(3) 
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+         sum0 = sum0 + (rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
       end do
       end do
       end do
@@ -246,9 +258,9 @@ DFT_Iteration : do iter=Miter+1,nscf
    case('norm_pot','norm_pot_dng')
       sum0=0.d0
 !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3) 
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+      do iz=mg%is(3),mg%ie(3) 
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
          sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
       end do
       end do
@@ -258,8 +270,8 @@ DFT_Iteration : do iter=Miter+1,nscf
          sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
    end select
-  
-   if( ilevel_print.ge.2 ) then
+   
+   if( ilevel_print.ge.3 ) then
    if(comm_is_root(nproc_id_global)) then
       write(*,*) '-----------------------------------------------'
       select case(iperiodic)
@@ -301,39 +313,70 @@ DFT_Iteration : do iter=Miter+1,nscf
 204   format("iter and ||Vlocal_i(ix)-Vlocal_i-1(ix)||**2/(# of grids)= ",i6,e15.8)
 
    end if
+
+   else if( ilevel_print==2 ) then
+
+   if(comm_is_root(nproc_id_global)) then
+      select case(iperiodic)
+      case(0)
+         write(*,400) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1,poisson%iterVh
+      case(3)
+         write(*,401) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1
+      end select
+400   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7,3x,"Vh iter=",i4)
+401   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7)
+   endif
+
+   end if  !ilevel_print
+
+! modification of mixing rate for auto_mixing
+   if(yn_auto_mixing=='y')then
+     call check_mixing_half(Miter,sum1,mixing)
    end if
+ 
    rNebox1 = 0d0 
 !$OMP parallel do reduction(+:rNebox1) private(iz,iy,ix)
-   do iz=ng%is(3),ng%ie(3)
-   do iy=ng%is(2),ng%ie(2)
-   do ix=ng%is(1),ng%ie(1)
-      rNebox1 = rNebox1 + srho%f(ix,iy,iz)
+   do iz=mg%is(3),mg%ie(3)
+   do iy=mg%is(2),mg%ie(2)
+   do ix=mg%is(1),mg%ie(1)
+      rNebox1 = rNebox1 + rho%f(ix,iy,iz)
    end do
    end do
    end do
    call comm_summation(rNebox1,rNebox2,info%icomm_r)
-   if( ilevel_print.ge.2 ) then
+   if( ilevel_print.ge.3 ) then
    if(comm_is_root(nproc_id_global))then
       write(*,*) "Ne=",rNebox2*system%Hvol
    end if
    end if
    call timer_end(LOG_WRITE_GS_RESULTS)
 !$OMP parallel do private(iz,iy,ix)
-   do iz=ng%is(3),ng%ie(3)
-   do iy=ng%is(2),ng%ie(2)
-   do ix=ng%is(1),ng%ie(1)
-      rho_old%f(ix,iy,iz)    = srho%f(ix,iy,iz)
+   do iz=mg%is(3),mg%ie(3)
+   do iy=mg%is(2),mg%ie(2)
+   do ix=mg%is(1),mg%ie(1)
+      rho_old%f(ix,iy,iz)    = rho%f(ix,iy,iz)
       Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
    end do
    end do
    end do
 
    if(theory=='dft' .and. yn_opt=='n')then
-   if((checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval)==0)) then
-      call checkpoint_gs(lg,mg,ng,system,info,spsi,Miter,mixing)
-      if(comm_is_root(nproc_id_global)) write(*,'(a)')"  checkpoint data is printed"
-      call comm_sync_all
-   endif
+     is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval) == 0)
+     is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+
+     if (is_checkpoint_iter .or. is_shutdown_time) then
+       if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+         print *, 'shutdown the calculation, iter =', Miter
+       end if
+
+       call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing)
+       if(comm_is_root(nproc_id_global)) write(*,'(a)')"  checkpoint data is printed"
+       call comm_sync_all
+
+       if (is_shutdown_time) then
+         exit DFT_Iteration
+       end if
+     endif
    endif
 
 end do DFT_Iteration
@@ -350,7 +393,6 @@ subroutine  get_band_gap(system,energy,gap)
     use structures
     use salmon_global, only: nelec
     use inputoutput, only: au_energy_ev
-    use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     implicit none
     type(s_dft_system),intent(in) :: system

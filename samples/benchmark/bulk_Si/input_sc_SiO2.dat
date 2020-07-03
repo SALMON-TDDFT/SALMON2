@@ -36,7 +36,7 @@
 	num_kgrid=4,4,4
 /
 &propagation
-	propagator='etrs'
+	propagator='middlepoint'
 /
 &pseudo
 	Lloc_ps=2,1
@@ -61,9 +61,7 @@
 /
 &system
 	al=9.284900d+00,1.608192d+01,1.021426d+01
-	crystal_structure='diamond'
 	yn_periodic = 'y'
-	isym=1
 	natom=18
 	nelec=96
 	nelem=2
@@ -71,8 +69,8 @@
 	temperature=-1.000000d+00
 /
 &tgrid
-	dt=4.000000d-02
-	nt=25000
+	dt=2.000000d-02
+	nt=50000
 /
 &units
 	unit_system='a.u.'

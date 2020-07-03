@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -31,9 +31,9 @@ subroutine write_avs(lg,fp,suffix,header_unit,rmat)
   character(20),intent(in) :: header_unit
   real(8),intent(in) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                              lg%is(3):lg%ie(3))
-  character(30),intent(in):: suffix
+  character(60),intent(in):: suffix
   !
-  character(30):: filename
+  character(60):: filename
   integer::ix,iy,iz
   integer::jj,icount
   integer::jsta,jend
@@ -94,20 +94,20 @@ end subroutine write_avs
 
 !======================================================================
 
-subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,hgs)
-  use inputoutput, only: natom,kion,rion,izatom
-  use structures, only: s_rgrid
+subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,system)
+  use inputoutput, only: natom,kion,izatom
+  use structures, only: s_rgrid, s_dft_system
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
   type(s_rgrid),intent(in) :: lg
+  type(s_dft_system),intent(in) :: system
   integer, intent(IN) :: fp
-  character(30),intent(in):: suffix
+  character(60),intent(in):: suffix
   character(30),intent(in):: phys_quantity
   real(8),intent(IN) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                               lg%is(3):lg%ie(3))
-  real(8),intent(in) :: hgs(3)
-  character(30):: filename
+  character(60):: filename
   integer :: j,iatom
   integer :: ix,iy,iz
   integer :: ik
@@ -132,12 +132,12 @@ subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,hgs)
     end if
     write(fp,*) "All values here are in a.u."
     write(fp,'(i5,3f12.6)') natom,lg%coordinate(lg%is(1),1),lg%coordinate(lg%is(2),2),lg%coordinate(lg%is(3),3)
-    write(fp,'(i5,3f12.6)') lg%num(1),hgs(1),0.d0,0.d0
-    write(fp,'(i5,3f12.6)') lg%num(2),0.d0,hgs(2),0.d0
-    write(fp,'(i5,3f12.6)') lg%num(3),0.d0,0.d0,hgs(3)
+    write(fp,'(i5,3f12.6)') lg%num(1),system%hgs(1),0.d0,0.d0
+    write(fp,'(i5,3f12.6)') lg%num(2),0.d0,system%hgs(2),0.d0
+    write(fp,'(i5,3f12.6)') lg%num(3),0.d0,0.d0,system%hgs(3)
     do iatom=1,natom
       ik=Kion(iatom)
-      write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(rion(j,iatom),j=1,3)
+      write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(system%Rion(j,iatom),j=1,3)
     end do
 
     do ix=lg%is(1),lg%ie(1)
@@ -168,11 +168,11 @@ subroutine write_vtk(lg,fp,suffix,rmat,hgs)
   implicit none
   type(s_rgrid),intent(in) :: lg
   integer,intent(in) :: fp
-  character(30),intent(in):: suffix
+  character(60),intent(in):: suffix
   real(8),intent(in) :: rmat(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),  &
                              lg%is(3):lg%ie(3))
   real(8),intent(in) :: hgs(3)
-  character(30):: filename
+  character(60):: filename
   integer :: ix,iy,iz
 
   if(comm_is_root(nproc_id_global))then

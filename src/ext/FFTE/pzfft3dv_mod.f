@@ -1,5 +1,5 @@
 C
-C  Copyright 2019 SALMON developers
+C  Copyright 2018-2020 SALMON developers
 C
 C  Licensed under the Apache License, Version 2.0 (the "License");
 C  you may not use this file except in compliance with the License.
@@ -413,10 +413,11 @@ C     1                  MPI_DOUBLE_COMPLEX,ICOMMY,IERR)
       END
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       SUBROUTINE CONVERT_1D(A,B,NN,ICOMM,NPU)
+      USE COMMUNICATION, ONLY: COMM_ALLTOALL
       IMPLICIT REAL*8 (A-H,O-Z)
-      COMPLEX*16 A(*),B(*)
-     
-      CALL ALLTOALL_1D(A,B,NN,ICOMM,NPU)
- 
+      COMPLEX*16 A(NN),B(NN)
+
+      CALL COMM_ALLTOALL(A,B,ICOMM,NN/NPU)
+
       END
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

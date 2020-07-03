@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -49,26 +49,24 @@ subroutine main_dft_k_expand_single
   use code_optimization
   use initialization_sub
   use occupation
-  use input_pp_sub
   use prep_pp_sub
   use mixing_sub
   use checkpoint_restart_sub
   use filesystem
   use hamiltonian
-  use salmon_total_energy
+  use total_energy
+  use initialization_dft
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_rgrid) :: ng
-  type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_scalar
   type(s_orbital) :: spsi,shpsi,sttpsi
   type(s_dft_system) :: system
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
-  type(s_scalar) :: srho,sVh,sVpsl
-  type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
+  type(s_scalar) :: rho,Vh,Vpsl
+  type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
@@ -94,15 +92,15 @@ subroutine main_dft_k_expand_single
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(process_allocation /= 'orbital_sequential') stop "error: process_allocation must be orbital_sequential"
 
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_scalar,ofl)
-  allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
+  allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 
   call initialization1_dft( system, energy, stencil, fg, poisson,  &
-                            lg, mg, ng,  &
-                            pinfo, info,  &
+                            lg, mg,  &
+                            info,  &
                             srg, srg_scalar,  &
-                            srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
+                            rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
                             spsi, shpsi, sttpsi,  &
                             pp, ppg, ppn,  &
                             ofl )
@@ -110,23 +108,21 @@ subroutine main_dft_k_expand_single
   nspin = system%nspin
   spsi%update_zwf_overlap = .false.
   mixing%num_rho_stock = 21
-  call init_mixing(nspin,ng,mixing)  !maybe not necessary
+  call init_mixing(nspin,mg,mixing)  !maybe not necessary
 
 
   if(system%nspin /= 1) stop "error: nspin must be 1"
   if(nproc_k /= system%nk) stop "error: nproc_k must be # of k-points"
-  if(mod(nstate,nproc_ob)/=0.or.mod(nelec/2,(nstate/nproc_ob))/=0) stop "error: must be mod(nstate,nproc_ob)==0.and.mod(nelec/2,(nstate/nproc_ob))==0"
-
-  yn_datafiles_dump = 'n'
+  if(mod(nstate,nproc_ob)/=0.or.mod(nelec/2,(nstate/nproc_ob))/=0) &
+    stop "error: must be mod(nstate,nproc_ob)==0.and.mod(nelec/2,(nstate/nproc_ob))==0"
 
   ! read restart data
-  call restart_gs(lg,mg,ng,system,info,spsi,Miter,mixing=mixing)
+  call restart_gs(lg,mg,system,info,spsi,Miter,mixing=mixing)
 
   ! initialization for k-expand
   call init_k_expand(system%nk,kex)
-  call get_print_rank_numbers(kex,info,pinfo)
+  call get_print_rank_numbers(kex,info)
 
-  yn_datafiles_dump = 'y'
   !(prepare directory)
   call init_dir_out_restart(ofl)
   allocate(wdir(kex%nk))
@@ -259,12 +255,11 @@ subroutine init_k_expand(mk,kex)
 
 end subroutine init_k_expand
 
-subroutine get_print_rank_numbers(kex,info,pinfo)
+subroutine get_print_rank_numbers(kex,info)
   use communication, only: comm_is_root, comm_bcast
   implicit none
   type(s_k_expand) :: kex
   type(s_parallel_info),intent(in) :: info
-  type(s_process_info),intent(in)  :: pinfo
   integer :: icnt,nl,i1,i2,i3,i4,i5,k1,k2,k3,nkx,nky,nkz
   integer :: nproc_k, nproc_o, nproc_r(3)
 
@@ -291,9 +286,9 @@ subroutine get_print_rank_numbers(kex,info,pinfo)
     nky = kex%nky
     nkz = kex%nkz
 
-    nproc_k  = pinfo%npk
-    nproc_o  = pinfo%nporbital
-    nproc_r  = pinfo%nprgrid
+    nproc_k  = info%npk
+    nproc_o  = info%nporbital
+    nproc_r  = info%nprgrid
 
     !(after)
     allocate( kex%myrank(kex%nk) )
@@ -488,7 +483,7 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
   type(s_parallel_info) :: info
   type(s_mixing) :: mixing
   character(*)    :: odir
-  character(1024) :: dir_file_out, ofile_cube
+  character(1024) :: dir_file_out  !,ofile_cube
   integer :: iu1,ik, num_rho_stock
   integer :: lg_is_new(3), lg_ie_new(3), ixyz, nval
   integer :: ix_add, iy_add, iz_add,iix,iiy,iiz
@@ -539,17 +534,17 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
         iz_add = lg%ie(3) * (kex%isupercell(3,ixyz)-1)
 
         !$omp parallel do collapse(2) private(ix,iy,iz,iix,iiy,iiz)
-        do iz= ng%is(3),ng%ie(3)
-        do iy= ng%is(2),ng%ie(2)
-        do ix= ng%is(1),ng%ie(1)
+        do iz= mg%is(3),mg%ie(3)
+        do iy= mg%is(2),mg%ie(2)
+        do ix= mg%is(1),mg%ie(1)
 
            iix = ix + ix_add
            iiy = iy + iy_add
            iiz = iz + iz_add
-           tmp1_rho_in_new(iix,iiy,iiz)  = mixing%srho_in(i)%f(ix,iy,iz)
+           tmp1_rho_in_new(iix,iiy,iiz)  = mixing%rho_in(i)%f(ix,iy,iz)
 
            if(i.le.num_rho_stock) &
-           tmp1_rho_out_new(iix,iiy,iiz) = mixing%srho_out(i)%f(ix,iy,iz)
+           tmp1_rho_out_new(iix,iiy,iiz) = mixing%rho_out(i)%f(ix,iy,iz)
 
         enddo
         enddo
@@ -616,13 +611,13 @@ subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
   type(s_parallel_info) :: info
   type(s_mixing)  :: mixing
   character(*)    :: odir(kex%nk)
-  character(1024) :: dir_file_out, ofile_cube
-  real(8) :: tmp_norm(system%nk,system%no), norm_all(system%nk,system%no)
-  real(8) :: norm, scale, rshift(3), r(3)
-  integer :: ix_add, iy_add, iz_add !,mx,my,mz
+  character(1024) :: dir_file_out    !,ofile_cube
+ !real(8) :: tmp_norm(system%nk,system%no), norm_all(system%nk,system%no)
+  real(8) :: scale, rshift(3), r(3)  !,norm
+  integer :: ix_add, iy_add, iz_add  !,mx,my,mz
   integer :: iu,id,ip_x,ip_y,ip_z, inkx,inky,inkz, ip_o,ip_k
-  integer :: im,ik,is,ix,iy,iz,iix,iiy,iiz, io
-  real(8),allocatable :: orb_real(:,:,:)
+  integer :: im,ik,is,ix,iy,iz,iix,iiy,iiz !, io
+ !real(8),allocatable :: orb_real(:,:,:)
   complex(8) :: ai,ekr
   complex(8),allocatable :: zwf_ekr(:,:,:,:)
 
@@ -746,7 +741,7 @@ subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
   write(fp,'(i5,3f12.6)') mz,0.d0,0.d0,hgs(3)
   do i=1,n
      !ik=Kion(iatom)
-     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(rion(j,iatom),j=1,3)
+     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(Rion(j,iatom),j=1,3)
      write(fp,'(i5,4f12.6)') 8,dble(8),(crd(j,i),j=1,3)
   end do
   

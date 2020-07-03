@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -20,13 +20,14 @@ module init_poisson_sub
 contains
 
 !=====================================================================
-subroutine make_corr_pole(lg,ng,poisson)
-  use salmon_global, only: natom,Rion,layout_multipole,num_multipole_xyz,al
+subroutine make_corr_pole(lg,mg,system,poisson)
+  use salmon_global, only: natom,layout_multipole,num_multipole_xyz,al
   use inputoutput, only: au_length_aa
-  use structures, only: s_rgrid,s_poisson
+  use structures, only: s_rgrid,s_dft_system,s_poisson
   implicit none
   type(s_rgrid), intent(in) :: lg
-  type(s_rgrid), intent(in) :: ng
+  type(s_rgrid), intent(in) :: mg
+  type(s_dft_system),intent(in) :: system
   type(s_poisson),intent(inout) :: poisson
   integer :: a,i
   integer :: ix,iy,iz
@@ -48,14 +49,14 @@ subroutine make_corr_pole(lg,ng,poisson)
   
     amax=natom
     allocate(Rion2(3,natom))
-    Rion2(:,:)=Rion(:,:)
+    Rion2(:,:)=system%Rion(:,:)
   
     allocate(poisson%ig_num(1:amax))
-    allocate(nearatomnum(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3)))
+    allocate(nearatomnum(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     poisson%ig_num=0
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       rmin=1.d6
       do a=1,amax
         r=sqrt( (lg%coordinate(ix,1)-Rion2(1,a))**2      &
@@ -90,9 +91,9 @@ subroutine make_corr_pole(lg,ng,poisson)
   
     poisson%ig_num(:)=0
   
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       ibox=inv_icorr_polenum(nearatomnum(ix,iy,iz))
       poisson%ig_num(ibox)=poisson%ig_num(ibox)+1
       poisson%ig(1,poisson%ig_num(ibox),ibox)=ix
@@ -137,9 +138,9 @@ subroutine make_corr_pole(lg,ng,poisson)
   
     iflag_pole=0
   
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       do i=1,poisson%npole_total
         if(ista_Mxin_pole(3,i-1)<=iz.and.iend_Mxin_pole(3,i-1)>=iz.and.   &
            ista_Mxin_pole(2,i-1)<=iy.and.iend_Mxin_pole(2,i-1)>=iy.and.   &
@@ -171,9 +172,9 @@ subroutine make_corr_pole(lg,ng,poisson)
   
     poisson%ig_num=0
   
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       do i=1,poisson%npole_partial
         if(ista_Mxin_pole(3,poisson%ipole_tbl(i)-1)<=iz.and.iend_Mxin_pole(3,poisson%ipole_tbl(i)-1)>=iz.and.   &
            ista_Mxin_pole(2,poisson%ipole_tbl(i)-1)<=iy.and.iend_Mxin_pole(2,poisson%ipole_tbl(i)-1)>=iy.and.   &
@@ -190,9 +191,9 @@ subroutine make_corr_pole(lg,ng,poisson)
    
     poisson%ig_num=0
   
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       do i=1,poisson%npole_partial
         if(ista_Mxin_pole(3,poisson%ipole_tbl(i)-1)<=iz.and.iend_Mxin_pole(3,poisson%ipole_tbl(i)-1)>=iz.and.   &
            ista_Mxin_pole(2,poisson%ipole_tbl(i)-1)<=iy.and.iend_Mxin_pole(2,poisson%ipole_tbl(i)-1)>=iy.and.   &
@@ -218,22 +219,22 @@ end subroutine make_corr_pole
 
 !=====================================================================
 
-subroutine set_ig_bound(lg,ng,poisson)
+subroutine set_ig_bound(lg,mg,poisson)
   use structures, only: s_rgrid,s_poisson
   implicit none
-  type(s_rgrid), intent(in)     :: lg, ng
+  type(s_rgrid), intent(in)     :: lg, mg
   type(s_poisson),intent(inout) :: poisson
   integer :: ix,iy,iz
   integer :: ibox
   integer :: icount
   integer,parameter :: ndh=4
   
-  ibox=ng%num(1)*ng%num(2)*ng%num(3)/minval(ng%num(1:3))*2*ndh
+  ibox=mg%num(1)*mg%num(2)*mg%num(3)/minval(mg%num(1:3))*2*ndh
   allocate( poisson%ig_bound(3,ibox,3) )
   
   icount=0
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
   do ix=lg%is(1)-ndh,lg%is(1)-1
     icount=icount+1
     poisson%ig_bound(1,icount,1)=ix
@@ -242,8 +243,8 @@ subroutine set_ig_bound(lg,ng,poisson)
   end do
   end do
   end do
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
   do ix=lg%ie(1)+1,lg%ie(1)+ndh
     icount=icount+1
     poisson%ig_bound(1,icount,1)=ix
@@ -253,9 +254,9 @@ subroutine set_ig_bound(lg,ng,poisson)
   end do
   end do
   icount=0
-  do iz=ng%is(3),ng%ie(3)
+  do iz=mg%is(3),mg%ie(3)
   do iy=lg%is(2)-ndh,lg%is(2)-1
-  do ix=ng%is(1),ng%ie(1)
+  do ix=mg%is(1),mg%ie(1)
     icount=icount+1
     poisson%ig_bound(1,icount,2)=ix
     poisson%ig_bound(2,icount,2)=iy
@@ -263,9 +264,9 @@ subroutine set_ig_bound(lg,ng,poisson)
   end do
   end do
   end do
-  do iz=ng%is(3),ng%ie(3)
+  do iz=mg%is(3),mg%ie(3)
   do iy=lg%ie(2)+1,lg%ie(2)+ndh
-  do ix=ng%is(1),ng%ie(1)
+  do ix=mg%is(1),mg%ie(1)
     icount=icount+1
     poisson%ig_bound(1,icount,2)=ix
     poisson%ig_bound(2,icount,2)=iy
@@ -275,8 +276,8 @@ subroutine set_ig_bound(lg,ng,poisson)
   end do
   icount=0
   do iz=lg%is(3)-ndh,lg%is(3)-1
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     icount=icount+1
     poisson%ig_bound(1,icount,3)=ix
     poisson%ig_bound(2,icount,3)=iy
@@ -285,8 +286,8 @@ subroutine set_ig_bound(lg,ng,poisson)
   end do
   end do
   do iz=lg%ie(3)+1,lg%ie(3)+ndh
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
     icount=icount+1
     poisson%ig_bound(1,icount,3)=ix
     poisson%ig_bound(2,icount,3)=iy

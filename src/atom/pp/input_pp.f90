@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2018-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -22,39 +22,11 @@ module input_pp_sub
 
 contains
 
-subroutine read_pslfile(system,pp,ppg)
-  use salmon_global, only: iperiodic,nelem
-  use salmon_pp, only: init_pp
-  use structures
-  use prep_pp_sub, only: init_mps
-  implicit none
-  type(s_dft_system) :: system
-  type(s_pp_info)    :: pp
-  type(s_pp_grid)    :: ppg
-  !
-  integer :: nrmax
-  integer,parameter :: Lmax=4
-  logical :: flag_nlcc = .false.
-
-  if(iperiodic==0)then
-    nrmax=20000
-  else if(iperiodic==3)then
-    nrmax=3000
-  end if
-
-  call init_pp(pp,nrmax,Lmax,flag_nlcc)
-  call init_mps(ppg)
-  call input_pp(pp,system%hgs(1),system%hgs(2),system%hgs(3))
-
-  system%mass(1:nelem) = pp%rmass(1:nelem)
-
-end subroutine read_pslfile
-
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
 subroutine input_pp(pp,hx,hy,hz)
   use structures,only : s_pp_info
-  use salmon_global,only : file_pseudo
+  use salmon_global,only : file_pseudo, quiet
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
     & yn_psmask
@@ -196,6 +168,7 @@ subroutine input_pp(pp,hx,hy,hz)
 ! number of non-local projectors
       if ( all(pp%nproj(:,ik)==0) ) pp%nproj(0:pp%mlps(ik),ik)=1
 
+      if (.not. quiet) then
       write(*,*) '===================pseudopotential data==================='
       write(*,*) 'ik ,atom_symbol=',ik, pp%atom_symbol(ik)
       write(*,*) 'ps_format =',ps_format(ik)
@@ -209,14 +182,17 @@ subroutine input_pp(pp,hx,hy,hz)
       write(*,*) 'Mass(ik) =',pp%rmass(ik)
       write(*,*) 'flag_nlcc_element(ik) =',flag_nlcc_element(ik)
       write(*,*) '=========================================================='
+      end if
 
       if (yn_psmask == 'y') then
         call making_ps_with_masking(pp,hx,hy,hz,ik, &
                                     rhor_nlcc,flag_nlcc_element)
+        if (.not. quiet) then
         write(*,*) 'Following quantities are modified by masking procedure'
         write(*,*) 'Rps(ik), NRps(ik) =',pp%rps(ik), pp%nrps(ik)
         write(*,*) 'anorm(ik,l) =',(pp%anorm(l,ik),l=0,pp%mlps(ik))
         write(*,*) 'inorm(ik,l) =',(pp%inorm(l,ik),l=0,pp%mlps(ik))
+        end if
       else if (yn_psmask == 'n') then
         call making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
 
@@ -262,7 +238,8 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%rho_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%tau_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%flag_nlcc,nproc_group_global)
-  if(comm_is_root(nproc_id_global)) write(*,*)"flag_nlcc = ",pp%flag_nlcc
+  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) &
+    & write(*,*)"flag_nlcc = ",pp%flag_nlcc
 
   return
 end subroutine input_pp
@@ -375,7 +352,7 @@ subroutine read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 !This is for  FHI pseudopotential listed in abinit web page and not for original FHI98PP.
 !See http://www.abinit.org/downloads/psp-links/lda_fhi
   use structures,only : s_pp_info
-  use salmon_global,only : nelem, Lmax_ps
+  use salmon_global,only : nelem, Lmax_ps, quiet
   use math_constants,only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -395,11 +372,13 @@ subroutine read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   rrc_mat(0:pp%lmax,0:pp%lmax)=-1.d0
 
   open(4,file=ps_file,status='old')
+  if (.not. quiet) &
   write(*,*) '===================Header of ABINITFHI pseudo potential==================='
   do i=1,7
     read(4,'(a)') temptext
     write(*,*) temptext
   end do
+  if (.not. quiet) &
   write(*,*) '===================Header of ABINITFHI pseudo potential==================='
   read(4,*) rzps,pp%mlps(ik)
   pp%zps(ik)=int(rzps+1d-10)

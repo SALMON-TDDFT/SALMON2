@@ -75,12 +75,12 @@
 
 &tgrid
   !time step size and number of time grids(steps)
-  dt = 0.16d0
-  nt = 3000
+  dt = 0.08d0
+  nt = 6000
 /
 
 &emfield
-  !envelope shape of the incident pulse('Ecos2': cos^2 type envelope for scalar potential)
+  !envelope shape of the incident pulse('Acos2': cos^2 type envelope for vector potential)
   ae_shape1 = 'Acos2'
   
   !peak intensity(W/cm^2) of the incident pulse
@@ -100,20 +100,32 @@
   !---------------------------------------------------------------------!
 /
 
-&propagation
-  !propagator('etrs': time-reversal symmetry propagator)
-  propagator = 'etrs'
-/
 
 &multiscale
-  !explainations of these will be added after multi-scale calcution will be moved from ARTED
-  fdtddim    = '1d'
-  twod_shape = 'periodic'
-  nx_m       = 8
-  ny_m       = 1
-  hx_m       = 188.97
-  nxvacl_m   = -500
-  nxvacr_m   = +500
+  !number of macro grids in electromagnetic analysis for x, y, and z directions
+  nx_m = 8
+  ny_m = 1
+  nz_m = 1
+  
+  !macro grid spacing for x, y, and z directions
+  hx_m = 100.0d0
+  hy_m = 100.0d0
+  hz_m = 100.0d0
+  
+  !number of macroscopic grids for vacumm region
+  !(nxvacl_m is for negative x-direction in front of material)
+  !(nxvacr_m is for positive x-direction behind material)
+  nxvacl_m = 1000
+  nxvacr_m = 1000
+/
+
+&maxwell
+  !boundary condition of electromagnetic analysis
+  !first index(1-3 rows) corresponds to x, y, and z directions
+  !second index(1-2 columns) corresponds to bottom and top of the directions
+  !('abc' is absorbing boundary condition)
+  boundary_em(1,1) = 'abc'
+  boundary_em(1,2) = 'abc'
 /
 
 &atomic_red_coor

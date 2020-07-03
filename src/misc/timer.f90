@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2017-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -185,6 +185,7 @@ module timer
 
   public :: timer_initialize
   public :: timer_set, timer_reset
+  public :: timer_now
   public :: timer_get, timer_thread_get
   public :: timer_begin, timer_end
   public :: timer_thread_begin, timer_thread_end
@@ -194,10 +195,14 @@ module timer
   public :: timer_reentrance_read, timer_reentrance_write
   public :: timer_write, timer_thread_write
 
+  public :: timer_enable_sub, timer_disable_sub
+  public :: timer_get_sub
+
 
   integer,private,parameter   :: LOG_SIZE = 300
-  real(8),private,allocatable :: log_time(:)
-  real(8),private,allocatable :: log_temp(:)
+  integer,private             :: enable_range
+  real(8),private,allocatable :: log_time(:,:)
+  real(8),private,allocatable :: log_temp(:,:)
   logical,private,allocatable :: ticked(:)
 
   real(8),private,allocatable :: log_time_t(:,:)
@@ -219,23 +224,25 @@ contains
   subroutine timer_initialize
     use omp_lib, only: omp_get_max_threads
     implicit none
-    allocate(log_time(0:LOG_SIZE - 1))
-    allocate(log_temp(0:LOG_SIZE - 1))
+    allocate(log_time(0:LOG_SIZE - 1,2))
+    allocate(log_temp(0:LOG_SIZE - 1,2))
     allocate(log_time_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
     allocate(log_temp_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
     allocate(ticked(0:LOG_SIZE - 1))
     allocate(ticked_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))
     ticked(:)     = .false.
     ticked_t(:,:) = .false.
+    call timer_enable_sub
     call timer_reset
+    call timer_disable_sub
   end subroutine
 
   subroutine timer_set(e,t)
     implicit none
     integer,intent(in) :: e
     real(8),intent(in) :: t
-    log_time(e) = t
-    log_temp(e) = 0.d0
+    log_time(e,1:enable_range) = t
+    log_temp(e,1:enable_range) = 0.d0
     ticked(e)   = .false.
   end subroutine
 
@@ -248,8 +255,8 @@ contains
       do j=0,size(ticked_t,2)-1
         CHECK_TICKED_T(e,j)
       end do
-      log_time  (e)   = 0.d0
-      log_temp  (e)   = 0.d0
+      log_time  (e,1:enable_range) = 0.d0
+      log_temp  (e,1:enable_range) = 0.d0
       log_time_t(e,:) = 0.d0
       log_temp_t(e,:) = 0.d0
       ticked(e)       = .false.
@@ -260,8 +267,8 @@ contains
           CHECK_TICKED_T(i,j)
         end do
       end do
-      log_time  (:)   = 0.d0
-      log_temp  (:)   = 0.d0
+      log_time  (:,1:enable_range) = 0.d0
+      log_temp  (:,1:enable_range) = 0.d0
       log_time_t(:,:) = 0.d0
       log_time_t(:,:) = 0.d0
       ticked(:)       = .false.
@@ -289,7 +296,7 @@ contains
     implicit none
     integer,intent(in) :: id
     CHECK_TICKED(id)
-    log_temp(id) = get_wtime()
+    log_temp(id,1:enable_range) = get_wtime()
     ticked(id)   = .true.
   end subroutine
 
@@ -297,7 +304,7 @@ contains
     implicit none
     integer,intent(in) :: id
     CHECK_STOPPED(id)
-    log_time(id) = log_time(id) + get_wtime() - log_temp(id)
+    log_time(id,1:enable_range) = log_time(id,1:enable_range) + get_wtime() - log_temp(id,1:enable_range)
     ticked(id)   = .false.
   end subroutine
 
@@ -334,7 +341,7 @@ contains
     character(*),intent(in) :: str
     integer,intent(in)      :: id
     real(8) :: time,hour
-    time = log_time(id)
+    time = log_time(id,1)
     hour = time / 3600
     write(*,SHOW_FORMAT) str,time,'sec =',hour,'hour'
   end subroutine
@@ -344,7 +351,7 @@ contains
     character(*),intent(in) :: str
     integer,intent(in)      :: id
     real(8) :: time,hour
-    time = get_wtime() - log_temp(id) + log_time(id)
+    time = get_wtime() - log_temp(id,1) + log_time(id,1)
     hour = time / 3600
     write(*,SHOW_FORMAT) str,time,'sec =',hour,'hour'
   end subroutine
@@ -354,7 +361,7 @@ contains
     character(*),intent(in) :: str
     integer,intent(in)      :: id
     real(8) :: time,mini
-    time = log_time(id)
+    time = log_time(id,1)
     mini = time / 60
     write(*,SHOW_FORMAT) str,time,'sec =',mini,'min'
   end subroutine
@@ -364,7 +371,7 @@ contains
     character(*),intent(in) :: str
     integer,intent(in)      :: id
     real(8) :: time,mini
-    time = get_wtime() - log_temp(id) + log_time(id)
+    time = get_wtime() - log_temp(id,1) + log_time(id,1)
     mini = time / 60
     write(*,SHOW_FORMAT) str,time,'sec =',mini,'min'
   end subroutine
@@ -374,7 +381,7 @@ contains
     character(*),intent(in) :: str
     integer,intent(in)      :: fd,id
     real(8) :: time
-    time = log_time(id)
+    time = log_time(id,1)
     write(fd,'(a,f16.8,a)') str,time,' [s]'
   end subroutine
 
@@ -392,11 +399,38 @@ contains
     end do
   end subroutine
 
+  function timer_now(id)
+    implicit none
+    integer,intent(in) :: id
+    real(8)            :: timer_now
+    if (.not. ticked(id)) then
+      stop 'error'
+    end if
+    timer_now = log_time(id,1) + get_wtime() - log_temp(id,1)
+  end function
+
   function timer_get(id)
     implicit none
     integer,intent(in) :: id
     real(8)            :: timer_get
-    timer_get = log_time(id)
+    timer_get = log_time(id,1)
+  end function
+
+  subroutine timer_enable_sub()
+    implicit none
+    enable_range = 2
+  end subroutine
+
+  subroutine timer_disable_sub()
+    implicit none
+    enable_range = 1
+  end subroutine
+
+  function timer_get_sub(id)
+    implicit none
+    integer,intent(in) :: id
+    real(8)            :: timer_get_sub
+    timer_get_sub = log_time(id,2)
   end function
 
   function timer_thread_get(id,tid)

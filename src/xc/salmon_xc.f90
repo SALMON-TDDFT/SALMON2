@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2018-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -17,6 +17,10 @@
 
 #include "config.h"
 
+#ifdef USE_LIBXC
+#include "xc_version.h"
+#endif
+
 module salmon_xc
   use structures, only: s_xc_functional
   use builtin_pz, only: exc_cor_pz
@@ -24,8 +28,11 @@ module salmon_xc
   use builtin_pzm, only: exc_cor_pzm
   use builtin_pbe, only: exc_cor_pbe
   use builtin_tbmbj, only: exc_cor_tbmbj
+
 #ifdef USE_LIBXC
+#if XC_MAJOR_VERSION <= 4 
   use xc_f90_types_m
+#endif
   use xc_f90_lib_m
 #endif
 
@@ -47,7 +54,7 @@ contains
 
 
 ! wrapper for calc_xc
-  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, srho_s, ppn, info, spsi, stencil, sVxc, E_xc)
+  subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, ppn, info, spsi, stencil, Vxc, E_xc)
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -57,12 +64,12 @@ contains
     type(s_xc_functional)   ,intent(in) :: xc_func
     type(s_rgrid)           ,intent(in) :: mg
     type(s_sendrecv_grid)               :: srg_scalar, srg
-    type(s_scalar)          ,intent(in) :: srho_s(system%nspin)
+    type(s_scalar)          ,intent(in) :: rho_s(system%nspin)
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)                     :: spsi
     type(s_stencil)         ,intent(in) :: stencil
-    type(s_scalar)                      :: sVxc(system%nspin)
+    type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
     !
     integer :: ix,iy,iz,is,nspin
@@ -81,7 +88,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        rho_tmp(ix,iy,iz)=srho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        rho_tmp(ix,iy,iz)=rho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -93,7 +100,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        rho_s_tmp(ix,iy,iz,is)=srho_s(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        rho_s_tmp(ix,iy,iz,is)=rho_s(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -117,13 +124,13 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        rhd(ix,iy,iz)=dble(srho_s(1)%f(ix,iy,iz))
+        rhd(ix,iy,iz)=dble(rho_s(1)%f(ix,iy,iz))
       enddo
       enddo
       enddo
 !$omp end parallel do
 
-      call update_overlap_real8(srg_scalar, mg, rhd)
+      if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,rhd,grho)
       call calc_laplacian_field(mg,stencil%coef_lap,stencil%coef_lap0*(-2d0),rhd &
       & ,lrho( 1:mg%num(1), 1:mg%num(2), 1:mg%num(3) ) )
@@ -143,7 +150,7 @@ contains
     end if
 
     if (xc_func%use_gradient) then
-      if(nspin==2) stop "error: GGA or metaGGA & ispin==1"
+      if(nspin==2) stop "error: GGA or metaGGA & spin=='polarized'"
       call calc_xc(xc_func, rho=rho_tmp, grho=delr, rlrho=lrho, tau=tau, rj=j, &
       & eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
     else
@@ -159,7 +166,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        sVxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
+        Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
       end do
       end do
       end do
@@ -171,7 +178,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        sVxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
+        Vxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
       end do
       end do
       end do
@@ -218,11 +225,19 @@ contains
       
       tau_tmp1 = 0d0
       j_tmp1 = 0d0
-      
-      if(info%if_divide_rspace) then
-         call update_overlap_complex8(srg, mg, spsi%zwf)
-      end if
-      
+
+      if(allocated(spsi%rwf)) then
+         if(info%if_divide_rspace) call update_overlap_real8(srg, mg, spsi%rwf)
+         if(.not.allocated(spsi%zwf)) &
+              allocate(spsi%zwf(mg%is_array(1):mg%ie_array(1) &
+                               ,mg%is_array(2):mg%ie_array(2) &
+                               ,mg%is_array(3):mg%ie_array(3) &
+                               ,nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e))
+         spsi%zwf = cmplx(spsi%rwf)
+      else
+         if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
+      endif
+
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
       do ispin=1,Nspin
@@ -263,6 +278,8 @@ contains
       end do
       end do
 !$omp end parallel do
+
+      if(allocated(spsi%rwf)) deallocate(spsi%zwf)
   
       return
     end subroutine calc_tau
@@ -285,10 +302,10 @@ contains
 
 
 
-  subroutine init_xc(xc, ispin, cval, xcname, xname, cname)
+  subroutine init_xc(xc, spin, cval, xcname, xname, cname)
     implicit none
     type(s_xc_functional), intent(inout) :: xc
-    integer, intent(in)                :: ispin
+    character(*), intent(in)           :: spin
     real(8), intent(in)                :: cval
     character(*), intent(in), optional :: xcname
     character(*), intent(in), optional :: xname
@@ -296,12 +313,17 @@ contains
 
     ! Initialization of xc variable
     xc%xctype(1:3) = salmon_xctype_none
-    xc%ispin = ispin
     xc%cval = cval
     xc%use_gradient = .false.
     xc%use_laplacian = .false.
     xc%use_kinetic_energy = .false.
     xc%use_current = .false.
+    
+    if(spin=='unpolarized') then
+      xc%ispin=0
+    else if(spin=='polarized') then
+      xc%ispin=1
+    end if
 
     ! Exchange correlation
     if (present(xcname) .and. (len_trim(xcname) > 0)) then
@@ -325,19 +347,8 @@ contains
 
 
     subroutine setup_xcfunc(name)
-      use salmon_global, only: iperiodic, yn_domain_parallel
-      use inputoutput, only: stop_by_bad_input2
       implicit none
       character(*), intent(in) :: name
-
-#ifdef USE_LIBXC
-      ! Libxc prefix is used...
-      if (lower(name(1:6)) == 'libxc:') then
-        xc%xctype(1) = salmon_xctype_libxc
-        call init_libxc(name(7:), 1)
-        return
-      end if
-#endif
 
       select case(lower(name))
       case('none')
@@ -386,7 +397,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "TPSS functional is not implemented" ! future work
 
       case ('vs98')
 
@@ -395,7 +406,7 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
-        return
+        stop "VS98 functional is not implemented" ! future work
 
       ! Please insert additional functional here:
       ! e.g.
@@ -428,9 +439,13 @@ contains
 
       case default
 
+#ifdef USE_LIBXC
+        xc%xctype(1) = salmon_xctype_libxc
+        call init_libxc(name, 1)
+        return
+#endif
         print '(A, A)', "Error! Undefined exchange functional:", trim(name)
         stop
-
       end select
       return
     end subroutine
@@ -441,13 +456,7 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef USE_LIBXC
-      if (lower(name(1:6)) == 'libxc:') then
-        xc%xctype(2) = salmon_xctype_libxc
-        call init_libxc(name(7:), 2)
-        return
-      end if
-#endif
+
 
       select case(name)
       case('none')
@@ -462,6 +471,12 @@ contains
 
       case default
 
+#ifdef USE_LIBXC
+        xc%xctype(2) = salmon_xctype_libxc
+        call init_libxc(name, 2)
+        return
+#endif
+
         print '(A, A)', "Error! Undefined exchange functional:", trim(name)
         stop
 
@@ -475,13 +490,6 @@ contains
       implicit none
       character(*), intent(in) :: name
 
-#ifdef USE_LIBXC
-      if (lower(name(1:6)) == 'libxc:') then
-        xc%xctype(3) = salmon_xctype_libxc
-        call init_libxc(name(7:), 3)
-        return
-      end if
-#endif
 
       select case(name)
       case('none')
@@ -495,6 +503,12 @@ contains
       !   return
 
       case default
+
+#ifdef USE_LIBXC
+        xc%xctype(3) = salmon_xctype_libxc
+        call init_libxc(name, 3)
+        return
+#endif
 
         print '(A, A)', "Undefined correlation functional:", trim(name)
         stop
@@ -519,16 +533,23 @@ contains
         stop
       end if
 
-      if (ispin > 0) then
+      if (spin /= 'unpolarized') then
         print '(A)', "Spin polarized is not available"
         stop
       end if
 
-      call xc_f90_func_init( &
-        & xc%func(ii), xc%info(ii), ixc, XC_UNPOLARIZED &
-        & )
+#if XC_MAJOR_VERSION <= 4
+      call xc_f90_func_init(xc%func(ii), xc%info(ii), ixc, XC_UNPOLARIZED)
+#else
+      call xc_f90_func_init(xc%func(ii), ixc, XC_UNPOLARIZED)
+      xc%info(ii) = xc_f90_func_get_info(xc%func(ii))
+#endif         
 
-      select case(xc_f90_info_family(xc%info(ii)))
+#if XC_MAJOR_VERSION <= 4
+      select case (xc_f90_info_family(xc%info(ii)))
+#else
+      select case (xc_f90_func_info_get_family(xc%info(ii)))
+#endif
       case (XC_FAMILY_LDA)
       case (XC_FAMILY_GGA)
         xc%use_gradient = .true.
@@ -863,7 +884,11 @@ contains
         tau_1d = reshape(tau, (/nl/))
       end if
 
+#if XC_MAJOR_VERSION <= 4
       select case (xc_f90_info_family(xc%info(ii)))
+#else
+      select case (xc_f90_func_info_get_family(xc%info(ii)))
+#endif
       case(XC_FAMILY_LDA)
         call xc_f90_lda_exc_vxc( &
           & xc%func(ii), nl, rho_1d(1), &

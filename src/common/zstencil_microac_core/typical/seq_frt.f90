@@ -1,5 +1,5 @@
 !
-!  Copyright 2017-2019 SALMON developers
+!  Copyright 2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 !  limitations under the License.
 !
 !OCL eval_concurrent
-subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
+subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,igs,ige &
                                        ,tpsi,htpsi,V_local,Ac,div_Ac,lap0,lapt,nabt,k &
                                        )
   use math_constants,only : zi
@@ -22,6 +22,7 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
   integer,intent(in) :: is_array(3),ie_array(3),is(3),ie(3)
   integer,intent(in) :: idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
+  integer,intent(in) :: igs(3),ige(3)
 
   complex(8),intent(in)  :: tpsi   (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
   complex(8),intent(out) :: htpsi  (is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
@@ -38,19 +39,19 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
   complex(8) :: v,w,psi0
   complex(8) :: t1,t2,t3,t4,t5,t6,t7,t8
 
-  endz = ie(3)
-  endy = ie(2)
-  endx = ie(1)
+  endz = ige(3)
+  endy = ige(2)
+  endx = ige(1)
 
-  do iz=is(3),endz
-  do iy=is(2),endy
+  do iz=igs(3),endz
+  do iy=igs(2),endy
 
 #define DX(dt) tpsi(idx(ix+(dt)),iy,iz)
 #define DY(dt) tpsi(ix,idy(iy+(dt)),iz)
 #define DZ(dt) tpsi(ix,iy,idz(iz+(dt)))
 
 !OCL swp
-  do ix=is(1),endx
+  do ix=igs(1),endx
     psi0   = tpsi(ix,iy,iz)
     kAc1   = Ac(1,ix,iy,iz) + k(1)
     kAc2   = Ac(2,ix,iy,iz) + k(2)
@@ -62,7 +63,7 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
   end do
 
 !OCL swp
-  do ix=is(1),endx
+  do ix=igs(1),endx
     kAc1 = Ac(1,ix,iy,iz) + k(1)
 
     t8 = DX(-4) ; t7 = DX(-3) ; t6 = DX(-2) ; t5 = DX(-1)
@@ -87,7 +88,7 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
 !OCL swp
 !OCL swp_freg_rate(105)
-  do ix=is(1),endx
+  do ix=igs(1),endx
     kAc2 = Ac(2,ix,iy,iz) + k(2)
 
     t8 = DY(-4) ; t7 = DY(-3) ; t6 = DY(-2) ; t5 = DY(-1)
@@ -112,7 +113,7 @@ subroutine zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz &
 
 !OCL swp
 !OCL swp_freg_rate(105)
-  do ix=is(1),endx
+  do ix=igs(1),endx
     kAc3 = Ac(3,ix,iy,iz) + k(3)
 
     t8 = DZ(-4) ; t7 = DZ(-3) ; t6 = DZ(-2) ; t5 = DZ(-1)

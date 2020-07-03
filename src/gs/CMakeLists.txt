@@ -20,12 +20,14 @@ set(SOURCES
 
 if (USE_SCALAPACK)
   set(SOURCES ${SOURCES}
+      scalapack_module.f90
       eigen_subdiag_scalapack.f90
       )
 endif ()
 
 if (USE_EIGENEXA)
   set(SOURCES ${SOURCES}
+      eigenexa_module.f90
       eigen_subdiag_eigenexa.f90
       )
 endif ()

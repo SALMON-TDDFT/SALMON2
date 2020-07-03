@@ -14,11 +14,6 @@
 !   in the current directory.                                                            !
 !########################################################################################!
 
-&parallel
-  !This will be removed when ARTED is deleted.
-  yn_domain_parallel = 'y'
-/
-
 &calculation
   !type of theory
   theory = 'tddft_response'
@@ -79,8 +74,8 @@
 
 &tgrid
   !time step size and number of time grids(steps)
-  dt = 0.16d0
-  nt = 3000
+  dt = 0.08d0
+  nt = 6000
 /
 
 &emfield
@@ -95,10 +90,6 @@
   !---------------------------------------------------------------------!
 /
 
-&propagation
-  !propagator('etrs': time-reversal symmetry propagator)
-  propagator = 'etrs'
-/
 
 &analysis
   !energy grid size and number of energy grids for output files

@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -274,14 +274,75 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   return
 end subroutine zpseudo
 
+subroutine calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox)
+  use structures
+  use timer
+  implicit none
+  integer        ,intent(in) :: nspin
+  type(s_parallel_info),intent(in) :: info
+  type(s_pp_grid),intent(in) :: ppg
+  type(s_orbital),intent(in) :: tpsi
+  complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
+  integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
+  integer :: ilma,ia,j,ix,iy,iz,Nlma
+  complex(8) :: uVpsi
+  integer :: ilocal
+
+  call timer_begin(LOG_UHPSI_PSEUDO)
+
+  im_s = info%im_s
+  im_e = info%im_e
+  ik_s = info%ik_s
+  ik_e = info%ik_e
+  io_s = info%io_s
+  io_e = info%io_e
+  norb = Nspin* info%numo * info%numk * info%numm
+
+  Nlma = ppg%Nlma
+
+  allocate(uVpsibox(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+
+!$omp parallel do collapse(4) &
+!$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
+  do im=im_s,im_e
+  do ik=ik_s,ik_e
+  do io=io_s,io_e
+  do ispin=1,Nspin
+
+    do ilocal=1,ppg%ilocal_nlma
+      ilma=ppg%ilocal_nlma2ilma(ilocal)
+      ia  =ppg%ilocal_nlma2ia  (ilocal)
+      uVpsi = 0.d0
+      do j=1,ppg%mps(ia)
+        ix = ppg%jxyz(1,j,ia)
+        iy = ppg%jxyz(2,j,ia)
+        iz = ppg%jxyz(3,j,ia)
+        uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+      end do
+      uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+      uVpsibox(ispin,io,ik,im,ilma) = uVpsi
+    end do
+
+  end do
+  end do
+  end do
+  end do
+!$omp end parallel do
+
+  call timer_end(LOG_UHPSI_PSEUDO)
+
+  return
+end subroutine calc_uVpsi
+
 subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   use structures
-  use salmon_global, only: natom
   use timer
-  use communication, only: comm_summation
 #ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
-  use communication, only: comm_wait_all
+  use salmon_global, only: natom
+  use communication, only: comm_wait_all,comm_show_error
   use mpi, only: MPI_SUM,MPI_DOUBLE_COMPLEX
+#else
+  use communication, only: comm_summation
 #endif
   implicit none
   integer        ,intent(in) :: nspin
@@ -291,9 +352,11 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
   complex(8)    ,allocatable :: uVpsibox (:,:,:,:,:)
   complex(8)    ,allocatable :: uVpsibox2(:,:,:,:,:)
   integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
-  integer :: ilma,ia,j,ix,iy,iz,Nlma,ierr,is,ie,ns
+  integer :: ilma,ia,j,ix,iy,iz,Nlma,ilocal
   complex(8) :: uVpsi
-  integer :: ireqs(natom), nreq, ilocal
+#ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
+  integer :: ireqs(natom),nreq,ierr,is,ie,ns
+#endif
 
   call timer_begin(LOG_UHPSI_PSEUDO)
 
@@ -309,6 +372,12 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
   allocate(uVpsibox (Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
   allocate(uVpsibox2(Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e,Nlma))
+
+#ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
+  uVpsibox2 = 0d0
+#else
+  uVpsibox  = 0d0
+#endif
 
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilocal,ilma,ia,uVpsi,j,ix,iy,iz)
@@ -354,10 +423,10 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
                          , uvpsibox2(1,io_s,ik_s,im_s,is) &
                          , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
                          , ireqs(nreq), ierr )
-    else
+      call comm_show_error(ierr)
+    !else
       ! uvpsibox2(:,:,:,:,ppg%irange_ia(1:2,ia)) does not use in this process...
       ! We can skip self copy, but zero clear required
-      uvpsibox2(:,io_s:io_e,ik_s:ik_e,im_s:im_e,is:ie) = 0d0
     end if
   end do
   call comm_wait_all(ireqs(1:nreq))

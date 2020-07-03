@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -212,7 +212,7 @@ module sendrecv_grid
               call comm_start_all(srg%ireq_real8(:, iside, idir))
             end if
           else
-            if (iand(iphase,srg_unpack) > 0) then
+            if (iand(iphase,srg_pack) > 0) then
               ! NOTE: If neightboring nodes are itself (periodic with single proc),
               !       a simple side-to-side copy is used instead of the MPI comm.
               call copy_self(iside, idir)
@@ -364,7 +364,7 @@ module sendrecv_grid
               call comm_start_all(srg%ireq_complex8(:, iside, idir))
             end if
           else
-            if (iand(iphase,srg_unpack) > 0) then
+            if (iand(iphase,srg_pack) > 0) then
               ! NOTE: If neightboring nodes are itself (periodic with single proc),
               !       a simple side-to-side copy is used instead of the MPI comm.
               call copy_self(iside, idir)
@@ -471,17 +471,16 @@ module sendrecv_grid
 
   end subroutine update_overlap_complex8
 
-  subroutine create_sendrecv_neig_orbital(neig_mg, info, pinfo, iperiodic)
-    use network_address, only: get_neighbour => get_orbital_neighbour_rank
-    use structures, only: s_parallel_info,s_process_info
+  subroutine create_sendrecv_neig(neig, info)
+    use network_address, only: get_neighbour_rank
+    use structures, only: s_parallel_info
     use communication, only: comm_proc_null
+    use salmon_global, only: yn_periodic
     implicit none
-    integer, intent(out) :: neig_mg(1:2, 1:3)
+    integer, intent(out) :: neig(1:2, 1:3)
     type(s_parallel_info), intent(in) :: info
-    type(s_process_info), intent(in)     :: pinfo
-    integer, intent(in) :: iperiodic
     !
-    integer :: idir,iside,idisp
+    integer :: idir,iside,idisp,iret
 
     do idir=1,3
     do iside=1,2
@@ -490,42 +489,16 @@ module sendrecv_grid
         case(2); idisp = -1
       end select
 
-      neig_mg(iside,idir) = get_neighbour(info, pinfo, idir, idisp)
+      iret = get_neighbour_rank(info, idir, idisp)
 
-      if (neig_mg(iside,idir) < 0 .and. iperiodic == 0) then
-        neig_mg(iside,idir) = comm_proc_null
+      if (iret < 0 .and. yn_periodic == 'n') then
+        neig(iside,idir) = comm_proc_null
+      else
+        neig(iside,idir) = iret
       end if
     end do
     end do
-  end subroutine create_sendrecv_neig_orbital
-
-  subroutine create_sendrecv_neig_scalar(neig_ng, info, pinfo, iperiodic)
-    use network_address, only: get_neighbour => get_field_neighbour_rank
-    use structures, only: s_process_info,s_parallel_info
-    use communication, only: comm_proc_null
-    implicit none
-    integer, intent(out) :: neig_ng(1:2, 1:3)
-    type(s_process_info), intent(in)   :: pinfo
-    type(s_parallel_info), intent(in) :: info
-    integer, intent(in) :: iperiodic
-    !
-    integer :: idir,iside,idisp
-
-    do idir=1,3
-    do iside=1,2
-      select case(iside)
-        case(1); idisp = 1
-        case(2); idisp = -1
-      end select
-
-      neig_ng(iside,idir) = get_neighbour(info, pinfo, idir, idisp)
-
-      if (neig_ng(iside,idir) < 0 .and. iperiodic == 0) then
-        neig_ng(iside,idir) = comm_proc_null
-      end if
-    end do
-    end do
-  end subroutine create_sendrecv_neig_scalar
+  end subroutine create_sendrecv_neig
 
 end module sendrecv_grid
 

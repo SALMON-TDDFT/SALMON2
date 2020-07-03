@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -67,6 +67,7 @@ module communication
 
   ! utils
   public :: comm_is_root
+  public :: comm_show_error
 
 
   type, public :: comm_maxloc_type
@@ -239,6 +240,9 @@ module communication
   end interface
 
   interface comm_get_min
+    ! scalar
+    module procedure comm_get_min_double
+
     ! 1-D array
     module procedure comm_get_min_array1d_double
   end interface
@@ -255,6 +259,11 @@ module communication
   interface comm_logical_and
     ! scalar
     module procedure comm_logical_and_scalar
+  end interface
+
+  interface comm_logical_or
+    ! 1-D array (in-place)
+    module procedure comm_ip_logical_or_array1d
   end interface
 
   private :: get_rank, error_check, abort_show_message
@@ -318,6 +327,12 @@ contains
     logical :: comm_is_root
     comm_is_root = npid == ROOT_PROCID
   end function
+
+  subroutine comm_show_error(errcode)
+    implicit none
+    integer, intent(in) :: errcode
+    UNUSED_VARIABLE(errcode)
+  end subroutine
 
   subroutine comm_sync_all(ngid)
     implicit none
@@ -964,6 +979,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array1d_integer")
   end subroutine
@@ -972,6 +988,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array2d_integer")
   end subroutine
@@ -980,6 +997,7 @@ contains
     implicit none
     real(8), intent(inout) :: values(:,:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array3d_double")
   end subroutine
@@ -988,6 +1006,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:,:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array3d_integer")
   end subroutine
@@ -996,6 +1015,7 @@ contains
     implicit none
     integer, intent(inout) :: values(:,:,:,:,:)
     integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_sum_ip_array5d_integer")
   end subroutine
@@ -1215,6 +1235,14 @@ contains
     outvalue = invalue
   end subroutine
 
+  subroutine comm_get_min_double(svalue, ngroup)
+    implicit none
+    real(8), intent(inout) :: svalue
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(svalue)
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_get_min_double")
+  end subroutine
 
   subroutine comm_get_min_array1d_double(invalue, outvalue, N, ngroup)
     implicit none
@@ -1228,7 +1256,6 @@ contains
   end subroutine
 
   subroutine comm_get_max_integer(svalue, ngroup)
-    use mpi, only: MPI_INTEGER, MPI_MAX, MPI_IN_PLACE
     implicit none
     integer, intent(inout) :: svalue
     integer, intent(in)    :: ngroup
@@ -1266,6 +1293,15 @@ contains
     UNUSED_VARIABLE(ngroup)
     !NOP! ABORT_MESSAGE(ngroup,"comm_logical_and_scalar")
     outvalue = invalue
+  end subroutine
+
+  subroutine comm_ip_logical_or_array1d(values, ngroup)
+    implicit none
+    logical, intent(inout) :: values(:)
+    integer, intent(in)    :: ngroup
+    UNUSED_VARIABLE(values)
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_ip_logical_or_array")
   end subroutine
 
 

@@ -5,3 +5,9 @@ Acknowledgements
 
 - We use the FFTE (http://www.ffte.jp/) package with partially modification.
   Thanks to Prof. Daisuke Takahashi (University of Tsukuba)
+
+- If necessary, we build and use the following libraries as is.
+    - Netlib LAPACK (http://www.netlib.org/lapack/)
+    - Netlib ScaLAPACK (http://www.netlib.org/scalapack/)
+    - RIKEN R-CCS EigenExa (https://www.r-ccs.riken.jp/labs/lpnctrt/en/projects/eigenexa/)
+    - Libxc (https://www.tddft.org/programs/libxc/)

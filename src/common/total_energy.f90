@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -14,14 +14,14 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-MODULE salmon_Total_Energy
+MODULE Total_Energy
 implicit none
 
 CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_isolated(system,info,ng,pp,rho,Vh,Vxc,rion_update,energy)
+  SUBROUTINE calc_Total_Energy_isolated(system,info,mg,pp,rho,Vh,Vxc,rion_update,energy)
     use structures
     use salmon_global, only: kion
     use communication, only: comm_summation
@@ -29,7 +29,7 @@ CONTAINS
     implicit none
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
-    type(s_rgrid)           ,intent(in) :: ng
+    type(s_rgrid)           ,intent(in) :: mg
     type(s_pp_info)         ,intent(in) :: pp
     type(s_scalar)          ,intent(in) :: rho(system%Nspin),Vh,Vxc(system%Nspin)
     logical                 ,intent(in) :: rion_update
@@ -43,7 +43,7 @@ CONTAINS
 
     Nspin = system%Nspin
 
-    if (Rion_update) then
+    if (rion_update) then
       Eion = 0d0
 !$omp parallel do default(none) &
 !$omp          reduction(+:Eion) &
@@ -79,11 +79,11 @@ CONTAINS
 !$omp parallel do collapse(4) default(none) &
 !$omp          reduction(+:sum1) &
 !$omp          private(ispin,ix,iy,iz) &
-!$omp          shared(Nspin,ng,Vh,rho,Vxc)
+!$omp          shared(Nspin,mg,Vh,rho,Vxc)
     do ispin=1,Nspin
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         sum1 = sum1 - 0.5d0* Vh%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz)    &
                     - ( Vxc(ispin)%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz) )
       end do
@@ -108,7 +108,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-  SUBROUTINE calc_Total_Energy_periodic(ng,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+  SUBROUTINE calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     use structures
     use salmon_math
     use math_constants,only : pi,zi
@@ -116,7 +116,7 @@ CONTAINS
     use communication, only: comm_summation,comm_is_root
     use timer
     implicit none
-    type(s_rgrid)           ,intent(in) :: ng
+    type(s_rgrid)           ,intent(in) :: mg
     type(s_ewald_ion_ion)   ,intent(in) :: ewald
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
@@ -128,7 +128,7 @@ CONTAINS
     type(s_dft_energy)                  :: energy
     !
     integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair
-    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),G2,Gd,sysvol,E_wrk(5),E_sum(5)
+    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),Gd,sysvol,E_wrk(5),E_sum(5)
     real(8) :: etmp
     complex(8) :: rho_e,rho_i
 
@@ -181,12 +181,12 @@ CONTAINS
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_tmp_l) &
 !$omp          private(ix,iy,iz,rho_i) &
-!$omp          shared(fg,aEwald,sysvol,ng,ppg)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
+!$omp          shared(fg,aEwald,sysvol,mg,ppg)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         rho_i = ppg%zrhoG_ion(ix,iy,iz)
-        E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2 * fg%exp_ewald(ix,iy,iz) *0.5d0) ! ewald (--> Rion_update)
+        E_tmp_l = E_tmp_l + sysvol* fg%coef(ix,iy,iz) * (abs(rho_i)**2 * fg%exp_ewald(ix,iy,iz) *0.5d0) ! ewald (--> rion_update)
       end do
       end do
       end do
@@ -198,10 +198,10 @@ CONTAINS
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
-!$omp          shared(ng,fg,aEwald,system,sysvol,kion,poisson,ppg,info)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+!$omp          shared(mg,fg,aEwald,system,sysvol,kion,poisson,ppg,info)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       g(1) = fg%vec_G(1,ix,iy,iz)
       g(2) = fg%vec_G(2,ix,iy,iz)
       g(3) = fg%vec_G(3,ix,iy,iz)
@@ -458,11 +458,11 @@ CONTAINS
   
 !===================================================================================================================================
 
-  subroutine init_ewald(system,info,ewald,fg)
+  subroutine init_ewald(system,info,ewald)
     use structures
     use salmon_math
 !    use math_constants,only : pi,zi
-    use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g
+    use salmon_global, only: NEwald,aEwald, cutoff_r,cutoff_r_buff, cutoff_g, quiet
     use communication, only: comm_is_root,comm_summation,comm_get_groupinfo
     use parallelization, only: nproc_id_global
     use inputoutput, only: au_length_aa
@@ -471,7 +471,6 @@ CONTAINS
     type(s_dft_system) ,intent(in) :: system
     type(s_parallel_info),intent(in) :: info
     type(s_ewald_ion_ion) :: ewald
-    type(s_reciprocal_grid),intent(in) :: fg
     !
     integer :: ix,iy,iz,iia,ia,ib,ir,ipair   !,ig
     integer :: npair_bk_max, npair_bk_loc
@@ -493,7 +492,7 @@ CONTAINS
     endif
     if(cutoff_g .lt. 0d0) cutoff_g = 99d99 ![1/Bohr]   !cutoff in G space
 
-    if(comm_is_root(nproc_id_global)) then
+    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
        write(*,900) " == Ewald =="
        write(*,800) " cutoff length in real-space in ewald =", cutoff_r*au_length_aa, " [A]"
        write(*,800) " (buffer length in bookkeeping =", cutoff_r_buff*au_length_aa, " [A])"
@@ -548,7 +547,7 @@ CONTAINS
       allocate( ewald%bk(4,ewald%nmax_pair_bk,info%nion_mg) )
       allocate( ewald%npair_bk(info%nion_mg) )
 
-      if(comm_is_root(nproc_id_global)) then
+      if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
          write(*,820) " number of ion-ion pair(/atom) used for allocation of bookkeeping=", ewald%nmax_pair_bk
          write(*,*)"==========="
 820      format(a,i6)
@@ -662,11 +661,11 @@ CONTAINS
     select case(theory)
     case('dft','dft_band','dft_md')
       rion_update = (yn_opt == 'y' .or. theory == 'dft_md')
-    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multiscale_experiment')
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
       rion_update = (yn_md == 'y')
     case default
       rion_update = .false.
     end select
   end function
 
-END MODULE salmon_Total_Energy
+END MODULE Total_Energy

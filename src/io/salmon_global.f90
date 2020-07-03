@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2017-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -35,22 +35,19 @@ module salmon_global
   integer,parameter :: ntype_atom_coor_cartesian = 1
   integer,parameter :: ntype_atom_coor_reduced   = 2
 
+! Flag for suppress standard outputs 
+  logical :: quiet
+
+  character(16)  :: calc_mode      !old input variable, but used as a flag; move later
+
 !Input variables
 !! &calculation
   character(32)  :: theory
-  character(16)  :: calc_mode          !remove later
-  character(1)   :: use_ehrenfest_md   !remove later
-  character(1)   :: use_adiabatic_md   !remove later
-  character(1)   :: use_ms_maxwell     !remove later
-  character(1)   :: use_geometry_opt   !remove later
-  character(1)   :: use_singlescale    !remove later
-  character(16)  :: use_potential_model
   character(1)   :: yn_md
   character(1)   :: yn_opt
 !! &control
   character(256) :: sysname
   character(256) :: base_directory
-  integer        :: output_buffer_interval
   character(1)   :: yn_restart
   character(256) :: directory_read_data
   character(1)   :: yn_self_checkpoint
@@ -61,20 +58,10 @@ module salmon_global
   real(8)        :: time_shutdown
   character(20)  :: method_wf_distributor
   integer        :: nblock_wf_distribute
-  character(1)   :: yn_gbp
-  character(1)   :: yn_gbp_stencil ! temporary
   !remove later
-  character(256) :: dump_filename
-  character(20)  :: modify_gs_wfn_k  !changed from modify_initial_guess
-  character(1)   :: read_gs_wfn_k
-  character(1)   :: read_rt_wfn_k
-  character(1)   :: read_gs_wfn_k_ms
-  character(1)   :: read_rt_wfn_k_ms
   character(1)   :: read_gs_dns_cube
   character(1)   :: write_gs_wfn_k
   character(1)   :: write_rt_wfn_k
-  character(1)   :: write_gs_wfn_k_ms
-  character(1)   :: write_rt_wfn_k_ms
 
 !! &units
   character(16)  :: unit_system
@@ -84,7 +71,6 @@ module salmon_global
   character(16)  :: unit_charge
 
 !! &parallel
-  character(1)   :: yn_domain_parallel
   integer        :: nproc_k
   integer        :: nproc_ob
   integer        :: nproc_rgrid(3)
@@ -97,11 +83,9 @@ module salmon_global
 !! &system
   integer        :: iperiodic  !this is old keyword but still defined here
   character(1)   :: yn_periodic
-  integer        :: ispin
+  character(16)  :: spin
   real(8)        :: al(3)
   real(8)        :: al_vec1(3),al_vec2(3),al_vec3(3)
-  integer        :: isym
-  character(32)  :: crystal_structure
   integer        :: nstate
   integer        :: nstate_spin(2)
   integer        :: nelec
@@ -149,9 +133,11 @@ module salmon_global
   integer        :: n_hamil
   character(16)  :: propagator
   character(1)   :: yn_fix_func
+  character(1)   :: yn_predictor_corrector
 
 !! &scf
   character(8)   :: method_init_wf
+  integer        :: iseed_number_change
   character(8)   :: method_min
   integer        :: ncg,ncg_init
   character(8)   :: method_mixing
@@ -160,22 +146,22 @@ module salmon_global
   real(8)        :: alpha_mb
   integer        :: nmemory_p
   real(8)        :: beta_p
-  character(1)   :: fsset_option
-  integer        :: nfsset_start
-  integer        :: nfsset_every
+  character(1)   :: yn_auto_mixing
+  real(8)        :: update_mixing_ratio
   integer        :: nscf
   character(1)   :: yn_subspace_diagonalization
   character(16)  :: convergence
   real(8)        :: threshold
-  character(1)   :: omp_loop
-  character(1)   :: skip_gsortho
-  integer        :: iditer_notemperature
-  integer        :: step_initial_mix_zero
-  integer        :: iseed_number_change
+  integer        :: nscf_init_redistribution
+  integer        :: nscf_init_no_diagonal
+  integer        :: nscf_init_mix_zero
+  real(8)        :: conv_gap_mix_zero
+
 
 !! &emfield
   character(2)   :: trans_longi
   character(16)  :: ae_shape1
+  character(256) :: file_input1
   real(8)        :: e_impulse
   real(8)        :: E_amplitude1
   real(8)        :: I_wcm2_1
@@ -194,13 +180,14 @@ module salmon_global
   real(8)        :: phi_cep2
   real(8)        :: t1_t2
   real(8)        :: t1_start
-  character(1)   :: yn_local_field
-  real(8)        :: rlaserbound_sta(3)
-  real(8)        :: rlaserbound_end(3)
   integer        :: num_dipole_source
   real(8)        :: vec_dipole_source(3,2)
   real(8)        :: cood_dipole_source(3,2)
   real(8)        :: rad_dipole_source
+
+!! &singlescale
+  character(32)  :: method_singlescale
+  real(8)        :: cutoff_G2_emfield
 
 !! &multiscale
   character(16)  :: fdtddim
@@ -226,6 +213,7 @@ module salmon_global
   character(1)   :: set_ini_coor_vel
   integer        :: nmacro_write_group
   !! TODO: remove num_macropoint later
+  integer        :: nmacro_chunk
 
 !! &maxwell
   real(8)        :: al_em(3)
@@ -257,9 +245,9 @@ module salmon_global
 
 !! &analysis
   character(2)   :: projection_option
-  character(4)   :: projection_decomp
   integer        :: nenergy
   real(8)        :: de
+  integer        :: out_rt_energy_step
   character(1)   :: yn_out_psi
   character(1)   :: yn_out_dos
   character(1)   :: yn_out_dos_set_fe_origin
@@ -289,11 +277,13 @@ module salmon_global
   integer        :: out_ms_step
   character(16)  :: format_voxel_data
   integer        :: nsplit_voxel_data
-  character(1)   :: timer_process
+  character(1)   :: yn_out_perflog
+  character(6)   :: format_perflog ! 'stdout','text','csv'
 
 !! &poisson
   integer        :: layout_multipole
   integer        :: num_multipole_xyz(3)
+  integer        :: lmax_multipole
   real(8)        :: threshold_cg
 
 !! &ewald
@@ -305,76 +295,44 @@ module salmon_global
 
 !! &opt
   integer        :: nopt
-  real(8)        :: cg_alpha_ini
-  real(8)        :: cg_alpha_up
-  real(8)        :: cg_alpha_down
   real(8)        :: max_step_len_adjust
-  real(8)        :: convrg_scf_force
-  real(8)        :: convrg_scf_ene
   real(8)        :: convrg_opt_fmax
-  real(8)        :: convrg_opt_ene
 
 !! &md
   character(10)  :: ensemble
   character(20)  :: thermostat
   integer        :: step_velocity_scaling
   integer        :: step_update_ps
-  integer        :: step_update_ps2
   real(8)        :: temperature0_ion_k
   character(1)   :: yn_set_ini_velocity
   character(256) :: file_ini_velocity
   real(8)        :: thermostat_tau
-  real(8)        :: friction
   character(1)   :: yn_stop_system_momt
 
 !! &group_fundamental
-  integer        :: iditer_nosubspace_diag
-  integer        :: ntmg
-  integer        :: idisnum(2)
   integer        :: iwrite_projection
   integer        :: itwproj
   integer        :: iwrite_projnum
-  integer        :: itcalc_ene
-
-!! &group_hartree
-  integer        :: lmax_lmp
 
 !! &group_others
-  integer        :: iswitch_orbital_mesh
-  integer        :: iflag_psicube
   integer        :: num_projection
   integer        :: iwrite_projection_ob(200)
   integer        :: iwrite_projection_k(200)
-  character(100) :: filename_pot
-  integer        :: iwrite_external
-  integer        :: iflag_intelectron
-  integer        :: num_dip2
-  real(8)        :: dip2boundary(100)
-  real(8)        :: dip2center(100)
-  integer        :: itotntime2
-  integer        :: iwdenoption
-  integer        :: iwdenstep
-  integer        :: iflag_estatic
 
 !! &atomic_coor
 !! &atomic_red_coor
 integer,allocatable :: kion(:)
-real(8),allocatable :: rion(:,:)
-real(8),allocatable :: rion_red(:,:)
+real(8),allocatable :: Rion(:,:)
+real(8),allocatable :: Rion_red(:,:)
 character(1),allocatable :: flag_opt_atom(:)
 character(256),allocatable :: atom_name(:)
 
 !! &code
-  character(1) :: yn_want_stencil_openmp_parallelization
   character(1) :: yn_want_stencil_hand_vectorization
-  character(1) :: yn_force_stencil_openmp_parallelization
-  character(1) :: yn_force_stencil_sequential_computation
   character(1) :: yn_want_communication_overlapping
+  character(10) :: stencil_openmp_mode  ! 'auto', 'orbital', 'rgrid'
+  character(10) :: current_openmp_mode  ! 'auto', 'orbital', 'rgrid'
+  character(10) :: force_openmp_mode    ! 'auto', 'orbital', 'rgrid'
 
-!! &dft2tddft
-  character(1) :: yn_datafiles_dump
-  integer      :: target_nproc_k
-  integer      :: target_nproc_ob
-  integer      :: target_nproc_rgrid(3)
 
 end module salmon_global

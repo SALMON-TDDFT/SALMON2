@@ -36,7 +36,7 @@
   nelem  = 2
   natom  = 4
   nelec  = 10
-  nstate = 5
+  nstate = 6
 /
 
 &pseudo
@@ -76,11 +76,11 @@
   !output of all orbitals, density,
   !density of states, projected density of states,
   !and electron localization function
-!  yn_out_psi  = 'y'
+  yn_out_psi  = 'y'
   yn_out_dns  = 'y'
   yn_out_dos  = 'y'
-!  yn_out_pdos = 'y'
-!  yn_out_elf  = 'y'
+  yn_out_pdos = 'y'
+  yn_out_elf  = 'y'
 /
 
 &atomic_coor

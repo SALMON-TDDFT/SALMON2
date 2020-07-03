@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2017-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -18,11 +18,12 @@ module broyden_sub
 
 contains
 
-subroutine broyden(vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_zero)
-  use salmon_global, only: alpha_mb, nmemory_mb
+subroutine broyden(alpha_mb,vecr,vecr_in,vecr_out,nl,iter,iter_mod,nstock,icomm,flag_mix_zero)
+  use salmon_global, only: nmemory_mb
   use communication, only: comm_summation
   use salmon_math
   implicit none
+  real(8), intent(in) :: alpha_mb
   integer, intent(in) :: nl
   integer, intent(in) :: iter
   integer, intent(in) :: iter_mod

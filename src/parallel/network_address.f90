@@ -1,5 +1,5 @@
 !
-!  Copyright 2018-2020 SALMON developers
+!  Copyright 2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -18,17 +18,16 @@ module network_address
 
 contains
   ! convert 5-D address to rank
-  function get_orbital_neighbour_rank(info, proc_info, idir, idisp) result(irank)
+  function get_neighbour_rank(info, idir, idisp) result(irank)
     use salmon_global, only: yn_periodic
-    use structures, only: s_parallel_info, s_process_info
+    use structures, only: s_parallel_info
     implicit none
     type(s_parallel_info), intent(in) :: info
-    type(s_process_info),  intent(in) :: proc_info
     integer,               intent(in) :: idir, idisp
     integer :: iaddr(5),irank
     integer :: ishape(5)
 
-    ishape(1:5) = [proc_info%nprgrid(1:3), proc_info%nporbital, proc_info%npk]
+    ishape(1:5) = [info%nprgrid(1:3), info%nporbital, info%npk]
     iaddr(1:5)  = info%iaddress(1:5)
     iaddr(idir) = iaddr(idir) + idisp
 
@@ -47,38 +46,6 @@ contains
     else
       irank = info%imap(iaddr(1),iaddr(2),iaddr(3),iaddr(4),iaddr(5))
     end if
-  end function get_orbital_neighbour_rank
-
-  ! convert 3-D address to rank
-  function get_field_neighbour_rank(info, proc_info, idir, idisp) result(irank)
-    use salmon_global, only: yn_periodic
-    use structures, only: s_parallel_info, s_process_info
-    implicit none
-    type(s_parallel_info),  intent(in) :: info
-    type(s_process_info),   intent(in) :: proc_info
-    integer,                intent(in) :: idir, idisp
-    integer :: iaddr(3),irank
-    integer :: ishape(3)
-
-    ishape(1:3) = proc_info%nprgrid(1:3)
-    iaddr(1:3)  = info%iaddress(1:3)
-    iaddr(idir) = iaddr(idir) + idisp
-
-    if (yn_periodic == 'y') then
-      ! periodic boundary
-      if (iaddr(idir) <  0)            iaddr(idir) = iaddr(idir) + ishape(idir)
-      if (iaddr(idir) >= ishape(idir)) iaddr(idir) = iaddr(idir) - ishape(idir)
-    else
-      ! dirichlet boundary
-      if (iaddr(idir) <  0)            iaddr(idir) = -1
-      if (iaddr(idir) >= ishape(idir)) iaddr(idir) = -1
-    end if
-
-    if (iaddr(idir) < 0) then
-      irank = -1
-    else
-      irank = info%imap(iaddr(1),iaddr(2),iaddr(3),info%iaddress(4),info%iaddress(5))
-    end if
-  end function get_field_neighbour_rank
+  end function get_neighbour_rank
 
 end module

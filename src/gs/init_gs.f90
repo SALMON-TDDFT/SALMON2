@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
+SUBROUTINE init_wf(lg,mg,system,info,spsi)
   use structures
   use inputoutput, only: au_length_aa, method_init_wf
-  use salmon_global, only: yn_periodic,natom,rion
+  use salmon_global, only: yn_periodic,natom,Rion
   use gram_schmidt_orth
   implicit none
 
@@ -32,7 +32,6 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info)   ,intent(in) :: info
   type(s_orbital)                     :: spsi
-  type(s_process_info)    ,intent(in) :: pinfo
   !
   integer :: ik,io,is,a,ix,iy,iz,ip, ig,ngauss
   real(8) :: xx,yy,zz,x1,y1,z1,rr,Xmax,Ymax,Zmax,q(3)
@@ -70,9 +69,9 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
     case ('gauss','gauss2','gauss3','gauss4','gauss5','gauss10')
       Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
       do a=1,natom
-        if ( abs(Rion(1,a)) > Xmax ) Xmax=abs(Rion(1,a))
-        if ( abs(Rion(2,a)) > Ymax ) Ymax=abs(Rion(2,a))
-        if ( abs(Rion(3,a)) > Zmax ) Zmax=abs(Rion(3,a))
+        if ( abs(system%Rion(1,a)) > Xmax ) Xmax=abs(system%Rion(1,a))
+        if ( abs(system%Rion(2,a)) > Ymax ) Ymax=abs(system%Rion(2,a))
+        if ( abs(system%Rion(3,a)) > Zmax ) Zmax=abs(system%Rion(3,a))
       end do
 
       Xmax=Xmax-Xzero+1.d0/au_length_aa
@@ -161,7 +160,7 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi,pinfo)
 
   end if
 
-  call gram_schmidt(system, mg, info, spsi, pinfo)
+  call gram_schmidt(system, mg, info, spsi)
 
   return
 

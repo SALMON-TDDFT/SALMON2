@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -44,6 +44,11 @@ subroutine init_dir_out_restart(ofl)
         ofl%dir_out_restart = 'data_for_restart_rt/'
         call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
       end if
+    case('multi_scale_maxwell_tddft')
+      if (write_rt_wfn_k == 'y') then
+        ofl%dir_out_restart = 'data_for_restart_ms'
+        call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
+      end if
     case('dft2tddft')
       ofl%dir_out_restart = 'data_for_restart_rt/'
       call atomic_create_directory(ofl%dir_out_restart,nproc_group_global,nproc_id_global)
@@ -80,13 +85,13 @@ subroutine generate_restart_directory_name(basedir,gdir,pdir)
 end subroutine generate_restart_directory_name
 
 
-subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
+subroutine checkpoint_gs(lg,mg,system,info,spsi,iter,mixing,odir)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: yn_self_checkpoint
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
-  type(s_rgrid)           ,intent(in) :: lg, mg, ng
+  type(s_rgrid)           ,intent(in) :: lg, mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
@@ -107,22 +112,22 @@ subroutine checkpoint_gs(lg,mg,ng,system,info,spsi,iter,mixing,odir)
     iself = (yn_self_checkpoint == 'y')
   end if
 
-  if (iself .or. yn_datafiles_dump == 'y') then
+  if (iself) then
     call create_directory(wdir)
   else
     wdir = gdir
   end if
   call write_Rion(wdir,system)
   call write_Velocity(wdir,system)
-  call write_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
+  call write_bin(wdir,lg,mg,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
 end subroutine checkpoint_gs
 
-subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
+subroutine restart_gs(lg,mg,system,info,spsi,iter,mixing)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_mixing
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,&
-                           yn_datafiles_dump,read_gs_restart_data
+                           read_gs_restart_data
   implicit none
-  type(s_rgrid)             ,intent(in) :: lg, mg, ng
+  type(s_rgrid)             ,intent(in) :: lg, mg
   type(s_dft_system)     ,intent(inout) :: system
   type(s_parallel_info)  ,intent(in) :: info
   type(s_orbital)        ,intent(inout) :: spsi
@@ -135,14 +140,14 @@ subroutine restart_gs(lg,mg,ng,system,info,spsi,iter,mixing)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
   if (read_gs_restart_data=='rho') then
     wdir = gdir
   end if
 
-  call read_bin(wdir,lg,mg,ng,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
+  call read_bin(wdir,lg,mg,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
 end subroutine restart_gs
 
 subroutine checkpoint_opt(Miopt,opt,odir)
@@ -220,18 +225,18 @@ subroutine restart_opt(Miopt,opt)
 
 end subroutine restart_opt
 
-subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,singlescale,idir)
+subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2,singlescale,idir)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint,yn_datafiles_dump,use_singlescale
+  use salmon_global, only: yn_self_checkpoint
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
-  type(s_rgrid)           ,intent(in) :: lg, mg, ng
+  type(s_rgrid)           ,intent(in) :: lg, mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
-  type(s_scalar)          ,intent(in) :: sVh_stock1,sVh_stock2
+  type(s_scalar)          ,intent(in) :: Vh_stock1,Vh_stock2
   type(s_singlescale)     ,intent(in) :: singlescale
   character(*),optional   ,intent(in) :: idir
 
@@ -248,30 +253,30 @@ subroutine checkpoint_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2,si
     iself = (yn_self_checkpoint == 'y')
   end if
 
-  if (iself .or. yn_datafiles_dump == 'y') then
+  if (iself) then
     call create_directory(wdir)
   else
     wdir = gdir
   end if
   call write_Rion(wdir,system)
   call write_Velocity(wdir,system)
-  call write_bin(wdir,lg,mg,ng,system,info,spsi,iter &
-                ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
-  if(use_singlescale=='y') then
-    call write_singlescale(wdir,lg,ng,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
+  call write_bin(wdir,lg,mg,system,info,spsi,iter &
+                ,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2,is_self_checkpoint=iself)
+  if(singlescale%flag_use) then
+    call write_singlescale(wdir,lg,mg,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
   end if
 end subroutine checkpoint_rt
 
-subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
+subroutine restart_rt(lg,mg,system,info,spsi,iter,Vh_stock1,Vh_stock2)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
-  type(s_rgrid)             ,intent(in) :: lg, mg, ng
+  type(s_rgrid)             ,intent(in) :: lg, mg
   type(s_dft_system)     ,intent(inout) :: system
   type(s_parallel_info)  ,intent(in) :: info
   type(s_orbital)        ,intent(inout) :: spsi
   integer                  ,intent(out) :: iter
-  type(s_scalar)         ,intent(inout) :: sVh_stock1,sVh_stock2
+  type(s_scalar)         ,intent(inout) :: Vh_stock1,Vh_stock2
 
   character(256) :: gdir,wdir
   logical :: iself
@@ -279,30 +284,30 @@ subroutine restart_rt(lg,mg,ng,system,info,spsi,iter,sVh_stock1,sVh_stock2)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
-  call read_bin(wdir,lg,mg,ng,system,info,spsi,iter &
-               ,sVh_stock1=sVh_stock1,sVh_stock2=sVh_stock2,is_self_checkpoint=iself)
+  call read_bin(wdir,lg,mg,system,info,spsi,iter &
+               ,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2,is_self_checkpoint=iself)
 end subroutine restart_rt
 
 !===================================================================================================================================
 
-subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use salmon_global, only: theory,calc_mode,write_gs_restart_data
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global, nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)            ,intent(in) :: odir
-  type(s_rgrid)           ,intent(in) :: lg, mg, ng
+  type(s_rgrid)           ,intent(in) :: lg, mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_orbital)         ,intent(in) :: spsi
   integer                 ,intent(in) :: iter
   type(s_mixing) ,optional,intent(in) :: mixing
-  type(s_scalar) ,optional,intent(in) :: sVh_stock1,sVh_stock2
+  type(s_scalar) ,optional,intent(in) :: Vh_stock1,Vh_stock2
   logical        ,optional,intent(in) :: is_self_checkpoint
 
   logical :: flag_GS, flag_RT
@@ -357,19 +362,19 @@ subroutine write_bin(odir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_s
   if( flag_GS.and. &
      (write_gs_restart_data=='all'.or.write_gs_restart_data=='rho_inout'))then
      if (present(mixing)) then
-        call write_rho_inout(odir,lg,ng,system,info,mixing,iself)
+        call write_rho_inout(odir,lg,mg,system,info,mixing,iself)
      end if
   end if
 
   !rho (only for GS)
   if( flag_GS .and. write_gs_restart_data=='rho' )then
-     call write_rho(odir,lg,ng,system,info,mixing)
+     call write_rho(odir,lg,mg,system,info,mixing)
   endif
 
   !Vh_stock
   if( flag_RT )then
-    if (present(sVh_stock1) .and. present(sVh_stock2)) then
-      call write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
+    if (present(Vh_stock1) .and. present(Vh_stock2)) then
+      call write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,iself)
     end if
   end if
 
@@ -377,20 +382,20 @@ end subroutine write_bin
 
 !===================================================================================================================================
 
-subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar
   use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_restart, theory,calc_mode,yn_datafiles_dump,read_gs_restart_data
+  use salmon_global, only: yn_restart, theory,calc_mode,read_gs_restart_data
   implicit none
   character(*)              ,intent(in) :: idir
-  type(s_rgrid)             ,intent(in) :: lg, mg, ng
+  type(s_rgrid)             ,intent(in) :: lg, mg
   type(s_dft_system)     ,intent(inout) :: system
   type(s_parallel_info)  ,intent(in) :: info
   type(s_orbital)        ,intent(inout) :: spsi
   integer                  ,intent(out) :: iter
   type(s_mixing),optional,intent(inout) :: mixing
-  type(s_scalar),optional,intent(inout) :: sVh_stock1,sVh_stock2
+  type(s_scalar),optional,intent(inout) :: Vh_stock1,Vh_stock2
   logical       ,optional,intent(in)    :: is_self_checkpoint
 
   logical :: flag_GS, flag_RT
@@ -453,7 +458,7 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
      end if
 
      !debug check
-     if (yn_restart == 'y' .and. yn_datafiles_dump == 'y') then
+     if (yn_restart == 'y') then
         if (nprocs /= nproc_size_global) then
            stop 'number of processes do not match!'
         end if
@@ -491,19 +496,19 @@ subroutine read_bin(idir,lg,mg,ng,system,info,spsi,iter,mixing,sVh_stock1,sVh_st
   if( flag_GS.and. &
      (read_gs_restart_data=='all'.or.read_gs_restart_data=='rho_inout'))then
     if (present(mixing)) then
-      call read_rho_inout(idir,lg,ng,system,info,mixing,iself)
+      call read_rho_inout(idir,lg,mg,system,info,mixing,iself)
     end if
   end if
 
   !rho (only for GS)
   if( flag_GS .and. read_gs_restart_data=='rho' )then
-     call read_rho(idir,lg,ng,system,info,mixing)
+     call read_rho(idir,lg,mg,system,info,mixing)
   endif
 
   !Vh_stock
   if( flag_RT .and. yn_restart=='y')then
-    if (present(sVh_stock1) .and. present(sVh_stock2)) then
-      call read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,iself)
+    if (present(Vh_stock1) .and. present(Vh_stock2)) then
+      call read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,iself)
     end if
   end if
 
@@ -513,9 +518,12 @@ end subroutine read_bin
 !===================================================================================================================================
 
 subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
-  use salmon_global, only: yn_datafiles_dump
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital
   use communication, only: comm_is_root, comm_summation, comm_bcast
+#ifdef USE_MPI
+#else
+  use salmon_global, only: method_wf_distributor
+#endif
   implicit none
   character(*),            intent(in) :: odir
   type(s_rgrid),           intent(in) :: lg, mg
@@ -535,7 +543,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
 
   iu2_w = 87
 
-  if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
+  if(is_self_checkpoint) then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
@@ -562,6 +570,23 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
     call distributed_rw_wavefunction(odir,lg,mg,system,info,spsi,system%nk,system%no,system%if_real_orbital,write_mode)
 #else
     ! single process execution
+    select case(method_wf_distributor)
+    case('single') ; call write_all    ! create single shared file
+    case('slice')  ; call write_sliced ! sliced shared file
+    case default   ; stop 'write_wavefunction: fatal error'
+    end select
+#endif
+  end if
+
+  !close file iu2_w
+  inquire(iu2_w, opened=is_written)
+  if (is_written) close(iu2_w)
+
+#ifdef USE_MPI
+#else
+contains
+  subroutine write_all
+    implicit none
     dir_file_out = trim(odir)//"wfn.bin"
     open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
 
@@ -584,23 +609,63 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
     end do
     end do
     end do
-#endif
-  end if
+  end subroutine
 
-  !close file iu2_w
-  inquire(iu2_w, opened=is_written)
-  if (is_written) close(iu2_w)
+  subroutine write_sliced
+    use salmon_global, only: nblock_wf_distribute
+    use filesystem
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io,nb
+    integer :: mo
+
+    mo = info%io_e - info%io_s + 1
+    nblock_orbital = min(mo,nblock_wf_distribute)
+
+    ! create all directory
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e,nblock_orbital
+      write (dir_file_out,'(A,I3.3,A,I6.6)') trim(odir)//'k_',ik,'_ob_',io
+      call create_directory(dir_file_out)
+    end do
+    end do
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+      write (dir_file_out,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
+
+      do is=1,system%nspin
+        if(allocated(spsi%rwf))then
+          write (iu2_w) spsi%rwf(lg%is(1):lg%ie(1),   &
+                                 lg%is(2):lg%ie(2),   &
+                                 lg%is(3):lg%ie(3),   &
+                                 is,io,ik,1)
+        else if(allocated(spsi%zwf))then
+          write (iu2_w) spsi%zwf(lg%is(1):lg%ie(1),   &
+                                 lg%is(2):lg%ie(2),   &
+                                 lg%is(3):lg%ie(3),   &
+                                 is,io,ik,1)
+        end if
+      end do
+
+      close(iu2_w)
+    end do
+    end do
+  end subroutine
+#endif
 end subroutine write_wavefunction
 
 !===================================================================================================================================
 
-subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
+subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)                        :: odir
-  type(s_rgrid)           ,intent(in) :: lg,ng
+  type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_mixing)          ,intent(in) :: mixing
@@ -618,18 +683,18 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
-      write(iu1_w) mixing%srho_in (i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+      write(iu1_w) mixing%rho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     do i=1,mixing%num_rho_stock
-      write(iu1_w) mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+      write(iu1_w) mixing%rho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     if(system%nspin==2) then
       do is=1,2
         do i=1,mixing%num_rho_stock+1
-          write(iu1_w) mixing%srho_s_in (i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+          write(iu1_w) mixing%rho_s_in (i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
         do i=1,mixing%num_rho_stock
-          write(iu1_w) mixing%srho_s_out(i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+          write(iu1_w) mixing%rho_s_out(i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
       end do
     end if
@@ -654,10 +719,10 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
 
     do i=1,mixing%num_rho_stock+1
 !$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        matbox2(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        matbox2(ix,iy,iz) = mixing%rho_in(i)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -669,10 +734,10 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
 
     do i=1,mixing%num_rho_stock
 !$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        matbox2(ix,iy,iz) = mixing%srho_out(i)%f(ix,iy,iz)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        matbox2(ix,iy,iz) = mixing%rho_out(i)%f(ix,iy,iz)
       end do
       end do
       end do
@@ -686,10 +751,10 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
       do is=1,2
         do i=1,mixing%num_rho_stock+1
 !$omp parallel do collapse(2) private(iz,iy,ix)
-          do iz=ng%is(3),ng%ie(3)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-            matbox2(ix,iy,iz) = mixing%srho_s_in(i,is)%f(ix,iy,iz)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            matbox2(ix,iy,iz) = mixing%rho_s_in(i,is)%f(ix,iy,iz)
           end do
           end do
           end do
@@ -701,10 +766,10 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
 
         do i=1,mixing%num_rho_stock
 !$omp parallel do collapse(2) private(iz,iy,ix)
-          do iz=ng%is(3),ng%ie(3)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-            matbox2(ix,iy,iz) = mixing%srho_s_out(i,is)%f(ix,iy,iz)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            matbox2(ix,iy,iz) = mixing%rho_s_out(i,is)%f(ix,iy,iz)
           end do
           end do
           end do
@@ -724,13 +789,13 @@ subroutine write_rho_inout(odir,lg,ng,system,info,mixing,is_self_checkpoint)
   end if
 end subroutine write_rho_inout
 
-subroutine write_rho(odir,lg,ng,system,info,mixing)
+subroutine write_rho(odir,lg,mg,system,info,mixing)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)                        :: odir
-  type(s_rgrid)           ,intent(in) :: lg,ng
+  type(s_rgrid)           ,intent(in) :: lg,mg
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_mixing)          ,intent(in) :: mixing
@@ -760,10 +825,10 @@ subroutine write_rho(odir,lg,ng,system,info,mixing)
 
   i=mixing%num_rho_stock+1
   !$omp parallel do collapse(2) private(iz,iy,ix)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-     matbox2(ix,iy,iz) = mixing%srho_in(i)%f(ix,iy,iz)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+     matbox2(ix,iy,iz) = mixing%rho_in(i)%f(ix,iy,iz)
   end do
   end do
   end do
@@ -776,10 +841,10 @@ subroutine write_rho(odir,lg,ng,system,info,mixing)
      do is=1,2
      i=mixing%num_rho_stock+1
      !$omp parallel do collapse(2) private(iz,iy,ix)
-     do iz=ng%is(3),ng%ie(3)
-     do iy=ng%is(2),ng%ie(2)
-     do ix=ng%is(1),ng%ie(1)
-        matbox2(ix,iy,iz) = mixing%srho_s_in(i,is)%f(ix,iy,iz)
+     do iz=mg%is(3),mg%ie(3)
+     do iy=mg%is(2),mg%ie(2)
+     do ix=mg%is(1),mg%ie(1)
+        matbox2(ix,iy,iz) = mixing%rho_s_in(i,is)%f(ix,iy,iz)
      end do
      end do
      end do
@@ -798,15 +863,15 @@ end subroutine write_rho
 
 !===================================================================================================================================
 
-subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_parallel_info, s_scalar
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*)   :: odir
-  type(s_rgrid), intent(in)    :: lg,ng
+  type(s_rgrid), intent(in)    :: lg,mg
   type(s_parallel_info),intent(in) :: info
-  type(s_scalar),intent(in) :: sVh_stock1,sVh_stock2
+  type(s_scalar),intent(in) :: Vh_stock1,Vh_stock2
   logical,intent(in) :: is_self_checkpoint
 
   character(256) ::  dir_file_out
@@ -820,8 +885,8 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoi
   if (is_self_checkpoint) then
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
-    write(iu1_w) sVh_stock1%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    write(iu1_w) sVh_stock2%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    write(iu1_w) Vh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) Vh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     close(iu1_w)
   else
     ! write root process
@@ -830,29 +895,29 @@ subroutine write_Vh_stock(odir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoi
     allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       matbox0(ix,iy,iz) = 0d0
     end do
     end do
     end do
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      matbox0(ix,iy,iz) = sVh_stock1%f(ix,iy,iz)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      matbox0(ix,iy,iz) = Vh_stock1%f(ix,iy,iz)
     end do
     end do
     end do
     call comm_summation(matbox0,matbox1,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      matbox0(ix,iy,iz) = sVh_stock2%f(ix,iy,iz)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      matbox0(ix,iy,iz) = Vh_stock2%f(ix,iy,iz)
     end do
     end do
     end do
@@ -872,15 +937,15 @@ end subroutine write_Vh_stock
 
 !===================================================================================================================================
 
-subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_checkpoint)
+subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_checkpoint)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: yn_gbp
+  use salmon_global, only: method_singlescale
   implicit none
   character(*)            ,intent(in) :: odir
-  type(s_rgrid)           ,intent(in) :: lg,ng
-  type(s_parallel_info),intent(in) :: info
+  type(s_rgrid)           ,intent(in) :: lg,mg
+  type(s_parallel_info)   ,intent(in) :: info
   type(s_singlescale)     ,intent(in) :: singlescale
   type(s_vector)          ,intent(in) :: Ac
   type(s_scalar)          ,intent(in) :: div_Ac
@@ -901,20 +966,23 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
   if (is_self_checkpoint) then
     ! write all processes
     open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
-    write(iu1_w) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
-    write(iu1_w) Ac%v(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    write(iu1_w) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    write(iu1_w) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    write(iu1_w) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    write(iu1_w) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    write(iu1_w) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    write(iu1_w) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    write(iu1_w) div_Ac%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    write(iu1_w) singlescale%div_Ac_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    if(yn_gbp=='y') then
+    write(iu1_w) singlescale%vec_Ac_m(-1:1,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
+    write(iu1_w) Ac%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) singlescale%vec_je_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) singlescale%vec_Ac_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) singlescale%vec_Ac_boundary_bottom_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_top_old   (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_bottom    (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    write(iu1_w) singlescale%vec_Ac_boundary_top       (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    write(iu1_w) div_Ac%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    write(iu1_w) singlescale%Energy_joule
+    write(iu1_w) singlescale%Energy_poynting
+    if(method_singlescale/='3d') then
       write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
-      write(iu1_w) singlescale%zAc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
-      write(iu1_w) singlescale%f_old  (1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      write(iu1_w) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
+      write(iu1_w) singlescale%zc_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
+      write(iu1_w) singlescale%zs_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
       write(iu1_w) singlescale%Ac_zt_boundary_bottom
       write(iu1_w) singlescale%Ac_zt_boundary_top
       write(iu1_w) singlescale%Ac_zt_boundary_bottom_old
@@ -931,9 +999,9 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
 !$omp end workshare
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       matbox0(-1:1,ix,iy,iz,1:3) = singlescale%vec_Ac_m(-1:1,ix,iy,iz,1:3)
     end do
     end do
@@ -948,9 +1016,9 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
 !$omp end workshare
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       v0(1:3,ix,iy,iz,1) = Ac%v(1:3,ix,iy,iz)
       v0(1:3,ix,iy,iz,2) = singlescale%vec_je_old(1:3,ix,iy,iz)
       v0(1:3,ix,iy,iz,3) = singlescale%vec_Ac_old(1:3,ix,iy,iz)
@@ -967,8 +1035,8 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
 !$omp end workshare
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       b0(ix,iy,1:3,1) = singlescale%vec_Ac_boundary_bottom_old(ix,iy,1:3)
       b0(ix,iy,1:3,2) = singlescale%vec_Ac_boundary_top_old   (ix,iy,1:3)
       b0(ix,iy,1:3,3) = singlescale%vec_Ac_boundary_bottom    (ix,iy,1:3)
@@ -985,9 +1053,9 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
 !$omp end workshare
 
 !$omp parallel do collapse(2) private(iz,iy,ix)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       d0(ix,iy,iz,1) = div_Ac%f(ix,iy,iz)
       d0(ix,iy,iz,2) = singlescale%div_Ac_old(ix,iy,iz)
     end do
@@ -995,25 +1063,26 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
     end do
     call comm_summation(d0,d1,lg%num(1)*lg%num(2)*lg%num(3)*2,info%icomm_r)
     
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
     
-      allocate(z0(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:2))
-      allocate(z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:2))
+      allocate(z0(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3))
+      allocate(z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3))
 
   !$omp workshare
       z0 = 0d0
   !$omp end workshare
 
   !$omp parallel do collapse(2) private(iz,iy,ix)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        z0(ix,iy,iz,0:3,1) = singlescale%zAc_old(ix,iy,iz,0:3)
-        z0(ix,iy,iz,0:3,2) = singlescale%f_old  (ix,iy,iz,0:3)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        z0(ix,iy,iz,0:3,1) = singlescale%zf_old(ix,iy,iz,0:3)
+        z0(ix,iy,iz,0:3,2) = singlescale%zc_old(ix,iy,iz,0:3)
+        z0(ix,iy,iz,0:3,3) = singlescale%zs_old(ix,iy,iz,0:3)
       end do
       end do
       end do
-      call comm_summation(z0,z1,lg%num(1)*lg%num(2)*lg%num(3)*4*2,info%icomm_r)
+      call comm_summation(z0,z1,lg%num(1)*lg%num(2)*lg%num(3)*4*3,info%icomm_r)
       
     end if
 
@@ -1023,10 +1092,13 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
       write(iu1_w) v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       write(iu1_w) b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
       write(iu1_w) d1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
-      if(yn_gbp=='y') then
+      write(iu1_w) singlescale%Energy_joule
+      write(iu1_w) singlescale%Energy_poynting
+      if(method_singlescale/='3d') then
         write(iu1_w) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1)
         write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,2)
+        write(iu1_w) z1(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,3)
         write(iu1_w) singlescale%Ac_zt_boundary_bottom
         write(iu1_w) singlescale%Ac_zt_boundary_top
         write(iu1_w) singlescale%Ac_zt_boundary_bottom_old
@@ -1036,7 +1108,7 @@ subroutine write_singlescale(odir,lg,ng,info,singlescale,Ac,div_Ac,is_self_check
     end if
 
     deallocate(matbox0,matbox1,v0,v1,b0,b1,d0,d1)
-    if(yn_gbp=='y') deallocate(z0,z1)
+    if(method_singlescale/='3d') deallocate(z0,z1)
   end if
 
 end subroutine write_singlescale
@@ -1046,8 +1118,11 @@ end subroutine write_singlescale
 subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, &
   &                     allocate_orbital_real, deallocate_orbital
-  use salmon_global, only: yn_datafiles_dump
   use communication, only: comm_is_root, comm_summation, comm_bcast
+#ifdef USE_MPI
+#else
+  use salmon_global, only: method_wf_distributor
+#endif
   implicit none
   character(*),            intent(in) :: idir
   type(s_rgrid),           intent(in) :: lg, mg
@@ -1060,17 +1135,15 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
   integer :: iu2_r
   character(256) :: dir_file_in
   logical :: is_read
-
 #ifdef USE_MPI
 #else
   real(8),allocatable :: ddummy(:,:,:)
   complex(8),allocatable :: zdummy(:,:,:)
-  integer :: im,ik,io,is
 #endif
 
   iu2_r = 86
 
-  if(is_self_checkpoint .or. yn_datafiles_dump == 'y') then
+  if(is_self_checkpoint) then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
@@ -1097,6 +1170,25 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
     call distributed_rw_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,read_mode)
 #else
     ! single process execution
+    select case(method_wf_distributor)
+    case('single') ; call read_all    ! create single shared file
+    case('slice')  ; call read_sliced ! sliced shared file
+    case default   ; stop 'read_wavefunction: fatal error'
+    end select
+#endif
+  end if
+
+  !close file iu2_r
+  inquire(iu2_r, opened=is_read)
+  if (is_read) close(iu2_r)
+
+#ifdef USE_MPI
+#else
+contains
+  subroutine read_all
+    implicit none
+    integer :: im,ik,io,is
+
     dir_file_in = trim(idir)//"wfn.bin"
     open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
 
@@ -1135,23 +1227,63 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
 
     if (allocated(ddummy)) deallocate(ddummy)
     if (allocated(zdummy)) deallocate(zdummy)
-#endif
-  end if
+  end subroutine
 
-  !close file iu2_r
-  inquire(iu2_r, opened=is_read)
-  if (is_read) close(iu2_r)
+  subroutine read_sliced
+    use salmon_global, only: nblock_wf_distribute
+    use filesystem
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io,nb,io_e,is
+
+    nblock_orbital = min(mo,nblock_wf_distribute)
+
+    if (if_real_orbital) then
+      allocate(ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    else
+      allocate(zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    end if
+
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+      nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
+      write (dir_file_in,'(A,I3.3,A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
+      open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
+
+      do is=1,system%nspin
+        if (if_real_orbital) then
+          read (iu2_r) ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+        else
+          read (iu2_r) zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+        endif
+
+        if (if_real_orbital) then
+          if (allocated(spsi%rwf)) then
+            spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = ddummy(:,:,:)
+          else
+            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = cmplx(ddummy(:,:,:))
+          end if
+        else
+          spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = zdummy(:,:,:)
+        end if
+      end do
+
+      close(iu2_r)
+    end do
+    end do
+  end subroutine
+#endif
 end subroutine read_wavefunction
 
 !===================================================================================================================================
 
-subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
+subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
-  type(s_rgrid), intent(in)    :: lg,ng
+  type(s_rgrid), intent(in)    :: lg,mg
   type(s_dft_system),intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_mixing),intent(inout) :: mixing
@@ -1169,18 +1301,18 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
     ! read all processses
     open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
-      read(iu1_r) mixing%srho_in (i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+      read(iu1_r) mixing%rho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     do i=1,mixing%num_rho_stock
-      read(iu1_r) mixing%srho_out(i)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+      read(iu1_r) mixing%rho_out(i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     if(system%nspin==2) then
       do is=1,2
         do i=1,mixing%num_rho_stock+1
-          read(iu1_r) mixing%srho_s_in (i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+          read(iu1_r) mixing%rho_s_in (i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
         do i=1,mixing%num_rho_stock
-          read(iu1_r) mixing%srho_s_out(i,is)%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+          read(iu1_r) mixing%rho_s_out(i,is)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
         end do
       end do
     end if
@@ -1200,10 +1332,10 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
       call comm_bcast(matbox,info%icomm_rko)
 
 !$omp parallel do collapse(2)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        mixing%rho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
       end do
       end do
       end do
@@ -1216,10 +1348,10 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
       call comm_bcast(matbox,info%icomm_rko)
 
 !$omp parallel do collapse(2)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
-      do ix=ng%is(1),ng%ie(1)
-        mixing%srho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        mixing%rho_out(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
       end do
       end do
       end do
@@ -1234,10 +1366,10 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
           call comm_bcast(matbox,info%icomm_rko)
 
 !$omp parallel do collapse(2)
-          do iz=ng%is(3),ng%ie(3)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-            mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            mixing%rho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
           end do
           end do
           end do
@@ -1250,10 +1382,10 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
           call comm_bcast(matbox,info%icomm_rko)
 
 !$omp parallel do collapse(2)
-          do iz=ng%is(3),ng%ie(3)
-          do iy=ng%is(2),ng%ie(2)
-          do ix=ng%is(1),ng%ie(1)
-            mixing%srho_s_out(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+          do iz=mg%is(3),mg%ie(3)
+          do iy=mg%is(2),mg%ie(2)
+          do ix=mg%is(1),mg%ie(1)
+            mixing%rho_s_out(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
           end do
           end do
           end do
@@ -1270,13 +1402,13 @@ subroutine read_rho_inout(idir,lg,ng,system,info,mixing,is_self_checkpoint)
 
 end subroutine read_rho_inout
 
-subroutine read_rho(idir,lg,ng,system,info,mixing)
+subroutine read_rho(idir,lg,mg,system,info,mixing)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_mixing
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
-  type(s_rgrid), intent(in)    :: lg,ng
+  type(s_rgrid), intent(in)    :: lg,mg
   type(s_dft_system),intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   type(s_mixing),intent(inout) :: mixing
@@ -1301,10 +1433,10 @@ subroutine read_rho(idir,lg,ng,system,info,mixing)
   call comm_bcast(matbox,info%icomm_rko)
 
   !$omp parallel do collapse(2)
-  do iz=ng%is(3),ng%ie(3)
-  do iy=ng%is(2),ng%ie(2)
-  do ix=ng%is(1),ng%ie(1)
-     mixing%srho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
+  do iz=mg%is(3),mg%ie(3)
+  do iy=mg%is(2),mg%ie(2)
+  do ix=mg%is(1),mg%ie(1)
+     mixing%rho_in(i)%f(ix,iy,iz)=matbox(ix,iy,iz)
   end do
   end do
   end do
@@ -1318,10 +1450,10 @@ subroutine read_rho(idir,lg,ng,system,info,mixing)
         call comm_bcast(matbox,info%icomm_rko)
 
         !$omp parallel do collapse(2)
-        do iz=ng%is(3),ng%ie(3)
-        do iy=ng%is(2),ng%ie(2)
-        do ix=ng%is(1),ng%ie(1)
-           mixing%srho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+           mixing%rho_s_in(i,is)%f(ix,iy,iz)=matbox(ix,iy,iz)
         end do
         end do
         end do
@@ -1337,15 +1469,15 @@ end subroutine read_rho
 
 !===================================================================================================================================
 
-subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoint)
+subroutine read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
   use structures, only: s_rgrid, s_parallel_info, s_scalar
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
   implicit none
   character(*), intent(in) :: idir
-  type(s_rgrid), intent(in)    :: lg,ng
+  type(s_rgrid), intent(in)    :: lg,mg
   type(s_parallel_info),intent(in) :: info
-  type(s_scalar),intent(inout) :: sVh_stock1,sVh_stock2
+  type(s_scalar),intent(inout) :: Vh_stock1,Vh_stock2
   logical,intent(in) :: is_self_checkpoint
 
   integer :: iu1_r
@@ -1359,8 +1491,8 @@ subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoin
   if (is_self_checkpoint) then
     ! read all processes
     open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
-    read(iu1_r) sVh_stock1%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    read(iu1_r) sVh_stock2%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
+    read(iu1_r) Vh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) Vh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     close(iu1_r)
   else
     ! read root process
@@ -1378,19 +1510,19 @@ subroutine read_Vh_stock(idir,lg,ng,info,sVh_stock1,sVh_stock2,is_self_checkpoin
     call comm_bcast(matbox2,info%icomm_rko)
 
 !$omp parallel do collapse(2)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      sVh_stock1%f(ix,iy,iz)=matbox1(ix,iy,iz)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      Vh_stock1%f(ix,iy,iz)=matbox1(ix,iy,iz)
     end do
     end do
     end do
 
 !$omp parallel do collapse(2)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
-      sVh_stock2%f(ix,iy,iz)=matbox2(ix,iy,iz)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      Vh_stock2%f(ix,iy,iz)=matbox2(ix,iy,iz)
     end do
     end do
     end do
@@ -1401,19 +1533,19 @@ end subroutine read_Vh_stock
 
 !===================================================================================================================================
 
-subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
+subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
   use structures
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
-  use salmon_global, only: directory_read_data,yn_self_checkpoint,yn_datafiles_dump,yn_gbp
+  use salmon_global, only: directory_read_data,yn_self_checkpoint,method_singlescale
   implicit none
   integer      ,intent(in) :: comm
-  type(s_rgrid),intent(in) :: lg,ng
+  type(s_rgrid),intent(in) :: lg,mg
   type(s_singlescale)      :: singlescale
   type(s_vector)           :: Ac
   type(s_scalar)           :: div_Ac
   !
-  integer :: iu1_r
+  integer :: iu1_r, ierr
   integer :: ix,iy,iz
   real(8),allocatable :: matbox1(:,:,:,:,:),matbox2(:,:,:,:,:),matbox3(:,:,:,:),matbox4(:,:,:,:)
   complex(8),allocatable :: zbox(:,:,:,:,:)
@@ -1424,7 +1556,7 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
@@ -1436,21 +1568,24 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
 
   if (iself) then
     ! read all processes
-    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
-    read(iu1_r) singlescale%vec_Ac_m(-1:1,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3),1:3)
-    read(iu1_r) Ac%v(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    read(iu1_r) singlescale%vec_je_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    read(iu1_r) singlescale%vec_Ac_old(1:3,ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    read(iu1_r) singlescale%vec_Ac_boundary_bottom_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    read(iu1_r) singlescale%vec_Ac_boundary_top_old   (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    read(iu1_r) singlescale%vec_Ac_boundary_bottom    (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    read(iu1_r) singlescale%vec_Ac_boundary_top       (ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),1:3)
-    read(iu1_r) div_Ac%f(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    read(iu1_r) singlescale%div_Ac_old(ng%is(1):ng%ie(1),ng%is(2):ng%ie(2),ng%is(3):ng%ie(3))
-    if(yn_gbp=='y') then
+    open(iu1_r,file=dir_file_in,form='unformatted',access='stream',status="old",err=20)
+    read(iu1_r) singlescale%vec_Ac_m(-1:1,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
+    read(iu1_r) Ac%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) singlescale%vec_je_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) singlescale%vec_Ac_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) singlescale%vec_Ac_boundary_bottom_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_top_old   (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_bottom    (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    read(iu1_r) singlescale%vec_Ac_boundary_top       (mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),1:3)
+    read(iu1_r) div_Ac%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) singlescale%div_Ac_old(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    read(iu1_r) singlescale%Energy_joule
+    read(iu1_r) singlescale%Energy_poynting
+    if(method_singlescale/='3d') then
       read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
-      read(iu1_r) singlescale%zAc_old(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
-      read(iu1_r) singlescale%f_old  (1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3)
+      read(iu1_r) singlescale%zf_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
+      read(iu1_r) singlescale%zc_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
+      read(iu1_r) singlescale%zs_old(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3)
       read(iu1_r) singlescale%Ac_zt_boundary_bottom
       read(iu1_r) singlescale%Ac_zt_boundary_top
       read(iu1_r) singlescale%Ac_zt_boundary_bottom_old
@@ -1463,30 +1598,39 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
     allocate(matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3))
     allocate(matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4))
     allocate(matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2))
-    if(yn_gbp=='y') allocate(zbox(1:lg%num(1),1:ng%num(2),1:ng%num(3),0:3,1:2))
+    if(method_singlescale/='3d') allocate(zbox(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3,1:3))
 
     if(comm_is_root(nproc_id_global))then
-      open(iu1_r,file=dir_file_in,form='unformatted')
+      open(iu1_r,file=dir_file_in,form='unformatted',status='old',iostat=ierr)
+      if(ierr==0) then
       read(iu1_r) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       read(iu1_r) matbox3(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
       read(iu1_r) matbox4(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:2)
-      if(yn_gbp=='y') then
+      read(iu1_r) singlescale%Energy_joule
+      read(iu1_r) singlescale%Energy_poynting
+      if(method_singlescale/='3d') then
         read(iu1_r) singlescale%Ac_zt_m(lg%is(3)-1:lg%ie(3)+1,-1:1,1:3)
-        read(iu1_r) zbox(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:2)
+        read(iu1_r) zbox(1:lg%num(1),1:lg%num(2),1:lg%num(3),0:3,1:3)
         read(iu1_r) singlescale%Ac_zt_boundary_bottom
         read(iu1_r) singlescale%Ac_zt_boundary_top
         read(iu1_r) singlescale%Ac_zt_boundary_bottom_old
         read(iu1_r) singlescale%Ac_zt_boundary_top_old
       end if
       close(iu1_r)
+      endif
     end if
+
+    call comm_bcast(ierr,comm)
+    if(ierr.ne.0) goto 20
 
     call comm_bcast(matbox1,comm)
     call comm_bcast(matbox2,comm)
     call comm_bcast(matbox3,comm)
     call comm_bcast(matbox4,comm)
-    if(yn_gbp=='y') then
+    call comm_bcast(singlescale%Energy_joule,comm)
+    call comm_bcast(singlescale%Energy_poynting,comm)
+    if(method_singlescale/='3d') then
       call comm_bcast(singlescale%Ac_zt_m,comm)
       call comm_bcast(zbox,comm)
       call comm_bcast(singlescale%Ac_zt_boundary_bottom,comm)
@@ -1496,9 +1640,9 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
     end if
 
 !$omp parallel do collapse(2)
-    do iz=ng%is(3),ng%ie(3)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       singlescale%vec_Ac_m(-1:1,ix,iy,iz,1:3) = matbox1(-1:1,ix,iy,iz,1:3)
       Ac%v(1:3,ix,iy,iz)                   = matbox2(1:3,ix,iy,iz,1)
       singlescale%vec_je_old(1:3,ix,iy,iz) = matbox2(1:3,ix,iy,iz,2)
@@ -1510,8 +1654,8 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
     end do
     
     !$omp parallel do collapse(2)
-    do iy=ng%is(2),ng%ie(2)
-    do ix=ng%is(1),ng%ie(1)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
       singlescale%vec_Ac_boundary_bottom_old(ix,iy,1:3) = matbox3(ix,iy,1:3,1)
       singlescale%vec_Ac_boundary_top_old   (ix,iy,1:3) = matbox3(ix,iy,1:3,2)
       singlescale%vec_Ac_boundary_bottom    (ix,iy,1:3) = matbox3(ix,iy,1:3,3)
@@ -1519,28 +1663,37 @@ subroutine restart_singlescale(comm,lg,ng,singlescale,Ac,div_Ac)
     end do
     end do
 
-    if(yn_gbp=='y') then
+    if(method_singlescale/='3d') then
       !$omp parallel do collapse(2)
-      do iz=ng%is(3),ng%ie(3)
-      do iy=ng%is(2),ng%ie(2)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
       do ix=1,lg%num(1)
-        singlescale%zAc_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,1)
-        singlescale%f_old  (ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,2)
+        singlescale%zf_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,1)
+        singlescale%zc_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,2)
+        singlescale%zs_old(ix,iy,iz,0:3) = zbox(ix,iy,iz,0:3,3)
       end do
       end do
       end do
     end if
 
     deallocate(matbox1,matbox2,matbox3,matbox4)
-    if(yn_gbp=='y') deallocate(zbox)
+    if(method_singlescale/='3d') deallocate(zbox)
   end if
+
+  return
+
+20 continue  !restart from e.x. theory=tddft_pulse or dft
+  if (comm_is_root(nproc_id_global)) then
+     write(*,*) "no singlescale.bin was found: restart from other theory is assumed"
+  endif
+  return
 end subroutine restart_singlescale
 
 !===================================================================================================================================
 !(currently not used: see subroutine "read_atomic_coordinates")
 subroutine restart_Rion(system)
   use structures, only: s_dft_system
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
   type(s_dft_system)     ,intent(inout) :: system
   character(256) :: gdir,wdir
@@ -1549,7 +1702,7 @@ subroutine restart_Rion(system)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
@@ -1560,7 +1713,7 @@ subroutine restart_Velocity(system)
   use structures, only: s_dft_system
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_datafiles_dump
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
   implicit none
   type(s_dft_system), intent(inout) :: system
   character(256) :: gdir,wdir
@@ -1569,7 +1722,7 @@ subroutine restart_Velocity(system)
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
 
   iself = (yn_restart =='y' .and. yn_self_checkpoint == 'y')
-  if (yn_datafiles_dump /= 'y' .and. .not. iself) then
+  if (.not. iself) then
     wdir = gdir
   end if
 
@@ -1656,7 +1809,7 @@ end subroutine write_Velocity
 !(currently not used: see subroutine "read_atomic_coordinates")
 subroutine read_Rion(idir,system)
   use structures, only: s_dft_system
-  use salmon_global, only: natom, atom_name, kion, rion, unit_length
+  use salmon_global, only: natom, atom_name, kion, unit_length !, Rion
 !  use inputoutput, only: au_length_aa  !?? why error??
   use parallelization, only: nproc_id_global,nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -1695,7 +1848,7 @@ subroutine read_Rion(idir,system)
   call comm_bcast(system%Rion,comm)
   call comm_bcast(atom_name,comm)
   call comm_bcast(kion,comm)
-  Rion(:,:) = system%Rion(:,:)  !remove later 
+  !Rion(:,:) = system%Rion(:,:)  !remove later 
 
 10 continue
 
@@ -1768,31 +1921,26 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
   if (allocated(spsi%rwf)) then
     source_type = MPI_DOUBLE
   else if (allocated(spsi%zwf)) then
-    source_type = MPI_DOUBLE_COMPLEX
-  end if
-
-  if (rw_mode == read_mode .and. if_real_orbital) then
-    source_type = MPI_DOUBLE
+    if (rw_mode == read_mode .and. if_real_orbital) then
+      source_type = MPI_DOUBLE
+    else
+      source_type = MPI_DOUBLE_COMPLEX
+    end if
   end if
 
   call set_mpi_info
 
   select case(method_wf_distributor)
-  ! create single shared file
-  case('single')
-    call write_all
-  ! sliced shared file
-  case ('slice')
-    call write_sliced
-  case default
-    stop 'rw_wavefunction: fatal error'
+  case('single') ; call rw_all    ! create single shared file
+  case('slice')  ; call rw_sliced ! sliced shared file
+  case default   ; stop 'rw_wavefunction: fatal error'
   end select
 
   call free_mpi_info
   call deallocate_orbital(dummy)
 
 contains
-  subroutine write_all
+  subroutine rw_all
     implicit none
 
     iofile = trim(iodir)//"wfn.bin"
@@ -1839,8 +1987,7 @@ contains
         else if (allocated(spsi%zwf)) then
           if (source_type == MPI_DOUBLE) then
             ! convert from double to double complex
-            ! NOTE: When simulating large-scale isolated system, it's possible that
-            !       SALMON hangs by failing memory allocation.
+            ! NOTE: When simulating large-scale isolated system, it's possible that SALMON hangs by failing memory allocation.
             MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
             spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:) &
               = cmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,:,:,:))
@@ -1853,14 +2000,14 @@ contains
     MPI_CHECK(MPI_File_close(mfile, ierr))
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
-  end subroutine write_all
+  end subroutine rw_all
 
-  subroutine write_sliced
+  subroutine rw_sliced
     use filesystem
     use communication, only: comm_is_root
     implicit none
     integer :: nblock_orbital
-    integer :: ik,io,nb,io_e
+    integer :: ik,io,nb,io_e,iret
     logical :: check
     type(s_parallel_info) :: dummy_info
 
@@ -1905,13 +2052,11 @@ contains
       end if
 
       do ik=info%ik_s,info%ik_e
-      do io=info%io_s,io_e,nblock_orbital
-        nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
-        if (nb >= (info%io_s - nblock_orbital + 1)) then
+      do io=1,mo+nblock_orbital-1,nblock_orbital
+        if (mod((io - 1) / nblock_orbital, info%isize_o) == info%id_o .and. comm_is_root(info%id_r)) then
+          nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
           write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
-          if (comm_is_root(info%id_r)) then
-            call create_directory(iofile)
-          end if
+          call create_directory(iofile)
         end if
       end do
       end do
@@ -1970,7 +2115,7 @@ contains
 
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
-  end subroutine write_sliced
+  end subroutine rw_sliced
 
   subroutine set_mpi_info
     implicit none

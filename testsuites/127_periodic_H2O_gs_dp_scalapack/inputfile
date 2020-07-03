@@ -7,7 +7,6 @@
 /
 
 &parallel
-  yn_domain_parallel='y'
   nproc_k = 1
   nproc_ob = 2
   nproc_rgrid = 1,2,1
@@ -21,7 +20,6 @@
 &system
   yn_periodic = 'y'
   al = 5.0d0, 5.0d0, 5.0d0
-  isym = 1
   nstate = 8
   nelec  = 8
   nelem  = 2

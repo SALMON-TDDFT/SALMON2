@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -265,7 +265,7 @@ contains
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use sym_vector_sub, only: sym_vector_xyz
-    use code_optimization, only: stencil_is_parallelized_by_omp
+    use code_optimization, only: current_omp_mode
     use timer
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -283,14 +283,11 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
-    logical :: is_parallel_info
 
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
-
-    is_parallel_info = .not. stencil_is_parallelized_by_omp
 
     nspin = system%nspin
     ngrid = system%ngrid
@@ -319,7 +316,7 @@ contains
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
-!$omp             reduction(+:wrk4) if(is_parallel_info)
+!$omp             reduction(+:wrk4) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 
@@ -426,7 +423,7 @@ contains
     use structures
     use communication, only: comm_summation
     use nonlocal_potential, only: calc_uVpsi_rdivided
-    use code_optimization, only: stencil_is_parallelized_by_omp
+    use code_optimization, only: current_omp_mode
     use timer
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -443,14 +440,11 @@ contains
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
-    logical :: is_parallel_info
 
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
 #endif
-
-    is_parallel_info = .not. stencil_is_parallelized_by_omp
 
     nspin = system%nspin
     ngrid = system%ngrid
@@ -472,7 +466,7 @@ contains
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
-!$omp             reduction(+:wrk3) if(is_parallel_info)
+!$omp             reduction(+:wrk3) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
 

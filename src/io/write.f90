@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ contains
     character(100) :: file_k_data
 
     NK = system%nk
-    file_k_data = trim(sysname)//'_k.data'!??????
+    file_k_data = trim(sysname)//'_k.data'
 
     if (comm_is_root(nproc_id_global)) then
       fh_k = open_filehandle(file_k_data, status="replace")
@@ -237,90 +237,90 @@ contains
     call comm_summation(u_rVnl_Vnlr_u_l,u_rVnl_Vnlr_u,3*NB*NB*NK,info%icomm_rko)
 
 
-    !calculate <u_nk|[r_j,dVnl^(0)]r|u_nk>  (j=x,y,z)
-    u_rVnlr_Vnlrr_u_l(:,:,:,:) = 0d0
-    do ik=ik_s,ik_e
-    do ilma=1,Nlma
-       ia=ppg%ia_tbl(ilma)
-       uVpsi=0d0;  uVpsix=0d0;  uVpsiy=0d0;  uVpsiz=0d0
-       uVpsixx=0d0;  uVpsixy=0d0;  uVpsixz=0d0
-                     uVpsiyy=0d0;  uVpsiyz=0d0
-                                   uVpsizz=0d0
-       do j=1,ppg%Mps(ia)
-          x = ppg%Rxyz(1,j,ia)
-          y = ppg%Rxyz(2,j,ia)
-          z = ppg%Rxyz(3,j,ia)
-          ix = ppg%Jxyz(1,j,ia)
-          iy = ppg%Jxyz(2,j,ia)
-          iz = ppg%Jxyz(3,j,ia)
-          veik = conjg(ppg%zekr_uV(j,ilma,ik))
-          do ib=1,NB
-          uVpsi(  ib,ik)=uVpsi(  ib,ik)+veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
-          uVpsix( ib,ik)=uVpsix( ib,ik)+veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
-          uVpsiy( ib,ik)=uVpsiy( ib,ik)+veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
-          uVpsiz( ib,ik)=uVpsiz( ib,ik)+veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
-          uVpsixx(ib,ik)=uVpsixx(ib,ik)+veik*x*x*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xx|u>
-          uVpsixy(ib,ik)=uVpsixy(ib,ik)+veik*x*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xy|u>
-          uVpsixz(ib,ik)=uVpsixz(ib,ik)+veik*x*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xz|u>
-          uVpsiyy(ib,ik)=uVpsiyy(ib,ik)+veik*y*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yy|u>
-          uVpsiyz(ib,ik)=uVpsiyz(ib,ik)+veik*y*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yz|u>
-          uVpsizz(ib,ik)=uVpsizz(ib,ik)+veik*z*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*zz|u>
-          enddo
-
-       end do
-
-       do ib=1,NB
-          !xx
-          ctmp1 = conjg(uVpsix(ib,ik))*uVpsix( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixx(ib,ik)
-          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !xy
-          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiy( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
-          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !xz
-          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiz( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
-          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !yx
-          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsix( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
-          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !yy
-          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiy( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyy(ib,ik)
-          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !yz
-          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiz( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
-          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !zx
-          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsix( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
-          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !zy
-          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiy( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
-          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-          !zz
-          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiz( ib,ik)
-          ctmp2 = conjg(uVpsi( ib,ik))*uVpsizz(ib,ik)
-          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) = &
-          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
-
-       enddo
-
-    enddo  !ilma
-    enddo  !ik
-    call comm_summation(u_rVnlr_Vnlrr_u_l,u_rVnlr_Vnlrr_u,3*3*NB*NK,info%icomm_rko)
+!    !calculate <u_nk|[r_j,dVnl^(0)]r|u_nk>  (j=x,y,z)
+!    u_rVnlr_Vnlrr_u_l(:,:,:,:) = 0d0
+!    do ik=ik_s,ik_e
+!    do ilma=1,Nlma
+!       ia=ppg%ia_tbl(ilma)
+!       uVpsi=0d0;  uVpsix=0d0;  uVpsiy=0d0;  uVpsiz=0d0
+!       uVpsixx=0d0;  uVpsixy=0d0;  uVpsixz=0d0
+!                     uVpsiyy=0d0;  uVpsiyz=0d0
+!                                   uVpsizz=0d0
+!       do j=1,ppg%Mps(ia)
+!          x = ppg%Rxyz(1,j,ia)
+!          y = ppg%Rxyz(2,j,ia)
+!          z = ppg%Rxyz(3,j,ia)
+!          ix = ppg%Jxyz(1,j,ia)
+!          iy = ppg%Jxyz(2,j,ia)
+!          iz = ppg%Jxyz(3,j,ia)
+!          veik = conjg(ppg%zekr_uV(j,ilma,ik))
+!          do ib=1,NB
+!          uVpsi(  ib,ik)=uVpsi(  ib,ik)+veik*    tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik|u>
+!          uVpsix( ib,ik)=uVpsix( ib,ik)+veik* x *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*x|u>
+!          uVpsiy( ib,ik)=uVpsiy( ib,ik)+veik* y *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*y|u>
+!          uVpsiz( ib,ik)=uVpsiz( ib,ik)+veik* z *tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*z|u>
+!          uVpsixx(ib,ik)=uVpsixx(ib,ik)+veik*x*x*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xx|u>
+!          uVpsixy(ib,ik)=uVpsixy(ib,ik)+veik*x*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xy|u>
+!          uVpsixz(ib,ik)=uVpsixz(ib,ik)+veik*x*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*xz|u>
+!          uVpsiyy(ib,ik)=uVpsiyy(ib,ik)+veik*y*y*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yy|u>
+!          uVpsiyz(ib,ik)=uVpsiyz(ib,ik)+veik*y*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*yz|u>
+!          uVpsizz(ib,ik)=uVpsizz(ib,ik)+veik*z*z*tpsi%zwf(ix,iy,iz,ispin,ib,ik,im) !=<v|e^ik*zz|u>
+!          enddo
+!
+!       end do
+!
+!       do ib=1,NB
+!          !xx
+!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsix( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixx(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(1,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !xy
+!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiy( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(1,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !xz
+!          ctmp1 = conjg(uVpsix(ib,ik))*uVpsiz( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(1,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !yx
+!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsix( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixy(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(2,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !yy
+!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiy( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyy(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(2,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !yz
+!          ctmp1 = conjg(uVpsiy(ib,ik))*uVpsiz( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(2,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !zx
+!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsix( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsixz(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(3,1,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !zy
+!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiy( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsiyz(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(3,2,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!          !zz
+!          ctmp1 = conjg(uVpsiz(ib,ik))*uVpsiz( ib,ik)
+!          ctmp2 = conjg(uVpsi( ib,ik))*uVpsizz(ib,ik)
+!          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) = &
+!          u_rVnlr_Vnlrr_u_l(3,3,ib,ik) + (ctmp1 - ctmp2)*ppg%rinv_uvu(ilma)
+!
+!       enddo
+!
+!    enddo  !ilma
+!    enddo  !ik
+!    call comm_summation(u_rVnlr_Vnlrr_u_l,u_rVnlr_Vnlrr_u,3*3*NB*NK,info%icomm_rko)
 
     file_tm_data = trim(sysname)//'_tm.data'!??????
 
@@ -344,15 +344,15 @@ contains
 !9000     format(3i8,6e18.10)
 9000     format(3i8,6e18.5)
 
-       !<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)
-       write(fh_tm,*) "#<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)"
-       do ik=1,NK
-       do ib=1,NB
-          do i=1,3
-             write(fh_tm,9000) ik,ib,i,(u_rVnlr_Vnlrr_u(i,j,ib,ik),j=1,3)
-          enddo
-       enddo
-       enddo
+!       !<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)
+!       write(fh_tm,*) "#<u_mk|[r_j,dVnl^(0)]r_i|u_nk>  (j,i=x,y,z)"
+!       do ik=1,NK
+!       do ib=1,NB
+!          do i=1,3
+!             write(fh_tm,9000) ik,ib,i,(u_rVnlr_Vnlrr_u(i,j,ib,ik),j=1,3)
+!          enddo
+!       enddo
+!       enddo
 
        !<u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)
        write(fh_tm,*) "#<u_mk|[r_j,dVnl^(0)]|u_nk>  (j=x,y,z)"
@@ -610,7 +610,7 @@ contains
     use structures, only: s_ofile,s_dft_energy,s_md
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
-    use salmon_global, only: ensemble, thermostat, itcalc_ene
+    use salmon_global, only: ensemble, thermostat, out_rt_energy_step
     use filesystem, only: open_filehandle
     use inputoutput, only: yn_md,t_unit_time,t_unit_energy
     implicit none
@@ -678,7 +678,7 @@ contains
        flush(uid)
 
     else  !it>=0
-       if(mod(it,itcalc_ene)==0)then
+       if(mod(it,out_rt_energy_step)==0)then
           uid = ofl%fh_rt_energy
    
           write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
@@ -746,14 +746,14 @@ contains
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
         & 1, "Energy", trim(t_unit_energy%name), &
         & 2, "Re(alpha_x)", trim(t_unit_polarizability%name), &
-        & 3, "Im(alpha_x)", trim(t_unit_polarizability%name), &
-        & 4, "Re(alpha_y)", trim(t_unit_polarizability%name), &
-        & 5, "Im(alpha_y)", trim(t_unit_polarizability%name), &
-        & 6, "Re(alpha_z)", trim(t_unit_polarizability%name), &
+        & 3, "Re(alpha_y)", trim(t_unit_polarizability%name), &
+        & 4, "Re(alpha_z)", trim(t_unit_polarizability%name), &
+        & 5, "Im(alpha_x)", trim(t_unit_polarizability%name), &
+        & 6, "Im(alpha_y)", trim(t_unit_polarizability%name), &
         & 7, "Im(alpha_z)", trim(t_unit_polarizability%name), &
         & 8, "df_x/dE", "none", &
         & 9, "df_y/dE", "none", &
-        & 10, "df_z/dE", "none"
+        & 10,"df_z/dE", "none"
 
       tt = dt*dble(nt)
 
@@ -806,30 +806,31 @@ contains
       write(uid,10) "eps", "Dielectric constant"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "Energy", trim(t_unit_energy%name), &
-        & 2, "Re(sigma_x)", trim(t_unit_conductivity%name), &
-        & 3, "Im(sigma_x)", trim(t_unit_conductivity%name), &
-        & 4, "Re(sigma_y)", trim(t_unit_conductivity%name), &
-        & 5, "Im(sigma_y)", trim(t_unit_conductivity%name), &
-        & 6, "Re(sigma_z)", trim(t_unit_conductivity%name), &
-        & 7, "Im(sigma_z)", trim(t_unit_conductivity%name), &
-        & 8, "Re(eps_x)", "none", &
-        & 9, "Im(eps_x)", "none", &
-        & 10, "Re(eps_y)", "none", &
-        & 11, "Im(eps_y)", "none", &
-        & 12, "Re(eps_z)", "none", &
+        & 1,  "Energy", trim(t_unit_energy%name), &
+        & 2,  "Re(sigma_x)", trim(t_unit_conductivity%name), &
+        & 3,  "Re(sigma_y)", trim(t_unit_conductivity%name), &
+        & 4,  "Re(sigma_z)", trim(t_unit_conductivity%name), &
+        & 5,  "Im(sigma_x)", trim(t_unit_conductivity%name), &
+        & 6,  "Im(sigma_y)", trim(t_unit_conductivity%name), &
+        & 7,  "Im(sigma_z)", trim(t_unit_conductivity%name), &
+        & 8,  "Re(eps_x)", "none", &
+        & 9,  "Re(eps_y)", "none", &
+        & 10, "Re(eps_z)", "none", &
+        & 11, "Im(eps_x)", "none", &
+        & 12, "Im(eps_y)", "none", &
         & 13, "Im(eps_z)", "none"
 
       tt = dt*dble(nt)
 
       do ihw=1,nenergy
-        hw=dble(ihw)*de ; zsigma(:)=(0.d0,0.d0)  
+        hw=dble(ihw)*de
+        zsigma(:)=(0.d0,0.d0)
         do n=1,nt
-          t2=dble(n)*dt ; zsigma(:)=zsigma(:)+exp(zi*hw*t2)*rt%curr(:,n) & 
-                                             *(1-3*(t2/tt)**2+2*(t2/tt)**3)
+          t2=dble(n)*dt
+          zsigma(:)=zsigma(:)+exp(zi*hw*t2)*rt%curr(:,n) *(1-3*(t2/tt)**2+2*(t2/tt)**3)
         end do
 
-        zsigma(:)=zsigma(:)/e_impulse*dt
+        zsigma(:) = (zsigma(:)/e_impulse)*dt
         if(trans_longi=="tr")then
           zeps(:)=1.d0+4.d0*pi*zi*zsigma(:)/hw
         else if(trans_longi=="lo")then
@@ -947,15 +948,15 @@ contains
       write(uid,10) "dm", "Dopile moment"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "energy", trim(t_unit_energy%name), &
-        & 2, "Re(dm_x)", trim(t_unit_spectrum_dipole%name), &
-        & 3, "Im(dm_x)", trim(t_unit_spectrum_dipole%name), &
-        & 4, "|dm_x|^2", trim(t_unit_spectrum_dipole%name), &
-        & 5, "Re(dm_y)", trim(t_unit_spectrum_dipole%name), &
-        & 6, "Im(dm_y)", trim(t_unit_spectrum_dipole%name), &
-        & 7, "|dm_y|^2", trim(t_unit_spectrum_dipole%name), &
-        & 8, "Re(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
-        & 9, "Im(dm_z)", trim(t_unit_spectrum_dipole_square%name), &
+        & 1,  "energy", trim(t_unit_energy%name), &
+        & 2,  "Re(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 3,  "Re(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 4,  "Re(dm_z)", trim(t_unit_spectrum_dipole%name), &
+        & 5,  "Im(dm_x)", trim(t_unit_spectrum_dipole%name), &
+        & 6,  "Im(dm_y)", trim(t_unit_spectrum_dipole%name), &
+        & 7,  "Im(dm_z)", trim(t_unit_spectrum_dipole%name), &
+        & 8,  "|dm_x|^2", trim(t_unit_spectrum_dipole_square%name), &
+        & 9,  "|dm_y|^2", trim(t_unit_spectrum_dipole_square%name), &
         & 10, "|dm_z|^2", trim(t_unit_spectrum_dipole_square%name)
 
       tt = dt*dble(nt)
@@ -1011,33 +1012,33 @@ contains
       write(uid,10) "E_tot", "Total electric field"
 
       write(uid, '("#",99(1X,I0,":",A,"[",A,"]"))') &
-        & 1, "energy", trim(t_unit_energy%name), &
-        & 2, "Re(Jm_x)", trim(t_unit_spectrum_current%name), &
-        & 3, "Im(Jm_x)", trim(t_unit_spectrum_current%name), &
-        & 4, "|Jm_x|^2", trim(t_unit_spectrum_current%name), &
-        & 5, "Re(Jm_y)", trim(t_unit_spectrum_current%name), &
-        & 6, "Im(Jm_y)", trim(t_unit_spectrum_current%name), &
-        & 7, "|Jm_y|^2", trim(t_unit_spectrum_current%name), &
-        & 8, "Re(Jm_z)", trim(t_unit_spectrum_current_square%name), &
-        & 9, "Im(Jm_z)", trim(t_unit_spectrum_current_square%name), &
+        & 1,  "energy", trim(t_unit_energy%name), &
+        & 2,  "Re(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 3,  "Re(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 4,  "Re(Jm_z)", trim(t_unit_spectrum_current%name), &
+        & 5,  "Im(Jm_x)", trim(t_unit_spectrum_current%name), &
+        & 6,  "Im(Jm_y)", trim(t_unit_spectrum_current%name), &
+        & 7,  "Im(Jm_z)", trim(t_unit_spectrum_current%name), &
+        & 8,  "|Jm_x|^2", trim(t_unit_spectrum_current_square%name), &
+        & 9,  "|Jm_y|^2", trim(t_unit_spectrum_current_square%name), &
         & 10, "|Jm_z|^2", trim(t_unit_spectrum_current_square%name), &
         & 11, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 12, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 13, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
-        & 14, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 12, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 13, "Re(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 14, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
         & 15, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
-        & 16, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
-        & 17, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
-        & 18, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 16, "Im(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 17, "|E_ext_x|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 18, "|E_ext_y|^2", trim(t_unit_spectrum_elec_square%name), &
         & 19, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name), &
         & 20, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 21, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 22, "|E_ext_x|^2", trim(t_unit_spectrum_elec%name), &
-        & 23, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 21, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
+        & 22, "Re(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 23, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
         & 24, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
-        & 25, "|E_ext_y|^2", trim(t_unit_spectrum_elec%name), &
-        & 26, "Re(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
-        & 27, "Im(E_ext_z)", trim(t_unit_spectrum_elec_square%name), &
+        & 25, "Im(E_ext_z)", trim(t_unit_spectrum_elec%name), &
+        & 26, "|E_ext_x|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 27, "|E_ext_y|^2", trim(t_unit_spectrum_elec_square%name), &
         & 28, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name)
 
       tt = dt*dble(nt)
@@ -1152,7 +1153,7 @@ contains
   !! export SYSNAME_info.data file (GS info)
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
-    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,ntmg,unit_system
+    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,unit_system
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1214,9 +1215,7 @@ contains
        write(fh,*)       
 100    format(1x,4(i5,f15.4,2x))
 
-       do ii=1,ntmg
-          write(fh,200) "Size of the box (A) = ", system%primitive_a*au_length_aa
-       end do
+       write(fh,200) "Size of the box (A) = ", system%primitive_a*au_length_aa
        write(fh,200) "Grid spacing (A)    = ", (system%Hgs(jj)*au_length_aa,jj=1,3)
        write(fh,*)
 200    format(1x,a,30f14.8)
@@ -1272,21 +1271,21 @@ contains
        ofl%fh_eigen = open_filehandle(trim(ofl%file_eigen_data))
        uid = ofl%fh_eigen
        open(uid,file=ofl%file_eigen_data)
-       write(uid,'("# 1 particle energies")')
+       write(uid,'("#esp: single-particle energies (eigen energies)")')
+       write(uid,'("#occ: occupation numbers, io: orbital index")')
        select case(unit_energy)
        case('au','a.u.')
-          write(uid,'("# Orbital   Energy[a.u.]")')
+          write(uid,'("# 1:io, 2:esp[a.u.], 3:occ")')
        case('ev','eV')
-          write(uid,'("# Orbital   Energy[eV]")')
+          write(uid,'("# 1:io, 2:esp[eV], 3:occ")')
        end select
-       write(uid,'("#-----------------------")')
        do is=1,system%nspin
        do iik=1,system%nk
           if(iperiodic==3)then
              write(uid,'("k=",1x,i5,",  spin=",1x,i5)') iik,is
           end if
           do iob=1,system%no
-             write(uid,'(1x,i5,e26.16e3)') iob, energy%esp(iob,iik,is)*uenergy_from_au
+             write(uid,'(1x,i5,2(e26.16e3))') iob, energy%esp(iob,iik,is)*uenergy_from_au, system%rocc(iob,iik,is)
           end do
        end do
        end do
@@ -1375,14 +1374,15 @@ contains
   
   subroutine write_pdos(lg,mg,system,info,pp,energy,tpsi)
     use structures
-    use math_constants, only: pi,zi
-    use salmon_math, only: ylm
-    use parallelization, only: nproc_id_global
-    use communication, only: comm_is_root, comm_summation
-    use salmon_global, only: out_dos_start, out_dos_end, out_dos_function, &
-    out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, nelec, kion, natom, nstate, unit_energy
-    use inputoutput, only: uenergy_from_au
-    use prep_pp_sub, only: bisection
+    use math_constants      ,only: pi,zi
+    use salmon_math         ,only: ylm
+    use parallelization     ,only: nproc_id_global
+    use communication       ,only: comm_is_root, comm_summation
+    use salmon_global       ,only: out_dos_start, out_dos_end, out_dos_function, &
+                                   out_dos_width, out_dos_nenergy, yn_out_dos_set_fe_origin, &
+                                   nelec, kion, natom, nstate, unit_energy
+    use inputoutput         ,only: uenergy_from_au
+    use prep_pp_sub         ,only: bisection
     implicit none
     type(s_rgrid)           ,intent(in) :: lg,mg
     type(s_dft_system)      ,intent(in) :: system
@@ -1457,7 +1457,11 @@ contains
               phi_r= ratio1*pp%upp_f(intr,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi)) +  &
                      ratio2*pp%upp_f(intr-1,pp%lref(ikoa),ikoa)/rr**(pp%lref(ikoa)+1)*sqrt((2*pp%lref(ikoa)+1)/(4*Pi))
                                             !Be carefull for upp(i,l)/vpp(i,l) reffering rad(i+1) as coordinate
-              rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+              if(allocated(tpsi%rwf)) then
+                rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%rwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+              else
+                rbox_pdos(lm,iatom)=rbox_pdos(lm,iatom)+tpsi%zwf(ix,iy,iz,ispin,iob,iik,1)*phi_r*Ylm(xxxx,yyyy,zzzz,L,m)*system%Hvol
+              end if
             end do
             end do
             end do

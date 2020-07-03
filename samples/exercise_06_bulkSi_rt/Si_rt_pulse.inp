@@ -14,11 +14,6 @@
 !   in the current directory.                                                            !
 !########################################################################################!
 
-&parallel
-  !This will be removed when ARTED is deleted.
-  yn_domain_parallel = 'y'
-/
-
 &calculation
   !type of theory
   theory = 'tddft_pulse'
@@ -79,12 +74,12 @@
 
 &tgrid
   !time step size and number of time grids(steps)
-  dt = 0.16d0
-  nt = 3000
+  dt = 0.08d0
+  nt = 6000
 /
 
 &emfield
-  !envelope shape of the incident pulse('Ecos2': cos^2 type envelope for scalar potential)
+  !envelope shape of the incident pulse('Acos2': cos^2 type envelope for vector potential)
   ae_shape1 = 'Acos2'
   
   !peak intensity(W/cm^2) of the incident pulse
@@ -104,10 +99,6 @@
   !---------------------------------------------------------------------!
 /
 
-&propagation
-  !propagator('etrs': time-reversal symmetry propagator)
-  propagator = 'etrs'
-/
 
 &atomic_red_coor
   !cartesian atomic reduced coodinates

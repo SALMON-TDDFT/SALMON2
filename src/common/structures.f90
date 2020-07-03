@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2019-2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -17,11 +17,19 @@
 
 #include "config.h"
 
-module structures
 #ifdef USE_LIBXC
-  use xc_f90_types_m
-  use xc_f90_lib_m
+#include "xc_version.h"
 #endif
+
+module structures
+
+#ifdef USE_LIBXC
+#if XC_MAJOR_VERSION <= 4 
+    use xc_f90_types_m
+#endif
+    use xc_f90_lib_m
+#endif
+
   implicit none
 
 ! scalar field
@@ -89,27 +97,6 @@ module structures
     real(8) ,allocatable :: coordinate(:,:)         ! (minval(is_overlap):maxval(ie_overlap),1:3), coordinate of grids
   end type s_rgrid
 
-  type s_process_info
-    integer :: npk
-    integer :: nporbital
-    integer :: nprgrid(3)    ! x,y,z
-#ifdef USE_SCALAPACK
-    logical :: flag_blacs_gridinit
-    integer :: icomm_sl ! for summation
-    integer :: iam,nprocs
-    integer,allocatable :: gridmap(:,:)
-    integer :: nprow,npcol,myrow,mycol
-    integer :: nrow_local,ncol_local,lda
-    integer :: desca(9), descz(9)
-    integer :: len_work  ! for PDSYEVD, PZHEEVD
-    integer :: len_rwork ! for PZHEEVD
-    integer,allocatable :: ndiv(:), i_tbl(:,:), j_tbl(:,:), iloc_tbl(:,:), jloc_tbl(:,:)
-#endif
-#ifdef USE_EIGENEXA
-    logical :: flag_eigenexa_init
-#endif
-  end type
-
 ! for persistent communication
   type s_pcomm_cache
     real(8), allocatable :: dbuf(:, :, :, :)
@@ -141,6 +128,11 @@ module structures
   end type s_sendrecv_grid
 
   type s_parallel_info
+  ! division of MPI processes (for orbital wavefunction)
+    integer :: npk        ! k-points
+    integer :: nporbital  ! orbital index
+    integer :: nprgrid(3) ! r-space (x,y,z)
+  ! parallelization of orbital wavefunction
     integer :: iaddress(5) ! address of MPI under orbital wavefunction (ix,iy,iz,io,ik)
     integer,allocatable :: imap(:,:,:,:,:) ! address map
     logical :: if_divide_rspace
@@ -161,16 +153,31 @@ module structures
     integer :: icomm_y,id_y,isize_y ! y-axis
     integer :: icomm_z,id_z,isize_z ! z-axis
     integer :: icomm_xy,id_xy,isize_xy ! for singlescale FDTD
+  ! for atom index #ia
+    integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
+    integer :: nion_mg
+    integer,allocatable :: ia_mg(:)
   ! for orbital index #io
     integer,allocatable :: irank_io(:) ! MPI rank of the orbital index #io
     integer,allocatable :: io_s_all(:) ! io_s for all orbital ranks
     integer,allocatable :: io_e_all(:) ! io_e for all orbital ranks
     integer,allocatable :: numo_all(:) ! numo for all orbital ranks
     integer :: numo_max ! max value of numo_all
-  ! for atom index #ia
-    integer :: ia_s,ia_e ! ia=ia_s,...,ia_e
-    integer :: nion_mg
-    integer,allocatable :: ia_mg(:)
+#ifdef USE_SCALAPACK
+    logical :: flag_blacs_gridinit
+    integer :: icomm_sl ! for summation
+    integer :: iam,nprocs
+    integer,allocatable :: gridmap(:,:)
+    integer :: nprow,npcol,myrow,mycol
+    integer :: nrow_local,ncol_local,lda
+    integer :: desca(9), descz(9)
+    integer :: len_work  ! for PDSYEVD, PZHEEVD
+    integer :: len_rwork ! for PZHEEVD
+    integer,allocatable :: ndiv(:), i_tbl(:,:), j_tbl(:,:), iloc_tbl(:,:), jloc_tbl(:,:)
+#endif
+#ifdef USE_EIGENEXA
+    logical :: flag_eigenexa_init
+#endif
   end type s_parallel_info
 
   type s_orbital
@@ -238,9 +245,6 @@ module structures
     integer :: nps
     integer,allocatable :: mps(:)
     integer,allocatable :: jxyz(:,:,:)
-    integer,allocatable :: jxx(:,:)
-    integer,allocatable :: jyy(:,:)
-    integer,allocatable :: jzz(:,:)
     real(8),allocatable :: rxyz(:,:,:)
     real(8),allocatable :: uv(:,:)
     real(8),allocatable :: duv(:,:,:)
@@ -249,12 +253,25 @@ module structures
     integer,allocatable :: ia_tbl(:)
     real(8),allocatable :: rinv_uvu(:)
     complex(8),allocatable :: zekr_uv(:,:,:) ! (j,ilma,ik), j=1~Mps(ia), ilma=1~Nlma, zekr_uV = exp(-i(k+A/c)r)*uv
-    complex(8),allocatable :: zrhoG_ion(:,:,:),zVG_ion(:,:,:,:) ! rho_ion(G),V_ion(G): local part of pseudopotential
+    !
+    complex(8),allocatable :: zrhoG_ion(:,:,:),zVG_ion(:,:,:,:) ! rho_ion(G),V_ion(G): local part of pseudopotential in G-space
+    real(8),allocatable :: Vpsl_ion(:,:,:,:) ! local part of pseudopotential in r-space (isolated system)
     !
     integer,allocatable :: ia_tbl_so(:)
     complex(8),allocatable :: uv_so(:,:,:,:)
     complex(8),allocatable :: duv_so(:,:,:,:,:)
     complex(8),allocatable :: zekr_uv_so(:,:,:,:,:)
+    !
+    real(8),allocatable :: Rion_old(:,:) ! old position
+    integer,allocatable :: jxyz_old(:,:,:)
+    integer,allocatable :: jxx_old(:,:)
+    integer,allocatable :: jyy_old(:,:)
+    integer,allocatable :: jzz_old(:,:)
+    integer,allocatable :: mps_old(:)
+    real(8),allocatable :: rxyz_old(:,:,:)
+    integer,allocatable :: jxyz_min(:,:)
+    integer,allocatable :: jxyz_max(:,:)
+    logical,allocatable :: jxyz_changed(:)
     !
     integer,allocatable :: proj_pairs_ao(:,:)
     integer,allocatable :: proj_pairs_info_ao(:,:)
@@ -269,7 +286,6 @@ module structures
     integer,allocatable :: jyy_ao(:,:)
     integer,allocatable :: jzz_ao(:,:)
     real(8),allocatable :: rxyz_ao(:,:,:)
-    real(8) :: Hvol
     ! for localized communication when calculating non-local pseudo-pt.
     integer,allocatable :: irange_atom(:,:)    ! uVpsi range for atom: n = (1,ia), m = (2,ia)
     logical,allocatable :: ireferred_atom(:)   ! uVpsi(n:m) is referred in this process
@@ -301,8 +317,13 @@ module structures
     logical :: use_kinetic_energy
     logical :: use_current
 #ifdef USE_LIBXC
+#if XC_MAJOR_VERSION <= 4 
     type(xc_f90_pointer_t) :: func(3)
     type(xc_f90_pointer_t) :: info(3)
+#else
+    TYPE(xc_f90_func_t) :: func(3)
+    TYPE(xc_f90_func_info_t) :: info(3)
+#endif
 #endif
   end type
 
@@ -312,7 +333,7 @@ module structures
     real(8),allocatable :: coef(:,:,:)      ! 4*pi/|G|^2 (coefficient of the Poisson equation)
     real(8),allocatable :: exp_ewald(:,:,:) ! exp(-|G|^2/(4*a_Ewald))
     complex(8),allocatable :: egx(:,:),egxc(:,:),egy(:,:),egyc(:,:),egz(:,:),egzc(:,:)
-    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),coef_cGdt(:,:,:) ! for single-scale Maxwell-TDDFT
+    complex(8),allocatable :: coef_nabla(:,:,:,:),coef_gxgy0(:,:,:),cos_cGdt(:,:,:),sin_cGdt(:,:,:) ! for single-scale Maxwell-TDDFT
   end type s_reciprocal_grid
 
 ! Poisson equation
@@ -336,7 +357,7 @@ module structures
   end type s_poisson
 
   type s_fdtd_system
-    type(s_rgrid)         :: lg, mg, ng   ! Structure for send and receive in fdtd
+    type(s_rgrid)         :: lg, mg       ! Structure for send and receive in fdtd
     type(s_sendrecv_grid) :: srg_ng       ! Structure for send and receive in fdtd
     real(8) :: rlsize(3)                  ! Size of Cell
     real(8) :: hgs(3)                     ! Grid Spacing
@@ -344,13 +365,6 @@ module structures
     character(8)  :: a_bc(3,2)            ! Boundary Condition for 1:x, 2:y, 3:z and 1:bottom and 2:top
     integer, allocatable :: imedia(:,:,:) ! Material information
   end type s_fdtd_system
-
-  type s_fdtd_field
-    type(s_scalar) :: phi, rho_em
-    type(s_vector) :: vec_e, vec_h, vec_a, vec_j_em
-    ! Experimental implementation
-    type(s_vector) :: vec_Ac, vec_Ac_old
-  end type s_fdtd_field
 
   type s_opt
      real(8),allocatable :: a_dRion(:), dFion(:)
@@ -396,7 +410,9 @@ module structures
   type s_mixing
     logical :: flag_mix_zero
     integer :: num_rho_stock
-    type(s_scalar),allocatable :: srho_in(:), srho_out(:), srho_s_in(:,:), srho_s_out(:,:)
+    type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)
+    real(8) :: mixrate, alpha_mb, beta_p
+    real(8) :: convergence_value_prev
   end type s_mixing
 
   type s_band_dft
@@ -436,6 +452,7 @@ module structures
 
 ! single-scale Maxwell-TDDFT method
   type s_singlescale
+    logical :: flag_use
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
     real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3)
     real(8),allocatable :: vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
@@ -449,12 +466,30 @@ module structures
     & ,integral_poynting_tmp(:),integral_poynting_tmp2(:)
     type(s_sendrecv_grid) :: srg_eg ! specialized in FDTD timestep
     type(s_rgrid)         :: eg
-  ! for yn_gbp
+  ! for method_singlescale=='1d','1d_fourier'
     real(8),dimension(3) :: Ac_zt_boundary_bottom,Ac_zt_boundary_top,Ac_zt_boundary_bottom_old,Ac_zt_boundary_top_old
     real(8),allocatable :: curr4pi_zt(:,:),Ac_zt_m(:,:,:)
     real(8),allocatable :: Ac_fourier(:,:,:,:)
-    complex(8),allocatable :: a_ffte(:,:,:,:),b_ffte(:,:,:,:),Vh_ffte_old(:,:,:),zAc_old(:,:,:,:),f_old(:,:,:,:)
+    complex(8),allocatable :: a_ffte(:,:,:,:),b_ffte(:,:,:,:),Vh_ffte_old(:,:,:),zf_old(:,:,:,:),zc_old(:,:,:,:),zs_old(:,:,:,:)
   end type s_singlescale
+
+
+  
+  type s_multiscale
+    integer :: nmacro
+    integer :: icomm_ms_world, isize_ms_world, id_ms_world ! Top level communicator
+    integer :: icomm_macropoint, isize_macropoint, id_macropoint ! Macropoint communicator
+    integer :: imacro_mygroup_s, imacro_mygroup_e
+    integer :: id_mygroup_s, id_mygroup_e
+    integer, allocatable :: ixyz_tbl(:, :)
+    integer, allocatable :: imacro_tbl(:, :, :)
+    character(256) :: base_directory
+    character(256) :: base_directory_RT_Ac
+    real(8), allocatable :: curr(:, :)
+    real(8), allocatable :: vec_Ac(:, :)
+    real(8), allocatable :: vec_Ac_old(:, :)
+    character(256) :: directory_read_data
+  end type s_multiscale
 
 !===================================================================================================================================
 
@@ -674,9 +709,6 @@ contains
     type(s_pp_grid) :: ppg
     DEAL(ppg%mps)
     DEAL(ppg%jxyz)
-    DEAL(ppg%jxx)
-    DEAL(ppg%jyy)
-    DEAL(ppg%jzz)
     DEAL(ppg%uv)
     DEAL(ppg%duv)
     DEAL(ppg%lma_tbl)

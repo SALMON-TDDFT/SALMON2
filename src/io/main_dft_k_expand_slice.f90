@@ -1,5 +1,5 @@
 !
-!  Copyright 2019 SALMON developers
+!  Copyright 2020 SALMON developers
 !
 !  Licensed under the Apache License, Version 2.0 (the "License");
 !  you may not use this file except in compliance with the License.
@@ -36,26 +36,24 @@ subroutine main_dft_k_expand_slice
   use code_optimization
   use initialization_sub
   use occupation
-  use input_pp_sub
   use prep_pp_sub
   use mixing_sub
   use checkpoint_restart_sub
   use filesystem
   use hamiltonian
-  use salmon_total_energy
+  use total_energy
+  use initialization_dft
   implicit none
   type(s_rgrid) :: lg
   type(s_rgrid) :: mg
-  type(s_rgrid) :: ng
-  type(s_process_info) :: pinfo
   type(s_parallel_info) :: info
   type(s_sendrecv_grid) :: srg, srg_ng
   type(s_orbital) :: spsi,shpsi,sttpsi
   type(s_dft_system) :: system
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
-  type(s_scalar) :: srho,sVh,sVpsl
-  type(s_scalar),allocatable :: V_local(:),srho_s(:),sVxc(:)
+  type(s_scalar) :: rho,Vh,Vpsl
+  type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
@@ -81,15 +79,15 @@ subroutine main_dft_k_expand_slice
   if(yn_restart /= 'y') stop "error: yn_restart must be y"
   if(method_wf_distributor /= 'slice') stop "error: method_wf_distributor must be slice"
 
-  call init_dft(nproc_group_global,pinfo,info,lg,mg,ng,system,stencil,fg,poisson,srg,srg_ng,ofl)
-  allocate( srho_s(system%nspin),V_local(system%nspin),sVxc(system%nspin) )
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_ng,ofl)
+  allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
 
   call initialization1_dft( system, energy, stencil, fg, poisson,  &
-                            lg, mg, ng,  &
-                            pinfo, info,  &
+                            lg, mg,  &
+                            info,  &
                             srg, srg_ng,  &
-                            srho, srho_s, sVh, V_local, sVpsl, sVxc,  &
+                            rho, rho_s, Vh, V_local, Vpsl, Vxc,  &
                             spsi, shpsi, sttpsi,  &
                             pp, ppg, ppn,  &
                             ofl )
@@ -97,14 +95,12 @@ subroutine main_dft_k_expand_slice
   nspin = system%nspin
   spsi%update_zwf_overlap = .false.
   mixing%num_rho_stock = 21
-  call init_mixing(nspin,ng,mixing)  !maybe not necessary
+  call init_mixing(nspin,mg,mixing)  !maybe not necessary
 
 
   if(system%nspin /= 1) stop "error: nspin must be 1"
   if(nproc_k /= system%nk) stop "error: nproc_k must be # of k-points"
 
-
-  yn_datafiles_dump = 'n'
 
   ! initialization for k-expand
   call init_k_expand(system%nk,kex)
@@ -129,7 +125,6 @@ subroutine main_dft_k_expand_slice
   endif
   allocate(wdir(ndir_w))
   call gen_restart_writing_directory_name_k_expand(kex,nblock_orbital,ofl%dir_out_restart,wgdir,wdir)
-
 
   if(comm_is_root(nproc_id_global)) then
      rdir0 = rgdir
@@ -278,6 +273,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   allocate( kex%iaddress(2,kex%nmax), kex%iaddress_new(2,kex%nmax) )
 
   kex%myrank(:) = -1
+  kex%iaddress(:,:) = -1
   kex%iaddress_new(:,:) = -1
 
   !!(for reading)
@@ -309,7 +305,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   end do
   end do
 
-  !write(*,'(a,100i5)') "myrank  =", kex%myrank(:)
+ !write(*,'(a,100i5)') "myrank  =", kex%myrank(:)
 
   end subroutine
 
@@ -730,7 +726,7 @@ subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
   write(fp,'(i5,3f12.6)') mz,0.d0,0.d0,hgs(3)
   do i=1,n
      !ik=Kion(iatom)
-     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(rion(j,iatom),j=1,3)
+     !write(fp,'(i5,4f12.6)') izatom(ik),dble(izatom(ik)),(Rion(j,iatom),j=1,3)
      write(fp,'(i5,4f12.6)') 8,dble(8),(crd(j,i),j=1,3)
   end do
   

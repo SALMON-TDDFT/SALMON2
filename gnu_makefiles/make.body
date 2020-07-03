@@ -1,265 +1,137 @@
-SALMONDIR = $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../)
+
+MAKEDIR = $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+SALMONDIR = $(abspath $(MAKEDIR)/../)
 BINDIR = $(SALMONDIR)/bin
 SRCDIR = $(SALMONDIR)/src
 OBJDIR = $(SALMONDIR)/build
 SALMON_TARGET = $(BINDIR)/$(TARGET)
 
+ifdef MPIFLAG
+	COMM_SET=
+else
+	COMM_SET=_dummy
+endif
+
 ifdef SIMD_SET
 	C_STENCIL_FILE= \
-		ARTED/stencil/C/$(SIMD_SET)/current.c \
-		ARTED/stencil/C/$(SIMD_SET)/hpsi.c \
-		ARTED/stencil/C/$(SIMD_SET)/total_energy.c
+		zstencil_core/${SIMD_SET}/omp.c
+		zstencil_core/${SIMD_SET}/seq.c
 	F90_STENCIL_FILE=
 else
 	C_STENCIL_FILE=
-	F90_STENCIL_FILE= \
-		ARTED/stencil/F90/current.f90 \
-		ARTED/stencil/F90/hpsi.f90 \
-		ARTED/stencil/F90/total_energy.f90
-endif
-
-ifdef COMM_SET
-	MPI_FLAG=
-else
-	
+	F90_STENCIL_FILE=
 endif
 
 F90_SRCS = \
-	misc/unusedvar.f90 \
-	misc/misc_routines.f90 \
-	misc/backup_routines.f90 \
-	misc/timer.f90 \
-	parallel/salmon_communication.f90 \
-	parallel/salmon_parallel.f90 \
-	ext/FFTE/alltoall_1d.f90 \
-	io/salmon_file.f90 \
-	io/salmon_global.f90 \
-	io/inputoutput.f90 \
-	math/salmon_math.f90 \
-	math/math_constants.f90 \
-	common/stencil.f90 \
-	common/broyden.f90 \
-	common/update_overlap.f90 \
-	common/hpsi.f90 \
-	xc/builtin_pz.f90 \
-	xc/builtin_pbe.f90 \
-	xc/builtin_tbmbj.f90 \
-	xc/builtin_pz_sp.f90 \
-	xc/builtin_pzm.f90 \
-	xc/salmon_xc.f90 \
-	atom/salmon_pp.f90 \
-	atom/input_pp.f90 \
-	atom/prep_pp.f90 \
-	atom/Ylm_dYlm.f90 \
-	ARTED/modules/nvtx.f90 \
-	ARTED/modules/global_variables.f90 \
-	ARTED/modules/opt_variables.f90 \
-	ARTED/modules/performance_analyzer.f90 \
-	ARTED/common/Exc_Cor.f90 \
-	ARTED/common/Ac_alocal_laser.f90 \
-	ARTED/common/psi_rho.f90 \
-	ARTED/common/hpsi.f90 \
-	ARTED/common/preprocessor.f90 \
-	ARTED/common/density_plot.f90 \
-	ARTED/common/projector.f90 \
-	ARTED/common/ion_force.f90 \
-	ARTED/common/Hartree.f90 \
-	ARTED/common/total_energy.f90 \
-	ARTED/common/restart.f90 \
-	ARTED/preparation/fd_coef.f90 \
-	ARTED/preparation/prep_ps.f90 \
-	ARTED/preparation/init_wf.f90 \
-	ARTED/preparation/init.f90 \
-	ARTED/preparation/pp_postprocess.f90 \
-	$(F90_STENCIL_FILE) \
-	ARTED/GS/Occupation_Redistribution.f90 \
-	ARTED/GS/sp_energy.f90 \
-	ARTED/GS/CG.f90 \
-	ARTED/GS/io_gs_wfn_k.f90 \
-	ARTED/GS/Gram_Schmidt.f90 \
-	ARTED/GS/Fermi_Dirac_distribution.f90 \
-	ARTED/GS/diag.f90 \
-	ARTED/GS/write_GS_data.f90 \
-	ARTED/RT/current.f90 \
-	ARTED/RT/hamiltonian.f90 \
-	ARTED/RT/init_Ac.f90 \
-	ARTED/RT/dt_evolve.f90 \
-	ARTED/RT/Fourier_tr.f90 \
-	ARTED/FDTD/FDTD.f90 \
-	ARTED/FDTD/beam.f90 \
-	ARTED/control/inputfile.f90 \
-	ARTED/control/ground_state.f90 \
-	ARTED/control/md_gs.f90 \
-	ARTED/control/initialization.f90 \
-	ARTED/control/ana_RT_useGS.f90 \
-	ARTED/control/control_sc.f90 \
-	ARTED/control/optimization.f90 \
-	ARTED/control/control_ms.f90 \
-	ARTED/main.f90 \
-	GCEED/modules/scf_data.f90 \
-	GCEED/modules/allocate_mat.f90 \
-	GCEED/modules/sendrecv_groupob_ngp.f90 \
-	GCEED/modules/read_pslfile.f90 \
-	GCEED/modules/copyVlocal.f90 \
-	GCEED/modules/deallocate_mat.f90 \
-	GCEED/modules/structure_opt.f90 \
-	GCEED/modules/allocate_psl.f90 \
-	GCEED/modules/new_world.f90 \
-	GCEED/modules/readbox_rt.f90 \
-	GCEED/modules/init_sendrecv.f90 \
-	GCEED/modules/inner_product.f90 \
-	GCEED/modules/change_order.f90 \
-	GCEED/modules/writebox_rt.f90 \
-	GCEED/modules/sendrecv_self.f90 \
-	GCEED/modules/sendrecv_groupob_tmp.f90 \
-	GCEED/modules/sendrecv_tmp.f90 \
-	GCEED/modules/pack_unpack.f90 \
-	GCEED/modules/persistent_comm.f90 \
-	GCEED/modules/sendrecv_groupob.f90 \
-	GCEED/modules/sendrecv.f90 \
-	GCEED/modules/gradient2.f90 \
-	GCEED/modules/laplacian2.f90 \
-	GCEED/modules/gradient.f90 \
-	GCEED/modules/copy_psi_mesh.f90 \
-	GCEED/modules/calc_density.f90 \
-	GCEED/modules/sendrecvh.f90 \
-	GCEED/modules/rmmdiis_eigen_lapack.f90 \
-	GCEED/modules/hpsi2.f90 \
-	GCEED/modules/total_energy.f90 \
-	GCEED/common/setcN.f90 \
-	GCEED/common/calc_force.f90 \
-	GCEED/common/sendrecv_copy.f90 \
-	GCEED/common/set_icoo1d.f90 \
-	GCEED/common/calc_myob.f90 \
-	GCEED/common/calcELF.f90 \
-	GCEED/common/writeavs.f90 \
-	GCEED/common/calcJxyz_all_periodic.f90 \
-	GCEED/common/hartree_boundary.f90 \
-	GCEED/common/writeestatic.f90 \
-	GCEED/common/calc_gradient_fast_c.f90 \
-	GCEED/common/writecube.f90 \
-	GCEED/common/setbN.f90 \
-	GCEED/common/check_numcpu.f90 \
-	GCEED/common/hartree_cg.f90 \
-	GCEED/common/calcVpsl_periodic.f90 \
-	GCEED/common/psl.f90 \
-	GCEED/common/writedns.f90 \
-	GCEED/common/calc_iroot.f90 \
-	GCEED/common/calc_pmax.f90 \
-	GCEED/common/conv_p.f90 \
-	GCEED/common/calc_allob.f90 \
-	GCEED/common/init_wf.f90 \
-	GCEED/common/calcJxyz.f90 \
-	GCEED/common/check_mg.f90 \
-	GCEED/common/calcVpsl_periodic_FFTE.f90 \
-	GCEED/common/set_filename.f90 \
-	GCEED/common/check_fourier.f90 \
-	GCEED/common/bisection.f90 \
-	GCEED/common/init_k_rd.f90 \
-	GCEED/common/check_ng.f90 \
-	GCEED/common/ylm.f90 \
-	GCEED/common/check_corrkob.f90 \
-	GCEED/common/calc_force_c.f90 \
-	GCEED/common/laplacianh.f90 \
-	GCEED/common/writepsi.f90 \
-	GCEED/common/hartree_periodic.f90 \
-	GCEED/common/set_imesh_oddeven.f90 \
-	GCEED/common/calcVpsl.f90 \
-	GCEED/common/hartree.f90 \
-	GCEED/common/calcuV.f90 \
-	GCEED/common/OUT_IN_data.f90 \
-	GCEED/common/set_gridcoo.f90 \
-	GCEED/common/writevtk.f90 \
-	GCEED/common/total_energy_periodic.f90 \
-	GCEED/common/inner_product3.f90 \
-	GCEED/common/calc_ob_num.f90 \
-	GCEED/common/set_isstaend.f90 \
-	GCEED/common/conv_p0.f90 \
-	GCEED/common/set_ispin.f90 \
-	GCEED/common/writeelf.f90 \
-	GCEED/common/storevpp.f90 \
-	GCEED/common/inner_product4.f90 \
-	GCEED/common/read_copy_pot.f90 \
-	GCEED/common/nabla.f90 \
-	GCEED/common/calc_gradient_fast.f90 \
-	GCEED/common/exc_cor_ns.f90 \
-	GCEED/common/calcJxyz_all.f90 \
-	GCEED/common/hartree_FFTE.f90 \
-	GCEED/common/calc_iquotient.f90 \
-	GCEED/common/prep_poisson_fft.f90 \
-	GCEED/common/allocate_sendrecv.f90 \
-	GCEED/common/check_cep.f90 \
-	GCEED/misc/setmg.f90 \
-	GCEED/misc/setlg.f90 \
-	GCEED/misc/setk.f90 \
-	GCEED/misc/setng.f90 \
-	GCEED/scf/subdgemm_lapack.f90 \
-	GCEED/scf/real_space_dft.f90 \
-	GCEED/scf/subspace_diag.f90 \
-	GCEED/scf/check_dos_pdos.f90 \
-	GCEED/scf/set_numcpu_scf.f90 \
-	GCEED/scf/add_in_broyden.f90 \
-	GCEED/scf/copy_density.f90 \
-	GCEED/scf/total_energy_periodic_scf.f90 \
-	GCEED/scf/ybcg.f90 \
-	GCEED/scf/rmmdiis.f90 \
-	GCEED/scf/simple_mixing.f90 \
-	GCEED/scf/prep_ini.f90 \
-	GCEED/scf/total_energy_periodic_scf_esp.f90 \
-	GCEED/scf/subspace_diag_periodic.f90 \
-	GCEED/scf/deallocate_sendrecv.f90 \
-	GCEED/scf/calc_occupation.f90 \
-	GCEED/scf/eigen_subdiag_periodic_lapack.f90 \
-	GCEED/scf/gram_schmidt.f90 \
-	GCEED/scf/rmmdiis_eigen.f90 \
-	GCEED/scf/gram_schmidt_periodic.f90 \
-	GCEED/scf/ybcg_periodic.f90 \
-	GCEED/scf/buffer_broyden_ns.f90 \
-	GCEED/scf/write_eigen.f90 \
-	GCEED/scf/calc_dos.f90 \
-	GCEED/scf/eigen_subdiag_lapack.f90 \
-	GCEED/scf/convert_input_scf.f90 \
-	GCEED/scf/inner_product5.f90 \
-	GCEED/scf/calc_pdos.f90 \
-	GCEED/rt/calc_current.f90 \
-	GCEED/rt/projection.f90 \
-	GCEED/rt/check_ae_shape.f90 \
-	GCEED/rt/convert_input_rt.f90 \
-	GCEED/rt/set_vonf_sd.f90 \
-	GCEED/rt/real_time_dft.f90 \
-	GCEED/rt/calc_env_trigon.f90 \
-	GCEED/rt/calcAext.f90 \
-	GCEED/rt/set_numcpu_rt_sp.f90 \
-	GCEED/rt/gradient_ex.f90 \
-	GCEED/rt/set_numcpu_rt.f90 \
-	GCEED/rt/calcEstatic.f90 \
-	GCEED/rt/time_evolution_step.f90 \
-	GCEED/rt/initA.f90 \
-	GCEED/rt/read_rt.f90 \
-	GCEED/rt/taylor_coe.f90 \
-	GCEED/rt/xc_fast.f90 \
-	GCEED/rt/calcVbox.f90 \
-	GCEED/rt/total_energy_groupob.f90 \
-	GCEED/rt/dip.f90 \
-	GCEED/rt/taylor.f90 \
-	GCEED/rt/hpsi_groupob.f90 \
-	GCEED/rt/add_polynomial.f90 \
-	GCEED/gceed.f90 \
-	GCEED/read_input_gceed.f90 \
-	maxwell/salmon_maxwell.f90 \
-	maxwell/weyl_calc.f90 \
-	maxwell/weyl_init.f90 \
-	maxwell/eh_init.f90 \
-	maxwell/coulomb_init.f90 \
-	maxwell/eh_finalize.f90 \
-	maxwell/weyl_finalize.f90 \
-	maxwell/coulomb_finalize.f90 \
-	maxwell/classic_em.f90 \
-	maxwell/eh_calc.f90 \
-	maxwell/coulomb_calc.f90 \
-	main.f90
+./misc/backup_routines.f90 \
+./misc/misc_routines.f90 \
+./misc/timer.f90 \
+./misc/unusedvar.f90 \
+./math/math_constants.f90 \
+./math/phys_constants.f90 \
+./math/salmon_math.f90 \
+./common/calc_gradient_psi.f90 \
+./common/const.f90 \
+./common/pack_unpack.f90 \
+./common/structures.f90 \
+./common/zstencil_core/typical/omp.f90 \
+./common/zstencil_core/typical/seq.f90 \
+./common/zstencil_microac_core/typical/omp.f90 \
+./common/zstencil_microac_core/typical/seq.f90 \
+./io/salmon_global.f90 \
+./parallel/communication$(COMM_SET).f90 \
+./common/broyden.f90 \
+./common/nonlocal_potential.f90 \
+./io/filesystem.f90 \
+./parallel/init_communicator.f90 \
+./parallel/network_address.f90 \
+./common/sendrecv_grid.f90 \
+./parallel/parallelization.f90 \
+./io/checkpoint_restart.f90 \
+./io/inputoutput.f90 \
+./io/perflog.f90 \
+./io/read_rtdata_file.f90 \
+./io/write_file3d.f90 \
+./parallel/code_optimization.f90 \
+./common/stencil.f90 \
+./io/write_field.f90 \
+./parallel/set_numcpu.f90 \
+./symmetry/symmetry.f90 \
+./symmetry/symmetry_kvector.f90 \
+./common/lattice.f90 \
+./symmetry/symmetry_rho.f90 \
+./symmetry/symmetry_vector.f90 \
+./common/density_matrix.f90 \
+./atom/pp/input_pp.f90 \
+./atom/pp/salmon_pp.f90 \
+./poisson/init_poisson.f90 \
+./common/initialization.f90 \
+./poisson/poisson_isolated.f90 \
+./poisson/poisson_periodic.f90 \
+./poisson/hartree.f90 \
+./maxwell/common_maxwell.f90 \
+./maxwell/fdtd_weyl_gauge.f90 \
+./xc/builtin_pbe.f90 \
+./xc/builtin_pz.f90 \
+./xc/builtin_pz_sp.f90 \
+./xc/builtin_pzm.f90 \
+./xc/builtin_tbmbj.f90 \
+./xc/salmon_xc.f90 \
+./plusu/calc_jxyz_plusu.f90 \
+./plusu/calc_nps_plusu.f90 \
+./plusu/plusu_global.f90 \
+./common/force.f90 \
+./plusu/density_matrix_and_energy_plusu.f90 \
+./plusu/prep_pp_plusu.f90 \
+./plusu/pseudo_pt_plusu.f90 \
+./plusu/update_kvector_plusu.f90 \
+./so/nondiagonal_so.f90 \
+./so/spin_orbit_global.f90 \
+./so/gram_schmidt_so.f90 \
+./so/prep_pp_so.f90 \
+./so/pseudo_pt_so.f90 \
+./so/update_kvector_so.f90 \
+./common/hamiltonian.f90 \
+./common/total_energy.f90 \
+./atom/pp/prep_pp.f90 \
+./gs/band.f90 \
+./io/write.f90 \
+./gs/band_dft.f90 \
+./gs/conjugate_gradient.f90 \
+./gs/eigen_subdiag_lapack.f90 \
+./gs/eigen_subdiag.f90 \
+./so/subspace_diagonalization_so.f90 \
+./gs/gram_schmidt_orth.f90 \
+./gs/init_gs.f90 \
+./gs/mixing.f90 \
+./gs/occupation.f90 \
+./gs/read_gs.f90 \
+./gs/structure_opt.f90 \
+./gs/subspace_diagonalization.f90 \
+./gs/scf_iteration.f90 \
+./gs/scf_iteration_dft.f90 \
+./rt/dip.f90 \
+./rt/em_field.f90 \
+./maxwell/fdtd_coulomb_gauge.f90 \
+./rt/md.f90 \
+./gs/initialization_dft.f90 \
+./io/main_dft_k_expand.f90 \
+./io/main_dft_k_expand_slice.f90 \
+./gs/main_dft.f90 \
+./gs/main_dft_md.f90 \
+./rt/initialization_rt.f90 \
+./rt/main_tddft.f90 \
+./rt/taylor.f90 \
+./rt/time_evolution_step.f90 \
+./ttm/ttm.f90 \
+./maxwell/fdtd_eh.f90 \
+./maxwell/main_maxwell.f90 \
+./ms/input_checker_ms.f90 \
+./ms/main_ms.f90 \
+./main.f90
 
 C_SRCS = \
+	io/posix.c \
 	$(C_STENCIL_FILE)
 
 F_SRCS = \
@@ -267,9 +139,6 @@ F_SRCS = \
 	ext/FFTE/fft235.f \
 	ext/FFTE/kernel.f \
 	ext/FFTE/pzfft3dv_mod.f
-
-H_IN_VERSION = $(addprefix $(SRCDIR)/, version.h.in versionf.h.in)
-H_VERSION = $(addprefix $(OBJDIR)/, version.h versionf.h)
 
 F90_SRC_FILES=$(addprefix $(SRCDIR)/, $(F90_SRCS))
 F90_OBJ_FILES=$(addprefix $(OBJDIR)/, $(F90_SRCS:.f90=.o))
@@ -280,33 +149,24 @@ F_OBJ_FILES=$(addprefix $(OBJDIR)/, $(F_SRCS:.f=.o))
 
 $(SALMON_TARGET): $(F90_OBJ_FILES) $(C_OBJ_FILES) $(F_OBJ_FILES)
 	@if [ ! -d $(dir $@) ]; then mkdir -p $(dir $@); fi
-	$(FC) $(FFLAGS) -o $@ $^ -I $(OBJDIR) $(LIBLAPACK) $(LIBXC_LIB)
+	$(FC) $(FFLAGS) -o $@ $^ -I $(OBJDIR) $(LIBLAPACK) $(LIBXC) $(MPIFLAG) $(OMPFLAG) $(CONFIG)
 
 $(F90_OBJ_FILES): $(F90_SRC_FILES)
 $(C_OBJ_FILES): $(C_SRC_FILES)
 $(F_OBJ_FILES): $(F_SRC_FILES)
-$(H_VERSION): $(H_IN_VERSION)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.f90 $(H_VERSION)
+$(OBJDIR)/%.o: $(SRCDIR)/%.f90
 	@if [ ! -d $(dir $@) ]; then mkdir -p $(dir $@); fi
-	$(FC) $(FFLAGS) $(MODULE_SWITCH) $(OBJDIR) -o $@ -c $< -I $(OBJDIR) $(LIBXC_INC) $(MPI_FLAG)
+	$(FC) $(FFLAGS) $(MODULE_SWITCH) $(OBJDIR) -o $@ -c $< -I $(OBJDIR) -I $(MAKEDIR) $(LIBXC) $(MPIFLAG) $(OMPFLAG) $(CONFIG)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.c $(H_VERSION)
+$(OBJDIR)/%.o: $(SRCDIR)/%.c 
 	@if [ ! -d $(dir $@) ]; then mkdir -p $(dir $@); fi
-	$(CC) $(CFLAGS) -o $@ -c $< -I $(OBJDIR) $(MPI_FLAG)
+	$(CC) $(CFLAGS) -o $@ -c $< -I $(OBJDIR) -I $(MAKEDIR) $(MPIFLAG) $(OMPFLAG) $(CONFIG)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.f $(H_VERSION)
+$(OBJDIR)/%.o: $(SRCDIR)/%.f 
 	@if [ ! -d $(dir $@) ]; then mkdir -p $(dir $@); fi
-	$(FC) $(FFLAGS) $(MODULE_SWITCH) $(OBJDIR) -o $@ -c $< -I $(OBJDIR) $(LIBXC_INC) $(MPI_FLAG)
+	$(FC) $(FFLAGS) $(MODULE_SWITCH) $(OBJDIR) -o $@ -c $< -I $(OBJDIR) $(LIBXC) $(MPIFLAG) $(OMPFLAG) $(CONFIG)
 
-$(OBJDIR)/%.h: $(SRCDIR)/%.h.in
-	@if [ ! -d $(dir $@) ]; then mkdir -p $(dir $@); fi
-	cat $< \
-	| sed -e "/cmakedefine/d" \
-	| sed -e "s/@GIT_FOUND@/false/" \
-	| sed -e "s/@GIT_BRANCH@//" \
-	| sed -e "s/@GIT_COMMIT_HASH@//" \
-	> $@
 
 .PHONY: all clean
 
