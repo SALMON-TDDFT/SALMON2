@@ -2052,11 +2052,11 @@ contains
       end if
 
       do ik=info%ik_s,info%ik_e
-      do io=info%io_s,io_e,nblock_orbital
-        if (mod((io - 1) / nblock_orbital, info%isize_o) == info%id_o) then
+      do io=1,mo+nblock_orbital-1,nblock_orbital
+        if (mod((io - 1) / nblock_orbital, info%isize_o) == info%id_o .and. comm_is_root(info%id_r)) then
           nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
           write (iofile,'(A,I3.3,A,I6.6)') trim(iodir)//'k_',ik,'_ob_',nb
-          call create_directory(iofile,iret)
+          call create_directory(iofile)
         end if
       end do
       end do
