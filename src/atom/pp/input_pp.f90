@@ -733,7 +733,7 @@ subroutine read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
     r=0
     do l=l0,l0+pp%nproj(ll,ik)-1
       do i=pp%mr(ik),1,-1
-        if ( abs(pp%vpp(i,l)) > 1.d-12 ) then
+        if ( abs(pp%vpp(i,l)) > 1.d-6 ) then
           r=max(r,pp%rad(i+1,ik))
           exit
         end if
