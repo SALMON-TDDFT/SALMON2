@@ -22,11 +22,14 @@ contains
 
 !===================================================================================================================================
 subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+  use math_constants,only: pi
   use inputoutput, only: iperiodic,yn_ffte
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
   use poisson_isolated
   use poisson_periodic
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
   type(s_rgrid)          ,intent(in)    :: mg
@@ -38,6 +41,8 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   type(s_stencil)        ,intent(in)    :: stencil
   type(s_scalar)         ,intent(in)    :: rho
   type(s_scalar)         ,intent(inout) :: Vh
+  integer :: ix,iy,iz
+  real(8) :: Vwall_z,Vwall_max,Vwall_wdt, z,z0
 
   select case(iperiodic)
   case(0)
@@ -50,6 +55,29 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
       call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
     end select
   end select
+
+  !XXX test XXX  add wall potential for z-direction
+  Vwall_max = 50.0d0 / 27.2114d0 ! wall height
+  Vwall_wdt =  5.0d0 / 0.529d0   ! wall width (gaussian)
+!$OMP parallel do private(iz,iy,ix,z,z0,Vwall_z)
+  do iz = mg%is(3),mg%ie(3)
+     z  = iz*system%hgs(3)
+     z0 = lg%num(3) * system%hgs(3)
+     if( z .le. Vwall_wdt ) then
+        Vwall_z = Vwall_max * cos((z/Vwall_wdt)*pi/2d0)**2
+     else if( z .ge. z0-Vwall_wdt ) then
+        Vwall_z = Vwall_max * cos(((z0-z)/Vwall_wdt)*pi/2d0)**2
+     else
+        cycle
+     endif
+!if(comm_is_root(nproc_id_global)) write(*,*) iz, z, Vwall_z
+     do iy = mg%is(2),mg%ie(2)
+     do ix = mg%is(1),mg%ie(1)
+        Vh%f(ix,iy,iz) = Vh%f(ix,iy,iz) + Vwall_z
+     end do
+     end do
+  end do
+
 
 return
 
