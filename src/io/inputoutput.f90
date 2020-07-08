@@ -877,8 +877,6 @@ contains
     call string_lowercase(method_mixing)
     call string_lowercase(convergence)
     call string_lowercase(trans_longi)
-    call string_lowercase(ae_shape1)
-    call string_lowercase(ae_shape2)
     call string_lowercase(method_singlescale)
 
 ! Broad cast
