@@ -348,7 +348,10 @@ contains
       
     namelist/singlescale/ &
       & method_singlescale, &
-      & cutoff_G2_emfield
+      & cutoff_G2_emfield, &
+      & yn_put_wall_z_boundary, &
+      & wall_height, &
+      & wall_width
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -651,6 +654,9 @@ contains
 !! == default for &singlescale
     method_singlescale = '3d'
     cutoff_G2_emfield  = -1d0
+    yn_put_wall_z_boundary = 'n'
+    wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
+    wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
 
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -1077,8 +1083,13 @@ contains
 
 !! == bcast for &singlescale
     call comm_bcast(method_singlescale,nproc_group_global)
-    call comm_bcast(cutoff_G2_emfield,nproc_group_global)
+    call comm_bcast(cutoff_G2_emfield ,nproc_group_global)
     cutoff_G2_emfield = cutoff_G2_emfield * uenergy_to_au
+    call comm_bcast(yn_put_wall_z_boundary,nproc_group_global)
+    call comm_bcast(wall_height           ,nproc_group_global)
+    call comm_bcast(wall_width            ,nproc_group_global)
+    wall_height = wall_height * uenergy_to_au
+    wall_width  = wall_width  * ulength_to_au
 
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1799,6 +1810,9 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'singlescale', inml_singlescale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_singlescale', method_singlescale
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
