@@ -228,26 +228,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     endif
     call timer_end(LOG_CALC_DENSITY_MATRIX)
 
-    call timer_begin(LOG_CALC_CURRENT)
-    system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
-    if(if_use_dmat) then
-       call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
-    else
-       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
-       spsi_out%update_zwf_overlap = .true. 
-    end if
-    call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
-    system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt)
-    system%vec_E_ext(1:3)  = rt%E_ext (1:3,itt)
-    system%vec_E(1:3)      = rt%E_tot (1:3,itt)
-    call timer_end(LOG_CALC_CURRENT)
-
-    if(yn_md=='y') then
-      call timer_begin(LOG_CALC_CURRENT_ION)
-      call calc_current_ion(lg,system,pp,curr_i_tmp)
-      call timer_end(LOG_CALC_CURRENT_ION)
-    end if
-
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
@@ -258,7 +238,28 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call fdtd_singlescale(itt,lg,mg,system,info,rho, &
       & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
       call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+      rt%curr(1:3,itt) = singlescale%curr_ave(1:3)
       call timer_end(LOG_CALC_SINGLESCALE)
+    else
+      call timer_begin(LOG_CALC_CURRENT)
+      system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
+      if(if_use_dmat) then
+         call calc_current_use_dmat(system,mg,stencil,info,spsi_out,ppg,dmat,curr_e_tmp(1:3,1:nspin))
+      else
+         call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
+         spsi_out%update_zwf_overlap = .true.
+      end if
+      call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
+      system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt)
+      system%vec_E_ext(1:3)  = rt%E_ext (1:3,itt)
+      system%vec_E(1:3)      = rt%E_tot (1:3,itt)
+      call timer_end(LOG_CALC_CURRENT)
+    end if
+    
+    if(yn_md=='y') then
+      call timer_begin(LOG_CALC_CURRENT_ION)
+      call calc_current_ion(lg,system,pp,curr_i_tmp)
+      call timer_end(LOG_CALC_CURRENT_ION)
     end if
 
   end select
