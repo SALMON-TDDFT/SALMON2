@@ -22,7 +22,8 @@ contains
 
 !===================================================================================================================================
 subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  use inputoutput, only: iperiodic,yn_ffte
+  use math_constants,only: pi
+  use inputoutput, only: iperiodic,yn_ffte,yn_put_wall_z_boundary
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
                         s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
   use poisson_isolated
@@ -51,7 +52,38 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
     end select
   end select
 
-return
+  !potentiall wall at the boundary on z direction
+  if(yn_put_wall_z_boundary=='y') call add_potential_wall
+
+  contains
+
+    subroutine  add_potential_wall
+      use inputoutput, only: wall_height, wall_width
+      implicit none
+      integer :: ix,iy,iz
+      real(8) :: Vwall_z, z,z0
+
+      !$omp parallel do private(iz,iy,ix,z,z0,Vwall_z)
+      do iz = mg%is(3),mg%ie(3)
+         z  = iz*system%hgs(3)
+         z0 = lg%num(3) * system%hgs(3)
+         if( z .le. wall_width ) then
+            Vwall_z = wall_height * cos((z/wall_width)*pi/2d0)**2
+         else if( z .ge. z0-wall_width ) then
+            Vwall_z = wall_height * cos(((z0-z)/wall_width)*pi/2d0)**2
+         else
+            cycle
+         endif
+
+         do iy = mg%is(2),mg%ie(2)
+         do ix = mg%is(1),mg%ie(1)
+            Vh%f(ix,iy,iz) = Vh%f(ix,iy,iz) + Vwall_z
+         end do
+         end do
+      end do
+      !$omp end parallel do
+    
+    end subroutine add_potential_wall
 
 end subroutine hartree
 
