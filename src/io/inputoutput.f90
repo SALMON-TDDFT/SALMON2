@@ -861,7 +861,25 @@ contains
 
 !! convert lowercase
     call string_lowercase(theory)
-
+    call string_lowercase(spin)
+    call string_lowercase(xc)
+    call string_lowercase(cname)
+    call string_lowercase(xname)
+#ifdef USE_LIBXC
+    call string_lowercase(alibxc)
+    call string_lowercase(alibx)
+    call string_lowercase(alibc)
+#endif
+    call string_lowercase(process_allocation)
+    call string_lowercase(propagator)
+    call string_lowercase(method_init_wf)
+    call string_lowercase(method_min)
+    call string_lowercase(method_mixing)
+    call string_lowercase(convergence)
+    call string_lowercase(trans_longi)
+    call string_lowercase(ae_shape1)
+    call string_lowercase(ae_shape2)
+    call string_lowercase(method_singlescale)
 
 ! Broad cast
 !! == bcast for &calculation
