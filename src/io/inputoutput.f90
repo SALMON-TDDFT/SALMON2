@@ -2048,6 +2048,7 @@ contains
   subroutine check_bad_input
     use parallelization
     use communication
+    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     integer :: round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
@@ -2182,6 +2183,12 @@ contains
         stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
       end select
     end select
+
+    if( SPIN_ORBIT_ON )then
+       if( ispin == 0 )then
+          stop 'ispin = 1 is necessary when spin-orbit calculation is performed'
+       end if
+    end if
 
   end subroutine check_bad_input
 
