@@ -19,7 +19,6 @@ module salmon_global
 
 !Parameters for pseudo-potential
   integer, parameter :: maxmki=10
-  integer :: MI,MKI
    !shinohara
   integer :: ipsfileform(maxmki)   ! file format for pseudo potential
   character(16)  :: ps_format(maxmki)

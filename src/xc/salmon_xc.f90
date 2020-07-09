@@ -210,7 +210,7 @@ contains
       use math_constants,only : zi
       implicit none
       integer :: im,ik,io,ispin
-      real(8) :: kAc(3),occ
+      real(8) :: k(3),occ
       complex(8) :: zs(3),p
       real(8) :: j_tmp1(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
                & j_tmp2(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),3), &
@@ -247,13 +247,13 @@ contains
             ,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
             
         occ = system%rocc(io,ik,ispin)*system%wtk(ik)
-        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        k(1:3) = system%vec_k(1:3,ik)
 !$omp parallel do collapse(2) private(iz,iy,ix,zs,p)
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
           p = spsi%zwf(ix,iy,iz,ispin,io,ik,im)
-          zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi* kAc(1:3)* p
+          zs(1:3) = gtpsi(1:3,ix,iy,iz) + zi* k(1:3)* p
           tau_tmp1(ix,iy,iz) = tau_tmp1(ix,iy,iz) + (abs(zs(1))**2+abs(zs(2))**2+abs(zs(3))**2)*occ*0.5d0
           j_tmp1(ix,iy,iz,1:3) = j_tmp1(ix,iy,iz,1:3) + aimag(conjg(p)*zs(1:3))*occ
         end do

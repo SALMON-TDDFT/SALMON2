@@ -264,6 +264,9 @@ subroutine initialization_ms()
         end do
     end do
 
+    ! incident field
+    allocate(Ac_inc(1:3, -1:itotNtime+2))
+
     call Weyl_init(fs, fw)
 
     allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
@@ -401,8 +404,8 @@ subroutine time_evolution_step_ms
     ! ----------------------------------------
     ! Time Evolution of FDTD System
     ! ----------------------------------------
-    fw%Ac_inc_new(:) = Ac_inc(:, itt+1)
-    fw%Ac_inc(:) = Ac_inc(:, itt)
+    fw%Ac_inc_new(:) = Ac_inc(:, itt)
+    fw%Ac_inc(:) = Ac_inc(:, itt-1)
     call weyl_calc(fs, fw)
     if (mod(itt, out_ms_step) == 0) call write_RT_Ac_file()
 
@@ -420,8 +423,8 @@ subroutine time_evolution_step_ms
         iix = ms%ixyz_tbl(1, iimacro)
         iiy = ms%ixyz_tbl(2, iimacro)
         iiz = ms%ixyz_tbl(3, iimacro)
-        rt%Ac_ext(1:3, itt) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
-        rt%Ac_ext(1:3, itt + 1) = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
+        rt%Ac_tot(1:3, itt-1) = fw%vec_Ac%v(1:3, iix, iiy, iiz)
+        rt%Ac_tot(1:3, itt)   = fw%vec_Ac_new%v(1:3, iix, iiy, iiz)
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
@@ -585,9 +588,9 @@ subroutine write_RT_Ac_file()
                 & iix, & 
                 & iiy, & 
                 & iiz, & 
-                & fw%vec_Ac%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
-                & fw%vec_Ac%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
-                & fw%vec_Ac%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_Ac_new%v(1, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_Ac_new%v(2, iix, iiy, iiz) * t_unit_ac%conv, &
+                & fw%vec_Ac_new%v(3, iix, iiy, iiz) * t_unit_ac%conv, &
                 & fw%vec_E%v(1, iix, iiy, iiz) * t_unit_elec%conv, &
                 & fw%vec_E%v(2, iix, iiy, iiz) * t_unit_elec%conv, &
                 & fw%vec_E%v(3, iix, iiy, iiz) * t_unit_elec%conv, &
@@ -620,13 +623,13 @@ subroutine incident()
     fw%vec_Ac%v = 0d0
     fw%vec_Ac_old%v = 0d0
 
-    ! x-directed incident
-    allocate(Ac_inc(1:3, -1:itotNtime+1))
 
     call calc_Ac_ext_t(-(fs%mg%is(1)-0.5d0)*fs%hgs(1) / cspeed_au, fw%dt, &
-        & -1, itotNtime+1, Ac_inc)
+        & -1, itotNtime+2, Ac_inc)
 
     if (yn_restart == 'y') then
+
+        itt = Mit
 
         if (comm_is_root(ms%id_ms_world)) then
             fh_bin = get_filehandle()
@@ -654,31 +657,34 @@ subroutine incident()
         call comm_bcast(fw%vec_j_em%v, ms%icomm_ms_world)
 
     else
-
+        itt = -1  ! Prepare itt=-1 Ac_vec field profile
         allocate(Ac_new(1:3, fs%mg%is_overlap(1):0))
         allocate(Ac(1:3, fs%mg%is_overlap(1):0))
-        allocate(Ac_old(1:3, fs%mg%is_overlap(1):0))    
-        call calc_Ac_ext_t(0*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac_new)
-        call calc_Ac_ext_t(-1*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac)
-        call calc_Ac_ext_t(-2*fw%dt, -fs%hgs(1) / cspeed_au, &
-            & fs%mg%is_overlap(1), 0, Ac_old)
+        allocate(Ac_old(1:3, fs%mg%is_overlap(1):0)) 
+        call calc_Ac_ext_t((itt)*fw%dt, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac_new)   ! Ac_new = Ac(itt) with itt=-1
+        call calc_Ac_ext_t((itt-1)*fw%dt, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac)       ! Ac = Ac(itt-1) with itt=-1
+        call calc_Ac_ext_t((itt-2)*fw%dt, -fs%hgs(1) / cspeed_au, &
+            & fs%mg%is_overlap(1), 0, Ac_old)   ! Ac = Ac(itt-2) with itt=-1
         do iiz = fs%mg%is_overlap(3), fs%mg%ie_overlap(3)
             do iiy = fs%mg%is_overlap(2), fs%mg%ie_overlap(2)
-                fw%vec_Ac%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3,  fs%mg%is_overlap(1):0)
-                fw%vec_Ac_new%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_new(1:3,  fs%mg%is_overlap(1):0)
-                fw%vec_Ac_old%v(1:3,  fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3,  fs%mg%is_overlap(1):0)
+                fw%vec_Ac_new%v(1:3, fs%mg%is_overlap(1):0, iiy, iiz) = Ac_new(1:3, fs%mg%is_overlap(1):0)
+                fw%vec_Ac%v(1:3, fs%mg%is_overlap(1):0, iiy, iiz) = Ac(1:3, fs%mg%is_overlap(1):0)
+                fw%vec_Ac_old%v(1:3, fs%mg%is_overlap(1):0, iiy, iiz) = Ac_old(1:3, fs%mg%is_overlap(1):0)
             end do
         end do
         deallocate(Ac_new, Ac, Ac_old)
 
-        fw%Ac_inc(:) = Ac_inc(:, 0)
-        fw%Ac_inc_new(:) = Ac_inc(:, 1)
+        itt = 0 ! Update to itt=0 Ac_vec field prodile
+        fw%Ac_inc(:) = Ac_inc(:, itt-1)
+        fw%Ac_inc_new(:) = Ac_inc(:, itt)
         call weyl_calc(fs, fw)
 
-        call write_RT_Ac_file()
     end if
+
+    ! Write out initial field profile:
+    call write_RT_Ac_file()
 
     return
  end subroutine incident
