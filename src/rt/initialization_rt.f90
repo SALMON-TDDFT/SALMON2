@@ -421,7 +421,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   if(iperiodic==3) then
     call calc_Ac_ext_t(0d0, dt, Mit, itotNtime+1, rt%Ac_ext(:,Mit:itotNtime+1))
-    rt%Ac_tot(:,Mit) = rt%Ac_ext(:,Mit) + rt%Ac_ind(:,Mit) ! future work: restart input of rt%Ac_ind
+    ! future work: restart input of rt%Ac_ind
+    rt%Ac_tot(1:3,Mit:Mit+1) = rt%Ac_ext(1:3,Mit:Mit+1) + rt%Ac_ind(1:3,Mit:Mit+1)
   end if
   
   if(yn_md=='y') call init_md(system,md)
