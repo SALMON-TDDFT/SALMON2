@@ -107,7 +107,8 @@ contains
     use salmon_global,   only: nt_em,al_em,dl_em,dt_em,boundary_em,yn_periodic,base_directory,&
                                media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
-                               obs_num_em,obs_loc_em,wave_input,trans_longi,e_impulse,nenergy,&
+                               obs_num_em,obs_loc_em,yn_obs_plane_integral_em,&
+                               wave_input,trans_longi,e_impulse,nenergy,&
                                source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
                                phi_cep1,I_wcm2_1,E_amplitude1,&
                                source_loc2,ek_dir2,epdir_re2,epdir_im2,ae_shape2,&
@@ -127,6 +128,7 @@ contains
     integer                           :: ii,ij,ix,iy,iz,icount,icount_ld,iflag_lr,iflag_pml
     real(8)                           :: dt_cfl
     character(1)                      :: dir
+    character(2)                      :: plane_name
     character(128)                    :: save_name
     
     !*** set initial parameter and value **********************************************************************!
@@ -341,7 +343,7 @@ contains
       fe%c1_j_ld(:,:)=0.0d0; fe%c2_j_ld(:,:)=0.0d0; fe%c3_j_ld(:,:)=0.0d0;
     end if
     
-    !*** set fdtd coeffient and write media information *******************************************************!
+    !*** set fdtd coeffient ***********************************************************************************!
     allocate(fe%rep(0:media_num),fe%rmu(0:media_num),fe%sig(0:media_num))
     fe%rep(:)=1.0d0; fe%rmu(:)=1.0d0; fe%sig(:)=0.0d0;
     do ii=0,media_num
@@ -351,7 +353,7 @@ contains
       call eh_coeff
     end do
 
-    !*** Check TTM On/Off, and initialization
+    !*** Check TTM On/Off, and initialization *****************************************************************!
     call init_ttm_parameters( dt_em )
     if( use_ttm )then
        call init_ttm_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
@@ -368,6 +370,7 @@ contains
        end if
     end if !use_ttm
 
+    !*** write media information ******************************************************************************!
     deallocate(fs%imedia); deallocate(fe%rmedia);
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
@@ -528,6 +531,7 @@ contains
         end do
         write(*,*) "**************************"
         do ii=1,obs_num_em
+          !set header for point data
           write(save_name,*) ii
           save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
           open(fe%ifn,file=save_name)
@@ -537,12 +541,12 @@ contains
           select case(unit_system)
           case('au','a.u.')
             write(fe%ifn,'("#",99(1X,I0,":",A))') &
-                  1, "Time[a.u.]",              &
-                  2, "E_x[a.u.]",         &
-                  3, "E_y[a.u.]",         &
-                  4, "E_z[a.u.]",         &
-                  5, "H_x[a.u.]",         &
-                  6, "H_y[a.u.]",         &
+                  1, "Time[a.u.]",                &
+                  2, "E_x[a.u.]",                 &
+                  3, "E_y[a.u.]",                 &
+                  4, "E_z[a.u.]",                 &
+                  5, "H_x[a.u.]",                 &
+                  6, "H_y[a.u.]",                 &
                   7, "H_z[a.u.]"
           case('A_eV_fs')
             write(fe%ifn,'("#",99(1X,I0,":",A))') &
@@ -555,6 +559,50 @@ contains
                   7, "H_z[A/Angstrom]"
           end select
           close(fe%ifn)
+          
+          !set header for plane integral data
+          if(yn_obs_plane_integral_em(ii)=='y') then
+            do ij=1,3
+              !set plane name
+              if(ij==1)     then !xy plane
+                plane_name='xy';
+              elseif(ij==2) then !yz plane
+                plane_name='yz';
+              elseif(ij==3) then !xz plane
+                plane_name='xz';
+              end if
+              
+              !set header
+              write(save_name,*) ii
+              save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//&
+                        '_'//plane_name//'_integral_rt.data'
+              open(fe%ifn,file=save_name)
+              write(fe%ifn,'(A)') "# Real time calculation:" 
+              write(fe%ifn,'(A)') "# IE: Plane integration of electric field" 
+              write(fe%ifn,'(A)') "# IH: Plane integration of magnetic field" 
+              select case(unit_system)
+              case('au','a.u.')
+                write(fe%ifn,'("#",99(1X,I0,":",A))') &
+                      1, "Time[a.u.]",                &
+                      2, "IE_x[a.u.]",                &
+                      3, "IE_y[a.u.]",                &
+                      4, "IE_z[a.u.]",                &
+                      5, "IH_x[a.u.]",                &
+                      6, "IH_y[a.u.]",                &
+                      7, "IH_z[a.u.]"
+              case('A_eV_fs')
+                write(fe%ifn,'("#",99(1X,I0,":",A))') &
+                      1, "Time[fs]",                  &
+                      2, "IE_x[V*Angstrom]",          &
+                      3, "IE_y[V*Angstrom]",          &
+                      4, "IE_z[V*Angstrom]",          &
+                      5, "IH_x[A*Angstrom]",          &
+                      6, "IH_y[A*Angstrom]",          &
+                      7, "IH_z[A*Angstrom]"
+              end select
+              close(fe%ifn)
+            end do
+          end if
         end do
       end if
     end if
@@ -1328,11 +1376,11 @@ contains
   !===========================================================================================
   != calculate eh-FDTD =======================================================================
   subroutine eh_calc(fs,fe)
-    use salmon_global,   only: dt_em,pole_num_ld,obs_num_em,obs_samp_em,yn_obs_plane_em,&
+    use salmon_global,   only: dt_em,pole_num_ld,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
                                base_directory,t1_t2,t1_start,&
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,&
                                E_amplitude2,tw2,omega2,phi_cep2,epdir_re2,epdir_im2,ae_shape2
-    use inputoutput,     only: utime_from_au, uenergy_from_au
+    use inputoutput,     only: utime_from_au,uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_size_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
@@ -1343,13 +1391,13 @@ contains
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer                           :: iter,ii,ij,ix,iy,iz
     character(128)                    :: save_name
-    
+    !for ttm
     integer :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
     real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
-    real(8) :: dV, tmp(4)
-    real(8), parameter :: hartree_kelvin_relationship = 3.1577502480407d5 ! [K] (+/- 6.1e-07)
+    real(8)             :: dV, tmp(4)
+    real(8), parameter  :: hartree_kelvin_relationship = 3.1577502480407d5 ! [K] (+/- 6.1e-07)
 
     !time-iteration
     do iter=fe%iter_sta,fe%iter_end
@@ -1425,8 +1473,8 @@ contains
                  fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,      'h','y') !hz_y
       call eh_sendrecv(fs,fe,'h')
       
+      !ttm
       if( use_ttm )then
-
          !Poynting vector
          if ( .not.allocated(Spoynting) ) then
             call allocate_poynting(fs, Spoynting, divS, u_energy)
@@ -1436,12 +1484,12 @@ contains
          call calc_poynting_vector(fs, fe, Spoynting)
          call calc_poynting_vector_div(fs, Spoynting, divS)
          u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
-
+         
          u_energy_p = u_energy
          call ttm_penetration( fs%mg%is, u_energy_p )
-
+         
          call ttm_main( fs%srg_ng, fs%mg, u_energy_p )
-
+         
          if( mod(iter,obs_samp_em) == 0 )then
             ix=fs%lg%is(1)-fe%Nd; jx=fs%lg%ie(1)+fe%Nd
             iy=fs%lg%is(2)-fe%Nd; jy=fs%lg%ie(2)+fe%Nd
@@ -1462,7 +1510,7 @@ contains
                write(unit1,*)
                end do
             end if
-!
+            
             dV=fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
             tmp(3)=sum(u_energy)*dV*uenergy_from_au
             tmp(4)=sum(u_energy_p)*dV*uenergy_from_au
@@ -1534,6 +1582,13 @@ contains
                                fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hy_s,'hy')
             call eh_save_plane(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uAperm_from_au,&
                                fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fe%ifn,ii,iter,fe%hz_s,'hz')
+          end if
+          
+          !plane integral
+          if(yn_obs_plane_integral_em(ii)=='y') then
+            call eh_save_plane_integral(fe%iobs_po_id(ii,:),fe%iobs_pl_pe(ii,:),fe%uVperm_from_au,fe%uAperm_from_au, &
+                                        dble(iter)*dt_em*utime_from_au,fs%mg%is,fs%mg%ie,fs%hgs,fe%Nd,fe%ifn,ii,     &
+                                        fe%ex_s,fe%ey_s,fe%ez_s,fe%hx_s,fe%hy_s,fe%hz_s)
           end if
         end do
         
@@ -2312,7 +2367,7 @@ contains
   !===========================================================================================
   != prepare mpi, grid, and sendrecv enviroments==============================================
   subroutine eh_mpi_grid_sr(fs,fe)
-    use salmon_global,     only: nproc_rgrid,yn_periodic,nproc_k,nproc_ob
+    use salmon_global,     only: nproc_rgrid,nproc_k,nproc_ob
     use parallelization,   only: nproc_group_global
     use set_numcpu,        only: set_numcpu_general,iprefer_domain_distribution
     use init_communicator, only: init_communicator_dft
@@ -2569,20 +2624,20 @@ contains
     implicit none
     integer,intent(in)      :: ista(3),iend(3),ng_is(3),ng_ie(3)
     integer,intent(in)      :: Nd
-    real(8),intent(in)      :: c1(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+    real(8),intent(in)      :: c1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd),&
-                               c2(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+                               c2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),intent(inout)   :: f1(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+    real(8),intent(inout)   :: f1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),intent(in)      :: f2(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+    real(8),intent(in)      :: f2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd),&
-                               f3(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                  ng_is(2)-Nd:ng_ie(2)+Nd,&
+                               f3(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                                  ng_is(2)-Nd:ng_ie(2)+Nd, &
                                   ng_is(3)-Nd:ng_ie(3)+Nd)
     character(1),intent(in) :: var,dir
     integer :: ix,iy,iz
@@ -2702,7 +2757,7 @@ contains
     
     do ii=1,3
       !allocate
-      if(ii==1) then     !xy plane
+      if(ii==1)     then !xy plane
         i1s=1; i2s=2; plane_name='xy';
       elseif(ii==2) then !yz plane
         i1s=2; i2s=3; plane_name='yz';
@@ -2773,6 +2828,118 @@ contains
   end subroutine eh_save_plane
   
   !===========================================================================================
+  != save plane data =========================================================================
+  subroutine eh_save_plane_integral(id,ipl,conv_e,conv_h,ti,ng_is,ng_ie,dl,Nd,ifn,iobs,ex,ey,ez,hx,hy,hz)
+    use salmon_global,   only: base_directory
+    use inputoutput,     only: ulength_from_au
+    use parallelization, only: nproc_id_global,nproc_group_global
+    use communication,   only: comm_is_root,comm_summation
+    implicit none
+    integer,intent(in) :: id(3),ipl(3)
+    real(8),intent(in) :: conv_e,conv_h,ti
+    integer,intent(in) :: ng_is(3),ng_ie(3)
+    real(8),intent(in) :: dl(3)
+    integer,intent(in) :: Nd,ifn,iobs
+    real(8),intent(in) :: ex(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          ey(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          ez(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          hx(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          hy(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd),&
+                          hz(ng_is(1)-Nd:ng_ie(1)+Nd, &
+                             ng_is(2)-Nd:ng_ie(2)+Nd, &
+                             ng_is(3)-Nd:ng_ie(3)+Nd)
+    real(8)          :: ds,&
+                        ex_sum1,ex_sum2,ey_sum1,ey_sum2,ez_sum1,ez_sum2,&
+                        hx_sum1,hx_sum2,hy_sum1,hy_sum2,hz_sum1,hz_sum2
+    integer          :: ii,i1,i1s,i2,i2s
+    character(2)     :: plane_name
+    character(128)   :: save_name
+    
+    do ii=1,3
+      !set plane
+      if(ii==1)     then !xy plane
+        i1s=1; i2s=2; plane_name='xy';
+      elseif(ii==2) then !yz plane
+        i1s=2; i2s=3; plane_name='yz';
+      elseif(ii==3) then !xz plane
+        i1s=1; i2s=3; plane_name='xz';
+      end if
+      ds=dl(i1s)*dl(i2s)*(ulength_from_au**2.0d0);
+
+      !prepare integral data
+      ex_sum1=0.0d0; ex_sum2=0.0d0; ey_sum1=0.0d0; ey_sum2=0.0d0; ez_sum1=0.0d0; ez_sum2=0.0d0;
+      hx_sum1=0.0d0; hx_sum2=0.0d0; hy_sum1=0.0d0; hy_sum2=0.0d0; hz_sum1=0.0d0; hz_sum2=0.0d0;
+      if(ipl(ii)==1) then
+        if(ii==1) then     !xy plane
+!$omp parallel
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+          do i2=ng_is(i2s),ng_ie(i2s)
+          do i1=ng_is(i1s),ng_ie(i1s)
+            ex_sum1=ex_sum1+ex(i1,i2,id(3)); ey_sum1=ey_sum1+ey(i1,i2,id(3)); ez_sum1=ez_sum1+ez(i1,i2,id(3));
+            hx_sum1=hx_sum1+hx(i1,i2,id(3)); hy_sum1=hy_sum1+hy(i1,i2,id(3)); hz_sum1=hz_sum1+hz(i1,i2,id(3));
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        elseif(ii==2) then !yz plane
+!$omp parallel
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+          do i2=ng_is(i2s),ng_ie(i2s)
+          do i1=ng_is(i1s),ng_ie(i1s)
+            ex_sum1=ex_sum1+ex(id(1),i1,i2); ey_sum1=ey_sum1+ey(id(1),i1,i2); ez_sum1=ez_sum1+ez(id(1),i1,i2);
+            hx_sum1=hx_sum1+hx(id(1),i1,i2); hy_sum1=hy_sum1+hy(id(1),i1,i2); hz_sum1=hz_sum1+hz(id(1),i1,i2);
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        elseif(ii==3) then !xz plane
+!$omp parallel
+!$omp do private(i1,i2) reduction(+:ex_sum1,ey_sum1,ez_sum1,hx_sum1,hy_sum1,hz_sum1)
+          do i2=ng_is(i2s),ng_ie(i2s)
+          do i1=ng_is(i1s),ng_ie(i1s)
+            ex_sum1=ex_sum1+ex(i1,id(2),i2); ey_sum1=ey_sum1+ey(i1,id(2),i2); ez_sum1=ez_sum1+ez(i1,id(2),i2);
+            hx_sum1=hx_sum1+hx(i1,id(2),i2); hy_sum1=hy_sum1+hy(i1,id(2),i2); hz_sum1=hz_sum1+hz(i1,id(2),i2);
+          end do
+          end do
+!$omp end do
+!$omp end parallel
+        end if
+      end if
+      call comm_summation(ex_sum1,ex_sum2,nproc_group_global)
+      call comm_summation(ey_sum1,ey_sum2,nproc_group_global)
+      call comm_summation(ez_sum1,ez_sum2,nproc_group_global)
+      call comm_summation(hx_sum1,hx_sum2,nproc_group_global)
+      call comm_summation(hy_sum1,hy_sum2,nproc_group_global)
+      call comm_summation(hz_sum1,hz_sum2,nproc_group_global)
+      ex_sum2=ex_sum2*ds; ey_sum2=ey_sum2*ds; ez_sum2=ez_sum2*ds;
+      hx_sum2=hx_sum2*ds; hy_sum2=hy_sum2*ds; hz_sum2=hz_sum2*ds;
+      
+      !save plane integral data
+      if(comm_is_root(nproc_id_global)) then
+        write(save_name,*) iobs
+        save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//&
+                  '_'//plane_name//'_integral_rt.data'
+        open(ifn,file=save_name,status='old',position='append')
+        write(ifn,"(F16.8,99(1X,E23.15E3))",advance='no') &
+              ti,ex_sum2*conv_e,ey_sum2*conv_e,ez_sum2*conv_e,hx_sum2*conv_h,hy_sum2*conv_h,hz_sum2*conv_h
+        close(ifn)
+      end if
+    end do
+    
+    return
+  end subroutine eh_save_plane_integral
+  
+  !===========================================================================================
   != Fourier transformation in eh ============================================================
   subroutine eh_fourier(nt,ne,dt,de,ti,ft,fr,fi)
     use salmon_global,  only: yn_wf_em
@@ -2812,6 +2979,8 @@ contains
     return
   end subroutine eh_fourier
   
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine calc_es_and_hs(fs, fe)
     use structures, only: s_fdtd_system
     use sendrecv_grid, only: update_overlap_real8
@@ -2844,6 +3013,8 @@ contains
     call update_overlap_real8( fs%srg_ng, fs%mg, fe%hz_s )
   end subroutine calc_es_and_hs
 
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine allocate_poynting(fs, S, divS, u)
     use structures, only: s_fdtd_system
     implicit none
@@ -2872,6 +3043,8 @@ contains
     end if
   end subroutine allocate_poynting
 
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine calc_poynting_vector(fs, fe, Spoynting)
     use structures, only: s_fdtd_system
     use sendrecv_grid, only: update_overlap_real8
@@ -2904,6 +3077,8 @@ contains
 !$omp end parallel
   end subroutine calc_poynting_vector
 
+  !===========================================================================================
+  != For ttm =================================================================================
   subroutine calc_poynting_vector_div(fs, Spoynting, divS)
     use structures, only: s_fdtd_system
     implicit none
