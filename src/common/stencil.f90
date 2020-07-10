@@ -285,6 +285,7 @@ end subroutine zstencil_nonorthogonal_highsymmetry
 subroutine zstencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
                                 ,tpsi,htpsi,V_local,Ac,div_Ac,lap0,lapt,nabt,k)
   use code_optimization, only: stencil_is_parallelized_by_omp
+  use salmon_global, only: yn_symmetrized_stencil
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -295,12 +296,115 @@ subroutine zstencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
                           & ,lap0,lapt(4,3),nabt(4,3),k(3)
   complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
 
-  ! typical version with fortran compiler vectorization
-  if (stencil_is_parallelized_by_omp) then
-    call zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+  if(yn_symmetrized_stencil=='y') then
+    call symmetrized_stencil 
   else
-    call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,is,ie,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+    ! typical version with fortran compiler vectorization
+    if (stencil_is_parallelized_by_omp) then
+      call zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+    else
+      call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,is,ie,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+    end if
   end if
+
+contains
+
+  subroutine symmetrized_stencil
+    implicit none
+    integer :: ix,iy,iz,i
+    real(8) :: kAc(3),Ac_tmp(1:3,is(1):ie(1),is(2):ie(2),is(3)-4:ie(3)+4)
+    complex(8) :: w(3),v,psi0,x
+    
+# define DTZ(dt) ix,iy,(iz+(dt))
+    
+!!!!!!!!!!! nproc_rgrid(1:3) must be =1
+
+  !$OMP parallel
+ !$OMP do collapse(2) private(iz,iy,ix)
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+      Ac_tmp(1:3,ix,iy,iz) = Ac(1:3,ix,iy,iz)
+    end do
+    end do
+    end do
+    !$OMP end do
+    !$OMP end parallel
+    
+    do i=1,4
+      iz = is(3)
+      Ac_tmp(:,:,:,iz-i) = Ac(:,:,:,iz)
+      iz = ie(3)
+      Ac_tmp(:,:,:,iz+i) = Ac(:,:,:,iz)
+    end do
+
+  !$OMP parallel
+  !$OMP do collapse(2) private(iz,iy,ix,w,v,psi0,kAc,x)
+    do iz=is(3),ie(3)
+    do iy=is(2),ie(2)
+    do ix=is(1),ie(1)
+      psi0 = tpsi(ix,iy,iz)
+      kAc = k + Ac(:,ix,iy,iz)
+
+    ! laplacian of psi
+      v =  lapt(1,1)*(tpsi(DX(1)) + tpsi(DX(-1))) &
+        & +lapt(2,1)*(tpsi(DX(2)) + tpsi(DX(-2))) &
+        & +lapt(3,1)*(tpsi(DX(3)) + tpsi(DX(-3))) &
+        & +lapt(4,1)*(tpsi(DX(4)) + tpsi(DX(-4)))
+
+      v =  lapt(1,2)*(tpsi(DY(1)) + tpsi(DY(-1))) &
+        & +lapt(2,2)*(tpsi(DY(2)) + tpsi(DY(-2))) &
+        & +lapt(3,2)*(tpsi(DY(3)) + tpsi(DY(-3))) &
+        & +lapt(4,2)*(tpsi(DY(4)) + tpsi(DY(-4))) + v
+
+      v =  lapt(1,3)*(tpsi(DZ(1)) + tpsi(DZ(-1))) &
+        & +lapt(2,3)*(tpsi(DZ(2)) + tpsi(DZ(-2))) &
+        & +lapt(3,3)*(tpsi(DZ(3)) + tpsi(DZ(-3))) &
+        & +lapt(4,3)*(tpsi(DZ(4)) + tpsi(DZ(-4))) + v
+
+    ! gradient of psi
+      w(1) =  nabt(1,1)*(tpsi(DX(1)) - tpsi(DX(-1))) &
+           & +nabt(2,1)*(tpsi(DX(2)) - tpsi(DX(-2))) &
+           & +nabt(3,1)*(tpsi(DX(3)) - tpsi(DX(-3))) &
+           & +nabt(4,1)*(tpsi(DX(4)) - tpsi(DX(-4)))
+
+      w(2) =  nabt(1,2)*(tpsi(DY(1)) - tpsi(DY(-1))) &
+           & +nabt(2,2)*(tpsi(DY(2)) - tpsi(DY(-2))) &
+           & +nabt(3,2)*(tpsi(DY(3)) - tpsi(DY(-3))) &
+           & +nabt(4,2)*(tpsi(DY(4)) - tpsi(DY(-4)))
+
+      w(3) =  nabt(1,3)*(tpsi(DZ(1)) - tpsi(DZ(-1))) &
+           & +nabt(2,3)*(tpsi(DZ(2)) - tpsi(DZ(-2))) &
+           & +nabt(3,3)*(tpsi(DZ(3)) - tpsi(DZ(-3))) &
+           & +nabt(4,3)*(tpsi(DZ(4)) - tpsi(DZ(-4)))
+           
+    ! divergence of (k+Ac)*psi
+      x    =  nabt(1,1)* ( (k(1)+Ac_tmp(1,DX(1) ))*tpsi(DX(1)) - (k(1)+Ac_tmp(1,DX(-1) ))*tpsi(DX(-1)) ) &
+           & +nabt(2,1)* ( (k(1)+Ac_tmp(1,DX(2) ))*tpsi(DX(2)) - (k(1)+Ac_tmp(1,DX(-2) ))*tpsi(DX(-2)) ) &
+           & +nabt(3,1)* ( (k(1)+Ac_tmp(1,DX(3) ))*tpsi(DX(3)) - (k(1)+Ac_tmp(1,DX(-3) ))*tpsi(DX(-3)) ) &
+           & +nabt(4,1)* ( (k(1)+Ac_tmp(1,DX(4) ))*tpsi(DX(4)) - (k(1)+Ac_tmp(1,DX(-4) ))*tpsi(DX(-4)) )
+           
+      x    =  nabt(1,2)* ( (k(2)+Ac_tmp(2,DY(1) ))*tpsi(DY(1)) - (k(2)+Ac_tmp(2,DY(-1) ))*tpsi(DY(-1)) ) &
+           & +nabt(2,2)* ( (k(2)+Ac_tmp(2,DY(2) ))*tpsi(DY(2)) - (k(2)+Ac_tmp(2,DY(-2) ))*tpsi(DY(-2)) ) &
+           & +nabt(3,2)* ( (k(2)+Ac_tmp(2,DY(3) ))*tpsi(DY(3)) - (k(2)+Ac_tmp(2,DY(-3) ))*tpsi(DY(-3)) ) &
+           & +nabt(4,2)* ( (k(2)+Ac_tmp(2,DY(4) ))*tpsi(DY(4)) - (k(2)+Ac_tmp(2,DY(-4) ))*tpsi(DY(-4)) ) + x
+           
+      x    =  nabt(1,3)* ( (k(3)+Ac_tmp(3,DTZ(1)))*tpsi(DZ(1)) - (k(3)+Ac_tmp(3,DTZ(-1)))*tpsi(DZ(-1)) ) &
+           & +nabt(2,3)* ( (k(3)+Ac_tmp(3,DTZ(2)))*tpsi(DZ(2)) - (k(3)+Ac_tmp(3,DTZ(-2)))*tpsi(DZ(-2)) ) &
+           & +nabt(3,3)* ( (k(3)+Ac_tmp(3,DTZ(3)))*tpsi(DZ(3)) - (k(3)+Ac_tmp(3,DTZ(-3)))*tpsi(DZ(-3)) ) &
+           & +nabt(4,3)* ( (k(3)+Ac_tmp(3,DTZ(4)))*tpsi(DZ(4)) - (k(3)+Ac_tmp(3,DTZ(-4)))*tpsi(DZ(-4)) ) + x
+
+      htpsi(ix,iy,iz) = ( V_local(ix,iy,iz) + lap0 )* psi0 - 0.5d0* v           &
+                      & + 0.5d0* ( kAc(1)**2 + kAc(2)**2 + kAc(3)**2 ) * psi0   &
+                      & - 0.5d0*zi* ( ( kAc(1)*w(1) + kAc(2)*w(2) + kAc(3)*w(3) ) + x ) 
+    end do
+    end do
+    end do
+  !$OMP end do
+  !$OMP end parallel
+    
+  end subroutine symmetrized_stencil
+  
 end subroutine zstencil_microAc
 
 !===================================================================================================================================
