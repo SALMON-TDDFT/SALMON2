@@ -454,7 +454,7 @@ module structures
   type s_singlescale
     logical :: flag_use
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
-    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3)
+    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),curr_ave(3)
     real(8),allocatable :: vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
     & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
     & ,current4pi(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &

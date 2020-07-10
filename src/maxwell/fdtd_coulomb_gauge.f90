@@ -47,7 +47,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
   real(8) :: Hvol,hgs(3),dt_m,tm,coef,lap_A,Energy_em,diff_A,coef2 &
   & ,e_em,e_em_wrk,e_joule,e_joule_wrk,e_poynting(2),e_poynting_wrk(2),rho_t
-  real(8),dimension(3) :: out_curr,out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
+  real(8),dimension(3) :: out_Aext,out_Ab1,out_Ab2,wrk,wrk2,wrk3,wrk4,vec_je,Aext0,Aext1,Aext0_old,Aext1_old
   real(8) :: e_poy1,e_poy2,rtmp1(6),rtmp2(6)
 
   call timer_begin(LOG_SS_FDTD_CALC)
@@ -84,7 +84,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   call timer_end(LOG_SS_FDTD_CALC)
 
   call timer_begin(LOG_SS_FDTD_COMM_COLL)
-  call comm_summation(wrk,out_curr,3,info%icomm_r)
+  call comm_summation(wrk,fw%curr_ave,3,info%icomm_r)
   call timer_end(LOG_SS_FDTD_COMM_COLL)
 
 ! gradient of d(Vh)/dt (Vh: Hartree potential)
@@ -297,7 +297,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   fw%Energy_poynting = fw%Energy_poynting + dt*e_poynting
 
   if(comm_is_root(info%id_rko)) write(fw%fh_rt_micro,'(99(1X,E23.15E3))') &
-    dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,out_curr,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule
+    dble(itt)*dt*t_unit_time%conv,out_Ab1,out_Ab2,out_Aext,fw%curr_ave,fw%E_electron,fw%Energy_poynting,Energy_em,fw%Energy_joule
     
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -796,6 +796,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
 
   fw%Energy_poynting = 0d0
   fw%Energy_joule = 0d0
+  fw%curr_ave = 0d0
 
   call set_bn(bnmat)
   do jj=1,3

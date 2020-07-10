@@ -19,7 +19,6 @@ module salmon_global
 
 !Parameters for pseudo-potential
   integer, parameter :: maxmki=10
-  integer :: MI,MKI
    !shinohara
   integer :: ipsfileform(maxmki)   ! file format for pseudo potential
   character(16)  :: ps_format(maxmki)
@@ -188,6 +187,9 @@ module salmon_global
 !! &singlescale
   character(32)  :: method_singlescale
   real(8)        :: cutoff_G2_emfield
+  character(1)   :: yn_put_wall_z_boundary
+  real(8)        :: wall_height
+  real(8)        :: wall_width
 
 !! &multiscale
   character(16)  :: fdtddim
@@ -241,6 +243,7 @@ module salmon_global
   integer        :: obs_samp_em
   real(8)        :: obs_loc_em(200,3)
   character(1)   :: yn_obs_plane_em(200)
+  character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em
 
 !! &analysis

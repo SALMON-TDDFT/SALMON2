@@ -348,7 +348,10 @@ contains
       
     namelist/singlescale/ &
       & method_singlescale, &
-      & cutoff_G2_emfield
+      & cutoff_G2_emfield, &
+      & yn_put_wall_z_boundary, &
+      & wall_height, &
+      & wall_width
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -372,32 +375,33 @@ contains
       & nmacro_write_group, &
       & nmacro_chunk
 
-    namelist/maxwell/    &
-      & al_em,           &
-      & dl_em,           &
-      & dt_em,           &
-      & nt_em,           &
-      & boundary_em,     &
-      & shape_file,      &
-      & media_num,       &
-      & media_type,      &
-      & epsilon_em,      &
-      & mu_em,           &
-      & sigma_em,        &
-      & pole_num_ld,     &
-      & omega_p_ld,      &
-      & f_ld,            &
-      & gamma_ld,        &
-      & omega_ld,        &
-      & wave_input,      &
-      & ek_dir1,         &
-      & source_loc1,     &
-      & ek_dir2,         &
-      & source_loc2,     &
-      & obs_num_em,      &
-      & obs_samp_em,     &
-      & obs_loc_em,      &
-      & yn_obs_plane_em, &
+    namelist/maxwell/             &
+      & al_em,                    &
+      & dl_em,                    &
+      & dt_em,                    &
+      & nt_em,                    &
+      & boundary_em,              &
+      & shape_file,               &
+      & media_num,                &
+      & media_type,               &
+      & epsilon_em,               &
+      & mu_em,                    &
+      & sigma_em,                 &
+      & pole_num_ld,              &
+      & omega_p_ld,               &
+      & f_ld,                     &
+      & gamma_ld,                 &
+      & omega_ld,                 &
+      & wave_input,               &
+      & ek_dir1,                  &
+      & source_loc1,              &
+      & ek_dir2,                  &
+      & source_loc2,              &
+      & obs_num_em,               &
+      & obs_samp_em,              &
+      & obs_loc_em,               &
+      & yn_obs_plane_em,          &
+      & yn_obs_plane_integral_em, &
       & yn_wf_em
 
     namelist/analysis/ &
@@ -651,6 +655,9 @@ contains
 !! == default for &singlescale
     method_singlescale = '3d'
     cutoff_G2_emfield  = -1d0
+    yn_put_wall_z_boundary = 'n'
+    wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
+    wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
 
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -674,32 +681,33 @@ contains
     nmacro_chunk = 20
 
 !! == default for &maxwell
-    al_em(:)           = 0d0
-    dl_em(:)           = 0d0
-    dt_em              = 0d0
-    nt_em              = 0
-    boundary_em(:,:)   = 'default'
-    shape_file         = 'none'
-    media_num          = 0
-    media_type(:)      = 'vacuum'
-    epsilon_em(:)      = 1d0
-    mu_em(:)           = 1d0
-    sigma_em(:)        = 0d0
-    pole_num_ld(:)     = 1
-    omega_p_ld(:)      = 0d0
-    f_ld(:,:)          = 0d0
-    gamma_ld(:,:)      = 0d0
-    omega_ld(:,:)      = 0d0
-    wave_input         = 'none'
-    ek_dir1(:)         = 0d0
-    source_loc1(:)     = 0d0
-    ek_dir2(:)         = 0d0
-    source_loc2(:)     = 0d0
-    obs_num_em         = 0
-    obs_samp_em        = 1
-    obs_loc_em(:,:)    = 0d0
-    yn_obs_plane_em(:) = 'n'
-    yn_wf_em           = 'y'
+    al_em(:)                    = 0d0
+    dl_em(:)                    = 0d0
+    dt_em                       = 0d0
+    nt_em                       = 0
+    boundary_em(:,:)            = 'default'
+    shape_file                  = 'none'
+    media_num                   = 0
+    media_type(:)               = 'vacuum'
+    epsilon_em(:)               = 1d0
+    mu_em(:)                    = 1d0
+    sigma_em(:)                 = 0d0
+    pole_num_ld(:)              = 1
+    omega_p_ld(:)               = 0d0
+    f_ld(:,:)                   = 0d0
+    gamma_ld(:,:)               = 0d0
+    omega_ld(:,:)               = 0d0
+    wave_input                  = 'none'
+    ek_dir1(:)                  = 0d0
+    source_loc1(:)              = 0d0
+    ek_dir2(:)                  = 0d0
+    source_loc2(:)              = 0d0
+    obs_num_em                  = 0
+    obs_samp_em                 = 1
+    obs_loc_em(:,:)             = 0d0
+    yn_obs_plane_em(:)          = 'n'
+    yn_obs_plane_integral_em(:) = 'n'
+    yn_wf_em                    = 'y'
 
 !! == default for &analysis
     projection_option   = 'no'
@@ -861,7 +869,26 @@ contains
 
 !! convert lowercase
     call string_lowercase(theory)
-
+    call string_lowercase(spin)
+    call string_lowercase(xc)
+    call string_lowercase(cname)
+    call string_lowercase(xname)
+#ifdef USE_LIBXC
+    call string_lowercase(alibxc)
+    call string_lowercase(alibx)
+    call string_lowercase(alibc)
+#endif
+    call string_lowercase(process_allocation)
+    call string_lowercase(propagator)
+    call string_lowercase(method_init_wf)
+    call string_lowercase(method_min)
+    call string_lowercase(method_mixing)
+    call string_lowercase(convergence)
+    call string_lowercase(trans_longi)
+    call string_lowercase(method_singlescale)
+    do ii = 0,media_num
+      call string_lowercase(media_type(ii))
+    end do
 
 ! Broad cast
 !! == bcast for &calculation
@@ -1061,8 +1088,13 @@ contains
 
 !! == bcast for &singlescale
     call comm_bcast(method_singlescale,nproc_group_global)
-    call comm_bcast(cutoff_G2_emfield,nproc_group_global)
+    call comm_bcast(cutoff_G2_emfield ,nproc_group_global)
     cutoff_G2_emfield = cutoff_G2_emfield * uenergy_to_au
+    call comm_bcast(yn_put_wall_z_boundary,nproc_group_global)
+    call comm_bcast(wall_height           ,nproc_group_global)
+    call comm_bcast(wall_width            ,nproc_group_global)
+    wall_height = wall_height * uenergy_to_au
+    wall_width  = wall_width  * ulength_to_au
 
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1090,41 +1122,42 @@ contains
     call comm_bcast(nmacro_chunk,nproc_group_global)
 
 !! == bcast for &maxwell
-    call comm_bcast(al_em           ,nproc_group_global)
+    call comm_bcast(al_em                    ,nproc_group_global)
     al_em = al_em * ulength_to_au
-    call comm_bcast(dl_em           ,nproc_group_global)
+    call comm_bcast(dl_em                    ,nproc_group_global)
     dl_em = dl_em * ulength_to_au
-    call comm_bcast(dt_em           ,nproc_group_global)
+    call comm_bcast(dt_em                    ,nproc_group_global)
     dt_em = dt_em * utime_to_au
-    call comm_bcast(nt_em           ,nproc_group_global)
-    call comm_bcast(boundary_em     ,nproc_group_global)
-    call comm_bcast(shape_file      ,nproc_group_global)
-    call comm_bcast(media_num       ,nproc_group_global)
-    call comm_bcast(media_type      ,nproc_group_global)
-    call comm_bcast(epsilon_em      ,nproc_group_global)
-    call comm_bcast(mu_em           ,nproc_group_global)
-    call comm_bcast(sigma_em        ,nproc_group_global)
-    call comm_bcast(pole_num_ld     ,nproc_group_global)
-    call comm_bcast(omega_p_ld      ,nproc_group_global)
+    call comm_bcast(nt_em                    ,nproc_group_global)
+    call comm_bcast(boundary_em              ,nproc_group_global)
+    call comm_bcast(shape_file               ,nproc_group_global)
+    call comm_bcast(media_num                ,nproc_group_global)
+    call comm_bcast(media_type               ,nproc_group_global)
+    call comm_bcast(epsilon_em               ,nproc_group_global)
+    call comm_bcast(mu_em                    ,nproc_group_global)
+    call comm_bcast(sigma_em                 ,nproc_group_global)
+    call comm_bcast(pole_num_ld              ,nproc_group_global)
+    call comm_bcast(omega_p_ld               ,nproc_group_global)
     omega_p_ld = omega_p_ld * uenergy_to_au
-    call comm_bcast(f_ld            ,nproc_group_global)
-    call comm_bcast(gamma_ld        ,nproc_group_global)
+    call comm_bcast(f_ld                     ,nproc_group_global)
+    call comm_bcast(gamma_ld                 ,nproc_group_global)
     gamma_ld = gamma_ld * uenergy_to_au
-    call comm_bcast(omega_ld        ,nproc_group_global)
+    call comm_bcast(omega_ld                 ,nproc_group_global)
     omega_ld = omega_ld * uenergy_to_au
-    call comm_bcast(yn_wf_em        ,nproc_group_global)
     call comm_bcast(wave_input,nproc_group_global)
-    call comm_bcast(ek_dir1         ,nproc_group_global)
-    call comm_bcast(source_loc1     ,nproc_group_global)
+    call comm_bcast(ek_dir1                  ,nproc_group_global)
+    call comm_bcast(source_loc1              ,nproc_group_global)
     source_loc1 = source_loc1 * ulength_to_au
-    call comm_bcast(ek_dir2         ,nproc_group_global)
-    call comm_bcast(source_loc2     ,nproc_group_global)
+    call comm_bcast(ek_dir2                  ,nproc_group_global)
+    call comm_bcast(source_loc2              ,nproc_group_global)
     source_loc2 = source_loc2 * ulength_to_au
-    call comm_bcast(obs_num_em      ,nproc_group_global)
-    call comm_bcast(obs_samp_em     ,nproc_group_global)
-    call comm_bcast(obs_loc_em      ,nproc_group_global)
+    call comm_bcast(obs_num_em               ,nproc_group_global)
+    call comm_bcast(obs_samp_em              ,nproc_group_global)
+    call comm_bcast(obs_loc_em               ,nproc_group_global)
     obs_loc_em = obs_loc_em * ulength_to_au
-    call comm_bcast(yn_obs_plane_em ,nproc_group_global)
+    call comm_bcast(yn_obs_plane_em          ,nproc_group_global)
+    call comm_bcast(yn_obs_plane_integral_em ,nproc_group_global)
+    call comm_bcast(yn_wf_em                 ,nproc_group_global)
 
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
@@ -1783,6 +1816,9 @@ contains
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'singlescale', inml_singlescale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'method_singlescale', method_singlescale
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
@@ -1855,10 +1891,15 @@ contains
       if(obs_num_em==0) then
         write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
         write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_em', yn_obs_plane_em(1)
+        write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_integral_em', yn_obs_plane_integral_em(1)
       else
         do i = 1,obs_num_em
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'obs_loc_em(',i,',:)', obs_loc_em(i,:)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'yn_obs_plane_em(',i,')', yn_obs_plane_em(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') &
+                                  'obs_loc_em(',i,',:)', obs_loc_em(i,:)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
+                                  'yn_obs_plane_em(',i,')', yn_obs_plane_em(i)
+          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
+                                  'yn_obs_plane_integral_em(',i,')', yn_obs_plane_integral_em(i)
         end do
       end if
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
@@ -1998,7 +2039,7 @@ contains
     use parallelization
     use communication
     implicit none
-    integer :: round_phi
+    integer :: i,round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
@@ -2037,6 +2078,14 @@ contains
     call yn_argument_check(yn_stop_system_momt)
     call yn_argument_check(yn_want_stencil_hand_vectorization)
     call yn_argument_check(yn_want_communication_overlapping)
+    if(obs_num_em>0) then
+      do i = 1,obs_num_em
+        call yn_argument_check(yn_obs_plane_em(i))
+        call yn_argument_check(yn_obs_plane_integral_em(i))
+      end do
+    end if
+    call yn_argument_check(yn_wf_em)
+
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
