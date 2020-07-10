@@ -187,6 +187,7 @@ module salmon_global
 !! &singlescale
   character(32)  :: method_singlescale
   real(8)        :: cutoff_G2_emfield
+  character(1)   :: yn_symmetrized_stencil
   character(1)   :: yn_put_wall_z_boundary
   real(8)        :: wall_height
   real(8)        :: wall_width

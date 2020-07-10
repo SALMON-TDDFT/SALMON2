@@ -285,7 +285,7 @@ end subroutine zstencil_nonorthogonal_highsymmetry
 subroutine zstencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
                                 ,tpsi,htpsi,V_local,Ac,div_Ac,lap0,lapt,nabt,k)
   use code_optimization, only: stencil_is_parallelized_by_omp
-  use salmon_global, only: yn_gbp_stencil ! temporary
+  use salmon_global, only: yn_symmetrized_stencil
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
@@ -296,18 +296,20 @@ subroutine zstencil_microAc(is_array,ie_array,is,ie,idx,idy,idz &
                           & ,lap0,lapt(4,3),nabt(4,3),k(3)
   complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
 
-  call test ! temporary
-  
-!    ! typical version with fortran compiler vectorization
-!    if (stencil_is_parallelized_by_omp) then
-!      call zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
-!    else
-!      call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
-!    end if
+  if(yn_symmetrized_stencil=='y') then
+    call symmetrized_stencil 
+  else
+    ! typical version with fortran compiler vectorization
+    if (stencil_is_parallelized_by_omp) then
+      call zstencil_microAc_typical_omp(is_array,ie_array,is,ie,idx,idy,idz,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+    else
+      call zstencil_microAc_typical_seq(is_array,ie_array,is,ie,idx,idy,idz,is,ie,tpsi,htpsi,V_local,Ac,div_ac,lap0,lapt,nabt,k)
+    end if
+  end if
 
 contains
 
-  subroutine test
+  subroutine symmetrized_stencil
     implicit none
     integer :: ix,iy,iz,i
     real(8) :: kAc(3),Ac_tmp(1:3,is(1):ie(1),is(2):ie(2),is(3)-4:ie(3)+4)
@@ -401,7 +403,7 @@ contains
   !$OMP end do
   !$OMP end parallel
     
-  end subroutine
+  end subroutine symmetrized_stencil
   
 end subroutine zstencil_microAc
 
