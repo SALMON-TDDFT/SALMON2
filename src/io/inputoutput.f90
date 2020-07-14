@@ -236,8 +236,8 @@ contains
       & nproc_rgrid, &
       & yn_ffte, &
       & yn_scalapack, &
-      & yn_scalapack_red_mem, &
       & yn_eigenexa, &
+      & yn_diagonalization_red_mem, &
       & process_allocation
 
     namelist/system/ &
@@ -550,8 +550,8 @@ contains
     nproc_rgrid          = 0
     yn_ffte              = 'n'
     yn_scalapack         = 'n'
-    yn_scalapack_red_mem = 'n'
     yn_eigenexa          = 'n'
+    yn_diagonalization_red_mem = 'n'
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
@@ -929,8 +929,8 @@ contains
     call comm_bcast(nproc_rgrid         ,nproc_group_global)
     call comm_bcast(yn_ffte             ,nproc_group_global)
     call comm_bcast(yn_scalapack        ,nproc_group_global)
-    call comm_bcast(yn_scalapack_red_mem ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
+    call comm_bcast(yn_diagonalization_red_mem,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
     call comm_bcast(yn_periodic,nproc_group_global)
@@ -1666,8 +1666,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack_red_mem', yn_scalapack_red_mem
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_diagonalization_red_mem', yn_diagonalization_red_mem
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 
       if(inml_system >0)ierr_nml = ierr_nml +1
@@ -2057,8 +2057,8 @@ contains
     call yn_argument_check(yn_reset_step_restart)
     call yn_argument_check(yn_ffte)
     call yn_argument_check(yn_scalapack)
-    call yn_argument_check(yn_scalapack_red_mem)
     call yn_argument_check(yn_eigenexa)
+    call yn_argument_check(yn_diagonalization_red_mem)
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
     call yn_argument_check(yn_fix_func)

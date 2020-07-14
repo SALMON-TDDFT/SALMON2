@@ -26,7 +26,7 @@ contains
 
 subroutine ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   use structures
-  use salmon_global, only: yn_scalapack_red_mem
+  use salmon_global, only: yn_diagonalization_red_mem
   use communication, only: comm_summation,comm_bcast
   use timer
   use hamiltonian, only: hpsi
@@ -44,7 +44,7 @@ subroutine ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
   type(s_sendrecv_grid)      :: srg
 
   if (system%if_real_orbital) then
-    if (yn_scalapack_red_mem == 'y') then
+    if (yn_diagonalization_red_mem == 'y') then
       call ssdg_rwf_rblas_red_mem(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     else
       call ssdg_rwf_rblas(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
