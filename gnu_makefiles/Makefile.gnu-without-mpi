@@ -3,7 +3,7 @@
 TARGET = salmon
 FC = gfortran
 CC = gcc
-FFLAGS = -O3 -Wall -cpp
+FFLAGS = -O3 -Wall -cpp -ffree-line-length-none
 CFLAGS = -O3 -Wall -std=c99
 OMPFLAG = -fopenmp
 MPIFLAG =
