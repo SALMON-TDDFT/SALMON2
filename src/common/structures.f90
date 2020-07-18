@@ -184,7 +184,6 @@ module structures
   ! ispin=1~nspin, io=io_s~io_e, ik=ik_s~ik_e, im=im_s~im_e (cf. s_parallel_info)
     real(8)   ,allocatable :: rwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
     complex(8),allocatable :: zwf(:,:,:,:,:,:,:) ! (ix,iy,iz,ispin,io,ik,im)
-    complex(8),allocatable :: ztmp(:,:,:,:)
     logical :: update_zwf_overlap   !flag of update_overlap_complex8 for zwf
   end type s_orbital
 
@@ -672,7 +671,6 @@ contains
     type(s_orbital) :: psi
     DEAL(psi%rwf)
     DEAL(psi%zwf)
-    DEAL(psi%ztmp)
   end subroutine deallocate_orbital
 
   subroutine deallocate_pp_info(pp)

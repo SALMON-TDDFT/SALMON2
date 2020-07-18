@@ -108,22 +108,22 @@ end subroutine zstencil
 
 !===================================================================================================================================
 
-subroutine zstencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz,wrk &
+subroutine zstencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz &
                                  ,tpsi,htpsi,V_local,lap0,lapt,nabt,Bk,F)
   implicit none
   integer   ,intent(in)  :: is_array(3),ie_array(3),is(3),ie(3) &
                            ,idx(is(1)-4:ie(1)+4),idy(is(2)-4:ie(2)+4),idz(is(3)-4:ie(3)+4)
   complex(8),intent(in)  :: tpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
   real(8)   ,intent(in)  :: V_local(is(1):ie(1),is(2):ie(2),is(3):ie(3)),lap0,lapt(4,3),nabt(4,3)
-  real(8)    ,intent(in) :: Bk(3),F(6)
-  complex(8)             :: wrk(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3),2)
+  real(8)   ,intent(in)  :: Bk(3),F(6)
   complex(8),intent(out) :: htpsi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
   !
   integer :: ix,iy,iz
   complex(8) :: w(3),v(3)
+  complex(8) :: wrk(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3),2)
 
-!$OMP parallel
-!$OMP do private(iz,iy,ix,w,v)
+!! !$OMP parallel
+!! !$OMP do private(iz,iy,ix,w,v)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -165,11 +165,11 @@ subroutine zstencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz,wrk &
   end do
   end do
   end do
-!$OMP end do
-!$OMP end parallel
+!! !$OMP end do
+!! !$OMP end parallel
 
-!$OMP parallel
-!$OMP do private(iz,iy,ix,w)
+!! !$OMP parallel
+!! !$OMP do private(iz,iy,ix,w)
   do iz=is(3),ie(3)
   do iy=is(2),ie(2)
   do ix=is(1),ie(1)
@@ -197,8 +197,8 @@ subroutine zstencil_nonorthogonal(is_array,ie_array,is,ie,idx,idy,idz,wrk &
   end do
   end do
   end do
-!$OMP end do
-!$OMP end parallel
+!! !$OMP end do
+!! !$OMP end parallel
 
   return
 end subroutine zstencil_nonorthogonal
