@@ -303,6 +303,8 @@ subroutine initialization_ms()
         end do
     end if
 
+    call comm_sync_all(ms%icomm_ms_world)
+
     do iimacro_s = 1, ms%nmacro, nmacro_chunk
         iimacro_e = min(iimacro_s + nmacro_chunk - 1, ms%nmacro)
         if (comm_is_root(ms%id_ms_world)) &
