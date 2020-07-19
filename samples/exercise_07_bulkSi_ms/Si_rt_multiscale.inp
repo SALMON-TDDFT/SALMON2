@@ -53,9 +53,9 @@
   
   !angular momentum of pseudopotential that will be treated as local
   lloc_ps(1) = 2
-  !--- Caution ---------------------------------------!
-  ! Index must correspond to those in &atomic_coor.   !
-  !---------------------------------------------------!
+  !--- Caution -------------------------------------------!
+  ! Index must correspond to those in &atomic_red_coor.   !
+  !-------------------------------------------------------!
 /
 
 &functional
