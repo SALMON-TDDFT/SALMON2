@@ -539,7 +539,7 @@ contains
     do iz=rg%is(3),rg%ie(3)
     do iy=rg%is(2),rg%ie(2)
     do ix=rg%is(1),rg%ie(1)
-      field%v = 0d0
+      field%v(:,ix,iy,iz) = 0d0
     end do
     end do
     end do
@@ -555,7 +555,7 @@ contains
     do iz=rg%is_array(3),rg%ie_array(3)
     do iy=rg%is_array(2),rg%ie_array(2)
     do ix=rg%is_array(1),rg%ie_array(1)
-      field%v = 0d0
+      field%v(:,ix,iy,iz) = 0d0
     end do
     end do
     end do
