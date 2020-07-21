@@ -265,8 +265,6 @@ subroutine initialization_ms()
     end do
 
     ! incident field
-    allocate(Ac_inc(1:3, -1:itotNtime+2))
-
     call Weyl_init(fs, fw)
 
     allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
@@ -348,7 +346,9 @@ subroutine initialization_ms()
         call comm_sync_all()
     end do
 
-    itt = mit; call incident()
+    itt = mit
+    allocate(Ac_inc(1:3, -1:itotNtime+2))
+    call incident()
 
     ! Experimental implementation
     if (comm_is_root(ms%id_ms_world)) then
