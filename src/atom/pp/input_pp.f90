@@ -136,6 +136,7 @@ subroutine input_pp(pp,hx,hy,hz)
         l0=0
         do ll=0,pp%mlps(ik)
         do l=l0,l0+pp%nproj(ll,ik)-1
+          if ( pp%anorm_so(l,ik) == 0.0d0 ) cycle
           pp%inorm_so(l,ik) = 1
           if( pp%anorm_so(l,ik) < 0.0d0 )then
             pp%anorm_so(l,ik) = -pp%anorm_so(l,ik)
@@ -178,6 +179,10 @@ subroutine input_pp(pp,hx,hy,hz)
       write(*,*) 'nproj(ik,l) =',(pp%nproj(l,ik),l=0,pp%mlps(ik))
       write(*,*) 'anorm(ik,l) =',(real(pp%anorm(l,ik)),l=0,sum(pp%nproj(:,ik))-1)
       write(*,*) 'inorm(ik,l) =',(pp%inorm(l,ik),l=0,sum(pp%nproj(:,ik))-1)
+      if( any(pp%anorm_so/=0.0d0) )then
+        write(*,*) 'anorm_so(ik,l) =',(real(pp%anorm_so(l,ik)),l=0,sum(pp%nproj(:,ik))-1)
+        write(*,*) 'inorm_so(ik,l) =',(pp%inorm_so(l,ik),l=0,sum(pp%nproj(:,ik))-1)
+      end if
       write(*,*) 'Mass(ik) =',pp%rmass(ik)
       write(*,*) 'flag_nlcc_element(ik) =',flag_nlcc_element(ik)
       write(*,*) '=========================================================='
@@ -1062,19 +1067,20 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
     enddo
   end if
 
-  pp%flag_nlcc = pp%flag_nlcc.or.flag_nlcc_element(ik)
-  pp%rho_nlcc_tbl(:,ik)=0d0; pp%tau_nlcc_tbl(:,ik)=0d0
-  if(.not.flag_nlcc_element(ik))return
-  do i=1,pp%mr(ik)
-  !do i=1,pp%nrps(ik)
-    if(rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7)exit
-    pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
-    pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
-  end do
-
   if ( ps_format(ik) == "ADPACK" ) then
     call making_ps_without_masking_so( pp, ik )
   end if
+
+  pp%flag_nlcc = pp%flag_nlcc.or.flag_nlcc_element(ik)
+  pp%rho_nlcc_tbl(:,ik)=0d0; pp%tau_nlcc_tbl(:,ik)=0d0
+
+  if ( .not.flag_nlcc_element(ik) ) return
+
+  do i=1,pp%mr(ik)
+    if ( rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7 ) exit
+    pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
+    pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
+  end do
 
   return
 end subroutine making_ps_without_masking

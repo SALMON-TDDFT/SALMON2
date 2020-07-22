@@ -150,6 +150,7 @@ subroutine init_dft_system(lg,system,stencil)
       else
         system%if_real_orbital = .false.
       end if
+      if ( SPIN_ORBIT_ON ) system%if_real_orbital=.false.
     end select
   end if
   if(comm_is_root(nproc_id_global)) then

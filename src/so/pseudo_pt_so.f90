@@ -40,16 +40,12 @@ contains
     type(s_orbital) :: htpsi
     !
     integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e
-    integer :: ilma,ia,j,ix,iy,iz,Nlma,jangl
+    integer :: ilma,ia,j,ix,iy,iz,Nlma
     complex(8) :: uVpsi(2,2),wrk
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
 
-    write(*,*) "------------------ pseudo_so"
-
-#ifdef SALMON_ENABLE_2MB_ALIGNED_ALLOCATE
-!dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
-#endif
+    !write(*,*) "------------------ pseudo_so"
 
     call timer_begin(LOG_UHPSI_PSEUDO)
 
@@ -99,7 +95,7 @@ contains
       deallocate( uVpsibox, uVpsibox2 )
 
     else !if ( .not. info%if_divide_rspace ) then
-write(*,*) "allocated",allocated(ppg%zekr_uV_so)
+
       do im=im_s,im_e
       do ik=ik_s,ik_e
       do io=io_s,io_e
@@ -110,22 +106,20 @@ write(*,*) "allocated",allocated(ppg%zekr_uV_so)
 
           uVpsi = (0.0d0,0.0d0)
 
-          do jangl=1,2  ! jangl = l+1/2, l-1/2
           do ispin=1,2
 
             do j=1,ppg%mps(ia)
               ix = ppg%jxyz(1,j,ia)
               iy = ppg%jxyz(2,j,ia)
               iz = ppg%jxyz(3,j,ia)
-              uVpsi(jangl,ispin) = uVpsi(jangl,ispin) &
-                   + conjg( ppg%zekr_uV_so(j,ilma,ik,jangl,ispin) ) &
+              uVpsi(ispin,1) = uVpsi(ispin,1) &
+                   + conjg( ppg%zekr_uV_so(j,ilma,ik,ispin,1) ) &
                    * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
             end do
 
           end do !ispin
-          end do !jangl
 
-!          uVpsi = uVpsi * ppg%rinv_uvu(ilma)
+          uVpsi = uVpsi * ppg%rinv_uvu_so(ilma)
 
           do j=1,ppg%mps(ia)
 
@@ -133,13 +127,11 @@ write(*,*) "allocated",allocated(ppg%zekr_uV_so)
             iy = ppg%jxyz(2,j,ia)
             iz = ppg%jxyz(3,j,ia)
 
-            wrk = ppg%zekr_uV_so(j,ilma,ik,1,1)*( uVpsi(1,1) + uVpsi(1,2) ) &
-                + ppg%zekr_uV_so(j,ilma,ik,2,1)*( uVpsi(2,1) + uVpsi(2,2) )
+            wrk = ppg%zekr_uV_so(j,ilma,ik,1,1)*( uVpsi(1,1) + uVpsi(2,1) )
 
             htpsi%zwf(ix,iy,iz,1,io,ik,im) = htpsi%zwf(ix,iy,iz,1,io,ik,im) + wrk
 
-            wrk = ppg%zekr_uV_so(j,ilma,ik,1,2)*( uVpsi(1,1) + uVpsi(1,2) ) &
-                + ppg%zekr_uV_so(j,ilma,ik,2,2)*( uVpsi(2,1) + uVpsi(2,2) )
+            wrk = ppg%zekr_uV_so(j,ilma,ik,2,1)*( uVpsi(1,1) + uVpsi(2,1) )
 
             htpsi%zwf(ix,iy,iz,2,io,ik,im) = htpsi%zwf(ix,iy,iz,2,io,ik,im) + wrk
 

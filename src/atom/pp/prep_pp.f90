@@ -144,7 +144,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call set_lma
   call calc_uv
   if ( SPIN_ORBIT_ON ) then
-!    call calc_uv_so(pp,ppg,lx,ly,lz,nl,hx,hy,hz,property,system%Hvol)
+    call calc_uv_so(pp,ppg,lg%num,hgs,hvol,property)
   end if
   if ( PLUS_U_ON ) then
 !    call calc_uv_plusU( pp, ppg, property )
@@ -164,7 +164,7 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call init_uvpsi_summation(ppg,info%icomm_r)
   call init_uvpsi_table(ppg)
   call timer_end(LOG_INIT_PS_UVPSI)
-  
+
   if(iperiodic==3) then
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   end if
@@ -507,7 +507,7 @@ contains
       l0=l
       enddo
     enddo
-   
+
   end subroutine calc_uv
 
 end subroutine init_ps
