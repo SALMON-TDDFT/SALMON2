@@ -313,6 +313,16 @@ module salmon_global
   real(8)        :: thermostat_tau
   character(1)   :: yn_stop_system_momt
 
+!! &jellium
+  character(1)   :: yn_jm
+  character(1)   :: yn_charge_neutral_jm
+  character(1)   :: yn_output_dns_jm
+  character(256) :: shape_file_jm
+  integer        :: num_jm
+  integer        :: nelec_jm(200)
+  real(8)        :: rs_bohr_jm(200)
+  real(8)        :: sphere_loc_jm(200,3)
+
 !! &group_fundamental
   integer        :: iwrite_projection
   integer        :: itwproj

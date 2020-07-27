@@ -49,7 +49,6 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
                  mg%is(3):mg%ie(3))
   type(s_sendrecv_grid),intent(inout) :: srg_scalar
   type(s_stencil),intent(in) :: stencil
-  
   integer,parameter :: maxiter=1000
   integer :: ix,iy,iz,iter
   real(8) :: sum1,sum2,ak,ck
@@ -68,7 +67,7 @@ subroutine poisson_cg(lg,mg,info,system,poisson,trho,tVh,srg_scalar,stencil)
   integer :: tid
   real(8),allocatable :: reduce_work(:)
   allocate(reduce_work(0:get_nthreads()-1))
-
+  
   call poisson_boundary(lg,mg,info,system,poisson,trho,pk)
   
 !------------------------- C-G minimization
@@ -341,7 +340,7 @@ subroutine poisson_boundary(lg,mg,info,system,poisson,trho,wk2)
   if(.not.allocated(ig))then
     allocate(ig(3,maxval(poisson%ig_num(:)),poisson%npole_partial))
   end if
-  ig=poisson%ig
+  if(layout_multipole/=1) ig=poisson%ig
 
   if(.not.allocated(coordinate))then
     allocate(coordinate(minval(lg%is_overlap(1:3)):maxval(lg%ie_overlap(1:3)),3))

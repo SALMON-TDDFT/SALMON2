@@ -24,7 +24,7 @@ contains
 SUBROUTINE init_wf(lg,mg,system,info,spsi)
   use structures
   use inputoutput, only: au_length_aa, method_init_wf
-  use salmon_global, only: yn_periodic,natom,Rion
+  use salmon_global, only: yn_periodic,natom,Rion,yn_jm
   use gram_schmidt_orth
   implicit none
 
@@ -67,16 +67,22 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
       call gen_random_rwf
 
     case ('gauss','gauss2','gauss3','gauss4','gauss5','gauss10')
-      Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
-      do a=1,natom
-        if ( abs(system%Rion(1,a)) > Xmax ) Xmax=abs(system%Rion(1,a))
-        if ( abs(system%Rion(2,a)) > Ymax ) Ymax=abs(system%Rion(2,a))
-        if ( abs(system%Rion(3,a)) > Zmax ) Zmax=abs(system%Rion(3,a))
-      end do
+      if(yn_jm=='n') then
+         Xmax=0.d0 ; Ymax=0.d0 ; Zmax=0.d0
+         do a=1,natom
+           if ( abs(system%Rion(1,a)) > Xmax ) Xmax=abs(system%Rion(1,a))
+           if ( abs(system%Rion(2,a)) > Ymax ) Ymax=abs(system%Rion(2,a))
+           if ( abs(system%Rion(3,a)) > Zmax ) Zmax=abs(system%Rion(3,a))
+         end do
 
-      Xmax=Xmax-Xzero+1.d0/au_length_aa
-      Ymax=Ymax-Yzero+1.d0/au_length_aa
-      Zmax=Zmax-Zzero+1.d0/au_length_aa
+         Xmax=Xmax-Xzero+1.d0/au_length_aa
+         Ymax=Ymax-Yzero+1.d0/au_length_aa
+         Zmax=Zmax-Zzero+1.d0/au_length_aa
+      else
+         Xmax=( lg%coordinate(lg%ie(1),1)-Xzero )*0.8d0
+         Ymax=( lg%coordinate(lg%ie(2),2)-Yzero )*0.8d0
+         Zmax=( lg%coordinate(lg%ie(3),3)-Zzero )*0.8d0
+      end if
 
       do is=1,system%nspin
       do io=1,system%no
@@ -119,9 +125,15 @@ SUBROUTINE init_wf(lg,mg,system,info,spsi)
       call gen_random_zwf
 
     case ('gauss','gauss2','gauss3','gauss4','gauss5','gauss10')
-      Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))-Xzero
-      Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))-Yzero
-      Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))-Zzero
+      if(yn_jm=='n') then
+        Xmax = sqrt(sum(system%primitive_a(1:3,1)**2))-Xzero
+        Ymax = sqrt(sum(system%primitive_a(1:3,2)**2))-Yzero
+        Zmax = sqrt(sum(system%primitive_a(1:3,3)**2))-Zzero
+      else
+         Xmax=( lg%coordinate(lg%ie(1),1)-Xzero )*0.8d0
+         Ymax=( lg%coordinate(lg%ie(2),2)-Yzero )*0.8d0
+         Zmax=( lg%coordinate(lg%ie(3),3)-Zzero )*0.8d0
+      endif
 
       do is=1,system%nspin
       do ik=1,system%nk

@@ -59,6 +59,8 @@ CONTAINS
       end do
 !$omp end parallel do
       energy%E_ion_ion = Eion
+    else
+      energy%E_ion_ion = 0d0
     end if
 
     Etot = 0d0
@@ -195,32 +197,52 @@ CONTAINS
 
     etmp = 0d0
     E_wrk = 0d0
+    if (rion_update) then
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
 !$omp          shared(mg,fg,aEwald,system,sysvol,kion,poisson,ppg,info)
-    do iz=mg%is(3),mg%ie(3)
-    do iy=mg%is(2),mg%ie(2)
-    do ix=mg%is(1),mg%ie(1)
-      g(1) = fg%vec_G(1,ix,iy,iz)
-      g(2) = fg%vec_G(2,ix,iy,iz)
-      g(3) = fg%vec_G(3,ix,iy,iz)
-      
-      rho_e = poisson%zrhoG_ele(ix,iy,iz)
-      rho_i = ppg%zrhoG_ion(ix,iy,iz)
-      
-      E_wrk(1) = E_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
-      E_wrk(2) = E_wrk(2) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
-
-      do ia=info%ia_s,info%ia_e
-        r = system%Rion(1:3,ia)
-        Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-        etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        g(1) = fg%vec_G(1,ix,iy,iz)
+        g(2) = fg%vec_G(2,ix,iy,iz)
+        g(3) = fg%vec_G(3,ix,iy,iz)
+        
+        rho_e = poisson%zrhoG_ele(ix,iy,iz)
+        rho_i = ppg%zrhoG_ion(ix,iy,iz)
+        
+        E_wrk(1) = E_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
+        E_wrk(2) = E_wrk(2) + sysvol* fg%coef(ix,iy,iz) * (-rho_e*conjg(rho_i))     ! electron-ion (valence)
+  
+        do ia=info%ia_s,info%ia_e
+          r = system%Rion(1:3,ia)
+          Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
+          etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+        end do
       end do
-    end do
-    end do
-    end do
+      end do
+      end do
 !$omp end parallel do
+    else
+!$omp parallel do collapse(2) default(none) &
+!$omp          reduction(+:E_wrk) &
+!$omp          private(ix,iy,iz,g,rho_e) &
+!$omp          shared(mg,fg,poisson,sysvol)
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        g(1) = fg%vec_G(1,ix,iy,iz)
+        g(2) = fg%vec_G(2,ix,iy,iz)
+        g(3) = fg%vec_G(3,ix,iy,iz)
+        
+        rho_e = poisson%zrhoG_ele(ix,iy,iz)
+        
+        E_wrk(1) = E_wrk(1) + sysvol* fg%coef(ix,iy,iz) * (abs(rho_e)**2*0.5d0)     ! Hartree
+      end do
+      end do
+      end do
+    end if
     call timer_end(LOG_TE_PERIODIC_CALC)
 
     call timer_begin(LOG_TE_PERIODIC_COMM_COLL)

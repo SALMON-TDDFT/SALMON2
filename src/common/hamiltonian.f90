@@ -32,7 +32,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
   use nondiagonal_so_sub, only: nondiagonal_so
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
-  use salmon_global, only: yn_want_communication_overlapping,yn_periodic
+  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
   implicit none
@@ -103,7 +103,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_STENCIL)
 
   ! pseudopotential
-    call dpseudo(tpsi,htpsi,info,Nspin,ppg)
+    if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
 
   else
 
@@ -304,15 +304,17 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_UHPSI_SUBTRACTION)
 
   ! nonlocal potential
-    if ( SPIN_ORBIT_ON ) then
-      call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
-      call pseudo_so(tpsi,htpsi,info,nspin,ppg)
-    else
-    ! pseudopotential
-      call zpseudo(tpsi,htpsi,info,nspin,ppg)
-    end if
-    if ( PLUS_U_ON ) then
-      call pseudo_plusU(tpsi,htpsi,system,info,ppg)
+    if(yn_jm=='n') then
+      if ( SPIN_ORBIT_ON ) then
+        call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
+        call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+      else
+      ! pseudopotential
+        call zpseudo(tpsi,htpsi,info,nspin,ppg)
+      end if
+      if ( PLUS_U_ON ) then
+        call pseudo_plusU(tpsi,htpsi,system,info,ppg)
+      end if
     end if
 
   end if

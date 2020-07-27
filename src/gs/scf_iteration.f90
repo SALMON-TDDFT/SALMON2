@@ -24,9 +24,10 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
                cg,ppg,vlocal,  &
                miter,   &
                nscf_init_no_diagonal, mixing, iter, &
-               poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+               poisson,fg,Vh,xc_func,ppn,Vxc,energy, &
+               rho_jm )
   use salmon_global, only: calc_mode,method_mixing  &
-                        ,yn_subspace_diagonalization,ncg,ncg_init
+                        ,yn_subspace_diagonalization,ncg,ncg_init,yn_jm
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
@@ -38,30 +39,31 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   use salmon_xc
   implicit none
 
-  type(s_rgrid),         intent(in)    :: lg
-  type(s_rgrid),         intent(in)    :: mg
-  type(s_dft_system),    intent(in)    :: system
-  type(s_parallel_info), intent(in)    :: info
-  type(s_orbital),       intent(inout) :: spsi,shpsi
-  type(s_scalar),        intent(inout) :: rho
-  type(s_scalar),        intent(inout) :: rho_s(system%nspin)
-  type(s_stencil),       intent(in)    :: stencil
-  type(s_sendrecv_grid), intent(inout) :: srg
-  type(s_sendrecv_grid), intent(inout) :: srg_scalar
-  type(s_pp_grid),       intent(in)    :: ppg
-  type(s_cg),            intent(inout) :: cg
-  type(s_scalar),        intent(in)    :: vlocal(system%nspin)
-  integer,               intent(in)    :: miter
-  integer,               intent(in)    :: nscf_init_no_diagonal
-  type(s_mixing),        intent(inout) :: mixing
-  integer,               intent(in)    :: iter
-  type(s_poisson),       intent(inout) :: poisson
-  type(s_reciprocal_grid),intent(inout):: fg
-  type(s_scalar),        intent(inout) :: Vh
-  type(s_xc_functional), intent(in)    :: xc_func
-  type(s_pp_nlcc),       intent(in)    :: ppn
-  type(s_scalar),        intent(inout) :: Vxc(system%nspin)
-  type(s_dft_energy),    intent(inout) :: energy
+  type(s_rgrid),          intent(in)           :: lg
+  type(s_rgrid),          intent(in)           :: mg
+  type(s_dft_system),     intent(in)           :: system
+  type(s_parallel_info),  intent(in)           :: info
+  type(s_orbital),        intent(inout)        :: spsi,shpsi
+  type(s_scalar),         intent(inout)        :: rho
+  type(s_scalar),         intent(inout)        :: rho_s(system%nspin)
+  type(s_stencil),        intent(in)           :: stencil
+  type(s_sendrecv_grid),  intent(inout)        :: srg
+  type(s_sendrecv_grid),  intent(inout)        :: srg_scalar
+  type(s_pp_grid),        intent(in)           :: ppg
+  type(s_cg),             intent(inout)        :: cg
+  type(s_scalar),         intent(in)           :: vlocal(system%nspin)
+  integer,                intent(in)           :: miter
+  integer,                intent(in)           :: nscf_init_no_diagonal
+  type(s_mixing),         intent(inout)        :: mixing
+  integer,                intent(in)           :: iter
+  type(s_poisson),        intent(inout)        :: poisson
+  type(s_reciprocal_grid),intent(inout)        :: fg
+  type(s_scalar),         intent(inout)        :: Vh
+  type(s_xc_functional),  intent(in)           :: xc_func
+  type(s_pp_nlcc),        intent(in)           :: ppn
+  type(s_scalar),         intent(inout)        :: Vxc(system%nspin)
+  type(s_dft_energy),     intent(inout)        :: energy
+  type(s_scalar),         intent(in), optional :: rho_jm
   !
   integer :: j,nncg
 
@@ -114,7 +116,11 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   if(calc_mode/='DFT_BAND')then
 
     call timer_begin(LOG_CALC_HARTREE)
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    if(yn_jm=='n')then
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    else
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
+    end if
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)

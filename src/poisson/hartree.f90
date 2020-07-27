@@ -21,36 +21,56 @@ module hartree_sub
 contains
 
 !===================================================================================================================================
-subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
   use math_constants,only: pi
-  use inputoutput, only: iperiodic,yn_ffte,yn_put_wall_z_boundary
+  use inputoutput, only: iperiodic,yn_ffte,yn_put_wall_z_boundary,yn_jm
   use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_poisson,  &
-                        s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid
+                        s_sendrecv_grid,s_stencil,s_scalar,s_reciprocal_grid,  &
+                        allocate_scalar, deallocate_scalar
   use poisson_isolated
   use poisson_periodic
   implicit none
-  type(s_rgrid)          ,intent(in)    :: lg
-  type(s_rgrid)          ,intent(in)    :: mg
-  type(s_parallel_info)  ,intent(in)    :: info
-  type(s_dft_system)     ,intent(in)    :: system
-  type(s_reciprocal_grid),intent(in)    :: fg
-  type(s_poisson)        ,intent(inout) :: poisson
-  type(s_sendrecv_grid)  ,intent(inout) :: srg_scalar
-  type(s_stencil)        ,intent(in)    :: stencil
-  type(s_scalar)         ,intent(in)    :: rho
-  type(s_scalar)         ,intent(inout) :: Vh
+  type(s_rgrid)          ,intent(in)          :: lg
+  type(s_rgrid)          ,intent(in)          :: mg
+  type(s_parallel_info)  ,intent(in)          :: info
+  type(s_dft_system)     ,intent(in)          :: system
+  type(s_reciprocal_grid),intent(in)          :: fg
+  type(s_poisson)        ,intent(inout)       :: poisson
+  type(s_sendrecv_grid)  ,intent(inout)       :: srg_scalar
+  type(s_stencil)        ,intent(in)          :: stencil
+  type(s_scalar)         ,intent(in)          :: rho
+  type(s_scalar)         ,intent(inout)       :: Vh
+  type(s_scalar)         ,intent(in),optional :: rho_jm
+  type(s_scalar)                              :: rho_tmp
 
-  select case(iperiodic)
-  case(0)
-    call poisson_cg(lg,mg,info,system,poisson,rho%f,Vh%f,srg_scalar,stencil)
-  case(3)
-    select case(yn_ffte)
-    case('n')
-      call poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
-    case('y')
-      call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
+  if(yn_jm=='n')then
+    select case(iperiodic)
+    case(0)
+      call poisson_cg(lg,mg,info,system,poisson,rho%f,Vh%f,srg_scalar,stencil)
+    case(3)
+      select case(yn_ffte)
+      case('n')
+        call poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
+      case('y')
+        call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
+      end select
     end select
-  end select
+  else
+    call allocate_scalar(mg,rho_tmp)
+    rho_tmp%f(:,:,:) = rho%f(:,:,:) + rho_jm%f(:,:,:)
+    select case(iperiodic)
+    case(0)
+      call poisson_cg(lg,mg,info,system,poisson,rho_tmp%f,Vh%f,srg_scalar,stencil)
+    case(3)
+      select case(yn_ffte)
+      case('n')
+        call poisson_ft(lg,mg,info,fg,rho_tmp,Vh,poisson)
+      case('y')
+        call poisson_ffte(lg,mg,info,fg,rho_tmp,Vh,poisson)
+      end select
+    end select
+    call deallocate_scalar(rho_tmp)
+  end if
 
   !potentiall wall at the boundary on z direction
   if(yn_put_wall_z_boundary=='y') call add_potential_wall

@@ -28,7 +28,8 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               V_local,Vh,Vxc,Vpsl,xc_func,  &
                               pp,ppg,ppn,  &
                               rho_old,Vlocal_old,  &
-                              band,ilevel_print )
+                              band,ilevel_print,  &
+                              rho_jm )
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -85,6 +86,7 @@ type(s_ewald_ion_ion) :: ewald
 type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
+type(s_scalar),intent(in),optional :: rho_jm
 
 logical :: rion_update, flag_conv
 integer :: i,j, icnt_conv_nomix
@@ -103,14 +105,24 @@ if(nscf_init_mix_zero.gt.1)then
    mixing%flag_mix_zero = .true.
    DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
-      rion_update = check_rion_update() .or. (iter == 1)
+      if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
       call copy_density(iter,system%nspin,mg,rho_s,mixing)
-      call scf_iteration_step(lg,mg,system,info,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
-                     cg,ppg,V_local,  &
-                     iter,  &
-                     nscf_init_no_diagonal, mixing, iter,  &
-                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+      if(yn_jm=='n')then
+        call scf_iteration_step(lg,mg,system,info,stencil,  &
+                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
+                       cg,ppg,V_local,  &
+                       iter,  &
+                       nscf_init_no_diagonal, mixing, iter,  &
+                       poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+      else
+        call scf_iteration_step(lg,mg,system,info,stencil,  &
+                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
+                       cg,ppg,V_local,  &
+                       iter,  &
+                       nscf_init_no_diagonal, mixing, iter,  &
+                       poisson,fg,Vh,xc_func,ppn,Vxc,energy,  &
+                       rho_jm )
+      end if
       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
@@ -164,19 +176,29 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    if(calc_mode/='DFT_BAND')then
       ! for calc_total_energy_periodic
-      rion_update = check_rion_update() .or. (iter == 1)
+      if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
   
       if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
          call ne2mu(energy,system)
       end if
    end if
    call copy_density(Miter,system%nspin,mg,rho_s,mixing)
-   call scf_iteration_step(lg,mg,system,info,stencil,  &
-                     srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
-                     cg,ppg,V_local,  &
-                     Miter,  &
-                     nscf_init_no_diagonal, mixing, iter,  &
-                     poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+   if(yn_jm=='n')then
+     call scf_iteration_step(lg,mg,system,info,stencil,  &
+                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
+                       cg,ppg,V_local,  &
+                       Miter,  &
+                       nscf_init_no_diagonal, mixing, iter,  &
+                       poisson,fg,Vh,xc_func,ppn,Vxc,energy)
+   else
+     call scf_iteration_step(lg,mg,system,info,stencil,  &
+                       srg,srg_scalar,spsi,shpsi,rho,rho_s,  &
+                       cg,ppg,V_local,  &
+                       Miter,  &
+                       nscf_init_no_diagonal, mixing, iter,  &
+                       poisson,fg,Vh,xc_func,ppn,Vxc,energy, &
+                       rho_jm)
+   end if
    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then

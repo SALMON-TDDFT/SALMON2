@@ -1153,7 +1153,7 @@ contains
   !! export SYSNAME_info.data file (GS info)
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
-    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,unit_system
+    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,unit_system,yn_jm
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
@@ -1220,32 +1220,34 @@ contains
        write(fh,*)
 200    format(1x,a,30f14.8)
 
-       write(fh,'(1x,"Number of atoms = ",i8)') natom
-       do ik=1,nelem
-          write(fh,'(1x,"iZatom(",i3,")     = ",i8)') ik, iZatom(ik)
-       end do
-       write(fh,*)
-       write(fh,*) "Ref. and max angular momentum",  &
-                   " and pseudo-core radius of PP (A)"
-       do ikoa=1,nelem
-          write(fh,'(1x,"(",i3,")  "," Ref, Max, Rps =",2i4,f8.3)') &
-                ikoa,pp%Lref(ikoa),pp%Mlps(ikoa),pp%Rps(ikoa)*au_length_aa
-       end do
-       
-       write(fh,*)
-       select case(unit_system)
-       case('au','a.u.')
-          write(fh,*) "Force [au] "
-          do iatom=1,natom
-             write(fh,300) iatom,(system%Force(ix,iatom),ix=1,3)
-          end do
-       case('A_eV_fs')
-          write(fh,*) "Force [eV/A] "
-          do iatom=1,natom
-             write(fh,300) iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
-          end do
-       end select
+       if(yn_jm=='n')then
+         write(fh,'(1x,"Number of atoms = ",i8)') natom
+         do ik=1,nelem
+            write(fh,'(1x,"iZatom(",i3,")     = ",i8)') ik, iZatom(ik)
+         end do
+         write(fh,*)
+         write(fh,*) "Ref. and max angular momentum",  &
+                     " and pseudo-core radius of PP (A)"
+         do ikoa=1,nelem
+            write(fh,'(1x,"(",i3,")  "," Ref, Max, Rps =",2i4,f8.3)') &
+                  ikoa,pp%Lref(ikoa),pp%Mlps(ikoa),pp%Rps(ikoa)*au_length_aa
+         end do
+         
+         write(fh,*)
+         select case(unit_system)
+         case('au','a.u.')
+            write(fh,*) "Force [au] "
+            do iatom=1,natom
+               write(fh,300) iatom,(system%Force(ix,iatom),ix=1,3)
+            end do
+         case('A_eV_fs')
+            write(fh,*) "Force [eV/A] "
+            do iatom=1,natom
+               write(fh,300) iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
+            end do
+         end select
 300    format(i6,3e16.8)
+       end if
 
        close(fh)
     endif
