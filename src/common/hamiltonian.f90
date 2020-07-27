@@ -226,11 +226,13 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     else if(.not.stencil%if_orthogonal) then
     ! non-orthogonal lattice
     
-      if(.not.allocated(htpsi%ztmp)) allocate(htpsi%ztmp(mg%is_array(1):mg%ie_array(1) &
-                                                        ,mg%is_array(2):mg%ie_array(2) &
-                                                        ,mg%is_array(3):mg%ie_array(3),2) )
+!$omp parallel do collapse(4) default(none) &
+!$omp private(im,ik,io,ispin,kAc,k_lap0) &
+!$omp shared(im_s,im_e,ik_s,ik_e,io_s,io_e,nspin,if_kac,system,stencil,mg,tpsi,htpsi,V_local)
       do im=im_s,im_e
       do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,Nspin
         kAc = 0d0
         k_lap0 = 0d0
         if(if_kAc) then
@@ -238,15 +240,14 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
           k_lap0 = stencil%coef_lap0 + 0.5d0* sum(kAc(1:3)**2)
           kAc(1:3) = matmul(system%rmatrix_B,kAc) ! B* (k+A/c)
         end if
-        do io=io_s,io_e
-        do ispin=1,Nspin
-          call zstencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,htpsi%ztmp &
+          call zstencil_nonorthogonal(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
                                      ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
                                      ,V_local(ispin)%f,k_lap0,stencil%coef_lap,stencil%coef_nab,kAc,stencil%coef_F)
-        end do
-        end do
       end do
       end do
+      end do
+      end do
+!$omp end parallel do
       
     end if
     call timer_end(LOG_UHPSI_STENCIL)

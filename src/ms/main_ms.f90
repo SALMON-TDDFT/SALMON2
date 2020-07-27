@@ -265,8 +265,6 @@ subroutine initialization_ms()
     end do
 
     ! incident field
-    allocate(Ac_inc(1:3, -1:itotNtime+2))
-
     call Weyl_init(fs, fw)
 
     allocate(fs%imedia(fs%mg%is_array(1):fs%mg%ie_array(1), &
@@ -302,6 +300,8 @@ subroutine initialization_ms()
             call create_directory(trim(base_directory_macro(i)))
         end do
     end if
+
+    call comm_sync_all(ms%icomm_ms_world)
 
     do iimacro_s = 1, ms%nmacro, nmacro_chunk
         iimacro_e = min(iimacro_s + nmacro_chunk - 1, ms%nmacro)
@@ -346,7 +346,9 @@ subroutine initialization_ms()
         call comm_sync_all()
     end do
 
-    itt = mit; call incident()
+    itt = mit
+    allocate(Ac_inc(1:3, -1:itotNtime+2))
+    call incident()
 
     ! Experimental implementation
     if (comm_is_root(ms%id_ms_world)) then

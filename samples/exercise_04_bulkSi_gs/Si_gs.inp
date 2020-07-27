@@ -48,9 +48,9 @@
   
   !angular momentum of pseudopotential that will be treated as local
   lloc_ps(1) = 2
-  !--- Caution ---------------------------------------!
-  ! Index must correspond to those in &atomic_coor.   !
-  !---------------------------------------------------!
+  !--- Caution -------------------------------------------!
+  ! Index must correspond to those in &atomic_red_coor.   !
+  !-------------------------------------------------------!
 /
 
 &functional
@@ -70,7 +70,7 @@
 
 &scf
   !maximum number of scf iteration and threshold of convergence
-  nscf      = 200
+  nscf      = 300
   threshold = 1.0d-9
 /
 
