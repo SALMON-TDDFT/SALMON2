@@ -45,6 +45,7 @@ use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
 use initialization_dft
+use jellium, only: check_condition_jm, make_rho_jm
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -60,7 +61,7 @@ type(s_dft_system) :: system
 type(s_poisson) :: poisson
 type(s_stencil) :: stencil
 type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
 type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
 type(s_reciprocal_grid) :: fg
 type(s_pp_info) :: pp
@@ -82,6 +83,9 @@ logical :: is_checkpoint_iter, is_shutdown_time
 
 if(theory=='dft_band'.and.iperiodic/=3) return
 
+!check condition for using jellium model
+if(yn_jm=='y') call check_condition_jm
+
 call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
@@ -90,7 +94,6 @@ call timer_begin(LOG_INIT_GS)
 ! please move folloings into initialization_dft
 call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
-
 
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg,   &
@@ -101,14 +104,30 @@ call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           pp, ppg, ppn,  &
                           ofl )
 
-call initialization2_dft( Miter, nspin, rion_update,  &
-                          system, energy, ewald, stencil, fg, poisson,&
-                          lg, mg, info,   &
-                          srg, srg_scalar,  &
-                          rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
-                          spsi, shpsi, sttpsi,  &
-                          pp, ppg, ppn,   &
-                          xc_func, mixing )
+if(yn_jm=='n')then
+  call initialization2_dft( Miter, nspin, rion_update,  &
+                            system, energy, ewald, stencil, fg, poisson,&
+                            lg, mg, info,   &
+                            srg, srg_scalar,  &
+                            rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                            spsi, shpsi, sttpsi,  &
+                            pp, ppg, ppn,   &
+                            xc_func, mixing )
+else
+  !make positive back ground charge density for using jellium model
+  call allocate_scalar(mg,rho_jm)
+  call make_rho_jm(lg,mg,system,info,rho_jm)
+  
+  call initialization2_dft( Miter, nspin, rion_update,  &
+                            system, energy, ewald, stencil, fg, poisson,&
+                            lg, mg, info,   &
+                            srg, srg_scalar,  &
+                            rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                            spsi, shpsi, sttpsi,  &
+                            pp, ppg, ppn,   &
+                            xc_func, mixing,  &
+                            rho_jm )
+end if
 
 Miopt = 0
 nopt_max = 1
@@ -179,20 +198,38 @@ call timer_end(LOG_INIT_GS_ITERATION)
 call timer_begin(LOG_GS_ITERATION)
 !------------------------------------ SCF Iteration
 !Iteration loop for SCF (DFT_Iteration)
-call scf_iteration_dft( Miter,rion_update,sum1,  &
-                        system,energy,ewald,  &
-                        lg,mg,  &
-                        info,  &
-                        poisson,fg,  &
-                        cg,mixing,  &
-                        stencil,  &
-                        srg,srg_scalar,   &
-                        spsi,shpsi,sttpsi,  &
-                        rho,rho_s,  &
-                        V_local,Vh,Vxc,Vpsl,xc_func,  &
-                        pp,ppg,ppn,  &
-                        rho_old,Vlocal_old,  &
-                        band, 3 )
+if(yn_jm=='n')then
+  call scf_iteration_dft( Miter,rion_update,sum1,  &
+                          system,energy,ewald,  &
+                          lg,mg,  &
+                          info,  &
+                          poisson,fg,  &
+                          cg,mixing,  &
+                          stencil,  &
+                          srg,srg_scalar,   &
+                          spsi,shpsi,sttpsi,  &
+                          rho,rho_s,  &
+                          V_local,Vh,Vxc,Vpsl,xc_func,  &
+                          pp,ppg,ppn,  &
+                          rho_old,Vlocal_old,  &
+                          band, 3)
+else
+  call scf_iteration_dft( Miter,rion_update,sum1,  &
+                          system,energy,ewald,  &
+                          lg,mg,  &
+                          info,  &
+                          poisson,fg,  &
+                          cg,mixing,  &
+                          stencil,  &
+                          srg,srg_scalar,   &
+                          spsi,shpsi,sttpsi,  &
+                          rho,rho_s,  &
+                          V_local,Vh,Vxc,Vpsl,xc_func,  &
+                          pp,ppg,ppn,  &
+                          rho_old,Vlocal_old,  &
+                          band, 3,  &
+                          rho_jm )
+end if
 
 
 if(theory=='dft_band')then
@@ -223,16 +260,18 @@ if(yn_out_tm  == 'y') then
 end if
 
    ! force
-   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
-   if(comm_is_root(nproc_id_global))then
-      write(*,*) "===== force ====="
-      do iatom=1,natom
-         select case(unit_system)
-         case('au','a.u.'); write(*,300)iatom,(system%Force(ix,iatom),ix=1,3)
-         case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
-         end select
-      end do
+   if(yn_jm=='n')then
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+     if(comm_is_root(nproc_id_global))then
+        write(*,*) "===== force ====="
+        do iatom=1,natom
+           select case(unit_system)
+           case('au','a.u.'); write(*,300)iatom,(system%Force(ix,iatom),ix=1,3)
+           case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
+           end select
+        end do
 300   format(i6,3e16.8)
+     end if
    end if
 
 call timer_end(LOG_GS_ITERATION)
