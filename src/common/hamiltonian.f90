@@ -32,7 +32,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use pseudo_pt_so_sub, only: pseudo_so, SPIN_ORBIT_ON
   use nondiagonal_so_sub, only: nondiagonal_so
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
-  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm
+  use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
   implicit none
@@ -180,8 +180,23 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       
     else if(stencil%if_orthogonal .and. if_singlescale) then
     ! orthogonal lattice, single-scale Maxwell-TDDFT
-
-      if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
+    
+      if(yn_symmetrized_stencil=='y') then
+      
+        do im=im_s,im_e
+        do ik=ik_s,ik_e
+        do io=io_s,io_e
+        do ispin=1,Nspin
+          call zstencil_microAc_symmetrized(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz &
+                        ,tpsi%zwf(:,:,:,ispin,io,ik,im),htpsi%zwf(:,:,:,ispin,io,ik,im) &
+                        ,V_local(ispin)%f,system%Ac_micro%v,stencil%coef_lap0 &
+                        ,stencil%coef_lap,stencil%coef_nab,system%vec_k(1:3,ik))
+        end do
+        end do
+        end do
+        end do
+        
+      else if(stencil_is_parallelized_by_omp .or. is_enable_overlapping) then
         ! OpenMP parallelization: rgrid
 
         if (is_enable_overlapping) then
