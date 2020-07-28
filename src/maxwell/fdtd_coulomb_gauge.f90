@@ -25,7 +25,7 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,method_singlescale
+  use salmon_global, only: dt,method_singlescale,yn_symmetrized_stencil
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
   use communication, only: comm_is_root, comm_summation
@@ -187,6 +187,12 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   end do
   end do
   end do
+  
+  if(yn_symmetrized_stencil=='y' .and. info%if_divide_rspace) then
+    call update_overlap_real8(srg_scalar, mg, Ac%v(1,:,:,:))
+    call update_overlap_real8(srg_scalar, mg, Ac%v(2,:,:,:))
+    call update_overlap_real8(srg_scalar, mg, Ac%v(3,:,:,:))
+  end if
 
 !-----------------------------------------------------------------------------------------------------------------------------------
 
@@ -769,7 +775,7 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
-  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,method_singlescale
+  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,method_singlescale,yn_symmetrized_stencil
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use initialization_sub, only: set_bn
@@ -792,7 +798,12 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   real(8) :: bnmat(4,4)
   
   call allocate_scalar(mg,div_Ac)
-  call allocate_vector(mg,Ac)
+  
+  if(yn_symmetrized_stencil=='y') then
+    call allocate_vector_with_ovlp(mg,Ac)
+  else
+    call allocate_vector(mg,Ac)
+  end if
 
   fw%Energy_poynting = 0d0
   fw%Energy_joule = 0d0
