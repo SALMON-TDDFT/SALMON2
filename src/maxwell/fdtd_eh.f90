@@ -120,7 +120,7 @@ contains
     use structures,      only: s_fdtd_system
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi
-    use common_maxwell,  only: set_coo_em,find_point_em
+    use common_maxwell,  only: set_coo_em,find_point_em,input_shape_em
     use ttm           ,  only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
@@ -272,7 +272,7 @@ contains
         if(comm_is_root(nproc_id_global)) then
           write(*,*) "shape file is inputed by .cube format."
         end if
-        call eh_input_shape(fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
+        call input_shape_em(shape_file,fe%ifn,fs%mg%is,fs%mg%ie,fs%lg%is,fs%lg%ie,fe%Nd,fs%imedia,'cu')
         fe%rmedia(:,:,:)=dble(fs%imedia(:,:,:))
         call eh_sendrecv(fs,fe,'r')
         fs%imedia(:,:,:)=int(fe%rmedia(:,:,:)+1d-3)
@@ -2424,100 +2424,6 @@ contains
     
     return
   end subroutine eh_mpi_grid_sr
-  
-  !===========================================================================================
-  != input fdtd shape data ===================================================================
-  subroutine eh_input_shape(ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
-    use salmon_global,   only: shape_file
-    use parallelization, only: nproc_id_global
-    use communication,   only: comm_is_root
-    implicit none
-    integer,intent(in)      :: ifn,Nd
-    integer,intent(in)      :: ng_is(3),ng_ie(3),lg_is(3),lg_ie(3)
-    integer,intent(out)     :: imat(ng_is(1)-Nd:ng_ie(1)+Nd,&
-                                    ng_is(2)-Nd:ng_ie(2)+Nd,&
-                                    ng_is(3)-Nd:ng_ie(3)+Nd)
-    character(2),intent(in) :: format
-    real(8),allocatable     :: rtmp1d(:)
-    integer                 :: inum(3),inum_check(3)
-    integer                 :: ii,ij,ix,iy,iz,iflag_x,iflag_y,iflag_z
-    
-    !open file
-    open(ifn,file=trim(shape_file), status='old')
-    
-    if(trim(format)=='cu') then
-      !check grid information
-      inum(:)=lg_ie(:)-lg_is(:)+1
-      read(ifn,*); read (ifn,*); read (ifn,*); !skip
-      allocate(rtmp1d(4))
-      read (ifn,*) rtmp1d; inum_check(1)=int(rtmp1d(1)+1d-3);
-      read (ifn,*) rtmp1d; inum_check(2)=int(rtmp1d(1)+1d-3);
-      read (ifn,*) rtmp1d; inum_check(3)=int(rtmp1d(1)+1d-3);
-      deallocate(rtmp1d)
-      do ii=1,3
-        if(inum(ii)/=inum_check(ii)) then
-          if(comm_is_root(nproc_id_global)) write(*,*) "al_em or dl_em does not mutch shape file."
-          stop
-        end if
-      end do
-      read (ifn,*); !skip
-      
-      !input shape(general case)
-      allocate(rtmp1d(6))
-      ix=lg_is(1); iy=lg_is(2); iz=lg_is(3);
-      do ii=1,int(inum(1)*inum(2)*inum(3)/6)
-        read (ifn,*) rtmp1d
-        do ij=1,6
-          !check flag and write imat
-          iflag_x=0; iflag_y=0; iflag_z=0;
-          if(ix>=ng_is(1) .and. ix<=ng_ie(1)) iflag_x=1
-          if(iy>=ng_is(2) .and. iy<=ng_ie(2)) iflag_y=1
-          if(iz>=ng_is(3) .and. iz<=ng_ie(3)) iflag_z=1
-          if(iflag_x==1 .and. iflag_y==1 .and. iflag_z==1) then
-            imat(ix,iy,iz)=int(rtmp1d(ij)+1d-3)
-          end if        
-          
-          !update iz, iy, ix 
-          iz=iz+1                                          !iz
-          if(iz>lg_ie(3))                      iz=lg_is(3) !iz
-          if(iz==lg_is(3))                     iy=iy+1     !iy
-          if(iy>lg_ie(2))                      iy=lg_is(2) !iy
-          if(iz==lg_is(3) .and. iy==lg_is(2))  ix=ix+1     !ix
-        end do
-      end do
-      deallocate(rtmp1d)
-      
-      !input shape(special case)
-      if(mod(inum(1)*inum(2)*inum(3),6)>0) then
-        allocate(rtmp1d(mod(inum(1)*inum(2)*inum(3),6)))
-        read (ifn,*) rtmp1d
-        do ij=1,mod(inum(1)*inum(2)*inum(3),6)
-          !check flag and write imat
-          iflag_x=0; iflag_y=0; iflag_z=0;
-          if(ix>=ng_is(1) .and. ix<=ng_ie(1)) iflag_x=1
-          if(iy>=ng_is(2) .and. iy<=ng_ie(2)) iflag_y=1
-          if(iz>=ng_is(3) .and. iz<=ng_ie(3)) iflag_z=1
-          if(iflag_x==1 .and. iflag_y==1 .and. iflag_z==1) then
-            imat(ix,iy,iz)=int(rtmp1d(ij)+1d-3)
-          end if        
-          
-          !update iz, iy, ix 
-          iz=iz+1                                          !iz
-          if(iz>lg_ie(3))                      iz=lg_is(3) !iz
-          if(iz==lg_is(3))                     iy=iy+1     !iy
-          if(iy>lg_ie(2))                      iy=lg_is(2) !iy
-          if(iz==lg_is(3) .and. iy==lg_is(2)) ix=ix+1      !ix
-        end do      
-        deallocate(rtmp1d)
-      end if
-    elseif(trim(format)=='mp') then
-    end if
-    
-    !close file
-    close(ifn)
-    
-    return
-  end subroutine eh_input_shape
   
   !===========================================================================================
   != send and receive eh =====================================================================
