@@ -23,7 +23,7 @@ CONTAINS
 
   SUBROUTINE calc_Total_Energy_isolated(system,info,mg,pp,rho,Vh,Vxc,rion_update,energy)
     use structures
-    use salmon_global, only: kion
+    use salmon_global, only: kion, yn_jm
     use communication, only: comm_summation
     use timer
     implicit none
@@ -60,7 +60,7 @@ CONTAINS
 !$omp end parallel do
       energy%E_ion_ion = Eion
     else
-      energy%E_ion_ion = 0d0
+      if(yn_jm=='y') energy%E_ion_ion = 0d0
     end if
 
     Etot = 0d0
