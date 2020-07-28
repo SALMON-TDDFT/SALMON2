@@ -1153,7 +1153,7 @@ contains
   !! export SYSNAME_info.data file (GS info)
   subroutine write_info_data(Miter,system,energy,pp)
     use structures
-    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,unit_system,yn_jm
+    use salmon_global,       only: natom,nelem,iZatom,nelec,sysname, nstate,nstate_spin,nelec_spin,unit_system, yn_jm
     use parallelization,     only: nproc_id_global
     use communication,only: comm_is_root
     use filesystem,         only: open_filehandle
