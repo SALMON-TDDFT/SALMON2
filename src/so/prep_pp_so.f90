@@ -77,7 +77,7 @@ contains
 
     Nlma_so = lma
 
-    !write(*,*) "Nlma_so=", Nlma_so, ppg%nlma
+    write(*,*) "Nlma_so=", Nlma_so, ppg%nlma
 
     allocate( lma_tbl_so(lm_max,natom,2) ); lma_tbl_so=0
     allocate( ppg%ia_tbl_so(Nlma_so) ); ppg%ia_tbl_so=0
@@ -91,6 +91,8 @@ contains
 
     allocate( ppg%uv_so(ppg%nps,Nlma_so,2,1) ); ppg%uv_so=(0.0d0,0.0d0)
     allocate( ppg%duv_so(ppg%nps,Nlma_so,3,2,1) ); ppg%duv_so=(0.0d0,0.0d0)
+
+    !call mpi_finalize(lm); stop 'set_nlma_so'
 
   end subroutine set_nlma_so
 
@@ -138,16 +140,32 @@ contains
                    lma_tbl_so(lm,a,j_angular_momentum)=lma
                    ia_tbl_so(lma)=a
                    ll_tbl_so(lma)=ll
-                   jj_tbl_so(lma)=ll+0.5d0
+                   jj_tbl_so(lma)=ll-0.5d0
                    mj_tbl_so(lma)=n_mj-(ll-0.5d0)-1
                    rinv_uvu_so(lma)=pp%inorm_so(l,ik)*hvol
                 end do
              end select
           end do !l
-          end do !ll
           l0=l
+          end do !ll
        end do !a
     end do !j_angular_momentum
+
+    !write(*,*) "check lma=",lma
+
+    !do lma=1,Nlma_so
+    !  write(*,'(1x,3i4,2f6.2)') lma,ia_tbl_so(lma),ll_tbl_so(lma),jj_tbl_so(lma),mj_tbl_so(lma)
+    !   write(*,*) lma,rinv_uvu_so(lma)
+    !end do
+    !write(*,*) "sum(rinv_uvu_so**2)",sum(rinv_uvu_so**2)
+    !write(*,*) "sum(ia_tbl_so**2)",sum(ia_tbl_so**2)
+    !write(*,*) "sum(ll_tbl_so**2)",sum(ll_tbl_so**2)
+    !write(*,*) "sum(jj_tbl_so**2)",sum(jj_tbl_so**2)
+    !write(*,*) "sum(mj_tbl_so**2)",sum(mj_tbl_so**2)
+    !write(*,*) "sum(pp%inorm**2)",sum(pp%inorm**2)
+    !write(*,*) "sum(pp%inorm_so**2)",sum(pp%inorm_so**2)
+    !call mpi_finalize(lm); stop 'set_lma_tbl'
+
   end subroutine set_lma_tbl
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -156,6 +174,9 @@ contains
     use math_constants, only : pi
     use structures,     only : s_pp_info, s_pp_grid
     use salmon_math,    only : spline
+    use communication,  only : comm_summation
+    use mpi, only: MPI_COMM_WORLD
+    use parallelization, only: nproc_id_global
     implicit none
     type(s_pp_info) :: pp
     type(s_pp_grid) :: ppg
@@ -167,11 +188,12 @@ contains
     real(8) :: save_udvtbl_c(pp%nrmax,0:2*pp%lmax+1,natom)
     real(8) :: save_udvtbl_d(pp%nrmax,0:2*pp%lmax+1,natom)
     integer :: a,ik,j,l,lm,m,ll,l0,n_mj
-    integer :: ilma,intr,ir,j_angular_momentum
+    integer :: lma,ilma,intr,ir,j_angular_momentum
     real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
     real(8) :: uvr(0:2*pp%lmax+1)
     real(8) :: r,x,y,z, xx
     real(8) :: rshift(3), coef, mj
+    real(8) :: tmp(2),tmp1(2)
 
     if ( iperiodic == 0 ) then
        if ( mod(num(1),2) == 1 ) then
@@ -197,6 +219,8 @@ contains
 
     call set_nlma_so( pp, ppg, hvol )
 
+    lma=0
+
     do j_angular_momentum = 1, 2 ![ 1:j=l+1/2, 2:j=l-1/2 ]
 
        !if ( property == 'initial' ) then
@@ -211,7 +235,8 @@ contains
           do l=l0,l0+pp%nproj(ll,ik)-1
              select case( j_angular_momentum )
              case(1); yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
-             case(2); yn(0:pp%nrps(ik)-1) = pp%udvtbl_so(1:pp%nrps(ik),l,ik)
+             case(2); yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
+             !case(2); yn(0:pp%nrps(ik)-1) = pp%udvtbl_so(1:pp%nrps(ik),l,ik)
              end select
              call spline(pp%nrps(ik),xn,yn,an,bn,cn,dn)
              save_udvtbl_a(1:pp%nrps(ik)-1,l,a) = an(0:pp%nrps(ik)-2)
@@ -295,13 +320,13 @@ contains
 ! j=l-1/2, alpha spin
 !
                       m = nint( mj - 0.5d0 )
-                      coef=sqrt( dble(ll-mj+0.5d0)/dble(2*ll+1) )
+                      coef=-sqrt( dble(ll-mj+0.5d0)/dble(2*ll+1) )
                       ppg%uv_so(j,ilma,1,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
 !
 ! j=l-1/2, beta spin
 !
                       m = nint( mj + 0.5d0 )
-                      coef=-sqrt( dble(ll+mj+0.5d0)/dble(2*ll+1) )
+                      coef=sqrt( dble(ll+mj+0.5d0)/dble(2*ll+1) )
                       ppg%uv_so(j,ilma,2,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
 
                    end do !n_mj
@@ -318,6 +343,14 @@ contains
 
     end do !j_angular_momentum
 
+    !do ilma=1,Nlma_so
+    !  a = ppg%ia_tbl_so(ilma)
+    !  tmp(1)=sum(abs(ppg%uv_so(:,ilma,1,1)))
+    !  tmp(2)=sum(abs(ppg%uv_so(:,ilma,2,1)))
+    !  call comm_summation( tmp, tmp1, 2, MPI_COMM_WORLD )
+    !  write(*,'(1x,5i6,2f6.2,2f20.10)') nproc_id_global,ilma,a,ppg%mps(a),ll_tbl_so(ilma),jj_tbl_so(ilma),mj_tbl_so(ilma),tmp1
+    !end do
+    !call mpi_finalize(j); stop 'calc_uv_so'
   end subroutine calc_uv_so
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130

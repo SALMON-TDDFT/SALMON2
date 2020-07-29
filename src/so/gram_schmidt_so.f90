@@ -50,7 +50,7 @@ contains
     type(s_rgrid),            intent(in)    :: rg
     type(s_parallel_info)   , intent(in)    :: wfi
     type(s_orbital),          intent(inout) :: wf
-    integer :: im, ik, io1, io2, n1,n2,n3,n4
+    integer :: im, ik, io1, io2, m1,m2,m3,m4,n1,n2,n3,n4
     real(8) :: norm2, norm2_tmp
 
     if ( allocated(wf%rwf) ) then
@@ -60,14 +60,15 @@ contains
 
     call timer_begin(LOG_CALC_GRAM_SCHMIDT)
 
+    m1 = rg%is_array(1); n1 = rg%ie_array(1)
+    m2 = rg%is_array(2); n2 = rg%ie_array(2)
+    m3 = rg%is_array(3); n3 = rg%ie_array(3)
+    m4 = lbound(wf%zwf,4); n4 = ubound(wf%zwf,4)
+
     if ( .not.allocated(wf_io1) ) then
-      n1 = size(wf%zwf,1)
-      n2 = size(wf%zwf,2)
-      n3 = size(wf%zwf,3)
-      n4 = size(wf%zwf,4)
-      allocate( wf_io1(n1,n2,n3,n4) )
-      allocate( wf_exc(n1,n2,n3,n4) )
-      allocate( wf_exc_tmp(n1,n2,n3,n4) )
+      allocate( wf_io1(m1:n1,m2:n2,m3:n3,m4:n4) )
+      allocate( wf_exc(m1:n1,m2:n2,m3:n3,m4:n4) )
+      allocate( wf_exc_tmp(m1:n1,m2:n2,m3:n3,m4:n4) )
       wf_io1=zero
       wf_exc=zero
       wf_exc_tmp=zero
@@ -144,15 +145,15 @@ contains
   ! Dot product of two wavefunctions:
   complex(8) function dot_wf(x, y) result(p)
     implicit none
-    complex(8), intent(in) :: x(:,:,:,:)
-    complex(8), intent(in) :: y(:,:,:,:)
+    complex(8), intent(in) :: x(rg%is_array(1):,rg%is_array(2):,rg%is_array(3):,:)
+    complex(8), intent(in) :: y(rg%is_array(1):,rg%is_array(2):,rg%is_array(3):,:)
     integer :: i1, i2, i3, i4
     p=zero
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3) reduction(+:p)
     do i4 = 1, size(x,4)
-      do i3 = 1, size(x,3)
-        do i2 = 1, size(x,2)
-          do i1 = 1, size(x,1)
+      do i3 = rg%is(3), rg%ie(3)
+        do i2 = rg%is(2), rg%ie(2)
+          do i1 = rg%is(1), rg%ie(1)
             p = p + conjg( x(i1,i2,i3,i4) )*y(i1,i2,i3,i4)
           end do
         end do
@@ -167,14 +168,14 @@ contains
   subroutine axpy_wf(a, x, y)
     implicit none
     complex(8), intent(in) :: a
-    complex(8), intent(in) :: x(:,:,:,:)
-    complex(8), intent(inout) :: y(:,:,:,:)
+    complex(8), intent(in) :: x(rg%is_array(1):,rg%is_array(2):,rg%is_array(3):,:)
+    complex(8), intent(inout) :: y(rg%is_array(1):,rg%is_array(2):,rg%is_array(3):,:)
     integer :: i1, i2, i3, i4
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
     do i4 = 1, size(x,4)
-      do i3 = 1, size(x,3)
-        do i2 = 1, size(x,2)
-          do i1 = 1, size(x,1)
+      do i3 = rg%is(3), rg%ie(3)
+        do i2 = rg%is(2), rg%ie(2)
+          do i1 = rg%is(1), rg%ie(1)
             y(i1, i2, i3, i4) = a * x(i1, i2, i3, i4) + y(i1, i2, i3, i4)
           end do
         end do
@@ -189,13 +190,13 @@ contains
   subroutine scal_wf(a, x)
     implicit none
     complex(8), intent(in) :: a
-    complex(8), intent(inout) :: x(:,:,:,:)
+    complex(8), intent(inout) :: x(rg%is_array(1):,rg%is_array(2):,rg%is_array(3):,:)
     integer :: i1, i2, i3, i4
     !$omp parallel do collapse(2) default(shared) private(i1,i2,i3)
     do i4 = 1, size(x,4)
-      do i3 = 1, size(x,3)
-        do i2 = 1, size(x,2)
-          do i1 = 1, size(x,1)
+      do i3 = rg%is(3), rg%ie(3)
+        do i2 = rg%is(2), rg%ie(2)
+          do i1 = rg%is(1), rg%ie(1)
             x(i1, i2, i3, i4) = a * x(i1, i2, i3, i4)
           end do
         end do

@@ -241,6 +241,11 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%flag_nlcc,nproc_group_global)
   if(comm_is_root(nproc_id_global)) write(*,*)"flag_nlcc = ",pp%flag_nlcc
 
+  call comm_bcast(pp%anorm_so,nproc_group_global)
+  call comm_bcast(pp%inorm_so,nproc_group_global)
+  call comm_bcast(pp%udvtbl_so,nproc_group_global)
+  call comm_bcast(pp%dudvtbl_so,nproc_group_global)
+
   return
 end subroutine input_pp
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
