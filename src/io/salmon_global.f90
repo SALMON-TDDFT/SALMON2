@@ -246,6 +246,7 @@ module salmon_global
   character(1)   :: yn_obs_plane_em(200)
   character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em
+  real(8)        :: film_thickness
 
 !! &analysis
   character(2)   :: projection_option

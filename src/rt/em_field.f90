@@ -24,11 +24,16 @@ contains
 subroutine calc_emfields(itt,nspin,curr_in,rt)
   use structures, only : s_rt
   use math_constants, only : pi
-  use salmon_global, only : dt,trans_longi
+  use phys_constants, only: cspeed_au
+  use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em
   implicit none
   integer   ,intent(in)    :: itt,nspin
   real(8)   ,intent(in)    :: curr_in(3,nspin)
   type(s_rt),intent(inout) :: rt
+  !
+  integer :: j
+  real(8) :: n1,n2
+  integer,parameter :: m=100
 
   if(nspin==1) then
     rt%curr(1:3,itt) = curr_in(1:3,1)
@@ -40,6 +45,16 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
     rt%Ac_ind(:,itt+1) = 2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
   else if(trans_longi=="tr")then
     rt%Ac_ind(:,itt+1) = 0d0
+  else if(trans_longi=="2d") then
+    n1 = sqrt(epsilon_em(1)) ! refractive index of medium 1
+    n2 = sqrt(epsilon_em(2)) ! refractive index of medium 2
+    do j=1,m
+      rt%Ac_ind(:,itt+1) = rt%Ac_ind(:,0) + ((n1-n2)/(n1+n2))* ( rt%Ac_ext(:,itt+1) - rt%Ac_ext(:,itt) )/m &
+      & - (dt/m)* (4d0*pi/(cspeed_au*(n1+n2)))* film_thickness* rt%curr(:,itt)
+      rt%Ac_ind(:,0) = rt%Ac_ind(:,itt+1)
+    end do
+  else
+    stop "error: invalid trans_longi"
   end if
 
   rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
