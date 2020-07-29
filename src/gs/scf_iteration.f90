@@ -36,6 +36,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   use mixing_sub
   use hartree_sub, only: hartree
   use salmon_xc
+  use noncollinear_module, only: SPIN_ORBIT_ON, calc_dm_noncollinear, rot_dm_noncollinear, rot_vxc_noncollinear
   implicit none
 
   type(s_rgrid),         intent(in)    :: lg
@@ -99,6 +100,11 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
 
   call calc_density(system,rho_s,spsi,info,mg)
 
+  if ( SPIN_ORBIT_ON ) then
+    call calc_dm_noncollinear( spsi, system, info, mg )
+    call rot_dm_noncollinear( rho_s, system, mg )
+  end if
+
   select case(method_mixing)
     case ('simple') ; call simple_mixing(mg,system,1.d0-mixing%mixrate,mixing%mixrate,rho_s,mixing)
     case ('broyden'); call wrapper_broyden(info%icomm_r,mg,system,rho_s,iter,mixing)
@@ -120,6 +126,8 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
+
+    if ( SPIN_ORBIT_ON ) call rot_vxc_noncollinear( Vxc, system, mg )
 
   end if
 

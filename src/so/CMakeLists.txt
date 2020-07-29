@@ -1,4 +1,5 @@
 set(SOURCES
+    noncollinear_module.f90
     gram_schmidt_so.f90
     nondiagonal_so.f90
     prep_pp_so.f90

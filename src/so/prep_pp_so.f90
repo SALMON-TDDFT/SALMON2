@@ -221,8 +221,8 @@ contains
           do l=l0,l0+pp%nproj(ll,ik)-1
              select case( j_angular_momentum )
              case(1); yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
-             case(2); yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
-             !case(2); yn(0:pp%nrps(ik)-1) = pp%udvtbl_so(1:pp%nrps(ik),l,ik)
+             !case(2); yn(0:pp%nrps(ik)-1) = pp%udvtbl(1:pp%nrps(ik),l,ik)
+             case(2); yn(0:pp%nrps(ik)-1) = pp%udvtbl_so(1:pp%nrps(ik),l,ik)
              end select
              call spline(pp%nrps(ik),xn,yn,an,bn,cn,dn)
              save_udvtbl_a(1:pp%nrps(ik)-1,l,a) = an(0:pp%nrps(ik)-2)
