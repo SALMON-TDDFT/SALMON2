@@ -114,7 +114,7 @@ CONTAINS
     use structures
     use salmon_math
     use math_constants,only : pi,zi
-    use salmon_global, only: kion,aEwald, cutoff_r
+    use salmon_global, only: kion,aEwald, cutoff_r, yn_jm
     use communication, only: comm_summation,comm_is_root
     use timer
     implicit none
@@ -197,7 +197,7 @@ CONTAINS
 
     etmp = 0d0
     E_wrk = 0d0
-    if (rion_update) then
+    if (yn_jm=='n') then
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
