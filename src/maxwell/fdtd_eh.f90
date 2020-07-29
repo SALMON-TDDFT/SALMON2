@@ -412,11 +412,11 @@ contains
             end if
           end do
         case default
-          write(*,'(A,A)')       ' media_type  =  ', trim(media_type(ii))
+          write(*,'(A,A)')     ' media_type  =  ', trim(media_type(ii))
         end select
-        write(*,'(A,ES12.5)')    ' epsilon_em  = ', fe%rep(ii)
-        write(*,'(A,ES12.5)')    ' mu_em       = ', fe%rmu(ii)
-        write(*,'(A,ES12.5)'   ) ' sigma_em    = ', fe%sig(ii)
+        write(*,'(A,ES12.5)')  ' epsilon_em  = ', fe%rep(ii)
+        write(*,'(A,ES12.5)')  ' mu_em       = ', fe%rmu(ii)
+        write(*,'(A,ES12.5)')  ' sigma_em    = ', fe%sig(ii)
       end do
       write(*,*) "**************************"
     end if

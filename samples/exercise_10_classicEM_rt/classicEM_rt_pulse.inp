@@ -101,7 +101,7 @@
   !location of source(x,y,z)
   source_loc1(1:3) = -37.8d0, 0.0d0, 0.0d0
   
-  !propagation direction of the incidenty pulse(x,y,z)
+  !propagation direction of the incident pulse(x,y,z)
   ek_dir1(1:3) = 1.0d0, 0.0d0, 0.0d0
   !*** SOURCE INFORMATION(END) ***************************************!
   
@@ -124,5 +124,5 @@
   ! on the cross-section including the observation point              !
   ! whose location is determined by obs_loc_em.                       !
   !-------------------------------------------------------------------!
-  !*** OBSERVATION END(START) ****************************************!
+  !*** OBSERVATION INFORMATION(END) **********************************!
 /
