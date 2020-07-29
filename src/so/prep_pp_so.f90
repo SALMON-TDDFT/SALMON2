@@ -48,7 +48,6 @@ contains
     lm_max=0
     lma=0
     do j_angular_momentum = 1, 2
-
       do a=1,natom
         ik=kion(a)
         lm=0
@@ -152,19 +151,6 @@ contains
     end do !j_angular_momentum
 
     !write(*,*) "check lma=",lma
-
-    !do lma=1,Nlma_so
-    !  write(*,'(1x,3i4,2f6.2)') lma,ia_tbl_so(lma),ll_tbl_so(lma),jj_tbl_so(lma),mj_tbl_so(lma)
-    !   write(*,*) lma,rinv_uvu_so(lma)
-    !end do
-    !write(*,*) "sum(rinv_uvu_so**2)",sum(rinv_uvu_so**2)
-    !write(*,*) "sum(ia_tbl_so**2)",sum(ia_tbl_so**2)
-    !write(*,*) "sum(ll_tbl_so**2)",sum(ll_tbl_so**2)
-    !write(*,*) "sum(jj_tbl_so**2)",sum(jj_tbl_so**2)
-    !write(*,*) "sum(mj_tbl_so**2)",sum(mj_tbl_so**2)
-    !write(*,*) "sum(pp%inorm**2)",sum(pp%inorm**2)
-    !write(*,*) "sum(pp%inorm_so**2)",sum(pp%inorm_so**2)
-    !call mpi_finalize(lm); stop 'set_lma_tbl'
 
   end subroutine set_lma_tbl
 
@@ -320,13 +306,13 @@ contains
 ! j=l-1/2, alpha spin
 !
                       m = nint( mj - 0.5d0 )
-                      coef=-sqrt( dble(ll-mj+0.5d0)/dble(2*ll+1) )
+                      coef=sqrt( dble(ll-mj+0.5d0)/dble(2*ll+1) )
                       ppg%uv_so(j,ilma,1,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
 !
 ! j=l-1/2, beta spin
 !
                       m = nint( mj + 0.5d0 )
-                      coef=sqrt( dble(ll+mj+0.5d0)/dble(2*ll+1) )
+                      coef=-sqrt( dble(ll+mj+0.5d0)/dble(2*ll+1) )
                       ppg%uv_so(j,ilma,2,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
 
                    end do !n_mj
@@ -343,14 +329,6 @@ contains
 
     end do !j_angular_momentum
 
-    !do ilma=1,Nlma_so
-    !  a = ppg%ia_tbl_so(ilma)
-    !  tmp(1)=sum(abs(ppg%uv_so(:,ilma,1,1)))
-    !  tmp(2)=sum(abs(ppg%uv_so(:,ilma,2,1)))
-    !  call comm_summation( tmp, tmp1, 2, MPI_COMM_WORLD )
-    !  write(*,'(1x,5i6,2f6.2,2f20.10)') nproc_id_global,ilma,a,ppg%mps(a),ll_tbl_so(ilma),jj_tbl_so(ilma),mj_tbl_so(ilma),tmp1
-    !end do
-    !call mpi_finalize(j); stop 'calc_uv_so'
   end subroutine calc_uv_so
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
@@ -473,6 +451,8 @@ end subroutine
     real(8),parameter :: factor=0.70710678118654752d0 ! =sqrt(0.5)
     zylm=(0.0d0,0.0d0)
     if ( l < 0 .or. abs(m) > l ) return
+    zylm=Ylm(x,y,z,l,m)
+    return
     if ( m < 0 ) then
       zylm = factor*dcmplx( -Ylm(x,y,z,l,m), Ylm(x,y,z,l,-m) )
     else if ( m == 0 ) then
