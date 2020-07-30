@@ -35,6 +35,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use salmon_global, only: yn_want_communication_overlapping,yn_periodic
   use timer
   use code_optimization, only: stencil_is_parallelized_by_omp
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_summation
   implicit none
   type(s_dft_system)      ,intent(in) :: system
   type(s_parallel_info),intent(in) :: info
@@ -50,6 +52,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
   logical :: if_kAc,if_singlescale
   logical :: is_enable_overlapping
+  !real(8) :: tmp,tmp1
 
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -316,8 +319,31 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   ! nonlocal potential
     if ( SPIN_ORBIT_ON ) then
-!      call nondiagonal_so(tpsi,htpsi,info,nspin,ppg)
-      call pseudo_so(tpsi,htpsi,info,nspin,ppg)
+      call nondiagonal_so(tpsi,htpsi,info,mg)
+      !tmp=0.0d0
+      !do iz=mg%is(3),mg%ie(3)
+      !do iy=mg%is(2),mg%ie(2)
+      !do ix=mg%is(1),mg%ie(1)
+      !  tmp=tmp+sum(abs(tpsi%zwf(ix,iy,iz,:,:,:,:)))
+      !end do
+      !end do
+      !end do
+      !call comm_summation( tmp,tmp1,info%icomm_r )
+      !write(*,*) "before",tmp1,nproc_id_global
+      call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
+      !call zpseudo(tpsi,htpsi,info,nspin,ppg)
+      !tmp=0.0d0
+      !do iz=mg%is(3),mg%ie(3)
+      !do iy=mg%is(2),mg%ie(2)
+      !do ix=mg%is(1),mg%ie(1)
+      !  tmp=tmp+sum(abs(htpsi%zwf(ix,iy,iz,:,:,:,:)))
+      !end do
+      !end do
+      !end do
+      !call comm_summation( tmp,tmp1,info%icomm_r )
+      !write(*,*) "after",tmp1,nproc_id_global
+      !call mpi_finalize(ix)
+      !stop 'hpsi'
     else
     ! pseudopotential
       call zpseudo(tpsi,htpsi,info,nspin,ppg)
