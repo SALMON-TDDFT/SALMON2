@@ -34,13 +34,20 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   integer :: j
   real(8) :: n1,n2
   integer,parameter :: m=100
+  
+! electric field
+  rt%E_ext(:,itt) = -( rt%Ac_ext(:,itt) - rt%Ac_ext(:,itt-1) )/dt
+  rt%E_ind(:,itt) = -( rt%Ac_ind(:,itt) - rt%Ac_ind(:,itt-1) )/dt
+  rt%E_tot(:,itt) = -( rt%Ac_tot(:,itt) - rt%Ac_tot(:,itt-1) )/dt
 
+! current density
   if(nspin==1) then
     rt%curr(1:3,itt) = curr_in(1:3,1)
   else if(nspin==2) then
     rt%curr(1:3,itt) = curr_in(1:3,1) + curr_in(1:3,2)
   end if
 
+! vector potential for next step
   if(trans_longi=="lo")then
     rt%Ac_ind(:,itt+1) = 2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2
   else if(trans_longi=="tr")then
@@ -48,20 +55,17 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   else if(trans_longi=="2d") then
     n1 = sqrt(epsilon_em(1)) ! refractive index of medium 1
     n2 = sqrt(epsilon_em(2)) ! refractive index of medium 2
+    ! Ac_ind(:,itt+1) = A_ref(t+dt)/c, Ac_tot(:,itt+1) = A_trans(t+dt)/c
     do j=1,m
-      rt%Ac_ind(:,itt+1) = rt%Ac_ind(:,0) + ((n1-n2)/(n1+n2))* ( rt%Ac_ext(:,itt+1) - rt%Ac_ext(:,itt) )/m &
-      & - (dt/m)* (4d0*pi/(cspeed_au*(n1+n2)))* film_thickness* rt%curr(:,itt)
-      rt%Ac_ind(:,0) = rt%Ac_ind(:,itt+1)
+      rt%Ac_ind(:,itt+1) = rt%Ac_ind(:,0) + (dt/m)*( &
+      & ((n1-n2)/(n1+n2))* ( rt%Ac_ext(:,itt+1) - rt%Ac_ext(:,itt) )/dt &
+      & - (4d0*pi/(cspeed_au*(n1+n2)))* film_thickness* rt%curr(:,itt) )
+      rt%Ac_ind(:,0) = rt%Ac_ind(:,itt+1) 
     end do
   else
     stop "error: invalid trans_longi"
   end if
-
   rt%Ac_tot(:,itt+1) = rt%Ac_ext(:,itt+1) + rt%Ac_ind(:,itt+1)
-
-  rt%E_ext(:,itt) = -(rt%Ac_ext(:,itt+1) - rt%Ac_ext(:,itt-1))/(2d0*dt)
-  rt%E_ind(:,itt) = -(rt%Ac_ind(:,itt+1) - rt%Ac_ind(:,itt-1))/(2d0*dt)
-  rt%E_tot(:,itt) = -(rt%Ac_tot(:,itt+1) - rt%Ac_tot(:,itt-1))/(2d0*dt)
 
 end subroutine calc_emfields
 
