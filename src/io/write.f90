@@ -1031,15 +1031,15 @@ contains
         & 17, "|E_ext_x|^2", trim(t_unit_spectrum_elec_square%name), &
         & 18, "|E_ext_y|^2", trim(t_unit_spectrum_elec_square%name), &
         & 19, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name), &
-        & 20, "Re(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 21, "Re(E_ext_y)", trim(t_unit_spectrum_elec%name), &
-        & 22, "Re(E_ext_z)", trim(t_unit_spectrum_elec%name), &
-        & 23, "Im(E_ext_x)", trim(t_unit_spectrum_elec%name), &
-        & 24, "Im(E_ext_y)", trim(t_unit_spectrum_elec%name), &
-        & 25, "Im(E_ext_z)", trim(t_unit_spectrum_elec%name), &
-        & 26, "|E_ext_x|^2", trim(t_unit_spectrum_elec_square%name), &
-        & 27, "|E_ext_y|^2", trim(t_unit_spectrum_elec_square%name), &
-        & 28, "|E_ext_z|^2", trim(t_unit_spectrum_elec_square%name)
+        & 20, "Re(E_tot_x)", trim(t_unit_spectrum_elec%name), &
+        & 21, "Re(E_tot_y)", trim(t_unit_spectrum_elec%name), &
+        & 22, "Re(E_tot_z)", trim(t_unit_spectrum_elec%name), &
+        & 23, "Im(E_tot_x)", trim(t_unit_spectrum_elec%name), &
+        & 24, "Im(E_tot_y)", trim(t_unit_spectrum_elec%name), &
+        & 25, "Im(E_tot_z)", trim(t_unit_spectrum_elec%name), &
+        & 26, "|E_tot_x|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 27, "|E_tot_y|^2", trim(t_unit_spectrum_elec_square%name), &
+        & 28, "|E_tot_z|^2", trim(t_unit_spectrum_elec_square%name)
 
       tt = dt*dble(nt)
 
