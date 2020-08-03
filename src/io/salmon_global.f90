@@ -247,6 +247,9 @@ module salmon_global
   character(1)   :: yn_obs_plane_integral_em(200)
   character(1)   :: yn_wf_em
   real(8)        :: film_thickness
+  integer        :: media_id_pml(3,2)
+  integer        :: media_id_source1
+  integer        :: media_id_source2
 
 !! &analysis
   character(2)   :: projection_option

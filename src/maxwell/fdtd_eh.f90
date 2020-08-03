@@ -46,7 +46,8 @@ module fdtd_eh
     integer,allocatable :: inc_po_id(:,:)  !id at incident current source point
     character(16)       :: inc_dist1       !spatial distribution type of inc.
     character(16)       :: inc_dist2       !spatial distribution type of inc.
-    real(8)             :: c2_inc_xyz(3)   !coeff. for inc., xyz(1:3) means propa. direc. of the inc.
+    real(8)             :: c2_inc1_xyz(3)   !coeff. for inc.1, xyz(1:3) means propa. direc. of the inc.
+    real(8)             :: c2_inc2_xyz(3)   !coeff. for inc.2, xyz(1:3) means propa. direc. of the inc.
     real(8),allocatable :: ex_y(:,:,:),c1_ex_y(:,:,:),c2_ex_y(:,:,:),ex_z(:,:,:),c1_ex_z(:,:,:),c2_ex_z(:,:,:) !e
     real(8),allocatable :: ey_z(:,:,:),c1_ey_z(:,:,:),c2_ey_z(:,:,:),ey_x(:,:,:),c1_ey_x(:,:,:),c2_ey_x(:,:,:) !e
     real(8),allocatable :: ez_x(:,:,:),c1_ez_x(:,:,:),c2_ez_x(:,:,:),ez_y(:,:,:),c1_ez_y(:,:,:),c2_ez_y(:,:,:) !e
@@ -108,6 +109,7 @@ contains
                                media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,&
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,&
                                obs_num_em,obs_loc_em,yn_obs_plane_integral_em,&
+                               media_id_pml,media_id_source1,media_id_source2,&
                                wave_input,trans_longi,e_impulse,nenergy,&
                                source_loc1,ek_dir1,epdir_re1,epdir_im1,ae_shape1,&
                                phi_cep1,I_wcm2_1,E_amplitude1,&
@@ -353,7 +355,7 @@ contains
       call eh_coeff
     end do
 
-    !*** Check TTM On/Off, and initialization *****************************************************************!
+    !*** check TTM On/Off, and initialization *****************************************************************!
     call init_ttm_parameters( dt_em )
     if( use_ttm )then
        call init_ttm_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
@@ -652,9 +654,12 @@ contains
       allocate(fe%inc_pl_pe(fe%inc_num,3)) !1:xy-plane, 2:yz-plane, 3:xz-plane
       fe%inc_po_id(:,:)=0; fe%inc_po_pe(:)=0; fe%inc_li_pe(:,:)=0; fe%inc_pl_pe(:,:)=0; 
       do ii=1,3
-        fe%c2_inc_xyz(ii)=(cspeed_au/fe%rep(0)*dt_em) &
-                           /(1.0d0+2.0d0*pi*fe%sig(0)/fe%rep(0)*dt_em) &
-                           *2.0d0/( fs%hgs(ii)*sqrt(fe%rmu(0)/fe%rep(0)) )
+        fe%c2_inc1_xyz(ii)=(cspeed_au/fe%rep(media_id_source1)*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(media_id_source1)/fe%rep(media_id_source1)*dt_em) &
+                            *2.0d0/( fs%hgs(ii)*sqrt(fe%rmu(media_id_source1)/fe%rep(media_id_source1)) )
+        fe%c2_inc2_xyz(ii)=(cspeed_au/fe%rep(media_id_source2)*dt_em) &
+                            /(1.0d0+2.0d0*pi*fe%sig(media_id_source2)/fe%rep(media_id_source2)*dt_em) &
+                            *2.0d0/( fs%hgs(ii)*sqrt(fe%rmu(media_id_source2)/fe%rep(media_id_source2)) )
       end do
       
       !search incident current source point and check others
@@ -1101,43 +1106,66 @@ contains
                                    fs%mg%is_array(2):fs%mg%ie_array(2),&
                                    fs%mg%is_array(3):fs%mg%ie_array(3))
       integer :: ista,iend
-      real(8) :: pml_del,s_max
-      real(8) :: s_l(fe%ipml_l+1),sh_l(fe%ipml_l), &
-                 c1_pml(fe%ipml_l+1),c2_pml(fe%ipml_l+1),c1_pml_h(fe%ipml_l),c2_pml_h(fe%ipml_l)
-  
+      real(8) :: pml_del,s_max_bot,s_max_top
+      real(8) :: s_l_bot(fe%ipml_l+1),sh_l_bot(fe%ipml_l), &
+                 s_l_top(fe%ipml_l+1),sh_l_top(fe%ipml_l), &
+                 c1_pml_bot(fe%ipml_l+1),c2_pml_bot(fe%ipml_l+1),c1_pml_bot_h(fe%ipml_l),c2_pml_bot_h(fe%ipml_l), &
+                 c1_pml_top(fe%ipml_l+1),c2_pml_top(fe%ipml_l+1),c1_pml_top_h(fe%ipml_l),c2_pml_top_h(fe%ipml_l)
+      
       !set pml conductivity
       pml_del=fs%hgs(idir)
-      s_max=-(fe%pml_m+1.0d0)*log(fe%pml_r)/(2.0d0*dble(fe%ipml_l)*pml_del) &
-            *cspeed_au/(4.0d0*pi)*sqrt(fe%rep(0)/fe%rmu(0));
+      s_max_bot=-(fe%pml_m+1.0d0)*log(fe%pml_r)/(2.0d0*dble(fe%ipml_l)*pml_del) &
+                *cspeed_au/(4.0d0*pi)*sqrt(fe%rep(media_id_pml(idir,1))/fe%rmu(media_id_pml(idir,1)));
+      s_max_top=-(fe%pml_m+1.0d0)*log(fe%pml_r)/(2.0d0*dble(fe%ipml_l)*pml_del) &
+                *cspeed_au/(4.0d0*pi)*sqrt(fe%rep(media_id_pml(idir,2))/fe%rmu(media_id_pml(idir,2)));
       do ii=1,(fe%ipml_l+1)
-        s_l(ii)=s_max*(&
-                      (dble(fe%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fe%ipml_l)*pml_del)&
-                      )**fe%pml_m;
+        s_l_bot(ii)=s_max_bot*(&
+                              (dble(fe%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                               )**fe%pml_m;
+        s_l_top(ii)=s_max_top*(&
+                              (dble(fe%ipml_l)*pml_del-(dble(ii)-1.0d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                               )**fe%pml_m;
       end do
       do ii=1,fe%ipml_l
-        sh_l(ii)=(fe%rmu(0)/fe%rep(0)) &
-                 *s_max*(&
-                        (dble(fe%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(fe%ipml_l)*pml_del)&
-                        )**fe%pml_m;
+        sh_l_bot(ii)=(fe%rmu(media_id_pml(idir,1))/fe%rep(media_id_pml(idir,1))) &
+                     *s_max_bot*(&
+                                (dble(fe%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                                 )**fe%pml_m;
+        sh_l_top(ii)=(fe%rmu(media_id_pml(idir,2))/fe%rep(media_id_pml(idir,2))) &
+                     *s_max_top*(&
+                                (dble(fe%ipml_l)*pml_del-(dble(ii)-0.5d0)*pml_del)/(dble(fe%ipml_l)*pml_del) &
+                                 )**fe%pml_m;
       end do
       
       !set pml coefficient
       do ii=1,(fe%ipml_l+1)
-        c1_pml(ii)=(1.0d0-2.0d0*pi*s_l(ii)/fe%rep(0)*dt_em) &
-                   /(1.0d0+2.0d0*pi*s_l(ii)/fe%rep(0)*dt_em);
-        c2_pml(ii)=(cspeed_au/fe%rep(0)*dt_em) &
-                   /(1.0d0+2.0d0*pi*s_l(ii)/fe%rep(0)*dt_em)/pml_del
+        c1_pml_bot(ii)=(1.0d0-2.0d0*pi*s_l_bot(ii)/fe%rep(media_id_pml(idir,1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_bot(ii)/fe%rep(media_id_pml(idir,1))*dt_em)
+        c2_pml_bot(ii)=(cspeed_au/fe%rep(media_id_pml(idir,1))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_bot(ii)/fe%rep(media_id_pml(idir,1))*dt_em)/pml_del
+        c1_pml_top(ii)=(1.0d0-2.0d0*pi*s_l_top(ii)/fe%rep(media_id_pml(idir,2))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_top(ii)/fe%rep(media_id_pml(idir,2))*dt_em)
+        c2_pml_top(ii)=(cspeed_au/fe%rep(media_id_pml(idir,2))*dt_em) &
+                       /(1.0d0+2.0d0*pi*s_l_top(ii)/fe%rep(media_id_pml(idir,2))*dt_em)/pml_del
       end do
-      call comm_bcast(c1_pml,nproc_group_global)
-      call comm_bcast(c2_pml,nproc_group_global)
+      call comm_bcast(c1_pml_bot,nproc_group_global)
+      call comm_bcast(c2_pml_bot,nproc_group_global)
+      call comm_bcast(c1_pml_top,nproc_group_global)
+      call comm_bcast(c2_pml_top,nproc_group_global)
       do ii=1,fe%ipml_l
-        c1_pml_h(ii)=(1.0d0-2.0d0*pi*sh_l(ii)/fe%rmu(0)*dt_em) &
-                     /(1.0d0+2.0d0*pi*sh_l(ii)/fe%rmu(0)*dt_em);
-        c2_pml_h(ii)=(cspeed_au/fe%rmu(0)*dt_em) &
-                     /(1.0d0+2.0d0*pi*sh_l(ii)/fe%rmu(0)*dt_em)/pml_del
+        c1_pml_bot_h(ii)=(1.0d0-2.0d0*pi*sh_l_bot(ii)/fe%rmu(media_id_pml(idir,1))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_bot(ii)/fe%rmu(media_id_pml(idir,1))*dt_em)
+        c2_pml_bot_h(ii)=(cspeed_au/fe%rmu(media_id_pml(idir,1))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_bot(ii)/fe%rmu(media_id_pml(idir,1))*dt_em)/pml_del
+        c1_pml_top_h(ii)=(1.0d0-2.0d0*pi*sh_l_top(ii)/fe%rmu(media_id_pml(idir,2))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_top(ii)/fe%rmu(media_id_pml(idir,2))*dt_em)
+        c2_pml_top_h(ii)=(cspeed_au/fe%rmu(media_id_pml(idir,2))*dt_em) &
+                         /(1.0d0+2.0d0*pi*sh_l_top(ii)/fe%rmu(media_id_pml(idir,2))*dt_em)/pml_del
       end do
-      call comm_bcast(c1_pml_h,nproc_group_global)
-      call comm_bcast(c2_pml_h,nproc_group_global)
+      call comm_bcast(c1_pml_bot_h,nproc_group_global)
+      call comm_bcast(c2_pml_bot_h,nproc_group_global)
+      call comm_bcast(c1_pml_top_h,nproc_group_global)
+      call comm_bcast(c2_pml_top_h,nproc_group_global)
       
       !set pml(bottom)
       if((fs%a_bc(idir,1)=='pml').and.(fs%mg%is(idir)<=(fs%lg%is(idir)+fe%ipml_l))) then
@@ -1149,20 +1177,20 @@ contains
         icount=1
         do ii=fs%mg%is(idir),iend
           if(idir==1) then
-            c1_e1(ii,:,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(ii,:,:)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(ii,:,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(ii,:,:)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(ii,:,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(ii,:,:)=-c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(ii,:,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(ii,:,:)= c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==2) then
-            c1_e1(:,ii,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(:,ii,:)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(:,ii,:)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(:,ii,:)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(:,ii,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(:,ii,:)=-c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(:,ii,:)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(:,ii,:)= c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==3) then
-            c1_e1(:,:,ii)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e1(:,:,ii)=-c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_e2(:,:,ii)= c1_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_e2(:,:,ii)= c2_pml(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e1(:,:,ii)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e1(:,:,ii)=-c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_e2(:,:,ii)= c1_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_e2(:,:,ii)= c2_pml_bot(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           end if
           icount=icount+1
         end do
@@ -1174,20 +1202,20 @@ contains
         icount=1
         do ii=fs%mg%is(idir),iend
           if(idir==1) then
-            c1_h1(ii,:,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(ii,:,:)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(ii,:,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(ii,:,:)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(ii,:,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(ii,:,:)= c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(ii,:,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(ii,:,:)=-c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==2) then
-            c1_h1(:,ii,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(:,ii,:)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(:,ii,:)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(:,ii,:)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(:,ii,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(:,ii,:)= c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(:,ii,:)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(:,ii,:)=-c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           elseif(idir==3) then
-            c1_h1(:,:,ii)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h1(:,:,ii)= c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c1_h2(:,:,ii)= c1_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
-            c2_h2(:,:,ii)=-c2_pml_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h1(:,:,ii)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h1(:,:,ii)= c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c1_h2(:,:,ii)= c1_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
+            c2_h2(:,:,ii)=-c2_pml_bot_h(fs%mg%is(idir)-fs%lg%is(idir)+icount)
           end if
           icount=icount+1
         end do
@@ -1203,20 +1231,20 @@ contains
         icount=1
         do ii=ista,fs%mg%ie(idir)
           if(idir==1) then
-            c1_e1(ii,:,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e1(ii,:,:)=-c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_e2(ii,:,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e2(ii,:,:)= c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e1(ii,:,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e1(ii,:,:)=-c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e2(ii,:,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e2(ii,:,:)= c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==2) then
-            c1_e1(:,ii,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e1(:,ii,:)=-c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_e2(:,ii,:)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e2(:,ii,:)= c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e1(:,ii,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e1(:,ii,:)=-c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e2(:,ii,:)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e2(:,ii,:)= c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==3) then
-            c1_e1(:,:,ii)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e1(:,:,ii)=-c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_e2(:,:,ii)= c1_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_e2(:,:,ii)= c2_pml((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e1(:,:,ii)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e1(:,:,ii)=-c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_e2(:,:,ii)= c1_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_e2(:,:,ii)= c2_pml_top((fe%ipml_l+1)-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           end if
           icount=icount+1
         end do
@@ -1230,20 +1258,20 @@ contains
         icount=1
         do ii=ista,iend
           if(idir==1) then
-            c1_h1(ii,:,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h1(ii,:,:)= c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_h2(ii,:,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h2(ii,:,:)=-c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h1(ii,:,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h1(ii,:,:)= c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h2(ii,:,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h2(ii,:,:)=-c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==2) then
-            c1_h1(:,ii,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h1(:,ii,:)= c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_h2(:,ii,:)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h2(:,ii,:)=-c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h1(:,ii,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h1(:,ii,:)= c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h2(:,ii,:)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h2(:,ii,:)=-c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           elseif(idir==3) then
-            c1_h1(:,:,ii)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h1(:,:,ii)= c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c1_h2(:,:,ii)= c1_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
-            c2_h2(:,:,ii)=-c2_pml_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h1(:,:,ii)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h1(:,:,ii)= c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c1_h2(:,:,ii)= c1_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
+            c2_h2(:,:,ii)=-c2_pml_top_h(fe%ipml_l-(ista-(fs%lg%ie(idir)-fe%ipml_l)+(icount-1)))
           end if
           icount=icount+1
         end do
@@ -1427,9 +1455,9 @@ contains
                  fe%c1_ez_y,fe%c2_ez_y,fe%ez_y,fe%hx_y,fe%hx_z,      'e','y') !ez_y
       if(fe%inc_num>0) then !add incident current source
         if(fe%inc_dist1/='none') call eh_add_inc(1,E_amplitude1,tw1,omega1,phi_cep1,&
-                                                    epdir_re1,epdir_im1,ae_shape1,fe%inc_dist1)
+                                                    epdir_re1,epdir_im1,fe%c2_inc1_xyz,ae_shape1,fe%inc_dist1)
         if(fe%inc_dist2/='none') call eh_add_inc(2,E_amplitude2,tw2,omega2,phi_cep2,&
-                                                    epdir_re2,epdir_im2,ae_shape2,fe%inc_dist2)
+                                                    epdir_re2,epdir_im2,fe%c2_inc2_xyz,ae_shape2,fe%inc_dist2)
       end if
       if(fe%num_ld>0) then
         call eh_add_curr(fe%rjx_sum_ld(:,:,:),fe%rjy_sum_ld(:,:,:),fe%rjz_sum_ld(:,:,:))
@@ -1818,11 +1846,11 @@ contains
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ add incident current source +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine eh_add_inc(iord,amp,tw,omega,cep,ep_r,ep_i,aes,typ)
+    subroutine eh_add_inc(iord,amp,tw,omega,cep,ep_r,ep_i,c2_inc_xyz,aes,typ)
       implicit none
       integer,intent(in)       :: iord
       real(8),intent(in)       :: amp,tw,omega,cep
-      real(8),intent(in)       :: ep_r(3),ep_i(3)
+      real(8),intent(in)       :: ep_r(3),ep_i(3),c2_inc_xyz(3)
       character(16),intent(in) :: aes,typ
       real(8)                  :: t_sta,t,theta1,theta2_r,theta2_i,alpha,beta,gamma,tf_r,tf_i
       real(8)                  :: add_inc(3)
@@ -1905,7 +1933,7 @@ contains
 !$omp do private(ix,iy)
           do iy=fe%iex_z_is(2),fe%iex_z_ie(2)
           do ix=fe%iex_z_is(1),fe%iex_z_ie(1)
-            fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+fe%c2_inc_xyz(3)*add_inc(1)
+            fe%ex_z(ix,iy,iz)=fe%ex_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(1)
           end do
           end do
 !$omp end do
@@ -1914,7 +1942,7 @@ contains
 !$omp do private(ix,iy)
           do iy=fe%iey_z_is(2),fe%iey_z_ie(2)
           do ix=fe%iey_z_is(1),fe%iey_z_ie(1)
-            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+fe%c2_inc_xyz(3)*add_inc(2)
+            fe%ey_z(ix,iy,iz)=fe%ey_z(ix,iy,iz)+c2_inc_xyz(3)*add_inc(2)
           end do
           end do
 !$omp end do
@@ -1927,7 +1955,7 @@ contains
 !$omp do private(iy,iz)
           do iz=fe%iey_x_is(3),fe%iey_x_ie(3)
           do iy=fe%iey_x_is(2),fe%iey_x_ie(2)
-            fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+fe%c2_inc_xyz(1)*add_inc(2)
+            fe%ey_x(ix,iy,iz)=fe%ey_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(2)
           end do
           end do
 !$omp end do
@@ -1936,7 +1964,7 @@ contains
 !$omp do private(iy,iz)
           do iz=fe%iez_x_is(3),fe%iez_x_ie(3)
           do iy=fe%iez_x_is(2),fe%iez_x_ie(2)
-            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+fe%c2_inc_xyz(1)*add_inc(3)
+            fe%ez_x(ix,iy,iz)=fe%ez_x(ix,iy,iz)+c2_inc_xyz(1)*add_inc(3)
           end do
           end do
 !$omp end do
@@ -1949,7 +1977,7 @@ contains
 !$omp do private(ix,iz)
           do iz=fe%iex_y_is(3),fe%iex_y_ie(3)
           do ix=fe%iex_y_is(1),fe%iex_y_ie(1)
-            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+fe%c2_inc_xyz(2)*add_inc(1)
+            fe%ex_y(ix,iy,iz)=fe%ex_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(1)
           end do
           end do
 !$omp end do
@@ -1958,7 +1986,7 @@ contains
 !$omp do private(ix,iz)
           do iz=fe%iez_y_is(3),fe%iez_y_ie(3)
           do ix=fe%iez_y_is(1),fe%iez_y_ie(1)
-            fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+fe%c2_inc_xyz(2)*add_inc(3)
+            fe%ez_y(ix,iy,iz)=fe%ez_y(ix,iy,iz)+c2_inc_xyz(2)*add_inc(3)
           end do
           end do
 !$omp end do
