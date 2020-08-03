@@ -404,8 +404,11 @@ contains
       & obs_loc_em,               &
       & yn_obs_plane_em,          &
       & yn_obs_plane_integral_em, &
-      & yn_wf_em                , &
-      & film_thickness
+      & yn_wf_em,                 &
+      & film_thickness,           &
+      & media_id_pml,             &
+      & media_id_source1,         &
+      & media_id_source2
 
     namelist/analysis/ &
       & projection_option, &
@@ -723,6 +726,9 @@ contains
     yn_obs_plane_integral_em(:) = 'n'
     yn_wf_em                    = 'y'
     film_thickness              = 0d0
+    media_id_pml(:,:)           = 0
+    media_id_source1            = 0
+    media_id_source2            = 0
 
 !! == default for &analysis
     projection_option   = 'no'
@@ -1188,6 +1194,9 @@ contains
     call comm_bcast(yn_wf_em                 ,nproc_group_global)
     call comm_bcast(film_thickness           ,nproc_group_global)
     film_thickness = film_thickness * ulength_to_au
+    call comm_bcast(media_id_pml             ,nproc_group_global)
+    call comm_bcast(media_id_source1         ,nproc_group_global)
+    call comm_bcast(media_id_source2         ,nproc_group_global)
 
 !! == bcast for &analysis
     call comm_bcast(projection_option   ,nproc_group_global)
@@ -1944,8 +1953,15 @@ contains
         end do
       end if
       write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'film_thickness',film_thickness
-      
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'film_thickness', film_thickness
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,1)', media_id_pml(1,1)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,2)', media_id_pml(1,2)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,1)', media_id_pml(2,1)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,2)', media_id_pml(2,2)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,1)', media_id_pml(3,1)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
+      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
 
       if(inml_analysis >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
