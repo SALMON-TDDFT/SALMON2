@@ -20,7 +20,7 @@
   call set_basic_flag(theory)
 
   call read_Hubbard_parameters  !should move into read_input subroutine!
-  call read_sw_spin_orbit
+  call read_sw_spin_orbit( yn_spinorbit )
 
   call timer_initialize
 

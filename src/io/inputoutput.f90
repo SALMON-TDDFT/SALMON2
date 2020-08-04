@@ -258,7 +258,8 @@ contains
       & nelem, &
       & natom, &
       & file_atom_coor, &
-      & file_atom_red_coor
+      & file_atom_red_coor, &
+      & yn_spinorbit
 
     namelist/pseudo/ &
       & file_pseudo, &
@@ -582,6 +583,7 @@ contains
     natom              = 0
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
+    yn_spinorbit       = 'n'
 !! == default for &pseudo
     file_pseudo = 'none'
     lmax_ps     = -1
@@ -954,6 +956,7 @@ contains
     call comm_bcast(natom              ,nproc_group_global)
     call comm_bcast(file_atom_coor     ,nproc_group_global)
     call comm_bcast(file_atom_red_coor ,nproc_group_global)
+    call comm_bcast(yn_spinorbit       ,nproc_group_global)
 !! == bcast for &pseudo
     call comm_bcast(file_pseudo  ,nproc_group_global)
     call comm_bcast(lmax_ps      ,nproc_group_global)
@@ -1694,6 +1697,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'natom', natom
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
 
       if(inml_pseudo >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
@@ -2048,7 +2052,6 @@ contains
   subroutine check_bad_input
     use parallelization
     use communication
-    use spin_orbit_global, only: SPIN_ORBIT_ON
     implicit none
     integer :: round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
@@ -2090,6 +2093,7 @@ contains
     call yn_argument_check(yn_want_communication_overlapping)
     call yn_argument_check(yn_gbp)
     call yn_argument_check(yn_gbp_fourier0) ! temporary
+    call yn_argument_check(yn_spinorbit)
 
     select case(method_wf_distributor)
     case ('single','slice') ; continue
@@ -2184,7 +2188,7 @@ contains
       end select
     end select
 
-    if( SPIN_ORBIT_ON )then
+    if( yn_spinorbit == 'y' )then
        if( ispin == 0 )then
           stop 'ispin = 1 is necessary when spin-orbit calculation is performed'
        end if
