@@ -17,7 +17,7 @@ filelist = [
 ]
 
 # difference of eigen energies for io=1 and io=2 with ik=2"
-reference_value_1 = 10.55645
+reference_value_1 = 15.56457
 permissible_error_1 = 0.00004 # (~0.001eV)
 
 # difference of eigen energies for io=5 and io=6 with ik=2"
