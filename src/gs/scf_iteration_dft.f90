@@ -135,10 +135,16 @@ if(nscf_init_mix_zero.gt.1)then
       if(comm_is_root(nproc_id_global)) then
          select case(iperiodic)
          case(0); write(*,300) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, poisson%iterVh
-         case(3); write(*,301) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+         case(3)
+           if(yn_jm=='n') then
+             write(*,301) iter, energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+           else
+             write(*,302) iter, ene_gap*au_energy_ev
+           end if
          end select
 300      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 301      format(2x,"no-mixing iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
+302      format(2x,"no-mixing iter=",i6,                         5x,"Gap=",f15.8)
       endif
       !(convergence: energy gap is over specified energy)
       if(ene_gap .ge. conv_gap_mix_zero) then
@@ -300,10 +306,15 @@ DFT_Iteration : do iter=Miter+1,nscf
       case(0)
          write(*,100) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, poisson%iterVh
       case(3)
-         write(*,101) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+        if(yn_jm=='n') then
+          write(*,101) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev
+        else
+          write(*,102) Miter, ene_gap*au_energy_ev
+        end if
       end select
 100   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8,5x,"Vh iter=",i4)
 101   format(1x,"iter=",i6,5x,"Total Energy=",f19.8,5x,"Gap=",f15.8)
+102   format(1x,"iter=",i6,5x,                         "Gap=",f15.8)
 
       do is=1,system%nspin
          if(system%nspin==2.and.is==1) write(*,*) "for up-spin"
@@ -341,12 +352,17 @@ DFT_Iteration : do iter=Miter+1,nscf
    if(comm_is_root(nproc_id_global)) then
       select case(iperiodic)
       case(0)
-         write(*,400) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1,poisson%iterVh
+        write(*,400) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1,poisson%iterVh
       case(3)
-         write(*,401) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1
+        if(yn_jm=='n') then
+          write(*,401) Miter,energy%E_tot*au_energy_ev, ene_gap*au_energy_ev, sum1
+        else
+          write(*,402) Miter,                           ene_gap*au_energy_ev, sum1
+        end if  
       end select
 400   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7,3x,"Vh iter=",i4)
 401   format(5x,"#SCF ",i6,3x,"E(total)=",f19.8,3x,"Gap=",f15.8,3x,"conv[au]=",e15.7)
+402   format(5x,"#SCF ",i6,3x,                     "Gap=",f15.8,3x,"conv[au]=",e15.7)
    endif
 
    end if  !ilevel_print

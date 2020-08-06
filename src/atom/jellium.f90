@@ -21,16 +21,17 @@ contains
   !===========================================================================================
   != check condition =========================================================================
   subroutine check_condition_jm
-    use salmon_global,   only: yn_md, yn_opt, yn_out_pdos, yn_out_tm, nelem, natom, nelec, spin, xc, &
-                               yn_periodic, layout_multipole, shape_file_jm, num_jm, nelec_jm
+    use salmon_global,   only: yn_md, yn_opt, yn_out_pdos, yn_out_tm, yn_out_rvf_rt, nelem, natom, nelec, spin, xc, &
+                               yn_periodic, layout_multipole, shape_file_jm, num_jm, nelec_jm, method_singlescale
     use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root
     implicit none
     
-    call condition_yn_jm(yn_md,      'yn_md',      'n')
-    call condition_yn_jm(yn_opt,     'yn_opt',     'n')
-    call condition_yn_jm(yn_out_pdos,'yn_out_pdos','n')
-    call condition_yn_jm(yn_out_tm,  'yn_out_tm',  'n')
+    call condition_yn_jm(yn_md,        'yn_md',        'n')
+    call condition_yn_jm(yn_opt,       'yn_opt',       'n')
+    call condition_yn_jm(yn_out_pdos,  'yn_out_pdos',  'n')
+    call condition_yn_jm(yn_out_tm,    'yn_out_tm',    'n')
+    call condition_yn_jm(yn_out_rvf_rt,'yn_out_rvf_rt','n')
 
     call condition_int_jm(nelem,'nelem',1)
     call condition_int_jm(natom,'natom',1)
@@ -46,13 +47,18 @@ contains
       stop
     end if
     
-    if (trim(spin)/='unpolarized') then
+    if(trim(spin)/='unpolarized') then
       if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, spin must be even unpolarized.")')
       stop
     end if
     
-    if (trim(xc)/='pz') then
+    if(trim(xc)/='pz') then
       if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, xc must be pz.")')
+      stop
+    end if
+    
+    if(trim(method_singlescale)/='3d') then
+      if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, method_singlescale must be 3d.")')
       stop
     end if
     
@@ -62,7 +68,7 @@ contains
       stop
     end if
     
-    if (num_jm<1) then
+    if(num_jm<1) then
       if(comm_is_root(nproc_id_global)) write(*,'("For yn_jm = y, num_jm must be larger than 0.")')
       stop
     end if
@@ -108,7 +114,7 @@ contains
   != meke positive back ground charge density ================================================
   subroutine make_rho_jm(lg,mg,system,info,rho_jm)
     use salmon_global,   only: shape_file_jm, num_jm, nelec_jm, rs_bohr_jm, sphere_loc_jm, &
-                               yn_charge_neutral_jm, yn_output_dns_jm, nelec, unit_system
+                               yn_charge_neutral_jm, yn_output_dns_jm, yn_periodic, nelec, unit_system
     use inputoutput,     only: ulength_from_au
     use structures,      only: s_rgrid, s_dft_system, s_parallel_info, s_scalar, allocate_scalar
     use parallelization, only: nproc_id_global, nproc_group_global
@@ -272,6 +278,11 @@ contains
       end if
       write(*,*) " in the atomic unit(Bohr)."
       write(*,'(A,E23.15E3," %")') '  Chrge neutrality error =', charge_error
+      if(yn_periodic=='y') then
+        write(*,*)
+        write(*,'("  For yn_jm = y and yn_periodic=y, this version still cannot output Total Energy.")')
+        write(*,*)
+      end if
       write(*,*) '*********************************************************'
       write(*,*)
     end if

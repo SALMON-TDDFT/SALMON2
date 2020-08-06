@@ -21,27 +21,28 @@ module fdtd_coulomb_gauge
 
 contains
 
-subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_Ac,fw)
+subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_Ac,fw,rho_jm)
   use structures
   use math_constants,only : zi,pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only: dt,method_singlescale,yn_symmetrized_stencil
+  use salmon_global, only: dt,method_singlescale,yn_symmetrized_stencil,yn_jm
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
   use communication, only: comm_is_root, comm_summation
   use inputoutput, only: t_unit_time
   use timer
   implicit none
-  integer                 ,intent(in) :: itt
-  type(s_rgrid)           ,intent(in) :: lg,mg
-  type(s_dft_system)      ,intent(in) :: system
-  type(s_parallel_info)   ,intent(in) :: info
-  type(s_scalar)          ,intent(in) :: rho,Vh ! electron number density & Hartree potential
-  type(s_vector)          ,intent(in) :: j_e    ! electron number current density (without rho*A/c)
-  type(s_sendrecv_grid)               :: srg_scalar
-  type(s_vector)                      :: Ac     ! A/c, A: vector potential, c: speed of light
-  type(s_scalar)                      :: div_Ac ! div(A/c)
-  type(s_singlescale)                 :: fw     ! FDTD working arrays, etc.
+  integer                 ,intent(in)           :: itt
+  type(s_rgrid)           ,intent(in)           :: lg,mg
+  type(s_dft_system)      ,intent(in)           :: system
+  type(s_parallel_info)   ,intent(in)           :: info
+  type(s_scalar)          ,intent(in)           :: rho,Vh ! electron number density & Hartree potential
+  type(s_vector)          ,intent(in)           :: j_e    ! electron number current density (without rho*A/c)
+  type(s_scalar)          ,intent(in), optional :: rho_jm ! positive background charge density by jellium model
+  type(s_sendrecv_grid)                         :: srg_scalar
+  type(s_vector)                                :: Ac     ! A/c, A: vector potential, c: speed of light
+  type(s_scalar)                                :: div_Ac ! div(A/c)
+  type(s_singlescale)                           :: fw     ! FDTD working arrays, etc.
   !
   integer,parameter :: mstep=100
   integer :: ix,iy,iz,i1,ii,krd(3,3),lcs(3,3,3),dr(3)
@@ -72,7 +73,11 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
     vec_je = ( j_e%v(1:3,ix,iy,iz) + fw%vec_je_old(1:3,ix,iy,iz) )*0.5d0 ! j_e(t) = ( j_e(t+dt/2) + j_e(t-dt/2) )/2
-    rho_t  = ( rho%f(ix,iy,iz)     + fw%rho_old(ix,iy,iz)        )*0.5d0 ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
+    if(yn_jm=='n')then                                                   ! rho(t) = ( rho(t+dt/2) + rho(t-dt/2) )/2
+      rho_t = ( rho%f(ix,iy,iz)    + fw%rho_old(ix,iy,iz)        )*0.5d0
+    else
+      rho_t = ( rho%f(ix,iy,iz) +rho_jm%f(ix,iy,iz) + fw%rho_old(ix,iy,iz) )*0.5d0
+    end if
     fw%curr(ix,iy,iz,1:3) = vec_je + rho_t * fw%vec_Ac_m(1,ix,iy,iz,1:3) ! curr(t): electron number current density
     wrk = wrk + fw%curr(ix,iy,iz,1:3)
 
@@ -365,7 +370,11 @@ subroutine fdtd_singlescale(itt,lg,mg,system,info,rho,Vh,j_e,srg_scalar,Ac,div_A
     fw%div_Ac_old(ix,iy,iz)      = fw%div_Ac(ix,iy,iz)      ! div Ac(t+dt) --> div Ac(t) of next step
     fw%grad_Vh_old(1:3,ix,iy,iz) = fw%grad_Vh(1:3,ix,iy,iz) ! grad[Vh(t-dt/2)] of next step
     fw%vec_je_old(1:3,ix,iy,iz)  = j_e%v(1:3,ix,iy,iz) ! j_e(t-dt/2) of next step
-    fw%rho_old(ix,iy,iz)         = rho%f(ix,iy,iz)     ! rho(t-dt/2) of next step
+    if(yn_jm=='n')then                                 ! rho(t-dt/2) of next step
+      fw%rho_old(ix,iy,iz)       = rho%f(ix,iy,iz)
+    else
+      fw%rho_old(ix,iy,iz)       = rho%f(ix,iy,iz) + rho_jm%f(ix,iy,iz)
+    end if
   end do
   end do
   end do
@@ -771,11 +780,11 @@ end subroutine fourier_singlescale
 
 !===================================================================================================================================
 
-subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
+subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac,rho_jm)
   use structures
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
-  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,method_singlescale,yn_symmetrized_stencil
+  use salmon_global, only: sysname,base_directory,yn_restart,yn_ffte,method_singlescale,yn_symmetrized_stencil,yn_jm
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   use initialization_sub, only: set_bn
@@ -784,14 +793,15 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   use checkpoint_restart_sub, only: restart_singlescale
   use sendrecv_grid, only: init_sendrecv_grid
   implicit none
-  type(s_rgrid)         ,intent(in) :: lg,mg
-  type(s_parallel_info) ,intent(in) :: info
-  real(8)               ,intent(in) :: hgs(3)
-  type(s_scalar)        ,intent(in) :: rho,Vh ! electron number density & Hartree potential
-  type(s_sendrecv_grid)             :: srg_scalar
-  type(s_singlescale)               :: fw
-  type(s_vector)                    :: Ac
-  type(s_scalar)                    :: div_Ac
+  type(s_rgrid)         ,intent(in)           :: lg,mg
+  type(s_parallel_info) ,intent(in)           :: info
+  real(8)               ,intent(in)           :: hgs(3)
+  type(s_scalar)        ,intent(in)           :: rho,Vh ! electron number density & Hartree potential
+  type(s_scalar)        ,intent(in), optional :: rho_jm ! positive background charge density by jellium model
+  type(s_sendrecv_grid)                       :: srg_scalar
+  type(s_singlescale)                         :: fw
+  type(s_vector)                              :: Ac
+  type(s_scalar)                              :: div_Ac
   !
   character(100) :: filename
   integer :: ii,jj,ix,iy,iz
@@ -924,7 +934,11 @@ subroutine init_singlescale(mg,lg,info,hgs,rho,Vh,srg_scalar,fw,Ac,div_Ac)
   do iy=mg%is(2),mg%ie(2)
   do ix=mg%is(1),mg%ie(1)
     fw%box1(ix,iy,iz) = Vh%f(ix,iy,iz)
-    fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz)
+    if(yn_jm=='n')then
+      fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz)
+    else
+      fw%rho_old(ix,iy,iz) = rho%f(ix,iy,iz) + rho_jm%f(ix,iy,iz)
+    end if
   end do
   end do
   end do

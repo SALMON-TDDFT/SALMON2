@@ -18,7 +18,7 @@
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
-&   ewald,md,ofl,poisson,singlescale)
+&   ewald,md,ofl,poisson,singlescale,rho_jm)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
@@ -68,6 +68,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
+  type(s_scalar),intent(in), optional :: rho_jm
 
   integer :: ix,iy,iz,iatom,is,nspin,Mit
   integer :: idensity, idiffDensity, ielf
@@ -91,7 +92,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   if(yn_md=='y') then
      rion_update = .true.
   else
-     rion_update = check_rion_update()
+     if(yn_jm=='n') rion_update = check_rion_update()
   endif
 
   if(ae_shape1 == 'impulse')then
@@ -124,7 +125,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       else
         stop 'invalid propagator'
       end if
-      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+      if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
     end if
   end select
 
@@ -186,7 +187,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   if(singlescale%flag_use .and. method_singlescale=='1d_fourier' .and. yn_ffte=='y') then
     call fourier_singlescale(lg,mg,info,fg,rho,rt%j_e,Vh,poisson,singlescale)
   else
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    if(yn_jm=='n') then
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    else
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
+    end if
   end if
   if(iperiodic==0 .and. itt/=1)then
     Vh_stock1%f = Vh%f
@@ -235,9 +240,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     if(singlescale%flag_use) then
       call timer_begin(LOG_CALC_SINGLESCALE)
       singlescale%E_electron = energy%E_tot
-      call fdtd_singlescale(itt,lg,mg,system,info,rho, &
-      & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
-      call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+      if(yn_jm=='n') then
+        call fdtd_singlescale(itt,lg,mg,system,info,rho, &
+        & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale)
+        call update_kvector_nonlocalpt_microAc(info%ik_s,info%ik_e,system,ppg)
+      else
+        call fdtd_singlescale(itt,lg,mg,system,info,rho, &
+        & Vh,rt%j_e,srg_scalar,system%Ac_micro,system%div_Ac,singlescale,rho_jm)
+      end if
       rt%curr(1:3,itt) = singlescale%curr_ave(1:3)
       call timer_end(LOG_CALC_SINGLESCALE)
     else
@@ -381,7 +391,12 @@ contains
       rho%f = rho_s(1)%f + rho_s(2)%f
       !$omp end workshare
     end if
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    
+    if(yn_jm=='n') then
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+    else
+      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
+    end if
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     

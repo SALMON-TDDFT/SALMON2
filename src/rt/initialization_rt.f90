@@ -29,7 +29,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, rho, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn )
+                     pp, ppg, ppn, &
+                     rho_jm  )
   use inputoutput
   use math_constants, only: pi, zi
   use structures
@@ -57,6 +58,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   use sendrecv_grid
   use salmon_global, only: quiet
   use gram_schmidt_orth, only: gram_schmidt
+  use jellium, only: make_rho_jm
   implicit none
   integer,parameter :: Nd = 4
 
@@ -88,6 +90,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
   type(s_ofile) :: ofile
+  type(s_scalar),intent(inout), optional :: rho_jm
   
   integer :: itotNtime
   integer :: iob, i1,iik,jspin, Mit, m, n
@@ -172,14 +175,20 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call allocate_scalar(mg,V_local(jspin))
     call allocate_scalar(mg,Vxc(jspin))
   end do
-  call read_pslfile(system,pp)
-  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+  if(yn_jm=='n') then
+    call read_pslfile(system,pp)
+    call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+  else
+    !make positive back ground charge density for using jellium model
+    call allocate_scalar(mg,rho_jm)
+    call make_rho_jm(lg,mg,system,info,rho_jm)
+  end if
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
   call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
   call allocate_orbital_complex(system%nspin,mg,info,tpsi)
   call allocate_dmatrix(system%nspin,mg,info,dmat)
-
+  
   if(propagator=='aetrs')then
     allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
     do jspin=1,system%nspin
@@ -204,10 +213,12 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
     call gram_schmidt(system, mg, info, spsi_in)
   end if
 
-  call calc_nlcc(pp, system, mg, ppn)
-  if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
-    write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
-    write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+  if(yn_jm=='n') then
+    call calc_nlcc(pp, system, mg, ppn)
+    if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
+      write(*, '(1x, a, es23.15e3)') "Maximal rho_NLCC=", maxval(ppn%rho_nlcc)
+      write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
+    end if
   end if
   
   call calc_density(system,rho_s,spsi_in,info,mg)
@@ -222,7 +233,11 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
-  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+  if(yn_jm=='n') then
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+  else
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
+  end if
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
@@ -256,7 +271,11 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
-  rion_update = .true. ! it's first calculation
+  if(yn_jm=='n') then
+    rion_update = .true. ! it's first calculation
+  else
+    rion_update = .false.
+  end if
   select case(iperiodic)
   case(0)
      call calc_Total_Energy_isolated(system,info,mg,pp,rho_s,Vh,Vxc,rion_update,energy)
@@ -434,9 +453,13 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   if(singlescale%flag_use) then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
-
-    call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
-    & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
+    if(yn_jm=='n') then
+      call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
+      & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
+    else
+      call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
+      & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac,rho_jm)
+    end if
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit

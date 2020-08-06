@@ -53,9 +53,11 @@ subroutine subdip(comm,itt,rt,lg,mg,rho,rNe,poisson,Etot,system,pp)
 
   !(ionic dipole) -- defined as plus charge (ordinary definition))
   rt%Dp_i(:,itt) = 0d0
-  do ia=1,natom
-     rt%Dp_i(:,itt) = rt%Dp_i(:,itt) + pp%Zps(Kion(ia)) * system%Rion(:,ia)
-  enddo
+  if(yn_jm=='n') then
+    do ia=1,natom
+       rt%Dp_i(:,itt) = rt%Dp_i(:,itt) + pp%Zps(Kion(ia)) * system%Rion(:,ia)
+    enddo
+  end if
 
   !(electronic dipole/quadrapole) -- defined as plus charge (opposite definition))
   rt%Dp_e(1:3,itt)  = -rbox_array2(1:3) * Hgs(1:3) * Hvol
@@ -75,8 +77,13 @@ subroutine subdip(comm,itt,rt,lg,mg,rho,rNe,poisson,Etot,system,pp)
        end if
      case(3)
        if(mod(itt,out_rt_energy_step)==0)then
-         if (.not. quiet) write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)') &
-             itt, time, rt%curr(1:3,itt), rNe, Etot*au_energy_ev
+         if(yn_jm=='n') then
+           if (.not. quiet) write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)') &
+               itt, time, rt%curr(1:3,itt), rNe, Etot*au_energy_ev
+         else
+           if (.not. quiet) write(*,'(i8,f14.8, 3e16.8, f15.8,f18.8)') &
+               itt, time, rt%curr(1:3,itt), rNe
+         end if
        end if
      end select
   end if
