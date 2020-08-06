@@ -36,7 +36,7 @@ result = {}
 linecount = 0
 for line in open("JM_rt.data"):
     linecount += 1
-    if linecount == 39: # corresponds to line 38 (0.0375 fs)
+    if linecount == 38: # corresponds to 0.0375 fs
         for name, [resval, refval, error] in checklist.items(): 
             data = line.split()
             result[name] = float(data[15])
