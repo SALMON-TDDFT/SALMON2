@@ -310,85 +310,51 @@ contains
     end if
     call timer_end(LOG_CURRENT_COMM_HALO)
 
-    if(yn_jm=='n') then
-      do im=info%im_s,info%im_e
-      do ispin=1,nspin
-        call timer_begin(LOG_CURRENT_CALC)
-        wrk4 = 0d0
+    do im=info%im_s,info%im_e
+    do ispin=1,nspin
+      call timer_begin(LOG_CURRENT_CALC)
+      wrk4 = 0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
-!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
+!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
 !$omp             reduction(+:wrk4) if(current_omp_mode)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
 
-          kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-          call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
-                              ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
-          wrk2 = matmul(BT,wrk2)
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
+                            ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
+        wrk2 = matmul(BT,wrk2)
 
+        if(yn_jm=='n') then
           if(info%if_divide_rspace) then
             uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
             call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
           else
             call calc_current_nonlocal         (wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
           end if
-
-          wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin)*system%wtk(ik)
-
-        end do
-        end do
-!$omp end parallel do
-        call timer_end(LOG_CURRENT_CALC)
-
-        call timer_begin(LOG_CURRENT_COMM_COLL)
-        call comm_summation(wrk4,wrk1,3,info%icomm_rko)
- 
-        curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
-        call timer_end(LOG_CURRENT_COMM_COLL)
-
-        call timer_begin(LOG_CURRENT_CALC)
-        call sym_vector_xyz( curr(:,ispin,im) )
-        call timer_end(LOG_CURRENT_CALC)
-      end do
-      end do
-    else
-      do im=info%im_s,info%im_e
-      do ispin=1,nspin
-        call timer_begin(LOG_CURRENT_CALC)
-        wrk4 = 0d0
-!$omp parallel do collapse(2) default(none) &
-!$omp             private(ik,io,kAc,wrk1,wrk2,wrk3) &
-!$omp             shared(info,system,mg,stencil,psi,BT,im,ispin) &
-!$omp             reduction(+:wrk4) if(current_omp_mode)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-
-          kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-          call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
-                              ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
-          wrk2 = matmul(BT,wrk2)
-
+        else
           wrk3 = 0d0
-          wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin)*system%wtk(ik)
+        end if
 
-        end do
-        end do
+        wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin)*system%wtk(ik)
+
+      end do
+      end do
 !$omp end parallel do
-        call timer_end(LOG_CURRENT_CALC)
+      call timer_end(LOG_CURRENT_CALC)
 
-        call timer_begin(LOG_CURRENT_COMM_COLL)
-        call comm_summation(wrk4,wrk1,3,info%icomm_rko)
- 
-        curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
-        call timer_end(LOG_CURRENT_COMM_COLL)
+      call timer_begin(LOG_CURRENT_COMM_COLL)
+      call comm_summation(wrk4,wrk1,3,info%icomm_rko)
 
-        call timer_begin(LOG_CURRENT_CALC)
-        call sym_vector_xyz( curr(:,ispin,im) )
-        call timer_end(LOG_CURRENT_CALC)
-      end do
-      end do
-    end if
+      curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      call timer_end(LOG_CURRENT_COMM_COLL)
+
+      call timer_begin(LOG_CURRENT_CALC)
+      call sym_vector_xyz( curr(:,ispin,im) )
+      call timer_end(LOG_CURRENT_CALC)
+    end do
+    end do
 
     if(info%if_divide_rspace .and. yn_jm=='n') deallocate(uVpsibox,uVpsibox2,uVpsi)
 
@@ -499,83 +465,50 @@ contains
     end if
     call timer_end(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
 
-    if(yn_jm=='n') then
-      do im=info%im_s,info%im_e
-      do ispin=1,nspin
-        call timer_begin(LOG_CURRENT_CALC)
-        wrk3 = 0d0
+    do im=info%im_s,info%im_e
+    do ispin=1,nspin
+      call timer_begin(LOG_CURRENT_CALC)
+      wrk3 = 0d0
 !$omp parallel do collapse(2) default(none) &
 !$omp             private(ik,io,kAc,wrk1,wrk2,uVpsi) &
-!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin) &
+!$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
 !$omp             reduction(+:wrk3) if(current_omp_mode)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
 
-          kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-          call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),kAc,mg%is_array,mg%ie_array,mg%is,mg%ie)
+        kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
+        call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),kAc,mg%is_array,mg%ie_array,mg%is,mg%ie)
 
+        if(yn_jm=='n') then
           if(info%if_divide_rspace) then
             uVpsi(:) = uVpsibox2(ispin,io,ik,im,:)
             call calc_current_nonlocal_rdivided(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,uVpsi)
           else
             call calc_current_nonlocal         (wrk2,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
           end if
-
-          wrk3 = wrk3 + (wrk1 + wrk2) * system%rocc(io,ik,ispin)*system%wtk(ik)
-
-        end do
-        end do
-!$omp end parallel do
-
-        call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
-        call timer_end(LOG_CURRENT_CALC)
-
-        call timer_begin(LOG_CURRENT_COMM_COLL)
-        call comm_summation(wrk3,wrk1,3,info%icomm_ko)
-
-        wrk2 = wrk1 + matmul(BT,wrk2)
-        call comm_summation(wrk2,wrk1,3,info%icomm_r)
-
-        curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
-        call timer_end(LOG_CURRENT_COMM_COLL)
-      end do
-      end do
-    else
-      do im=info%im_s,info%im_e
-      do ispin=1,nspin
-        call timer_begin(LOG_CURRENT_CALC)
-        wrk3 = 0d0
-!$omp parallel do collapse(2) default(none) &
-!$omp             private(ik,io,kAc,wrk1,wrk2) &
-!$omp             shared(info,system,mg,stencil,psi,BT,im,ispin) &
-!$omp             reduction(+:wrk3) if(current_omp_mode)
-        do ik=info%ik_s,info%ik_e
-        do io=info%io_s,info%io_e
-
-          kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-          call kvec_part(wrk1,psi%zwf(:,:,:,ispin,io,ik,im),kAc,mg%is_array,mg%ie_array,mg%is,mg%ie)
-
+        else
           wrk2 = 0d0
-          wrk3 = wrk3 + (wrk1 + wrk2) * system%rocc(io,ik,ispin)*system%wtk(ik)
+        end if
 
-        end do
-        end do
+        wrk3 = wrk3 + (wrk1 + wrk2) * system%rocc(io,ik,ispin)*system%wtk(ik)
+
+      end do
+      end do
 !$omp end parallel do
 
-        call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
-        call timer_end(LOG_CURRENT_CALC)
+      call stencil_current(wrk2,dmat%zrho_mat(:,:,:,:,:,ispin,im),stencil%coef_nab,mg%is,mg%ie,mg%ndir)
+      call timer_end(LOG_CURRENT_CALC)
 
-        call timer_begin(LOG_CURRENT_COMM_COLL)
-        call comm_summation(wrk3,wrk1,3,info%icomm_ko)
+      call timer_begin(LOG_CURRENT_COMM_COLL)
+      call comm_summation(wrk3,wrk1,3,info%icomm_ko)
 
-        wrk2 = wrk1 + matmul(BT,wrk2)
-        call comm_summation(wrk2,wrk1,3,info%icomm_r)
+      wrk2 = wrk1 + matmul(BT,wrk2)
+      call comm_summation(wrk2,wrk1,3,info%icomm_r)
 
-        curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
-        call timer_end(LOG_CURRENT_COMM_COLL)
-      end do
-      end do
-    end if
+      curr(:,ispin,im) = wrk1 / dble(ngrid) ! ngrid = aLxyz/Hxyz
+      call timer_end(LOG_CURRENT_COMM_COLL)
+    end do
+    end do
 
     if(info%if_divide_rspace .and. yn_jm=='n') deallocate(uVpsibox,uVpsibox2,uVpsi)
 
