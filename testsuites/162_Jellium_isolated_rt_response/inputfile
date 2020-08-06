@@ -1,0 +1,75 @@
+&calculation
+  !type of theory
+  theory = 'tddft_response'
+/
+
+&control
+  !common name of output files
+  sysname = 'JM'
+/
+
+&units
+  !units used in input and output files
+  unit_system = 'A_eV_fs'
+/
+
+&system
+  !periodic boundary condition
+  yn_periodic = 'n'
+  
+  !grid box size(x,y,z)
+  al(1:3) = 16.0d0, 16.0d0, 16.0d0
+  
+  !number of elements, atoms, electrons and states(orbitals)
+  nelem  = 1
+  natom  = 1
+  nelec  = 10
+  nstate = 6
+/
+
+&functional
+  !functional('PZ' is Perdew-Zunger LDA: Phys. Rev. B 23, 5048 (1981).)
+  xc = 'PZ'
+/
+
+&rgrid
+  !spatial grid spacing(x,y,z)
+  dl(1:3) = 0.25d0, 0.25d0, 0.25d0
+/
+
+&poisson
+  layout_multipole = 1
+  threshold_cg = 1.0d-15
+/
+
+&tgrid
+  !time step size and number of time grids(steps)
+  dt = 1.25d-3
+  nt = 30
+/
+
+&emfield
+  !envelope shape of the incident pulse('impulse': impulsive field)
+  ae_shape1 = 'impulse'
+  
+  !polarization unit vector(real part) for the incident pulse(x,y,z)
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+  !--- Caution ---------------------------------------------------------!
+  ! Defenition of the incident pulse is wrriten in:                     !
+  ! https://www.sciencedirect.com/science/article/pii/S0010465518303412 !
+  !---------------------------------------------------------------------!
+/
+
+&analysis
+  !energy grid size and number of energy grids for output files
+  de      = 1.0d-2
+  nenergy = 3000
+/
+
+&jellium
+  yn_jm              = 'y'
+  num_jm             = 1
+  nelec_jm(1)        = 10
+  rs_bohr_jm(1)      = 1.0d0
+  sphere_loc_jm(1,:) = 0.0d0, 0.0d0, 0.0d0
+/

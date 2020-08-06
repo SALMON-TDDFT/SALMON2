@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Test preparation script
+#
+# The preparation script is automatically executed before starting SALMON. 
+# if required, this script file can utilized for the preparation of 
+# the input data for the following calculations.
+

@@ -41,6 +41,8 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/131_bulk_Si_nonorthogonal_lattice"
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/141_bulk_Si_singlescale")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/151_bulk_Si_multiscale")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/152_bulk_Si_multiscale_restart")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/161_Jellium_isolated_gs")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/162_Jellium_isolated_rt_response")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/201_gs_restart")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/202_rt_checkpoint_single")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/203_rt_restart_single")
