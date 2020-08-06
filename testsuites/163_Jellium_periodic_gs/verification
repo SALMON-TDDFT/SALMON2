@@ -21,8 +21,8 @@ reference_value_1 = 15.56457
 permissible_error_1 = 0.0004 # (~0.01eV)
 
 # difference of eigen energies for io=5 and io=6 with ik=2"
-reference_value_2 = 2.646459
-permissible_error_2 = 0.00004 # (~0.001eV)
+reference_value_2 = 2.643055
+permissible_error_2 = 0.0004 # (~0.01eV)
 
 print("# Checking the existance of outputfile")
 for item in filelist:
