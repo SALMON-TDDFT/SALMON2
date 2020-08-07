@@ -275,7 +275,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end select
 
   call timer_begin(LOG_WRITE_ENERGIES)
-  call subdip(info%icomm_r,itt,rt,lg,mg,rho,rNe,poisson,energy%E_tot,system,pp)
+  call subdip(info%icomm_r,itt,rt,lg,mg,system,rho_s,rNe,poisson,energy%E_tot,pp)
   call timer_end(LOG_WRITE_ENERGIES)
 
   !(force)

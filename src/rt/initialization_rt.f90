@@ -394,7 +394,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   end if
   
   if(yn_restart /= 'y')then
-    call calc_dip(info%icomm_r,lg,mg,rho,rbox_array2)
+    call calc_dip(info%icomm_r,lg,mg,system,rho_s,rbox_array2)
     rt%Dp0_e(1:3) = -rbox_array2(1:3) * system%Hgs(1:3) * system%Hvol
   end if
   if ((.not. quiet) .and. comm_is_root(nproc_id_global))then
