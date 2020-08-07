@@ -111,15 +111,13 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   do j=1,system%nspin
     rho%f = rho%f + rho_s(j)%f
   end do
+  
+  if(yn_jm=='y') rho%f = rho%f + rho_jm%f
 
   if(calc_mode/='DFT_BAND')then
 
     call timer_begin(LOG_CALC_HARTREE)
-    if(yn_jm=='n')then
-      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-    else
-      call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
-    end if
+    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)

@@ -231,11 +231,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   spsi_in%update_zwf_overlap  = .false.
   spsi_out%update_zwf_overlap = .false.
 
-  if(yn_jm=='n') then
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  else
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
-  end if
+  if(yn_jm=='y') rho%f = rho%f + rho_jm%f
+
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
@@ -451,13 +449,8 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   if(singlescale%flag_use) then
     if(comm_is_root(nproc_id_global)) write(*,*) "single-scale Maxwell-TDDFT method"
     call allocate_vector(mg,rt%j_e)
-    if(yn_jm=='n') then
-      call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
-      & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
-    else
-      call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
-      & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac,rho_jm)
-    end if
+    call init_singlescale(mg,lg,info,system%hgs,rho,Vh &
+    & ,srg_scalar,singlescale,system%Ac_micro,system%div_Ac)
 
     if(yn_out_dns_ac_je=='y')then
        itt=Mit

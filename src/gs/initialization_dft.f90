@@ -291,13 +291,10 @@ real(8) :: rNe0,rNe
   !make positive back ground charge density for using jellium model
   if(yn_jm=='y') then
     call make_rho_jm(lg,mg,info,system,rho_jm)
+    rho%f = rho%f + rho_jm%f
   end if
 
-  if(yn_jm=='n') then
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
-  else
-    call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh,rho_jm)
-  end if
+  call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,ppn,info,spsi,stencil,Vxc,energy%E_xc)
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
