@@ -332,7 +332,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                                 lg,mg,  &
                                 info,  &
                                 srg,srg_scalar,  &
-                                rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                                rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
                                 xc_func,mixing )
@@ -372,7 +372,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
   type(s_poisson) :: poisson
   type(s_stencil) :: stencil
   type(s_xc_functional) :: xc_func
-  type(s_scalar) :: rho,Vh,Vpsl,rho_old,Vlocal_old
+  type(s_scalar) :: rho,rho_jm,Vh,Vpsl,rho_old,Vlocal_old
   type(s_scalar) :: V_local(system%nspin),rho_s(system%nspin),Vxc(system%nspin)
   type(s_reciprocal_grid) :: fg
   type(s_pp_info) :: pp
@@ -415,7 +415,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           stencil,  &
                           srg,srg_scalar,   &
                           spsi,shpsi,sttpsi,  &
-                          rho,rho_s,  &
+                          rho,rho_jm,rho_s,  &
                           V_local,Vh,Vxc,Vpsl,xc_func,  &
                           pp,ppg,ppn,  &
                           rho_old,Vlocal_old,  &

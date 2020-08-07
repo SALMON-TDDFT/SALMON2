@@ -86,7 +86,6 @@ it=0
 call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl)
 allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
 
-
 call initialization1_dft( system, energy, stencil, fg, poisson,  &
                           lg, mg,  &
                           info,  &
@@ -110,7 +109,7 @@ call initialization_dft_md( it, rion_update,  &
                           lg, mg,  &
                           info,  &
                           srg, srg_scalar,  &
-                          rho, rho_s, Vh,V_local, Vpsl, Vxc,  &
+                          rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
