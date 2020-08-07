@@ -181,7 +181,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   else
     !make positive back ground charge density for using jellium model
     call allocate_scalar(mg,rho_jm)
-    call make_rho_jm(lg,mg,system,info,rho_jm)
+    call make_rho_jm(lg,mg,info,system,rho_jm)
   end if
   
   call allocate_orbital_complex(system%nspin,mg,info,spsi_in)

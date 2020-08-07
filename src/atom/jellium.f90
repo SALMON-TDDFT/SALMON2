@@ -112,7 +112,7 @@ contains
   
   !===========================================================================================
   != meke positive back ground charge density ================================================
-  subroutine make_rho_jm(lg,mg,system,info,rho_jm)
+  subroutine make_rho_jm(lg,mg,info,system,rho_jm)
     use salmon_global,   only: shape_file_jm, num_jm, nelec_jm, rs_bohr_jm, sphere_loc_jm, &
                                yn_charge_neutral_jm, yn_output_dns_jm, yn_periodic, nelec, unit_system
     use inputoutput,     only: ulength_from_au
@@ -124,8 +124,8 @@ contains
     use math_constants,  only: pi
     implicit none
     type(s_rgrid),         intent(in)    :: lg, mg
-    type(s_dft_system),    intent(in)    :: system
     type(s_parallel_info), intent(in)    :: info
+    type(s_dft_system),    intent(in)    :: system
     type(s_scalar),        intent(inout) :: rho_jm
     type(s_scalar)                       :: work_l1,work_l2
     integer,allocatable :: imedia(:,:,:)
