@@ -56,7 +56,7 @@ type(s_dft_energy) :: energy
 type(s_md) :: md
 type(s_ofile) :: ofl
 type(s_scalar) :: Vpsl
-type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
 type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
 type(s_dmatrix) :: dmat
 type(s_orbital) :: spsi_in,spsi_out
@@ -330,7 +330,7 @@ subroutine initialization_ms()
                                         info,  &
                                         xc_func, dmat, ofl,  &
                                         srg, srg_scalar,  &
-                                        spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                                        spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                                         pp, ppg, ppn )
 
@@ -430,11 +430,11 @@ subroutine time_evolution_step_ms
 
         if(mod(itt,2)==1)then
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         else
             call time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func &
-            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
+            & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
             & ,Vpsl,dmat,fg,energy,ewald,md,ofl,poisson,singlescale)
         end if
     

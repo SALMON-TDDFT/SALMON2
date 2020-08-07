@@ -27,10 +27,9 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
                      lg, mg, info,  &
                      xc_func, dmat, ofl,  &
                      srg, srg_scalar,  &
-                     spsi_in, spsi_out, tpsi, rho, rho_s,  &
+                     spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn, &
-                     rho_jm  )
+                     pp, ppg, ppn  )
   use inputoutput
   use math_constants, only: pi, zi
   use structures
@@ -79,7 +78,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_md) :: md
   type(s_ofile) :: ofl
   type(s_scalar) :: Vpsl
-  type(s_scalar) :: rho,Vh,Vh_stock1,Vh_stock2,Vbox
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
   type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
   type(s_dmatrix) :: dmat
   type(s_orbital) :: spsi_in,spsi_out
@@ -90,7 +89,6 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
   type(s_ofile) :: ofile
-  type(s_scalar),intent(inout), optional :: rho_jm
   
   integer :: itotNtime
   integer :: iob, i1,iik,jspin, Mit, m, n

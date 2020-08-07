@@ -17,8 +17,8 @@
 !=======================================================================
 
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
-&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
-&   ewald,md,ofl,poisson,singlescale,rho_jm)
+&   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,dmat,fg,energy, &
+&   ewald,md,ofl,poisson,singlescale)
   use structures
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_density_matrix, calc_current, calc_current_use_dmat, calc_microscopic_current
@@ -59,6 +59,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_orbital),intent(inout) :: spsi_in,spsi_out
   type(s_orbital),intent(inout) :: tpsi ! temporary wavefunctions
   type(s_scalar), intent(inout) :: rho,rho_s(system%nspin),V_local(system%nspin),Vh,Vxc(system%nspin),Vpsl
+  type(s_scalar), intent(in)    :: rho_jm
   type(s_scalar), intent(inout) :: Vh_stock1,Vh_stock2,Vbox
   type(s_dmatrix),intent(inout) :: dmat
   type(s_poisson),intent(inout) :: poisson
@@ -68,7 +69,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_ewald_ion_ion) :: ewald
   type(s_md) :: md
   type(s_ofile) :: ofl
-  type(s_scalar),intent(in), optional :: rho_jm
 
   integer :: ix,iy,iz,iatom,is,nspin,Mit
   integer :: idensity, idiffDensity, ielf

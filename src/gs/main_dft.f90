@@ -45,7 +45,7 @@ use total_energy
 use band_dft_sub
 use init_gs, only: init_wf
 use initialization_dft
-use jellium, only: check_condition_jm, make_rho_jm
+use jellium, only: check_condition_jm
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin

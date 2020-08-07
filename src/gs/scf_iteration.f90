@@ -44,7 +44,7 @@ subroutine scf_iteration_step(lg,mg,system,info,stencil, &
   type(s_parallel_info),  intent(in)    :: info
   type(s_orbital),        intent(inout) :: spsi,shpsi
   type(s_scalar),         intent(inout) :: rho
-  type(s_scalar),         intent(in)    ::rho_jm
+  type(s_scalar),         intent(in)    :: rho_jm
   type(s_scalar),         intent(inout) :: rho_s(system%nspin)
   type(s_stencil),        intent(in)    :: stencil
   type(s_sendrecv_grid),  intent(inout) :: srg
