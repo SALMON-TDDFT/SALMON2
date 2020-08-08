@@ -1,4 +1,5 @@
 set(SOURCES
+    pp/read_ps_upf_module.f90
     pp/input_pp.f90
     pp/salmon_pp.f90
     pp/prep_pp.f90

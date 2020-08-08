@@ -33,6 +33,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
+  use read_ps_upf_module, only: read_ps_upf
   implicit none
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
@@ -70,6 +71,9 @@ subroutine input_pp(pp,hx,hy,hz)
         call read_ps_fhi(pp,rrc,ik,ps_file)
       case('ADPACK')
         call read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+      case('UPF')
+        call read_ps_upf(pp,rrc,rhor_nlcc,ik,ps_file)
+        flag_beta_proj_is_given =.true.
 !      case('ATOM')      ; call read_ps_ATOM
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'
       end select
