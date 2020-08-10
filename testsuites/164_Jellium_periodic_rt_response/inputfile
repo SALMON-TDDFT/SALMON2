@@ -68,7 +68,7 @@
 &jellium
   yn_jm              = 'y'
   num_jm             = 1
-  nelec_jm(1)        = 10
   rs_bohr_jm(1)      = 1.0d0
+  sphere_nelec_jm(1) = 10
   sphere_loc_jm(1,:) = 7.75d0, 7.75d0, 7.75d0
 /
