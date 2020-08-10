@@ -54,7 +54,7 @@ contains
     real(8),intent(out) :: rrc(0:)
     real(8),intent(out) :: rhor_nlcc(0:,0:)
     integer,intent(in) :: ik
-    integer,parameter :: max_loop=1000000, max_array_size = 8
+    integer,parameter :: max_loop=1000000, max_array_size = 16
     integer :: loop,i,j,k,l,ir,ic,nr
     integer,allocatable :: lo(:),no(:)
     character(100) :: cbuf, ckey
@@ -371,7 +371,7 @@ contains
     write(*,*) "cut off radius =",(rrc(l),l=0,pp%mlps(ik))
     write(*,*) "# of radial mesh points =",pp%mr(ik)
     write(*,*) "uVu integral (anorm) ="
-    write(*,'(1x,8f10.5)') ( pp%anorm(i,ik),i=1,norb )
+    write(*,'(1x,8f10.5)') ( pp%anorm(i,ik),i=0,norb-1 )
     r=0.0d0
     do i=1,pp%mr(ik)
        r=r+rhor_nlcc(i,0)*pp%rad(i+1,ik)**2*(pp%rad(i+1,ik)-pp%rad(i,ik))
