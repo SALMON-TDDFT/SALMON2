@@ -167,11 +167,12 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   call allocate_scalar(mg,Vh_stock2)
   call allocate_scalar_with_shadow(lg,Nd,Vbox)
   call allocate_scalar(mg,Vpsl)
-  allocate(rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin))
+  allocate(rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin),rt%rho0_s(system%nspin))
   do jspin=1,system%nspin
     call allocate_scalar(mg,rho_s(jspin))
     call allocate_scalar(mg,V_local(jspin))
     call allocate_scalar(mg,Vxc(jspin))
+    call allocate_scalar(mg,rt%rho0_s(jspin))
   end do
   if(yn_jm=='n') then
     call read_pslfile(system,pp)
@@ -223,6 +224,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   rho%f = 0d0
   do jspin=1,system%nspin
      rho%f = rho%f + rho_s(jspin)%f
+     rt%rho0_s(jspin)%f = rho_s(jspin)%f ! electron density @ t=0 (GS)
   end do
   if(yn_restart=='y')then
     Vh%f = 2.d0*Vh_stock1%f - Vh_stock2%f
@@ -423,8 +425,7 @@ subroutine initialization_rt( Mit, itotNtime, system, energy, ewald, rt, md, &
   
     do itt=0,0
       if(yn_out_dns_rt=='y')then
-         !!XXX bug XXX dnsdiff data is wrong as reference dns is rho%f now !AY
-        call write_dns(lg,mg,system,rho%f,rho%f,itt)
+        call write_dns(lg,mg,system,rho_s,rt%rho0_s,itt)
       end if
       if(yn_out_elf_rt=='y')then
         call write_elf(itt,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi_in)
